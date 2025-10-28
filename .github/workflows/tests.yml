@@ -1,0 +1,77 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports: [ "5432:5432" ]
+        env:
+          POSTGRES_DB: botdb
+          POSTGRES_USER: botuser
+          POSTGRES_PASSWORD: botpass
+        options: >-
+          --health-cmd "pg_isready -U botuser -d botdb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Wait for Postgres (5432)
+        run: |
+          for i in {1..60}; do
+            nc -z 127.0.0.1 5432 && echo "postgres OK" && exit 0
+            sleep 1
+          done
+          echo "postgres not ready" && exit 1
+
+      - name: Run unit tests (no Docker required)
+        env:
+          CI: "true"
+        run: ./gradlew clean test --console=plain
+
+      - name: Run integration tests (Docker)
+        env:
+          CI: "true"
+        run: ./gradlew test -PrunIT=true --console=plain
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: "**/build/reports/tests/**"
+          if-no-files-found: ignore
+
+      - name: Upload jacoco reports (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: "**/build/reports/jacoco/**"
+          if-no-files-found: ignore

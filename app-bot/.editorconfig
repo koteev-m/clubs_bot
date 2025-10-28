@@ -1,0 +1,4 @@
+root = false
+
+[*.{kt,kts}]
+ktlint_standard_function-signature = enabled

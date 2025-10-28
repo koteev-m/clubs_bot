@@ -1,0 +1,119 @@
+name: Deploy (SSH → Docker host)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "stage"
+        type: choice
+        options: [ "stage", "prod" ]
+      image_tag:
+        description: "Image tag to deploy (e.g. latest or v1.2.3)"
+        required: true
+        default: "latest"
+        type: string
+      service_url:
+        description: "Readiness URL (http://host:port)"
+        required: true
+        default: "http://localhost:8080"
+        type: string
+
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'prod' }}
+
+    steps:
+      - name: Derive inputs (env/tag/url)
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ ^v.* ]]; then
+            ENV_NAME="prod"
+            IMAGE_TAG="${GITHUB_REF_NAME}"
+            SERVICE_URL="${{ github.server_url }}/" # dummy default, will be overridden below to localhost
+            # Для prod по тегу используем локальный URL по умолчанию:
+            SERVICE_URL="http://localhost:8080"
+          else
+            ENV_NAME="${{ inputs.environment }}"
+            IMAGE_TAG="${{ inputs.image_tag }}"
+            SERVICE_URL="${{ inputs.service_url }}"
+          fi
+          echo "env=${ENV_NAME}"        >> "$GITHUB_OUTPUT"
+          echo "tag=${IMAGE_TAG}"       >> "$GITHUB_OUTPUT"
+          echo "service_url=${SERVICE_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add host to known_hosts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts"
+
+      - name: Deploy over SSH
+        env:
+          SSH_USER:            ${{ secrets.SSH_USER }}
+          SSH_HOST:            ${{ secrets.SSH_HOST }}
+          SSH_PORT:            ${{ secrets.SSH_PORT || '22' }}
+          COMPOSE_PATH:        ${{ secrets.COMPOSE_PATH }}
+          GHCR_USERNAME:       ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN:          ${{ secrets.GHCR_TOKEN }}
+          IMAGE_TAG:           ${{ steps.vars.outputs.tag }}
+          SERVICE_URL:         ${{ steps.vars.outputs.service_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo ">>> SSH into ${SSH_USER}@${SSH_HOST}:${SSH_PORT}"
+          ssh -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" bash -se <<'REMOTE'
+          set -euo pipefail
+          echo ">>> docker login ghcr.io"
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+          echo ">>> cd ${COMPOSE_PATH}"
+          cd "${COMPOSE_PATH}"
+
+          echo ">>> Pull app image tag=${IMAGE_TAG}"
+          IMAGE_TAG="${IMAGE_TAG}" docker compose pull app
+
+          echo ">>> Up app"
+          IMAGE_TAG="${IMAGE_TAG}" docker compose up -d --remove-orphans
+
+          echo ">>> Wait readiness: ${SERVICE_URL}/ready"
+          for i in {1..60}; do
+            if curl -fsS "${SERVICE_URL}/ready" >/dev/null 2>&1; then
+              echo "READY OK"
+              break
+            fi
+            sleep 1
+            if [[ $i -eq 60 ]]; then
+              echo "!!! Readiness failed"
+              docker compose ps
+              docker compose logs --no-color app | tail -n 200 || true
+              exit 1
+            fi
+          done
+
+          echo ">>> Prune unused images"
+          docker image prune -f >/dev/null 2>&1 || true
+REMOTE
+
+      - name: Done
+        run: echo "Deploy OK → env=${{ steps.vars.outputs.env }} tag=${{ steps.vars.outputs.tag }}"

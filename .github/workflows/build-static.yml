@@ -1,0 +1,59 @@
+name: Build & Static
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-static-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-static:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Gradle format (non-fatal)
+        run: ./gradlew -q formatAll || true
+
+      - name: Static check + build
+        run: ./gradlew staticCheck build --console=plain
+
+      - name: Upload detekt reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detekt-reports
+          path: "**/build/reports/detekt/*.*"
+          if-no-files-found: ignore
+
+      - name: Upload ktlint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ktlint-reports
+          path: "**/build/reports/ktlint/*.*"
+          if-no-files-found: ignore
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: "**/build/reports/tests/**"
+          if-no-files-found: ignore

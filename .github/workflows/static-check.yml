@@ -1,0 +1,27 @@
+name: static-check
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+jobs:
+  detekt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+      - name: Run detekt
+        run: ./gradlew detekt --console=plain
+      - name: Upload detekt HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: detekt-html
+          path: "**/build/reports/detekt/detekt.html"
+      - name: Upload detekt SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "**/build/reports/detekt/detekt.sarif"

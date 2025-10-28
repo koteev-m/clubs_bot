@@ -1,0 +1,29 @@
+name: Lint
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run ktlint/detekt
+        run: |
+          ./gradlew :app-bot:ktlintMainSourceSetCheck :app-bot:ktlintTestSourceSetCheck || true
+          ./gradlew :app-bot:detekt || true
+      - name: Upload lint artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-reports
+          path: |
+            app-bot/build/reports/ktlint/**/*
+            app-bot/build/reports/detekt/**/*

@@ -1,0 +1,23 @@
+:root {
+  --bg: #0f0f10;
+  --fg: #f2f2f3;
+  --muted: #b8b8bd;
+  --accent: #24a0ed;
+  --danger: #ff4d4f;
+  --ok: #00b37e;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+main { max-width: 560px; margin: 0 auto; padding: 16px; }
+header h1 { margin: 0 0 4px; font-size: 20px; }
+header p { margin: 0 0 16px; color: var(--muted); }
+.panel { background: rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; }
+.row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.row label { width: 64px; color: var(--muted); }
+.row input { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.04); color: var(--fg); }
+button { width: 100%; padding: 12px 14px; border: 0; border-radius: 10px; color: white; background: var(--accent); font-weight: 600; cursor: pointer; }
+button[disabled] { opacity: 0.6; cursor: not-allowed; }
+#status { margin-top: 12px; min-height: 20px; }
+.toast-ok { color: var(--ok); }
+.toast-err { color: var(--danger); }

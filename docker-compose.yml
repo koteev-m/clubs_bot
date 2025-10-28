@@ -1,0 +1,96 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: bot_postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-botdb}
+      POSTGRES_USER: ${DB_USER:-botuser}
+      POSTGRES_PASSWORD: ${DB_PASS:-botpass}
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U ${DB_USER:-botuser} -d ${DB_NAME:-botdb}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # нужно для локальных инструментов/psql с хоста
+    ports:
+      - "15432:5432"
+    restart: unless-stopped
+
+  app:
+    image: nightconcierge/app-bot:latest
+    container_name: bot_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # --- profile/runtime ---
+      APP_PROFILE: PROD
+      PORT: "8080"
+
+      # --- database (через сервис db) ---
+      DATABASE_URL: jdbc:postgresql://db:5432/${DB_NAME:-botdb}
+      DATABASE_USER: ${DB_USER:-botuser}
+      DATABASE_PASSWORD: ${DB_PASS:-botpass}
+
+      # --- flyway: только postgres миграции ---
+      FLYWAY_ENABLED: "true"
+      FLYWAY_LOCATIONS: "classpath:db/migration/postgresql"
+
+      # --- telegram / security ---
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BOT_TOKEN: ${BOT_TOKEN}                # ДОЛЖЕН совпадать с TELEGRAM_BOT_TOKEN
+      TELEGRAM_USE_POLLING: "false"
+
+      # единый ключ для вебхука; поддерживаем оба имени на всякий случай
+      WEBHOOK_SECRET_TOKEN: ${WEBHOOK_SECRET_TOKEN:-${TELEGRAM_WEBHOOK_SECRET}}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
+
+      TELEGRAM_WEBHOOK_PUBLIC_PATH: ${TELEGRAM_WEBHOOK_PUBLIC_PATH:-/telegram/webhook}
+      OWNER_TELEGRAM_ID: ${OWNER_TELEGRAM_ID}
+      QR_SECRET: ${QR_SECRET}
+
+      # --- public urls ---
+      BASE_URL: ${BASE_URL}
+      WEBAPP_ORIGIN: ${WEBAPP_ORIGIN}
+
+      # --- feature flags ---
+      RATE_LIMIT_ENABLED: "true"
+      HOT_PATH_ENABLED: "true"
+      RBAC_ENABLED: "true"
+      USE_NOTIFY_SENDER: "true"
+      NOTIFY_ROUTES_ENABLED: "true"
+
+    expose:
+      - "8080"
+    healthcheck:
+      # используем wget (обычно есть в busybox). Если в образе есть curl — можешь вернуть curl-вариант.
+      test: ["CMD-SHELL","wget -qO- http://localhost:8080/health >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: bot_caddy
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy-data:
+  caddy-config:

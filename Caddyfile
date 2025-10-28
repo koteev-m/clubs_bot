@@ -1,0 +1,18 @@
+{
+  email {$ACME_EMAIL}
+}
+
+nightconcierge.help {
+  encode gzip
+  reverse_proxy app:8080
+
+  @health path /health
+  handle @health {
+    reverse_proxy app:8080
+  }
+
+  @ready path /ready
+  handle @ready {
+    reverse_proxy app:8080
+  }
+}

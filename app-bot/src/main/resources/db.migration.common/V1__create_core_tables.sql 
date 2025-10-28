@@ -1,0 +1,14 @@
+-- Создаём базовую таблицу клубов (то, что сейчас ломается на /api/clubs)
+CREATE TABLE IF NOT EXISTS clubs (
+  id                BIGINT PRIMARY KEY,
+  name              TEXT        NOT NULL,
+  description       TEXT,
+  timezone          TEXT        NOT NULL,
+  admin_chat_id     BIGINT,
+  general_topic_id  BIGINT,
+  bookings_topic_id BIGINT,
+  lists_topic_id    BIGINT,
+  qa_topic_id       BIGINT,
+  media_topic_id    BIGINT,
+  system_topic_id   BIGINT
+);

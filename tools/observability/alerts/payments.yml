@@ -1,0 +1,74 @@
+groups:
+  - name: payments
+    rules:
+      - alert: PaymentsHighErrorRate
+        expr: |
+          sum(rate(payments_errors_total{path=~"finalize|cancel|refund",kind!="validation"}[10m]))
+            /
+          sum(rate({__name__=~"payments_(finalize|cancel|refund)_duration_seconds_count"}[10m]))
+            > TODO_ERROR_THRESHOLD
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Payments high non-validation error rate"
+          description: "TODO: adjust error rate threshold and include runbook link."
+
+      - alert: PaymentsLatencyP95High
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate({__name__=~"payments_(finalize|cancel|refund)_duration_seconds_bucket"}[5m])) by (le,path))
+            > 0.7
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Payments P95 latency elevated"
+          description: "TODO: tune 700ms warning and add critical threshold handling."
+
+      - alert: PaymentsLatencyP95Critical
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate({__name__=~"payments_(finalize|cancel|refund)_duration_seconds_bucket"}[5m])) by (le,path))
+            > 1.5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Payments P95 latency critical"
+          description: "TODO: review critical threshold and escalation policy."
+
+      - alert: PaymentsIdemAnomaly
+        expr: |
+          sum(rate(payments_idempotent_hit_total[15m])) by (path)
+            /
+          sum(rate({__name__=~"payments_(finalize|cancel|refund)_duration_seconds_count"}[15m])) by (path)
+            > TODO_IDEMPOTENT_THRESHOLD
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Payments idempotent hit rate anomaly"
+          description: "TODO: configure acceptable retry baseline and actions."
+
+      - alert: RefundOutboxStuck
+        expr: outbox_refund_backlog > 50
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Refund outbox backlog is elevated"
+          description: "Refund provider worker backlog above 50 items for 15 minutes."
+
+      - alert: RefundProviderErrorsHigh
+        expr: |
+          sum(rate(provider_refund_fail_total[5m]))
+            /
+          sum(rate(provider_refund_duration_seconds_count[5m]))
+            > 0.03
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Refund provider error rate above 3%"
+          description: "Investigate provider API availability or configuration issues."

@@ -1,0 +1,728 @@
+{
+  "type": "FeatureCollection",
+  "image": {
+    "width": 1794,
+    "height": 1468,
+    "note": "coords are normalized [0..1]"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "zone": "Танцпол",
+        "number": "216",
+        "capacity": 6,
+        "minDeposit": 40000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.082625,
+              0.544118
+            ],
+            [
+              0.15166,
+              0.544118
+            ],
+            [
+              0.15166,
+              0.581269
+            ],
+            [
+              0.082625,
+              0.581269
+            ],
+            [
+              0.082625,
+              0.544118
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "215.1",
+        "zone": "Танцпол",
+        "capacity": 6,
+        "minDeposit": 40000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.182694,
+              0.544118
+            ],
+            [
+              0.228295,
+              0.544118
+            ],
+            [
+              0.228295,
+              0.582043
+            ],
+            [
+              0.182694,
+              0.582043
+            ],
+            [
+              0.182694,
+              0.544118
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "215",
+        "zone": "Танцпол",
+        "capacity": 6,
+        "minDeposit": 40000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.230195,
+              0.54644
+            ],
+            [
+              0.277696,
+              0.54644
+            ],
+            [
+              0.277696,
+              0.583591
+            ],
+            [
+              0.230195,
+              0.583591
+            ],
+            [
+              0.230195,
+              0.54644
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "214",
+        "capacity": 6,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.31063,
+              0.544892
+            ],
+            [
+              0.379664,
+              0.544892
+            ],
+            [
+              0.379664,
+              0.582043
+            ],
+            [
+              0.31063,
+              0.582043
+            ],
+            [
+              0.31063,
+              0.544892
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "capacity": 6,
+        "minDeposit": 40000,
+        "number": "223",
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.403731,
+              0.347523
+            ],
+            [
+              0.487333,
+              0.347523
+            ],
+            [
+              0.487333,
+              0.393963
+            ],
+            [
+              0.403731,
+              0.393963
+            ],
+            [
+              0.403731,
+              0.347523
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "capacity": 6,
+        "minDeposit": 40000,
+        "zone": "Танцпол",
+        "number": "223"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.173827,
+              0.400929
+            ],
+            [
+              0.258062,
+              0.400929
+            ],
+            [
+              0.258062,
+              0.444272
+            ],
+            [
+              0.173827,
+              0.444272
+            ],
+            [
+              0.173827,
+              0.400929
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "217.1",
+        "capacity": 6,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.030057,
+              0.244582
+            ],
+            [
+              0.059824,
+              0.244582
+            ],
+            [
+              0.059824,
+              0.294118
+            ],
+            [
+              0.030057,
+              0.294118
+            ],
+            [
+              0.030057,
+              0.244582
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "217",
+        "capacity": 6,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.02879,
+              0.295666
+            ],
+            [
+              0.059191,
+              0.295666
+            ],
+            [
+              0.059191,
+              0.343653
+            ],
+            [
+              0.02879,
+              0.343653
+            ],
+            [
+              0.02879,
+              0.295666
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "218",
+        "capacity": 6,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.02879,
+              0.051858
+            ],
+            [
+              0.071225,
+              0.051858
+            ],
+            [
+              0.071225,
+              0.091331
+            ],
+            [
+              0.02879,
+              0.091331
+            ],
+            [
+              0.02879,
+              0.051858
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "219",
+        "capacity": 4,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.097825,
+              0.02709
+            ],
+            [
+              0.113026,
+              0.02709
+            ],
+            [
+              0.113026,
+              0.060372
+            ],
+            [
+              0.097825,
+              0.060372
+            ],
+            [
+              0.097825,
+              0.02709
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "220",
+        "capacity": 5,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.144693,
+              0.035604
+            ],
+            [
+              0.175093,
+              0.035604
+            ],
+            [
+              0.175093,
+              0.05805
+            ],
+            [
+              0.144693,
+              0.05805
+            ],
+            [
+              0.144693,
+              0.035604
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "221",
+        "capacity": 2,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.194094,
+              0.035604
+            ],
+            [
+              0.231461,
+              0.035604
+            ],
+            [
+              0.231461,
+              0.058824
+            ],
+            [
+              0.194094,
+              0.058824
+            ],
+            [
+              0.194094,
+              0.035604
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "222",
+        "capacity": 4,
+        "minDeposit": 40000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.249828,
+              0.033282
+            ],
+            [
+              0.280229,
+              0.033282
+            ],
+            [
+              0.280229,
+              0.057276
+            ],
+            [
+              0.249828,
+              0.057276
+            ],
+            [
+              0.249828,
+              0.033282
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "VIP 1",
+        "capacity": 6,
+        "minDeposit": 50000,
+        "zone": "VIP"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.203594,
+              0.674149
+            ],
+            [
+              0.248562,
+              0.674149
+            ],
+            [
+              0.248562,
+              0.754644
+            ],
+            [
+              0.203594,
+              0.754644
+            ],
+            [
+              0.203594,
+              0.674149
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "VIP 2",
+        "capacity": 6,
+        "minDeposit": 50000,
+        "zone": "VIP"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.279596,
+              0.674149
+            ],
+            [
+              0.326463,
+              0.674149
+            ],
+            [
+              0.326463,
+              0.755418
+            ],
+            [
+              0.279596,
+              0.755418
+            ],
+            [
+              0.279596,
+              0.674149
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "VIP3",
+        "capacity": 6,
+        "minDeposit": 50000,
+        "zone": "VIP"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.355597,
+              0.673375
+            ],
+            [
+              0.401831,
+              0.673375
+            ],
+            [
+              0.401831,
+              0.75387
+            ],
+            [
+              0.355597,
+              0.75387
+            ],
+            [
+              0.355597,
+              0.673375
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "VIP",
+        "capacity": 6,
+        "minDeposit": 50000,
+        "zone": "VIP"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.432865,
+              0.673375
+            ],
+            [
+              0.4791,
+              0.673375
+            ],
+            [
+              0.4791,
+              0.75387
+            ],
+            [
+              0.432865,
+              0.75387
+            ],
+            [
+              0.432865,
+              0.673375
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect",
+        "number": "Vip Room",
+        "capacity": 6,
+        "minDeposit": 50000,
+        "zone": "Танцпол"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.008523,
+              0.497678
+            ],
+            [
+              0.052858,
+              0.497678
+            ],
+            [
+              0.052858,
+              0.612229
+            ],
+            [
+              0.008523,
+              0.612229
+            ],
+            [
+              0.008523,
+              0.497678
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "type": "table",
+        "shape": "rect"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              1.111812,
+              0.289474
+            ],
+            [
+              1.11237,
+              0.289474
+            ],
+            [
+              1.11237,
+              0.290155
+            ],
+            [
+              1.111812,
+              0.290155
+            ],
+            [
+              1.111812,
+              0.289474
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

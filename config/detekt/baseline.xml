@@ -1,0 +1,23 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>MagicNumber:GuestListRoutes.kt$50</ID>
+    <ID>MagicNumber:PromoAttributionService.kt$InMemoryPromoAttributionStore$24</ID>
+    <ID>MaxLineLength:BookingTemplateService.kt$BookingTemplateService$return</ID>
+    <ID>MaxLineLength:GuestListRoutes.kt$builder.appendLine("entry_id,list_id,club_id,list_title,owner_type,owner_user_id,full_name,phone,guests_count,status,notes,list_created_at")</ID>
+    <ID>MaxLineLength:GuestListRoutes.kt$return request.acceptItems().any { header -&gt; header.value.equals(ContentType.Text.CSV.toString(), ignoreCase = true) }</ID>
+    <ID>MaxLineLength:TemplatesHandler.kt$BookingTemplateBotHandler$InlineKeyboardButton("Шаблон #${template.id} · ${template.tableCapacityMin} гостей").callbackData(token)</ID>
+    <ID>NestedBlockDepth:BookingTemplateService.kt$BookingTemplateService$suspend fun listTemplates( actor: TemplateActor, clubId: Long? = null, onlyActive: Boolean = true, ): List&lt;BookingTemplate&gt;</ID>
+    <ID>ReturnCount:GuestListImportBotHandler.kt$GuestListImportBotHandler$suspend fun handle(update: Update)</ID>
+    <ID>ReturnCount:PromoAttributionService.kt$PromoAttributionService$suspend fun issuePromoLink(telegramUserId: Long): PromoLinkIssueResult</ID>
+    <ID>ReturnCount:PromoAttributionService.kt$PromoAttributionService$suspend fun registerStart(telegramUserId: Long, token: String): PromoStartResult</ID>
+    <ID>ReturnCount:PromoAttributionService.kt$PromoLinkTokenCodec$fun decode(value: String): PromoLinkToken?</ID>
+    <ID>SpreadOperator:TemplatesHandler.kt$BookingTemplateBotHandler$(*rows.toTypedArray())</ID>
+    <ID>ThrowsCount:BookingTemplateService.kt$BookingTemplateService$suspend fun applyTemplate( actor: TemplateActor, templateId: Long, request: TemplateBookingRequest, ): BookingCmdResult</ID>
+    <ID>ThrowsCount:GuestListRoutes.kt$fun Application.guestListRoutes(repository: GuestListRepository, parser: GuestListCsvParser)</ID>
+    <ID>TooManyFunctions:BookingTemplateService.kt$BookingTemplateService</ID>
+    <ID>TooManyFunctions:GuestListRepositoryImpl.kt$GuestListRepositoryImpl : GuestListRepository</ID>
+    <ID>TooManyFunctions:GuestListRoutes.kt$com.example.bot.routes.GuestListRoutes.kt</ID>
+  </CurrentIssues>
+</SmellBaseline>

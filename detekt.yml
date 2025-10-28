@@ -1,0 +1,49 @@
+style:
+  MagicNumber:
+    active: true
+    ignoreNumbers: ['-1', '0', '1', '2', '10', '60', '100', '1000']
+    ignorePropertyDeclaration: true
+    excludes: ['**/test/**']
+
+  MaxLineLength:
+    active: true
+    maxLineLength: 120
+    excludes: ['**/test/**']
+  WildcardImport:
+    active: false
+
+  UseCheckOrError:
+    active: false
+
+  UnusedParameter:
+    active: false
+
+  UtilityClassWithPublicConstructor:
+    active: false
+
+naming:
+  MatchingDeclarationName:
+    active: false
+
+complexity:
+  LongMethod:
+    active: false
+  CyclomaticComplexMethod:
+    active: false
+  LongParameterList:
+    active: false
+
+empty-blocks:
+  EmptyFunctionBlock:
+    active: false
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: true
+    excludes:
+      - '**/plugins/MigrationsPlugin.kt'
+      - '**/routes/ObservabilityRoutes.kt'
+    exceptionNames:
+      - 'org.flywaydb.core.api.FlywayException'
+      - 'java.lang.RuntimeException'
+

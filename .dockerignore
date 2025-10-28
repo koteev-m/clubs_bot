@@ -1,0 +1,36 @@
+# VCS / CI / IDE
+.git
+.github
+.githooks
+.idea
+.vscode
+*.iml
+out/
+
+# Gradle / build
+.gradle
+build
+**/build
+
+# Node / front
+node_modules
+miniapp/node_modules
+miniapp/dist
+
+# Logs / temp
+*.log
+*.tmp
+
+# Secrets / env
+.env
+.env.*
+docker-compose*.yml
+
+# VCS / OS
+.git/
+.gitignore
+.DS_Store
+
+# Node / web
+node_modules/
+app-bot/src/main/resources/miniapp/dist/*

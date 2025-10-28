@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive current and previous tag
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          PREV="$(git tag --list 'v*' --sort=-creatordate | grep -v "^${TAG}$" | head -n1 || true)"
+          echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.vars.outputs.tag }}"
+          PREV="${{ steps.vars.outputs.prev }}"
+          if [[ -n "${PREV}" ]]; then
+            git log --pretty=format:"- %h %s" "${PREV}..${TAG}" > CHANGELOG.md
+          else
+            git log -n 50 --pretty=format:"- %h %s" > CHANGELOG.md
+          fi
+          {
+            echo "body<<'EOF'"
+            echo "## Changes in ${TAG}"
+            cat CHANGELOG.md
+            echo
+            echo "### Images"
+            echo "\`ghcr.io/${{ github.repository }}/app-bot:latest\`"
+            echo "\`ghcr.io/${{ github.repository }}/app-bot:${TAG}\`"
+            SHORT_TAG=$(echo "${TAG}" | sed -E 's/^v([0-9]+)\.([0-9]+)\..*/v\1.\2/')
+            if [[ "${SHORT_TAG}" != "${TAG}" ]]; then
+              echo "\`ghcr.io/${{ github.repository }}/app-bot:${SHORT_TAG}\`"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.tag }}
+          body: ${{ steps.changelog.outputs.body }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload CHANGELOG.md as asset
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          files: CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

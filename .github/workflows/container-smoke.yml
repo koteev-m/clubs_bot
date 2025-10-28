@@ -1,0 +1,94 @@
+name: Container Smoke
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports: [ "5432:5432" ]
+        env:
+          POSTGRES_DB: botdb
+          POSTGRES_USER: botuser
+          POSTGRES_PASSWORD: botpass
+        options: >-
+          --health-cmd "pg_isready -U botuser -d botdb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (for potential Gradle pre-steps)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Build app image
+        run: docker build -t app-bot:ci .
+
+      - name: Wait for Postgres (port check)
+        run: |
+          for i in {1..60}; do
+            nc -z 127.0.0.1 5432 && echo "postgres OK" && exit 0
+            sleep 1
+          done
+          echo "postgres not ready" && exit 1
+
+      - name: Run app container
+        run: |
+          docker run -d --name app-bot-ci \
+            -p 8080:8080 \
+            -e DATABASE_URL="jdbc:postgresql://127.0.0.1:5432/botdb" \
+            -e DATABASE_USER="botuser" \
+            -e DATABASE_PASSWORD="botpass" \
+            -e TELEGRAM_BOT_TOKEN="000000:TEST" \
+            -e OWNER_TELEGRAM_ID="0" \
+            app-bot:ci
+
+      - name: Probe /health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "health failed" && exit 1
+
+      - name: Probe /ready
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8080/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ready failed" && exit 1
+
+      - name: Dump app logs on failure
+        if: failure()
+        run: docker logs app-bot-ci || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f app-bot-ci || true

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Entry Check-in</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main id="app">
+    <header>
+      <h1 id="title">Check-in</h1>
+      <p id="subtitle">Сканируйте QR-гостей при входе</p>
+    </header>
+
+    <section class="panel">
+      <div class="row">
+        <label for="clubId">Клуб</label>
+        <input id="clubId" type="text" readonly>
+      </div>
+      <button id="scanBtn" type="button">Сканировать QR</button>
+
+      <div id="status" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

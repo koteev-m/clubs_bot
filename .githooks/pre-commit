@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+./gradlew -q formatAll
+./gradlew -q staticCheck

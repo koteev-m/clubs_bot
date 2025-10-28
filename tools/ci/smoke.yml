@@ -1,0 +1,27 @@
+name: Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run smoke script
+        run: |
+          chmod +x tools/smoke.sh
+          tools/smoke.sh
+      - name: Upload smoke reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-reports
+          path: build/reports/smoke

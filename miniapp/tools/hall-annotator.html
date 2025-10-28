@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <title>Hall Annotator – club_1</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        :root { --bg:#0f1115; --fg:#e2e8f0; --panel:#151923; --accent:#60a5fa; --danger:#ef4444; }
+        html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto; }
+        .root { display:grid; grid-template-columns: 1fr 320px; height:100%; }
+        .toolbar { position:fixed; left:12px; top:12px; background:var(--panel); border:1px solid #222735; border-radius:10px; padding:8px; display:flex; gap:8px; z-index:5; }
+        .toolbar input[type="file"] { color:#94a3b8; }
+        .btn { background:#1b2230; color:var(--fg); border:1px solid #263044; border-radius:8px; padding:6px 10px; cursor:pointer; }
+        .btn:hover { background:#222a3a; }
+        .btn.active { outline:2px solid var(--accent); }
+        .btn-danger { background:#3a1f23; border-color:#4b2328; color:#fecaca; }
+        .canvas-wrap { position:relative; overflow:hidden; background:#0b0e13; }
+        canvas { display:block; width:100%; height:100%; background:#0b0e13; cursor: crosshair; }
+        .side { border-left:1px solid #222735; background:var(--panel); padding:14px; overflow:auto; }
+        h3 { margin:10px 0 8px; font-weight:600; font-size:15px; }
+        label { display:block; margin:8px 0 4px; font-size:12px; color:#9aa6b2; }
+        input[type="text"], input[type="number"] { width:100%; padding:8px; background:#0f141d; color:var(--fg); border:1px solid #263044; border-radius:8px; }
+        .row { display:flex; gap:8px; }
+        .row > * { flex:1; }
+        .list { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#0f141d; border:1px solid #263044; border-radius:8px; padding:8px; max-height:200px; overflow:auto; }
+        .hint { color:#94a3b8; font-size:12px; }
+        .kbd { padding:1px 6px; border:1px solid #2a3346; border-radius:6px; background:#111827; color:#cbd5e1; }
+    </style>
+</head>
+<body>
+<div class="toolbar">
+    <input id="imgInput" type="file" accept="image/*" />
+    <button id="toolSelect" class="btn active">Select (V)</button>
+    <button id="toolCircle" class="btn">Circle (C)</button>
+    <button id="toolRect" class="btn">Rect (R)</button>
+    <button id="toolPoly" class="btn">Polygon (P)</button>
+    <button id="btnUndo" class="btn">Undo (Ctrl/⌘Z)</button>
+    <button id="btnSave" class="btn">Save GEOJSON</button>
+</div>
+
+<div class="root">
+    <div class="canvas-wrap"><canvas id="cv"></canvas></div>
+    <aside class="side">
+        <h3>Выбранный стол</h3>
+        <div id="noneSel" class="hint">Ничего не выбрано. Выберите зону кликом.</div>
+        <div id="formSel" style="display:none">
+            <label>Number</label>
+            <input id="fNum" type="text" placeholder="например 224" />
+            <div class="row">
+                <div>
+                    <label>Capacity</label>
+                    <input id="fCap" type="number" min="1" step="1" />
+                </div>
+                <div>
+                    <label>MinDeposit</label>
+                    <input id="fMin" type="number" min="0" step="100" />
+                </div>
+            </div>
+            <label>Zone</label>
+            <input id="fZone" type="text" placeholder="VIP, бар, танцпол…" />
+            <div style="margin-top:10px; display:flex; gap:8px">
+                <button id="btnDelete" class="btn btn-danger">Удалить</button>
+                <button id="btnDuplicate" class="btn">Дублировать</button>
+            </div>
+        </div>
+
+        <h3 style="margin-top:18px">Горячие клавиши</h3>
+        <div class="hint">
+            <div><span class="kbd">V</span> Select • <span class="kbd">C</span> Circle • <span class="kbd">R</span> Rect • <span class="kbd">P</span> Polygon</div>
+            <div><span class="kbd">Колесо</span> — зум • <span class="kbd">Пробел + перетаскивание</span> — панорамирование</div>
+            <div>Двойной клик — замкнуть полигон</div>
+        </div>
+
+        <h3 style="margin-top:18px">Список объектов</h3>
+        <div class="list" id="list"></div>
+    </aside>
+</div>
+
+<script>
+    (() => {
+      /** @typedef {{id:string, kind:'circle'|'rect'|'polygon', props:{number?:string, capacity?:number, minDeposit?:number, zone?:string}, geom:any}} Shape */
+      const cv = document.getElementById('cv');
+      const ctx = cv.getContext('2d');
+      const imgInput = document.getElementById('imgInput');
+      const listEl = document.getElementById('list');
+      const formSel = document.getElementById('formSel');
+      const noneSel = document.getElementById('noneSel');
+      const fNum = document.getElementById('fNum');
+      const fCap = document.getElementById('fCap');
+      const fMin = document.getElementById('fMin');
+      const fZone = document.getElementById('fZone');
+      const btnDelete = document.getElementById('btnDelete');
+      const btnDuplicate = document.getElementById('btnDuplicate');
+
+      const tools = {
+        select: document.getElementById('toolSelect'),
+        circle: document.getElementById('toolCircle'),
+        rect:   document.getElementById('toolRect'),
+        poly:   document.getElementById('toolPoly'),
+      };
+      const btnUndo = document.getElementById('btnUndo');
+      const btnSave = document.getElementById('btnSave');
+
+      let img = new Image();
+      let imgW = 0, imgH = 0;
+
+      // viewport
+      let vw = window.innerWidth - 320, vh = window.innerHeight;
+      cv.width = vw; cv.height = vh;
+
+      // transform (pan/zoom)
+      let scale = 1, tx = 0, ty = 0;
+      const toWorld = (x,y) => [(x - tx)/scale, (y - ty)/scale];
+      const toScreen = (x,y) => [x*scale + tx, y*scale + ty];
+
+      // state
+      /** @type {Shape[]} */ let shapes = [];
+      /** @type {Shape|null} */ let selected = null;
+      let mode = 'select'; // select|circle|rect|poly
+      let creating = null; // temporary structure
+      let history = [];
+
+      function pushHistory() {
+        history.push(JSON.stringify(shapes));
+        if (history.length > 100) history.shift();
+      }
+      function undo() {
+        if (!history.length) return;
+        const snap = history.pop();
+        shapes = JSON.parse(snap);
+        selected = null;
+        render();
+      }
+
+      function setMode(m) {
+        mode = m;
+        for (const k in tools) tools[k].classList.toggle('active', k === m);
+        cv.style.cursor = m === 'select' ? 'default' : 'crosshair';
+      }
+
+      function fitImage() {
+        // центрируем изображение
+        const s = Math.min(vw / imgW, vh / imgH);
+        scale = s * 0.95;
+        tx = (vw - imgW*scale)/2;
+        ty = (vh - imgH*scale)/2;
+      }
+
+      function render() {
+        ctx.clearRect(0,0,cv.width,cv.height);
+        // фон
+        ctx.fillStyle = '#0b0e13';
+        ctx.fillRect(0,0,cv.width,cv.height);
+        // изображение
+        ctx.save();
+        ctx.setTransform(scale,0,0,scale,tx,ty);
+        if (imgW) ctx.drawImage(img, 0, 0, imgW, imgH);
+
+        // grid (лёгкая)
+        ctx.lineWidth = 1/scale;
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        const step = 100;
+        for (let x=0;x<=imgW;x+=step){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,imgH); ctx.stroke(); }
+        for (let y=0;y<=imgH;y+=step){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(imgW,y); ctx.stroke(); }
+
+        // объекты
+        for (const s of shapes) drawShape(s, s===selected);
+        if (creating) drawCreating();
+
+        ctx.restore();
+
+        // список
+        listEl.innerHTML = shapes.map(s => {
+          const n = s.props.number ?? '—';
+          return `<div data-id="${s.id}" style="padding:4px;border-bottom:1px solid #222735;cursor:pointer">
+            <b>${n}</b> <span style="color:#94a3b8">(${s.kind})</span>
+            ${s.props.capacity?` • cap ${s.props.capacity}`:''}
+          </div>`;
+        }).join('');
+        for (const el of listEl.querySelectorAll('[data-id]')) {
+          el.onclick = () => { selected = shapes.find(x=>x.id===el.getAttribute('data-id')); updateForm(); render(); };
+        }
+      }
+
+      function drawShape(s, isSel){
+        ctx.lineWidth = 2/scale;
+        if (s.kind==='circle') {
+          const {cx,cy,r} = s.geom;
+          ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+        } else if (s.kind==='rect') {
+          const {x,y,w,h} = s.geom;
+          ctx.beginPath(); ctx.rect(x,y,w,h);
+        } else {
+          const pts = s.geom.points;
+          ctx.beginPath(); pts.forEach((p,i)=> i? ctx.lineTo(p[0],p[1]) : ctx.moveTo(p[0],p[1]));
+          ctx.closePath();
+        }
+        ctx.fillStyle = isSel ? 'rgba(96,165,250,0.25)' : 'rgba(34,197,94,0.18)';
+        ctx.strokeStyle = isSel ? '#60a5fa' : '#22c55e';
+        ctx.fill(); ctx.stroke();
+
+        // номер
+        const center = getCenter(s);
+        ctx.fillStyle = '#fff';
+        ctx.font = `${14/scale}px sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline='middle';
+        ctx.fillText(s.props.number ?? '', center[0], center[1]);
+      }
+
+      function getCenter(s){
+        if (s.kind==='circle') return [s.geom.cx, s.geom.cy];
+        if (s.kind==='rect') return [s.geom.x + s.geom.w/2, s.geom.y + s.geom.h/2];
+        const pts = s.geom.points;
+        const c = pts.reduce((a,p)=>[a[0]+p[0],a[1]+p[1]],[0,0]); return [c[0]/pts.length, c[1]/pts.length];
+      }
+
+      function drawCreating(){
+        ctx.lineWidth = 2/scale;
+        ctx.setLineDash([6/scale, 6/scale]);
+        ctx.strokeStyle = '#93c5fd';
+        if (creating.kind==='circle'){
+          const {cx,cy,r} = creating.geom;
+          ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+        } else if (creating.kind==='rect'){
+          const {x,y,w,h} = creating.geom;
+          ctx.strokeRect(x,y,w,h);
+        } else {
+          const pts = creating.geom.points;
+          ctx.beginPath(); pts.forEach((p,i)=> i? ctx.lineTo(p[0],p[1]) : ctx.moveTo(p[0],p[1])); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+
+      // Mouse handling
+      let isPanning = false, panStart = [0,0], tStart = [0,0];
+      cv.addEventListener('wheel', (e)=>{
+        e.preventDefault();
+        const delta = Math.sign(e.deltaY) * -0.1;
+        const mx = e.offsetX, my = e.offsetY;
+        const [wx, wy] = toWorld(mx,my);
+        const ns = Math.min(8, Math.max(0.2, scale * (1 + delta)));
+        tx = mx - wx*ns; ty = my - wy*ns; scale = ns; render();
+      }, {passive:false});
+
+      window.addEventListener('keydown', (e)=>{
+        if (e.key===' '){ isPanning = true; cv.style.cursor='grab'; }
+        if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){ undo(); }
+        if (e.key.toLowerCase()==='v') setMode('select');
+        if (e.key.toLowerCase()==='c') setMode('circle');
+        if (e.key.toLowerCase()==='r') setMode('rect');
+        if (e.key.toLowerCase()==='p') setMode('poly');
+      });
+      window.addEventListener('keyup', (e)=>{ if (e.key===' ') { isPanning=false; cv.style.cursor= mode==='select'?'default':'crosshair'; } });
+
+      cv.addEventListener('mousedown', (e)=>{
+        if (isPanning || e.button===1) { panStart=[e.offsetX,e.offsetY]; tStart=[tx,ty]; return; }
+        const [wx,wy] = toWorld(e.offsetX, e.offsetY);
+        if (mode==='select'){
+          selected = hitTest(wx,wy);
+          updateForm(); render();
+          return;
+        }
+        // start creating
+        if (mode==='circle'){ creating = {kind:'circle', geom:{cx:wx, cy:wy, r:1}, props:{}, id: rid()}; }
+        else if (mode==='rect'){ creating = {kind:'rect', geom:{x:wx, y:wy, w:1, h:1}, props:{}, id: rid()}; }
+        else if (mode==='poly'){ creating = creating ?? {kind:'polygon', geom:{points:[[wx,wy]]}, props:{}, id: rid()}; }
+      });
+
+      cv.addEventListener('mousemove', (e)=>{
+        if (isPanning || e.buttons===4){ tx = tStart[0] + (e.offsetX - panStart[0]); ty = tStart[1] + (e.offsetY - panStart[1]); render(); return; }
+        if (!creating) return;
+        const [wx,wy] = toWorld(e.offsetX, e.offsetY);
+        if (creating.kind==='circle'){
+          const dx = wx - creating.geom.cx, dy = wy - creating.geom.cy;
+          creating.geom.r = Math.max(5, Math.hypot(dx,dy));
+        } else if (creating.kind==='rect'){
+          creating.geom.w = wx - creating.geom.x; creating.geom.h = wy - creating.geom.y;
+        } else if (creating.kind==='polygon'){
+          const pts = creating.geom.points;
+          pts[pts.length-1] = [wx,wy];
+        }
+        render();
+      });
+
+      cv.addEventListener('mouseup', (e)=>{
+        if (isPanning || e.button===1) return;
+        const [wx,wy] = toWorld(e.offsetX, e.offsetY);
+        if (!creating) return;
+        if (creating.kind==='circle'){ pushHistory(); shapes.push(creating); selected = creating; creating=null; updateForm(); render(); }
+        else if (creating.kind==='rect'){ pushHistory(); // normalize rect
+          let {x,y,w,h} = creating.geom; if (w<0){x+=w;w=-w;} if (h<0){y+=h;h=-h;}
+          creating.geom = {x,y,w,h}; shapes.push(creating); selected=creating; creating=null; updateForm(); render(); }
+        else if (creating.kind==='polygon'){ // добавляем вершину
+          const pts = creating.geom.points; pts.push([wx,wy]); render();
+        }
+      });
+
+      cv.addEventListener('dblclick', (e)=>{
+        // завершение полигона
+        if (creating && creating.kind==='polygon'){
+          if (creating.geom.points.length >= 4){ // включая "текущую" последнюю
+            pushHistory(); shapes.push(creating); selected = creating; creating=null; updateForm(); render();
+          }
+        }
+      });
+
+      function hitTest(wx,wy){
+        // простая проверка — сначала полигоны/прямоугольники, затем круги
+        for (let i=shapes.length-1; i>=0; i--){
+          const s = shapes[i];
+          if (s.kind==='circle'){
+            const d = Math.hypot(wx - s.geom.cx, wy - s.geom.cy);
+            if (d <= s.geom.r) return s;
+          } else if (s.kind==='rect'){
+            const {x,y,w,h} = s.geom;
+            if (wx>=x && wx<=x+w && wy>=y && wy<=y+h) return s;
+          } else if (s.kind==='polygon'){
+            if (pointInPolygon([wx,wy], s.geom.points)) return s;
+          }
+        }
+        return null;
+      }
+      function pointInPolygon(p, pts){
+        let c=false; for (let i=0,j=pts.length-1; i<pts.length; j=i++){
+          const xi=pts[i][0], yi=pts[i][1], xj=pts[j][0], yj=pts[j][1];
+          const inter = ((yi>p[1]) !== (yj>p[1])) && (p[0] < (xj-xi)*(p[1]-yi)/(yj-yi)+xi);
+          if (inter) c=!c;
+        } return c;
+      }
+      function rid(){ return Math.random().toString(36).slice(2,10); }
+
+      function updateForm(){
+        if (!selected){ formSel.style.display='none'; noneSel.style.display='block'; return; }
+        formSel.style.display='block'; noneSel.style.display='none';
+        fNum.value = selected.props.number ?? '';
+        fCap.value = selected.props.capacity ?? '';
+        fMin.value = selected.props.minDeposit ?? '';
+        fZone.value = selected.props.zone ?? '';
+      }
+      fNum.oninput = ()=>{ if (selected){ selected.props.number = fNum.value.trim(); render(); } };
+      fCap.oninput = ()=>{ if (selected){ selected.props.capacity = fCap.value? Number(fCap.value): undefined; render(); } };
+      fMin.oninput = ()=>{ if (selected){ selected.props.minDeposit = fMin.value? Number(fMin.value): undefined; render(); } };
+      fZone.oninput = ()=>{ if (selected){ selected.props.zone = fZone.value.trim() || undefined; render(); } };
+      btnDelete.onclick = ()=>{ if (!selected) return; pushHistory(); shapes = shapes.filter(s=>s!==selected); selected=null; updateForm(); render(); };
+      btnDuplicate.onclick = ()=>{ if (!selected) return; pushHistory(); const copy = JSON.parse(JSON.stringify(selected)); copy.id = rid(); shapes.push(copy); selected = copy; render(); };
+
+      // tools
+      tools.select.onclick = ()=>setMode('select');
+      tools.circle.onclick = ()=>setMode('circle');
+      tools.rect.onclick = ()=>setMode('rect');
+      tools.poly.onclick = ()=>setMode('poly');
+      btnUndo.onclick = undo;
+
+      // load image
+      imgInput.addEventListener('change', (e)=>{
+        const file = e.target.files?.[0]; if (!file) return;
+        const url = URL.createObjectURL(file);
+        img = new Image();
+        img.onload = ()=>{ imgW = img.naturalWidth; imgH = img.naturalHeight; fitImage(); render(); };
+        img.src = url;
+      });
+
+      // save geojson
+      btnSave.onclick = ()=>{
+        if (!imgW) { alert('Сначала загрузите изображение плана'); return; }
+        const fc = {
+          type: 'FeatureCollection',
+          image: { width: imgW, height: imgH, note: 'coords are normalized [0..1]' },
+          features: shapes.map(s => toFeature(s))
+        };
+        const blob = new Blob([JSON.stringify(fc, null, 2)], {type:'application/json'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'club_1.geojson';
+        a.click();
+      };
+
+      function norm(x,y){ return [Number((x/imgW).toFixed(6)), Number((y/imgH).toFixed(6))]; }
+      function toFeature(s){
+        if (s.kind==='circle'){
+          // аппроксимируем окружность полигоном (32 сегмента)
+          const {cx,cy,r} = s.geom; const pts=[];
+          for (let i=0;i<32;i++){ const a=i/32*2*Math.PI; pts.push(norm(cx + Math.cos(a)*r, cy + Math.sin(a)*r)); }
+          pts.push(pts[0]);
+          return { type:'Feature', properties:{type:'table', shape:'circle', ...s.props},
+            geometry:{ type:'Polygon', coordinates:[pts] } };
+        } else if (s.kind==='rect'){
+          const {x,y,w,h} = s.geom; const p = [
+            norm(x,y), norm(x+w,y), norm(x+w,y+h), norm(x,y+h), norm(x,y)
+          ];
+          return { type:'Feature', properties:{type:'table', shape:'rect', ...s.props},
+            geometry:{ type:'Polygon', coordinates:[p] } };
+        } else {
+          const pts = s.geom.points.slice(0,-1).concat([s.geom.points[0]]).map(([x,y])=>norm(x,y));
+          return { type:'Feature', properties:{type:'table', shape:'polygon', ...s.props},
+            geometry:{ type:'Polygon', coordinates:[pts] } };
+        }
+      }
+
+      // init
+      render();
+    })();
+</script>
+</body>
+</html>
