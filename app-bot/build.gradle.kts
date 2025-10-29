@@ -86,8 +86,10 @@ dependencies {
     implementation(libs.micrometer.tracing.bridge.otel)
     implementation(libs.opentelemetry.sdk)
     implementation(libs.opentelemetry.exporter.otlp)
+    implementation(libs.slf4j.api)
     implementation(libs.logback)
     implementation(libs.logstash.encoder)
+    implementation(libs.kotlinx.coroutines.slf4j)
 
     // Telegram
     implementation(libs.pengrad.telegram)
