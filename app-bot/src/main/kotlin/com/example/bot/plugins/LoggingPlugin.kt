@@ -18,13 +18,18 @@ private const val REQ_ID = "X-Request-ID"
 private const val CORR_ID = "X-Correlation-ID"
 private const val REQUEST_ID_MIN_LENGTH = 8
 private const val REQUEST_ID_MAX_LENGTH = 128
+private val REQUEST_ID_ALLOWED_CHARS = Regex("^[A-Za-z0-9._-]+$")
+
+private fun isRequestIdSafe(candidate: String): Boolean =
+    candidate.length in REQUEST_ID_MIN_LENGTH..REQUEST_ID_MAX_LENGTH &&
+        REQUEST_ID_ALLOWED_CHARS.matches(candidate)
 
 fun Application.installRequestLogging() {
     install(CallId) {
         header(REQ_ID)
         header(CORR_ID)
         generate { UUID.randomUUID().toString() }
-        verify { it.length in REQUEST_ID_MIN_LENGTH..REQUEST_ID_MAX_LENGTH }
+        verify(::isRequestIdSafe)
         reply { call, id ->
             call.response.header(REQ_ID, id)
         }

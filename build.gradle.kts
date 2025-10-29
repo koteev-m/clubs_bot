@@ -17,8 +17,8 @@ import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import javax.inject.Inject
 
 plugins {
-    kotlin("jvm") version "2.2.10" apply false
-    kotlin("plugin.serialization") version "2.2.10" apply false
+    kotlin("jvm") version "2.2.21" apply false
+    kotlin("plugin.serialization") version "2.2.21" apply false
     id("io.gitlab.arturbosch.detekt") version "1.23.6" apply false
     id("org.jlleitschuh.gradle.ktlint") version "12.1.0" apply false
 }
@@ -26,8 +26,12 @@ plugins {
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 val kotlinVersionProperty = providers.gradleProperty("kotlinVersion")
     .orElse(providers.environmentVariable("KOTLIN_VERSION"))
-    .orElse("2.2.10")
+    .orElse("2.2.21")
 val kotlinVersion = kotlinVersionProperty.get()
+val slf4jVersionProperty = providers.gradleProperty("slf4jVersion")
+    .orElse(providers.environmentVariable("SLF4J_VERSION"))
+    .orElse("2.0.17")
+val slf4jVersion = slf4jVersionProperty.get()
 
 allprojects {
     configurations.configureEach {
@@ -40,6 +44,10 @@ allprojects {
             ) {
                 useTarget("org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion")
                 because("Collapse legacy kotlin-stdlib-jdk7/jdk8 to kotlin-stdlib for Kotlin $kotlinVersion")
+            }
+            if (requestedGroup == "org.slf4j" && requestedName == "slf4j-api") {
+                useVersion(slf4jVersion)
+                because("Enforce SLF4J 2.0.17 for consistent logging policy")
             }
         }
     }
@@ -74,11 +82,11 @@ abstract class DependencyGuard : DefaultTask() {
     )
 
     @get:Input
-    val enforcedKtorVersion: Property<String> = objects.property<String>().convention(
-        providerFactory.gradleProperty("ktorEnforcedVersion")
-            .orElse(providerFactory.environmentVariable("KTOR_VERSION"))
-            .orElse("3.3.0")
-    )
+        val enforcedKtorVersion: Property<String> = objects.property<String>().convention(
+            providerFactory.gradleProperty("ktorEnforcedVersion")
+                .orElse(providerFactory.environmentVariable("KTOR_VERSION"))
+                .orElse("3.3.1")
+        )
 
     @TaskAction
     fun run() {
