@@ -25,6 +25,8 @@ dependencies {
     implementation(libs.ktor.server.auth)
     implementation(libs.ktor.server.double.receive)
     implementation(libs.ktor.server.host.common)
+    implementation(libs.ktor.server.call.logging)
+    implementation(libs.ktor.server.call.id)
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotest.runner)

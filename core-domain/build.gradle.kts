@@ -21,6 +21,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.slf4j)
     implementation(libs.micrometer.core)
     implementation(libs.micrometer.prometheus)
     implementation(libs.micrometer.tracing.bridge.otel)

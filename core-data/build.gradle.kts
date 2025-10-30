@@ -91,8 +91,6 @@ tasks.withType<FlywayTask>().configureEach {
 }
 
 dependencies {
-    val exposedVersion = libs.versions.exposed.get()
-
     // Доменные
     implementation(projects.coreDomain)
 
@@ -100,8 +98,8 @@ dependencies {
     implementation(libs.exposed.core)
     implementation(libs.exposed.dao)
     implementation(libs.exposed.jdbc)
-    implementation("org.jetbrains.exposed:exposed-json:$exposedVersion")
-    implementation("org.jetbrains.exposed:exposed-java-time:$exposedVersion")
+    implementation(libs.exposed.json)
+    implementation(libs.exposed.java.time)
     implementation(libs.hikari)
 
     // Flyway (runtime приложения) — core + модуль Postgres (ВАЖНО для PG16+)
