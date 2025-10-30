@@ -7,53 +7,70 @@ import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.ProviderFactory
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.testing.Test
-import org.gradle.api.tasks.Input
-import org.gradle.kotlin.dsl.register
+import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.listProperty
 import org.gradle.kotlin.dsl.property
+import org.gradle.kotlin.dsl.register
+import org.gradle.kotlin.dsl.withType
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import javax.inject.Inject
 
 plugins {
-    kotlin("jvm") version "2.2.21" apply false
-    kotlin("plugin.serialization") version "2.2.21" apply false
-    id("io.gitlab.arturbosch.detekt") version "1.23.6" apply false
+    kotlin("jvm") version "2.2.20" apply false
+    kotlin("plugin.serialization") version "2.2.20" apply false
+    id("io.gitlab.arturbosch.detekt") version "1.23.8" apply false
     id("org.jlleitschuh.gradle.ktlint") version "12.1.0" apply false
 }
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
-val kotlinVersionProperty = providers.gradleProperty("kotlinVersion")
+
+// Управляемые через -PkotlinVersion / env KOTLIN_VERSION
+val kotlinVersionProperty = providers
+    .gradleProperty("kotlinVersion")
     .orElse(providers.environmentVariable("KOTLIN_VERSION"))
-    .orElse("2.2.21")
+    .orElse("2.2.20")
 val kotlinVersion = kotlinVersionProperty.get()
-val slf4jVersionProperty = providers.gradleProperty("slf4jVersion")
+
+// Управляемые через -Pslf4jVersion / env SLF4J_VERSION
+val slf4jVersionProperty = providers
+    .gradleProperty("slf4jVersion")
     .orElse(providers.environmentVariable("SLF4J_VERSION"))
     .orElse("2.0.17")
 val slf4jVersion = slf4jVersionProperty.get()
 
 allprojects {
+    // Глобальная стратегия: схлопываем legacy stdlib и выравниваем SLF4J
     configurations.configureEach {
         resolutionStrategy.eachDependency {
             val requestedGroup = requested.group
             val requestedName = requested.name
+
+            // kotlin-stdlib-jdk7/8 → kotlin-stdlib одной версии
             if (
                 requestedGroup == "org.jetbrains.kotlin" &&
                 (requestedName == "kotlin-stdlib-jdk7" || requestedName == "kotlin-stdlib-jdk8")
             ) {
                 useTarget("org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion")
-                because("Collapse legacy kotlin-stdlib-jdk7/jdk8 to kotlin-stdlib for Kotlin $kotlinVersion")
+                because("kotlin-stdlib-jdk7/8 объединены в kotlin-stdlib в Kotlin 1.8+; используем единый stdlib $kotlinVersion")
             }
+
+            // Выравниваем слои логирования
             if (requestedGroup == "org.slf4j" && requestedName == "slf4j-api") {
                 useVersion(slf4jVersion)
-                because("Enforce SLF4J 2.0.17 for consistent logging policy")
+                because("Единая версия SLF4J ($slf4jVersion) для согласованной политики логирования")
             }
         }
     }
 }
 
+// -------------------------
+// Кастомная проверка зависимостей
+// -------------------------
 abstract class DependencyGuard : DefaultTask() {
+
     @get:Inject
     protected abstract val configurationContainer: ConfigurationContainer
 
@@ -82,47 +99,57 @@ abstract class DependencyGuard : DefaultTask() {
     )
 
     @get:Input
-        val enforcedKtorVersion: Property<String> = objects.property<String>().convention(
-            providerFactory.gradleProperty("ktorEnforcedVersion")
-                .orElse(providerFactory.environmentVariable("KTOR_VERSION"))
-                .orElse("3.3.1")
-        )
+    val enforcedKtorVersion: Property<String> = objects.property<String>().convention(
+        providerFactory.gradleProperty("ktorEnforcedVersion")
+            .orElse(providerFactory.environmentVariable("KTOR_VERSION"))
+            .orElse("3.3.1")
+    )
 
     @TaskAction
     fun run() {
         val banned = bannedArtifacts.get()
         val enforcedKtor = enforcedKtorVersion.get()
 
-        val configs = configurationNames.get().mapNotNull { configurationContainer.findByName(it) }
+        val configs = configurationNames.get()
+            .mapNotNull { name -> configurationContainer.findByName(name) }
 
-        val all = configs.flatMap { cfg ->
+        val allArtifacts: Set<String> = configs.flatMap { cfg ->
             cfg.resolvedConfiguration.lenientConfiguration.allModuleDependencies.flatMap { dep ->
                 sequenceOf("${dep.moduleGroup}:${dep.moduleName}:${dep.moduleVersion}") +
                     dep.children.map { "${it.moduleGroup}:${it.moduleName}:${it.moduleVersion}" }
             }
         }.toSet()
 
-        val legacy = all.filter { line -> banned.any { line.startsWith(it) } }
-        if (legacy.isNotEmpty()) {
-            error("DependencyGuard: legacy kotlin stdlib artifacts detected:\n${legacy.joinToString("\n")}")
+        val legacyStdlib = allArtifacts.filter { line -> banned.any { line.startsWith(it) } }
+        if (legacyStdlib.isNotEmpty()) {
+            error(
+                "DependencyGuard: legacy Kotlin stdlib артефакты обнаружены:\n" +
+                    legacyStdlib.joinToString("\n")
+            )
         }
 
-        val ktor = all.filter { it.startsWith("io.ktor:") }
-        val wrongKtor = ktor.filterNot { it.endsWith(":$enforcedKtor") }
-        if (wrongKtor.isNotEmpty()) {
-            error("DependencyGuard: mismatched Ktor versions (expected $enforcedKtor):\n${wrongKtor.joinToString("\n")}")
+        val ktorArtifacts = allArtifacts.filter { it.startsWith("io.ktor:") }
+        val mismatchedKtor = ktorArtifacts.filterNot { it.endsWith(":$enforcedKtor") }
+        if (mismatchedKtor.isNotEmpty()) {
+            error(
+                "DependencyGuard: несовпадение версий Ktor (ожидается $enforcedKtor):\n" +
+                    mismatchedKtor.joinToString("\n")
+            )
         }
 
-        val dynamic = all.filter {
+        val dynamic = allArtifacts.filter {
             it.endsWith(":latest.release") ||
                 it.endsWith(":latest.integration") ||
                 it.contains("SNAPSHOT")
         }
         if (dynamic.isNotEmpty()) {
-            error("DependencyGuard: dynamic/SNAPSHOT dependencies detected:\n${dynamic.joinToString("\n")}")
+            error(
+                "DependencyGuard: обнаружены динамические/SNAPSHOT зависимости:\n" +
+                    dynamic.joinToString("\n")
+            )
         }
 
-        println("DependencyGuard: OK (${all.size} artifacts checked)")
+        println("DependencyGuard: OK (${allArtifacts.size} artifacts checked)")
     }
 }
 
@@ -131,7 +158,11 @@ tasks.register<DependencyGuard>("dependencyGuard") {
     description = "Fail build if dependency rules are violated"
 }
 
+// -------------------------
+// Настройки подмодулей
+// -------------------------
 subprojects {
+    // Линтеры
     apply(plugin = "io.gitlab.arturbosch.detekt")
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
 
@@ -158,19 +189,22 @@ subprojects {
             sarif.required.set(true)
             xml.required.set(false)
             md.required.set(false)
-            val reportsDir = project.layout.buildDirectory
-            html.outputLocation.set(reportsDir.file("reports/detekt/detekt.html"))
-            sarif.outputLocation.set(reportsDir.file("reports/detekt/detekt.sarif"))
+            val out = project.layout.buildDirectory
+            html.outputLocation.set(out.file("reports/detekt/detekt.html"))
+            sarif.outputLocation.set(out.file("reports/detekt/detekt.sarif"))
         }
     }
 
+    // CLI-обёртки (если есть соответствующие файлы в репо)
     pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
         apply(from = rootProject.file("gradle/detekt-cli.gradle.kts"))
         apply(from = rootProject.file("gradle/ktlint-cli.gradle.kts"))
     }
 
+    // Тесты: -PrunIT=true для интеграционных
     tasks.withType<Test>().configureEach {
-        val runIt = project.findProperty("runIT")?.toString()?.equals("true", ignoreCase = true) == true
+        val runIt = project.findProperty("runIT")?.toString()
+            ?.equals("true", ignoreCase = true) == true
         useJUnitPlatform {
             if (!runIt) {
                 excludeTags("it")
@@ -179,6 +213,7 @@ subprojects {
     }
 }
 
+// Удобные агрегирующие команды
 tasks.register("staticCheck") {
     group = "verification"
     description = "Run detekt CLI and ktlint CLI across all Kotlin modules"
@@ -186,7 +221,7 @@ tasks.register("staticCheck") {
         subprojects.flatMap { sp ->
             listOfNotNull(
                 sp.tasks.findByName("detektCli"),
-                sp.tasks.findByName("ktlintCheckCli")
+                sp.tasks.findByName("ktlintCheckCli"),
             )
         }
     )

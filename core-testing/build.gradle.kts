@@ -31,7 +31,7 @@ dependencies {
     testImplementation(libs.ktor.server.test.host)
     testImplementation(projects.appBot)
     testImplementation(libs.pengrad.telegram)
-    testImplementation("com.google.code.gson:gson:2.10.1")
+    testImplementation(libs.gson)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -1,0 +1,7 @@
+# Нормализация текстовых файлов: хранить в репозитории в LF
+* text=auto
+
+# Явные правила
+*.sh   text eol=lf
+gradlew text eol=lf
+*.bat  text eol=crlf

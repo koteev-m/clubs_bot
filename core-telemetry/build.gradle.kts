@@ -22,6 +22,8 @@ dependencies {
     implementation(libs.micrometer.core)
     implementation(libs.micrometer.prometheus)
     implementation(libs.ktor.server.core)
+    implementation(libs.ktor.server.call.logging)
+    implementation(libs.ktor.server.call.id)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotest.runner)
     testImplementation(libs.kotest.assertions)

@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.pengrad.telegram)
 
     // DI
+    implementation(platform(libs.koin.bom))
     implementation(libs.koin.core)
     implementation(libs.koin.ktor)
     implementation(libs.koin.logger.slf4j)
@@ -132,16 +133,19 @@ tasks.register<Copy>("copyMiniAppDist") {
 
 tasks.named<ProcessResources>("processResources") {
     dependsOn("copyMiniAppDist")
-    from(layout.buildDirectory.dir("generated/miniapp")) { into("") }
+    from(layout.buildDirectory.dir("generated/miniapp")) {
+        into("")
+    }
 }
 
 application {
     // EngineMain + application.conf (modules = [ com.example.bot.ApplicationKt.module ])
     mainClass.set("com.example.bot.ApplicationKt")
-    applicationDefaultJvmArgs = listOf(
-        "-Dfile.encoding=UTF-8",
-        "-XX:+ExitOnOutOfMemoryError",
-    )
+    applicationDefaultJvmArgs =
+        listOf(
+            "-Dfile.encoding=UTF-8",
+            "-XX:+ExitOnOutOfMemoryError",
+        )
 }
 
 /**
