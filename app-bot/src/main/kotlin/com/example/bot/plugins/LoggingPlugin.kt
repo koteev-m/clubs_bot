@@ -12,38 +12,40 @@ import io.ktor.server.response.header
 import io.ktor.server.response.respondText
 import io.ktor.util.pipeline.PipelineContext
 import org.slf4j.event.Level
-import java.util.UUID
+import java.security.SecureRandom
 
-private const val REQ_ID = "X-Request-ID"
-private const val CORR_ID = "X-Correlation-ID"
-private const val REQUEST_ID_MIN_LENGTH = 8
-private const val REQUEST_ID_MAX_LENGTH = 128
-private val REQUEST_ID_ALLOWED_CHARS = Regex("^[A-Za-z0-9._-]+$")
+private const val REQUEST_ID_HEADER = "X-Request-Id"
+private const val LEGACY_REQUEST_ID_HEADER = "X-Request-ID"
+private val REQUEST_ID_REGEX = Regex("[A-Za-z0-9._-]+")
+private val secureRandom: SecureRandom by lazy { SecureRandom() }
 
-private fun isRequestIdSafe(candidate: String): Boolean =
-    candidate.length in REQUEST_ID_MIN_LENGTH..REQUEST_ID_MAX_LENGTH &&
-        REQUEST_ID_ALLOWED_CHARS.matches(candidate)
+private fun generateRequestId(): String {
+    val bytes = ByteArray(10)
+    secureRandom.nextBytes(bytes)
+    return buildString(bytes.size * 2) {
+        bytes.forEach { byte ->
+            append(((byte.toInt() and 0xff).toString(16)).padStart(2, '0'))
+        }
+    }
+}
 
 fun Application.installRequestLogging() {
     install(CallId) {
-        header(REQ_ID)
-        header(CORR_ID)
-        generate { UUID.randomUUID().toString() }
-        verify(::isRequestIdSafe)
-        reply { call, id ->
-            call.response.header(REQ_ID, id)
-        }
+        header(REQUEST_ID_HEADER)
+        header(LEGACY_REQUEST_ID_HEADER)
+        generate { generateRequestId() }
+        verify { id -> id.isNotBlank() && REQUEST_ID_REGEX.matches(id) }
+        reply { call, id -> call.response.header(REQUEST_ID_HEADER, id) }
     }
     install(CallLogging) {
         level = Level.INFO
-        mdc("callId") { it.callId }
+        mdc("request_id") { it.callId }
         filter { call ->
             val path = call.request.path()
             !path.startsWith("/metrics")
         }
         mdc("method") { it.request.httpMethod.value }
         mdc("path") { it.request.path() }
-        mdc("requestId") { it.callId }
     }
 }
 

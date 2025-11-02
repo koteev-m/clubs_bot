@@ -6,6 +6,7 @@ import com.example.bot.booking.BookingWriteRepository
 import com.example.bot.outbox.OutboxService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
@@ -33,7 +34,7 @@ class BookingService(
         idemKey: String,
     ): Either<BookingError, HoldResponse> =
         runCatching {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 val event =
                     readRepo.findEvent(req.clubId, req.eventStartUtc)
                         ?: return@withContext Either.Left(BookingError.NotFound("event not found"))
@@ -78,7 +79,7 @@ class BookingService(
         idemKey: String,
     ): Either<BookingError, BookingSummary> =
         runCatching {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 val event =
                     readRepo.findEvent(req.clubId, req.eventStartUtc)
                         ?: return@withContext Either.Left(BookingError.NotFound("event not found"))
@@ -125,7 +126,7 @@ class BookingService(
         idemKey: String,
     ): Either<BookingError, BookingSummary> =
         runCatching {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 val booking =
                     readRepo.findBookingById(bookingId)
                         ?: return@withContext Either.Left(BookingError.NotFound("booking not found"))
@@ -146,7 +147,7 @@ class BookingService(
         idemKey: String,
     ): Either<BookingError, BookingSummary> =
         runCatching {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 val booking =
                     readRepo.findBookingByQr(qrSecret)
                         ?: return@withContext Either.Left(BookingError.NotFound("booking not found"))
@@ -162,7 +163,7 @@ class BookingService(
     /** Marks overdue bookings as NO_SHOW based on arrivalBy. */
     @Suppress("UnusedParameter")
     suspend fun markNoShowOverdue(now: Instant): Int =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO + MDCContext()) {
             // In-memory repository used in tests does not support batch update; this is noop.
             0
         }

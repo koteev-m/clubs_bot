@@ -8,6 +8,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.serialization.Serializable
 import com.example.bot.data.repo.ClubDto as ClubProjection
 
@@ -28,7 +29,7 @@ fun Application.clubsPublicRoutes(repository: ClubRepository) {
     routing {
         get("/api/clubs") {
             val clubs =
-                withContext(Dispatchers.IO) {
+                withContext(Dispatchers.IO + MDCContext()) {
                     repository.listClubs(limit = Int.MAX_VALUE)
                 }
             val response = clubs.map { it.toDto() }

@@ -24,7 +24,10 @@ fun Application.installTracing(tracer: Tracer) {
             MDC.put("spanId", ctx.spanId())
 
             val callId = call.callId
-            val requestId = callId ?: call.request.headers["X-Request-ID"]
+            val requestId =
+                callId
+                    ?: call.request.headers["X-Request-Id"]
+                    ?: call.request.headers["X-Request-ID"]
             if (callId != null) {
                 MDC.put(CALL_ID_KEY, callId)
                 span.tag("http.call_id", callId)

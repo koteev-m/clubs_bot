@@ -2,6 +2,7 @@ package com.example.bot.render
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Font
@@ -63,7 +64,7 @@ class DefaultHallRenderer : HallRenderer {
         scale: Double,
         stateKey: String,
     ): ByteArray =
-        withContext(Dispatchers.Default) {
+        withContext(Dispatchers.Default + MDCContext()) {
             val s = if (scale.isFinite() && scale > MIN_SCALE) scale else DEFAULT_SCALE
             val w = (BASE_W * s).toInt()
             val h = (BASE_H * s).toInt()

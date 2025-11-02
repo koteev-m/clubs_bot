@@ -13,6 +13,7 @@ import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.io.readByteArray
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
@@ -76,7 +77,7 @@ suspend fun PipelineContext<Unit, io.ktor.server.application.ApplicationCall>.sa
         )
         return null
     }
-    return withContext(PerfDispatchers.cpu) {
+    return withContext(PerfDispatchers.cpu + MDCContext()) {
         call.receiveChannel().toByteArray()
     }
 }

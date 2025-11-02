@@ -10,6 +10,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.time.ZoneId
@@ -49,7 +50,7 @@ fun Application.availabilityApiRoutes(service: AvailabilityService) {
                 }
                     ?: return@get call.respond(HttpStatusCode.BadRequest, "Invalid limit")
 
-            val nights = withContext(Dispatchers.IO) { service.listOpenNights(clubId, limit) }
+            val nights = withContext(Dispatchers.IO + MDCContext()) { service.listOpenNights(clubId, limit) }
             call.respond(nights.map { it.toApiDto() })
         }
 
@@ -67,7 +68,7 @@ fun Application.availabilityApiRoutes(service: AvailabilityService) {
                     .getOrNull()
                     ?: return@get call.respond(HttpStatusCode.BadRequest, "Invalid startUtc")
 
-            val tables = withContext(Dispatchers.IO) { service.listFreeTables(clubId, startUtc) }
+            val tables = withContext(Dispatchers.IO + MDCContext()) { service.listFreeTables(clubId, startUtc) }
             call.respond(tables.map { it.toApiDto() })
         }
     }
