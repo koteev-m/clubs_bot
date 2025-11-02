@@ -7,6 +7,7 @@ import io.ktor.server.application.ApplicationStopped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.slf4j.LoggerFactory
@@ -27,7 +28,7 @@ fun Application.installMigrationsAndDatabase() {
     try {
         // 2) Выбор локаций миграций (PG-only / H2) + миграции в IO-контексте
         runBlocking {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 val jdbcUrlEnv = System.getenv("DATABASE_URL")?.lowercase() ?: ""
                 val isH2 = jdbcUrlEnv.startsWith("jdbc:h2:")
 

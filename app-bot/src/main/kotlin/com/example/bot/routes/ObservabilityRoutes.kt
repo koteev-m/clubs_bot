@@ -10,6 +10,7 @@ import io.ktor.server.routing.get
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.coroutines.withTimeout
 import java.sql.Connection
 import java.sql.SQLException
@@ -31,7 +32,7 @@ fun Route.healthRoute() {
         val ok =
             try {
                 withTimeout(healthDbTimeoutMs()) {
-                    withContext(Dispatchers.IO) {
+                    withContext(Dispatchers.IO + MDCContext()) {
                         ds.connection.use { conn: Connection ->
                             conn.prepareStatement("SELECT 1").use { st ->
                                 st.execute()

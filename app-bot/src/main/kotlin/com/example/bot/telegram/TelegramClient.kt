@@ -11,6 +11,7 @@ import com.pengrad.telegrambot.response.BaseResponse
 import com.pengrad.telegrambot.response.GetWebhookInfoResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 
 /**
  * Abstraction over the Telegram Bot API client based on pengrad implementation.
@@ -24,7 +25,7 @@ class TelegramClient(token: String, apiUrl: String? = null) {
             }.build()
 
     suspend fun send(request: Any): BaseResponse {
-        return withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO + MDCContext()) {
             @Suppress("UNCHECKED_CAST")
             bot.execute(request as BaseRequest<*, *>) as BaseResponse
         }
@@ -37,7 +38,7 @@ class TelegramClient(token: String, apiUrl: String? = null) {
         maxConnections: Int,
         allowedUpdates: List<String>,
     ): BaseResponse {
-        return withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO + MDCContext()) {
             bot.execute(
                 SetWebhook()
                     .url(url)
@@ -49,13 +50,13 @@ class TelegramClient(token: String, apiUrl: String? = null) {
     }
 
     suspend fun deleteWebhook(dropPending: Boolean): BaseResponse {
-        return withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO + MDCContext()) {
             bot.execute(DeleteWebhook().dropPendingUpdates(dropPending))
         }
     }
 
     suspend fun getWebhookInfo(): GetWebhookInfoResponse {
-        return withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO + MDCContext()) {
             bot.execute(GetWebhookInfo())
         }
     }
@@ -65,7 +66,7 @@ class TelegramClient(token: String, apiUrl: String? = null) {
         offset: Long,
         allowedUpdates: List<String>,
     ): List<Update> {
-        return withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO + MDCContext()) {
             val resp =
                 bot.execute(
                     GetUpdates()

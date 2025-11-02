@@ -7,6 +7,7 @@ import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.metrics.UiWaitlistMetrics
 import com.example.bot.music.MusicService
+import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.configureSecurity
 import com.example.bot.routes.checkinRoutes
 import com.example.bot.routes.guestListInviteRoutes
@@ -16,16 +17,35 @@ import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.webapp.InitDataAuthConfig
 import io.ktor.server.application.Application
+import io.ktor.server.application.install
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
+import io.ktor.server.plugins.callid.CallId
+import io.ktor.server.plugins.callid.callId
+import io.ktor.server.plugins.calllogging.CallLogging
+import io.ktor.server.response.header
 import io.micrometer.core.instrument.Metrics
 import org.koin.ktor.ext.inject
+import java.security.SecureRandom
 
 @Suppress("unused")
 fun Application.module() {
+    install(CallId) {
+        header("X-Request-Id")
+        header("X-Request-ID")
+        generate { generateRequestId() }
+        verify { id -> id.isNotBlank() && id.matches(Regex("[A-Za-z0-9._-]+")) }
+        reply { call, id -> call.response.header("X-Request-Id", id) }
+    }
+
+    install(CallLogging) {
+        mdc("request_id") { it.callId }
+    }
+
     // Глобальная безопасность
     configureSecurity()
+    install(ActorMdcPlugin)
 
     // --- DI через Koin ---
     val guestListRepository by inject<GuestListRepository>()
@@ -71,5 +91,17 @@ fun Application.module() {
     routing {
         securedBookingRoutes(bookingService)
         get("/health") { call.respondText("OK") }
+    }
+}
+
+private val secureRandom: SecureRandom by lazy { SecureRandom() }
+
+private fun generateRequestId(): String {
+    val bytes = ByteArray(10)
+    secureRandom.nextBytes(bytes)
+    return buildString(bytes.size * 2) {
+        bytes.forEach { byte ->
+            append(((byte.toInt() and 0xff).toString(16)).padStart(2, '0'))
+        }
     }
 }

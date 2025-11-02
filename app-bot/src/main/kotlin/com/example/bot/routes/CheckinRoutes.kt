@@ -20,6 +20,7 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.time.Clock
@@ -90,7 +91,7 @@ fun Application.checkinRoutes(
                             }
 
                             val list =
-                                withContext(Dispatchers.IO) { repository.getList(decoded.listId) }
+                                withContext(Dispatchers.IO + MDCContext()) { repository.getList(decoded.listId) }
                                     ?: run {
                                         UiCheckinMetrics.incError()
                                         logger.warn("checkin.scan error=list_not_found clubId={}", clubId)
@@ -105,7 +106,7 @@ fun Application.checkinRoutes(
                             }
 
                             val entry =
-                                withContext(Dispatchers.IO) { repository.findEntry(decoded.entryId) }
+                                withContext(Dispatchers.IO + MDCContext()) { repository.findEntry(decoded.entryId) }
                                     ?: run {
                                         UiCheckinMetrics.incError()
                                         logger.warn("checkin.scan error=entry_not_found clubId={}", clubId)
@@ -131,7 +132,7 @@ fun Application.checkinRoutes(
                             }
 
                             val marked =
-                                withContext(Dispatchers.IO) {
+                                withContext(Dispatchers.IO + MDCContext()) {
                                     repository.markArrived(entry.id, Instant.now(clock))
                                 }
                             if (!marked) {
@@ -174,7 +175,7 @@ fun Application.checkinRoutes(
                                     }
 
                             val entry =
-                                withContext(Dispatchers.IO) { repository.findEntry(payload.entryId) }
+                                withContext(Dispatchers.IO + MDCContext()) { repository.findEntry(payload.entryId) }
                                     ?: run {
                                         UiCheckinMetrics.incByNameError()
                                         call.application.environment.log.warn(
@@ -186,7 +187,7 @@ fun Application.checkinRoutes(
                                     }
 
                             val list =
-                                withContext(Dispatchers.IO) { repository.getList(entry.listId) }
+                                withContext(Dispatchers.IO + MDCContext()) { repository.getList(entry.listId) }
                                     ?: run {
                                         UiCheckinMetrics.incByNameError()
                                         call.application.environment.log.warn(
@@ -219,7 +220,7 @@ fun Application.checkinRoutes(
                             }
 
                             val marked =
-                                withContext(Dispatchers.IO) {
+                                withContext(Dispatchers.IO + MDCContext()) {
                                     repository.markArrived(entry.id, Instant.now(clock))
                                 }
 

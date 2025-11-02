@@ -30,6 +30,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import java.time.Duration
@@ -174,7 +175,7 @@ class MenuCallbacksHandler(
                     chatUiSession.putNightContext(chatId, threadId, clubId, startUtc)
                     logger.info("ui.night.select clubId={} start={}", clubId, startUtc)
                     val tables =
-                        withContext(Dispatchers.IO) {
+                        withContext(Dispatchers.IO + MDCContext()) {
                             UiBookingMetrics.timeListTables { availability.listFreeTables(clubId, startUtc) }
                         }
                     renderTablesPage(chatId, threadId, lang, clubId, startUtc, page = 1, preloadedTables = tables)
@@ -493,7 +494,7 @@ class MenuCallbacksHandler(
         lang: String?,
     ): BookingCmdResult {
         val holdResult =
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 bookingService.hold(
                     HoldRequest(
                         clubId = decoded.clubId,
@@ -549,7 +550,7 @@ class MenuCallbacksHandler(
         lang: String?,
     ): BookingCmdResult {
         val confirmResult =
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 bookingService.confirm(holdId, "$idemKey:confirm")
             }
         logger.info(
@@ -615,7 +616,7 @@ class MenuCallbacksHandler(
         lang: String?,
     ): BookingCmdResult {
         val finalizeResult =
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + MDCContext()) {
                 bookingService.finalize(
                     bookingId,
                     telegramUserId = callbackQuery.from()?.id()?.toLong(),
@@ -675,7 +676,7 @@ class MenuCallbacksHandler(
     }
 
     private suspend fun safeLoadClubs(limit: Int = CLUB_LIST_LIMIT): List<ClubDto> =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO + MDCContext()) {
             try {
                 clubRepository.listClubs(limit)
             } catch (ex: Exception) {
@@ -688,7 +689,7 @@ class MenuCallbacksHandler(
         clubId: Long,
         limit: Int = NIGHT_LIST_LIMIT,
     ): List<NightDto>? =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO + MDCContext()) {
             try {
                 availability.listOpenNights(clubId, limit)
             } catch (ex: Exception) {
@@ -929,7 +930,7 @@ class MenuCallbacksHandler(
         clubId: Long,
         startUtc: Instant,
     ): List<TableAvailabilityDto> =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO + MDCContext()) {
             try {
                 UiBookingMetrics.timeListTables { availability.listFreeTables(clubId, startUtc) }
             } catch (ex: Exception) {

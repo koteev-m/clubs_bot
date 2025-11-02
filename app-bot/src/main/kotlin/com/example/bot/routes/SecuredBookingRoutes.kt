@@ -19,6 +19,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.slf4j.MDCContext
 import java.util.UUID
 
 fun Route.securedBookingRoutes(bookingService: BookingService) {
@@ -62,7 +63,7 @@ fun Route.securedBookingRoutes(bookingService: BookingService) {
                                     mapOf("error" to "invalid_payload"),
                                 )
                             }
-                    val result = withContext(Dispatchers.IO) { bookingService.hold(command, idempotencyKey) }
+                    val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.hold(command, idempotencyKey) }
                     respondBookingResult(call, result)
                 }
 
@@ -103,7 +104,7 @@ fun Route.securedBookingRoutes(bookingService: BookingService) {
                                     mapOf("error" to "invalid_payload"),
                                 )
                             }
-                    val result = withContext(Dispatchers.IO) { bookingService.confirm(holdId, idempotencyKey) }
+                    val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.confirm(holdId, idempotencyKey) }
                     respondBookingResult(call, result)
                 }
             }
@@ -120,13 +121,13 @@ fun Route.securedBookingRoutes(bookingService: BookingService) {
                 post("/{bookingId}/seat") {
                     val clubId = call.clubIdOrBadRequest() ?: return@post
                     val bookingId = call.bookingIdOrBadRequest() ?: return@post
-                    val result = withContext(Dispatchers.IO) { bookingService.seat(clubId, bookingId) }
+                    val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.seat(clubId, bookingId) }
                     respondStatusChange(call, result, "seated")
                 }
                 post("/{bookingId}/no-show") {
                     val clubId = call.clubIdOrBadRequest() ?: return@post
                     val bookingId = call.bookingIdOrBadRequest() ?: return@post
-                    val result = withContext(Dispatchers.IO) { bookingService.markNoShow(clubId, bookingId) }
+                    val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.markNoShow(clubId, bookingId) }
                     respondStatusChange(call, result, "no_show")
                 }
             }
