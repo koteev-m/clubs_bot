@@ -89,6 +89,7 @@ dependencies {
     implementation(libs.slf4j.api)
     implementation(libs.logback)
     implementation(libs.logstash.encoder)
+    implementation(libs.janino)
     implementation(libs.kotlinx.coroutines.slf4j)
 
     // Telegram
@@ -110,6 +111,7 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.h2)
+    testImplementation(libs.postgres)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.junit)
     testImplementation(projects.coreTesting)

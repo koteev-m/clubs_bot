@@ -33,7 +33,7 @@ class CampaignSchedulerWiringTest :
                         modules(
                             schedulerModule,
                             module {
-                                single { SchedulerConfig(tickInterval = Duration.ofMillis(50), batchSize = 10) }
+                                single { SchedulerConfig(tickInterval = Duration.ofMillis(50), batchSize = 10, enabled = true) }
                                 single<CoroutineScope>(named("campaignSchedulerScope")) { scope }
                                 single<SchedulerApi> { fakeApi }
                             },

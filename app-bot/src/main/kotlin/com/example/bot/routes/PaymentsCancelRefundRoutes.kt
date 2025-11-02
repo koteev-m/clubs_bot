@@ -124,7 +124,6 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
     val paymentsService = koin.get<PaymentsService>()
 
     if (cancelEnabled) {
-        // Плагин ставится на дочерний узел /{bookingId}/cancel
         route("/{bookingId}/cancel") {
             withMiniAppAuth(miniAppBotTokenProvider)
 
@@ -236,7 +235,6 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
     }
 
     if (refundEnabled) {
-        // Плагин ставится на дочерний узел /{bookingId}/refund
         route("/{bookingId}/refund") {
             withMiniAppAuth(miniAppBotTokenProvider)
 

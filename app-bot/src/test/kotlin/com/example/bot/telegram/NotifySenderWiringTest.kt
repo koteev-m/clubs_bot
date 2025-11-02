@@ -22,10 +22,11 @@ class NotifySenderWiringTest : StringSpec({
         sender: NotifySender = mockk(relaxed = true),
     ) =
         koinApplication {
+            allowOverride(true)
             modules(
                 bookingModule,
                 module { single { sender } },
-                module(override = true) { single { config } },
+                module { single { config } },
             )
         }
 
