@@ -84,24 +84,15 @@ private val MiniAppAuth =
 /* -------- идемпотентность установки -------- */
 
 private val MiniAppAuthRouteMarker = AttributeKey<Boolean>("miniapp.auth.installed.route")
-private val MiniAppAuthAppMarker  = AttributeKey<Boolean>("miniapp.auth.installed.app")
 
 fun Route.withMiniAppAuth(botTokenProvider: () -> String) {
     if (attributes.contains(MiniAppAuthRouteMarker)) return
-    val app = this.application
-    if (app.attributes.getOrNull(MiniAppAuthAppMarker) == true) {
-        attributes.put(MiniAppAuthRouteMarker, true)
-        return
-    }
     try {
         install(MiniAppAuth) { this.botTokenProvider = botTokenProvider }
     } catch (_: DuplicatePluginException) {
         // уже установлен выше
     }
     attributes.put(MiniAppAuthRouteMarker, true)
-    if (app.attributes.getOrNull(MiniAppAuthAppMarker) != true) {
-        app.attributes.put(MiniAppAuthAppMarker, true)
-    }
 }
 
 fun Application.installMiniAppAuthStatusPage() {

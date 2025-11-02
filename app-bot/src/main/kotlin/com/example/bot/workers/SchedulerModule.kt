@@ -9,7 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import org.koin.core.error.ClosedScopeException
-import org.koin.core.error.NoBeanDefFoundException // старое имя (deprecated, но всё ещё есть)
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import org.koin.ktor.ext.getKoin
@@ -25,6 +24,7 @@ data class SchedulerConfig(
     val tickInterval: Duration =
         System.getenv("SCHEDULER_TICK_MS")?.toLongOrNull()?.let(Duration::ofMillis) ?: DEFAULT_TICK_INTERVAL,
     val batchSize: Int = System.getenv("SCHEDULER_BATCH")?.toIntOrNull() ?: DEFAULT_BATCH_SIZE,
+    val enabled: Boolean = System.getenv("CAMPAIGN_SCHEDULER_ENABLED")?.equals("true", ignoreCase = true) ?: false,
 )
 
 /** Lightweight metrics adapter around Telemetry/Micrometer. */
@@ -77,11 +77,14 @@ val schedulerModule =
     }
 
 private val schedLog = LoggerFactory.getLogger("CampaignScheduler")
+private val noBeanDefFoundExceptionClass: Class<*>? =
+    runCatching { Class.forName("org.koin.core.error.NoBeanDefFoundException") }.getOrNull()
 
 fun Application.launchCampaignSchedulerOnStart() {
     // Включать в проде, когда связана реальная реализация SchedulerApi
-    val enabled = System.getenv("CAMPAIGN_SCHEDULER_ENABLED")
-        ?.equals("true", ignoreCase = true) ?: false
+    val schedulerConfig = runCatching { getKoin().getOrNull<SchedulerConfig>() }.getOrNull()
+    val enabled = schedulerConfig?.enabled
+        ?: System.getenv("CAMPAIGN_SCHEDULER_ENABLED")?.equals("true", ignoreCase = true) ?: false
 
     if (!enabled) {
         schedLog.info("CampaignScheduler disabled via CAMPAIGN_SCHEDULER_ENABLED")
@@ -99,7 +102,8 @@ fun Application.launchCampaignSchedulerOnStart() {
         }.onFailure { t ->
             // Поддерживаем и старый, и новый тип Koin-исключения
             val isMissingDefinition =
-                t is NoBeanDefFoundException || t.javaClass.simpleName == "NoDefinitionFoundException"
+                (noBeanDefFoundExceptionClass?.isInstance(t) == true) ||
+                    t.javaClass.simpleName == "NoDefinitionFoundException"
 
             when {
                 isMissingDefinition -> {

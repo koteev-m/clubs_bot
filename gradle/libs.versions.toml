@@ -19,6 +19,7 @@ micrometerTracing  = "1.2.5"
 otel               = "1.41.0"
 logback            = "1.5.20"
 logstash           = "8.0"
+janino            = "3.1.12"
 
 # Тесты
 junit         = "5.10.2"
@@ -93,6 +94,7 @@ opentelemetry-sdk-testing     = { module = "io.opentelemetry:opentelemetry-sdk-t
 # Логирование
 logback          = { module = "ch.qos.logback:logback-classic",        version.ref = "logback" }
 logstash-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash" }
+janino           = { module = "org.codehaus.janino:janino",                 version.ref = "janino" }
 
 # DI
 koin-bom = { module = "io.insert-koin:koin-bom", version.ref = "koin" }
