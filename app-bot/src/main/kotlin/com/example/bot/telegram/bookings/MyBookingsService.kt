@@ -74,21 +74,22 @@ class MyBookingsService(
         lang: String?,
     ): CancelResult {
         val user = userRepository.getByTelegramId(telegramUserId) ?: return CancelResult.NotFound
-        val info = loadBookingById(user.id, bookingId) ?: return CancelResult.NotFound
+        val userId = user.id
+        val info = loadBookingById(userId, bookingId) ?: return CancelResult.NotFound
 
         metrics.incCancelRequested(info.clubId)
 
         return when (info.status) {
             BookingStatus.CANCELLED -> {
                 metrics.incCancelAlready(info.clubId)
-                logger.info("mybookings.cancel: already booking={} user={}", bookingId, telegramUserId)
+                logger.info("mybookings.cancel: already booking={} user={}", bookingId, userId)
                 CancelResult.Already(info)
             }
 
             BookingStatus.BOOKED -> performCancellation(user, info, texts, lang)
             BookingStatus.SEATED, BookingStatus.NO_SHOW -> {
                 metrics.incCancelAlready(info.clubId)
-                logger.info("mybookings.cancel: already booking={} user={} status={}", bookingId, telegramUserId, info.status)
+                logger.info("mybookings.cancel: already booking={} user={} status={}", bookingId, userId, info.status)
                 CancelResult.Already(info)
             }
         }
@@ -111,14 +112,14 @@ class MyBookingsService(
             }
         if (!updated) {
             metrics.incCancelAlready(info.clubId)
-            logger.info("mybookings.cancel: already booking={} user={} race", info.id, user.telegramId)
+            logger.info("mybookings.cancel: already booking={} user={} race", info.id, user.id)
             return CancelResult.Already(info.copy(status = BookingStatus.CANCELLED))
         }
 
         val message = buildCancelMessage(info, user, texts, lang)
         enqueueOutbox(info, message)
         metrics.incCancelOk(info.clubId)
-        logger.info("mybookings.cancel: ok booking={} user={}", info.id, user.telegramId)
+        logger.info("mybookings.cancel: ok booking={} user={}", info.id, user.id)
         return CancelResult.Ok(info.copy(status = BookingStatus.CANCELLED))
     }
 
