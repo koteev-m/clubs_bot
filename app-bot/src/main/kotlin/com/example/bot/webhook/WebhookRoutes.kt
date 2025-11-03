@@ -13,6 +13,7 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -54,7 +55,7 @@ fun Route.webhookRoute(
                 null -> call.respond(HttpStatusCode.OK)
                 is WebhookReply.Inline -> call.respond(reply.payload)
                 is WebhookReply.Async -> {
-                    call.application.launch { client.send(reply.request) }
+                    call.application.launch(MDCContext()) { client.send(reply.request) }
                     call.respond(HttpStatusCode.OK)
                 }
             }

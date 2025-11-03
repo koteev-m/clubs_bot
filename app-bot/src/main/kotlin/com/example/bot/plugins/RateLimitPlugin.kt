@@ -98,6 +98,7 @@ val RateLimitPlugin =
             val requestId =
                 call.request.header(HttpHeaders.XRequestId)
                     ?: call.callId
+            val safeRequestId = requestId ?: "-"
 
             // 1) IP limiting
             if (cfg.ipEnabled) {
@@ -110,13 +111,13 @@ val RateLimitPlugin =
                     RateLimitMetrics.ipBlocked.incrementAndGet()
                     RateLimitMetrics.lastBlockedRequestId.set(requestId)
                     call.response.header(HttpHeaders.RetryAfter, cfg.retryAfter.seconds.toString())
-                    logger.warn(
-                        "ratelimit.blocked type=ip path={} requestId={} host={}:{}",
-                        path,
-                        requestId,
-                        call.request.host(),
-                        call.request.port(),
-                    )
+                        logger.warn(
+                            "ratelimit.blocked type=ip path={} requestId={} host={}:{}",
+                            path,
+                            safeRequestId,
+                            call.request.host(),
+                            call.request.port(),
+                        )
                     call.respondText("Too Many Requests (IP limit)", status = HttpStatusCode.TooManyRequests)
                     return@onCall
                 }
@@ -135,7 +136,7 @@ val RateLimitPlugin =
                         logger.warn(
                             "ratelimit.blocked type=subject path={} requestId={} host={}:{}",
                             path,
-                            requestId,
+                            safeRequestId,
                             call.request.host(),
                             call.request.port(),
                         )

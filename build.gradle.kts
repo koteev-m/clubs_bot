@@ -180,7 +180,10 @@ subprojects {
         buildUponDefaultConfig = true
         allRules = false
         config.setFrom(files(rootProject.file("detekt.yml")))
-        baseline = rootProject.file("config/detekt/baseline.xml")
+        baseline = when (project.path) {
+            ":app-bot" -> rootProject.file("config/detekt/baseline-main.xml")
+            else -> rootProject.file("config/detekt/baseline.xml")
+        }
     }
 
     tasks.withType<Detekt>().configureEach {
@@ -192,6 +195,17 @@ subprojects {
             val out = project.layout.buildDirectory
             html.outputLocation.set(out.file("reports/detekt/detekt.html"))
             sarif.outputLocation.set(out.file("reports/detekt/detekt.sarif"))
+        }
+    }
+
+    if (project.path == ":app-bot") {
+        tasks.matching { it.name == "detekt" }.configureEach {
+            this as Detekt
+            baseline = rootProject.file("config/detekt/baseline-main.xml")
+        }
+        tasks.matching { it.name == "detektTest" }.configureEach {
+            this as Detekt
+            baseline = rootProject.file("config/detekt/baseline-test.xml")
         }
     }
 

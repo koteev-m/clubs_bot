@@ -94,13 +94,22 @@ fun Application.checkinRoutes(
                                 withContext(Dispatchers.IO + MDCContext()) { repository.getList(decoded.listId) }
                                     ?: run {
                                         UiCheckinMetrics.incError()
-                                        logger.warn("checkin.scan error=list_not_found clubId={}", clubId)
+                                        logger.warn(
+                                            "checkin.scan error=list_not_found clubId={} listId={}",
+                                            clubId,
+                                            decoded.listId,
+                                        )
                                         call.respond(HttpStatusCode.NotFound, "list_not_found")
                                         return@timeScanSuspend
                                     }
                             if (list.clubId != clubId) {
                                 UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error=club_scope_mismatch clubId={}", clubId)
+                                logger.warn(
+                                    "checkin.scan error=club_scope_mismatch clubId={} listId={} listClubId={}",
+                                    clubId,
+                                    list.id,
+                                    list.clubId,
+                                )
                                 call.respond(HttpStatusCode.Forbidden, "club_scope_mismatch")
                                 return@timeScanSuspend
                             }
@@ -109,13 +118,24 @@ fun Application.checkinRoutes(
                                 withContext(Dispatchers.IO + MDCContext()) { repository.findEntry(decoded.entryId) }
                                     ?: run {
                                         UiCheckinMetrics.incError()
-                                        logger.warn("checkin.scan error=entry_not_found clubId={}", clubId)
+                                        logger.warn(
+                                            "checkin.scan error=entry_not_found clubId={} listId={} entryId={}",
+                                            clubId,
+                                            decoded.listId,
+                                            decoded.entryId,
+                                        )
                                         call.respond(HttpStatusCode.NotFound, "entry_not_found")
                                         return@timeScanSuspend
                                     }
                             if (entry.listId != list.id) {
                                 UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error=entry_list_mismatch clubId={}", clubId)
+                                logger.warn(
+                                    "checkin.scan error=entry_list_mismatch clubId={} listId={} entryListId={} entryId={}",
+                                    clubId,
+                                    list.id,
+                                    entry.listId,
+                                    entry.id,
+                                )
                                 call.respond(HttpStatusCode.BadRequest, "entry_list_mismatch")
                                 return@timeScanSuspend
                             }
@@ -137,7 +157,12 @@ fun Application.checkinRoutes(
                                 }
                             if (!marked) {
                                 UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error=unable_to_mark clubId={}", clubId)
+                                logger.warn(
+                                    "checkin.scan error=unable_to_mark clubId={} listId={} entryId={}",
+                                    clubId,
+                                    list.id,
+                                    entry.id,
+                                )
                                 call.respond(HttpStatusCode.Conflict, "unable_to_mark")
                                 return@timeScanSuspend
                             }
@@ -179,8 +204,9 @@ fun Application.checkinRoutes(
                                     ?: run {
                                         UiCheckinMetrics.incByNameError()
                                         call.application.environment.log.warn(
-                                            "checkin.by_name error=entry_not_found clubId={}",
+                                            "checkin.by_name error=entry_not_found clubId={} entryId={}",
                                             clubId,
+                                            payload.entryId,
                                         )
                                         call.respond(HttpStatusCode.NotFound, "entry_not_found")
                                         return@timeByNameSuspend
@@ -191,8 +217,10 @@ fun Application.checkinRoutes(
                                     ?: run {
                                         UiCheckinMetrics.incByNameError()
                                         call.application.environment.log.warn(
-                                            "checkin.by_name error=list_not_found clubId={}",
+                                            "checkin.by_name error=list_not_found clubId={} listId={} entryId={}",
                                             clubId,
+                                            entry.listId,
+                                            entry.id,
                                         )
                                         call.respond(HttpStatusCode.NotFound, "list_not_found")
                                         return@timeByNameSuspend
@@ -201,8 +229,10 @@ fun Application.checkinRoutes(
                             if (list.clubId != clubId) {
                                 UiCheckinMetrics.incByNameError()
                                 call.application.environment.log.warn(
-                                    "checkin.by_name error=club_scope_mismatch clubId={}",
+                                    "checkin.by_name error=club_scope_mismatch clubId={} listId={} listClubId={}",
                                     clubId,
+                                    list.id,
+                                    list.clubId,
                                 )
                                 call.respond(HttpStatusCode.Forbidden, "club_scope_mismatch")
                                 return@timeByNameSuspend

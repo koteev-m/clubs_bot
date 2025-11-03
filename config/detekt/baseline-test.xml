@@ -1,0 +1,21 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ExceptionRaisedInUnexpectedLocation:PaymentsFinalizeRoutesTest.kt$PaymentsFinalizeRoutesTest.&lt;no name provided&gt;$override suspend fun finalize( clubId: Long, bookingId: UUID, paymentToken: String?, idemKey: String, actorUserId: Long, ): FinalizeResult</ID>
+    <ID>ExceptionRaisedInUnexpectedLocation:PaymentsFinalizeRoutesTest.kt$PaymentsFinalizeRoutesTest.FailingFinalizeService$override suspend fun finalize( clubId: Long, bookingId: UUID, paymentToken: String?, idemKey: String, actorUserId: Long, ): FinalizeResult</ID>
+    <ID>InjectDispatcher:CampaignSchedulerWiringTest.kt$CampaignSchedulerWiringTest$Default</ID>
+    <ID>NoNameShadowing:TestRequestExtensions.kt${ it.isNotEmpty() }</ID>
+    <ID>ObjectLiteralToLambda:RefundOutboxWorkerTest.kt$RefundOutboxWorkerTest$object : ProviderRefundClient { override suspend fun send(command: ProviderRefundCommand): ProviderRefundResult = sender(command) }</ID>
+    <ID>UnnecessaryAbstractClass:PostgresAppTest.kt$PostgresAppTest$PostgresAppTest</ID>
+    <ID>UnnecessaryNotNullOperator:QrGuestListCodecTest.kt$QrGuestListCodecTest$decoded!!</ID>
+    <ID>UnnecessaryNotNullOperator:WebAppInitDataVerifierTest.kt$WebAppInitDataVerifierTest$verified!!</ID>
+    <ID>UnnecessaryNotNullOperator:WebAppInitDataVerifierTest.kt$WebAppInitDataVerifierTest$verifiedFirst!!</ID>
+    <ID>UnnecessaryNotNullOperator:WebAppInitDataVerifierTest.kt$WebAppInitDataVerifierTest$verifiedSecond!!</ID>
+    <ID>UseOrEmpty:EntryManagerCheckInSmokeTest.kt$(registry as? PrometheusMeterRegistry)?.scrape() ?: ""</ID>
+    <ID>UseOrEmpty:PromoAttributionServiceTest.kt$StaticUserRoleRepository$clubIds[userId] ?: emptySet()</ID>
+    <ID>UseOrEmpty:PromoAttributionServiceTest.kt$StaticUserRoleRepository$roles[userId] ?: emptySet()</ID>
+    <ID>UseOrEmpty:RbacFeatureFlagTest.kt$RbacFeatureFlagTest.InMemoryUserRoleRepository$clubs[userId] ?: emptySet()</ID>
+    <ID>UseOrEmpty:RbacFeatureFlagTest.kt$RbacFeatureFlagTest.InMemoryUserRoleRepository$roles[userId] ?: emptySet()</ID>
+  </CurrentIssues>
+</SmellBaseline>

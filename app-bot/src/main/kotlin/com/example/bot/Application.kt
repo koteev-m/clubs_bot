@@ -22,7 +22,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.plugins.callid.CallId
-import io.ktor.server.plugins.callid.callId
+import com.example.bot.logging.callIdMdc
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.response.header
 import io.micrometer.core.instrument.Metrics
@@ -35,12 +35,12 @@ fun Application.module() {
         header("X-Request-Id")
         header("X-Request-ID")
         generate { generateRequestId() }
-        verify { id -> id.isNotBlank() && id.matches(Regex("[A-Za-z0-9._-]+")) }
+        verify { id -> id.isNotBlank() && requestIdPattern.matches(id) }
         reply { call, id -> call.response.header("X-Request-Id", id) }
     }
 
     install(CallLogging) {
-        mdc("request_id") { it.callId }
+        callIdMdc("request_id")
     }
 
     // Глобальная безопасность
@@ -95,6 +95,8 @@ fun Application.module() {
 }
 
 private val secureRandom: SecureRandom by lazy { SecureRandom() }
+
+private val requestIdPattern: Regex = Regex("^[A-Za-z0-9._-]{1,64}")
 
 private fun generateRequestId(): String {
     val bytes = ByteArray(10)

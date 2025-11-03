@@ -87,7 +87,7 @@ class MenuCallbacksHandler(
 
         when {
             data == MENU_CLUBS && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val clubs = safeLoadClubs()
                     val text = buildClubSelectionMessage(clubs, lang)
                     val clubButtons = clubs.map { club -> ClubTokenCodec.encode(club.id) to club.name }
@@ -97,13 +97,17 @@ class MenuCallbacksHandler(
                 }
 
             data == MENU_BOOKINGS && chatId != null ->
-                uiScope.launch { handleMyBookingsMenu(callbackQuery, chatId, threadId, lang) }
+                uiScope.launch(MDCContext()) { handleMyBookingsMenu(callbackQuery, chatId, threadId, lang) }
 
             data.startsWith(BOOKINGS_LIST_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val pageNumber = data.removePrefix(BOOKINGS_LIST_PREFIX).toIntOrNull()
                     if (pageNumber == null) {
-                        logger.warn("ui.menu.malformed tokenType=bk:list")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=bk:list chatId={} threadId={}",
+                            chatId,
+                            threadId,
+                        )
                         send(chatId, threadId, texts.sessionExpired(lang), keyboards.startMenu(lang))
                         return@launch
                     }
@@ -111,10 +115,14 @@ class MenuCallbacksHandler(
                 }
 
             data.startsWith(BOOKINGS_SHOW_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val parsed = parsePageAndId(data, BOOKINGS_SHOW_PREFIX)
                     if (parsed == null) {
-                        logger.warn("ui.menu.malformed tokenType=bk:show")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=bk:show chatId={} threadId={}",
+                            chatId,
+                            threadId,
+                        )
                         send(chatId, threadId, texts.sessionExpired(lang), keyboards.startMenu(lang))
                         return@launch
                     }
@@ -122,10 +130,14 @@ class MenuCallbacksHandler(
                 }
 
             data.startsWith(BOOKINGS_CANCEL_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val parsed = parsePageAndId(data, BOOKINGS_CANCEL_PREFIX)
                     if (parsed == null) {
-                        logger.warn("ui.menu.malformed tokenType=bk:cancel")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=bk:cancel chatId={} threadId={}",
+                            chatId,
+                            threadId,
+                        )
                         send(chatId, threadId, texts.sessionExpired(lang), keyboards.startMenu(lang))
                         return@launch
                     }
@@ -133,11 +145,15 @@ class MenuCallbacksHandler(
                 }
 
             data.startsWith(CLUB_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val token = data.removePrefix(CLUB_PREFIX)
                     val clubId = ClubTokenCodec.decode(token)
                     if (clubId == null) {
-                        logger.warn("ui.menu.malformed tokenType=club")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=club chatId={} threadId={}",
+                            chatId,
+                            threadId,
+                        )
                         send(chatId, threadId, texts.buttonExpired(lang))
                         return@launch
                     }
@@ -163,11 +179,15 @@ class MenuCallbacksHandler(
                 }
 
             data.startsWith(NIGHT_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val token = data.removePrefix(NIGHT_PREFIX)
                     val decoded = NightTokenCodec.decode(token)
                     if (decoded == null) {
-                        logger.warn("ui.menu.malformed tokenType=night")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=night chatId={} threadId={}",
+                            chatId,
+                            threadId,
+                        )
                         send(chatId, threadId, texts.sessionExpired(lang), keyboards.startMenu(lang))
                         return@launch
                     }
@@ -182,16 +202,21 @@ class MenuCallbacksHandler(
                 }
 
             data.startsWith(PAGE_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val pageNumber = data.removePrefix(PAGE_PREFIX).toIntOrNull()
                     if (pageNumber == null) {
-                        logger.warn("ui.menu.malformed tokenType=page")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=page chatId={} threadId={} rawPage={}",
+                            chatId,
+                            threadId,
+                            data.removePrefix(PAGE_PREFIX),
+                        )
                         send(chatId, threadId, texts.sessionExpired(lang), keyboards.startMenu(lang))
                         return@launch
                     }
                     val context = chatUiSession.getNightContext(chatId, threadId)
                     if (context == null) {
-                        logger.warn("ui.menu.context_missing route=pg")
+                        logger.warn("ui.menu.context_missing route=pg chatId={} threadId={}", chatId, threadId)
                         send(chatId, threadId, texts.sessionExpired(lang), keyboards.startMenu(lang))
                         return@launch
                     }
@@ -211,10 +236,14 @@ class MenuCallbacksHandler(
                 }
 
             data.startsWith(TABLE_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val decodedTable = TableSelectCodec.decode(data)
                     if (decodedTable == null) {
-                        logger.warn("ui.menu.malformed tokenType=tbl")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=tbl chatId={} threadId={}",
+                            chatId,
+                            threadId,
+                        )
                         send(chatId, threadId, texts.buttonExpired(lang))
                         return@launch
                     }
@@ -245,10 +274,14 @@ class MenuCallbacksHandler(
                 }
 
             data.startsWith(GUEST_PREFIX) && chatId != null ->
-                uiScope.launch {
+                uiScope.launch(MDCContext()) {
                     val decoded = GuestsSelectCodec.decode(data)
                     if (decoded == null) {
-                        logger.warn("ui.menu.malformed tokenType=g")
+                        logger.warn(
+                            "ui.menu.malformed tokenType=g chatId={} threadId={}",
+                            chatId,
+                            threadId,
+                        )
                         send(chatId, threadId, texts.buttonExpired(lang))
                         return@launch
                     }
