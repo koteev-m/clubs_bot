@@ -82,14 +82,20 @@ class MyBookingsService(
         return when (info.status) {
             BookingStatus.CANCELLED -> {
                 metrics.incCancelAlready(info.clubId)
-                logger.info("mybookings.cancel: already booking={} user={}", bookingId, userId)
+                logger.info("mybookings.cancel: already booking={} user={} clubId={}", bookingId, userId, info.clubId)
                 CancelResult.Already(info)
             }
 
             BookingStatus.BOOKED -> performCancellation(user, info, texts, lang)
             BookingStatus.SEATED, BookingStatus.NO_SHOW -> {
                 metrics.incCancelAlready(info.clubId)
-                logger.info("mybookings.cancel: already booking={} user={} status={}", bookingId, userId, info.status)
+                logger.info(
+                    "mybookings.cancel: already booking={} user={} clubId={} status={}",
+                    bookingId,
+                    userId,
+                    info.clubId,
+                    info.status,
+                )
                 CancelResult.Already(info)
             }
         }
@@ -112,14 +118,14 @@ class MyBookingsService(
             }
         if (!updated) {
             metrics.incCancelAlready(info.clubId)
-            logger.info("mybookings.cancel: already booking={} user={} race", info.id, user.id)
+            logger.info("mybookings.cancel: already booking={} user={} clubId={} race", info.id, user.id, info.clubId)
             return CancelResult.Already(info.copy(status = BookingStatus.CANCELLED))
         }
 
         val message = buildCancelMessage(info, user, texts, lang)
         enqueueOutbox(info, message)
         metrics.incCancelOk(info.clubId)
-        logger.info("mybookings.cancel: ok booking={} user={}", info.id, user.id)
+        logger.info("mybookings.cancel: ok booking={} user={} clubId={}", info.id, user.id, info.clubId)
         return CancelResult.Ok(info.copy(status = BookingStatus.CANCELLED))
     }
 

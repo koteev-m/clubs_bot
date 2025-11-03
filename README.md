@@ -58,6 +58,36 @@ build if it detects legacy Kotlin stdlib artifacts, mismatched Ktor versions or
 dynamic/SNAPSHOT coordinates. Run it locally via `./gradlew dependencyGuard
 --console=plain` or let CI handle it as part of the standard pipeline.
 
+## SEC-02 Политика логирования и приватность
+
+- Логируем только безопасные идентификаторы и статусы: `clubId`, `listId`,
+  `entryId`, `bookingId`, `userId`, `status`, `outcome`. Эти поля всегда
+  сопровождаются `request_id` (для всех запросов) и `actor_id` (после
+  аутентификации) в MDC.
+- `MessageMaskingConverter` автоматически маскирует телефоны, «голые»
+  Telegram-токены и значения ключей `fullName/fio/name/guest/ФИО`, оставляя
+  только безопасные первые буквы. На уровне Logback подключён
+  `DenySensitiveTurboFilter`, который запрещает сообщения с `qr=`,
+  `start_param=` и `idempotencyKey` — такие строки не доходят до аппендеров.
+- По умолчанию логи пишутся в stdout, формат:
+
+  ```
+  2024-07-20 12:00:00.000 [ktor-worker-1] INFO ... request_id=<id> actor_id=<id> - <masked message>
+  ```
+
+- Для включения файлового логирования установите `APP_ENV=prod`. В этом режиме
+  Logback активирует `RollingFileAppender` и пишет в `logs/app.log` с дневной
+  ротацией (`logs/app.log.YYYY-MM-DD`). Консольный аппендер в `prod` отключён.
+- Быстрый smoke-чек:
+
+  ```bash
+  ./gradlew :app-bot:test --console=plain
+  curl -s -D - http://localhost:8080/health >/dev/null  # X-Request-Id вернётся в ответе
+  ```
+
+  После запроса убедитесь в логах, что присутствует `request_id=<значение>` и
+  нет сырых телефонов, ФИО, токенов, `qr/start_param/idempotencyKey`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` (used by Docker Compose) and provide the required

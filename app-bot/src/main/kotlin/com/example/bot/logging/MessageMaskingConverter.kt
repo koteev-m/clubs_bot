@@ -14,7 +14,7 @@ class MessageMaskingConverter : MessageConverter() {
     }
 
     companion object {
-        private val PHONE_REGEX = Regex("""(?<!\w)(\+?\d[\d\s().-]{6,}\d)""")
+        private val PHONE_REGEX = Regex("""(?<!\w)(\+?\d[\d\s().-]{7,}\d)""")
         private val NAME_PAIR_REGEX = Regex("""(?i)\b(fullName|fio|name|guest|ФИО)(\s*=\s*)([^,;|]+)""")
         private val TOKEN_REGEX = Regex("""\b\d{6,12}:[A-Za-z0-9_-]{30,}\b""")
 
@@ -43,7 +43,9 @@ class MessageMaskingConverter : MessageConverter() {
 
         private fun maskPhoneNumber(rawPhone: String): String {
             val digitsCount = rawPhone.count { it.isDigit() }
-            if (digitsCount == 0) return rawPhone
+            if (digitsCount == 0 || digitsCount < 9) {
+                return rawPhone
+            }
 
             val digitsToShow = when {
                 digitsCount <= 2 -> digitsCount

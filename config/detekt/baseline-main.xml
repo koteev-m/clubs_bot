@@ -1,0 +1,142 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:StartParamGuestListCodec.kt$StartParamGuestListCodec$secret.isBlank() || ttl.isZero || ttl.isNegative || maxClockSkew.isNegative</ID>
+    <ID>DoubleMutabilityForCollection:Keyboards.kt$Keyboards$var row = mutableListOf&lt;InlineKeyboardButton&gt;()</ID>
+    <ID>ExceptionRaisedInUnexpectedLocation:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$override suspend fun finalize( clubId: Long, bookingId: UUID, paymentToken: String?, idemKey: String, actorUserId: Long, ): PaymentsFinalizeService.FinalizeResult</ID>
+    <ID>ExceptionRaisedInUnexpectedLocation:DefaultPaymentsService.kt$DefaultPaymentsService$override suspend fun finalize( clubId: Long, bookingId: UUID, paymentToken: String?, idemKey: String, actorUserId: Long, ): PaymentsService.FinalizeResult</ID>
+    <ID>InjectDispatcher:AvailabilityApiRoutes.kt$IO</ID>
+    <ID>InjectDispatcher:CheckinRoutes.kt$IO</ID>
+    <ID>InjectDispatcher:ClubsRoutes.kt$IO</ID>
+    <ID>InjectDispatcher:HallRenderer.kt$DefaultHallRenderer$Default</ID>
+    <ID>InjectDispatcher:HallRoutes.kt$IO</ID>
+    <ID>InjectDispatcher:MenuCallbacksHandler.kt$MenuCallbacksHandler$IO</ID>
+    <ID>InjectDispatcher:MigrationsPlugin.kt$IO</ID>
+    <ID>InjectDispatcher:MyBookingsService.kt$MyBookingsService$IO</ID>
+    <ID>InjectDispatcher:ObservabilityRoutes.kt$IO</ID>
+    <ID>InjectDispatcher:SchedulerModule.kt$Default</ID>
+    <ID>InjectDispatcher:SecuredBookingRoutes.kt$IO</ID>
+    <ID>InjectDispatcher:TelegramClient.kt$TelegramClient$IO</ID>
+    <ID>InstanceOfCheckForException:DefaultPaymentsService.kt$DefaultPaymentsService$unexpected !is PaymentsService.UnprocessableException</ID>
+    <ID>InvalidPackageDeclaration:GuestListInviteRoutes.kt$package com.example.bot.routes</ID>
+    <ID>MagicNumber:Application.kt$0xff</ID>
+    <ID>MagicNumber:Application.kt$16</ID>
+    <ID>MagicNumber:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$4</ID>
+    <ID>MagicNumber:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$8</ID>
+    <ID>MagicNumber:GuestListInviteRoutes.kt$12</ID>
+    <ID>MagicNumber:GuestListRoutes.kt$50</ID>
+    <ID>MagicNumber:LoggingPlugin.kt$0xff</ID>
+    <ID>MagicNumber:LoggingPlugin.kt$16</ID>
+    <ID>MagicNumber:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$3</ID>
+    <ID>MagicNumber:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$4</ID>
+    <ID>MagicNumber:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$9</ID>
+    <ID>MagicNumber:OutboxAdminRoutes.kt$10_000</ID>
+    <ID>MagicNumber:OutboxAdminRoutes.kt$50</ID>
+    <ID>MagicNumber:OutboxAdminRoutes.kt$500</ID>
+    <ID>MagicNumber:PromoAttributionService.kt$InMemoryPromoAttributionStore$24</ID>
+    <ID>MagicNumber:ProviderRefundClient.kt$HttpProviderRefundClient$200</ID>
+    <ID>MagicNumber:ProviderRefundClient.kt$HttpProviderRefundClient$299</ID>
+    <ID>MagicNumber:ProviderRefundClient.kt$HttpProviderRefundClient$429</ID>
+    <ID>MagicNumber:ProviderRefundClient.kt$HttpProviderRefundClient$500</ID>
+    <ID>MagicNumber:ProviderRefundClient.kt$ProviderRefundClientConfig$3</ID>
+    <ID>MagicNumber:ProviderRefundClient.kt$ProviderRefundClientConfig.Companion$10_000</ID>
+    <ID>MagicNumber:ProviderRefundClient.kt$ProviderRefundClientConfig.Companion$3_000</ID>
+    <ID>MagicNumber:RefundOutboxWorker.kt$RefundOutboxWorker$5</ID>
+    <ID>MagicNumber:RefundOutboxWorker.kt$RefundWorkerConfig$50</ID>
+    <ID>MagicNumber:StartInviteArriveHandler.kt$StartInviteArriveHandler$12</ID>
+    <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$0xFF</ID>
+    <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$3</ID>
+    <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$4</ID>
+    <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$5</ID>
+    <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$64</ID>
+    <ID>MagicNumber:TracingExt.kt$8</ID>
+    <ID>MagicNumber:UiCheckinMetrics.kt$UiCheckinMetrics$0.5</ID>
+    <ID>MagicNumber:UiCheckinMetrics.kt$UiCheckinMetrics$0.95</ID>
+    <ID>MagicNumber:UiCheckinMetrics.kt$UiCheckinMetrics$0.99</ID>
+    <ID>MagicNumber:WaitlistRoutes.kt$120</ID>
+    <ID>MagicNumber:WaitlistRoutes.kt$15</ID>
+    <ID>MagicNumber:WaitlistRoutes.kt$5</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$"checkin.scan error=entry_list_mismatch clubId={} listId={} entryListId={} entryId={}"</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$logger.info("checkin.scan status=arrived clubId={} listId={} entryId={}", clubId, list.id, entry.id)</ID>
+    <ID>MaxLineLength:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$BookingCmdResult.DuplicateActiveBooking -&gt; throw PaymentsFinalizeService.ConflictException("booking duplicate active")</ID>
+    <ID>MaxLineLength:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$BookingCmdResult.IdempotencyConflict -&gt; throw PaymentsFinalizeService.ConflictException("booking idempotency conflict")</ID>
+    <ID>MaxLineLength:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$paymentsRepository.findByIdempotencyKey(idemKey) ?: created.copy(status = paymentStatus, externalId = tokenDigest)</ID>
+    <ID>MaxLineLength:GuestListRoutes.kt$return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "outside_arrival_window"))</ID>
+    <ID>MaxLineLength:Keyboards.kt$Keyboards$val back = InlineKeyboardButton(texts.myBookingsBack(lang)).callbackData("bk:list:${originatingPage.coerceAtLeast(1)}")</ID>
+    <ID>MaxLineLength:OutboxAdminRoutes.kt$"Outbox replay completed actor=$actor topic=${result.topic ?: adminFilter?.topic ?: "MULTI"} "</ID>
+    <ID>MaxLineLength:OutboxAdminRoutes.kt$"Outbox replay request actor=$actor dryRun=$dryRun maxRows=$clamp ids=${ids.size} filter={$filterSignature}"</ID>
+    <ID>MaxLineLength:OutboxAdminRoutes.kt$"topic=${it.topic ?: "ANY"},status=${it.status ?: "ANY"},createdAfter=${it.createdAfter ?: "NONE"}"</ID>
+    <ID>MaxLineLength:OutboxAdminRoutes.kt$val timer = resolvedMetrics?.timer("outbox.admin.list.timer", "topic", topicTag, "status", statusTag)</ID>
+    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] cancel result=ok club=$clubId booking=$bookingLabel requestId=$callId idempotent=${result.idempotent}"</ID>
+    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] cancel result=validation club=$clubId booking=$bookingLabel requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] refund result=ok club=$clubId booking=$bookingLabel requestId=$callId idempotent=${result.idempotent}"</ID>
+    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] refund result=unprocessable club=$clubId booking=$bookingLabel requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] refund result=validation club=$clubId booking=$bookingLabel requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$logger.warn { "[payments] cancel result=validation club=$clubId booking=${maskBookingId(bookingId)} requestId=$callId" }</ID>
+    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$logger.warn { "[payments] refund result=validation club=$clubId booking=${maskBookingId(bookingId)} requestId=$callId" }</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize promo-attach-failed club=$clubId booking=$bookingLabel requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=conflict club=$clubId booking=$bookingLabel requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=ok club=$clubId booking=$bookingLabel requestId=$callId status=${result.paymentStatus}"</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=unexpected club=$clubId booking=$bookingLabel requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=validation club=$clubId booking=$bookingLabel requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=validation club=$clubId booking=unknown requestId=$callId"</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$logger.warn { "[payments] finalize result=validation club=$clubId booking=unknown requestId=$callId" }</ID>
+    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$logger.warn { "[payments] finalize result=validation club=unknown booking=unknown requestId=$callId" }</ID>
+    <ID>MaxLineLength:RefundOutboxWorker.kt$RefundOutboxWorker$"Provider refund request failed for message {} attempt {}"</ID>
+    <ID>MaxLineLength:SecuredBookingRoutes.kt$val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.confirm(holdId, idempotencyKey) }</ID>
+    <ID>MaxLineLength:SecuredBookingRoutes.kt$val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.hold(command, idempotencyKey) }</ID>
+    <ID>MaxLineLength:SecuredBookingRoutes.kt$val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.markNoShow(clubId, bookingId) }</ID>
+    <ID>MaxLineLength:StartInviteArriveHandler.kt$StartInviteArriveHandler$val decoded = StartParamGuestListCodec.verify(payload, now, ttl, secret) ?: return Result.ExpiredOrSignatureError</ID>
+    <ID>MaxLineLength:WaitlistRoutes.kt$?:</ID>
+    <ID>NestedBlockDepth:BookingTemplateService.kt$BookingTemplateService$suspend fun listTemplates( actor: TemplateActor, clubId: Long? = null, onlyActive: Boolean = true, ): List&lt;BookingTemplate&gt;</ID>
+    <ID>NoNameShadowing:GuestListImportBotHandler.kt$GuestListImportBotHandler$document</ID>
+    <ID>RedundantSuspendModifier:NotifySender.kt$NotifySender$suspend</ID>
+    <ID>ReturnCount:AppEnvFilter.kt$AppEnvFilter$override fun decide(event: ILoggingEvent?): FilterReply</ID>
+    <ID>ReturnCount:BookingService.kt$BookingService$private suspend fun updateStatus( clubId: Long, bookingId: UUID, targetStatus: BookingStatus, action: String, metricName: String, outboxTopic: String, ): BookingStatusUpdateResult</ID>
+    <ID>ReturnCount:GuestListImportBotHandler.kt$GuestListImportBotHandler$suspend fun handle(update: Update)</ID>
+    <ID>ReturnCount:GuestListInviteRoutes.kt$private fun canIssueForList(context: RbacContext, list: GuestList): Boolean</ID>
+    <ID>ReturnCount:InitDataAuth.kt$private suspend fun extractInitData(call: ApplicationCall): String?</ID>
+    <ID>ReturnCount:MenuCallbacksHandler.kt$MenuCallbacksHandler$private fun parsePageAndId( data: String, prefix: String, ): Pair&lt;Int, UUID&gt;?</ID>
+    <ID>ReturnCount:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$private fun maskNameValue(value: String): String</ID>
+    <ID>ReturnCount:MyBookingsService.kt$MyBookingsService$suspend fun cancel( telegramUserId: Long, bookingId: UUID, texts: BotTexts, lang: String?, ): CancelResult</ID>
+    <ID>ReturnCount:MyBookingsService.kt$MyBookingsService$suspend fun list( telegramUserId: Long, page: Int, pageSize: Int, ): BookingPage</ID>
+    <ID>ReturnCount:MyBookingsService.kt$MyBookingsService$suspend fun loadBooking( telegramUserId: Long, bookingId: UUID, ): BookingInfo?</ID>
+    <ID>ReturnCount:NotifySenderSendPort.kt$NotifySenderSendPort$override suspend fun send(topic: String, payload: JsonObject): SendOutcome</ID>
+    <ID>ReturnCount:PromoAttributionService.kt$PromoAttributionService$private fun extractTokenFromDeepLink(value: String): PromoLinkToken?</ID>
+    <ID>ReturnCount:PromoAttributionService.kt$PromoAttributionService$suspend fun attachDeepLink( bookingId: UUID, deepLink: String, ): Boolean</ID>
+    <ID>ReturnCount:PromoAttributionService.kt$PromoLinkTokenCodec$fun decode(value: String): PromoLinkToken?</ID>
+    <ID>ReturnCount:ProviderRefundClient.kt$HttpProviderRefundClient$private fun parseRetryAfter(response: HttpResponse): Duration?</ID>
+    <ID>ReturnCount:RefundOutboxWorker.kt$RefundOutboxWorker$suspend fun runOnce(): Boolean</ID>
+    <ID>ReturnCount:StartInviteArriveHandler.kt$StartInviteArriveHandler$suspend fun handleStartPayload(startPayload: String): Result</ID>
+    <ID>ReturnCount:StartParamGuestListCodec.kt$StartParamGuestListCodec$fun verify( token: String, now: Instant, ttl: Duration, secret: String, maxClockSkew: Duration = Duration.ofMinutes(2), ): Decoded?</ID>
+    <ID>SpreadOperator:MigrateMain.kt$(*locations)</ID>
+    <ID>SpreadOperator:MigrationsPlugin.kt$(*locations)</ID>
+    <ID>SpreadOperator:PaymentsMetrics.kt$PaymentsMetrics$("payments.idempotent.hit", *tags)</ID>
+    <ID>SpreadOperator:PaymentsMetrics.kt$PaymentsMetrics$("payments.refund.remainder", holderSupplier(holder), *tags)</ID>
+    <ID>SpreadOperator:PaymentsMetrics.kt$PaymentsMetrics.TimerSample.Real$(*tagArray)</ID>
+    <ID>SpreadOperator:TemplatesHandler.kt$BookingTemplateBotHandler$(*rows.toTypedArray())</ID>
+    <ID>ThrowsCount:BookingTemplateService.kt$BookingTemplateService$suspend fun applyTemplate( actor: TemplateActor, templateId: Long, request: TemplateBookingRequest, ): BookingCmdResult</ID>
+    <ID>ThrowsCount:DefaultPaymentsService.kt$DefaultPaymentsService$private fun PaymentsSpanScope.handleExistingCancel( existing: SavedAction, clubId: Long, bookingId: UUID, ): PaymentsService.CancelResult</ID>
+    <ID>ThrowsCount:DefaultPaymentsService.kt$DefaultPaymentsService$private fun PaymentsSpanScope.handleExistingRefund( existing: SavedAction, clubId: Long, bookingId: UUID, requestedAmount: Long?, ): PaymentsService.RefundResult</ID>
+    <ID>ThrowsCount:OutboxAdminRoutes.kt$fun Application.outboxAdminRoutes( repository: OutboxAdminRepository, metricsProvider: MetricsProvider? = null, tracer: Tracer? = null, )</ID>
+    <ID>TooManyFunctions:BookingTemplateService.kt$BookingTemplateService</ID>
+    <ID>TooManyFunctions:GuestListRoutes.kt$com.example.bot.routes.GuestListRoutes.kt</ID>
+    <ID>TooManyFunctions:KotlinLogging.kt$KLogger</ID>
+    <ID>TooManyFunctions:MyBookingsService.kt$MyBookingsService</ID>
+    <ID>TooManyFunctions:PaymentsMetrics.kt$PaymentsMetrics</ID>
+    <ID>UnnecessarySafeCall:OutboxAdminRoutes.kt$resolvedMetrics?.registry</ID>
+    <ID>UnreachableCode:WebhookRoutes.kt$val update = try { json.decodeFromString(UpdateDto.serializer(), payload) } catch (ex: SerializationException) { logger.warn("Failed to decode update {}: {}", call.webhookUpdateId(), ex.message) call.respond(HttpStatusCode.BadRequest) return@post }</ID>
+    <ID>UnreachableCode:WebhookRoutes.kt$when (val reply = handler(update)) { null -&gt; call.respond(HttpStatusCode.OK) is WebhookReply.Inline -&gt; call.respond(reply.payload) is WebhookReply.Async -&gt; { call.application.launch(MDCContext()) { client.send(reply.request) } call.respond(HttpStatusCode.OK) } }</ID>
+    <ID>UnsafeCallOnNullableType:BookingRoutes.kt$call.parameters["id"]!!</ID>
+    <ID>UnsafeCallOnNullableType:GuestListRoutes.kt$query.filter!!</ID>
+    <ID>UnsafeCallOnNullableType:NotifySender.kt$NotifySender$retryAfterSec!!</ID>
+    <ID>UnsafeCallOnNullableType:TokenBucket.kt$SubjectBucketStore$map.compute(subjectKey) { _, old -&gt; val e = if (old == null) { Entry(TokenBucket(capacity, refillPerSec), now).also { sizeCounter.incrementAndGet() } } else { old.lastSeen = now old } e }!!</ID>
+    <ID>UnusedPrivateProperty:RefundOutboxWorker.kt$RefundOutboxWorker$private val backlogGauge = metrics?.gauge("outbox.refund.backlog", Supplier&lt;Number&gt; { backlogGaugeValue.get() })</ID>
+    <ID>UseOrEmpty:BookingRoutes.kt$call.request.headers["Idempotency-Key"] ?: ""</ID>
+    <ID>UseOrEmpty:GuestListRoutes.kt$item.phone ?: ""</ID>
+    <ID>UseOrEmpty:MessageMaskingConverter.kt$MessageMaskingConverter$event.formattedMessage ?: ""</ID>
+    <ID>UseOrEmpty:MigrationsPlugin.kt$System.getenv("DATABASE_URL")?.lowercase() ?: ""</ID>
+    <ID>UseOrEmpty:WebAppRoutes.kt$envString("BOT_TOKEN") ?: ""</ID>
+  </CurrentIssues>
+</SmellBaseline>
