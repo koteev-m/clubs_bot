@@ -148,7 +148,7 @@ val WebhookSecurity =
             when (val result = state.dedupRepository.mark(updateId)) {
                 is DedupResult.FirstSeen -> Unit
                 is DedupResult.Duplicate -> {
-                    state.logger.debug("Duplicate update {} from {}", updateId, remoteIp)
+                    state.logger.debug("Duplicate update {}", updateId)
                     if (result.duplicateCount >= state.duplicateThreshold) {
                         state.recordSuspicious(
                             remoteIp,
@@ -200,7 +200,7 @@ private data class WebhookSecurityState(
         details: String?,
     ) {
         suspiciousRepository.record(ip, userAgent, reason, details)
-        logger.warn("suspicious_ip reason={} ip={} details={}", reason, ip, details)
+        logger.warn("suspicious_ip reason={} details={}", reason, details)
     }
 
     fun extractUpdateId(payload: String): Long? {

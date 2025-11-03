@@ -111,8 +111,7 @@ val RateLimitPlugin =
                     RateLimitMetrics.lastBlockedRequestId.set(requestId)
                     call.response.header(HttpHeaders.RetryAfter, cfg.retryAfter.seconds.toString())
                     logger.warn(
-                        "ratelimit.blocked type=ip ip={} path={} requestId={} host={}:{}",
-                        ip,
+                        "ratelimit.blocked type=ip path={} requestId={} host={}:{}",
                         path,
                         requestId,
                         call.request.host(),
@@ -134,8 +133,7 @@ val RateLimitPlugin =
                         RateLimitMetrics.lastBlockedRequestId.set(requestId)
                         call.response.header(HttpHeaders.RetryAfter, cfg.retryAfter.seconds.toString())
                         logger.warn(
-                            "ratelimit.blocked type=subject subject={} path={} requestId={} host={}:{}",
-                            key,
+                            "ratelimit.blocked type=subject path={} requestId={} host={}:{}",
                             path,
                             requestId,
                             call.request.host(),

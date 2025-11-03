@@ -309,9 +309,8 @@ class MenuCallbacksHandler(
                 myBookingsService.loadBooking(telegramUserId, bookingId)
             } catch (ex: Exception) {
                 logger.warn(
-                    "ui.mybookings.show.failed booking={} user={}",
+                    "ui.mybookings.show.failed booking={}",
                     bookingId,
-                    telegramUserId,
                     ex,
                 )
                 null
@@ -349,9 +348,8 @@ class MenuCallbacksHandler(
                 myBookingsService.cancel(telegramUserId, bookingId, texts, lang)
             } catch (ex: Exception) {
                 logger.warn(
-                    "ui.mybookings.cancel.failed booking={} user={}",
+                    "ui.mybookings.cancel.failed booking={}",
                     bookingId,
-                    telegramUserId,
                     ex,
                 )
                 null
@@ -386,8 +384,7 @@ class MenuCallbacksHandler(
                 myBookingsService.list(telegramUserId, safePage, MY_BOOKINGS_PAGE_SIZE)
             } catch (ex: Exception) {
                 logger.warn(
-                    "ui.mybookings.list.failed user={} page={}",
-                    telegramUserId,
+                    "ui.mybookings.list.failed page={}",
                     safePage,
                     ex,
                 )
