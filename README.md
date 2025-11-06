@@ -60,33 +60,78 @@ dynamic/SNAPSHOT coordinates. Run it locally via `./gradlew dependencyGuard
 
 ## SEC-02 Политика логирования и приватность
 
-- Логируем только безопасные идентификаторы и статусы: `clubId`, `listId`,
-  `entryId`, `bookingId`, `userId`, `status`, `outcome`. Эти поля всегда
-  сопровождаются `request_id` (для всех запросов) и `actor_id` (после
-  аутентификации) в MDC.
-- `MessageMaskingConverter` автоматически маскирует телефоны, «голые»
-  Telegram-токены и значения ключей `fullName/fio/name/guest/ФИО`, оставляя
-  только безопасные первые буквы. На уровне Logback подключён
-  `DenySensitiveTurboFilter`, который запрещает сообщения с `qr=`,
-  `start_param=` и `idempotencyKey` — такие строки не доходят до аппендеров.
-- По умолчанию логи пишутся в stdout, формат:
+### Что пишем в логи
+- **Технические идентификаторы:** `request_id` (из Ktor CallId; также уходит в заголовок ответа `X-Request-Id`), `actor_id` (идентификатор актёра после успешной аутентификации/авторизации). Оба ключа лежат в **MDC** и попадают во все записи логов в рамках запроса.
+- **Бизнес‑ID:** `clubId`, `listId`, `entryId`, `bookingId`, внутренний `userId`.
+- **Статусы/исходы**, **тайминги/метрики** и прочую **не‑PII** диагностическую информацию.
+- **Никогда** не логируем тела запросов/ответов и произвольные payload’ы.
 
-  ```
-  2024-07-20 12:00:00.000 [ktor-worker-1] INFO ... request_id=<id> actor_id=<id> - <masked message>
-  ```
+### Что маскируем (делает `MessageMaskingConverter`, используется как `%maskedMsg` в `logback.xml`)
+- **Телефоны** → маскируем всё, кроме 2–3 последних цифр. Пример: `+7 *** *** ** 67`.
+- **Имена/ФИО** (`fullName`/`fio`/`name`) → оставляем первые буквы слов, остальное `*`. Пример: `И*** И*****`.
+- **«Голые» токены** формата `\d{6,12}:[A-Za-z0-9_-]{30,}` → `***REDACTED***`.
 
-- Для включения файлового логирования установите `APP_ENV=prod`. В этом режиме
-  Logback активирует `RollingFileAppender` и пишет в `logs/app.log` с дневной
-  ротацией (`logs/app.log.YYYY-MM-DD`). Консольный аппендер в `prod` отключён.
-- Быстрый smoke-чек:
+### Что запрещено (TurboFilter = DENY)
+Сообщения, содержащие ключи `qr`, `start_param`, `idempotencyKey`, **не доходят до аппендеров**: такие записи отсекаются `DenySensitiveTurboFilter` на ранней стадии.
 
+### Файл‑логирование (prod)
+- Консольный вывод включён всегда.
+- Файловый аппендер настроен на `logs/app.log` с дневной ротацией.
+- Каталог задаётся переменной окружения `LOG_DIR` (по умолчанию — `./logs`). Убедитесь, что каталог существует и доступен на запись.
+- Типичный прод‑запуск:  
   ```bash
-  ./gradlew :app-bot:test --console=plain
-  curl -s -D - http://localhost:8080/health >/dev/null  # X-Request-Id вернётся в ответе
+  export LOG_DIR=/var/log/app
+  # дополнительные переменные окружения см. ниже
+  # запуск вашего entrypoint (Docker/K8s/systemd)
   ```
 
-  После запроса убедитесь в логах, что присутствует `request_id=<значение>` и
-  нет сырых телефонов, ФИО, токенов, `qr/start_param/idempotencyKey`.
+Если нужно — ротацию/формат можно настраивать в logback.xml.
+
+### Локальный смоук
+
+1) **Тестовый смоук (без запуска сервера)**
+
+   ```bash
+   # Юнит/интеграционные тесты модуля app-bot
+   ./gradlew :app-bot:test --no-daemon -S -i
+   ```
+
+   Что проверить:
+   - Тесты на маскирование и TurboFilter зелёные.
+   - Тест `KtorMdcTest` (если включён) подтверждает: X-Request-Id в ответе и request_id в MDC логов.
+
+2) **Ручной смоук (опционально, если есть возможность поднять локально)**
+
+   Запуск с in-memory H2, чтобы не требовать PostgreSQL:
+
+   ```bash
+   export TELEGRAM_BOT_TOKEN=111111:TEST_BOT_TOKEN
+   export NOTIFICATIONS_ENABLED=false
+   export DATABASE_URL='jdbc:h2:mem:clubsb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_UPPER=false'
+   export DATABASE_USER=sa
+   export DATABASE_PASSWORD=
+   export FLYWAY_LOCATIONS=classpath:db/migration/h2
+   export LOG_DIR=./logs
+
+   # если настроен application plugin с рабочей точкой входа:
+   ./gradlew :app-bot:run --no-daemon -S -i
+   ```
+
+   Дальше — 1–2 запроса (подойдёт даже несуществующий путь — CallLogging всё равно сработает):
+
+   ```bash
+   # с заданным X-Request-Id
+   curl -i -H 'X-Request-Id: smoke-req-1' http://localhost:8080/__smoke__
+   # без заголовка — сервер сам сгенерирует request_id
+   curl -i http://localhost:8080/__smoke__
+   ```
+
+   В логах проверьте:
+   - есть request_id=<...> (и actor_id=<...> в авторизованных ветках);
+   - нет телефонных номеров/ФИО/«голых» токенов;
+   - нет упоминаний qr=/start_param=/idempotencyKey=.
+
+ℹ️ Если в модуле нет исполняемой main, можно ограничиться «тестовым смоуком» (п.1): он покрывает генерацию и прокидывание request_id через MDC, а также маскирование/запрет чувствительных полей.
 
 ## Configuration
 
