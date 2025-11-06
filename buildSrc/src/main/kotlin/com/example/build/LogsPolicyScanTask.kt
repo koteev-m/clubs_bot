@@ -21,6 +21,11 @@ import kotlin.concurrent.thread
  */
 abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : DefaultTask() {
 
+    private companion object {
+        private const val LOG_CALL_PATTERN =
+            """(?:(?<!\\w)(?:logger|log|LOG|LOGGER)|environment\\.log|application\\.log)\\.(?:trace|debug|info|warn|error|critical|fatal)"""
+    }
+
     @get:Input
     val timeoutSeconds: Property<Int> = objects.property(Int::class.java).convention(120)
 
@@ -31,6 +36,35 @@ abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : 
 
     @get:Input
     val patterns: ListProperty<String> = objects.listProperty(String::class.java).convention(emptyList())
+        listOf(
+            "-n", "--hidden",
+            "-g", "!**/build/**",
+            "-g", "!**/.gradle/**",
+            "-g", "!**/.idea/**",
+            "-g", "!**/.git/**",
+            "-g", "!**/*.iml",
+            "-g", "!**/src/test/**",
+            "-g", "!**/src/main/resources/**",
+            "-g", "!**/docs/**",
+            "-g", "!**/*.md",
+            "-g", "!**/test/fixtures/**"
+        )
+    )
+
+    @get:Input
+    val patterns: ListProperty<String> = objects.listProperty(String::class.java).convention(
+        listOf(
+            """qr=""",
+            """start_param=""",
+            """idempotencyKey""",
+            // «голые» Telegram-токены бота
+            """\\b\\d{6,12}:[A-Za-z0-9_-]{30,}\\b""",
+            // сырые телефоны
+            """\\+?\\d[\\d \\-\\(\\)]{8,}\\d""",
+            // попытки логировать ФИО/имя
+            """\\b(ФИО|fullName|fio|name)\\s*="""
+        )
+    )
 
     @get:Internal
     val workingDirectory = objects.directoryProperty().convention(project.layout.projectDirectory)
@@ -40,6 +74,11 @@ abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : 
         val args = mutableListOf("rg")
         args += includeArgs.get()
         patterns.get().forEach { p -> args += listOf("-e", p) }
+        args += "-P"
+        patterns.get().forEach { pattern ->
+            val combinedPattern = "$LOG_CALL_PATTERN[^\\n]*$pattern"
+            args += listOf("-e", combinedPattern)
+        }
         args += "."
 
         logger.lifecycle("SEC-02: ripgrep {}", args.joinToString(" "))
@@ -76,6 +115,20 @@ abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : 
             1 -> logger.lifecycle("SEC-02: совпадений не найдено (rg exit=1).")
             0 -> throw GradleException("SEC-02: найдены потенциальные нарушения (rg exit=0). См. строки [rg] выше.")
             else -> throw GradleException("SEC-02: ошибка выполнения ripgrep (exit=$exit). Установите/проверьте rg.")
+        stdoutThread.join()
+        stderrThread.join()
+
+        when (val exitCode = process.exitValue()) {
+            1 -> logger.lifecycle("SEC-02: ripgrep найденных нарушений нет (exit=1).")
+            0 -> throw GradleException(
+                "SEC-02: найдены потенциально сырые данные в лог-вызовах (exit=0). См. строки выше."
+            )
+            2 -> throw GradleException(
+                "SEC-02: ripgrep завершился с ошибкой (exit=2). Установите ripgrep (rg) и повторите."
+            )
+            else -> throw GradleException(
+                "SEC-02: ripgrep завершился с ошибкой (exit=${'$'}exitCode). См. лог выше."
+            )
         }
     }
 }

@@ -201,6 +201,9 @@ tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
             "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*masked)(?=.*\\b(?:ФИО|fullName|fio|name)\\s*=)"
         )
     )
+// Включаем политику в стандартную проверку модуля
+tasks.named("check").configure {
+    dependsOn("checkLogsPolicy")
 }
 
 // Включаем гейт в фазу проверки модуля
