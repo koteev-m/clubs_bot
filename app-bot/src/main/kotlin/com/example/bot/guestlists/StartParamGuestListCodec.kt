@@ -38,7 +38,7 @@ object StartParamGuestListCodec {
         val hmacHex = toHexLower(hmacSha256(message, deriveKey(secret)))
         val shortHex = hmacHex.substring(0, HMAC_TRUNC_HEX_LEN)
 
-        // Пример: G_123_456_1730012345_deadbeefcafebabe
+        // Пример: G_<listId>_<entryId>_<issuedEpoch>_<hmac16hex>
         return "G_${listId}_${entryId}_${ts}_$shortHex"
     }
 

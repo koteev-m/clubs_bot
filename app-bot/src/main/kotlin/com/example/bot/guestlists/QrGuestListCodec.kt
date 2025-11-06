@@ -28,8 +28,8 @@ data class QrDecoded(
  *   - <hmacHexLower> — hex нижним регистром HMAC_SHA256(message="<listId>:<entryId>:<ts>",
  *       key=HMAC_SHA256("QrGuestList", secret))
  *
- * Примеры:
- *   GL:12345:67890:1732390400:0a1b2c... (64 hex)
+ * Пример:
+ *   GL:<listId>:<entryId>:<epochSeconds>:<hmacHexLower>
  */
 object QrGuestListCodec {
     private const val TOKEN_PREFIX = "GL:"

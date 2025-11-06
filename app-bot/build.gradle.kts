@@ -1,4 +1,4 @@
-import org.gradle.api.GradleException
+import com.example.build.LogsPolicyScanTask
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
@@ -161,47 +161,15 @@ val runMigrations by tasks.registering(JavaExec::class) {
     mainClass.set("com.example.bot.tools.MigrateMainKt")
 }
 
-tasks.register("checkLogsPolicy") {
+// SEC-02: алиас, который гоняет юнит-тесты и ripgrep-скан (потоково)
+tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
     group = "verification"
-    description = "Run unit tests and scan sources for forbidden logging patterns"
-    dependsOn(tasks.named("test"))
-    doLast {
-        val args =
-            listOf(
-                "rg",
-                "-n",
-                "--hidden",
-                "-g",
-                "!**/build/**",
-                "-g",
-                "!**/test/**",
-                "-e",
-                "qr=",
-                "-e",
-                "start_param=",
-                "-e",
-                "idempotencyKey",
-                "-e",
-                "\\b\\d{6,12}:[A-Za-z0-9_-]{30,}\\b",
-                "-e",
-                "\\+?\\d[\\d \\-\\(\\)]{8,}\\d",
-                ".",
-            )
-        val process =
-            ProcessBuilder(args)
-                .directory(project.projectDir)
-                .redirectErrorStream(true)
-                .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        if (output.isNotBlank()) {
-            logger.lifecycle(output)
-        }
-        when (val exitCode = process.waitFor()) {
-            0 -> throw GradleException("Forbidden logging patterns detected. Review scan output above.")
-            1 -> Unit
-            else -> throw GradleException("Failed to execute ripgrep for logging policy check. Exit code $exitCode.")
-        }
-    }
+    description = "SEC-02: stream rg scan + honor exit codes (fails on matches)"
+    // сначала тесты — чтобы не шуметь ненужными логами, затем скан
+    dependsOn("test")
 }
 
-tasks.named("check") { dependsOn("checkLogsPolicy") }
+// Включаем политику в стандартную проверку модуля
+tasks.named("check") {
+    dependsOn("checkLogsPolicy")
+}

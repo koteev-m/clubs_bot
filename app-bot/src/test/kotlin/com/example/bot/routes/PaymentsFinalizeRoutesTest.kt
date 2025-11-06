@@ -108,6 +108,7 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
             testApplication {
                 val validatingService =
                     object : PaymentsFinalizeService {
+                        @Suppress("ExceptionRaisedInUnexpectedLocation")
                         override suspend fun finalize(
                             clubId: Long,
                             bookingId: UUID,
@@ -233,6 +234,7 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
     private class RecordingFinalizeService : PaymentsFinalizeService {
         private val responses = mutableMapOf<String, FinalizeResult>()
 
+        @Suppress("ExceptionRaisedInUnexpectedLocation")
         override suspend fun finalize(
             clubId: Long,
             bookingId: UUID,
