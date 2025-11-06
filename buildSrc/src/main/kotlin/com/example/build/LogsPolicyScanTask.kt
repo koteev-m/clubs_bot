@@ -13,12 +13,11 @@ import javax.inject.Inject
 import kotlin.concurrent.thread
 
 /**
- * SEC-02: ripgrep-скан опасных паттернов с потоковой печатью результатов.
- *
+ * SEC-02: ripgrep-скан опасных паттернов с потоковой печатью.
  * Exit-коды rg:
  *   0 — совпадения НАЙДЕНЫ (для нас это нарушение → fail)
  *   1 — совпадений НЕТ (ok)
- *   2 — ошибка выполнения rg (отсутствует или иная проблема → fail)
+ *   2 — ошибка (нет rg и т.п.) → fail
  */
 abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : DefaultTask() {
 
@@ -32,6 +31,11 @@ abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : 
 
     @get:Input
     val includeArgs: ListProperty<String> = objects.listProperty(String::class.java).convention(
+        listOf("-n", "--hidden")
+    )
+
+    @get:Input
+    val patterns: ListProperty<String> = objects.listProperty(String::class.java).convention(emptyList())
         listOf(
             "-n", "--hidden",
             "-g", "!**/build/**",
@@ -69,6 +73,7 @@ abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : 
     fun runScan() {
         val args = mutableListOf("rg")
         args += includeArgs.get()
+        patterns.get().forEach { p -> args += listOf("-e", p) }
         args += "-P"
         patterns.get().forEach { pattern ->
             val combinedPattern = "$LOG_CALL_PATTERN[^\\n]*$pattern"
@@ -76,43 +81,40 @@ abstract class LogsPolicyScanTask @Inject constructor(objects: ObjectFactory) : 
         }
         args += "."
 
-        logger.lifecycle("SEC-02: running ripgrep: {}", args.joinToString(" "))
+        logger.lifecycle("SEC-02: ripgrep {}", args.joinToString(" "))
 
-        val processBuilder = ProcessBuilder(args)
+        val pb = ProcessBuilder(args)
             .directory(workingDirectory.asFile.get())
             .redirectErrorStream(false)
 
-        val process = try {
-            processBuilder.start()
-        } catch (exception: Exception) {
-            throw GradleException(
-                "ripgrep (rg) не найден в PATH. Установите rg и повторите. Оригинальная ошибка: ${exception.message}",
-                exception
-            )
+        val process = try { pb.start() } catch (e: Exception) {
+            throw GradleException("ripgrep (rg) не найден в PATH. Установите rg. ${e.message}", e)
         }
 
-        val stdoutThread = thread(name = "rg-stdout-${'$'}{project.path}", isDaemon = true) {
+        val outT = thread(name = "rg-stdout-$name", isDaemon = true) {
             process.inputStream.bufferedReader().useLines { lines ->
-                lines.forEach { line -> logger.lifecycle("[rg] {}", line) }
+                lines.forEach { logger.lifecycle("[rg] {}", it) }
             }
         }
-        val stderrThread = thread(name = "rg-stderr-${'$'}{project.path}", isDaemon = true) {
+        val errT = thread(name = "rg-stderr-$name", isDaemon = true) {
             process.errorStream.bufferedReader().useLines { lines ->
-                lines.forEach { line -> logger.warn("[rg:err] {}", line) }
+                lines.forEach { logger.warn("[rg:err] {}", it) }
             }
         }
 
         val finished = process.waitFor(timeoutSeconds.get().toLong(), TimeUnit.SECONDS)
         if (!finished) {
             process.destroy()
-            if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                process.destroyForcibly()
-            }
-            stdoutThread.join(1000)
-            stderrThread.join(1000)
+            if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly()
+            outT.join(1000); errT.join(1000)
             throw GradleException("ripgrep завис и был остановлен по таймауту ${timeoutSeconds.get()}s")
         }
 
+        outT.join(); errT.join()
+        when (val exit = process.exitValue()) {
+            1 -> logger.lifecycle("SEC-02: совпадений не найдено (rg exit=1).")
+            0 -> throw GradleException("SEC-02: найдены потенциальные нарушения (rg exit=0). См. строки [rg] выше.")
+            else -> throw GradleException("SEC-02: ошибка выполнения ripgrep (exit=$exit). Установите/проверьте rg.")
         stdoutThread.join()
         stderrThread.join()
 

@@ -161,15 +161,50 @@ val runMigrations by tasks.registering(JavaExec::class) {
     mainClass.set("com.example.bot.tools.MigrateMainKt")
 }
 
-// SEC-02: алиас, который гоняет юнит-тесты и ripgrep-скан (потоково)
+// SEC-02: quality gate — тесты + точечный rg-скан логвызовов
 tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
     group = "verification"
-    description = "SEC-02: stream rg scan + honor exit codes (fails on matches)"
-    // сначала тесты — чтобы не шуметь ненужными логами, затем скан
-    dependsOn("test")
-}
+    description = "SEC-02: run tests and scan logs for PII/secret patterns (streamed ripgrep)"
 
+    // сначала тесты (включая KtorMdcTest), затем скан
+    dependsOn("test")
+
+    // Ограничиваем область поиска и включаем PCRE2 (-P) для сложных паттернов
+    includeArgs.set(
+        listOf(
+            "-n", "--hidden", "-P",
+            "-g", "!**/build/**",
+            "-g", "!**/.gradle/**",
+            "-g", "!**/.idea/**",
+            "-g", "!**/.git/**",
+            "-g", "!**/*.iml",
+            "-g", "!**/src/test/**",
+            "-g", "!**/test/**",
+            "-g", "!**/fixtures/**",
+            "-g", "!**/resources/**",
+            "-g", "!miniapp/dist/**"
+        )
+    )
+
+    // Матчим ТОЛЬКО строки, где одновременно есть вызов логгера и подозрительный шаблон
+    patterns.set(
+        listOf(
+            // qr=
+            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*safe)(?=.*\\bqr=)",
+            // start_param=
+            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*safe)(?=.*\\bstart_param=)",
+            // idempotencyKey
+            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*safe)(?=.*\\bidempotencyKey\\b)",
+            // телефоны
+            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*masked)(?=.*\\+?\\d[\\d \\-\\(\\)]{8,}\\d)",
+            // имена/ФИО
+            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*masked)(?=.*\\b(?:ФИО|fullName|fio|name)\\s*=)"
+        )
+    )
 // Включаем политику в стандартную проверку модуля
 tasks.named("check").configure {
     dependsOn("checkLogsPolicy")
 }
+
+// Включаем гейт в фазу проверки модуля
+tasks.named("check") { dependsOn("checkLogsPolicy") }
