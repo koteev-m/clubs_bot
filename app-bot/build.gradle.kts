@@ -170,6 +170,6 @@ tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
 }
 
 // Включаем политику в стандартную проверку модуля
-tasks.named("check") {
+tasks.named("check").configure {
     dependsOn("checkLogsPolicy")
 }
