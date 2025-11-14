@@ -29,8 +29,8 @@ import com.pengrad.telegrambot.request.SendMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import java.time.Duration
@@ -972,9 +972,7 @@ class MenuCallbacksHandler(
     private suspend fun resolveNightEndUtc(
         clubId: Long,
         startUtc: Instant,
-    ): Instant? {
-        return findNight(clubId, startUtc)?.eventEndUtc
-    }
+    ): Instant? = findNight(clubId, startUtc)?.eventEndUtc
 
     private suspend fun findNight(
         clubId: Long,

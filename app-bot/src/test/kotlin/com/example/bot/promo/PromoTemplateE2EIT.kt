@@ -195,16 +195,15 @@ class PromoTemplateE2EIT : PostgresAppTest() {
             val telegramClient = mockk<TelegramClient>(relaxed = true)
             val updatePayload =
                 """
-                    {
-                      "update_id": 101,
-                      "message": {
-                        "message_id": 1,
-                        "chat": { "id": $promoterTelegramId },
-                        "text": "/start $token"
-                      }
-                    }
-                """
-                    .trimIndent()
+                {
+                  "update_id": 101,
+                  "message": {
+                    "message_id": 1,
+                    "chat": { "id": $promoterTelegramId },
+                    "text": "/start $token"
+                  }
+                }
+                """.trimIndent()
             testApplication {
                 application {
                     routing {
@@ -325,8 +324,8 @@ class PromoTemplateE2EIT : PostgresAppTest() {
             }
         }
 
-    private fun insertClub(name: String): Long {
-        return transaction(database) {
+    private fun insertClub(name: String): Long =
+        transaction(database) {
             Clubs.insert { row ->
                 row[Clubs.name] = name
                 row[Clubs.description] = "$name club"
@@ -340,7 +339,6 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                 row[Clubs.systemTopicId] = null
             } get Clubs.id
         }.value.toLong()
-    }
 
     private fun insertEvent(
         clubId: Long,
@@ -364,8 +362,8 @@ class PromoTemplateE2EIT : PostgresAppTest() {
         tableNumber: Int,
         capacity: Int,
         deposit: BigDecimal,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             TablesTable.insert { row ->
                 row[TablesTable.clubId] = clubId
                 row[TablesTable.zoneId] = null
@@ -375,13 +373,12 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                 row[TablesTable.active] = true
             } get TablesTable.id
         }
-    }
 
     private fun insertUser(
         telegramId: Long,
         username: String,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             TestUsersTable.insert { row ->
                 row[TestUsersTable.telegramUserId] = telegramId
                 row[TestUsersTable.username] = username
@@ -389,7 +386,6 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                 row[TestUsersTable.phone] = null
             } get TestUsersTable.id
         }
-    }
 
     private fun assignRole(
         userId: Long,

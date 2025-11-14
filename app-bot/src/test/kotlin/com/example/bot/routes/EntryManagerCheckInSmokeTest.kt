@@ -318,8 +318,7 @@ private fun Application.emConfigureApp(module: Module) {
                         "initData",
                         "Init-Data",
                         "x-telegram-init-data",
-                    )
-                        .mapNotNull { key -> call.request.header(key) }
+                    ).mapNotNull { key -> call.request.header(key) }
                         .firstOrNull()
 
                 val verified =
@@ -368,9 +367,7 @@ private class EMGuestListRepository : GuestListRepository {
         arrivalWindowStart: Instant?,
         arrivalWindowEnd: Instant?,
         status: GuestListStatus,
-    ): GuestList {
-        throw UnsupportedOperationException()
-    }
+    ): GuestList = throw UnsupportedOperationException()
 
     override suspend fun getList(id: Long): GuestList? = if (list?.id == id) list else null
 
@@ -380,9 +377,7 @@ private class EMGuestListRepository : GuestListRepository {
         clubId: Long,
         page: Int,
         size: Int,
-    ): List<GuestList> {
-        throw UnsupportedOperationException()
-    }
+    ): List<GuestList> = throw UnsupportedOperationException()
 
     override suspend fun addEntry(
         listId: Long,
@@ -391,27 +386,21 @@ private class EMGuestListRepository : GuestListRepository {
         guestsCount: Int,
         notes: String?,
         status: GuestListEntryStatus,
-    ): GuestListEntry {
-        throw UnsupportedOperationException()
-    }
+    ): GuestListEntry = throw UnsupportedOperationException()
 
     override suspend fun setEntryStatus(
         entryId: Long,
         status: GuestListEntryStatus,
         checkedInBy: Long?,
         at: Instant?,
-    ): GuestListEntry? {
-        throw UnsupportedOperationException()
-    }
+    ): GuestListEntry? = throw UnsupportedOperationException()
 
     override suspend fun listEntries(
         listId: Long,
         page: Int,
         size: Int,
         statusFilter: GuestListEntryStatus?,
-    ): List<GuestListEntry> {
-        throw UnsupportedOperationException()
-    }
+    ): List<GuestListEntry> = throw UnsupportedOperationException()
 
     override suspend fun markArrived(
         entryId: Long,
@@ -422,17 +411,13 @@ private class EMGuestListRepository : GuestListRepository {
         listId: Long,
         rows: List<ParsedGuest>,
         dryRun: Boolean,
-    ): GuestListEntryPage {
-        throw UnsupportedOperationException()
-    }
+    ): GuestListEntryPage = throw UnsupportedOperationException()
 
     override suspend fun searchEntries(
         filter: GuestListEntrySearch,
         page: Int,
         size: Int,
-    ): GuestListEntryPage {
-        throw UnsupportedOperationException()
-    }
+    ): GuestListEntryPage = throw UnsupportedOperationException()
 
     fun removeList(id: Long) {
         if (list?.id == id) list = null

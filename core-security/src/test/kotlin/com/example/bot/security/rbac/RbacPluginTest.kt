@@ -144,12 +144,17 @@ class RbacPluginTest {
             userRoleRepository = roleRepo
             auditLogRepository = auditRepo
             principalExtractor = { call ->
-                call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { TelegramPrincipal(it, null) }
+                call.request
+                    .header("X-Telegram-Id")
+                    ?.toLongOrNull()
+                    ?.let { TelegramPrincipal(it, null) }
             }
         }
     }
 
-    private class InMemoryUserRepository(private val users: Map<Long, User>) : UserRepository {
+    private class InMemoryUserRepository(
+        private val users: Map<Long, User>,
+    ) : UserRepository {
         override suspend fun getByTelegramId(id: Long): User? = users[id]
     }
 

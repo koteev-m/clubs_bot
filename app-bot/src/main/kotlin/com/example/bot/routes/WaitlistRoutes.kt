@@ -39,10 +39,22 @@ fun Application.waitlistRoutes(
             ) {
                 clubScoped(ClubScope.Own) {
                     get {
-                        val clubId = call.parameters["clubId"]?.toLongOrNull()
-                            ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_club_id"))
-                        val eventId = call.request.queryParameters["eventId"]?.toLongOrNull()
-                            ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_event_id"))
+                        val clubId =
+                            call.parameters["clubId"]?.toLongOrNull()
+                                ?: return@get call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "error" to "invalid_club_id",
+                                    ),
+                                )
+                        val eventId =
+                            call.request.queryParameters["eventId"]?.toLongOrNull()
+                                ?: return@get call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "error" to "invalid_event_id",
+                                    ),
+                                )
 
                         val items = repository.listQueue(clubId, eventId)
                         call.respond(HttpStatusCode.OK, items.map { it.toResponse() })
@@ -50,19 +62,39 @@ fun Application.waitlistRoutes(
 
                     // --- CALL: позвать гостя (резерв на N минут) ---
                     @Serializable
-                    data class CallPayload(val reserveMinutes: Int? = 15)
+                    data class CallPayload(
+                        val reserveMinutes: Int? = 15,
+                    )
 
                     post("{id}/call") {
-                        val clubId = call.parameters["clubId"]?.toLongOrNull()
-                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_club_id"))
-                        val id = call.parameters["id"]?.toLongOrNull()
-                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_id"))
+                        val clubId =
+                            call.parameters["clubId"]?.toLongOrNull()
+                                ?: return@post call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "error" to "invalid_club_id",
+                                    ),
+                                )
+                        val id =
+                            call.parameters["id"]?.toLongOrNull()
+                                ?: return@post call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "error" to "invalid_id",
+                                    ),
+                                )
 
                         val payload = runCatching { call.receive<CallPayload>() }.getOrNull()
                         val reserve = (payload?.reserveMinutes ?: 15).coerceIn(5, 120)
 
-                        val updated = repository.callEntry(clubId, id, reserve)
-                            ?: return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "not_waiting_or_not_found"))
+                        val updated =
+                            repository.callEntry(clubId, id, reserve)
+                                ?: return@post call.respond(
+                                    HttpStatusCode.Conflict,
+                                    mapOf(
+                                        "error" to "not_waiting_or_not_found",
+                                    ),
+                                )
 
                         UiWaitlistMetrics.incClaimed()
                         call.respond(HttpStatusCode.OK, updated.toResponse())
@@ -70,14 +102,32 @@ fun Application.waitlistRoutes(
 
                     // --- EXPIRE: вернуть в очередь или закрыть ---
                     post("{id}/expire") {
-                        val clubId = call.parameters["clubId"]?.toLongOrNull()
-                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_club_id"))
-                        val id = call.parameters["id"]?.toLongOrNull()
-                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_id"))
+                        val clubId =
+                            call.parameters["clubId"]?.toLongOrNull()
+                                ?: return@post call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "error" to "invalid_club_id",
+                                    ),
+                                )
+                        val id =
+                            call.parameters["id"]?.toLongOrNull()
+                                ?: return@post call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "error" to "invalid_id",
+                                    ),
+                                )
                         val close = call.request.queryParameters["close"]?.toBooleanStrictOrNull() ?: false
 
-                        val updated = repository.expireEntry(clubId, id, close)
-                            ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "not_found"))
+                        val updated =
+                            repository.expireEntry(clubId, id, close)
+                                ?: return@post call.respond(
+                                    HttpStatusCode.NotFound,
+                                    mapOf(
+                                        "error" to "not_found",
+                                    ),
+                                )
 
                         UiWaitlistMetrics.incExpired()
                         call.respond(HttpStatusCode.OK, updated.toResponse())
@@ -96,27 +146,48 @@ fun Application.waitlistRoutes(
                 Role.GUEST,
             ) {
                 @Serializable
-                data class EnqueuePayload(val eventId: Long, val partySize: Int)
+                data class EnqueuePayload(
+                    val eventId: Long,
+                    val partySize: Int,
+                )
 
                 post {
-                    val clubId = call.parameters["clubId"]?.toLongOrNull()
-                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_club_id"))
-                    val payload = runCatching { call.receive<EnqueuePayload>() }.getOrNull()
-                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_payload"))
+                    val clubId =
+                        call.parameters["clubId"]?.toLongOrNull()
+                            ?: return@post call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf(
+                                    "error" to "invalid_club_id",
+                                ),
+                            )
+                    val payload =
+                        runCatching { call.receive<EnqueuePayload>() }.getOrNull()
+                            ?: return@post call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf(
+                                    "error" to "invalid_payload",
+                                ),
+                            )
 
                     if (payload.partySize <= 0) {
-                        return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_party_size"))
+                        return@post call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf(
+                                "error" to "invalid_party_size",
+                            ),
+                        )
                     }
 
                     val context = call.rbacContext()
                     val userId = context.user.id
 
-                    val entry = repository.enqueue(
-                        clubId = clubId,
-                        eventId = payload.eventId,
-                        userId = userId,
-                        partySize = payload.partySize,
-                    )
+                    val entry =
+                        repository.enqueue(
+                            clubId = clubId,
+                            eventId = payload.eventId,
+                            userId = userId,
+                            partySize = payload.partySize,
+                        )
                     UiWaitlistMetrics.incAdded()
                     call.respond(HttpStatusCode.OK, entry.toResponse())
                 }

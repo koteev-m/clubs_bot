@@ -14,7 +14,10 @@ import java.util.UUID
  */
 private val MINORS_IN_MAJOR = BigDecimal(100)
 
-class PaymentsService(private val bookingService: BookingService, private val paymentsRepo: PaymentsRepository) {
+class PaymentsService(
+    private val bookingService: BookingService,
+    private val paymentsRepo: PaymentsRepository,
+) {
     /**
      * Starts confirmation flow respecting [policy].
      */

@@ -25,14 +25,14 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.testApplication
 import kotlinx.serialization.json.Json
-import org.koin.ktor.ext.get
-import org.koin.ktor.plugin.Koin
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.koin.ktor.ext.get
+import org.koin.ktor.plugin.Koin
 import java.util.UUID
 
 private object UsersTable : Table("users") {
@@ -77,19 +77,18 @@ class NotifyRoutesTest :
                         contentType(ContentType.Application.Json)
                         setBody(
                             """
-                                {
-                                  "chatId": 1,
-                                  "messageThreadId": null,
-                                  "method": "TEXT",
-                                  "text": "hi",
-                                  "parseMode": null,
-                                  "photoUrl": null,
-                                  "album": null,
-                                  "buttons": null,
-                                  "dedupKey": null
-                                }
-                            """
-                                .trimIndent(),
+                            {
+                              "chatId": 1,
+                              "messageThreadId": null,
+                              "method": "TEXT",
+                              "text": "hi",
+                              "parseMode": null,
+                              "photoUrl": null,
+                              "album": null,
+                              "buttons": null,
+                              "dedupKey": null
+                            }
+                            """.trimIndent(),
                         )
                     }
                 resp.status shouldBe HttpStatusCode.Accepted

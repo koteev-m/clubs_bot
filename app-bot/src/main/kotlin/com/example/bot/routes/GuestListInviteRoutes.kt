@@ -52,23 +52,45 @@ fun Application.guestListInviteRoutes(
                 Role.PROMOTER,
             ) {
                 post("/invite") {
-                    val listId = call.parameters["listId"]?.toLongOrNull()
-                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_list_id"))
-                    val entryId = call.parameters["entryId"]?.toLongOrNull()
-                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_entry_id"))
+                    val listId =
+                        call.parameters["listId"]?.toLongOrNull()
+                            ?: return@post call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf("error" to "invalid_list_id"),
+                            )
+                    val entryId =
+                        call.parameters["entryId"]?.toLongOrNull()
+                            ?: return@post call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf("error" to "invalid_entry_id"),
+                            )
 
-                    val list = repository.getList(listId)
-                        ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "list_not_found"))
-                    val entry = repository.findEntry(entryId)
-                        ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "entry_not_found"))
+                    val list =
+                        repository.getList(listId)
+                            ?: return@post call.respond(
+                                HttpStatusCode.NotFound,
+                                mapOf("error" to "list_not_found"),
+                            )
+                    val entry =
+                        repository.findEntry(entryId)
+                            ?: return@post call.respond(
+                                HttpStatusCode.NotFound,
+                                mapOf("error" to "entry_not_found"),
+                            )
                     if (entry.listId != list.id) {
-                        return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "entry_list_mismatch"))
+                        return@post call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf("error" to "entry_list_mismatch"),
+                        )
                     }
 
                     // RBAC: можно ли выпускать для этого списка
                     val context = call.rbacContext()
                     if (!canIssueForList(context, list)) {
-                        return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
+                        return@post call.respond(
+                            HttpStatusCode.Forbidden,
+                            mapOf("error" to "forbidden"),
+                        )
                     }
 
                     val now = Instant.now(clock)
@@ -104,19 +126,25 @@ fun Application.guestListInviteRoutes(
     }
 }
 
-private fun canIssueForList(context: RbacContext, list: GuestList): Boolean {
-    val global = setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
-    if (context.roles.any { it in global }) return true
+private val GLOBAL_ROLES: Set<Role> =
+    setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+
+private fun canIssueForList(
+    context: RbacContext,
+    list: GuestList,
+): Boolean {
+    val isGlobal = context.roles.any { it in GLOBAL_ROLES }
 
     // Админ/менеджер клуба — если список относится к его клубу
-    if ((Role.CLUB_ADMIN in context.roles) || (Role.MANAGER in context.roles)) {
-        if (list.clubId in context.clubIds) return true
-    }
+    val isClubScoped =
+        (Role.CLUB_ADMIN in context.roles || Role.MANAGER in context.roles) &&
+            (list.clubId in context.clubIds)
 
     // Промоутер — только свои списки
-    if (Role.PROMOTER in context.roles) {
-        if (list.ownerType == GuestListOwnerType.PROMOTER && list.ownerUserId == context.user.id) return true
-    }
+    val isPromoterOwnList =
+        (Role.PROMOTER in context.roles) &&
+            list.ownerType == GuestListOwnerType.PROMOTER &&
+            list.ownerUserId == context.user.id
 
-    return false
+    return isGlobal || isClubScoped || isPromoterOwnList
 }

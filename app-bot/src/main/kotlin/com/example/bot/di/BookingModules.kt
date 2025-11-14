@@ -2,12 +2,15 @@ package com.example.bot.di
 
 import com.example.bot.booking.BookingService
 import com.example.bot.club.GuestListRepository
+import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.booking.core.AuditLogRepository
 import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.booking.core.OutboxRepository
 import com.example.bot.data.booking.core.PaymentsBookingRepository
+import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListRepositoryImpl
+import com.example.bot.data.club.WaitlistRepositoryImpl
 import com.example.bot.data.notifications.NotificationsOutboxRepository
 import com.example.bot.data.promo.BookingTemplateRepositoryImpl
 import com.example.bot.data.promo.PromoAttributionRepositoryImpl
@@ -25,8 +28,8 @@ import com.example.bot.promo.PromoAttributionRepository
 import com.example.bot.promo.PromoAttributionService
 import com.example.bot.promo.PromoAttributionStore
 import com.example.bot.promo.PromoLinkRepository
-import com.example.bot.telegram.NotifyAdapterMetrics
 import com.example.bot.telegram.NotificationsDispatchConfig
+import com.example.bot.telegram.NotifyAdapterMetrics
 import com.example.bot.telegram.NotifySenderSendPort
 import com.example.bot.telegram.bookings.MyBookingsMetrics
 import com.example.bot.telegram.bookings.MyBookingsService
@@ -43,13 +46,13 @@ import kotlin.math.ceil
 
 val bookingModule =
     module {
-        // DB
         single {
             val ds = DataSourceHolder.dataSource ?: error("DataSource is not initialized")
             Database.connect(ds)
         }
 
-        // Core repos
+        single { GuestListCsvParser() }
+
         single { BookingRepository(get()) }
         single<PaymentsBookingRepository> { get<BookingRepository>() }
         single { BookingHoldRepository(get()) }
@@ -57,25 +60,21 @@ val bookingModule =
         single { NotificationsOutboxRepository(get()) }
         single { AuditLogRepository(get()) }
 
-        // Guests
         single<GuestListRepository> { GuestListRepositoryImpl(get()) }
+        single<WaitlistRepository> { WaitlistRepositoryImpl(get()) }
 
-        // Promo repos (interfaces -> impl)
         single<PromoLinkRepository> { PromoLinkRepositoryImpl(get()) }
         single<PromoAttributionRepository> { PromoAttributionRepositoryImpl(get()) }
         single<BookingTemplateRepository> { BookingTemplateRepositoryImpl(get()) }
 
-        // Security repos (interfaces -> impl)
         single<UserRepository> { ExposedUserRepository(get()) }
         single<UserRoleRepository> { ExposedUserRoleRepository(get()) }
 
         single { MyBookingsMetrics(runCatching { get<MeterRegistry>() }.getOrNull()) }
         single { MyBookingsService(get(), get(), get(), get()) }
 
-        // Promo store/service
         single<PromoAttributionStore> { InMemoryPromoAttributionStore() }
 
-        // ВНИМАНИЕ: порядок параметров соответствует реальной сигнатуре
         single {
             PromoAttributionService(
                 get<PromoLinkRepository>(),
@@ -87,7 +86,6 @@ val bookingModule =
         }
         single<PromoAttributionCoordinator> { get<PromoAttributionService>() }
 
-        // ВНИМАНИЕ: порядок параметров соответствует реальной сигнатуре
         single {
             BookingTemplateService(
                 get<BookingTemplateRepository>(),
@@ -100,7 +98,6 @@ val bookingModule =
 
         single { NotificationsDispatchConfig.fromEnvironment() }
 
-        // Outbound port wiring (NotifySender via environment toggle)
         single<SendPort> {
             val dispatchConfig = get<NotificationsDispatchConfig>()
             if (dispatchConfig.isDispatchActive) {
@@ -142,7 +139,6 @@ val bookingModule =
             config.toHealth(implementation)
         }
 
-        // High-level services/workers
         single {
             BookingService(
                 get(),
@@ -163,9 +159,7 @@ private object DummySendPort : SendPort {
     override suspend fun send(
         topic: String,
         payload: JsonObject,
-    ): SendOutcome {
-        return SendOutcome.Ok
-    }
+    ): SendOutcome = SendOutcome.Ok
 }
 
 private val notifySendPortLogger = LoggerFactory.getLogger("NotifySenderWiring")

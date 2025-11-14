@@ -15,7 +15,11 @@ private val ONE_SECOND_NANOS: Double = Duration.ofSeconds(1).toNanos().toDouble(
  *  - capacity: максимум токенов (burst)
  *  - refillPerSec: скорость пополнения в токенах/сек
  */
-class TokenBucket(capacity: Double, refillPerSec: Double, nowNanos: Long = System.nanoTime()) {
+class TokenBucket(
+    capacity: Double,
+    refillPerSec: Double,
+    nowNanos: Long = System.nanoTime(),
+) {
     private val capacity = capacity.coerceAtLeast(BotLimits.RateLimit.TOKEN_BUCKET_MIN_CAPACITY)
     private val refillPerSec = refillPerSec.coerceAtLeast(BotLimits.RateLimit.TOKEN_BUCKET_MIN_REFILL_PER_SECOND)
 
@@ -51,7 +55,11 @@ class TokenBucket(capacity: Double, refillPerSec: Double, nowNanos: Long = Syste
 /**
  * Хранилище subject-бакетов с TTL (удаляем неиспользуемые).
  */
-class SubjectBucketStore(private val capacity: Double, private val refillPerSec: Double, private val ttl: Duration) {
+class SubjectBucketStore(
+    private val capacity: Double,
+    private val refillPerSec: Double,
+    private val ttl: Duration,
+) {
     private data class Entry(
         val bucket: TokenBucket,
         @Volatile var lastSeen: Instant,

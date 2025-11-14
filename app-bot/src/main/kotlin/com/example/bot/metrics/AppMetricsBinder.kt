@@ -36,7 +36,8 @@ private object RateLimitMicrometerMetrics {
     ) {
         val existing = registry.find(name).gauge()
         if (existing != null) return
-        Gauge.builder(name) { counter.get().toDouble() }
+        Gauge
+            .builder(name) { counter.get().toDouble() }
             .strongReference(true)
             .register(registry)
     }

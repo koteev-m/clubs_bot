@@ -4,10 +4,8 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.example.bot.plugins.installMetrics
-import com.example.bot.plugins.installRequestLogging
 import com.example.bot.plugins.installTracing
 import io.ktor.client.request.get
-import io.ktor.server.application.call
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
@@ -24,8 +22,9 @@ class TracingSmokeTest {
         testApplication {
             application {
                 installMetrics()
-                installRequestLogging()
-                routing { get("/ping") { call.respondText("pong") } }
+                routing {
+                    get("/ping") { call.respondText("pong") }
+                }
             }
             assertEquals(200, client.get("/ping").status.value)
         }
@@ -35,20 +34,34 @@ class TracingSmokeTest {
         testApplication {
             val exporter = InMemorySpanExporter.create()
             val tracer = TracingProvider.create(exporter).tracer
-            val list = ListAppender<ILoggingEvent>()
+            val list = ListAppender<ILoggingEvent>().apply { start() }
             val logger = LoggerFactory.getLogger("io.ktor.test") as Logger
-            list.start()
             logger.addAppender(list)
+
             application {
                 installMetrics()
-                installRequestLogging()
                 installTracing(tracer)
-                routing { get("/ping") { call.respondText("pong") } }
+
+                routing {
+                    get("/ping") {
+                        // Нам не нужен отдельный плагин request logging — сами пишем строку
+                        // и проверяем, что плагин трассировки положил traceId в MDC.
+                        logger.info("handling /ping")
+                        call.respondText("pong")
+                    }
+                }
             }
+
+            // Делаем запрос, чтобы сгенерировался хотя бы один спан
             client.get("/ping")
+
+            // Проверяем, что спаны выгрузились в память
             assertTrue(exporter.finishedSpanItems.isNotEmpty(), "spans")
-            val event = list.list.firstOrNull { it.mdcPropertyMap.containsKey("traceId") }
-            assertTrue(event != null && event.mdcPropertyMap["traceId"]?.isNotEmpty() == true)
+
+            // Ищем любое лог-событие, где появился traceId в MDC
+            val eventWithTrace = list.list.firstOrNull { it.mdcPropertyMap.containsKey("traceId") }
+            assertTrue(eventWithTrace != null && eventWithTrace.mdcPropertyMap["traceId"]?.isNotEmpty() == true)
+
             logger.detachAppender(list)
         }
 }

@@ -19,7 +19,11 @@ object StartParamGuestListCodec {
     private const val HMAC_TRUNC_HEX_LEN = 16
     private val KEY_LABEL_BYTES = "StartGuestList".toByteArray(StandardCharsets.UTF_8)
 
-    data class Decoded(val listId: Long, val entryId: Long, val issuedAt: Instant)
+    data class Decoded(
+        val listId: Long,
+        val entryId: Long,
+        val issuedAt: Instant,
+    )
 
     fun encode(
         listId: Long,
@@ -83,7 +87,10 @@ object StartParamGuestListCodec {
         return mac.doFinal(KEY_LABEL_BYTES)
     }
 
-    private fun hmacSha256(message: String, key: ByteArray): ByteArray {
+    private fun hmacSha256(
+        message: String,
+        key: ByteArray,
+    ): ByteArray {
         val mac = Mac.getInstance(HMAC_ALGO)
         mac.init(SecretKeySpec(key, HMAC_ALGO))
         return mac.doFinal(message.toByteArray(StandardCharsets.UTF_8))
@@ -100,14 +107,33 @@ object StartParamGuestListCodec {
         return String(hexChars)
     }
 
-    private fun constantTimeEqualsHex(a: String, b: String): Boolean {
+    private fun constantTimeEqualsHex(
+        a: String,
+        b: String,
+    ): Boolean {
         if (a.length != b.length) return false
         var res = 0
         for (i in a.indices) res = res or (a[i].code xor b[i].code)
         return res == 0
     }
 
-    private val HEX = charArrayOf(
-        '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'
-    )
+    private val HEX =
+        charArrayOf(
+            '0',
+            '1',
+            '2',
+            '3',
+            '4',
+            '5',
+            '6',
+            '7',
+            '8',
+            '9',
+            'a',
+            'b',
+            'c',
+            'd',
+            'e',
+            'f',
+        )
 }

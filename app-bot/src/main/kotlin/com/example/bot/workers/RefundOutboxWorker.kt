@@ -97,10 +97,12 @@ class RefundOutboxWorker(
                     runCatching { client.send(command) }
                         .onFailure { failure ->
                             logger.warn(
-                                "Provider refund request failed for message {} attempt {}", message.id, attempt, failure,
+                                "Provider refund request failed for message {} attempt {}",
+                                message.id,
+                                attempt,
+                                failure,
                             )
-                        }
-                        .getOrElse { throwable ->
+                        }.getOrElse { throwable ->
                             ProviderRefundResult.Retry(status = null, retryAfter = null, cause = throwable)
                         }
                 if (outcome is ProviderRefundResult.Retry && outcome.retryAfter != null) {
@@ -148,7 +150,9 @@ class RefundOutboxWorker(
             }
             is BookingCoreResult.Failure ->
                 logger.warn(
-                    "Failed to schedule retry for refund outbox message {}: {}", message.id, update.error,
+                    "Failed to schedule retry for refund outbox message {}: {}",
+                    message.id,
+                    update.error,
                 )
         }
     }
@@ -170,13 +174,18 @@ class RefundOutboxWorker(
             }
             is BookingCoreResult.Failure -> {
                 logger.warn(
-                    "Failed to mark refund outbox message {} as failed: {}", message.id, update.error,
+                    "Failed to mark refund outbox message {} as failed: {}",
+                    message.id,
+                    update.error,
                 )
             }
         }
     }
 
-    private fun recordDuration(timer: Timer?, startNanos: Long) {
+    private fun recordDuration(
+        timer: Timer?,
+        startNanos: Long,
+    ) {
         if (timer == null) {
             return
         }
@@ -193,13 +202,12 @@ class RefundOutboxWorker(
         return if (candidate.compareTo(max) > 0) max else candidate
     }
 
-    private fun buildRetryReason(result: ProviderRefundResult.Retry): String {
-        return when {
+    private fun buildRetryReason(result: ProviderRefundResult.Retry): String =
+        when {
             result.status != null -> "HTTP ${result.status}"
             result.cause != null -> result.cause.message ?: result.cause.javaClass.simpleName
             else -> "retry"
         }
-    }
 
     private suspend fun updateBacklogGauge() {
         val pending =
@@ -213,16 +221,23 @@ class RefundOutboxWorker(
 
 private fun currentRequestId(): String? = MDC.get("requestId") ?: MDC.get("callId")
 
-private fun envBool(name: String, default: Boolean): Boolean {
+private fun envBool(
+    name: String,
+    default: Boolean,
+): Boolean {
     val raw = System.getenv(name) ?: return default
     return raw.equals("true", ignoreCase = true)
 }
 
-private fun envInt(name: String, default: Int): Int {
-    return System.getenv(name)?.toIntOrNull()?.takeIf { it > 0 } ?: default
-}
+private fun envInt(
+    name: String,
+    default: Int,
+): Int = System.getenv(name)?.toIntOrNull()?.takeIf { it > 0 } ?: default
 
-private fun envDuration(name: String, default: Duration): Duration {
+private fun envDuration(
+    name: String,
+    default: Duration,
+): Duration {
     val millis = System.getenv(name)?.toLongOrNull()
     return if (millis != null && millis > 0) Duration.ofMillis(millis) else default
 }

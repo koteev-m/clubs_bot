@@ -285,13 +285,20 @@ class BookingServiceIT : PostgresAppTest() {
         }
 
     private fun computeExpectedDelay(attemptsAfterFailure: Int): Duration {
-        val base = com.example.bot.config.BotLimits.notifySendBaseBackoff.toMillis()
-        val max = com.example.bot.config.BotLimits.notifySendMaxBackoff.toMillis()
-        val jitter = com.example.bot.config.BotLimits.notifySendJitter.toMillis()
+        val base =
+            com.example.bot.config.BotLimits.notifySendBaseBackoff
+                .toMillis()
+        val max =
+            com.example.bot.config.BotLimits.notifySendMaxBackoff
+                .toMillis()
+        val jitter =
+            com.example.bot.config.BotLimits.notifySendJitter
+                .toMillis()
         val shift =
-            (attemptsAfterFailure - 1).coerceAtLeast(
-                0,
-            ).coerceAtMost(com.example.bot.config.BotLimits.notifyBackoffMaxShift)
+            (attemptsAfterFailure - 1)
+                .coerceAtLeast(
+                    0,
+                ).coerceAtMost(com.example.bot.config.BotLimits.notifyBackoffMaxShift)
         val raw = base shl shift
         val capped = raw.coerceAtMost(max)
         val offset = if (jitter == 0L) 0L else Random(0).nextLong(-jitter, jitter + 1)

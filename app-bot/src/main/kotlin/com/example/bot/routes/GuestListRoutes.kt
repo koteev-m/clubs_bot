@@ -64,22 +64,24 @@ fun Application.guestListRoutes(
                     val query = call.extractSearch(context)
 
                     if (query.forbidden) {
-                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden")); return@get
+                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
+                        return@get
                     }
                     if (query.empty) {
                         call.respond(
-                            GuestListPageResponse(items = emptyList(), total = 0, page = query.page, size = query.size)
+                            GuestListPageResponse(items = emptyList(), total = 0, page = query.page, size = query.size),
                         )
                         return@get
                     }
 
                     val result = repository.searchEntries(query.filter!!, page = query.page, size = query.size)
-                    val response = GuestListPageResponse(
-                        items = result.items.map { it.toResponse() },
-                        total = result.total,
-                        page = query.page,
-                        size = query.size,
-                    )
+                    val response =
+                        GuestListPageResponse(
+                            items = result.items.map { it.toResponse() },
+                            total = result.total,
+                            page = query.page,
+                            size = query.size,
+                        )
                     call.respond(response)
                 }
 
@@ -89,12 +91,16 @@ fun Application.guestListRoutes(
                     val query = call.extractSearch(context)
 
                     if (query.forbidden) {
-                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden")); return@get
+                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
+                        return@get
                     }
 
                     val items =
-                        if (query.empty) emptyList()
-                        else repository.searchEntries(query.filter!!, page = query.page, size = query.size).items
+                        if (query.empty) {
+                            emptyList()
+                        } else {
+                            repository.searchEntries(query.filter!!, page = query.page, size = query.size).items
+                        }
 
                     val csv = items.toExportCsv()
                     call.respondText(csv, ContentType.Text.CSV)
@@ -102,26 +108,31 @@ fun Application.guestListRoutes(
 
                 // POST /api/guest-lists/{listId}/import
                 post("{listId}/import") {
-                    val listId = call.parameters.getOrFail("listId").toLongOrNull()
-                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid listId"))
+                    val listId =
+                        call.parameters.getOrFail("listId").toLongOrNull()
+                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid listId"))
 
-                    val list = repository.getList(listId)
-                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "List not found"))
+                    val list =
+                        repository.getList(listId)
+                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "List not found"))
 
                     val context = call.rbacContext()
                     if (!context.canAccess(list)) {
-                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden")); return@post
+                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
+                        return@post
                     }
 
                     val dryRun = call.request.queryParameters["dry_run"].toBooleanStrictOrNull() ?: false
                     val type = call.request.contentType()
                     if (!type.match(ContentType.Text.CSV) && type != TSV_CONTENT_TYPE) {
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Expected text/csv body")); return@post
+                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Expected text/csv body"))
+                        return@post
                     }
 
                     val payload = call.receiveText()
                     if (payload.isBlank()) {
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Empty body")); return@post
+                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Empty body"))
+                        return@post
                     }
 
                     val report =
@@ -138,20 +149,26 @@ fun Application.guestListRoutes(
                             return@post
                         }
 
-                    if (call.wantsCsv()) call.respondText(report.toCsv(), ContentType.Text.CSV)
-                    else call.respond(report.toResponse())
+                    if (call.wantsCsv()) {
+                        call.respondText(report.toCsv(), ContentType.Text.CSV)
+                    } else {
+                        call.respond(report.toResponse())
+                    }
                 }
 
                 // --- POST /api/guest-lists/entries/{entryId}/arriveByName (алиас ручного чек-ина)
                 post("/entries/{entryId}/arriveByName") {
-                    val entryId = call.parameters["entryId"]?.toLongOrNull()
-                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_entry_id"))
+                    val entryId =
+                        call.parameters["entryId"]?.toLongOrNull()
+                            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_entry_id"))
 
-                    val entry = repository.findEntry(entryId)
-                        ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "entry_not_found"))
+                    val entry =
+                        repository.findEntry(entryId)
+                            ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "entry_not_found"))
 
-                    val list = repository.getList(entry.listId)
-                        ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "list_not_found"))
+                    val list =
+                        repository.getList(entry.listId)
+                            ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "list_not_found"))
 
                     // Проверка club scope: доступ разрешён если пользователь имеет право на этот клуб
                     val context = call.rbacContext()
@@ -167,7 +184,10 @@ fun Application.guestListRoutes(
                         if (entry.status == GuestListEntryStatus.CALLED) {
                             UiCheckinMetrics.incLateOverride()
                         } else {
-                            return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "outside_arrival_window"))
+                            return@post call.respond(
+                                HttpStatusCode.Conflict,
+                                mapOf("error" to "outside_arrival_window"),
+                            )
                         }
                     }
 
@@ -182,7 +202,10 @@ fun Application.guestListRoutes(
     }
 }
 
-internal data class GuestListImportReport(val accepted: Int, val rejected: List<RejectedRow>)
+internal data class GuestListImportReport(
+    val accepted: Int,
+    val rejected: List<RejectedRow>,
+)
 
 internal suspend fun performGuestListImport(
     repository: GuestListRepository,
@@ -308,17 +331,23 @@ private fun ApplicationCall.extractSearch(context: RbacContext): SearchContext {
     val ownerId = if (Role.PROMOTER in context.roles) context.user.id else null
     val empty = clubIds?.isEmpty() == true
     val filter =
-        if (empty || forbidden) null
-        else baseFilter.copy(clubIds = clubIds?.takeIf { it.isNotEmpty() }, ownerUserId = ownerId)
+        if (empty || forbidden) {
+            null
+        } else {
+            baseFilter.copy(clubIds = clubIds?.takeIf { it.isNotEmpty() }, ownerUserId = ownerId)
+        }
 
     return SearchContext(filter, page, size, empty, forbidden)
 }
 
 private fun parseInstant(value: String?): Instant? =
-    if (value.isNullOrBlank()) null
-    else runCatching { Instant.parse(value) }.getOrElse {
-        val date = runCatching { LocalDate.parse(value) }.getOrElse { throw BadRequestException("Invalid date") }
-        date.atStartOfDay().toInstant(ZoneOffset.UTC)
+    if (value.isNullOrBlank()) {
+        null
+    } else {
+        runCatching { Instant.parse(value) }.getOrElse {
+            val date = runCatching { LocalDate.parse(value) }.getOrElse { throw BadRequestException("Invalid date") }
+            date.atStartOfDay().toInstant(ZoneOffset.UTC)
+        }
     }
 
 private fun GuestListEntryView.toResponse(): GuestListEntryResponse =
@@ -347,10 +376,19 @@ private fun List<GuestListEntryView>.toExportCsv(): String {
     val b = StringBuilder()
     b.appendLine(
         listOf(
-            "entry_id", "list_id", "club_id", "list_title", "owner_type",
-            "owner_user_id", "full_name", "phone", "guests_count",
-            "status", "notes", "list_created_at"
-        ).joinToString(",")
+            "entry_id",
+            "list_id",
+            "club_id",
+            "list_title",
+            "owner_type",
+            "owner_user_id",
+            "full_name",
+            "phone",
+            "guests_count",
+            "status",
+            "notes",
+            "list_created_at",
+        ).joinToString(","),
     )
     for (item in this) {
         b.append(item.id).append(',')
@@ -401,7 +439,11 @@ private fun String?.toBooleanStrictOrNull(): Boolean? =
 
 private val TSV_CONTENT_TYPE: ContentType = ContentType.parse("text/tab-separated-values")
 
-private fun isWithinWindow(now: Instant, start: Instant?, end: Instant?): Boolean {
+private fun isWithinWindow(
+    now: Instant,
+    start: Instant?,
+    end: Instant?,
+): Boolean {
     val afterStart = start?.let { !now.isBefore(it) } ?: true
     val beforeEnd = end?.let { !now.isAfter(it) } ?: true
     return afterStart && beforeEnd

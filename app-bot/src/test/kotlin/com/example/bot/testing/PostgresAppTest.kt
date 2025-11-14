@@ -31,8 +31,7 @@ abstract class PostgresAppTest {
             .locations(
                 "classpath:db/migration/common",
                 "classpath:db/migration/postgresql",
-            )
-            .baselineOnMigrate(true)
+            ).baselineOnMigrate(true)
             .load()
             .migrate()
         database =

@@ -72,7 +72,11 @@ val WebhookSecurity =
             )
 
         onCall { call ->
-            val forwarded = call.request.header(HttpHeaders.XForwardedFor)?.substringBefore(',')?.trim()
+            val forwarded =
+                call.request
+                    .header(HttpHeaders.XForwardedFor)
+                    ?.substringBefore(',')
+                    ?.trim()
             val remoteIp =
                 forwarded?.takeIf { it.isNotEmpty() }
                     ?: call.request.header("X-Real-IP")?.takeIf { it.isNotBlank() }
@@ -203,8 +207,8 @@ private data class WebhookSecurityState(
         logger.warn("suspicious_ip reason={} details={}", reason, details)
     }
 
-    fun extractUpdateId(payload: String): Long? {
-        return try {
+    fun extractUpdateId(payload: String): Long? =
+        try {
             val element: JsonElement = json.parseToJsonElement(payload)
             element.jsonObject["update_id"]?.jsonPrimitive?.long
         } catch (_: SerializationException) {
@@ -212,7 +216,6 @@ private data class WebhookSecurityState(
         } catch (_: IllegalArgumentException) {
             null
         }
-    }
 
     fun applyMdc(call: ApplicationCall): List<String> {
         val keys = mutableListOf<String>()
@@ -272,10 +275,9 @@ private suspend fun ByteReadChannel.readBodyLimited(limit: Long): ByteArray? {
     return output.toByteArray()
 }
 
-private fun ApplicationCall.extractIdempotencyKey(): String? {
-    return request.header(IDEMPOTENCY_HEADER)?.takeIf { it.isNotBlank() }
+private fun ApplicationCall.extractIdempotencyKey(): String? =
+    request.header(IDEMPOTENCY_HEADER)?.takeIf { it.isNotBlank() }
         ?: parameters["idempotency_key"]?.takeIf { it.isNotBlank() }
-}
 
 fun ApplicationCall.webhookRawBody(): ByteArray = attributes[webhookBodyKey]
 

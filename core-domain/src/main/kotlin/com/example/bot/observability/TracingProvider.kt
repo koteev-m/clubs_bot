@@ -14,7 +14,10 @@ import io.opentelemetry.sdk.trace.export.SpanExporter
  * Factory for Micrometer tracing backed by OpenTelemetry.
  */
 object TracingProvider {
-    data class Tracing(val tracer: Tracer, val sdk: SdkTracerProvider)
+    data class Tracing(
+        val tracer: Tracer,
+        val sdk: SdkTracerProvider,
+    )
 
     fun create(
         endpoint: String,

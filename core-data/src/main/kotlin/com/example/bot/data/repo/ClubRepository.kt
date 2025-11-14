@@ -13,4 +13,8 @@ interface ClubRepository {
 /**
  * Simple projection of a club used in selection lists.
  */
-data class ClubDto(val id: Long, val name: String, val shortDescription: String?)
+data class ClubDto(
+    val id: Long,
+    val name: String,
+    val shortDescription: String?,
+)

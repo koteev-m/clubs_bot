@@ -3,9 +3,9 @@ package com.example.bot.routes
 import com.example.bot.data.security.Role
 import com.example.bot.notifications.NotifyMessage
 import com.example.bot.notifications.ParseMode
-import com.example.bot.telegram.NotifyDispatchHealth
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.security.rbac.authorize
+import com.example.bot.telegram.NotifyDispatchHealth
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.call
@@ -45,13 +45,24 @@ data class CampaignDto(
 )
 
 @Serializable
-data class CampaignCreateRequest(val title: String, val text: String, val parseMode: ParseMode? = null)
+data class CampaignCreateRequest(
+    val title: String,
+    val text: String,
+    val parseMode: ParseMode? = null,
+)
 
 @Serializable
-data class CampaignUpdateRequest(val title: String? = null, val text: String? = null, val parseMode: ParseMode? = null)
+data class CampaignUpdateRequest(
+    val title: String? = null,
+    val text: String? = null,
+    val parseMode: ParseMode? = null,
+)
 
 @Serializable
-data class ScheduleRequest(val cron: String? = null, val startsAt: String? = null)
+data class ScheduleRequest(
+    val cron: String? = null,
+    val startsAt: String? = null,
+)
 
 /** Simple in-memory campaign service used by routes. */
 class CampaignService {
@@ -116,8 +127,8 @@ class TxNotifyService {
 private fun sanitize(
     text: String,
     mode: ParseMode?,
-): String {
-    return when (mode) {
+): String =
+    when (mode) {
         ParseMode.HTML -> text.replace("<", "&lt;").replace(">", "&gt;")
         ParseMode.MARKDOWNV2 ->
             text
@@ -125,7 +136,6 @@ private fun sanitize(
                 .replace("*", "\\*")
         else -> text
     }
-}
 
 fun Route.notifyHealthRoute(healthProvider: () -> NotifyDispatchHealth) {
     get("/notify/health") {

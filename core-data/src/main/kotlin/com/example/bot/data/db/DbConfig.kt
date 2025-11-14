@@ -2,15 +2,18 @@ package com.example.bot.data.db
 
 import java.util.Locale
 
-data class DbConfig(val url: String, val user: String, val password: String) {
+data class DbConfig(
+    val url: String,
+    val user: String,
+    val password: String,
+) {
     companion object {
-        fun fromEnv(): DbConfig {
-            return DbConfig(
+        fun fromEnv(): DbConfig =
+            DbConfig(
                 url = envRequired("DATABASE_URL"),
                 user = envRequired("DATABASE_USER"),
                 password = envRequired("DATABASE_PASSWORD"),
             )
-        }
     }
 }
 
@@ -82,10 +85,9 @@ private fun prop(name: String): String? = System.getProperty(name)
 
 private fun envRequired(name: String): String = env(name) ?: error("ENV $name is required")
 
-private fun String.toBooleanStrictOrNull(): Boolean? {
-    return when (this.lowercase(Locale.ROOT)) {
+private fun String.toBooleanStrictOrNull(): Boolean? =
+    when (this.lowercase(Locale.ROOT)) {
         "true" -> true
         "false" -> false
         else -> null
     }
-}

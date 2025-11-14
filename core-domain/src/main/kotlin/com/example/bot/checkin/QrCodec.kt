@@ -26,9 +26,15 @@ private const val ENTRY_IDX = 4
 private const val SIG_TAG_IDX = 5
 private const val HMAC_IDX = 6
 
-class QrCodec(private val key: ByteArray) {
+class QrCodec(
+    private val key: ByteArray,
+) {
     /** Data extracted from a QR code. */
-    data class Data(val clubId: Long, val eventId: Long, val entryId: Long)
+    data class Data(
+        val clubId: Long,
+        val eventId: Long,
+        val entryId: Long,
+    )
 
     private fun mac(): Mac =
         Mac.getInstance("HmacSHA256").apply {

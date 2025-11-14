@@ -143,8 +143,8 @@ class GuestListRoutesTest :
             fun ApplicationTestBuilder.authenticatedClient(
                 telegramId: Long,
                 username: String = "user$telegramId",
-            ): HttpClient {
-                return defaultRequest {
+            ): HttpClient =
+                defaultRequest {
                     val initData = buildSignedInitData(telegramId, username)
                     withInitData(initData)
                     header("X-Telegram-Id", telegramId.toString())
@@ -152,10 +152,9 @@ class GuestListRoutesTest :
                         header("X-Telegram-Username", username)
                     }
                 }
-            }
 
-            fun createClub(name: String): Long {
-                return transaction(database) {
+            fun createClub(name: String): Long =
+                transaction(database) {
                     GLClubsTable.insert {
                         it[GLClubsTable.name] = name
                         it[timezone] = "Europe/Moscow"
@@ -166,7 +165,6 @@ class GuestListRoutesTest :
                         it[qaTopicId] = null
                     } get GLClubsTable.id
                 }
-            }
 
             fun createEvent(
                 clubId: Long,
@@ -184,8 +182,8 @@ class GuestListRoutesTest :
                 }
             }
 
-            fun createDomainUser(username: String): Long {
-                return transaction(database) {
+            fun createDomainUser(username: String): Long =
+                transaction(database) {
                     GLDomainUsersTable.insert {
                         it[telegramUserId] = null
                         it[GLDomainUsersTable.username] = username
@@ -193,14 +191,13 @@ class GuestListRoutesTest :
                         it[phone] = null
                     } get GLDomainUsersTable.id
                 }
-            }
 
             fun registerRbacUser(
                 telegramId: Long,
                 roles: Set<Role>,
                 clubs: Set<Long>,
-            ): Long {
-                return transaction(database) {
+            ): Long =
+                transaction(database) {
                     roles.forEach { role ->
                         val exists =
                             GLRolesTable
@@ -240,7 +237,6 @@ class GuestListRoutesTest :
                     }
                     userId
                 }
-            }
 
             "import dry run returns json report" {
                 val clubId = createClub("Nebula")
@@ -534,8 +530,8 @@ private object GLUserRolesTable : Table("user_roles") {
 private class GLUserRepositoryStub(
     private val db: Database,
 ) : UserRepository {
-    override suspend fun getByTelegramId(id: Long): User? {
-        return transaction(db) {
+    override suspend fun getByTelegramId(id: Long): User? =
+        transaction(db) {
             GLDomainUsersTable
                 .selectAll()
                 .where { GLDomainUsersTable.telegramUserId eq id }
@@ -551,31 +547,28 @@ private class GLUserRepositoryStub(
                     )
                 }
         }
-    }
 }
 
 private class GLUserRoleRepositoryStub(
     private val db: Database,
 ) : UserRoleRepository {
-    override suspend fun listRoles(userId: Long): Set<Role> {
-        return transaction(db) {
+    override suspend fun listRoles(userId: Long): Set<Role> =
+        transaction(db) {
             GLUserRolesTable
                 .selectAll()
                 .where { GLUserRolesTable.userId eq userId }
                 .map { row -> Role.valueOf(row[GLUserRolesTable.roleCode]) }
                 .toSet()
         }
-    }
 
-    override suspend fun listClubIdsFor(userId: Long): Set<Long> {
-        return transaction(db) {
+    override suspend fun listClubIdsFor(userId: Long): Set<Long> =
+        transaction(db) {
             GLUserRolesTable
                 .selectAll()
                 .where { GLUserRolesTable.userId eq userId }
                 .mapNotNull { row -> row[GLUserRolesTable.scopeClubId] }
                 .toSet()
         }
-    }
 }
 
 private fun relaxedAuditRepository(): AuditLogRepository = mockk(relaxed = true)

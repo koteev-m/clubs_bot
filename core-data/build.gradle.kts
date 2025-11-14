@@ -26,13 +26,16 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
  * Настройки источников БД для flyway plugin (использует ENV или Gradle properties).
  */
 val databaseUrlProvider =
-    providers.environmentVariable("DATABASE_URL")
+    providers
+        .environmentVariable("DATABASE_URL")
         .orElse(providers.gradleProperty("DATABASE_URL"))
 val databaseUserProvider =
-    providers.environmentVariable("DATABASE_USER")
+    providers
+        .environmentVariable("DATABASE_USER")
         .orElse(providers.gradleProperty("DATABASE_USER"))
 val databasePasswordProvider =
-    providers.environmentVariable("DATABASE_PASSWORD")
+    providers
+        .environmentVariable("DATABASE_PASSWORD")
         .orElse(providers.gradleProperty("DATABASE_PASSWORD"))
 
 /**

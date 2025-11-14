@@ -9,17 +9,16 @@ import com.example.bot.data.repo.Paged
 import com.example.bot.data.repo.Sort
 import com.example.bot.data.repo.SortDirection
 import com.example.bot.data.repo.SortField
+import com.example.bot.data.security.Role
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.plugins.envBool
 import com.example.bot.plugins.envString
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.security.rbac.authorize
-import com.example.bot.data.security.Role
 import com.example.bot.telemetry.spanSuspending
 import io.ktor.http.HttpHeaders
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.application.call
 import io.ktor.server.application.pluginOrNull
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.callid.callId
@@ -33,12 +32,12 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.Timer
 import io.micrometer.tracing.Tracer
-import java.time.Instant
-import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeParseException
 import kotlinx.serialization.Serializable
 import mu.KotlinLogging
 import org.koin.ktor.ext.getKoin
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 private val logger = KotlinLogging.logger("OutboxAdminRoutes")
 
@@ -119,7 +118,7 @@ fun Application.outboxAdminRoutes(
     val resolvedTracer = tracer ?: runCatching { getKoin().get<Tracer>() }.getOrNull()
     val actorBase = envString("OUTBOX_ADMIN_ACTOR", default = "outbox-admin") ?: "outbox-admin"
 
-    logger.info { "Outbox admin routes enabled (defaultMaxRows=1000, maxRowsCap=10000, rbac=${rbacAvailable})" }
+    logger.info { "Outbox admin routes enabled (defaultMaxRows=1000, maxRowsCap=10000, rbac=$rbacAvailable)" }
 
     routing {
         route("/api/admin/outbox") {
@@ -132,12 +131,20 @@ fun Application.outboxAdminRoutes(
                     val topicTag = query.topic ?: "ALL"
                     val statusTag = query.status ?: "ALL"
 
-                    val timer = resolvedMetrics?.timer("outbox.admin.list.timer", "topic", topicTag, "status", statusTag)
-                    val sample = if (timer != null) {
-                        resolvedMetrics?.registry?.let { registry -> Timer.start(registry) }
-                    } else {
-                        null
-                    }
+                    val timer =
+                        resolvedMetrics?.timer(
+                            "outbox.admin.list.timer",
+                            "topic",
+                            topicTag,
+                            "status",
+                            statusTag,
+                        )
+                    val sample =
+                        if (timer != null) {
+                            resolvedMetrics?.registry?.let { registry -> Timer.start(registry) }
+                        } else {
+                            null
+                        }
 
                     try {
                         val (paged, stats) =
@@ -172,7 +179,11 @@ fun Application.outboxAdminRoutes(
 
                 post("/replay") {
                     val request = call.receive<ReplayRequest>()
-                    val ids = request.ids?.filter { it > 0 }?.distinct().orEmpty()
+                    val ids =
+                        request.ids
+                            ?.filter { it > 0 }
+                            ?.distinct()
+                            .orEmpty()
                     val hasFilter = request.filter != null
                     if (ids.isEmpty() && !hasFilter) {
                         throw BadRequestException("ids or filter must be provided")
@@ -190,10 +201,13 @@ fun Application.outboxAdminRoutes(
                     }
                     val filterSignature =
                         request.filter?.let {
-                            "topic=${it.topic ?: "ANY"},status=${it.status ?: "ANY"},createdAfter=${it.createdAfter ?: "NONE"}"
+                            "topic=${it.topic ?: "ANY"},status=${it.status ?: "ANY"}," +
+                                "createdAfter=${it.createdAfter ?: "NONE"}"
                         } ?: "topic=ANY,status=ANY,createdAfter=NONE"
                     logger.info {
-                        "Outbox replay request actor=$actor dryRun=$dryRun maxRows=$clamp ids=${ids.size} filter={$filterSignature}"
+                        "Outbox replay request " +
+                            "actor=$actor dryRun=$dryRun maxRows=$clamp ids=${ids.size} " +
+                            "filter={$filterSignature}"
                     }
 
                     val timerTopic = request.filter?.topic ?: if (ids.isNotEmpty()) "ids" else "ALL"
@@ -206,11 +220,12 @@ fun Application.outboxAdminRoutes(
                             "status",
                             timerStatus,
                         )
-                    val sample = if (replayTimer != null) {
-                        resolvedMetrics?.registry?.let { registry -> Timer.start(registry) }
-                    } else {
-                        null
-                    }
+                    val sample =
+                        if (replayTimer != null) {
+                            resolvedMetrics?.registry?.let { registry -> Timer.start(registry) }
+                        } else {
+                            null
+                        }
 
                     val resultTagSuccess = if (dryRun) "dry_run" else "success"
                     val resultTagError = "error"
@@ -243,8 +258,11 @@ fun Application.outboxAdminRoutes(
 
                         if (!result.dryRun) {
                             logger.info {
-                                "Outbox replay completed actor=$actor topic=${result.topic ?: adminFilter?.topic ?: "MULTI"} " +
-                                    "candidates=${result.totalCandidates} affected=${result.affected}"
+                                "Outbox replay completed " +
+                                    "actor=$actor " +
+                                    "topic=${result.topic ?: adminFilter?.topic ?: "MULTI"} " +
+                                    "candidates=${result.totalCandidates} " +
+                                    "affected=${result.affected}"
                             }
                         }
 
@@ -316,7 +334,10 @@ private fun OutboxRecord.toDto(): OutboxRecordDto {
     )
 }
 
-private fun Paged<OutboxRecord>.toDto(page: Page, stats: AdminStats?): OutboxAdminPage {
+private fun Paged<OutboxRecord>.toDto(
+    page: Page,
+    stats: AdminStats?,
+): OutboxAdminPage {
     val orderField =
         when (page.sort.field) {
             SortField.CreatedAt -> "created_at"

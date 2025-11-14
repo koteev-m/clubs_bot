@@ -14,13 +14,14 @@ class DenySensitiveTurboFilter : TurboFilter() {
         level: Level?,
         format: String?,
         params: Array<out Any>?,
-        t: Throwable?
+        t: Throwable?,
     ): FilterReply {
-        val message = when {
-            format.isNullOrEmpty() -> format.orEmpty()
-            params.isNullOrEmpty() -> format
-            else -> MessageFormatter.arrayFormat(format, params).message
-        }
+        val message =
+            when {
+                format.isNullOrEmpty() -> format.orEmpty()
+                params.isNullOrEmpty() -> format
+                else -> MessageFormatter.arrayFormat(format, params).message
+            }
 
         return if (message != null && SENSITIVE_PATTERN.containsMatchIn(message)) {
             FilterReply.DENY

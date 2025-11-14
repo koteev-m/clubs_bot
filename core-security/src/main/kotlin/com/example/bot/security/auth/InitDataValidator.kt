@@ -62,4 +62,7 @@ object InitDataValidator {
  * Minimal representation of Telegram user contained in init data.
  */
 @Serializable
-data class TelegramUser(val id: Long, val username: String? = null)
+data class TelegramUser(
+    val id: Long,
+    val username: String? = null,
+)

@@ -30,8 +30,12 @@ data class SegmentNode(
 
 /** Identifier of a saved segment. */
 @JvmInline
-value class SegmentId(val value: Long)
+value class SegmentId(
+    val value: Long,
+)
 
 /** Identifier of user. */
 @JvmInline
-value class UserId(val value: Long)
+value class UserId(
+    val value: Long,
+)

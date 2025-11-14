@@ -19,11 +19,17 @@ import java.time.Instant
 import java.util.UUID
 
 sealed interface BookingCmdResult {
-    data class HoldCreated(val holdId: UUID) : BookingCmdResult
+    data class HoldCreated(
+        val holdId: UUID,
+    ) : BookingCmdResult
 
-    data class Booked(val bookingId: UUID) : BookingCmdResult
+    data class Booked(
+        val bookingId: UUID,
+    ) : BookingCmdResult
 
-    data class AlreadyBooked(val bookingId: UUID) : BookingCmdResult
+    data class AlreadyBooked(
+        val bookingId: UUID,
+    ) : BookingCmdResult
 
     data object HoldExpired : BookingCmdResult
 
@@ -35,9 +41,13 @@ sealed interface BookingCmdResult {
 }
 
 sealed interface BookingStatusUpdateResult {
-    data class Success(val record: BookingRecord) : BookingStatusUpdateResult
+    data class Success(
+        val record: BookingRecord,
+    ) : BookingStatusUpdateResult
 
-    data class Conflict(val record: BookingRecord) : BookingStatusUpdateResult
+    data class Conflict(
+        val record: BookingRecord,
+    ) : BookingStatusUpdateResult
 
     data object NotFound : BookingStatusUpdateResult
 }
@@ -338,11 +348,12 @@ class BookingService(
         metricName: String,
         outboxTopic: String,
     ): BookingStatusUpdateResult {
-        val current = bookingRepository.findById(bookingId)
-            ?: run {
-                log(action, clubId, "not_found", metaFor(bookingId, null))
-                return BookingStatusUpdateResult.NotFound
-            }
+        val current =
+            bookingRepository.findById(bookingId)
+                ?: run {
+                    log(action, clubId, "not_found", metaFor(bookingId, null))
+                    return BookingStatusUpdateResult.NotFound
+                }
         if (current.clubId != clubId) {
             log(action, clubId, "not_found", metaFor(bookingId, null))
             return BookingStatusUpdateResult.NotFound

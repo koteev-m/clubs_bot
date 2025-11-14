@@ -18,7 +18,10 @@ data class ConfirmInput(
 /**
  * Contact details supplied by the guest.
  */
-data class ContactInfo(val tgUsername: String?, val phoneE164: String?)
+data class ContactInfo(
+    val tgUsername: String?,
+    val phoneE164: String?,
+)
 
 /**
  * Information about a generated invoice.
@@ -35,8 +38,12 @@ data class InvoiceInfo(
 /** Result of confirmation attempt. */
 sealed interface ConfirmResult {
     /** Confirmation is pending payment; [invoice] should be sent to user. */
-    data class PendingPayment(val invoice: InvoiceInfo) : ConfirmResult
+    data class PendingPayment(
+        val invoice: InvoiceInfo,
+    ) : ConfirmResult
 
     /** Booking has been confirmed immediately. */
-    data class Confirmed(val booking: BookingSummary) : ConfirmResult
+    data class Confirmed(
+        val booking: BookingSummary,
+    ) : ConfirmResult
 }

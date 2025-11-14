@@ -47,8 +47,8 @@ class GuestListRepositoryImpl(
         arrivalWindowStart: Instant?,
         arrivalWindowEnd: Instant?,
         status: GuestListStatus,
-    ): GuestList {
-        return withTxRetry {
+    ): GuestList =
+        withTxRetry {
             transaction(database) {
                 val createdAt = clock.instant().atOffset(ZoneOffset.UTC)
                 GuestListsTable
@@ -63,16 +63,14 @@ class GuestListRepositoryImpl(
                         it[GuestListsTable.arrivalWindowEnd] = arrivalWindowEnd?.atOffset(ZoneOffset.UTC)
                         it[GuestListsTable.status] = status.name
                         it[GuestListsTable.createdAt] = createdAt
-                    }
-                    .resultedValues!!
+                    }.resultedValues!!
                     .single()
                     .toGuestList()
             }
         }
-    }
 
-    override suspend fun getList(id: Long): GuestList? {
-        return withTxRetry {
+    override suspend fun getList(id: Long): GuestList? =
+        withTxRetry {
             transaction(database) {
                 GuestListsTable
                     .selectAll()
@@ -81,10 +79,9 @@ class GuestListRepositoryImpl(
                     ?.toGuestList()
             }
         }
-    }
 
-    override suspend fun findEntry(id: Long): GuestListEntry? {
-        return withTxRetry {
+    override suspend fun findEntry(id: Long): GuestListEntry? =
+        withTxRetry {
             transaction(database) {
                 GuestListEntriesTable
                     .selectAll()
@@ -93,7 +90,6 @@ class GuestListRepositoryImpl(
                     ?.toGuestListEntry()
             }
         }
-    }
 
     override suspend fun listListsByClub(
         clubId: Long,
@@ -150,8 +146,7 @@ class GuestListRepositoryImpl(
                                 it[GuestListEntriesTable.checkedInAt] = null
                                 it[GuestListEntriesTable.checkedInBy] = null
                             }
-                        }
-                        .resultedValues!!
+                        }.resultedValues!!
                         .single()
                 inserted.toGuestListEntry()
             }
@@ -163,8 +158,8 @@ class GuestListRepositoryImpl(
         status: GuestListEntryStatus,
         checkedInBy: Long?,
         at: Instant?,
-    ): GuestListEntry? {
-        return withTxRetry {
+    ): GuestListEntry? =
+        withTxRetry {
             transaction(database) {
                 val checkedAt =
                     if (status == GuestListEntryStatus.CHECKED_IN) {
@@ -190,7 +185,6 @@ class GuestListRepositoryImpl(
                 }
             }
         }
-    }
 
     override suspend fun listEntries(
         listId: Long,
@@ -262,8 +256,8 @@ class GuestListRepositoryImpl(
         listId: Long,
         rows: List<ParsedGuest>,
         dryRun: Boolean,
-    ): GuestListEntryPage {
-        return withTxRetry {
+    ): GuestListEntryPage =
+        withTxRetry {
             transaction(database) {
                 val validRows = mutableListOf<EntryValidationOutcome.Valid>()
                 rows.forEach { row ->
@@ -303,7 +297,6 @@ class GuestListRepositoryImpl(
                 GuestListEntryPage(emptyList(), 0)
             }
         }
-    }
 
     override suspend fun searchEntries(
         filter: GuestListEntrySearch,
@@ -374,8 +367,8 @@ class GuestListRepositoryImpl(
         }
     }
 
-    private fun ResultRow.toGuestList(): GuestList {
-        return GuestList(
+    private fun ResultRow.toGuestList(): GuestList =
+        GuestList(
             id = this[GuestListsTable.id],
             clubId = this[GuestListsTable.clubId],
             eventId = this[GuestListsTable.eventId],
@@ -388,10 +381,9 @@ class GuestListRepositoryImpl(
             status = GuestListStatus.valueOf(this[GuestListsTable.status]),
             createdAt = this[GuestListsTable.createdAt].toInstant(),
         )
-    }
 
-    private fun ResultRow.toGuestListEntry(): GuestListEntry {
-        return GuestListEntry(
+    private fun ResultRow.toGuestListEntry(): GuestListEntry =
+        GuestListEntry(
             id = this[GuestListEntriesTable.id],
             listId = this[GuestListEntriesTable.guestListId],
             fullName = this[GuestListEntriesTable.fullName],
@@ -402,10 +394,9 @@ class GuestListRepositoryImpl(
             checkedInAt = this[GuestListEntriesTable.checkedInAt]?.toInstant(),
             checkedInBy = this[GuestListEntriesTable.checkedInBy],
         )
-    }
 
-    private fun ResultRow.toEntryView(): GuestListEntryView {
-        return GuestListEntryView(
+    private fun ResultRow.toEntryView(): GuestListEntryView =
+        GuestListEntryView(
             id = this[GuestListEntriesTable.id],
             listId = this[GuestListEntriesTable.guestListId],
             listTitle = this[GuestListsTable.title],
@@ -419,15 +410,11 @@ class GuestListRepositoryImpl(
             status = GuestListEntryStatus.valueOf(this[GuestListEntriesTable.status]),
             listCreatedAt = this[GuestListsTable.createdAt].toInstant(),
         )
-    }
 }
 
-private fun escapeLike(value: String): String {
-    return value
+private fun escapeLike(value: String): String =
+    value
         .replace("%", "\\%")
         .replace("_", "\\_")
-}
 
-private fun sanitizePhoneQuery(raw: String): String {
-    return raw.filter { it.isDigit() || it == '+' }
-}
+private fun sanitizePhoneQuery(raw: String): String = raw.filter { it.isDigit() || it == '+' }

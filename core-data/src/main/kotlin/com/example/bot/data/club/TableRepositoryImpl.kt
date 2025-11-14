@@ -11,9 +11,11 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 
-class TableRepositoryImpl(private val database: Database) : TableRepository {
-    override suspend fun listByClub(clubId: Long): List<Table> {
-        return withTxRetry {
+class TableRepositoryImpl(
+    private val database: Database,
+) : TableRepository {
+    override suspend fun listByClub(clubId: Long): List<Table> =
+        withTxRetry {
             transaction(database) {
                 TablesTable
                     .selectAll()
@@ -22,10 +24,9 @@ class TableRepositoryImpl(private val database: Database) : TableRepository {
                     .map { it.toTable() }
             }
         }
-    }
 
-    override suspend fun get(id: Long): Table? {
-        return withTxRetry {
+    override suspend fun get(id: Long): Table? =
+        withTxRetry {
             transaction(database) {
                 TablesTable
                     .selectAll()
@@ -34,10 +35,9 @@ class TableRepositoryImpl(private val database: Database) : TableRepository {
                     ?.toTable()
             }
         }
-    }
 
-    private fun ResultRow.toTable(): Table {
-        return Table(
+    private fun ResultRow.toTable(): Table =
+        Table(
             id = this[TablesTable.id],
             clubId = this[TablesTable.clubId],
             zoneId = this[TablesTable.zoneId],
@@ -46,5 +46,4 @@ class TableRepositoryImpl(private val database: Database) : TableRepository {
             minDeposit = this[TablesTable.minDeposit],
             active = this[TablesTable.active],
         )
-    }
 }

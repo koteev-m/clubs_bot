@@ -62,7 +62,6 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
     routing {
         // Общий корневой узел БЕЗ установки InitDataAuthPlugin
         route("/api/clubs/{clubId}/bookings") {
-
             // Плагин ставим на дочерний узел /finalize, чтобы не конфликтовать с другими модулями
             route("/finalize") {
                 withMiniAppAuth(miniAppBotTokenProvider)
@@ -78,8 +77,19 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                         PaymentsMetrics
                             .timer(metricsProvider, Path.Finalize, Source.MiniApp)
                             .record(Result.Validation)
-                        logger.warn { "[payments] finalize result=validation club=unknown booking=unknown requestId=$callId" }
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid club id"))
+                        logger.warn {
+                            "[payments] finalize " +
+                                "result=validation " +
+                                "club=unknown " +
+                                "booking=unknown " +
+                                "requestId=$callId"
+                        }
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf(
+                                "error" to "invalid club id",
+                            ),
+                        )
                         return@post
                     }
 
@@ -88,8 +98,19 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                         PaymentsMetrics
                             .timer(metricsProvider, Path.Finalize, Source.MiniApp)
                             .record(Result.Validation)
-                        logger.warn { "[payments] finalize result=validation club=$clubId booking=unknown requestId=$callId" }
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Idempotency-Key required"))
+                        logger.warn {
+                            "[payments] finalize " +
+                                "result=validation " +
+                                "club=$clubId " +
+                                "booking=unknown " +
+                                "requestId=$callId"
+                        }
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf(
+                                "error" to "Idempotency-Key required",
+                            ),
+                        )
                         return@post
                     }
 
@@ -100,9 +121,18 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                                     .timer(metricsProvider, Path.Finalize, Source.MiniApp)
                                     .record(Result.Validation)
                                 logger.warn(throwable) {
-                                    "[payments] finalize result=validation club=$clubId booking=unknown requestId=$callId"
+                                    "[payments] finalize " +
+                                        "result=validation " +
+                                        "club=$clubId " +
+                                        "booking=unknown " +
+                                        "requestId=$callId"
                                 }
-                                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid payload"))
+                                call.respond(
+                                    HttpStatusCode.BadRequest,
+                                    mapOf(
+                                        "error" to "invalid payload",
+                                    ),
+                                )
                                 return@post
                             }
 
@@ -111,8 +141,19 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                         PaymentsMetrics
                             .timer(metricsProvider, Path.Finalize, Source.MiniApp)
                             .record(Result.Validation)
-                        logger.warn { "[payments] finalize result=validation club=$clubId booking=unknown requestId=$callId" }
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid bookingId"))
+                        logger.warn {
+                            "[payments] finalize " +
+                                "result=validation " +
+                                "club=$clubId " +
+                                "booking=unknown " +
+                                "requestId=$callId"
+                        }
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf(
+                                "error" to "invalid bookingId",
+                            ),
+                        )
                         return@post
                     }
 
@@ -127,7 +168,12 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                             requestId = callId,
                         )
 
-                    logger.info { "[payments] finalize start club=$clubId booking=$bookingLabel requestId=$callId" }
+                    logger.info {
+                        "[payments] finalize start " +
+                            "club=$clubId " +
+                            "booking=$bookingLabel " +
+                            "requestId=$callId"
+                    }
 
                     val promoService = koin.getOrNull<PromoAttributionService>()
                     tracer.spanSuspending("payments.finalize.handler", metadata) {
@@ -147,7 +193,10 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                                         promoService.attachDeepLink(bookingId, request.promoDeepLink)
                                     }.onFailure { throwable ->
                                         logger.warn(throwable) {
-                                            "[payments] finalize promo-attach-failed club=$clubId booking=$bookingLabel requestId=$callId"
+                                            "[payments] finalize promo-attach-failed" +
+                                                " club=$clubId " +
+                                                "booking=$bookingLabel " +
+                                                "requestId=$callId"
                                         }
                                     }.getOrDefault(false)
                                 } else {
@@ -157,7 +206,12 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                             timer.record(Result.Ok)
                             setResult(Result.Ok)
                             logger.info {
-                                "[payments] finalize result=ok club=$clubId booking=$bookingLabel requestId=$callId status=${result.paymentStatus}"
+                                "[payments] finalize " +
+                                    "result=ok " +
+                                    "club=$clubId " +
+                                    "booking=$bookingLabel " +
+                                    "requestId=$callId " +
+                                    "status=${result.paymentStatus}"
                             }
                             call.respond(
                                 HttpStatusCode.OK,
@@ -172,23 +226,50 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                             timer.record(Result.Conflict)
                             setResult(Result.Conflict)
                             logger.warn(conflict) {
-                                "[payments] finalize result=conflict club=$clubId booking=$bookingLabel requestId=$callId"
+                                "[payments] finalize " +
+                                    "result=conflict " +
+                                    "club=$clubId " +
+                                    "booking=$bookingLabel " +
+                                    "requestId=$callId"
                             }
-                            call.respond(HttpStatusCode.Conflict, mapOf("error" to conflict.message))
+                            call.respond(
+                                HttpStatusCode.Conflict,
+                                mapOf(
+                                    "error" to conflict.message,
+                                ),
+                            )
                         } catch (validation: PaymentsFinalizeService.ValidationException) {
                             timer.record(Result.Validation)
                             setResult(Result.Validation)
                             logger.warn(validation) {
-                                "[payments] finalize result=validation club=$clubId booking=$bookingLabel requestId=$callId"
+                                "[payments] finalize " +
+                                    "result=validation " +
+                                    "club=$clubId " +
+                                    "booking=$bookingLabel " +
+                                    "requestId=$callId"
                             }
-                            call.respond(HttpStatusCode.BadRequest, mapOf("error" to validation.message))
+                            call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf(
+                                    "error" to validation.message,
+                                ),
+                            )
                         } catch (unexpected: Throwable) {
                             timer.record(Result.Unexpected)
                             setResult(Result.Unexpected)
                             logger.error(unexpected) {
-                                "[payments] finalize result=unexpected club=$clubId booking=$bookingLabel requestId=$callId"
+                                "[payments] finalize " +
+                                    "result=unexpected " +
+                                    "club=$clubId " +
+                                    "booking=$bookingLabel " +
+                                    "requestId=$callId"
                             }
-                            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "internal"))
+                            call.respond(
+                                HttpStatusCode.InternalServerError,
+                                mapOf(
+                                    "error" to "internal",
+                                ),
+                            )
                         }
                     }
                 }

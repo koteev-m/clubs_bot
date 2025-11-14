@@ -31,9 +31,13 @@ sealed interface BookingCoreError {
 }
 
 sealed interface BookingCoreResult<out T> {
-    data class Success<T>(val value: T) : BookingCoreResult<T>
+    data class Success<T>(
+        val value: T,
+    ) : BookingCoreResult<T>
 
-    data class Failure(val error: BookingCoreError) : BookingCoreResult<Nothing>
+    data class Failure(
+        val error: BookingCoreError,
+    ) : BookingCoreResult<Nothing>
 }
 
 data class BookingRecord(

@@ -5,8 +5,8 @@ import com.example.bot.booking.BookingRecord
 import com.example.bot.booking.BookingWriteRepository
 import com.example.bot.outbox.OutboxService
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
@@ -193,7 +193,11 @@ class BookingService(
 
 /** Simple Either implementation. */
 sealed class Either<out L, out R> {
-    data class Left<L>(val value: L) : Either<L, Nothing>()
+    data class Left<L>(
+        val value: L,
+    ) : Either<L, Nothing>()
 
-    data class Right<R>(val value: R) : Either<Nothing, R>()
+    data class Right<R>(
+        val value: R,
+    ) : Either<Nothing, R>()
 }

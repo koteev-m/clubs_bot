@@ -12,16 +12,14 @@ private const val SQL_STATE_DEADLOCK = "40P01"
 private const val SQL_STATE_SERIALIZATION_FAILURE = "40001"
 private const val SQL_STATE_UNIQUE_VIOLATION = "23505"
 
-private fun Throwable.sqlState(): String? {
-    return generateSequence(this) { it.cause }
+private fun Throwable.sqlState(): String? =
+    generateSequence(this) { it.cause }
         .filterIsInstance<SQLException>()
         .firstOrNull()
         ?.sqlState
-}
 
-private fun isRetryable(state: String?): Boolean {
-    return state == SQL_STATE_DEADLOCK || state == SQL_STATE_SERIALIZATION_FAILURE
-}
+private fun isRetryable(state: String?): Boolean =
+    state == SQL_STATE_DEADLOCK || state == SQL_STATE_SERIALIZATION_FAILURE
 
 private fun computeBackoff(attempt: Int): Duration {
     val shift = attempt.coerceAtMost(BotLimits.notifyBackoffMaxShift)
@@ -63,11 +61,10 @@ suspend fun <T> withTxRetry(
     throw lastError ?: IllegalStateException("withTxRetry failed without exception")
 }
 
-fun Throwable.isUniqueViolation(): Boolean {
-    return generateSequence(this) { it.cause }
+fun Throwable.isUniqueViolation(): Boolean =
+    generateSequence(this) { it.cause }
         .filterIsInstance<SQLException>()
         .any { it.sqlState == SQL_STATE_UNIQUE_VIOLATION }
-}
 
 fun Throwable.isRetryLimitExceeded(): Boolean {
     val state = this.sqlState()

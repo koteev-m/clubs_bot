@@ -44,11 +44,10 @@ class InMemoryBookingRepository :
 
     override suspend fun findBookingById(id: UUID): BookingRecord? = bookings[id]
 
-    override suspend fun findBookingByQr(qrSecret: String): BookingRecord? {
-        return bookings.values.find {
+    override suspend fun findBookingByQr(qrSecret: String): BookingRecord? =
+        bookings.values.find {
             it.qrSecret == qrSecret
         }
-    }
 
     override suspend fun insertHold(
         tableId: Long,

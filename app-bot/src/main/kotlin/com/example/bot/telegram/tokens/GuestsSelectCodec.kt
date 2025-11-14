@@ -72,13 +72,12 @@ object GuestsSelectCodec {
     private fun normalizeEnd(
         startUtc: Instant,
         endUtc: Instant,
-    ): Instant {
-        return if (endUtc.isAfter(startUtc)) {
+    ): Instant =
+        if (endUtc.isAfter(startUtc)) {
             endUtc
         } else {
             startUtc.plus(DEFAULT_DURATION)
         }
-    }
 
     private val DEFAULT_DURATION: Duration = Duration.ofHours(8)
 }

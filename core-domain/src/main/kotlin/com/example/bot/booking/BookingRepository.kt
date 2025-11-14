@@ -56,13 +56,30 @@ interface BookingWriteRepository {
 }
 
 /** Simple event projection for repository. */
-data class EventDto(val id: Long, val clubId: Long, val startUtc: Instant, val endUtc: Instant)
+data class EventDto(
+    val id: Long,
+    val clubId: Long,
+    val startUtc: Instant,
+    val endUtc: Instant,
+)
 
 /** Simple table projection for repository. */
-data class TableDto(val id: Long, val number: Int, val capacity: Int, val minDeposit: BigDecimal, val active: Boolean)
+data class TableDto(
+    val id: Long,
+    val number: Int,
+    val capacity: Int,
+    val minDeposit: BigDecimal,
+    val active: Boolean,
+)
 
 /** Representation of a hold stored in repository. */
-data class HoldRecord(val id: UUID, val tableId: Long, val eventId: Long, val guests: Int, val expiresAt: Instant)
+data class HoldRecord(
+    val id: UUID,
+    val tableId: Long,
+    val eventId: Long,
+    val guests: Int,
+    val expiresAt: Instant,
+)
 
 /** Representation of a booking stored in repository. */
 data class BookingRecord(

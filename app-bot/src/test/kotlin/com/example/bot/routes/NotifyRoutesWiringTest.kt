@@ -22,79 +22,80 @@ import kotlinx.serialization.json.Json
 import org.koin.ktor.ext.get
 import org.koin.ktor.plugin.Koin
 
-class NotifyRoutesWiringTest : StringSpec({
-    val payload =
-        Json.encodeToString(
-            NotifyMessage(
-                chatId = 1,
-                messageThreadId = null,
-                method = NotifyMethod.TEXT,
-                text = "hello",
-                parseMode = ParseMode.MARKDOWNV2,
-                photoUrl = null,
-                album = null,
-                buttons = null,
-                dedupKey = null,
-            ),
-        )
+class NotifyRoutesWiringTest :
+    StringSpec({
+        val payload =
+            Json.encodeToString(
+                NotifyMessage(
+                    chatId = 1,
+                    messageThreadId = null,
+                    method = NotifyMethod.TEXT,
+                    text = "hello",
+                    parseMode = ParseMode.MARKDOWNV2,
+                    photoUrl = null,
+                    album = null,
+                    buttons = null,
+                    dedupKey = null,
+                ),
+            )
 
-    "notify routes enabled by default" {
-        lateinit var txService: TxNotifyService
+        "notify routes enabled by default" {
+            lateinit var txService: TxNotifyService
 
-        testApplication {
-            application {
-                install(ContentNegotiation) { json() }
-                install(Koin) { modules(notifyModule) }
+            testApplication {
+                application {
+                    install(ContentNegotiation) { json() }
+                    install(Koin) { modules(notifyModule) }
 
-                val notifyEnabled = resolveFlag("NOTIFY_ROUTES_ENABLED", default = true)
-                if (notifyEnabled) {
-                    notifyRoutes(
-                        tx = get<TxNotifyService>().also { txService = it },
-                        campaigns = get(),
-                    )
+                    val notifyEnabled = resolveFlag("NOTIFY_ROUTES_ENABLED", default = true)
+                    if (notifyEnabled) {
+                        notifyRoutes(
+                            tx = get<TxNotifyService>().also { txService = it },
+                            campaigns = get(),
+                        )
+                    }
                 }
+
+                val response =
+                    client.post("/api/notify/tx") {
+                        contentType(ContentType.Application.Json)
+                        setBody(payload)
+                    }
+
+                response.status shouldBe HttpStatusCode.Accepted
+                txService.size() shouldBe 1
             }
-
-            val response =
-                client.post("/api/notify/tx") {
-                    contentType(ContentType.Application.Json)
-                    setBody(payload)
-                }
-
-            response.status shouldBe HttpStatusCode.Accepted
-            txService.size() shouldBe 1
         }
-    }
 
-    "notify routes disabled when NOTIFY_ROUTES_ENABLED=false" {
-        testApplication {
-            environment {
-                config =
-                    MapApplicationConfig(
-                        "app.flags.NOTIFY_ROUTES_ENABLED" to "false",
-                    )
-            }
-
-            application {
-                install(ContentNegotiation) { json() }
-                install(Koin) { modules(notifyModule) }
-
-                val notifyEnabled = resolveFlag("NOTIFY_ROUTES_ENABLED", default = true)
-                if (notifyEnabled) {
-                    notifyRoutes(
-                        tx = get(),
-                        campaigns = get(),
-                    )
-                }
-            }
-
-            val response =
-                client.post("/api/notify/tx") {
-                    contentType(ContentType.Application.Json)
-                    setBody(payload)
+        "notify routes disabled when NOTIFY_ROUTES_ENABLED=false" {
+            testApplication {
+                environment {
+                    config =
+                        MapApplicationConfig(
+                            "app.flags.NOTIFY_ROUTES_ENABLED" to "false",
+                        )
                 }
 
-            response.status shouldBe HttpStatusCode.NotFound
+                application {
+                    install(ContentNegotiation) { json() }
+                    install(Koin) { modules(notifyModule) }
+
+                    val notifyEnabled = resolveFlag("NOTIFY_ROUTES_ENABLED", default = true)
+                    if (notifyEnabled) {
+                        notifyRoutes(
+                            tx = get(),
+                            campaigns = get(),
+                        )
+                    }
+                }
+
+                val response =
+                    client.post("/api/notify/tx") {
+                        contentType(ContentType.Application.Json)
+                        setBody(payload)
+                    }
+
+                response.status shouldBe HttpStatusCode.NotFound
+            }
         }
-    }
-})
+    })

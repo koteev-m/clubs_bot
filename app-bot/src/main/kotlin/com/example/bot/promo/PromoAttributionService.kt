@@ -94,7 +94,10 @@ class InMemoryPromoAttributionStore(
     private val ttl: Duration = Duration.ofHours(24),
     private val clock: Clock = Clock.systemUTC(),
 ) : PromoAttributionStore {
-    private data class Entry(val value: PendingPromoAttribution, val storedAt: Instant)
+    private data class Entry(
+        val value: PendingPromoAttribution,
+        val storedAt: Instant,
+    )
 
     private val entries = ConcurrentHashMap<Long, Entry>()
 
@@ -119,7 +122,10 @@ class InMemoryPromoAttributionStore(
 }
 
 sealed interface PromoLinkIssueResult {
-    data class Success(val token: String, val promoLink: PromoLink) : PromoLinkIssueResult
+    data class Success(
+        val token: String,
+        val promoLink: PromoLink,
+    ) : PromoLinkIssueResult
 
     data object NotAuthorized : PromoLinkIssueResult
 }
@@ -260,17 +266,21 @@ class PromoAttributionService(
         val candidates =
             buildList {
                 uri?.let { parsed ->
-                    parsed.query?.split('&')?.mapNotNull { param ->
-                        val parts = param.split('=', limit = 2)
-                        if (parts.size == 2) parts[1] else null
-                    }?.let { addAll(it) }
+                    parsed.query
+                        ?.split('&')
+                        ?.mapNotNull { param ->
+                            val parts = param.split('=', limit = 2)
+                            if (parts.size == 2) parts[1] else null
+                        }?.let { addAll(it) }
                     parsed.fragment?.takeIf { it.isNotBlank() }?.let(::add)
-                    parsed.path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }?.let(::add)
+                    parsed.path
+                        ?.substringAfterLast('/')
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let(::add)
                 }
                 add(trimmed.substringAfterLast('/'))
                 add(trimmed.substringAfterLast('='))
-            }
-                .asSequence()
+            }.asSequence()
                 .map { candidate -> candidate.substringBefore('&').substringBefore('?').trim() }
                 .filter { it.isNotEmpty() }
 

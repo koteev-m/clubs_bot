@@ -13,7 +13,9 @@ import java.util.UUID
 /**
  * Factory for inline keyboards used in the guest flow.
  */
-class Keyboards(private val texts: BotTexts) {
+class Keyboards(
+    private val texts: BotTexts,
+) {
     /**
      * Main menu keyboard shown on /start.
      */
@@ -133,8 +135,7 @@ class Keyboards(private val texts: BotTexts) {
                         InlineKeyboardButton(texts.myBookingsMoreButton(lang)).callbackData(encodeShow(booking.id)),
                         InlineKeyboardButton(texts.myBookingsCancelButton(lang)).callbackData(encodeCancel(booking.id)),
                     )
-                }
-                .toMutableList()
+                }.toMutableList()
         if (hasPrev || hasNext) {
             val navButtons = mutableListOf<InlineKeyboardButton>()
             if (hasPrev) {
@@ -159,7 +160,10 @@ class Keyboards(private val texts: BotTexts) {
         encodeCancel: (UUID) -> String,
     ): InlineKeyboardMarkup {
         val cancel = InlineKeyboardButton(texts.myBookingsCancelButton(lang)).callbackData(encodeCancel(bookingId))
-        val back = InlineKeyboardButton(texts.myBookingsBack(lang)).callbackData("bk:list:${originatingPage.coerceAtLeast(1)}")
+        val back =
+            InlineKeyboardButton(
+                texts.myBookingsBack(lang),
+            ).callbackData("bk:list:${originatingPage.coerceAtLeast(1)}")
         return InlineKeyboardMarkup(arrayOf(cancel, back))
     }
 }
@@ -168,10 +172,6 @@ private const val GUESTS_PER_ROW = 4
 private const val TABLE_PREFIX = "tbl:"
 private const val GUEST_PREFIX = "g:"
 
-private fun String.ensureTablePrefix(): String {
-    return if (startsWith(TABLE_PREFIX)) this else TABLE_PREFIX + this
-}
+private fun String.ensureTablePrefix(): String = if (startsWith(TABLE_PREFIX)) this else TABLE_PREFIX + this
 
-private fun String.ensureGuestPrefix(): String {
-    return if (startsWith(GUEST_PREFIX)) this else GUEST_PREFIX + this
-}
+private fun String.ensureGuestPrefix(): String = if (startsWith(GUEST_PREFIX)) this else GUEST_PREFIX + this

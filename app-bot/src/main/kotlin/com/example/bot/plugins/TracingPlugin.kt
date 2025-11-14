@@ -55,11 +55,12 @@ fun Application.installTracing(tracer: Tracer) {
 }
 
 fun Application.installTracingFromEnv(): TracingProvider.Tracing? {
-    val endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")?.takeIf { it.isNotBlank() }
-        ?: run {
-            environment.log.info("Tracing disabled: OTEL_EXPORTER_OTLP_ENDPOINT not set")
-            return null
-        }
+    val endpoint =
+        System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")?.takeIf { it.isNotBlank() }
+            ?: run {
+                environment.log.info("Tracing disabled: OTEL_EXPORTER_OTLP_ENDPOINT not set")
+                return null
+            }
     val headers = System.getenv("OTEL_EXPORTER_OTLP_HEADERS")?.let(::parseHeaders).orEmpty()
 
     return runCatching {
@@ -91,6 +92,5 @@ private fun parseHeaders(raw: String): Map<String, String> {
             val key = trimmed.substring(0, delimiterIndex).trim()
             val value = trimmed.substring(delimiterIndex + 1).trim()
             if (key.isEmpty()) null else key to value
-        }
-        .toMap()
+        }.toMap()
 }

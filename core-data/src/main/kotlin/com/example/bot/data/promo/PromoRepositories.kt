@@ -101,8 +101,7 @@ class PromoLinkRepositoryImpl(
                         it[PromoLinksTable.utmCampaign] = utmCampaign
                         it[PromoLinksTable.utmContent] = utmContent
                         it[PromoLinksTable.createdAt] = now.atOffset(ZoneOffset.UTC)
-                    }
-                    .resultedValues
+                    }.resultedValues
                     ?.single()
                     ?.toPromoLink()
                     ?: error("Failed to insert promo link")
@@ -110,8 +109,8 @@ class PromoLinkRepositoryImpl(
         }
     }
 
-    override suspend fun get(id: Long): PromoLink? {
-        return withTxRetry {
+    override suspend fun get(id: Long): PromoLink? =
+        withTxRetry {
             transaction(db) {
                 PromoLinksTable
                     .selectAll()
@@ -121,13 +120,12 @@ class PromoLinkRepositoryImpl(
                     ?.toPromoLink()
             }
         }
-    }
 
     override suspend fun listByPromoter(
         promoterUserId: Long,
         clubId: Long?,
-    ): List<PromoLink> {
-        return withTxRetry {
+    ): List<PromoLink> =
+        withTxRetry {
             transaction(db) {
                 val query =
                     PromoLinksTable
@@ -139,10 +137,9 @@ class PromoLinkRepositoryImpl(
                     .map { it.toPromoLink() }
             }
         }
-    }
 
-    override suspend fun deactivate(id: Long): PromoLinkResult<Unit> {
-        return withTxRetry {
+    override suspend fun deactivate(id: Long): PromoLinkResult<Unit> =
+        withTxRetry {
             transaction(db) {
                 val affected = PromoLinksTable.deleteWhere { PromoLinksTable.id eq id }
                 if (affected == 0) {
@@ -152,7 +149,6 @@ class PromoLinkRepositoryImpl(
                 }
             }
         }
-    }
 }
 
 class PromoAttributionRepositoryImpl(
@@ -183,8 +179,7 @@ class PromoAttributionRepositoryImpl(
                                 it[PromoAttributionTable.utmCampaign] = utmCampaign
                                 it[PromoAttributionTable.utmContent] = utmContent
                                 it[PromoAttributionTable.createdAt] = now.atOffset(ZoneOffset.UTC)
-                            }
-                            .resultedValues
+                            }.resultedValues
                             ?.single()
                             ?.toPromoAttribution()
                             ?: error("Failed to insert promo attribution")
@@ -200,8 +195,8 @@ class PromoAttributionRepositoryImpl(
         }
     }
 
-    override suspend fun findByBooking(bookingId: UUID): PromoAttribution? {
-        return withTxRetry {
+    override suspend fun findByBooking(bookingId: UUID): PromoAttribution? =
+        withTxRetry {
             transaction(db) {
                 PromoAttributionTable
                     .selectAll()
@@ -211,7 +206,6 @@ class PromoAttributionRepositoryImpl(
                     ?.toPromoAttribution()
             }
         }
-    }
 }
 
 class BookingTemplateRepositoryImpl(
@@ -235,8 +229,7 @@ class BookingTemplateRepositoryImpl(
                         it[BookingTemplatesTable.notes] = notes
                         it[BookingTemplatesTable.isActive] = true
                         it[BookingTemplatesTable.createdAt] = now.atOffset(ZoneOffset.UTC)
-                    }
-                    .resultedValues
+                    }.resultedValues
                     ?.single()
                     ?.toBookingTemplate()
                     ?: error("Failed to insert booking template")
@@ -249,8 +242,8 @@ class BookingTemplateRepositoryImpl(
         tableCapacityMin: Int,
         notes: String?,
         isActive: Boolean,
-    ): BookingTemplateResult<BookingTemplate> {
-        return withTxRetry {
+    ): BookingTemplateResult<BookingTemplate> =
+        withTxRetry {
             transaction(db) {
                 val updated =
                     BookingTemplatesTable.update({ BookingTemplatesTable.id eq id }) {
@@ -271,10 +264,9 @@ class BookingTemplateRepositoryImpl(
                 }
             }
         }
-    }
 
-    override suspend fun deactivate(id: Long): BookingTemplateResult<Unit> {
-        return withTxRetry {
+    override suspend fun deactivate(id: Long): BookingTemplateResult<Unit> =
+        withTxRetry {
             transaction(db) {
                 val updated =
                     BookingTemplatesTable.update({ BookingTemplatesTable.id eq id }) {
@@ -287,10 +279,9 @@ class BookingTemplateRepositoryImpl(
                 }
             }
         }
-    }
 
-    override suspend fun get(id: Long): BookingTemplate? {
-        return withTxRetry {
+    override suspend fun get(id: Long): BookingTemplate? =
+        withTxRetry {
             transaction(db) {
                 BookingTemplatesTable
                     .selectAll()
@@ -300,10 +291,9 @@ class BookingTemplateRepositoryImpl(
                     ?.toBookingTemplate()
             }
         }
-    }
 
-    override suspend fun listByOwner(promoterUserId: Long): List<BookingTemplate> {
-        return withTxRetry {
+    override suspend fun listByOwner(promoterUserId: Long): List<BookingTemplate> =
+        withTxRetry {
             transaction(db) {
                 BookingTemplatesTable
                     .selectAll()
@@ -312,13 +302,12 @@ class BookingTemplateRepositoryImpl(
                     .map { it.toBookingTemplate() }
             }
         }
-    }
 
     override suspend fun listByClub(
         clubId: Long,
         onlyActive: Boolean,
-    ): List<BookingTemplate> {
-        return withTxRetry {
+    ): List<BookingTemplate> =
+        withTxRetry {
             transaction(db) {
                 val query =
                     BookingTemplatesTable
@@ -332,7 +321,6 @@ class BookingTemplateRepositoryImpl(
                     .map { it.toBookingTemplate() }
             }
         }
-    }
 
     override suspend fun applyTemplateSignature(id: Long): BookingTemplateResult<BookingTemplateSignature> {
         return withTxRetry {
@@ -366,8 +354,8 @@ class BookingTemplateRepositoryImpl(
     }
 }
 
-private fun ResultRow.toPromoLink(): PromoLink {
-    return PromoLink(
+private fun ResultRow.toPromoLink(): PromoLink =
+    PromoLink(
         id = this[PromoLinksTable.id],
         promoterUserId = this[PromoLinksTable.promoterUserId],
         clubId = this[PromoLinksTable.clubId],
@@ -377,10 +365,9 @@ private fun ResultRow.toPromoLink(): PromoLink {
         utmContent = this[PromoLinksTable.utmContent],
         createdAt = this[PromoLinksTable.createdAt].toInstant(),
     )
-}
 
-private fun ResultRow.toPromoAttribution(): PromoAttribution {
-    return PromoAttribution(
+private fun ResultRow.toPromoAttribution(): PromoAttribution =
+    PromoAttribution(
         id = this[PromoAttributionTable.id],
         bookingId = this[PromoAttributionTable.bookingId],
         promoLinkId = this[PromoAttributionTable.promoLinkId],
@@ -391,10 +378,9 @@ private fun ResultRow.toPromoAttribution(): PromoAttribution {
         utmContent = this[PromoAttributionTable.utmContent],
         createdAt = this[PromoAttributionTable.createdAt].toInstant(),
     )
-}
 
-private fun ResultRow.toBookingTemplate(): BookingTemplate {
-    return BookingTemplate(
+private fun ResultRow.toBookingTemplate(): BookingTemplate =
+    BookingTemplate(
         id = this[BookingTemplatesTable.id],
         promoterUserId = this[BookingTemplatesTable.promoterUserId],
         clubId = this[BookingTemplatesTable.clubId],
@@ -403,4 +389,3 @@ private fun ResultRow.toBookingTemplate(): BookingTemplate {
         isActive = this[BookingTemplatesTable.isActive],
         createdAt = this[BookingTemplatesTable.createdAt].toInstant(),
     )
-}

@@ -169,8 +169,13 @@ open class AvailabilityService(
 }
 
 /** Simple timed cache with TTL. */
-private class TimedCache<K, V>(private val ttl: Duration) {
-    private data class Entry<V>(val value: V, val expiresAt: Instant)
+private class TimedCache<K, V>(
+    private val ttl: Duration,
+) {
+    private data class Entry<V>(
+        val value: V,
+        val expiresAt: Instant,
+    )
 
     private val store = ConcurrentHashMap<K, Entry<V>>()
 

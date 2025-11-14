@@ -14,23 +14,24 @@ import io.ktor.server.testing.testApplication
 import org.koin.ktor.ext.get
 import org.koin.ktor.plugin.Koin
 
-class HealthRoutesTest : StringSpec({
-    "health and readiness endpoints return status field" {
-        testApplication {
-            application {
-                install(ContentNegotiation) { json() }
-                install(Koin) { modules(healthModule) }
+class HealthRoutesTest :
+    StringSpec({
+        "health and readiness endpoints return status field" {
+            testApplication {
+                application {
+                    install(ContentNegotiation) { json() }
+                    install(Koin) { modules(healthModule) }
 
-                healthRoutes(get())
+                    healthRoutes(get())
+                }
+
+                val health = client.get("/health")
+                health.status shouldBe HttpStatusCode.OK
+                health.bodyAsText() shouldContain "\"status\""
+
+                val ready = client.get("/ready")
+                ready.status shouldBe HttpStatusCode.OK
+                ready.bodyAsText() shouldContain "\"status\""
             }
-
-            val health = client.get("/health")
-            health.status shouldBe HttpStatusCode.OK
-            health.bodyAsText() shouldContain "\"status\""
-
-            val ready = client.get("/ready")
-            ready.status shouldBe HttpStatusCode.OK
-            ready.bodyAsText() shouldContain "\"status\""
         }
-    }
-})
+    })

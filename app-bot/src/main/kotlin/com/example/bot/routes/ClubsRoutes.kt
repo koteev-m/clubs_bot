@@ -7,8 +7,8 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import com.example.bot.data.repo.ClubDto as ClubProjection
 
@@ -18,12 +18,11 @@ data class ClubDto(
     val name: String,
 )
 
-private fun ClubProjection.toDto(): ClubDto {
-    return ClubDto(
+private fun ClubProjection.toDto(): ClubDto =
+    ClubDto(
         id = id,
         name = name,
     )
-}
 
 fun Application.clubsPublicRoutes(repository: ClubRepository) {
     routing {

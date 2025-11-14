@@ -7,7 +7,12 @@ import java.util.UUID
 /**
  * Request to place a hold on a table for a particular event.
  */
-data class HoldRequest(val clubId: Long, val eventStartUtc: Instant, val tableId: Long, val guestsCount: Int)
+data class HoldRequest(
+    val clubId: Long,
+    val eventStartUtc: Instant,
+    val tableId: Long,
+    val guestsCount: Int,
+)
 
 /**
  * Response for a successful hold operation.
@@ -57,15 +62,28 @@ data class BookingSummary(
  * Error returned by booking operations.
  */
 sealed interface BookingError {
-    data class Conflict(val message: String) : BookingError
+    data class Conflict(
+        val message: String,
+    ) : BookingError
 
-    data class Validation(val message: String) : BookingError
+    data class Validation(
+        val message: String,
+    ) : BookingError
 
-    data class NotFound(val message: String) : BookingError
+    data class NotFound(
+        val message: String,
+    ) : BookingError
 
-    data class Forbidden(val message: String) : BookingError
+    data class Forbidden(
+        val message: String,
+    ) : BookingError
 
-    data class Gone(val message: String) : BookingError
+    data class Gone(
+        val message: String,
+    ) : BookingError
 
-    data class Internal(val message: String, val cause: Throwable? = null) : BookingError
+    data class Internal(
+        val message: String,
+        val cause: Throwable? = null,
+    ) : BookingError
 }

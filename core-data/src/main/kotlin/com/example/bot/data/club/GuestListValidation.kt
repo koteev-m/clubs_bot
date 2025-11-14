@@ -20,10 +20,16 @@ internal sealed interface EntryValidationOutcome {
         val status: GuestListEntryStatus,
     ) : EntryValidationOutcome
 
-    data class Invalid(val reason: String) : EntryValidationOutcome
+    data class Invalid(
+        val reason: String,
+    ) : EntryValidationOutcome
 }
 
-internal data class PhoneNormalization(val normalized: String?, val provided: Boolean, val valid: Boolean)
+internal data class PhoneNormalization(
+    val normalized: String?,
+    val provided: Boolean,
+    val valid: Boolean,
+)
 
 internal fun sanitizePhone(raw: String?): PhoneNormalization {
     val trimmed = raw?.trim()

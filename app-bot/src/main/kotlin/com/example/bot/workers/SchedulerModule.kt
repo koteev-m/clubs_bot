@@ -19,15 +19,18 @@ import java.time.Duration
 // private val DEFAULT_TICK_INTERVAL: Duration = Duration.ofSeconds(15)
 // private const val DEFAULT_BATCH_SIZE: Int = 100
 
-/** Optional scheduler configuration sourced from environment variables. */
 data class SchedulerConfig(
     val tickInterval: Duration =
         System.getenv("SCHEDULER_TICK_MS")?.toLongOrNull()?.let(Duration::ofMillis) ?: DEFAULT_TICK_INTERVAL,
-    val batchSize: Int = System.getenv("SCHEDULER_BATCH")?.toIntOrNull() ?: DEFAULT_BATCH_SIZE,
-    val enabled: Boolean = System.getenv("CAMPAIGN_SCHEDULER_ENABLED")?.equals("true", ignoreCase = true) ?: false,
+    val batchSize: Int =
+        System.getenv("SCHEDULER_BATCH")?.toIntOrNull() ?: DEFAULT_BATCH_SIZE,
+    val enabled: Boolean =
+        System.getenv("CAMPAIGN_SCHEDULER_ENABLED")?.equals(
+            "true",
+            ignoreCase = true,
+        ) ?: false,
 )
 
-/** Lightweight metrics adapter around Telemetry/Micrometer. */
 class WorkerMetrics(
     private val onStarted: (() -> Unit)? = null,
     private val onStopped: (() -> Unit)? = null,
@@ -35,13 +38,16 @@ class WorkerMetrics(
     private val onError: (() -> Unit)? = null,
 ) {
     fun markStarted() = onStarted?.invoke() ?: Unit
+
     fun markStopped() = onStopped?.invoke() ?: Unit
+
     fun markEnqueued(n: Int) = onEnqueued?.invoke(n) ?: Unit
+
     fun markError() = onError?.invoke() ?: Unit
 
     companion object {
-        fun fromTelemetry(): WorkerMetrics {
-            return runCatching {
+        fun fromTelemetry(): WorkerMetrics =
+            runCatching {
                 val registry = Telemetry.registry
                 val started = registry.counter("campaign_scheduler_started_total")
                 val stopped = registry.counter("campaign_scheduler_stopped_total")
@@ -54,7 +60,6 @@ class WorkerMetrics(
                     onError = { errors.increment() },
                 )
             }.getOrElse { WorkerMetrics() }
-        }
     }
 }
 
@@ -66,10 +71,9 @@ val schedulerModule =
         single { SchedulerConfig() }
         single { WorkerMetrics.fromTelemetry() }
         single {
-            // Lazy — создастся только по запросу из Koin
             CampaignScheduler(
                 scope = get(named("campaignSchedulerScope")),
-                api = get(),      // SchedulerApi должен быть провайжен, когда включишь флаг
+                api = get(),
                 config = get(),
                 metrics = get(),
             )
@@ -83,8 +87,9 @@ private val noBeanDefFoundExceptionClass: Class<*>? =
 fun Application.launchCampaignSchedulerOnStart() {
     // Включать в проде, когда связана реальная реализация SchedulerApi
     val schedulerConfig = runCatching { getKoin().getOrNull<SchedulerConfig>() }.getOrNull()
-    val enabled = schedulerConfig?.enabled
-        ?: System.getenv("CAMPAIGN_SCHEDULER_ENABLED")?.equals("true", ignoreCase = true) ?: false
+    val enabled =
+        schedulerConfig?.enabled
+            ?: System.getenv("CAMPAIGN_SCHEDULER_ENABLED")?.equals("true", ignoreCase = true) ?: false
 
     if (!enabled) {
         schedLog.info("CampaignScheduler disabled via CAMPAIGN_SCHEDULER_ENABLED")

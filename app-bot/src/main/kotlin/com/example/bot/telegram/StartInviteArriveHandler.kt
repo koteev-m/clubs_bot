@@ -13,11 +13,20 @@ class StartInviteArriveHandler(
     private val secretProvider: () -> String = { System.getenv("QR_SECRET") ?: error("QR_SECRET missing") },
 ) {
     sealed interface Result {
-        data class Arrived(val clubId: Long, val listId: Long, val entryId: Long) : Result
+        data class Arrived(
+            val clubId: Long,
+            val listId: Long,
+            val entryId: Long,
+        ) : Result
+
         data object Invalid : Result
+
         data object ExpiredOrSignatureError : Result
+
         data object NotFoundList : Result
+
         data object NotFoundEntry : Result
+
         data object ScopeMismatch : Result // если понадобится проверка границ клуба
     }
 
@@ -27,7 +36,13 @@ class StartInviteArriveHandler(
 
         val secret = secretProvider()
         val now = Instant.now(clock)
-        val decoded = StartParamGuestListCodec.verify(payload, now, ttl, secret) ?: return Result.ExpiredOrSignatureError
+        val decoded =
+            StartParamGuestListCodec.verify(
+                payload,
+                now,
+                ttl,
+                secret,
+            ) ?: return Result.ExpiredOrSignatureError
 
         val list = repository.getList(decoded.listId) ?: return Result.NotFoundList
         val entry = repository.findEntry(decoded.entryId) ?: return Result.NotFoundEntry

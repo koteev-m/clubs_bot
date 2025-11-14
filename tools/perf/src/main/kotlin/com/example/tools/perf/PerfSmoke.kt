@@ -51,21 +51,23 @@ private const val HTTP_SUCCESS_MAX = 399
 private const val PERCENTILE_MEDIAN = 0.50
 private const val PERCENTILE_P95 = 0.95
 
-private fun parseArgs(raw: Array<String>): Args {
+/**
+ * Принимаем List<String>, чтобы избежать небезопасного приведения Array<out String> → Array<String>.
+ */
+private fun parseArgs(raw: List<String>): Args {
     fun get(
         name: String,
         def: String? = null,
     ): String? =
-        raw.asSequence()
+        raw
+            .asSequence()
             .mapNotNull {
                 val p = it.trim()
                 if (!p.startsWith("--")) null else p.removePrefix("--")
-            }
-            .mapNotNull { kv ->
+            }.map { kv ->
                 val i = kv.indexOf('=')
                 if (i < 0) kv to "" else kv.substring(0, i) to kv.substring(i + 1)
-            }
-            .toMap()[name] ?: def
+            }.toMap()[name] ?: def
 
     fun durationSeconds(
         name: String,
@@ -127,21 +129,25 @@ private class Metrics {
     val started = AtomicLong(0)
     val successful = AtomicLong(0)
     val errors = AtomicLong(0)
-    val latencies = Collections.synchronizedList(mutableListOf<Duration>())
+    val latencies: MutableList<Duration> = Collections.synchronizedList(mutableListOf())
 }
 
 suspend fun main(vararg raw: String) {
-    val args = parseArgs(raw as Array<String>)
+    // Избегаем небезопасного cast: работаем со списком
+    val args = parseArgs(raw.asList())
+
     val http =
-        HttpClient.newBuilder()
+        HttpClient
+            .newBuilder()
             .connectTimeout(HTTP_CONNECT_TIMEOUT)
             .version(HttpClient.Version.HTTP_1_1)
             .build()
 
     val workerPool =
-        Executors.newFixedThreadPool(args.workers.coerceAtMost(MAX_THREAD_POOL_WORKERS)) { r ->
-            Thread(r, "perf-worker").apply { isDaemon = true }
-        }.asCoroutineDispatcher()
+        Executors
+            .newFixedThreadPool(args.workers.coerceAtMost(MAX_THREAD_POOL_WORKERS)) { r ->
+                Thread(r, "perf-worker").apply { isDaemon = true }
+            }.asCoroutineDispatcher()
     val scope = CoroutineScope(workerPool)
 
     val metrics = Metrics()
@@ -299,7 +305,8 @@ private suspend fun doOne(
 ): Int {
     val uri = URI.create(if (endpoint.startsWith("/")) "$baseUrl$endpoint" else "$baseUrl/$endpoint")
     val request =
-        HttpRequest.newBuilder()
+        HttpRequest
+            .newBuilder()
             .uri(uri)
             .GET()
             .timeout(HTTP_REQUEST_TIMEOUT)

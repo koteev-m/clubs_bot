@@ -28,6 +28,6 @@ fun Application.installGuestListInviteRoute() {
 
     guestListInviteRoutes(
         repository = guestListRepository,
-        initDataAuth = initDataAuth
+        initDataAuth = initDataAuth,
     )
 }

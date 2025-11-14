@@ -17,7 +17,9 @@ class InMemoryNotifyIdempotencyStore(
         System.getenv("NOTIFY_IDEMPOTENCY_TTL_HOURS")?.toLongOrNull()?.let(Duration::ofHours)
             ?: BotLimits.notifyIdempotencyTtl,
 ) : NotifyIdempotencyStore {
-    private data class Entry(val timestamp: Instant)
+    private data class Entry(
+        val timestamp: Instant,
+    )
 
     private val ttl: Duration = ttl
     private val map: ConcurrentHashMap<String, Entry> = ConcurrentHashMap()

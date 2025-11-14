@@ -170,8 +170,8 @@ class RbacIntegrationTest {
         telegramId: Long,
         roles: Set<Role>,
         clubs: Set<Long>,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             val userId =
                 UsersTable.insert {
                     it[telegramUserId] = telegramId
@@ -202,7 +202,6 @@ class RbacIntegrationTest {
             }
             userId
         }
-    }
 
     private fun verifyAudit(
         result: String,

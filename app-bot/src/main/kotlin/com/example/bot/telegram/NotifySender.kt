@@ -27,16 +27,28 @@ private const val RETRY_AFTER_POSITIVE_THRESHOLD = 0
 private const val JITTER_INCLUSIVE_OFFSET = 1L
 
 sealed interface SendResult {
-    data class Ok(val messageId: Long?, val already: Boolean = false) : SendResult
+    data class Ok(
+        val messageId: Long?,
+        val already: Boolean = false,
+    ) : SendResult
 
-    data class RetryAfter(val retryAfterMs: Long) : SendResult
+    data class RetryAfter(
+        val retryAfterMs: Long,
+    ) : SendResult
 
-    data class RetryableError(val message: String) : SendResult
+    data class RetryableError(
+        val message: String,
+    ) : SendResult
 
-    data class PermanentError(val message: String) : SendResult
+    data class PermanentError(
+        val message: String,
+    ) : SendResult
 }
 
-data class MediaSpec(val fileIdOrUrl: String, val caption: String? = null)
+data class MediaSpec(
+    val fileIdOrUrl: String,
+    val caption: String? = null,
+)
 
 object NotifyMetrics {
     val ok: AtomicLong = AtomicLong()
@@ -70,9 +82,13 @@ class NotifySender(
     private sealed interface SendOutcome {
         data object Success : SendOutcome
 
-        data class Retry(val delayMs: Long) : SendOutcome
+        data class Retry(
+            val delayMs: Long,
+        ) : SendOutcome
 
-        data class Fail(val result: SendResult) : SendOutcome
+        data class Fail(
+            val result: SendResult,
+        ) : SendOutcome
     }
 
     suspend fun sendMessage(
@@ -134,8 +150,7 @@ class NotifySender(
                             .asFlow()
                             .map { spec ->
                                 sendPhoto(chatId, spec.fileIdOrUrl, spec.caption, threadId, null)
-                            }
-                            .firstOrNull { it !is SendResult.Ok }
+                            }.firstOrNull { it !is SendResult.Ok }
                     fallbackFailure ?: SendResult.Ok(messageId = null)
                 }
             }

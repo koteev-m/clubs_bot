@@ -45,4 +45,9 @@ object TableSelectCodec {
         }.getOrNull()
 }
 
-data class DecodedTable(val clubId: Long, val startUtc: Instant, val endUtc: Instant, val tableId: Long)
+data class DecodedTable(
+    val clubId: Long,
+    val startUtc: Instant,
+    val endUtc: Instant,
+    val tableId: Long,
+)

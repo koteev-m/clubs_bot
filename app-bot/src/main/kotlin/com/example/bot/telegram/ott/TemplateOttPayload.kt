@@ -4,7 +4,9 @@ import java.time.Instant
 
 /** Payload stored inside OTT callback tokens for template actions. */
 sealed interface TemplateOttPayload : OttPayload {
-    data class Selection(val templateId: Long) : TemplateOttPayload
+    data class Selection(
+        val templateId: Long,
+    ) : TemplateOttPayload
 
     data class Booking(
         val templateId: Long,

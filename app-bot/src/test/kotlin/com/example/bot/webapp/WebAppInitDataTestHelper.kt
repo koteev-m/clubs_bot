@@ -26,9 +26,7 @@ internal object WebAppInitDataTestHelper {
         username: String? = null,
         firstName: String? = null,
         lastName: String? = null,
-    ): String {
-        return json.encodeToString(TelegramUser.serializer(), TelegramUser(id, username, firstName, lastName))
-    }
+    ): String = json.encodeToString(TelegramUser.serializer(), TelegramUser(id, username, firstName, lastName))
 
     fun createInitData(
         botToken: String,

@@ -76,7 +76,8 @@ object UiBookingMetrics {
             registry
                 .find("ui.tables.fetch.duration.ms")
                 .timer()
-                ?: Timer.builder("ui.tables.fetch.duration.ms")
+                ?: Timer
+                    .builder("ui.tables.fetch.duration.ms")
                     .publishPercentiles(PERCENTILE_MEDIAN, PERCENTILE_95, PERCENTILE_99)
                     .description("AvailabilityService.listFreeTables duration")
                     .register(registry)
@@ -85,7 +86,8 @@ object UiBookingMetrics {
             registry
                 .find("ui.booking.total.duration.ms")
                 .timer()
-                ?: Timer.builder("ui.booking.total.duration.ms")
+                ?: Timer
+                    .builder("ui.booking.total.duration.ms")
                     .publishPercentiles(PERCENTILE_MEDIAN, PERCENTILE_95, PERCENTILE_99)
                     .description("End-to-end booking flow from guests selection")
                     .register(registry)

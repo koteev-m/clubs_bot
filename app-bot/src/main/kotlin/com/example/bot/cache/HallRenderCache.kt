@@ -9,13 +9,20 @@ import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.LongAdder
 
-data class CacheEntry(val etag: String, val bytes: ByteArray, val expiresAt: Instant)
+data class CacheEntry(
+    val etag: String,
+    val bytes: ByteArray,
+    val expiresAt: Instant,
+)
 
 /**
  * Простой потокобезопасный TTL + LRU кэш на LinkedHashMap(access-order).
  * Все публичные методы синхронизированы.
  */
-class TtlLruCache<K, V>(private val maxEntries: Int, private val ttl: Duration) {
+class TtlLruCache<K, V>(
+    private val maxEntries: Int,
+    private val ttl: Duration,
+) {
     private val map: LinkedHashMap<K, Timed<V>> =
         object : LinkedHashMap<K, Timed<V>>(16, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, Timed<V>>): Boolean {
@@ -27,7 +34,10 @@ class TtlLruCache<K, V>(private val maxEntries: Int, private val ttl: Duration) 
             }
         }
 
-    data class Timed<V>(val value: V, val expiresAt: Instant)
+    data class Timed<V>(
+        val value: V,
+        val expiresAt: Instant,
+    )
 
     @Synchronized
     fun get(key: K): V? {
@@ -75,9 +85,14 @@ class HallRenderCache(
     private val cache = TtlLruCache<String, CacheEntry>(maxEntries, ttlDuration)
 
     sealed interface Result {
-        data class NotModified(val etag: String) : Result
+        data class NotModified(
+            val etag: String,
+        ) : Result
 
-        data class Ok(val etag: String, val bytes: ByteArray) : Result
+        data class Ok(
+            val etag: String,
+            val bytes: ByteArray,
+        ) : Result
     }
 
     /**

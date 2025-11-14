@@ -16,39 +16,42 @@ object RulesMetrics {
         dow: Int,
         overnight: Boolean,
     ) {
-        registry.counter(
-            "rules.holiday.inherited_open",
-            tags(
-                "dow" to dow.toString(),
-                "overnight" to boolTag(overnight),
-            ),
-        ).increment()
+        registry
+            .counter(
+                "rules.holiday.inherited_open",
+                tags(
+                    "dow" to dow.toString(),
+                    "overnight" to boolTag(overnight),
+                ),
+            ).increment()
     }
 
     fun incHolidayInheritedClose(
         dow: Int,
         overnight: Boolean,
     ) {
-        registry.counter(
-            "rules.holiday.inherited_close",
-            tags(
-                "dow" to dow.toString(),
-                "overnight" to boolTag(overnight),
-            ),
-        ).increment()
+        registry
+            .counter(
+                "rules.holiday.inherited_close",
+                tags(
+                    "dow" to dow.toString(),
+                    "overnight" to boolTag(overnight),
+                ),
+            ).increment()
     }
 
     fun incExceptionApplied(
         dow: Int,
         overnight: Boolean,
     ) {
-        registry.counter(
-            "rules.exception.applied",
-            tags(
-                "dow" to dow.toString(),
-                "overnight" to boolTag(overnight),
-            ),
-        ).increment()
+        registry
+            .counter(
+                "rules.exception.applied",
+                tags(
+                    "dow" to dow.toString(),
+                    "overnight" to boolTag(overnight),
+                ),
+            ).increment()
     }
 
     fun incDayOpen(
@@ -57,14 +60,15 @@ object RulesMetrics {
         holidayApplied: Boolean,
         overnight: Boolean,
     ) {
-        registry.counter(
-            "rules.day.open",
-            tags(
-                "dow" to dow.toString(),
-                "exception" to boolTag(exceptionApplied),
-                "holiday" to boolTag(holidayApplied),
-                "overnight" to boolTag(overnight),
-            ),
-        ).increment()
+        registry
+            .counter(
+                "rules.day.open",
+                tags(
+                    "dow" to dow.toString(),
+                    "exception" to boolTag(exceptionApplied),
+                    "holiday" to boolTag(holidayApplied),
+                    "overnight" to boolTag(overnight),
+                ),
+            ).increment()
     }
 }

@@ -12,7 +12,9 @@ import java.util.function.Supplier
 /**
  * Helper that supplies a [MeterRegistry] and convenience factory methods for metrics.
  */
-class MetricsProvider(val registry: MeterRegistry) {
+class MetricsProvider(
+    val registry: MeterRegistry,
+) {
     companion object {
         fun prometheusRegistry(): PrometheusMeterRegistry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
 

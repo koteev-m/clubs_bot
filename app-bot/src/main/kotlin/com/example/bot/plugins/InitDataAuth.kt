@@ -6,10 +6,10 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.DuplicatePluginException
 import io.ktor.server.application.createRouteScopedPlugin
 import io.ktor.server.application.install
 import io.ktor.server.application.pluginOrNull
-import io.ktor.server.application.DuplicatePluginException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.contentType
 import io.ktor.server.request.header
@@ -17,7 +17,6 @@ import io.ktor.server.request.receiveParameters
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
-import io.ktor.server.routing.application
 import io.ktor.util.AttributeKey
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
@@ -81,7 +80,7 @@ private val MiniAppAuth =
         }
     }
 
-/* -------- идемпотентность установки -------- */
+// -------- идемпотентность установки --------
 
 private val MiniAppAuthRouteMarker = AttributeKey<Boolean>("miniapp.auth.installed.route")
 
@@ -98,7 +97,7 @@ fun Route.withMiniAppAuth(botTokenProvider: () -> String) {
 fun Application.installMiniAppAuthStatusPage() {
     if (pluginOrNull(StatusPages) == null) {
         install(StatusPages) {
-            exception<MiniAppAuthAbort> { _, _ -> /* 401 уже отправлен */ }
+            exception<MiniAppAuthAbort> { _, _ -> }
         }
     }
 }
@@ -111,10 +110,9 @@ internal fun resetMiniAppValidator() {
     validator = { raw, token -> InitDataValidator.validate(raw, token)?.toMiniUser() }
 }
 
-private fun TelegramUser.toMiniUser(): TelegramMiniUser =
-    TelegramMiniUser(id = id, username = username)
+private fun TelegramUser.toMiniUser(): TelegramMiniUser = TelegramMiniUser(id = id, username = username)
 
-/* -------- helpers -------- */
+// -------- helpers --------
 
 private suspend fun extractInitData(call: ApplicationCall): String? {
     val q = call.request.queryParameters["initData"]?.takeIf { it.isNotBlank() }
@@ -132,8 +130,8 @@ private suspend fun ApplicationCall.respondUnauthorized(reason: String) {
     respond(HttpStatusCode.Unauthorized, mapOf("error" to reason))
 }
 
-private suspend fun extractInitDataFromBodyOrNull(call: ApplicationCall): String? {
-    return try {
+private suspend fun extractInitDataFromBodyOrNull(call: ApplicationCall): String? =
+    try {
         when {
             call.request.contentType().match(ContentType.Application.FormUrlEncoded) ->
                 call.receiveParameters()["initData"]
@@ -148,6 +146,5 @@ private suspend fun extractInitDataFromBodyOrNull(call: ApplicationCall): String
     } catch (_: Throwable) {
         null
     }
-}
 
 private val INIT_DATA_REGEX = "\"initData\"\\s*:\\s*\"([^\"]+)\"".toRegex()

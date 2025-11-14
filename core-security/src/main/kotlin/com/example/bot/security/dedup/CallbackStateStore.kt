@@ -10,8 +10,13 @@ private const val DEFAULT_TTL_MINUTES = 15L
  * In-memory state store for mapping short callback tokens to opaque state objects.
  * Entries expire after configured [ttl].
  */
-class CallbackStateStore<T>(private val ttl: Duration = Duration.ofMinutes(DEFAULT_TTL_MINUTES)) {
-    private data class Entry<V>(val value: V, val expiresAt: Instant)
+class CallbackStateStore<T>(
+    private val ttl: Duration = Duration.ofMinutes(DEFAULT_TTL_MINUTES),
+) {
+    private data class Entry<V>(
+        val value: V,
+        val expiresAt: Instant,
+    )
 
     private val store = ConcurrentHashMap<String, Entry<T>>()
 

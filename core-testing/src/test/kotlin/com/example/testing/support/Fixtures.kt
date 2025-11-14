@@ -37,7 +37,11 @@ object Fixtures {
         role: String = "guest",
     ) = User(id, name, role)
 
-    data class Promoter(val id: Long = 1, val name: String = "Promoter", val alias: String = "prom")
+    data class Promoter(
+        val id: Long = 1,
+        val name: String = "Promoter",
+        val alias: String = "prom",
+    )
 
     fun promoter(
         id: Long = 1,

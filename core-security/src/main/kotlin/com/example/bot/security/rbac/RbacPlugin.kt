@@ -213,7 +213,9 @@ fun Route.clubScoped(
     scopedRoute.block()
 }
 
-private class PluginRouteSelector(private val label: String) : RouteSelector() {
+private class PluginRouteSelector(
+    private val label: String,
+) : RouteSelector() {
     override suspend fun evaluate(
         context: RoutingResolveContext,
         segmentIndex: Int,
@@ -230,7 +232,9 @@ internal sealed interface RbacResolution {
         val clubIds: Set<Long>,
     ) : RbacResolution
 
-    data class Failure(val reason: FailureReason) : RbacResolution
+    data class Failure(
+        val reason: FailureReason,
+    ) : RbacResolution
 }
 
 data class RbacContext(
@@ -367,10 +371,14 @@ private suspend fun withIdempotencyMdc(
 
 private val clubResolutionKey = AttributeKey<ClubResolution>("rbac.club.resolution")
 
-private data class ClubResolution(val clubId: Long?)
+private data class ClubResolution(
+    val clubId: Long?,
+)
 
 /** Resolves club identifier from request parameters. */
-class ClubScopeResolver(private val bodyKeys: Set<String> = setOf("clubId", "club_id")) {
+class ClubScopeResolver(
+    private val bodyKeys: Set<String> = setOf("clubId", "club_id"),
+) {
     suspend fun resolve(call: ApplicationCall): Long? {
         val explicit = if (call.attributes.contains(CLUB_ID_ATTRIBUTE)) call.attributes[CLUB_ID_ATTRIBUTE] else null
         val cachedHolder = if (call.attributes.contains(clubResolutionKey)) call.attributes[clubResolutionKey] else null
@@ -416,8 +424,8 @@ class ClubScopeResolver(private val bodyKeys: Set<String> = setOf("clubId", "clu
         return root?.let { findInJson(it) }
     }
 
-    private fun findInJson(element: JsonElement): Long? {
-        return when (element) {
+    private fun findInJson(element: JsonElement): Long? =
+        when (element) {
             is JsonObject -> {
                 bodyKeys.firstNotNullOfOrNull { key -> element[key]?.let { toLong(it) } }
                     ?: element.values.firstNotNullOfOrNull { findInJson(it) }
@@ -425,7 +433,6 @@ class ClubScopeResolver(private val bodyKeys: Set<String> = setOf("clubId", "clu
             is JsonArray -> element.firstNotNullOfOrNull { findInJson(it) }
             else -> null
         }
-    }
 
     private fun toLong(element: JsonElement): Long? {
         if (element is JsonNull) return null

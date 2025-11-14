@@ -34,7 +34,10 @@ data class NightSlot(
     val zone: ZoneId,
 )
 
-private data class DayHours(val open: LocalTime, val close: LocalTime)
+private data class DayHours(
+    val open: LocalTime,
+    val close: LocalTime,
+)
 
 private data class DayException(
     val isOpen: Boolean,
@@ -51,7 +54,11 @@ private data class DayHoliday(
 /**
  * Weekly operating hours for a club.
  */
-data class ClubHour(val dayOfWeek: DayOfWeek, val open: LocalTime, val close: LocalTime)
+data class ClubHour(
+    val dayOfWeek: DayOfWeek,
+    val open: LocalTime,
+    val close: LocalTime,
+)
 
 /**
  * Special holiday rules for a club.
@@ -76,7 +83,10 @@ data class ClubException(
 /**
  * Minimal club representation.
  */
-data class Club(val id: Long, val timezone: String)
+data class Club(
+    val id: Long,
+    val timezone: String,
+)
 
 /**
  * Materialized event stored in the database.
@@ -320,14 +330,18 @@ class OperatingRulesResolver(
             last.eventEndUtc == slot.eventStartUtc
 }
 
-private enum class BoundarySource(val logKey: String) {
+private enum class BoundarySource(
+    val logKey: String,
+) {
     BASE("base"),
     EXCEPTION("exception"),
     HOLIDAY("holiday"),
     INHERITED("inherited"),
 }
 
-private enum class ClosedReason(val logKey: String) {
+private enum class ClosedReason(
+    val logKey: String,
+) {
     EXCEPTION_CLOSED("exception_closed"),
     HOLIDAY_CLOSED("holiday_closed"),
     NO_BASE_INCOMPLETE_HOLIDAY("no_base_incomplete_holiday"),
@@ -354,9 +368,13 @@ private data class ResolvedDayHours(
 private fun ResolvedDayHours.toDayHours(): DayHours = DayHours(open, close)
 
 private sealed class DayResolution {
-    data class Open(val hours: ResolvedDayHours) : DayResolution()
+    data class Open(
+        val hours: ResolvedDayHours,
+    ) : DayResolution()
 
-    data class Closed(val reason: ClosedReason) : DayResolution()
+    data class Closed(
+        val reason: ClosedReason,
+    ) : DayResolution()
 }
 
 @Suppress("ReturnCount")

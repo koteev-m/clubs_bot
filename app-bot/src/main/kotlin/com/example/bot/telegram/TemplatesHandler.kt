@@ -22,13 +22,12 @@ class BookingTemplateBotHandler(
     private val tokenService: CallbackTokenService,
 ) {
     /** Builds a menu keyboard with template actions. */
-    fun buildMenu(): InlineKeyboardMarkup {
-        return InlineKeyboardMarkup(
+    fun buildMenu(): InlineKeyboardMarkup =
+        InlineKeyboardMarkup(
             arrayOf(InlineKeyboardButton("Мои шаблоны").callbackData(ACTION_LIST)),
             arrayOf(InlineKeyboardButton("Создать шаблон").callbackData(ACTION_CREATE)),
             arrayOf(InlineKeyboardButton("Забронировать по шаблону").callbackData(ACTION_BOOK)),
         )
-    }
 
     /**
      * Issues OTT tokens for templates and produces keyboard for selection.
@@ -70,9 +69,7 @@ class BookingTemplateBotHandler(
     suspend fun listTemplates(
         actor: TemplateActor,
         clubId: Long? = null,
-    ): List<BookingTemplate> {
-        return service.listTemplates(actor, clubId, onlyActive = false)
-    }
+    ): List<BookingTemplate> = service.listTemplates(actor, clubId, onlyActive = false)
 
     suspend fun applyBooking(
         actor: TemplateActor,

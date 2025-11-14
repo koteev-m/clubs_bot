@@ -10,7 +10,9 @@ object SystemTimeSource : TimeSource {
     override fun nowMs(): Long = System.currentTimeMillis()
 }
 
-class FakeTimeSource(startMs: Long = 0L) : TimeSource {
+class FakeTimeSource(
+    startMs: Long = 0L,
+) : TimeSource {
     private val t = AtomicLong(startMs)
 
     override fun nowMs(): Long = t.get()

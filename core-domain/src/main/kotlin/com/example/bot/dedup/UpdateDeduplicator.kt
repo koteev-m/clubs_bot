@@ -13,7 +13,9 @@ import java.util.concurrent.ConcurrentHashMap
  */
 private const val HOURS_IN_DAY = 24L
 
-class UpdateDeduplicator(private val ttl: Duration = Duration.ofHours(HOURS_IN_DAY)) {
+class UpdateDeduplicator(
+    private val ttl: Duration = Duration.ofHours(HOURS_IN_DAY),
+) {
     private val seen: MutableMap<Long, Instant> = ConcurrentHashMap()
 
     /**

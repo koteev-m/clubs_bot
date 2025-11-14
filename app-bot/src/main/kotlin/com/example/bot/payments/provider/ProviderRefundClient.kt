@@ -56,7 +56,10 @@ sealed interface ProviderRefundResult {
         val cause: Throwable? = null,
     ) : ProviderRefundResult
 
-    data class Failure(val status: Int, val body: String?) : ProviderRefundResult
+    data class Failure(
+        val status: Int,
+        val body: String?,
+    ) : ProviderRefundResult
 }
 
 /**
@@ -77,15 +80,20 @@ data class ProviderRefundClientConfig(
 ) {
     companion object {
         private fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
-        private fun envMs(name: String, default: Long): Duration =
-            env(name)?.toLongOrNull()?.let(Duration::ofMillis) ?: Duration.ofMillis(default)
+
+        private fun envMs(
+            name: String,
+            default: Long,
+        ): Duration = env(name)?.toLongOrNull()?.let(Duration::ofMillis) ?: Duration.ofMillis(default)
 
         fun fromEnv(): ProviderRefundClientConfig {
-            val rawUrl: String = env("REFUND_PROVIDER_URL")
-                ?: error("REFUND_PROVIDER_URL is not configured")
-            val token: String = env("REFUND_PROVIDER_TOKEN")
-                ?: env("REFUND_PROVIDER_API_KEY")
-                ?: error("REFUND_PROVIDER_TOKEN is not configured (or REFUND_PROVIDER_API_KEY)")
+            val rawUrl: String =
+                env("REFUND_PROVIDER_URL")
+                    ?: error("REFUND_PROVIDER_URL is not configured")
+            val token: String =
+                env("REFUND_PROVIDER_TOKEN")
+                    ?: env("REFUND_PROVIDER_API_KEY")
+                    ?: error("REFUND_PROVIDER_TOKEN is not configured (or REFUND_PROVIDER_API_KEY)")
 
             val url = rawUrl.trim().removeSuffix("/")
             val healthPath = env("REFUND_PROVIDER_HEALTH_PATH")?.let { it.trim().ifEmpty { "/health" } } ?: "/health"
@@ -109,13 +117,14 @@ data class ProviderRefundClientConfig(
 class HttpProviderRefundClient(
     private val config: ProviderRefundClientConfig,
     private val clock: Clock = Clock.systemUTC(),
-    private val json: Json = Json {
-        ignoreUnknownKeys = true
-        explicitNulls = false
-        encodeDefaults = true
-    },
-) : ProviderRefundClient, ProviderRefundHealth {
-
+    private val json: Json =
+        Json {
+            ignoreUnknownKeys = true
+            explicitNulls = false
+            encodeDefaults = true
+        },
+) : ProviderRefundClient,
+    ProviderRefundHealth {
     private val logger = LoggerFactory.getLogger(HttpProviderRefundClient::class.java)
 
     private val client: HttpClient =
@@ -129,8 +138,8 @@ class HttpProviderRefundClient(
             // Не включаем подробное логирование тел/заголовков, чтобы не утечь секретами.
         }
 
-    override suspend fun send(command: ProviderRefundCommand): ProviderRefundResult {
-        return try {
+    override suspend fun send(command: ProviderRefundCommand): ProviderRefundResult =
+        try {
             val response: HttpResponse =
                 client.post(config.url) {
                     applyCommonHeaders(this, command)
@@ -142,7 +151,6 @@ class HttpProviderRefundClient(
             logger.warn("Provider refund call failed: {}", ex.toString())
             ProviderRefundResult.Retry(status = null, retryAfter = null, cause = ex)
         }
-    }
 
     /** Health-пинг: GET {baseUrl}{healthPath}. Бросаем исключение при не-2xx. */
     override suspend fun ping() {

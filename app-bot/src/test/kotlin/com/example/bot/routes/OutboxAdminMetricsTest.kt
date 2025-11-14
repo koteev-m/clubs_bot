@@ -12,7 +12,6 @@ import io.kotest.matchers.shouldBe
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -76,117 +75,129 @@ class OutboxAdminMetricsTest : StringSpec() {
             }
             val metricsProvider = MetricsProvider(MetricsProvider.simpleRegistry())
 
-        testApplication {
-            environment {
-                config =
-                    MapApplicationConfig(
-                        "app.profile" to "DEV",
-                        "app.OUTBOX_ADMIN_ENABLED" to "true",
-                    )
-            }
-            application {
-                install(ContentNegotiation) { json() }
-                installTestKoin(database)
-                outboxAdminRoutes(get(), metricsProvider = metricsProvider, tracer = null)
-            }
-
-            val response =
-                client.get("/api/admin/outbox") {
-                    url.parameters.append("topic", "payment.refunded")
-                    url.parameters.append("status", "FAILED")
+            testApplication {
+                environment {
+                    config =
+                        MapApplicationConfig(
+                            "app.profile" to "DEV",
+                            "app.OUTBOX_ADMIN_ENABLED" to "true",
+                        )
                 }
-            response.status shouldBe HttpStatusCode.OK
-        }
+                application {
+                    install(ContentNegotiation) { json() }
+                    installTestKoin(database)
+                    outboxAdminRoutes(get(), metricsProvider = metricsProvider, tracer = null)
+                }
 
-        val timer =
-            metricsProvider.registry
-                .find("outbox.admin.list.timer")
-                .tags("topic", "payment.refunded", "status", "FAILED")
-                .timer()
-        timer?.count() shouldBe 1L
+                val response =
+                    client.get("/api/admin/outbox") {
+                        url.parameters.append("topic", "payment.refunded")
+                        url.parameters.append("status", "FAILED")
+                    }
+                response.status shouldBe HttpStatusCode.OK
+            }
 
-        val counter =
-            metricsProvider.registry
-                .find("outbox.admin.list.total")
-                .tags("topic", "payment.refunded", "status", "FAILED")
-                .counter()
-        counter?.count() shouldBe 1.0
+            val timer =
+                metricsProvider.registry
+                    .find("outbox.admin.list.timer")
+                    .tags("topic", "payment.refunded", "status", "FAILED")
+                    .timer()
+            timer?.count() shouldBe 1L
+
+            val counter =
+                metricsProvider.registry
+                    .find("outbox.admin.list.total")
+                    .tags("topic", "payment.refunded", "status", "FAILED")
+                    .counter()
+            counter?.count() shouldBe 1.0
         }
 
         "replay updates success counter" {
-        transaction(this@OutboxAdminMetricsTest.database) {
-            val now = OffsetDateTime.now(ZoneOffset.UTC)
-            NotificationsOutboxTable.insert {
-                it[kind] = "payment.refunded"
-                it[status] = OutboxStatus.FAILED.name
-                it[attempts] = 1
-                it[nextAttemptAt] = now.minusHours(1)
-                it[lastError] = "boom"
-                it[createdAt] = now.minusHours(2)
-                it[targetChatId] = 99
-                it[messageThreadId] = null
-                it[payload] = JsonObject(emptyMap())
-                it[recipientType] = "chat"
-                it[recipientId] = 99
-                it[priority] = 100
-                it[method] = "TEXT"
-                it[clubId] = null
-                it[campaignId] = null
-                it[language] = null
-            }
-        }
-        val metricsProvider = MetricsProvider(MetricsProvider.simpleRegistry())
-
-        testApplication {
-            environment {
-                config =
-                    MapApplicationConfig(
-                        "app.profile" to "DEV",
-                        "app.OUTBOX_ADMIN_ENABLED" to "true",
-                    )
-            }
-            application {
-                install(ContentNegotiation) { json() }
-                installTestKoin(database)
-                outboxAdminRoutes(get(), metricsProvider = metricsProvider, tracer = null)
-            }
-
-            val request =
-                ReplayRequest(
-                    filter = OutboxAdminQuery(topic = "payment.refunded", status = "FAILED"),
-                    dryRun = false,
-                )
-            val response =
-                client.post("/api/admin/outbox/replay") {
-                    contentType(ContentType.Application.Json)
-                    setBody(json.encodeToString(ReplayRequest.serializer(), request))
+            transaction(this@OutboxAdminMetricsTest.database) {
+                val now = OffsetDateTime.now(ZoneOffset.UTC)
+                NotificationsOutboxTable.insert {
+                    it[kind] = "payment.refunded"
+                    it[status] = OutboxStatus.FAILED.name
+                    it[attempts] = 1
+                    it[nextAttemptAt] = now.minusHours(1)
+                    it[lastError] = "boom"
+                    it[createdAt] = now.minusHours(2)
+                    it[targetChatId] = 99
+                    it[messageThreadId] = null
+                    it[payload] = JsonObject(emptyMap())
+                    it[recipientType] = "chat"
+                    it[recipientId] = 99
+                    it[priority] = 100
+                    it[method] = "TEXT"
+                    it[clubId] = null
+                    it[campaignId] = null
+                    it[language] = null
                 }
-            response.status shouldBe HttpStatusCode.OK
-        }
+            }
+            val metricsProvider = MetricsProvider(MetricsProvider.simpleRegistry())
 
-        val counter =
-            metricsProvider.registry
-                .find("outbox.admin.replay.total")
-                .tags("result", "success", "topic", "payment.refunded", "status", "FAILED")
-                .counter()
-        counter?.count() shouldBe 1.0
+            testApplication {
+                environment {
+                    config =
+                        MapApplicationConfig(
+                            "app.profile" to "DEV",
+                            "app.OUTBOX_ADMIN_ENABLED" to "true",
+                        )
+                }
+                application {
+                    install(ContentNegotiation) { json() }
+                    installTestKoin(database)
+                    outboxAdminRoutes(get(), metricsProvider = metricsProvider, tracer = null)
+                }
 
-        val timer =
-            metricsProvider.registry
-                .find("outbox.admin.replay.timer")
-                .tags("topic", "payment.refunded", "status", "FAILED")
-                .timer()
-        timer?.count() shouldBe 1L
+                val request =
+                    ReplayRequest(
+                        filter = OutboxAdminQuery(topic = "payment.refunded", status = "FAILED"),
+                        dryRun = false,
+                    )
+                val response =
+                    client.post("/api/admin/outbox/replay") {
+                        contentType(ContentType.Application.Json)
+                        setBody(json.encodeToString(ReplayRequest.serializer(), request))
+                    }
+                response.status shouldBe HttpStatusCode.OK
+            }
+
+            val counter =
+                metricsProvider.registry
+                    .find("outbox.admin.replay.total")
+                    .tags(
+                        "result",
+                        "success",
+                        "topic",
+                        "payment.refunded",
+                        "status",
+                        "FAILED",
+                    ).counter()
+            counter?.count() shouldBe 1.0
+
+            val timer =
+                metricsProvider.registry
+                    .find("outbox.admin.replay.timer")
+                    .tags("topic", "payment.refunded", "status", "FAILED")
+                    .timer()
+            timer?.count() shouldBe 1L
         }
     }
 }
 
-private data class MetricsDbSetup(val dataSource: JdbcDataSource, val database: Database)
+private data class MetricsDbSetup(
+    val dataSource: JdbcDataSource,
+    val database: Database,
+)
 
 private fun prepareDatabase(): MetricsDbSetup {
     val ds =
         JdbcDataSource().apply {
-            setURL("jdbc:h2:mem:outbox_admin_metrics_${System.nanoTime()};MODE=PostgreSQL;DATABASE_TO_UPPER=false;DB_CLOSE_DELAY=-1")
+            val jdbcUrl =
+                "jdbc:h2:mem:outbox_admin_metrics_${System.nanoTime()};" +
+                    "MODE=PostgreSQL;DATABASE_TO_UPPER=false;DB_CLOSE_DELAY=-1"
+            setURL(jdbcUrl)
             user = "sa"
             password = ""
         }

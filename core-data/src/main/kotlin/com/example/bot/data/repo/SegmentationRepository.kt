@@ -27,7 +27,9 @@ import java.time.LocalDate
 /**
  * Repository resolving audience segments into user id sequences.
  */
-class SegmentationRepository(private val db: Database) {
+class SegmentationRepository(
+    private val db: Database,
+) {
     object Users : Table("users") {
         val id = long("id").autoIncrement()
         val clubId = integer("club_id")
@@ -58,8 +60,8 @@ class SegmentationRepository(private val db: Database) {
     fun resolveSegment(
         segmentId: SegmentId,
         batchSize: Int = 500,
-    ): Sequence<UserId> {
-        return sequence {
+    ): Sequence<UserId> =
+        sequence {
             val node =
                 transaction(db) {
                     Segments
@@ -83,16 +85,14 @@ class SegmentationRepository(private val db: Database) {
                 offset += batch.size
             }
         }
-    }
 
-    private fun buildCondition(node: SegmentNode): Op<Boolean> {
-        return when (node.op.uppercase()) {
+    private fun buildCondition(node: SegmentNode): Op<Boolean> =
+        when (node.op.uppercase()) {
             "AND" -> node.items.map { buildCondition(it) }.reduce { acc, op -> acc and op }
             "OR" -> node.items.map { buildCondition(it) }.reduce { acc, op -> acc or op }
             "NOT" -> not(buildCondition(node.items.single()))
             else -> fieldCondition(node)
         }
-    }
 
     private fun fieldCondition(node: SegmentNode): Op<Boolean> {
         val field = node.field ?: error("field required for leaf node")

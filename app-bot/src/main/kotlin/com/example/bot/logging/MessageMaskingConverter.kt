@@ -47,11 +47,12 @@ class MessageMaskingConverter : MessageConverter() {
                 return rawPhone
             }
 
-            val digitsToShow = when {
-                digitsCount <= 2 -> digitsCount
-                digitsCount <= 4 -> 2
-                else -> 3
-            }
+            val digitsToShow =
+                when {
+                    digitsCount <= 2 -> digitsCount
+                    digitsCount <= 4 -> 2
+                    else -> 3
+                }
 
             val digitsToMask = (digitsCount - digitsToShow).coerceAtLeast(0)
             var maskedDigits = 0
@@ -79,18 +80,19 @@ class MessageMaskingConverter : MessageConverter() {
             val core = value.trim()
             if (core.isEmpty()) return value
 
-            val maskedCore = core
-                .split(Regex("\\s+"))
-                .joinToString(" ") { part ->
-                    if (part.isEmpty()) {
-                        part
-                    } else {
-                        buildString {
-                            append(part.first())
-                            repeat(part.length - 1) { append('*') }
+            val maskedCore =
+                core
+                    .split(Regex("\\s+"))
+                    .joinToString(" ") { part ->
+                        if (part.isEmpty()) {
+                            part
+                        } else {
+                            buildString {
+                                append(part.first())
+                                repeat(part.length - 1) { append('*') }
+                            }
                         }
                     }
-                }
 
             return leadingWhitespace + maskedCore + trailingWhitespace
         }

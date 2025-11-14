@@ -6,13 +6,20 @@ import org.flywaydb.core.api.output.ValidateResult
 import org.slf4j.LoggerFactory
 import javax.sql.DataSource
 
-class MigrationRunner(private val dataSource: DataSource, private val cfg: FlywayConfig) {
+class MigrationRunner(
+    private val dataSource: DataSource,
+    private val cfg: FlywayConfig,
+) {
     private val log = LoggerFactory.getLogger(MigrationRunner::class.java)
 
     sealed interface Result {
-        data class Migrated(val migrate: MigrateResult) : Result
+        data class Migrated(
+            val migrate: MigrateResult,
+        ) : Result
 
-        data class Validated(val validate: ValidateResult) : Result
+        data class Validated(
+            val validate: ValidateResult,
+        ) : Result
     }
 
     @Suppress("SpreadOperator")

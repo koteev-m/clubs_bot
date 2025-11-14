@@ -133,32 +133,30 @@ class MyBookingsService(
         userId: Long,
         limit: Int,
         offset: Long,
-    ): List<BookingInfo> {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = database) {
+    ): List<BookingInfo> =
+        newSuspendedTransaction(context = Dispatchers.IO, db = database) {
             val rows =
                 BookingsTable
                     .selectAll()
                     .where {
                         (BookingsTable.guestUserId eq userId) and (BookingsTable.status inList ACTIVE_STATUSES)
-                    }
-                    .orderBy(BookingsTable.slotStart to SortOrder.ASC)
+                    }.orderBy(BookingsTable.slotStart to SortOrder.ASC)
                     .limit(limit, offset)
                     .toList()
             mapRows(rows)
         }
-    }
 
     private suspend fun loadBookingById(
         userId: Long,
         bookingId: UUID,
-    ): BookingInfo? {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = database) {
+    ): BookingInfo? =
+        newSuspendedTransaction(context = Dispatchers.IO, db = database) {
             val row =
                 BookingsTable
                     .selectAll()
-                    .where{
-                        (BookingsTable.id eq bookingId) and (BookingsTable.guestUserId eq userId) }
-                    .limit(1)
+                    .where {
+                        (BookingsTable.id eq bookingId) and (BookingsTable.guestUserId eq userId)
+                    }.limit(1)
                     .firstOrNull()
             if (row == null) {
                 null
@@ -166,7 +164,6 @@ class MyBookingsService(
                 mapRows(listOf(row)).firstOrNull()
             }
         }
-    }
 
     private fun buildCancelMessage(
         info: BookingInfo,
@@ -181,7 +178,7 @@ class MyBookingsService(
         val end = BotLocales.timeHHmm(info.slotEnd, zone, locale)
         val amount = BotLocales.money(info.totalMinor, locale) + texts.receiptCurrencySuffix(lang)
         val userLabel =
-            user.username?.takeIf { it.isNotBlank() }?.let { "@${it}" }
+            user.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
                 ?: "tg:${user.telegramId}"
         return buildString {
             append("❌ ")
@@ -244,10 +241,9 @@ class MyBookingsService(
         val results =
             ClubsLite
                 .selectAll()
-                .where{
+                .where {
                     ClubsLite.id inList ids.toList()
-                }
-                .associateBy({ it[ClubsLite.id] }, { ClubRow.fromRow(it) })
+                }.associateBy({ it[ClubsLite.id] }, { ClubRow.fromRow(it) })
         return results
     }
 
@@ -255,10 +251,9 @@ class MyBookingsService(
         if (ids.isEmpty()) return emptyMap()
         return EventsTable
             .selectAll()
-            .where{
+            .where {
                 EventsTable.id inList ids.toList()
-            }
-            .associateBy({ it[EventsTable.id] }, { EventRow.fromRow(it) })
+            }.associateBy({ it[EventsTable.id] }, { EventRow.fromRow(it) })
     }
 
     private fun ResultRow.toBookingInfo(
@@ -271,7 +266,12 @@ class MyBookingsService(
         val slotEnd = this[BookingsTable.slotEnd].toInstant()
         val start = event?.start ?: slotStart
         val end = event?.end ?: slotEnd
-        val shortId = id.toString().replace("-", "").take(SHORT_ID_LENGTH).uppercase()
+        val shortId =
+            id
+                .toString()
+                .replace("-", "")
+                .take(SHORT_ID_LENGTH)
+                .uppercase()
         val timezone = resolveZone(club.timezone)
         return BookingInfo(
             id = id,
@@ -316,9 +316,13 @@ class MyBookingsService(
     }
 
     sealed interface CancelResult {
-        data class Ok(val info: BookingInfo) : CancelResult
+        data class Ok(
+            val info: BookingInfo,
+        ) : CancelResult
 
-        data class Already(val info: BookingInfo) : CancelResult
+        data class Already(
+            val info: BookingInfo,
+        ) : CancelResult
 
         data object NotFound : CancelResult
     }
@@ -330,14 +334,13 @@ class MyBookingsService(
         val adminChatId: Long?,
     ) {
         companion object {
-            fun fromRow(row: ResultRow): ClubRow {
-                return ClubRow(
+            fun fromRow(row: ResultRow): ClubRow =
+                ClubRow(
                     id = row[ClubsLite.id],
                     name = row[ClubsLite.name],
                     timezone = row[ClubsLite.timezone],
                     adminChatId = row[ClubsLite.adminChatId],
                 )
-            }
         }
     }
 
@@ -347,13 +350,12 @@ class MyBookingsService(
         val end: Instant,
     ) {
         companion object {
-            fun fromRow(row: ResultRow): EventRow {
-                return EventRow(
+            fun fromRow(row: ResultRow): EventRow =
+                EventRow(
                     id = row[EventsTable.id],
                     start = row[EventsTable.startAt].toInstant(),
                     end = row[EventsTable.endAt].toInstant(),
                 )
-            }
         }
     }
 
@@ -379,7 +381,9 @@ class MyBookingsService(
     }
 }
 
-class MyBookingsMetrics(private val registry: io.micrometer.core.instrument.MeterRegistry?) {
+class MyBookingsMetrics(
+    private val registry: io.micrometer.core.instrument.MeterRegistry?,
+) {
     fun incOpen() {
         registry?.counter("ui.mybookings.open.total", SOURCE_TAG, SOURCE_VALUE)?.increment()
     }
@@ -396,10 +400,12 @@ class MyBookingsMetrics(private val registry: io.micrometer.core.instrument.Mete
         counter("booking.cancel.already", clubId).increment()
     }
 
-    private fun counter(name: String, clubId: Long): io.micrometer.core.instrument.Counter {
-        return registry?.counter(name, SOURCE_TAG, SOURCE_VALUE, CLUB_TAG, clubId.toString())
+    private fun counter(
+        name: String,
+        clubId: Long,
+    ): io.micrometer.core.instrument.Counter =
+        registry?.counter(name, SOURCE_TAG, SOURCE_VALUE, CLUB_TAG, clubId.toString())
             ?: NoopCounter
-    }
 
     private object NoopCounter : io.micrometer.core.instrument.Counter {
         override fun count(): Double = 0.0
@@ -410,9 +416,8 @@ class MyBookingsMetrics(private val registry: io.micrometer.core.instrument.Mete
 
         override fun measure(): MutableIterable<io.micrometer.core.instrument.Measurement> = mutableListOf()
 
-        override fun getId(): io.micrometer.core.instrument.Meter.Id {
+        override fun getId(): io.micrometer.core.instrument.Meter.Id =
             throw UnsupportedOperationException("Noop counter has no id")
-        }
     }
 
     companion object {

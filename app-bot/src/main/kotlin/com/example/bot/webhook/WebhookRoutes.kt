@@ -99,8 +99,12 @@ data class UserDto(
 /** Represents result of handling an update. */
 sealed interface WebhookReply {
     /** Inline reply returned directly in webhook response body. */
-    data class Inline(val payload: Map<String, Any?>) : WebhookReply
+    data class Inline(
+        val payload: Map<String, Any?>,
+    ) : WebhookReply
 
     /** Asynchronous response that should be executed via Telegram API. */
-    data class Async(val request: Any) : WebhookReply
+    data class Async(
+        val request: Any,
+    ) : WebhookReply
 }

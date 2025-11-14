@@ -109,7 +109,11 @@ class MusicService(
         val source = "${updatedAt ?: Instant.EPOCH}|$count|$seed|$window"
         val md = MessageDigest.getInstance("SHA-256")
         val hash = md.digest(source.toByteArray())
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(hash).take(ETAG_LENGTH)
+        return Base64
+            .getUrlEncoder()
+            .withoutPadding()
+            .encodeToString(hash)
+            .take(ETAG_LENGTH)
     }
 }
 

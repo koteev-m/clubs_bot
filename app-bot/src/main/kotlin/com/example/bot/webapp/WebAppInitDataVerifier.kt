@@ -69,12 +69,11 @@ private fun hexToBytes(hex: String): ByteArray? {
     return if (invalid) null else bytes
 }
 
-private fun buildDataCheckString(parameters: Map<String, String>): String {
-    return parameters
+private fun buildDataCheckString(parameters: Map<String, String>): String =
+    parameters
         .toSortedMap()
         .entries
         .joinToString("\n") { (key, value) -> "$key=$value" }
-}
 
 private fun decodeSegment(segment: String): Pair<String, String>? {
     val delimiterIndex = segment.indexOf('=')
@@ -135,12 +134,11 @@ private fun String.toInstantOrNull(): Instant? {
     return runCatching { Instant.ofEpochSecond(epochSeconds) }.getOrNull()
 }
 
-private fun secretKey(botToken: String): ByteArray {
-    return hmacSha256(
+private fun secretKey(botToken: String): ByteArray =
+    hmacSha256(
         "WebAppData".toByteArray(StandardCharsets.UTF_8),
         botToken.toByteArray(StandardCharsets.UTF_8),
     )
-}
 
 object WebAppInitDataVerifier {
     fun verify(

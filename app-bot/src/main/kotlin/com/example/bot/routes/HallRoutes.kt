@@ -14,8 +14,8 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.util.getOrFail
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 import java.time.Duration
 
 private const val MIN_SCALE = 0.1
@@ -45,7 +45,9 @@ fun Route.hallImageRoute(
         val clubId = call.parameters.getOrFail<Long>("clubId")
         val startUtc = call.parameters.getOrFail("startUtc")
         val scale =
-            call.request.queryParameters["scale"]?.toDoubleOrNull()?.takeIf { it > MIN_SCALE } ?: DEFAULT_SCALE
+            call.request.queryParameters["scale"]
+                ?.toDoubleOrNull()
+                ?.takeIf { it > MIN_SCALE } ?: DEFAULT_SCALE
         val stateKey = withContext(Dispatchers.IO + MDCContext()) { stateKeyProvider(clubId, startUtc) }
         val cacheKey = "$clubId|$startUtc|$scale|$baseVersion|$stateKey"
 

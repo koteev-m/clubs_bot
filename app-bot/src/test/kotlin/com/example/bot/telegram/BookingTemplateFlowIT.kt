@@ -68,10 +68,18 @@ class BookingTemplateFlowIT : PostgresAppTest() {
 
     @BeforeEach
     fun setUpServices() {
-        val bookingRepository = com.example.bot.data.booking.core.BookingRepository(database, clock)
-        val holdRepository = com.example.bot.data.booking.core.BookingHoldRepository(database, clock)
-        val outboxRepository = com.example.bot.data.booking.core.OutboxRepository(database, clock)
-        val auditRepository = com.example.bot.data.booking.core.AuditLogRepository(database, clock)
+        val bookingRepository =
+            com.example.bot.data.booking.core
+                .BookingRepository(database, clock)
+        val holdRepository =
+            com.example.bot.data.booking.core
+                .BookingHoldRepository(database, clock)
+        val outboxRepository =
+            com.example.bot.data.booking.core
+                .OutboxRepository(database, clock)
+        val auditRepository =
+            com.example.bot.data.booking.core
+                .AuditLogRepository(database, clock)
         bookingService = BookingService(bookingRepository, holdRepository, outboxRepository, auditRepository)
         val templateRepository = BookingTemplateRepositoryImpl(database, clock)
         val notificationsOutbox = NotificationsOutboxRepository(database)
@@ -295,8 +303,8 @@ class BookingTemplateFlowIT : PostgresAppTest() {
         clubId: Long,
         start: Instant,
         end: Instant,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             EventsTable.insert { row ->
                 row[EventsTable.clubId] = clubId
                 row[EventsTable.title] = "Show"
@@ -306,15 +314,14 @@ class BookingTemplateFlowIT : PostgresAppTest() {
                 row[EventsTable.posterUrl] = null
             } get EventsTable.id
         }
-    }
 
     private fun insertTable(
         clubId: Long,
         tableNumber: Int,
         capacity: Int,
         deposit: BigDecimal,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             TablesTable.insert { row ->
                 row[TablesTable.clubId] = clubId
                 row[TablesTable.zoneId] = null
@@ -324,13 +331,12 @@ class BookingTemplateFlowIT : PostgresAppTest() {
                 row[TablesTable.active] = true
             } get TablesTable.id
         }
-    }
 
     private fun insertUser(
         telegramId: Long,
         username: String,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             TestUsersTable.insert { row ->
                 row[TestUsersTable.telegramUserId] = telegramId
                 row[TestUsersTable.username] = username
@@ -338,7 +344,6 @@ class BookingTemplateFlowIT : PostgresAppTest() {
                 row[TestUsersTable.phone] = null
             } get TestUsersTable.id
         }
-    }
 
     private fun assignRole(
         userId: Long,

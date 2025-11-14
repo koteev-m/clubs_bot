@@ -57,9 +57,7 @@ class CallbackQueryHandler(
         }
     }
 
-    private fun isMenuCallback(data: String): Boolean {
-        return MENU_PREFIXES.any { prefix -> data.startsWith(prefix) }
-    }
+    private fun isMenuCallback(data: String): Boolean = MENU_PREFIXES.any { prefix -> data.startsWith(prefix) }
 
     private fun handleBookTable(
         cq: CallbackQuery,

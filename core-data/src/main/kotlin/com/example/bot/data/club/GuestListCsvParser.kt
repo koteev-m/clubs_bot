@@ -9,7 +9,10 @@ import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 
 /** Result of parsing a guest list import file. */
-data class GuestListParseResult(val rows: List<ParsedGuest>, val rejected: List<RejectedRow>)
+data class GuestListParseResult(
+    val rows: List<ParsedGuest>,
+    val rejected: List<RejectedRow>,
+)
 
 /**
  * Parser for guest list CSV/TSV files with header `name,phone,guests_count,notes`.
@@ -62,13 +65,12 @@ class GuestListCsvParser {
         }
     }
 
-    private fun detectDelimiter(header: String): Char {
-        return when {
+    private fun detectDelimiter(header: String): Char =
+        when {
             header.contains('\t') -> '\t'
             header.contains(',') -> ','
             else -> error("Unsupported delimiter in header")
         }
-    }
 
     companion object {
         private val EXPECTED_HEADER = listOf("name", "phone", "guests_count", "notes")

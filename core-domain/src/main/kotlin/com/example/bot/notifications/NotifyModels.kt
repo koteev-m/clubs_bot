@@ -4,19 +4,34 @@ import kotlinx.serialization.Serializable
 
 // Domain events that may trigger notifications
 sealed interface TxEvent {
-    data class BookingCreated(val bookingId: String) : TxEvent
+    data class BookingCreated(
+        val bookingId: String,
+    ) : TxEvent
 
-    data class BookingCancelled(val bookingId: String) : TxEvent
+    data class BookingCancelled(
+        val bookingId: String,
+    ) : TxEvent
 
-    data class BookingSeated(val bookingId: String) : TxEvent
+    data class BookingSeated(
+        val bookingId: String,
+    ) : TxEvent
 
-    data class GuestArrived(val guestId: String) : TxEvent
+    data class GuestArrived(
+        val guestId: String,
+    ) : TxEvent
 
-    data class GuestDenied(val guestId: String) : TxEvent
+    data class GuestDenied(
+        val guestId: String,
+    ) : TxEvent
 
-    data class GuestLate(val guestId: String) : TxEvent
+    data class GuestLate(
+        val guestId: String,
+    ) : TxEvent
 
-    data class QuestionFromUser(val userId: String, val question: String) : TxEvent
+    data class QuestionFromUser(
+        val userId: String,
+        val question: String,
+    ) : TxEvent
 }
 
 // Notification send method
@@ -37,11 +52,18 @@ enum class ParseMode {
 // Simple representation of media for albums
 // type can be "photo", "video", etc.
 @Serializable
-data class MediaItem(val type: String, val url: String, val caption: String? = null, val parseMode: ParseMode? = null)
+data class MediaItem(
+    val type: String,
+    val url: String,
+    val caption: String? = null,
+    val parseMode: ParseMode? = null,
+)
 
 // Minimal keyboard specification: rows of button labels
 @Serializable
-data class InlineKeyboardSpec(val rows: List<List<String>>)
+data class InlineKeyboardSpec(
+    val rows: List<List<String>>,
+)
 
 // Unified notification message
 // Depending on method, text/photoUrl/album are used

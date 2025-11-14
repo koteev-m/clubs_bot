@@ -80,5 +80,8 @@ class InMemoryChatUiSessionStore(
         return !expiresAt.isAfter(now)
     }
 
-    private data class SessionKey(val chatId: Long, val threadId: Int?)
+    private data class SessionKey(
+        val chatId: Long,
+        val threadId: Int?,
+    )
 }

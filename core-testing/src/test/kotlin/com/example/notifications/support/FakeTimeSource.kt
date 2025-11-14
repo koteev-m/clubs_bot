@@ -4,7 +4,9 @@ import com.example.bot.notifications.TimeSource
 import java.util.concurrent.atomic.AtomicLong
 
 /** Deterministic [TimeSource] for tests. */
-class FakeTimeSource(startMs: Long = 0L) : TimeSource {
+class FakeTimeSource(
+    startMs: Long = 0L,
+) : TimeSource {
     private val now = AtomicLong(startMs)
 
     override fun nowMs(): Long = now.get()

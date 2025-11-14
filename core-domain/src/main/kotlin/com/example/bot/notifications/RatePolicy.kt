@@ -13,7 +13,10 @@ private const val DEFAULT_CHAT_RPS: Double = 1.5
 private const val BUCKET_TTL_MS: Long = 10 * 60 * MS
 
 /** Result of token acquisition. */
-data class Permit(val granted: Boolean, val retryAfterMs: Long = 0L)
+data class Permit(
+    val granted: Boolean,
+    val retryAfterMs: Long = 0L,
+)
 
 /** Rate policy with global and per-chat token buckets. */
 interface RatePolicy {
@@ -109,7 +112,10 @@ class DefaultRatePolicy(
 ) : RatePolicy {
     private val globalBucket = TokenBucket(globalRps.toDouble(), globalRps.toDouble(), timeSource)
 
-    private data class Holder(val bucket: TokenBucket, val lastUsed: AtomicLong)
+    private data class Holder(
+        val bucket: TokenBucket,
+        val lastUsed: AtomicLong,
+    )
 
     private val chats = ConcurrentHashMap<Long, Holder>()
     private val lastCleanup = AtomicLong(timeSource.nowMs())

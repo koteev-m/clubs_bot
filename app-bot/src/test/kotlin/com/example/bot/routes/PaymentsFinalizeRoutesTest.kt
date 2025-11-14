@@ -30,9 +30,9 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
-import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.testApplication
 import kotlinx.serialization.decodeFromString
@@ -50,7 +50,10 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
         overrideMiniAppValidatorForTesting { _, _ -> user }
     }
 
-    override suspend fun afterEach(testCase: TestCase, result: TestResult) {
+    override suspend fun afterEach(
+        testCase: TestCase,
+        result: TestResult,
+    ) {
         resetMiniAppValidator()
     }
 
@@ -115,9 +118,7 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
                             paymentToken: String?,
                             idemKey: String,
                             actorUserId: Long,
-                        ): FinalizeResult {
-                            throw PaymentsFinalizeService.ValidationException("invalid payment token")
-                        }
+                        ): FinalizeResult = throw PaymentsFinalizeService.ValidationException("invalid payment token")
                     }
                 application { configureTestApp(validatingService) }
 
@@ -127,7 +128,9 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-400")
                         header("X-Telegram-Init-Data", "stub")
-                        setBody(Json.encodeToString(FinalizeRequest(UUID.randomUUID().toString(), paymentToken = "bad")))
+                        setBody(
+                            Json.encodeToString(FinalizeRequest(UUID.randomUUID().toString(), paymentToken = "bad")),
+                        )
                     }
                 response.status shouldBe HttpStatusCode.BadRequest
             }
@@ -148,25 +151,26 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
                 )
             val promoService =
                 PromoAttributionService(
-                    promoLinkRepository = object : PromoLinkRepository {
-                        override suspend fun issueLink(
-                            promoterUserId: Long,
-                            clubId: Long?,
-                            utmSource: String,
-                            utmMedium: String,
-                            utmCampaign: String,
-                            utmContent: String?,
-                        ): PromoLink = error("not used")
+                    promoLinkRepository =
+                        object : PromoLinkRepository {
+                            override suspend fun issueLink(
+                                promoterUserId: Long,
+                                clubId: Long?,
+                                utmSource: String,
+                                utmMedium: String,
+                                utmCampaign: String,
+                                utmContent: String?,
+                            ): PromoLink = error("not used")
 
-                        override suspend fun get(id: Long): PromoLink? = if (id == promoLink.id) promoLink else null
+                            override suspend fun get(id: Long): PromoLink? = if (id == promoLink.id) promoLink else null
 
-                        override suspend fun listByPromoter(
-                            promoterUserId: Long,
-                            clubId: Long?,
-                        ): List<PromoLink> = emptyList()
+                            override suspend fun listByPromoter(
+                                promoterUserId: Long,
+                                clubId: Long?,
+                            ): List<PromoLink> = emptyList()
 
-                        override suspend fun deactivate(id: Long) = error("not used")
-                    },
+                            override suspend fun deactivate(id: Long) = error("not used")
+                        },
                     promoAttributionRepository =
                         object : PromoAttributionRepository {
                             override suspend fun attachUnique(
@@ -177,8 +181,8 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
                                 utmMedium: String,
                                 utmCampaign: String,
                                 utmContent: String?,
-                            ): PromoAttributionResult<PromoAttribution> {
-                                return PromoAttributionResult.Success(
+                            ): PromoAttributionResult<PromoAttribution> =
+                                PromoAttributionResult.Success(
                                     PromoAttribution(
                                         id = 1L,
                                         bookingId = bookingId,
@@ -191,24 +195,28 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
                                         createdAt = Instant.now(),
                                     ),
                                 )
-                            }
 
                             override suspend fun findByBooking(bookingId: UUID): PromoAttribution? = null
                         },
                     store = InMemoryPromoAttributionStore(),
-                    userRepository = object : UserRepository {
-                        override suspend fun getByTelegramId(id: Long): User? = null
-                    },
-                    userRoleRepository = object : UserRoleRepository {
-                        override suspend fun listRoles(userId: Long): Set<Role> = emptySet()
+                    userRepository =
+                        object : UserRepository {
+                            override suspend fun getByTelegramId(id: Long): User? = null
+                        },
+                    userRoleRepository =
+                        object : UserRoleRepository {
+                            override suspend fun listRoles(userId: Long): Set<Role> = emptySet()
 
-                        override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
-                    },
+                            override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
+                        },
                 )
             testApplication {
                 application { configureTestApp(service, promoService) }
 
-                val encodedToken = PromoLinkTokenCodec.encode(PromoLinkToken(promoLinkId = promoLink.id, clubId = promoLink.clubId))
+                val encodedToken =
+                    PromoLinkTokenCodec.encode(
+                        PromoLinkToken(promoLinkId = promoLink.id, clubId = promoLink.clubId),
+                    )
                 val response =
                     client.post("/api/clubs/1/bookings/finalize") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
@@ -241,21 +249,18 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
             paymentToken: String?,
             idemKey: String,
             actorUserId: Long,
-        ): FinalizeResult {
-            return responses.getOrPut(idemKey) { FinalizeResult("CAPTURED") }
-        }
+        ): FinalizeResult = responses.getOrPut(idemKey) { FinalizeResult("CAPTURED") }
     }
 
     private class FailingFinalizeService : PaymentsFinalizeService {
+        @Suppress("ExceptionRaisedInUnexpectedLocation")
         override suspend fun finalize(
             clubId: Long,
             bookingId: UUID,
             paymentToken: String?,
             idemKey: String,
             actorUserId: Long,
-        ): FinalizeResult {
-            throw ConflictException("should not be called")
-        }
+        ): FinalizeResult = throw ConflictException("should not be called")
     }
 
     private fun Application.configureTestApp(

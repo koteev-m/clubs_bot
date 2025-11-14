@@ -20,7 +20,9 @@ import java.util.UUID
 /**
  * Exposed-based implementation of [PaymentsRepository].
  */
-class PaymentsRepositoryImpl(private val db: Database) : PaymentsRepository {
+class PaymentsRepositoryImpl(
+    private val db: Database,
+) : PaymentsRepository {
     object PaymentsTable : Table("payments") {
         val id = uuid("id").autoGenerate()
         val bookingId = uuid("booking_id").nullable()
@@ -58,8 +60,8 @@ class PaymentsRepositoryImpl(private val db: Database) : PaymentsRepository {
         amountMinor: Long,
         payload: String,
         idempotencyKey: String,
-    ): PaymentRecord {
-        return newSuspendedTransaction(db = db) {
+    ): PaymentRecord =
+        newSuspendedTransaction(db = db) {
             val row =
                 PaymentsTable
                     .insert {
@@ -74,7 +76,6 @@ class PaymentsRepositoryImpl(private val db: Database) : PaymentsRepository {
                     .first()
             row.toRecord()
         }
-    }
 
     override suspend fun markPending(id: UUID) = updateStatus(id, "PENDING", null)
 
@@ -99,33 +100,31 @@ class PaymentsRepositoryImpl(private val db: Database) : PaymentsRepository {
         updateStatus(id, "REFUNDED", externalId)
     }
 
-    override suspend fun findByPayload(payload: String): PaymentRecord? {
-        return newSuspendedTransaction(db = db) {
+    override suspend fun findByPayload(payload: String): PaymentRecord? =
+        newSuspendedTransaction(db = db) {
             PaymentsTable
                 .selectAll()
                 .where { PaymentsTable.payload eq payload }
                 .firstOrNull()
                 ?.toRecord()
         }
-    }
 
-    override suspend fun findByIdempotencyKey(idempotencyKey: String): PaymentRecord? {
-        return newSuspendedTransaction(db = db) {
+    override suspend fun findByIdempotencyKey(idempotencyKey: String): PaymentRecord? =
+        newSuspendedTransaction(db = db) {
             PaymentsTable
                 .selectAll()
                 .where { PaymentsTable.idempotencyKey eq idempotencyKey }
                 .firstOrNull()
                 ?.toRecord()
         }
-    }
 
     override suspend fun recordAction(
         bookingId: UUID,
         key: String,
         action: Action,
         result: Result,
-    ): SavedAction {
-        return newSuspendedTransaction(db = db) {
+    ): SavedAction =
+        newSuspendedTransaction(db = db) {
             PaymentActionsTable
                 .insert {
                     it[PaymentActionsTable.bookingId] = bookingId
@@ -137,10 +136,9 @@ class PaymentsRepositoryImpl(private val db: Database) : PaymentsRepository {
                 .first()
                 .toSavedAction()
         }
-    }
 
-    override suspend fun findActionByIdempotencyKey(key: String): SavedAction? {
-        return newSuspendedTransaction(db = db) {
+    override suspend fun findActionByIdempotencyKey(key: String): SavedAction? =
+        newSuspendedTransaction(db = db) {
             PaymentActionsTable
                 .selectAll()
                 .where { PaymentActionsTable.idempotencyKey eq key }
@@ -148,24 +146,21 @@ class PaymentsRepositoryImpl(private val db: Database) : PaymentsRepository {
                 .firstOrNull()
                 ?.toSavedAction()
         }
-    }
 
     override suspend fun updateStatus(
         id: UUID,
         status: String,
         externalId: String?,
-    ) {
-        return newSuspendedTransaction(db = db) {
-            PaymentsTable.update({ PaymentsTable.id eq id }) {
-                it[PaymentsTable.status] = status
-                it[PaymentsTable.externalId] = externalId
-            }
-            Unit
+    ) = newSuspendedTransaction(db = db) {
+        PaymentsTable.update({ PaymentsTable.id eq id }) {
+            it[PaymentsTable.status] = status
+            it[PaymentsTable.externalId] = externalId
         }
+        Unit
     }
 
-    private fun ResultRow.toRecord(): PaymentRecord {
-        return PaymentRecord(
+    private fun ResultRow.toRecord(): PaymentRecord =
+        PaymentRecord(
             id = this[PaymentsTable.id],
             bookingId = this[PaymentsTable.bookingId],
             provider = this[PaymentsTable.provider],
@@ -178,19 +173,18 @@ class PaymentsRepositoryImpl(private val db: Database) : PaymentsRepository {
             createdAt = this[PaymentsTable.createdAt],
             updatedAt = this[PaymentsTable.updatedAt],
         )
-    }
 
-    private fun ResultRow.toSavedAction(): SavedAction {
-        return SavedAction(
+    private fun ResultRow.toSavedAction(): SavedAction =
+        SavedAction(
             id = this[PaymentActionsTable.id],
             bookingId = this[PaymentActionsTable.bookingId],
             idempotencyKey = this[PaymentActionsTable.idempotencyKey],
             action = Action.valueOf(this[PaymentActionsTable.action]),
-            result = Result(
-                status = Status.valueOf(this[PaymentActionsTable.status]),
-                reason = this[PaymentActionsTable.reason],
-            ),
+            result =
+                Result(
+                    status = Status.valueOf(this[PaymentActionsTable.status]),
+                    reason = this[PaymentActionsTable.reason],
+                ),
             createdAt = this[PaymentActionsTable.createdAt],
         )
-    }
 }

@@ -21,6 +21,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 dependencies {
     implementation(projects.coreDomain)
     implementation(projects.coreData)
+    testImplementation(project(":core-telemetry"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.junit.jupiter)
     implementation(libs.testcontainers.junit)

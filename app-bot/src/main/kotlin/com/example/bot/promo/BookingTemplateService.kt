@@ -53,9 +53,13 @@ data class TemplateBookingRequest(
     val holdTtl: Duration = DEFAULT_HOLD_TTL,
 )
 
-class TemplateAccessException(message: String) : RuntimeException(message)
+class TemplateAccessException(
+    message: String,
+) : RuntimeException(message)
 
-class TemplateNotFoundException(message: String) : RuntimeException(message)
+class TemplateNotFoundException(
+    message: String,
+) : RuntimeException(message)
 
 /**
  * Service that enforces RBAC rules for booking templates and orchestrates booking flow.
@@ -100,9 +104,7 @@ class BookingTemplateService(
         clubId: Long,
         tableCapacityMin: Int,
         notes: String?,
-    ): BookingTemplate {
-        return repository.create(promoterId, clubId, tableCapacityMin, notes)
-    }
+    ): BookingTemplate = repository.create(promoterId, clubId, tableCapacityMin, notes)
 
     suspend fun toggleActive(
         id: Long,
@@ -139,8 +141,8 @@ class BookingTemplateService(
         actor: TemplateActor,
         clubId: Long? = null,
         onlyActive: Boolean = true,
-    ): List<BookingTemplate> {
-        return when {
+    ): List<BookingTemplate> =
+        when {
             Role.PROMOTER in actor.roles ->
                 repository
                     .listByOwner(actor.userId)
@@ -160,7 +162,6 @@ class BookingTemplateService(
                 seen.values.toList()
             }
         }
-    }
 
     suspend fun updateTemplate(
         actor: TemplateActor,
@@ -315,14 +316,13 @@ class BookingTemplateService(
         }
     }
 
-    private fun TemplateActor.canAccess(template: BookingTemplate): Boolean {
-        return when {
+    private fun TemplateActor.canAccess(template: BookingTemplate): Boolean =
+        when {
             hasRole(Role.OWNER, Role.HEAD_MANAGER) -> true
             hasRole(Role.CLUB_ADMIN, Role.MANAGER) -> template.clubId in clubIds
             hasRole(Role.PROMOTER) -> template.promoterUserId == userId
             else -> false
         }
-    }
 
     private fun determineClubScope(
         actor: TemplateActor,

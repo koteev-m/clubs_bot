@@ -5,7 +5,11 @@ import com.example.bot.telegram.SendResult
 
 /** Simple in-memory fake of sender that records sent messages. */
 class FakeNotifySender {
-    data class Sent(val timestamp: Long, val chatId: Long, val method: String)
+    data class Sent(
+        val timestamp: Long,
+        val chatId: Long,
+        val method: String,
+    )
 
     val sent = mutableListOf<Sent>()
     private val scripted = ArrayDeque<SendResult>()

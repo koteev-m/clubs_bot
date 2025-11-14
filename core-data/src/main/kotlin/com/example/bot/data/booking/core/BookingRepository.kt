@@ -31,11 +31,17 @@ import java.util.UUID
 private val ACTIVE_STATUSES = listOf(BookingStatus.BOOKED.name, BookingStatus.SEATED.name)
 
 sealed interface BookingCancellationResult {
-    data class Cancelled(val record: BookingRecord) : BookingCancellationResult
+    data class Cancelled(
+        val record: BookingRecord,
+    ) : BookingCancellationResult
 
-    data class AlreadyCancelled(val record: BookingRecord) : BookingCancellationResult
+    data class AlreadyCancelled(
+        val record: BookingRecord,
+    ) : BookingCancellationResult
 
-    data class ConflictingStatus(val record: BookingRecord) : BookingCancellationResult
+    data class ConflictingStatus(
+        val record: BookingRecord,
+    ) : BookingCancellationResult
 
     data object NotFound : BookingCancellationResult
 }
@@ -50,9 +56,9 @@ interface PaymentsBookingRepository {
 class BookingRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
-): PaymentsBookingRepository {
-    suspend fun findById(id: UUID): BookingRecord? {
-        return withTxRetry {
+) : PaymentsBookingRepository {
+    suspend fun findById(id: UUID): BookingRecord? =
+        withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 BookingsTable
                     .selectAll()
@@ -62,10 +68,9 @@ class BookingRepository(
                     ?.toBookingRecord()
             }
         }
-    }
 
-    suspend fun findByIdempotencyKey(key: String): BookingRecord? {
-        return withTxRetry {
+    suspend fun findByIdempotencyKey(key: String): BookingRecord? =
+        withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 BookingsTable
                     .selectAll()
@@ -75,7 +80,6 @@ class BookingRepository(
                     ?.toBookingRecord()
             }
         }
-    }
 
     suspend fun existsActiveFor(
         tableId: Long,
@@ -93,8 +97,7 @@ class BookingRepository(
                             (BookingsTable.slotStart eq start) and
                             (BookingsTable.slotEnd eq end) and
                             (BookingsTable.status inList ACTIVE_STATUSES)
-                    }
-                    .empty()
+                    }.empty()
                     .not()
             }
         }
@@ -133,8 +136,7 @@ class BookingRepository(
                                     (BookingsTable.slotStart eq start) and
                                     (BookingsTable.slotEnd eq end) and
                                     (BookingsTable.status inList ACTIVE_STATUSES)
-                            }
-                            .empty()
+                            }.empty()
                             .not()
                     if (activeExists) {
                         BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
@@ -160,8 +162,8 @@ class BookingRepository(
     suspend fun setStatus(
         id: UUID,
         newStatus: BookingStatus,
-    ): BookingCoreResult<BookingRecord> {
-        return try {
+    ): BookingCoreResult<BookingRecord> =
+        try {
             val record =
                 withTxRetry {
                     newSuspendedTransaction(context = Dispatchers.IO, db = db) {
@@ -179,7 +181,6 @@ class BookingRepository(
                 else -> throw ex
             }
         }
-    }
 
     override suspend fun cancel(
         bookingId: UUID,
@@ -216,8 +217,14 @@ class BookingRepository(
                                     ?: return@newSuspendedTransaction BookingCancellationResult.NotFound
                             val refreshedStatus = BookingStatus.valueOf(refreshed[BookingsTable.status])
                             when (refreshedStatus) {
-                                BookingStatus.CANCELLED -> BookingCancellationResult.AlreadyCancelled(refreshed.toBookingRecord())
-                                BookingStatus.BOOKED -> BookingCancellationResult.ConflictingStatus(refreshed.toBookingRecord())
+                                BookingStatus.CANCELLED ->
+                                    BookingCancellationResult.AlreadyCancelled(
+                                        refreshed.toBookingRecord(),
+                                    )
+                                BookingStatus.BOOKED ->
+                                    BookingCancellationResult.ConflictingStatus(
+                                        refreshed.toBookingRecord(),
+                                    )
                                 else -> BookingCancellationResult.ConflictingStatus(refreshed.toBookingRecord())
                             }
                         } else {
@@ -260,8 +267,7 @@ class BookingRepository(
                     (EventsTable.clubId eq tableRow[TablesTable.clubId]) and
                         (EventsTable.startAt eq slotStart) and
                         (EventsTable.endAt eq slotEnd)
-                }
-                .limit(1)
+                }.limit(1)
                 .firstOrNull()
                 ?: throw IllegalStateException("event for slot not found")
         val id = UUID.randomUUID()
@@ -319,8 +325,7 @@ class BookingRepository(
                             (BookingsTable.slotStart eq slotStart) and
                             (BookingsTable.slotEnd eq slotEnd) and
                             (BookingsTable.status inList ACTIVE_STATUSES)
-                    }
-                    .empty()
+                    }.empty()
                     .not()
             if (activeExists) {
                 BookingCoreError.DuplicateActiveBooking
@@ -350,8 +355,8 @@ class BookingRepository(
             ?.toBookingRecord()
     }
 
-    private fun ResultRow.toBookingRecord(): BookingRecord {
-        return BookingRecord(
+    private fun ResultRow.toBookingRecord(): BookingRecord =
+        BookingRecord(
             id = this[BookingsTable.id],
             clubId = this[BookingsTable.clubId],
             tableId = this[BookingsTable.tableId],
@@ -368,7 +373,6 @@ class BookingRepository(
             createdAt = this[BookingsTable.createdAt].toInstant(),
             updatedAt = this[BookingsTable.updatedAt].toInstant(),
         )
-    }
 }
 
 class BookingHoldRepository(
@@ -408,8 +412,7 @@ class BookingHoldRepository(
                                     (BookingsTable.slotStart eq start) and
                                     (BookingsTable.slotEnd eq end) and
                                     (BookingsTable.status inList ACTIVE_STATUSES)
-                            }
-                            .empty()
+                            }.empty()
                             .not()
                     if (existingBooking) {
                         BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
@@ -422,8 +425,7 @@ class BookingHoldRepository(
                                         (BookingHoldsTable.slotStart eq start) and
                                         (BookingHoldsTable.slotEnd eq end) and
                                         (BookingHoldsTable.expiresAt greater now.toOffsetDateTime())
-                                }
-                                .empty()
+                                }.empty()
                                 .not()
                         if (activeExists) {
                             BookingCoreResult.Failure(BookingCoreError.ActiveHoldExists)
@@ -455,8 +457,8 @@ class BookingHoldRepository(
     suspend fun prolongHold(
         id: UUID,
         ttl: java.time.Duration,
-    ): BookingCoreResult<BookingHold> {
-        return try {
+    ): BookingCoreResult<BookingHold> =
+        try {
             withTxRetry {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                     prolongHoldInternal(id, ttl)
@@ -468,10 +470,9 @@ class BookingHoldRepository(
                 else -> throw ex
             }
         }
-    }
 
-    suspend fun consumeHold(id: UUID): BookingCoreResult<BookingHold> {
-        return try {
+    suspend fun consumeHold(id: UUID): BookingCoreResult<BookingHold> =
+        try {
             withTxRetry {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                     consumeHoldInternal(id)
@@ -483,10 +484,9 @@ class BookingHoldRepository(
                 else -> throw ex
             }
         }
-    }
 
-    suspend fun findHoldByIdempotencyKey(idempotencyKey: String): BookingHold? {
-        return withTxRetry {
+    suspend fun findHoldByIdempotencyKey(idempotencyKey: String): BookingHold? =
+        withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 BookingHoldsTable
                     .selectAll()
@@ -496,7 +496,6 @@ class BookingHoldRepository(
                     ?.toBookingHold()
             }
         }
-    }
 
     suspend fun cleanupExpired(now: Instant): Int {
         val cutoff = now.toOffsetDateTime()
@@ -530,8 +529,7 @@ class BookingHoldRepository(
                     (EventsTable.clubId eq tableRow[TablesTable.clubId]) and
                         (EventsTable.startAt eq slotStart) and
                         (EventsTable.endAt eq slotEnd)
-                }
-                .limit(1)
+                }.limit(1)
                 .firstOrNull()
                 ?: throw IllegalStateException("event for hold slot not found")
         val expiresAt = now.plus(ttl).toOffsetDateTime()
@@ -666,12 +664,10 @@ class OutboxRepository(
                     .where {
                         (BookingOutboxTable.status eq OutboxMessageStatus.NEW.name) and
                             (BookingOutboxTable.nextAttemptAt lessEq now)
-                    }
-                    .orderBy(
+                    }.orderBy(
                         BookingOutboxTable.nextAttemptAt to SortOrder.ASC,
                         BookingOutboxTable.id to SortOrder.ASC,
-                    )
-                    .limit(limit)
+                    ).limit(limit)
                     .map { it.toOutboxMessage() }
             }
         }
@@ -694,12 +690,10 @@ class OutboxRepository(
                         (BookingOutboxTable.status eq OutboxMessageStatus.NEW.name) and
                             (BookingOutboxTable.nextAttemptAt lessEq now) and
                             (BookingOutboxTable.topic inList topicList)
-                    }
-                    .orderBy(
+                    }.orderBy(
                         BookingOutboxTable.nextAttemptAt to SortOrder.ASC,
                         BookingOutboxTable.id to SortOrder.ASC,
-                    )
-                    .limit(limit)
+                    ).limit(limit)
                     .map { it.toOutboxMessage() }
             }
         }
@@ -822,17 +816,16 @@ class OutboxRepository(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 BookingOutboxTable
                     .selectAll()
-                    .where{
+                    .where {
                         (BookingOutboxTable.status inList statusList) and
                             (BookingOutboxTable.topic inList topicList)
-                    }
-                    .count()
+                    }.count()
             }
         }
     }
 
-    private fun ResultRow.toOutboxMessage(): OutboxMessage {
-        return OutboxMessage(
+    private fun ResultRow.toOutboxMessage(): OutboxMessage =
+        OutboxMessage(
             id = this[BookingOutboxTable.id],
             topic = this[BookingOutboxTable.topic],
             payload = this[BookingOutboxTable.payload],
@@ -841,14 +834,13 @@ class OutboxRepository(
             nextAttemptAt = this[BookingOutboxTable.nextAttemptAt].toInstant(),
             lastError = this[BookingOutboxTable.lastError],
         )
-    }
 
     private fun ResultRow.toOutboxMessage(
         attempts: Int,
         nextAttempt: Instant,
         reason: String?,
-    ): OutboxMessage {
-        return OutboxMessage(
+    ): OutboxMessage =
+        OutboxMessage(
             id = this[BookingOutboxTable.id],
             topic = this[BookingOutboxTable.topic],
             payload = this[BookingOutboxTable.payload],
@@ -857,7 +849,6 @@ class OutboxRepository(
             nextAttemptAt = nextAttempt,
             lastError = reason,
         )
-    }
 }
 
 class AuditLogRepository(
@@ -890,7 +881,6 @@ class AuditLogRepository(
             }
         }
     }
-
 }
 
 private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

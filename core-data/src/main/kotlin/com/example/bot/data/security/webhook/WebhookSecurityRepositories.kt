@@ -59,18 +59,17 @@ class SuspiciousIpRepository(
         }
     }
 
-    suspend fun listRecent(limit: Int = 50): List<SuspiciousIpRecord> {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+    suspend fun listRecent(limit: Int = 50): List<SuspiciousIpRecord> =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             SuspiciousIpTable
                 .selectAll()
                 .orderBy(SuspiciousIpTable.createdAt to SortOrder.DESC)
                 .limit(limit)
                 .map { it.toRecord() }
         }
-    }
 
-    private fun ResultRow.toRecord(): SuspiciousIpRecord {
-        return SuspiciousIpRecord(
+    private fun ResultRow.toRecord(): SuspiciousIpRecord =
+        SuspiciousIpRecord(
             id = this[SuspiciousIpTable.id],
             ip = this[SuspiciousIpTable.ip],
             userAgent = this[SuspiciousIpTable.userAgent],
@@ -78,11 +77,12 @@ class SuspiciousIpRepository(
             details = this[SuspiciousIpTable.details],
             createdAt = this[SuspiciousIpTable.createdAt].toInstant(),
         )
-    }
 }
 
 sealed interface DedupResult {
-    data class FirstSeen(val updateId: Long) : DedupResult
+    data class FirstSeen(
+        val updateId: Long,
+    ) : DedupResult
 
     data class Duplicate(
         val updateId: Long,
@@ -158,14 +158,13 @@ class WebhookUpdateDedupRepository(
         WebhookUpdateDedupTable.deleteWhere { WebhookUpdateDedupTable.firstSeenAt less expireBefore }
     }
 
-    private fun ResultRow.toRecord(): WebhookUpdateRecord {
-        return WebhookUpdateRecord(
+    private fun ResultRow.toRecord(): WebhookUpdateRecord =
+        WebhookUpdateRecord(
             updateId = this[WebhookUpdateDedupTable.updateId],
             firstSeenAt = this[WebhookUpdateDedupTable.firstSeenAt].toInstant(),
             lastSeenAt = this[WebhookUpdateDedupTable.lastSeenAt].toInstant(),
             duplicateCount = this[WebhookUpdateDedupTable.duplicateCount],
         )
-    }
 }
 
 private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

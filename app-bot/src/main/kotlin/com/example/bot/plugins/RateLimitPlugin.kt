@@ -111,13 +111,13 @@ val RateLimitPlugin =
                     RateLimitMetrics.ipBlocked.incrementAndGet()
                     RateLimitMetrics.lastBlockedRequestId.set(requestId)
                     call.response.header(HttpHeaders.RetryAfter, cfg.retryAfter.seconds.toString())
-                        logger.warn(
-                            "ratelimit.blocked type=ip path={} requestId={} host={}:{}",
-                            path,
-                            safeRequestId,
-                            call.request.host(),
-                            call.request.port(),
-                        )
+                    logger.warn(
+                        "ratelimit.blocked type=ip path={} requestId={} host={}:{}",
+                        path,
+                        safeRequestId,
+                        call.request.host(),
+                        call.request.port(),
+                    )
                     call.respondText("Too Many Requests (IP limit)", status = HttpStatusCode.TooManyRequests)
                     return@onCall
                 }
@@ -150,7 +150,8 @@ val RateLimitPlugin =
 
 private fun clientIp(call: io.ktor.server.application.ApplicationCall): String {
     val forwarded =
-        call.request.header("X-Forwarded-For")
+        call.request
+            .header("X-Forwarded-For")
             ?.split(',')
             ?.firstOrNull()
             ?.trim()
@@ -172,7 +173,10 @@ fun Application.installRateLimitPluginDefaults() {
         app.resolveDouble("RL_SUBJECT_BURST")?.let { subjectBurst = it }
         app.resolveLong("RL_SUBJECT_TTL_SECONDS")?.let { subjectTtl = Duration.ofSeconds(it) }
         app.resolveLong("RL_RETRY_AFTER_SECONDS")?.let { retryAfter = Duration.ofSeconds(it) }
-        app.resolveEnv("RL_SUBJECT_PATH_PREFIXES")?.split(',')?.map { it.trim() }
+        app
+            .resolveEnv("RL_SUBJECT_PATH_PREFIXES")
+            ?.split(',')
+            ?.map { it.trim() }
             ?.filter { it.isNotEmpty() }
             ?.let { subjectPathPrefixes = it }
         ipEnabled = app.resolveFlag("RL_IP_ENABLED", ipEnabled)

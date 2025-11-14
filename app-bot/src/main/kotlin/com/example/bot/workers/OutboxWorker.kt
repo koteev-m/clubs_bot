@@ -27,9 +27,13 @@ interface SendPort {
 sealed interface SendOutcome {
     data object Ok : SendOutcome
 
-    data class RetryableError(val cause: Throwable) : SendOutcome
+    data class RetryableError(
+        val cause: Throwable,
+    ) : SendOutcome
 
-    data class FatalError(val cause: Throwable) : SendOutcome
+    data class FatalError(
+        val cause: Throwable,
+    ) : SendOutcome
 }
 
 class OutboxWorker(

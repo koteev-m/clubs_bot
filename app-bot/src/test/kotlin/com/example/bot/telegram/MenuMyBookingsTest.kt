@@ -32,12 +32,6 @@ import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
-import java.math.BigDecimal
-import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.ZoneOffset
-import java.util.UUID
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -50,240 +44,267 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.math.BigDecimal
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.util.UUID
+import kotlin.time.Duration.Companion.seconds
 
-class MenuMyBookingsTest : StringSpec({
-    val dataSource =
-        JdbcDataSource().apply {
-            setURL("jdbc:h2:mem:my_bookings_${System.nanoTime()};MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1")
-            user = "sa"
-            password = ""
-        }
-    val database = Database.connect(dataSource)
-
-    transaction(database) {
-        SchemaUtils.create(
-            MyBookingsUsersTable,
-            MyBookingsClubsTable,
-            EventsTable,
-            TablesTable,
-            BookingsTable,
-            BookingOutboxTable,
-        )
-    }
-
-    val texts = BotTexts()
-    val keyboards = Keyboards(texts)
-    val registry = SimpleMeterRegistry()
-    val metrics = MyBookingsMetrics(registry)
-    val userRepository = ExposedUserRepository(database)
-    val outboxRepository = OutboxRepository(database)
-    val service = MyBookingsService(database, userRepository, outboxRepository, metrics)
-
-    val availability = mockk<com.example.bot.availability.AvailabilityService>()
-    val bookingService = mockk<com.example.bot.booking.BookingService>()
-    val chatSession = mockk<com.example.bot.telegram.ui.ChatUiSessionStore>(relaxed = true)
-    val clubRepository = mockk<com.example.bot.data.repo.ClubRepository>()
-
-    lateinit var bot: TelegramBot
-    lateinit var handler: MenuCallbacksHandler
-    lateinit var testScope: TestScope
-
-    beforeTest {
-        transaction(database) {
-            BookingOutboxTable.deleteAll()
-            BookingsTable.deleteAll()
-            EventsTable.deleteAll()
-            TablesTable.deleteAll()
-            MyBookingsClubsTable.deleteAll()
-            MyBookingsUsersTable.deleteAll()
-        }
-        registry.clear()
-        bot = mockk(relaxed = true)
-        testScope = TestScope(UnconfinedTestDispatcher())
-        handler =
-            MenuCallbacksHandler(
-                bot = bot,
-                keyboards = keyboards,
-                texts = texts,
-                clubRepository = clubRepository,
-                availability = availability,
-                bookingService = bookingService,
-                chatUiSession = chatSession,
-                uiScope = testScope,
-                myBookingsService = service,
-                myBookingsMetrics = metrics,
-            )
-    }
-
-    "empty list renders fallback" {
-        insertUser(telegramId = 1001L, userName = "guest") // сайд-эффект
-        val messages = captureMessages(bot)
-
-        runHandler(
-            handler,
-            testScope,
-            buildCallback("menu:bookings", chatId = 1L, fromId = 1001L),
-        )
-
-        eventually(1.seconds) { messages shouldHaveSize 1 }
-        val message = messages.single()
-        message.parameters["text"] shouldBe texts.myBookingsEmpty("ru")
-        registry.counter("ui.mybookings.open.total", "source", "telegram").count() shouldBeExactly 1.0
-    }
-
-    "pagination splits bookings by 8" {
-        val telegramId = 2002L
-        val userId = insertUser(telegramId, "pager")
-        val clubId = insertClub(id = 1L, name = "Orion", timezone = "UTC")
-        repeat(10) { index ->
-            val tableId =
-                insertTable(
-                    clubId,
-                    tableNumber = index + 1,
-                    capacity = 4,
-                    deposit = BigDecimal("1000.00"),
+class MenuMyBookingsTest :
+    StringSpec({
+        val dataSource =
+            JdbcDataSource().apply {
+                setURL(
+                    "jdbc:h2:mem:my_bookings_${System.nanoTime()};" +
+                        "MODE=PostgreSQL;" +
+                        "DATABASE_TO_LOWER=TRUE;" +
+                        "DB_CLOSE_DELAY=-1",
                 )
-            val start = Instant.parse("2025-05-${(index + 1).toString().padStart(2, '0')}T18:00:00Z")
-            val end = start.plusSeconds(3_600)
+                user = "sa"
+                password = ""
+            }
+        val database = Database.connect(dataSource)
+
+        transaction(database) {
+            SchemaUtils.create(
+                MyBookingsUsersTable,
+                MyBookingsClubsTable,
+                EventsTable,
+                TablesTable,
+                BookingsTable,
+                BookingOutboxTable,
+            )
+        }
+
+        val texts = BotTexts()
+        val keyboards = Keyboards(texts)
+        val registry = SimpleMeterRegistry()
+        val metrics = MyBookingsMetrics(registry)
+        val userRepository = ExposedUserRepository(database)
+        val outboxRepository = OutboxRepository(database)
+        val service = MyBookingsService(database, userRepository, outboxRepository, metrics)
+
+        val availability = mockk<com.example.bot.availability.AvailabilityService>()
+        val bookingService = mockk<com.example.bot.booking.BookingService>()
+        val chatSession = mockk<com.example.bot.telegram.ui.ChatUiSessionStore>(relaxed = true)
+        val clubRepository = mockk<com.example.bot.data.repo.ClubRepository>()
+
+        lateinit var bot: TelegramBot
+        lateinit var handler: MenuCallbacksHandler
+        lateinit var testScope: TestScope
+
+        beforeTest {
+            transaction(database) {
+                BookingOutboxTable.deleteAll()
+                BookingsTable.deleteAll()
+                EventsTable.deleteAll()
+                TablesTable.deleteAll()
+                MyBookingsClubsTable.deleteAll()
+                MyBookingsUsersTable.deleteAll()
+            }
+            registry.clear()
+            bot = mockk(relaxed = true)
+            testScope = TestScope(UnconfinedTestDispatcher())
+            handler =
+                MenuCallbacksHandler(
+                    bot = bot,
+                    keyboards = keyboards,
+                    texts = texts,
+                    clubRepository = clubRepository,
+                    availability = availability,
+                    bookingService = bookingService,
+                    chatUiSession = chatSession,
+                    uiScope = testScope,
+                    myBookingsService = service,
+                    myBookingsMetrics = metrics,
+                )
+        }
+
+        "empty list renders fallback" {
+            insertUser(telegramId = 1001L, userName = "guest") // сайд-эффект
+            val messages = captureMessages(bot)
+
+            runHandler(
+                handler,
+                testScope,
+                buildCallback("menu:bookings", chatId = 1L, fromId = 1001L),
+            )
+
+            eventually(1.seconds) { messages shouldHaveSize 1 }
+            val message = messages.single()
+            message.parameters["text"] shouldBe texts.myBookingsEmpty("ru")
+            registry.counter("ui.mybookings.open.total", "source", "telegram").count() shouldBeExactly 1.0
+        }
+
+        "pagination splits bookings by 8" {
+            val telegramId = 2002L
+            val userId = insertUser(telegramId, "pager")
+            val clubId = insertClub(id = 1L, name = "Orion", timezone = "UTC")
+            repeat(10) { index ->
+                val tableId =
+                    insertTable(
+                        clubId,
+                        tableNumber = index + 1,
+                        capacity = 4,
+                        deposit = BigDecimal("1000.00"),
+                    )
+                val start = Instant.parse("2025-05-${(index + 1).toString().padStart(2, '0')}T18:00:00Z")
+                val end = start.plusSeconds(3_600)
+                val eventId = insertEvent(clubId, start, end)
+                insertBooking(
+                    id = UUID.randomUUID(),
+                    eventId = eventId,
+                    clubId = clubId,
+                    tableId = tableId,
+                    tableNumber = index + 1,
+                    userId = userId,
+                    slotStart = start,
+                    slotEnd = end,
+                    totalDeposit = BigDecimal("5000.00"),
+                )
+            }
+            val messages = captureMessages(bot)
+
+            runHandler(handler, testScope, buildCallback("menu:bookings", chatId = 10L, fromId = telegramId))
+            eventually(1.seconds) { messages.shouldHaveSize(1) }
+            val firstPageText = messages.last().parameters["text"] as String
+            firstPageText.lines().count { it.startsWith("#") } shouldBe 8
+
+            runHandler(handler, testScope, buildCallback("bk:list:2", chatId = 10L, fromId = telegramId))
+            eventually(1.seconds) { messages.shouldHaveSize(2) }
+            val secondPage = messages.last().parameters["text"] as String
+            secondPage.lines().count { it.startsWith("#") } shouldBe 2
+        }
+
+        "cancel marks booking and enqueues outbox" {
+            val telegramId = 3003L
+            val userId = insertUser(telegramId, "canceller")
+            val clubId = insertClub(id = 5L, name = "Luna", timezone = "UTC", adminChat = 555L)
+            val tableId = insertTable(clubId, tableNumber = 12, capacity = 6, deposit = BigDecimal("2000.00"))
+            val start = Instant.parse("2025-06-15T20:00:00Z")
+            val end = start.plusSeconds(7_200)
             val eventId = insertEvent(clubId, start, end)
+            val bookingId = UUID.randomUUID()
             insertBooking(
-                id = UUID.randomUUID(),
+                id = bookingId,
                 eventId = eventId,
                 clubId = clubId,
                 tableId = tableId,
-                tableNumber = index + 1,
+                tableNumber = 12,
                 userId = userId,
                 slotStart = start,
                 slotEnd = end,
-                totalDeposit = BigDecimal("5000.00"),
+                totalDeposit = BigDecimal("8000.00"),
             )
-        }
-        val messages = captureMessages(bot)
+            val messages = captureMessages(bot)
 
-        runHandler(handler, testScope, buildCallback("menu:bookings", chatId = 10L, fromId = telegramId))
-        eventually(1.seconds) { messages.shouldHaveSize(1) }
-        val firstPageText = messages.last().parameters["text"] as String
-        firstPageText.lines().count { it.startsWith("#") } shouldBe 8
+            runHandler(
+                handler,
+                testScope,
+                buildCallback("bk:cancel:1:$bookingId", chatId = 77L, fromId = telegramId),
+            )
 
-        runHandler(handler, testScope, buildCallback("bk:list:2", chatId = 10L, fromId = telegramId))
-        eventually(1.seconds) { messages.shouldHaveSize(2) }
-        val secondPage = messages.last().parameters["text"] as String
-        secondPage.lines().count { it.startsWith("#") } shouldBe 2
-    }
+            eventually(2.seconds) { messages.shouldHaveSize(2) }
+            val resultText = messages.first().parameters["text"] as String
+            val expectedShortId =
+                bookingId
+                    .toString()
+                    .replace("-", "")
+                    .take(6)
+                    .uppercase()
+            resultText shouldBe texts.myBookingsCancelOk("ru", expectedShortId)
 
-    "cancel marks booking and enqueues outbox" {
-        val telegramId = 3003L
-        val userId = insertUser(telegramId, "canceller")
-        val clubId = insertClub(id = 5L, name = "Luna", timezone = "UTC", adminChat = 555L)
-        val tableId = insertTable(clubId, tableNumber = 12, capacity = 6, deposit = BigDecimal("2000.00"))
-        val start = Instant.parse("2025-06-15T20:00:00Z")
-        val end = start.plusSeconds(7_200)
-        val eventId = insertEvent(clubId, start, end)
-        val bookingId = UUID.randomUUID()
-        insertBooking(
-            id = bookingId,
-            eventId = eventId,
-            clubId = clubId,
-            tableId = tableId,
-            tableNumber = 12,
-            userId = userId,
-            slotStart = start,
-            slotEnd = end,
-            totalDeposit = BigDecimal("8000.00"),
-        )
-        val messages = captureMessages(bot)
-
-        runHandler(
-            handler,
-            testScope,
-            buildCallback("bk:cancel:1:$bookingId", chatId = 77L, fromId = telegramId),
-        )
-
-        eventually(2.seconds) { messages.shouldHaveSize(2) }
-        val resultText = messages.first().parameters["text"] as String
-        val expectedShortId = bookingId.toString().replace("-", "").take(6).uppercase()
-        resultText shouldBe texts.myBookingsCancelOk("ru", expectedShortId)
-
-        transaction(database) {
-            val status =
-                BookingsTable
-                    .selectAll()
-                    .where { BookingsTable.id eq bookingId }
-                    .single()[BookingsTable.status]
-            status shouldBe BookingStatus.CANCELLED.name
-
-            BookingOutboxTable
-                .selectAll()
-                .toList() shouldHaveSize 1
-        }
-        registry.counter("ui.mybookings.cancel.requested", "source", "telegram", "club_id", clubId.toString())
-            .count() shouldBeExactly 1.0
-        registry.counter("booking.cancel.ok", "source", "telegram", "club_id", clubId.toString())
-            .count() shouldBeExactly 1.0
-        registry.counter("booking.cancel.already", "source", "telegram", "club_id", clubId.toString())
-            .count() shouldBeExactly 0.0
-    }
-
-    "repeat cancel is idempotent" {
-        val telegramId = 4004L
-        val userId = insertUser(telegramId, "repeat")
-        val clubId = insertClub(id = 7L, name = "Nova", timezone = "UTC", adminChat = 777L)
-        val tableId = insertTable(clubId, 9, 4, BigDecimal("1500.00"))
-        val start = Instant.parse("2025-07-01T21:00:00Z")
-        val end = start.plusSeconds(5_400)
-        val eventId = insertEvent(clubId, start, end)
-        val bookingId = UUID.randomUUID()
-        insertBooking(
-            id = bookingId,
-            eventId = eventId,
-            clubId = clubId,
-            tableId = tableId,
-            tableNumber = 9,
-            userId = userId,
-            slotStart = start,
-            slotEnd = end,
-            totalDeposit = BigDecimal("6000.00"),
-        )
-        val messages = captureMessages(bot)
-
-        runHandler(
-            handler,
-            testScope,
-            buildCallback("bk:cancel:1:$bookingId", chatId = 88L, fromId = telegramId),
-        )
-        eventually(2.seconds) {
             transaction(database) {
-                val current =
+                val status =
                     BookingsTable
                         .selectAll()
                         .where { BookingsTable.id eq bookingId }
                         .single()[BookingsTable.status]
-                current shouldBe BookingStatus.CANCELLED.name
+                status shouldBe BookingStatus.CANCELLED.name
+
+                BookingOutboxTable
+                    .selectAll()
+                    .toList() shouldHaveSize 1
             }
+            registry
+                .counter("ui.mybookings.cancel.requested", "source", "telegram", "club_id", clubId.toString())
+                .count() shouldBeExactly 1.0
+            registry
+                .counter("booking.cancel.ok", "source", "telegram", "club_id", clubId.toString())
+                .count() shouldBeExactly 1.0
+            registry
+                .counter("booking.cancel.already", "source", "telegram", "club_id", clubId.toString())
+                .count() shouldBeExactly 0.0
         }
 
-        runHandler(
-            handler,
-            testScope,
-            buildCallback("bk:cancel:1:$bookingId", chatId = 88L, fromId = telegramId),
-        )
+        "repeat cancel is idempotent" {
+            val telegramId = 4004L
+            val userId = insertUser(telegramId, "repeat")
+            val clubId = insertClub(id = 7L, name = "Nova", timezone = "UTC", adminChat = 777L)
+            val tableId = insertTable(clubId, 9, 4, BigDecimal("1500.00"))
+            val start = Instant.parse("2025-07-01T21:00:00Z")
+            val end = start.plusSeconds(5_400)
+            val eventId = insertEvent(clubId, start, end)
+            val bookingId = UUID.randomUUID()
+            insertBooking(
+                id = bookingId,
+                eventId = eventId,
+                clubId = clubId,
+                tableId = tableId,
+                tableNumber = 9,
+                userId = userId,
+                slotStart = start,
+                slotEnd = end,
+                totalDeposit = BigDecimal("6000.00"),
+            )
+            val messages = captureMessages(bot)
 
-        eventually(2.seconds) { messages.shouldHaveSize(4) }
-        val payloads = messages.map { it.parameters["text"] as String }
-        payloads shouldContain texts.myBookingsCancelAlready("ru")
-        val shortId = bookingId.toString().replace("-", "").take(6).uppercase()
-        payloads.any { it.contains(shortId) && it.startsWith("Бронь") } shouldBe true
-        payloads.count { it == texts.myBookingsEmpty("ru") } shouldBe 2
+            runHandler(
+                handler,
+                testScope,
+                buildCallback("bk:cancel:1:$bookingId", chatId = 88L, fromId = telegramId),
+            )
+            eventually(2.seconds) {
+                transaction(database) {
+                    val current =
+                        BookingsTable
+                            .selectAll()
+                            .where { BookingsTable.id eq bookingId }
+                            .single()[BookingsTable.status]
+                    current shouldBe BookingStatus.CANCELLED.name
+                }
+            }
 
-        transaction(database) {
-            BookingOutboxTable.selectAll().toList() shouldHaveSize 1
+            runHandler(
+                handler,
+                testScope,
+                buildCallback("bk:cancel:1:$bookingId", chatId = 88L, fromId = telegramId),
+            )
+
+            eventually(2.seconds) { messages.shouldHaveSize(4) }
+            val payloads = messages.map { it.parameters["text"] as String }
+            payloads shouldContain texts.myBookingsCancelAlready("ru")
+            val shortId =
+                bookingId
+                    .toString()
+                    .replace("-", "")
+                    .take(6)
+                    .uppercase()
+            payloads.any { it.contains(shortId) && it.startsWith("Бронь") } shouldBe true
+            payloads.count { it == texts.myBookingsEmpty("ru") } shouldBe 2
+
+            transaction(database) {
+                BookingOutboxTable.selectAll().toList() shouldHaveSize 1
+            }
+            registry
+                .counter("booking.cancel.ok", "source", "telegram", "club_id", clubId.toString())
+                .count() shouldBeExactly 1.0
+            registry
+                .counter("booking.cancel.already", "source", "telegram", "club_id", clubId.toString())
+                .count() shouldBeExactly 1.0
         }
-        registry.counter("booking.cancel.ok", "source", "telegram", "club_id", clubId.toString())
-            .count() shouldBeExactly 1.0
-        registry.counter("booking.cancel.already", "source", "telegram", "club_id", clubId.toString())
-            .count() shouldBeExactly 1.0
-    }
-})
+    })
 
 private fun captureMessages(bot: TelegramBot): MutableList<SendMessage> {
     val sent = mutableListOf<SendMessage>()
@@ -341,10 +362,11 @@ private fun insertUser(
     userName: String,
 ): Long =
     transaction {
-        MyBookingsUsersTable.insertAndGetId { row ->
-            row[telegramUserId] = telegramId
-            row[username] = userName
-        }.value
+        MyBookingsUsersTable
+            .insertAndGetId { row ->
+                row[telegramUserId] = telegramId
+                row[username] = userName
+            }.value
     }
 
 private fun insertClub(

@@ -1,12 +1,12 @@
 package com.example.bot.routes
 
+import com.example.bot.data.security.Role
 import com.example.bot.di.PaymentsService
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.envBool
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
-import com.example.bot.data.security.Role
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
@@ -27,11 +27,11 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import io.micrometer.tracing.Tracer
 import kotlinx.serialization.Serializable
 import mu.KotlinLogging
 import org.koin.core.Koin
 import org.koin.ktor.ext.getKoin
-import io.micrometer.tracing.Tracer
 import java.util.UUID
 
 private val logger = KotlinLogging.logger("PaymentsCancelRefundRoutes")
@@ -39,7 +39,9 @@ private val logger = KotlinLogging.logger("PaymentsCancelRefundRoutes")
 private typealias RbacRouteWrapper = io.ktor.server.routing.Route.() -> Unit
 
 @Serializable
-private data class CancelRequest(val reason: String? = null)
+private data class CancelRequest(
+    val reason: String? = null,
+)
 
 @Serializable
 data class CancelResponse(
@@ -50,7 +52,9 @@ data class CancelResponse(
 )
 
 @Serializable
-private data class RefundRequest(val amountMinor: Long? = null)
+private data class RefundRequest(
+    val amountMinor: Long? = null,
+)
 
 @Serializable
 data class RefundResponse(
@@ -77,7 +81,6 @@ fun Application.paymentsCancelRefundRoutes(miniAppBotTokenProvider: () -> String
         // Корневой узел оставляем без InitDataAuthPlugin,
         // чтобы избежать DuplicatePluginException
         route("/api/clubs/{clubId}/bookings") {
-
             val registerHandlers: RbacRouteWrapper =
                 if (rbacAvailable) {
                     {
@@ -156,7 +159,11 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     PaymentsMetrics
                         .timer(metricsProvider, Path.Cancel, Source.MiniApp)
                         .record(Result.Validation)
-                    logger.warn { "[payments] cancel result=validation club=$clubId booking=${maskBookingId(bookingId)} requestId=$callId" }
+                    logger.warn {
+                        "[payments] cancel result=validation club=$clubId booking=${maskBookingId(
+                            bookingId,
+                        )} requestId=$callId"
+                    }
                     call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Idempotency-Key required"))
                     return@post
                 }
@@ -169,9 +176,15 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                         .getOrElse { throwable ->
                             timer.record(Result.Validation)
                             logger.warn(throwable) {
-                                "[payments] cancel result=validation club=$clubId booking=$bookingLabel requestId=$callId"
+                                "[payments] cancel result=validation " +
+                                    "club=$clubId " +
+                                    "booking=$bookingLabel " +
+                                    "requestId=$callId"
                             }
-                            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_payload"))
+                            call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf("error" to "invalid_payload"),
+                            )
                             return@post
                         }
 
@@ -197,7 +210,11 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                         timer.record(Result.Ok)
                         setResult(Result.Ok)
                         logger.info {
-                            "[payments] cancel result=ok club=$clubId booking=$bookingLabel requestId=$callId idempotent=${result.idempotent}"
+                            "[payments] cancel result=ok " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId " +
+                                "idempotent=${result.idempotent}"
                         }
                         call.respond(
                             CancelResponse(
@@ -211,23 +228,50 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                         timer.record(Result.Validation)
                         setResult(Result.Validation)
                         logger.warn(validation) {
-                            "[payments] cancel result=validation club=$clubId booking=$bookingLabel requestId=$callId"
+                            "[payments] cancel " +
+                                "result=validation " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId"
                         }
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to validation.message))
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf(
+                                "error" to validation.message,
+                            ),
+                        )
                     } catch (conflict: PaymentsService.ConflictException) {
                         timer.record(Result.Conflict)
                         setResult(Result.Conflict)
                         logger.warn(conflict) {
-                            "[payments] cancel result=conflict club=$clubId booking=$bookingLabel requestId=$callId"
+                            "[payments] cancel " +
+                                "result=conflict " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId"
                         }
-                        call.respond(HttpStatusCode.Conflict, mapOf("error" to conflict.message))
+                        call.respond(
+                            HttpStatusCode.Conflict,
+                            mapOf(
+                                "error" to conflict.message,
+                            ),
+                        )
                     } catch (unexpected: Throwable) {
                         timer.record(Result.Unexpected)
                         setResult(Result.Unexpected)
                         logger.error(unexpected) {
-                            "[payments] cancel result=unexpected club=$clubId booking=$bookingLabel requestId=$callId"
+                            "[payments] cancel " +
+                                "result=unexpected " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId"
                         }
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "internal"))
+                        call.respond(
+                            HttpStatusCode.InternalServerError,
+                            mapOf(
+                                "error" to "internal",
+                            ),
+                        )
                     }
                 }
             }
@@ -246,8 +290,19 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     PaymentsMetrics
                         .timer(metricsProvider, Path.Refund, Source.MiniApp)
                         .record(Result.Validation)
-                    logger.warn { "[payments] refund result=validation club=unknown booking=unknown requestId=$callId" }
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_club"))
+                    logger.warn {
+                        "[payments] refund " +
+                            "result=validation " +
+                            "club=unknown " +
+                            "booking=unknown " +
+                            "requestId=$callId"
+                    }
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        mapOf(
+                            "error" to "invalid_club",
+                        ),
+                    )
                     return@post
                 }
 
@@ -257,8 +312,19 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     PaymentsMetrics
                         .timer(metricsProvider, Path.Refund, Source.MiniApp)
                         .record(Result.Validation)
-                    logger.warn { "[payments] refund result=validation club=$clubId booking=unknown requestId=$callId" }
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_booking"))
+                    logger.warn {
+                        "[payments] refund " +
+                            "result=validation " +
+                            "club=$clubId " +
+                            "booking=unknown " +
+                            "requestId=$callId"
+                    }
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        mapOf(
+                            "error" to "invalid_booking",
+                        ),
+                    )
                     return@post
                 }
 
@@ -267,8 +333,20 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     PaymentsMetrics
                         .timer(metricsProvider, Path.Refund, Source.MiniApp)
                         .record(Result.Validation)
-                    logger.warn { "[payments] refund result=validation club=$clubId booking=${maskBookingId(bookingId)} requestId=$callId" }
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Idempotency-Key required"))
+
+                    logger.warn {
+                        "[payments] refund " +
+                            "result=validation " +
+                            "club=$clubId " +
+                            "booking=${maskBookingId(bookingId)} " +
+                            "requestId=$callId"
+                    }
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        mapOf(
+                            "error" to "Idempotency-Key required",
+                        ),
+                    )
                     return@post
                 }
 
@@ -280,9 +358,18 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                         .getOrElse { throwable ->
                             timer.record(Result.Validation)
                             logger.warn(throwable) {
-                                "[payments] refund result=validation club=$clubId booking=$bookingLabel requestId=$callId"
+                                "[payments] refund " +
+                                    "result=validation " +
+                                    "club=$clubId " +
+                                    "booking=$bookingLabel " +
+                                    "requestId=$callId"
                             }
-                            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_payload"))
+                            call.respond(
+                                HttpStatusCode.BadRequest,
+                                mapOf(
+                                    "error" to "invalid_payload",
+                                ),
+                            )
                             return@post
                         }
 
@@ -308,7 +395,11 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                         timer.record(Result.Ok)
                         setResult(Result.Ok)
                         logger.info {
-                            "[payments] refund result=ok club=$clubId booking=$bookingLabel requestId=$callId idempotent=${result.idempotent}"
+                            "[payments] refund result=ok " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId " +
+                                "idempotent=${result.idempotent}"
                         }
                         call.respond(
                             RefundResponse(
@@ -322,30 +413,66 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                         timer.record(Result.Validation)
                         setResult(Result.Validation)
                         logger.warn(validation) {
-                            "[payments] refund result=validation club=$clubId booking=$bookingLabel requestId=$callId"
+                            "[payments] refund " +
+                                "result=validation " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId"
                         }
-                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to validation.message))
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf(
+                                "error" to validation.message,
+                            ),
+                        )
                     } catch (conflict: PaymentsService.ConflictException) {
                         timer.record(Result.Conflict)
                         setResult(Result.Conflict)
                         logger.warn(conflict) {
-                            "[payments] refund result=conflict club=$clubId booking=$bookingLabel requestId=$callId"
+                            "[payments] refund " +
+                                "result=conflict " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId"
                         }
-                        call.respond(HttpStatusCode.Conflict, mapOf("error" to conflict.message))
+                        call.respond(
+                            HttpStatusCode.Conflict,
+                            mapOf(
+                                "error" to conflict.message,
+                            ),
+                        )
                     } catch (unprocessable: PaymentsService.UnprocessableException) {
                         timer.record(Result.Unprocessable)
                         setResult(Result.Unprocessable)
                         logger.warn(unprocessable) {
-                            "[payments] refund result=unprocessable club=$clubId booking=$bookingLabel requestId=$callId"
+                            "[payments] refund " +
+                                "result=unprocessable " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId"
                         }
-                        call.respond(HttpStatusCode.UnprocessableEntity, mapOf("error" to unprocessable.message))
+                        call.respond(
+                            HttpStatusCode.UnprocessableEntity,
+                            mapOf(
+                                "error" to unprocessable.message,
+                            ),
+                        )
                     } catch (unexpected: Throwable) {
                         timer.record(Result.Unexpected)
                         setResult(Result.Unexpected)
                         logger.error(unexpected) {
-                            "[payments] refund result=unexpected club=$clubId booking=$bookingLabel requestId=$callId"
+                            "[payments] refund " +
+                                "result=unexpected " +
+                                "club=$clubId " +
+                                "booking=$bookingLabel " +
+                                "requestId=$callId"
                         }
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "internal"))
+                        call.respond(
+                            HttpStatusCode.InternalServerError,
+                            mapOf(
+                                "error" to "internal",
+                            ),
+                        )
                     }
                 }
             }

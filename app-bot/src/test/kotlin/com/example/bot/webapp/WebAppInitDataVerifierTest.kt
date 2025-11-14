@@ -36,13 +36,12 @@ private fun hexLower(bytes: ByteArray): String {
     return builder.toString()
 }
 
-private fun buildDataCheckString(params: Map<String, String>): String {
-    return params
+private fun buildDataCheckString(params: Map<String, String>): String =
+    params
         .filterKeys { it != "hash" }
         .toSortedMap()
         .entries
         .joinToString("\n") { (key, value) -> "$key=$value" }
-}
 
 private fun buildInitData(
     botToken: String,

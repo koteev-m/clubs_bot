@@ -17,40 +17,39 @@ data class NotifySegment(
     val createdAt: OffsetDateTime,
 )
 
-class NotifySegmentsRepository(private val db: Database) {
+class NotifySegmentsRepository(
+    private val db: Database,
+) {
     suspend fun insert(
         title: String,
         definition: JsonElement,
         createdBy: Long,
-    ): Long {
-        return newSuspendedTransaction(db = db) {
+    ): Long =
+        newSuspendedTransaction(db = db) {
             NotifySegments.insert {
                 it[NotifySegments.title] = title
                 it[NotifySegments.definition] = definition
                 it[NotifySegments.createdBy] = createdBy
             }[NotifySegments.id]
         }
-    }
 
-    suspend fun find(id: Long): NotifySegment? {
-        return newSuspendedTransaction(db = db) {
+    suspend fun find(id: Long): NotifySegment? =
+        newSuspendedTransaction(db = db) {
             NotifySegments
                 .selectAll()
                 .where { NotifySegments.id eq id }
                 .map { toSegment(it) }
                 .singleOrNull()
         }
-    }
 
-    private fun toSegment(row: ResultRow): NotifySegment {
-        return NotifySegment(
+    private fun toSegment(row: ResultRow): NotifySegment =
+        NotifySegment(
             id = row[NotifySegments.id],
             title = row[NotifySegments.title],
             definition = row[NotifySegments.definition],
             createdBy = row[NotifySegments.createdBy],
             createdAt = row[NotifySegments.createdAt],
         )
-    }
 }
 
 data class NotifyCampaign(
@@ -68,9 +67,11 @@ data class NotifyCampaign(
     val updatedAt: OffsetDateTime,
 )
 
-class NotifyCampaignsRepository(private val db: Database) {
-    suspend fun insert(campaign: NotifyCampaign): Long {
-        return newSuspendedTransaction(db = db) {
+class NotifyCampaignsRepository(
+    private val db: Database,
+) {
+    suspend fun insert(campaign: NotifyCampaign): Long =
+        newSuspendedTransaction(db = db) {
             NotifyCampaigns.insert {
                 it[NotifyCampaigns.title] = campaign.title
                 it[NotifyCampaigns.status] = campaign.status
@@ -83,20 +84,18 @@ class NotifyCampaignsRepository(private val db: Database) {
                 it[NotifyCampaigns.createdBy] = campaign.createdBy
             }[NotifyCampaigns.id]
         }
-    }
 
-    suspend fun find(id: Long): NotifyCampaign? {
-        return newSuspendedTransaction(db = db) {
+    suspend fun find(id: Long): NotifyCampaign? =
+        newSuspendedTransaction(db = db) {
             NotifyCampaigns
                 .selectAll()
                 .where { NotifyCampaigns.id eq id }
                 .map { toCampaign(it) }
                 .singleOrNull()
         }
-    }
 
-    private fun toCampaign(row: ResultRow): NotifyCampaign {
-        return NotifyCampaign(
+    private fun toCampaign(row: ResultRow): NotifyCampaign =
+        NotifyCampaign(
             id = row[NotifyCampaigns.id],
             title = row[NotifyCampaigns.title],
             status = row[NotifyCampaigns.status],
@@ -110,7 +109,6 @@ class NotifyCampaignsRepository(private val db: Database) {
             createdAt = row[NotifyCampaigns.createdAt],
             updatedAt = row[NotifyCampaigns.updatedAt],
         )
-    }
 }
 
 data class UserSubscription(
@@ -121,9 +119,11 @@ data class UserSubscription(
     val lang: String,
 )
 
-class UserSubscriptionsRepository(private val db: Database) {
-    suspend fun insert(sub: UserSubscription) {
-        return newSuspendedTransaction(db = db) {
+class UserSubscriptionsRepository(
+    private val db: Database,
+) {
+    suspend fun insert(sub: UserSubscription) =
+        newSuspendedTransaction(db = db) {
             UserSubscriptions.insert {
                 it[UserSubscriptions.userId] = sub.userId
                 it[UserSubscriptions.clubId] = sub.clubId
@@ -132,35 +132,31 @@ class UserSubscriptionsRepository(private val db: Database) {
                 it[UserSubscriptions.lang] = sub.lang
             }
         }
-    }
 
     suspend fun find(
         userId: Long,
         clubId: Long?,
         topic: String,
-    ): UserSubscription? {
-        return newSuspendedTransaction(db = db) {
+    ): UserSubscription? =
+        newSuspendedTransaction(db = db) {
             UserSubscriptions
                 .selectAll()
                 .where {
                     (UserSubscriptions.userId eq userId) and
                         (UserSubscriptions.topic eq topic) and
                         (clubId?.let { UserSubscriptions.clubId eq it } ?: UserSubscriptions.clubId.isNull())
-                }
-                .map { toSubscription(it) }
+                }.map { toSubscription(it) }
                 .singleOrNull()
         }
-    }
 
-    private fun toSubscription(row: ResultRow): UserSubscription {
-        return UserSubscription(
+    private fun toSubscription(row: ResultRow): UserSubscription =
+        UserSubscription(
             userId = row[UserSubscriptions.userId],
             clubId = row[UserSubscriptions.clubId],
             topic = row[UserSubscriptions.topic],
             optIn = row[UserSubscriptions.optIn],
             lang = row[UserSubscriptions.lang],
         )
-    }
 }
 
 data class OutboxRecord(
@@ -175,7 +171,9 @@ data class OutboxRecord(
     val createdAt: OffsetDateTime,
 )
 
-class NotificationsOutboxRepository(private val db: Database) {
+class NotificationsOutboxRepository(
+    private val db: Database,
+) {
     suspend fun enqueue(
         kind: String,
         payload: JsonElement,
@@ -189,8 +187,8 @@ class NotificationsOutboxRepository(private val db: Database) {
         dedupKey: String? = null,
         campaignId: Long? = null,
         language: String? = null,
-    ): Long {
-        return newSuspendedTransaction(db = db) {
+    ): Long =
+        newSuspendedTransaction(db = db) {
             NotificationsOutboxTable.insert { row ->
                 row[NotificationsOutboxTable.clubId] = clubId
                 row[NotificationsOutboxTable.targetChatId] = targetChatId
@@ -206,10 +204,9 @@ class NotificationsOutboxRepository(private val db: Database) {
                 row[NotificationsOutboxTable.language] = language
             }[NotificationsOutboxTable.id]
         }
-    }
 
-    suspend fun insert(record: OutboxRecord) {
-        return newSuspendedTransaction(db = db) {
+    suspend fun insert(record: OutboxRecord) =
+        newSuspendedTransaction(db = db) {
             NotificationsOutboxTable.insert {
                 it[NotificationsOutboxTable.recipientType] = record.recipientType
                 it[NotificationsOutboxTable.recipientId] = record.recipientId
@@ -221,20 +218,18 @@ class NotificationsOutboxRepository(private val db: Database) {
                 it[NotificationsOutboxTable.status] = OutboxStatus.NEW.name
             }
         }
-    }
 
-    suspend fun find(id: Long): OutboxRecord? {
-        return newSuspendedTransaction(db = db) {
+    suspend fun find(id: Long): OutboxRecord? =
+        newSuspendedTransaction(db = db) {
             NotificationsOutboxTable
                 .selectAll()
                 .where { NotificationsOutboxTable.id eq id }
                 .map { toOutbox(it) }
                 .singleOrNull()
         }
-    }
 
-    private fun toOutbox(row: ResultRow): OutboxRecord {
-        return OutboxRecord(
+    private fun toOutbox(row: ResultRow): OutboxRecord =
+        OutboxRecord(
             id = row[NotificationsOutboxTable.id],
             recipientType = row[NotificationsOutboxTable.recipientType],
             recipientId = row[NotificationsOutboxTable.recipientId],
@@ -245,5 +240,4 @@ class NotificationsOutboxRepository(private val db: Database) {
             payload = row[NotificationsOutboxTable.payload],
             createdAt = row[NotificationsOutboxTable.createdAt],
         )
-    }
 }

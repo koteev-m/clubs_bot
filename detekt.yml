@@ -26,6 +26,12 @@ naming:
     active: false
 
 complexity:
+  TooManyFunctions:
+    active: true
+    thresholdInClasses: 15
+    thresholdInObjects: 12
+    thresholdInFiles: 15
+    ignorePrivate: true
   LongMethod:
     active: false
   CyclomaticComplexMethod:

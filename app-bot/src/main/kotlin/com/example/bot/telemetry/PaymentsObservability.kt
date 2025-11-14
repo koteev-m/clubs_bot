@@ -23,7 +23,10 @@ internal object PaymentsObservability {
         debugOverride.set(null)
     }
 
-    private fun readFlag(name: String, default: Boolean): Boolean {
+    private fun readFlag(
+        name: String,
+        default: Boolean,
+    ): Boolean {
         val env = System.getenv(name)?.toBooleanStrictOrNull()
         return env ?: default
     }

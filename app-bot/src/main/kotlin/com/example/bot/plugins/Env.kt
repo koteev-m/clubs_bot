@@ -7,7 +7,11 @@ fun Application.envBool(
     default: Boolean,
 ): Boolean {
     val envValue = System.getenv(name)?.toBooleanStrictOrNull()
-    val configValue = environment.config.propertyOrNull("app.$name")?.getString()?.toBooleanStrictOrNull()
+    val configValue =
+        environment.config
+            .propertyOrNull("app.$name")
+            ?.getString()
+            ?.toBooleanStrictOrNull()
     return envValue ?: configValue ?: default
 }
 

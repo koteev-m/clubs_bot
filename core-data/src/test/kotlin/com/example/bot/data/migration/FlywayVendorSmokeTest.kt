@@ -73,7 +73,8 @@ class FlywayVendorSmokeTest {
         vendor: String,
     ) {
         val flyway =
-            Flyway.configure()
+            Flyway
+                .configure()
                 .dataSource(jdbcUrl, user, password)
                 .locations("classpath:db/migration/common", "classpath:db/migration/$vendor")
                 .cleanDisabled(false)
@@ -101,16 +102,17 @@ class FlywayVendorSmokeTest {
 
     private fun assertUuidDefault(connection: Connection) {
         val key = "smoke-" + UUID.randomUUID()
-        connection.prepareStatement(
-            "INSERT INTO payments (provider, currency, amount, status, idempotency_key) VALUES (?, ?, ?, ?, ?)",
-        ).use { statement ->
-            statement.setString(1, "stripe")
-            statement.setString(2, "USD")
-            statement.setBigDecimal(3, BigDecimal("10.00"))
-            statement.setString(4, "INITIATED")
-            statement.setString(5, key)
-            statement.executeUpdate()
-        }
+        connection
+            .prepareStatement(
+                "INSERT INTO payments (provider, currency, amount, status, idempotency_key) VALUES (?, ?, ?, ?, ?)",
+            ).use { statement ->
+                statement.setString(1, "stripe")
+                statement.setString(2, "USD")
+                statement.setBigDecimal(3, BigDecimal("10.00"))
+                statement.setString(4, "INITIATED")
+                statement.setString(5, key)
+                statement.executeUpdate()
+            }
 
         connection.prepareStatement("SELECT id FROM payments WHERE idempotency_key = ?").use { statement ->
             statement.setString(1, key)

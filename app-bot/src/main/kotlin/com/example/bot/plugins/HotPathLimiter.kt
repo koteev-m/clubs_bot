@@ -11,11 +11,11 @@ import io.ktor.server.request.path
 import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.server.response.header
 import io.ktor.server.response.respondText
+import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import org.slf4j.LoggerFactory
 
 /**
  * Конфигурация плагина лимитирования «горячих» путей.
@@ -30,7 +30,9 @@ class HotPathLimiterConfig {
      * Максимум параллельных обработок для каждого совпадающего пути.
      */
     var maxConcurrent: Int =
-        Runtime.getRuntime().availableProcessors()
+        Runtime
+            .getRuntime()
+            .availableProcessors()
             .coerceAtLeast(BotLimits.RateLimit.HOT_PATH_MIN_CONFIG_PARALLELISM)
 
     /**
@@ -111,7 +113,8 @@ fun Application.installHotPathLimiterDefaults() {
     install(HotPathLimiter) {
         pathPrefixes = defaults
         maxConcurrent =
-            app.resolveInt("HOT_PATH_MAX_CONCURRENT")
+            app
+                .resolveInt("HOT_PATH_MAX_CONCURRENT")
                 ?.coerceAtLeast(1)
                 ?: maxOf(2, Runtime.getRuntime().availableProcessors())
         retryAfter =

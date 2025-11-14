@@ -7,9 +7,10 @@ fun interface EnvValueProvider {
     fun get(name: String): String?
 
     companion object {
-        val system = EnvValueProvider { name ->
-            System.getenv(name) ?: System.getProperty(name)
-        }
+        val system =
+            EnvValueProvider { name ->
+                System.getenv(name) ?: System.getProperty(name)
+            }
     }
 }
 

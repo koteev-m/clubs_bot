@@ -19,40 +19,48 @@ class NotifySenderSendPort(
     private val sender: NotifySender,
     private val metrics: NotifyAdapterMetrics? = null,
 ) : SendPort {
-
-    override suspend fun send(topic: String, payload: JsonObject): SendOutcome {
+    override suspend fun send(
+        topic: String,
+        payload: JsonObject,
+    ): SendOutcome {
         metrics?.incAttempts()
 
         val chatId = payload["chatId"]?.jsonPrimitive?.longOrNull
-        if (chatId == null) {
-            metrics?.incPermanent()
-            logger.debug("Skipping notify send: missing chatId for topic {}", topic)
-            return SendOutcome.Ok
-        }
-
         val text = payload["text"]?.jsonPrimitive?.contentOrNull
         val dedupKey = payload["dedup"]?.jsonPrimitive?.contentOrNull
 
-        if (text == null) {
+        var result: SendResult? = null
+
+        // Валидации входных данных без ранних return
+        if (chatId == null) {
             metrics?.incPermanent()
-            logger.debug("Skipping notify send: unsupported payload without text for topic {}", topic)
-            return SendOutcome.Ok
+            logger.debug("Skipping notify send: missing chatId for topic {}", topic)
+        } else if (text == null) {
+            metrics?.incPermanent()
+            logger.debug(
+                "Skipping notify send: unsupported payload without text for topic {}",
+                topic,
+            )
+        } else {
+            // Пытаемся отправить, ошибка не приводит к return
+            result =
+                try {
+                    sender.sendMessage(chatId, text, dedupKey = dedupKey)
+                } catch (t: Throwable) {
+                    metrics?.incRetryable()
+                    logger.debug("Notify sender threw for topic {}", topic, t)
+                    null
+                }
         }
 
-        val result =
-            try {
-                sender.sendMessage(chatId, text, dedupKey = dedupKey)
-            } catch (t: Throwable) {
-                metrics?.incRetryable()
-                logger.debug("Notify sender threw for topic {}", topic, t)
-                return SendOutcome.Ok
-            }
-
-        when (result) {
+        when (val r = result) {
             is SendResult.Ok -> metrics?.incOk()
-            is SendResult.RetryAfter -> metrics?.incRetryAfter(result.retryAfterMs)
+            is SendResult.RetryAfter -> metrics?.incRetryAfter(r.retryAfterMs)
             is SendResult.RetryableError -> metrics?.incRetryable()
             is SendResult.PermanentError -> metrics?.incPermanent()
+            null -> {
+                // метрики уже учтены выше, делать ничего не надо
+            }
         }
 
         return SendOutcome.Ok
@@ -74,23 +82,13 @@ class NotifyAdapterMetrics(
     private val onRetryable: (() -> Unit)? = null,
     private val onPermanent: (() -> Unit)? = null,
 ) {
-    fun incAttempts() {
-        onAttempt?.invoke()
-    }
+    fun incAttempts() = onAttempt?.invoke()
 
-    fun incOk() {
-        onOk?.invoke()
-    }
+    fun incOk() = onOk?.invoke()
 
-    fun incRetryAfter(delayMs: Long) {
-        onRetryAfter?.invoke(delayMs)
-    }
+    fun incRetryAfter(delayMs: Long) = onRetryAfter?.invoke(delayMs)
 
-    fun incRetryable() {
-        onRetryable?.invoke()
-    }
+    fun incRetryable() = onRetryable?.invoke()
 
-    fun incPermanent() {
-        onPermanent?.invoke()
-    }
+    fun incPermanent() = onPermanent?.invoke()
 }

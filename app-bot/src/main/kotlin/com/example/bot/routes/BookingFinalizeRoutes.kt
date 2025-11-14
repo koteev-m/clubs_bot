@@ -82,4 +82,6 @@ fun Application.bookingFinalizeRoutes(
 }
 
 @Serializable
-private data class FinalizePayload(val bookingId: String)
+private data class FinalizePayload(
+    val bookingId: String,
+)

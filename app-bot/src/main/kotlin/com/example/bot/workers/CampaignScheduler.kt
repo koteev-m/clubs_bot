@@ -8,17 +8,17 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
-import org.slf4j.LoggerFactory
 
 private const val CRON_PARTS = 5
 private val FULL_MINUTE_RANGE = 0..59
@@ -53,15 +53,16 @@ class CampaignScheduler(
             return
         }
         logger.info("CampaignScheduler starting")
-        job = scope.launch(CoroutineName("campaign-scheduler")) {
-            metrics.markStarted()
-            try {
-                loop()
-            } finally {
-                metrics.markStopped()
-                logger.info("CampaignScheduler stopped")
+        job =
+            scope.launch(CoroutineName("campaign-scheduler")) {
+                metrics.markStarted()
+                try {
+                    loop()
+                } finally {
+                    metrics.markStopped()
+                    logger.info("CampaignScheduler stopped")
+                }
             }
-        }
     }
 
     suspend fun stop() {
@@ -122,8 +123,8 @@ class CampaignScheduler(
         }
     }
 
-    private fun remainingGauge(id: Long): AtomicLong {
-        return remaining.computeIfAbsent(id) {
+    private fun remainingGauge(id: Long): AtomicLong =
+        remaining.computeIfAbsent(id) {
             AtomicLong(0).also { ref ->
                 Telemetry.registry.gauge(
                     "notify_campaign_remaining",
@@ -132,7 +133,6 @@ class CampaignScheduler(
                 )
             }
         }
-    }
 
     private fun isDue(
         c: SchedulerApi.Campaign,
@@ -167,8 +167,8 @@ class CampaignScheduler(
     private fun match(
         field: String,
         value: Int,
-    ): Boolean {
-        return when {
+    ): Boolean =
+        when {
             field == "*" -> true
             field.contains(",") -> field.split(",").any { match(it, value) }
             field.contains("/") -> {
@@ -180,7 +180,6 @@ class CampaignScheduler(
             field.contains("-") -> value in parseRange(field)
             else -> field.toIntOrNull() == value
         }
-    }
 
     private fun parseRange(s: String): IntRange {
         val (start, end) = s.split("-")

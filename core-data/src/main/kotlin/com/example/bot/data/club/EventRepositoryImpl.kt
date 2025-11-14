@@ -15,7 +15,9 @@ import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.ranges.ClosedRange
 
-class EventRepositoryImpl(private val database: Database) : EventRepository {
+class EventRepositoryImpl(
+    private val database: Database,
+) : EventRepository {
     override suspend fun listByClub(
         clubId: Long,
         dateRange: ClosedRange<Instant>,
@@ -33,8 +35,8 @@ class EventRepositoryImpl(private val database: Database) : EventRepository {
         }
     }
 
-    override suspend fun get(id: Long): Event? {
-        return withTxRetry {
+    override suspend fun get(id: Long): Event? =
+        withTxRetry {
             transaction(database) {
                 EventsTable
                     .selectAll()
@@ -43,10 +45,9 @@ class EventRepositoryImpl(private val database: Database) : EventRepository {
                     ?.toEvent()
             }
         }
-    }
 
-    private fun ResultRow.toEvent(): Event {
-        return Event(
+    private fun ResultRow.toEvent(): Event =
+        Event(
             id = this[EventsTable.id],
             clubId = this[EventsTable.clubId],
             title = this[EventsTable.title],
@@ -55,5 +56,4 @@ class EventRepositoryImpl(private val database: Database) : EventRepository {
             isSpecial = this[EventsTable.isSpecial],
             posterUrl = this[EventsTable.posterUrl],
         )
-    }
 }

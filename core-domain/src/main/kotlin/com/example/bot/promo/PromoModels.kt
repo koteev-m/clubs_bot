@@ -20,9 +20,13 @@ sealed interface PromoLinkError {
 }
 
 sealed interface PromoLinkResult<out T> {
-    data class Success<T>(val value: T) : PromoLinkResult<T>
+    data class Success<T>(
+        val value: T,
+    ) : PromoLinkResult<T>
 
-    data class Failure(val error: PromoLinkError) : PromoLinkResult<Nothing>
+    data class Failure(
+        val error: PromoLinkError,
+    ) : PromoLinkResult<Nothing>
 }
 
 interface PromoLinkRepository {
@@ -63,9 +67,13 @@ sealed interface PromoAttributionError {
 }
 
 sealed interface PromoAttributionResult<out T> {
-    data class Success<T>(val value: T) : PromoAttributionResult<T>
+    data class Success<T>(
+        val value: T,
+    ) : PromoAttributionResult<T>
 
-    data class Failure(val error: PromoAttributionError) : PromoAttributionResult<Nothing>
+    data class Failure(
+        val error: PromoAttributionError,
+    ) : PromoAttributionResult<Nothing>
 }
 
 interface PromoAttributionRepository {
@@ -93,16 +101,23 @@ data class BookingTemplate(
     val createdAt: Instant,
 )
 
-data class BookingTemplateSignature(val templateId: Long, val value: String)
+data class BookingTemplateSignature(
+    val templateId: Long,
+    val value: String,
+)
 
 sealed interface BookingTemplateError {
     data object NotFound : BookingTemplateError
 }
 
 sealed interface BookingTemplateResult<out T> {
-    data class Success<T>(val value: T) : BookingTemplateResult<T>
+    data class Success<T>(
+        val value: T,
+    ) : BookingTemplateResult<T>
 
-    data class Failure(val error: BookingTemplateError) : BookingTemplateResult<Nothing>
+    data class Failure(
+        val error: BookingTemplateError,
+    ) : BookingTemplateResult<Nothing>
 }
 
 interface BookingTemplateRepository {

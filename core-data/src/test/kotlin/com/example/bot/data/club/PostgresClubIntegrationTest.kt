@@ -36,8 +36,7 @@ abstract class PostgresClubIntegrationTest {
             .locations(
                 "classpath:db/migration/common",
                 "classpath:db/migration/postgresql",
-            )
-            .baselineOnMigrate(true)
+            ).baselineOnMigrate(true)
             .load()
             .migrate()
         database =
@@ -65,8 +64,7 @@ abstract class PostgresClubIntegrationTest {
                     clubs,
                     users
                 RESTART IDENTITY CASCADE
-                """
-                    .trimIndent(),
+                """.trimIndent(),
             )
         }
     }
@@ -74,8 +72,8 @@ abstract class PostgresClubIntegrationTest {
     protected fun insertClub(
         name: String,
         timezone: String = "Europe/Moscow",
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             ClubsTable
                 .insert {
                     it[ClubsTable.name] = name
@@ -85,19 +83,17 @@ abstract class PostgresClubIntegrationTest {
                     it[ClubsTable.bookingsTopicId] = null
                     it[ClubsTable.checkinTopicId] = null
                     it[ClubsTable.qaTopicId] = null
-                }
-                .resultedValues!!
+                }.resultedValues!!
                 .single()[ClubsTable.id]
         }
-    }
 
     protected fun insertEvent(
         clubId: Long,
         title: String,
         startAt: Instant,
         endAt: Instant,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             EventsTable
                 .insert {
                     it[EventsTable.clubId] = clubId
@@ -106,11 +102,9 @@ abstract class PostgresClubIntegrationTest {
                     it[EventsTable.endAt] = endAt.atOffset(ZoneOffset.UTC)
                     it[EventsTable.isSpecial] = false
                     it[EventsTable.posterUrl] = null
-                }
-                .resultedValues!!
+                }.resultedValues!!
                 .single()[EventsTable.id]
         }
-    }
 
     protected fun insertTable(
         clubId: Long,
@@ -118,8 +112,8 @@ abstract class PostgresClubIntegrationTest {
         capacity: Int,
         minDeposit: BigDecimal,
         active: Boolean = true,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             TablesTable
                 .insert {
                     it[TablesTable.clubId] = clubId
@@ -128,28 +122,24 @@ abstract class PostgresClubIntegrationTest {
                     it[TablesTable.capacity] = capacity
                     it[TablesTable.minDeposit] = minDeposit
                     it[TablesTable.active] = active
-                }
-                .resultedValues!!
+                }.resultedValues!!
                 .single()[TablesTable.id]
         }
-    }
 
     protected fun insertUser(
         username: String,
         displayName: String,
-    ): Long {
-        return transaction(database) {
+    ): Long =
+        transaction(database) {
             UsersTable
                 .insert {
                     it[UsersTable.telegramUserId] = null
                     it[UsersTable.username] = username
                     it[UsersTable.displayName] = displayName
                     it[UsersTable.phoneE164] = null
-                }
-                .resultedValues!!
+                }.resultedValues!!
                 .single()[UsersTable.id]
         }
-    }
 
     @AfterAll
     fun stopContainer() {

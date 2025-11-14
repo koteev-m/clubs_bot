@@ -7,7 +7,10 @@ import java.time.Instant
 /**
  * Booking cutoff and arrival policies.
  */
-class CutoffPolicy(private val onlineCutoffMinutes: Long = 60, private val defaultArrivalByMinutes: Long = 120) {
+class CutoffPolicy(
+    private val onlineCutoffMinutes: Long = 60,
+    private val defaultArrivalByMinutes: Long = 120,
+) {
     /**
      * Returns true when online booking is still allowed for the slot.
      */

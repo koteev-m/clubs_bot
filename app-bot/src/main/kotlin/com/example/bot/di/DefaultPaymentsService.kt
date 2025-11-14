@@ -7,7 +7,6 @@ import com.example.bot.observability.MetricsProvider
 import com.example.bot.payments.PaymentsRepository
 import com.example.bot.payments.PaymentsRepository.Action
 import com.example.bot.payments.PaymentsRepository.Result
-import com.example.bot.payments.PaymentsRepository.Result.Status as ActionStatus
 import com.example.bot.payments.PaymentsRepository.SavedAction
 import com.example.bot.payments.finalize.PaymentsFinalizeService
 import com.example.bot.telemetry.PaymentsMetrics
@@ -21,6 +20,7 @@ import io.micrometer.tracing.Tracer
 import org.slf4j.MDC
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import com.example.bot.payments.PaymentsRepository.Result.Status as ActionStatus
 
 class DefaultPaymentsService(
     private val finalizeService: PaymentsFinalizeService,
@@ -29,7 +29,6 @@ class DefaultPaymentsService(
     private val metricsProvider: MetricsProvider?,
     private val tracer: Tracer?,
 ) : PaymentsService {
-
     private data class BookingLedger(
         var status: BookingStatus = BookingStatus.BOOKED,
         var capturedMinor: Long = 0,
@@ -41,15 +40,25 @@ class DefaultPaymentsService(
     private fun currentRequestId(): String? = MDC.get("requestId") ?: MDC.get("callId")
 
     private sealed interface RefundOutcome {
-        data class Success(val amount: Long, val remainderAfter: Long) : RefundOutcome
+        data class Success(
+            val amount: Long,
+            val remainderAfter: Long,
+        ) : RefundOutcome
 
-        data class Conflict(val reason: String) : RefundOutcome
+        data class Conflict(
+            val reason: String,
+        ) : RefundOutcome
 
-        data class Unprocessable(val reason: String) : RefundOutcome
+        data class Unprocessable(
+            val reason: String,
+        ) : RefundOutcome
 
-        data class Validation(val reason: String) : RefundOutcome
+        data class Validation(
+            val reason: String,
+        ) : RefundOutcome
     }
 
+    @Suppress("ExceptionRaisedInUnexpectedLocation")
     override suspend fun finalize(
         clubId: Long,
         bookingId: UUID,
@@ -340,11 +349,12 @@ class DefaultPaymentsService(
         capturedMinor: Long,
         refundedMinor: Long,
     ) {
-        val bookingStatus = when (status.uppercase()) {
-            "BOOKED" -> BookingStatus.BOOKED
-            "CANCELLED" -> BookingStatus.CANCELLED
-            else -> BookingStatus.BOOKED
-        }
+        val bookingStatus =
+            when (status.uppercase()) {
+                "BOOKED" -> BookingStatus.BOOKED
+                "CANCELLED" -> BookingStatus.CANCELLED
+                else -> BookingStatus.BOOKED
+            }
         val ledger = ledgers.computeIfAbsent(clubId to bookingId) { BookingLedger() }
         ledger.status = bookingStatus
         ledger.capturedMinor = capturedMinor
@@ -436,8 +446,9 @@ class DefaultPaymentsService(
         }
         return when (existing.result.status) {
             ActionStatus.OK -> {
-                val amount = existing.result.reason?.toLongOrNull()
-                    ?: throw PaymentsService.ValidationException("stored refund amount missing")
+                val amount =
+                    existing.result.reason?.toLongOrNull()
+                        ?: throw PaymentsService.ValidationException("stored refund amount missing")
                 if (requestedAmount != null && requestedAmount != amount) {
                     throw PaymentsService.ConflictException("idempotency payload mismatch")
                 }

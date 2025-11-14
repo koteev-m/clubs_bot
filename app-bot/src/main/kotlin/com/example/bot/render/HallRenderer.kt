@@ -1,8 +1,8 @@
 package com.example.bot.render
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Font

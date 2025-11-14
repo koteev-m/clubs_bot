@@ -13,7 +13,12 @@ class BotTexts {
     fun isEn(lang: String?): Boolean = lang?.startsWith("en", true) == true
 
     // ====== Меню / кнопки ======
-    data class Menu(val chooseClub: String, val myBookings: String, val ask: String, val music: String)
+    data class Menu(
+        val chooseClub: String,
+        val myBookings: String,
+        val ask: String,
+        val music: String,
+    )
 
     fun menu(lang: String?): Menu =
         if (isEn(lang)) {
@@ -133,7 +138,10 @@ class BotTexts {
 
     fun myBookingsBack(lang: String?): String = if (isEn(lang)) "⟵ Back" else "⟵ Назад"
 
-    fun myBookingsCancelOk(lang: String?, shortId: String): String =
+    fun myBookingsCancelOk(
+        lang: String?,
+        shortId: String,
+    ): String =
         if (isEn(lang)) {
             "Booking #$shortId was cancelled."
         } else {
@@ -154,7 +162,10 @@ class BotTexts {
             "Бронь не найдена."
         }
 
-    fun myBookingsCancelTitle(lang: String?, shortId: String): String =
+    fun myBookingsCancelTitle(
+        lang: String?,
+        shortId: String,
+    ): String =
         if (isEn(lang)) {
             "Booking #$shortId cancelled"
         } else {

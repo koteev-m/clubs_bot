@@ -22,12 +22,14 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 /** Exposed implementation of [MusicItemRepository] and [MusicPlaylistRepository]. */
-class MusicItemRepositoryImpl(private val db: Database) : MusicItemRepository {
+class MusicItemRepositoryImpl(
+    private val db: Database,
+) : MusicItemRepository {
     override suspend fun create(
         req: MusicItemCreate,
         actor: UserId,
-    ): MusicItemView {
-        return newSuspendedTransaction(Dispatchers.IO, db) {
+    ): MusicItemView =
+        newSuspendedTransaction(Dispatchers.IO, db) {
             val row =
                 MusicItemsTable
                     .insert {
@@ -45,7 +47,6 @@ class MusicItemRepositoryImpl(private val db: Database) : MusicItemRepository {
                     .first()
             row.toView()
         }
-    }
 
     override suspend fun listActive(
         clubId: Long?,
@@ -53,8 +54,8 @@ class MusicItemRepositoryImpl(private val db: Database) : MusicItemRepository {
         offset: Int,
         tag: String?,
         q: String?,
-    ): List<MusicItemView> {
-        return newSuspendedTransaction(Dispatchers.IO, db) {
+    ): List<MusicItemView> =
+        newSuspendedTransaction(Dispatchers.IO, db) {
             var cond: Op<Boolean> = MusicItemsTable.isActive eq true
             if (clubId != null) cond = cond and (MusicItemsTable.clubId eq clubId)
             // tag filtering omitted for simplicity
@@ -69,10 +70,9 @@ class MusicItemRepositoryImpl(private val db: Database) : MusicItemRepository {
                 .limit(limit, offset.toLong())
                 .map { it.toView() }
         }
-    }
 
-    override suspend fun lastUpdatedAt(): Instant? {
-        return newSuspendedTransaction(Dispatchers.IO, db) {
+    override suspend fun lastUpdatedAt(): Instant? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
             MusicItemsTable
                 .selectAll()
                 .orderBy(MusicItemsTable.updatedAt, SortOrder.DESC)
@@ -81,10 +81,9 @@ class MusicItemRepositoryImpl(private val db: Database) : MusicItemRepository {
                 ?.get(MusicItemsTable.updatedAt)
                 ?.toInstant()
         }
-    }
 
-    private fun ResultRow.toView(): MusicItemView {
-        return MusicItemView(
+    private fun ResultRow.toView(): MusicItemView =
+        MusicItemView(
             id = this[MusicItemsTable.id],
             clubId = this[MusicItemsTable.clubId],
             title = this[MusicItemsTable.title],
@@ -97,17 +96,18 @@ class MusicItemRepositoryImpl(private val db: Database) : MusicItemRepository {
             tags = this[MusicItemsTable.tags]?.split(",")?.filter { it.isNotBlank() },
             publishedAt = this[MusicItemsTable.publishedAt]?.toInstant(),
         )
-    }
 }
 
-class MusicPlaylistRepositoryImpl(private val db: Database) : MusicPlaylistRepository {
+class MusicPlaylistRepositoryImpl(
+    private val db: Database,
+) : MusicPlaylistRepository {
     private val logger = LoggerFactory.getLogger(MusicPlaylistRepositoryImpl::class.java)
 
     override suspend fun create(
         req: PlaylistCreate,
         actor: UserId,
-    ): PlaylistView {
-        return newSuspendedTransaction(Dispatchers.IO, db) {
+    ): PlaylistView =
+        newSuspendedTransaction(Dispatchers.IO, db) {
             val row =
                 MusicPlaylistsTable
                     .insert {
@@ -120,20 +120,17 @@ class MusicPlaylistRepositoryImpl(private val db: Database) : MusicPlaylistRepos
                     .first()
             row.toView()
         }
-    }
 
     override suspend fun setItems(
         playlistId: Long,
         itemIds: List<Long>,
-    ) {
-        return newSuspendedTransaction(Dispatchers.IO, db) {
-            MusicPlaylistItemsTable.deleteWhere { MusicPlaylistItemsTable.playlistId eq playlistId }
-            itemIds.forEachIndexed { idx, itemId ->
-                MusicPlaylistItemsTable.insert {
-                    it[this.playlistId] = playlistId
-                    it[this.itemId] = itemId
-                    it[position] = idx
-                }
+    ) = newSuspendedTransaction(Dispatchers.IO, db) {
+        MusicPlaylistItemsTable.deleteWhere { MusicPlaylistItemsTable.playlistId eq playlistId }
+        itemIds.forEachIndexed { idx, itemId ->
+            MusicPlaylistItemsTable.insert {
+                it[this.playlistId] = playlistId
+                it[this.itemId] = itemId
+                it[position] = idx
             }
         }
     }
@@ -141,8 +138,8 @@ class MusicPlaylistRepositoryImpl(private val db: Database) : MusicPlaylistRepos
     override suspend fun listActive(
         limit: Int,
         offset: Int,
-    ): List<PlaylistView> {
-        return newSuspendedTransaction(Dispatchers.IO, db) {
+    ): List<PlaylistView> =
+        newSuspendedTransaction(Dispatchers.IO, db) {
             MusicPlaylistsTable
                 .selectAll()
                 .where { MusicPlaylistsTable.isActive eq true }
@@ -150,7 +147,6 @@ class MusicPlaylistRepositoryImpl(private val db: Database) : MusicPlaylistRepos
                 .limit(limit, offset.toLong())
                 .map { it.toView() }
         }
-    }
 
     override suspend fun itemsCount(playlistIds: Collection<Long>): Map<Long, Int> {
         if (playlistIds.isEmpty()) return emptyMap()
@@ -196,8 +192,8 @@ class MusicPlaylistRepositoryImpl(private val db: Database) : MusicPlaylistRepos
         }
     }
 
-    override suspend fun lastUpdatedAt(): Instant? {
-        return newSuspendedTransaction(Dispatchers.IO, db) {
+    override suspend fun lastUpdatedAt(): Instant? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
             MusicPlaylistsTable
                 .selectAll()
                 .orderBy(MusicPlaylistsTable.updatedAt, SortOrder.DESC)
@@ -206,20 +202,18 @@ class MusicPlaylistRepositoryImpl(private val db: Database) : MusicPlaylistRepos
                 ?.get(MusicPlaylistsTable.updatedAt)
                 ?.toInstant()
         }
-    }
 
-    private fun ResultRow.toView(): PlaylistView {
-        return PlaylistView(
+    private fun ResultRow.toView(): PlaylistView =
+        PlaylistView(
             id = this[MusicPlaylistsTable.id],
             clubId = this[MusicPlaylistsTable.clubId],
             title = this[MusicPlaylistsTable.title],
             description = this[MusicPlaylistsTable.description],
             coverUrl = this[MusicPlaylistsTable.coverUrl],
         )
-    }
 
-    private fun ResultRow.toItemView(): MusicItemView {
-        return MusicItemView(
+    private fun ResultRow.toItemView(): MusicItemView =
+        MusicItemView(
             id = this[MusicItemsTable.id],
             clubId = this[MusicItemsTable.clubId],
             title = this[MusicItemsTable.title],
@@ -232,5 +226,4 @@ class MusicPlaylistRepositoryImpl(private val db: Database) : MusicPlaylistRepos
             tags = this[MusicItemsTable.tags]?.split(",")?.filter { it.isNotBlank() },
             publishedAt = this[MusicItemsTable.publishedAt]?.toInstant(),
         )
-    }
 }

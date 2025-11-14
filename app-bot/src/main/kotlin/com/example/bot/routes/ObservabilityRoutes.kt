@@ -9,8 +9,8 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.sql.Connection
 import java.sql.SQLException

@@ -31,9 +31,11 @@ private object UserRolesTable : Table("user_roles") {
 /**
  * Exposed implementation of [UserRepository].
  */
-class ExposedUserRepository(private val db: Database) : UserRepository {
-    override suspend fun getByTelegramId(id: Long): User? {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+class ExposedUserRepository(
+    private val db: Database,
+) : UserRepository {
+    override suspend fun getByTelegramId(id: Long): User? =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             UsersTable
                 .selectAll()
                 .where { UsersTable.telegramUserId eq id }
@@ -41,15 +43,16 @@ class ExposedUserRepository(private val db: Database) : UserRepository {
                 .firstOrNull()
                 ?.toUser()
         }
-    }
 }
 
 /**
  * Exposed implementation of [UserRoleRepository].
  */
-class ExposedUserRoleRepository(private val db: Database) : UserRoleRepository {
-    override suspend fun listRoles(userId: Long): Set<Role> {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+class ExposedUserRoleRepository(
+    private val db: Database,
+) : UserRoleRepository {
+    override suspend fun listRoles(userId: Long): Set<Role> =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             UserRolesTable
                 .selectAll()
                 .where { UserRolesTable.userId eq userId }
@@ -57,28 +60,24 @@ class ExposedUserRoleRepository(private val db: Database) : UserRoleRepository {
                     Role.valueOf(row[UserRolesTable.roleCode])
                 }
         }
-    }
 
-    override suspend fun listClubIdsFor(userId: Long): Set<Long> {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+    override suspend fun listClubIdsFor(userId: Long): Set<Long> =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             UserRolesTable
                 .selectAll()
                 .where {
                     (UserRolesTable.userId eq userId) and
                         (UserRolesTable.scopeType eq "CLUB") and
                         UserRolesTable.scopeClubId.isNotNull()
-                }
-                .mapNotNullTo(mutableSetOf()) { row ->
+                }.mapNotNullTo(mutableSetOf()) { row ->
                     row[UserRolesTable.scopeClubId]
                 }
         }
-    }
 }
 
-private fun ResultRow.toUser(): User {
-    return User(
+private fun ResultRow.toUser(): User =
+    User(
         id = this[UsersTable.id],
         telegramId = this[UsersTable.telegramUserId],
         username = this[UsersTable.username],
     )
-}

@@ -2,9 +2,9 @@ package com.example.bot.telemetry
 
 import io.micrometer.tracing.Span
 import io.micrometer.tracing.Tracer
+import org.slf4j.MDC
 import java.io.Closeable
 import java.util.UUID
-import org.slf4j.MDC
 
 data class PaymentsTraceMetadata(
     val httpRoute: String? = null,
@@ -15,11 +15,20 @@ data class PaymentsTraceMetadata(
 )
 
 interface PaymentsSpanScope {
-    fun setAttribute(key: String, value: String)
+    fun setAttribute(
+        key: String,
+        value: String,
+    )
 
-    fun setAttribute(key: String, value: Boolean)
+    fun setAttribute(
+        key: String,
+        value: Boolean,
+    )
 
-    fun setAttribute(key: String, value: Long)
+    fun setAttribute(
+        key: String,
+        value: Long,
+    )
 }
 
 fun maskBookingId(bookingId: UUID): String = bookingId.toString().takeLast(8)
@@ -89,26 +98,45 @@ private fun PaymentsTraceMetadata.applyToScope(scope: PaymentsSpanScope) {
 }
 
 private object NoopPaymentsSpanScope : PaymentsSpanScope {
-    override fun setAttribute(key: String, value: String) {}
+    override fun setAttribute(
+        key: String,
+        value: String,
+    ) {}
 
-    override fun setAttribute(key: String, value: Boolean) {}
+    override fun setAttribute(
+        key: String,
+        value: Boolean,
+    ) {}
 
-    override fun setAttribute(key: String, value: Long) {}
+    override fun setAttribute(
+        key: String,
+        value: Long,
+    ) {}
 }
 
 private class RealPaymentsSpanScope(
     private val span: Span,
     private val scope: Tracer.SpanInScope,
-) : PaymentsSpanScope, Closeable {
-    override fun setAttribute(key: String, value: String) {
+) : PaymentsSpanScope,
+    Closeable {
+    override fun setAttribute(
+        key: String,
+        value: String,
+    ) {
         span.tag(key, value)
     }
 
-    override fun setAttribute(key: String, value: Boolean) {
+    override fun setAttribute(
+        key: String,
+        value: Boolean,
+    ) {
         span.tag(key, value.toString())
     }
 
-    override fun setAttribute(key: String, value: Long) {
+    override fun setAttribute(
+        key: String,
+        value: Long,
+    ) {
         span.tag(key, value.toString())
     }
 

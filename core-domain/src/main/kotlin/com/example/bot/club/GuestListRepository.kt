@@ -85,10 +85,13 @@ enum class GuestListEntryStatus {
     PLANNED,
     CHECKED_IN,
     NO_SHOW,
+
     /** Гость в листе ожидания (для совместимости отображаем в списках промоутеров). */
     WAITLISTED,
+
     /** Оператор позвал гостя; действует короткий резерв окна прибытия. */
     CALLED,
+
     /** Истёк резерв/окно или запись закрыта. */
     EXPIRED,
 }
@@ -127,7 +130,10 @@ data class ParsedGuest(
     val notes: String?,
 )
 
-data class RejectedRow(val line: Int, val reason: String)
+data class RejectedRow(
+    val line: Int,
+    val reason: String,
+)
 
 data class GuestListEntrySearch(
     val clubIds: Set<Long>? = null,
@@ -155,4 +161,7 @@ data class GuestListEntryView(
     val listCreatedAt: Instant,
 )
 
-data class GuestListEntryPage(val items: List<GuestListEntryView>, val total: Long)
+data class GuestListEntryPage(
+    val items: List<GuestListEntryView>,
+    val total: Long,
+)

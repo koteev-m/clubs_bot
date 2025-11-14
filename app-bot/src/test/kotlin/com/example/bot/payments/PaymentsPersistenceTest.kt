@@ -7,19 +7,18 @@ import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.booking.core.PaymentsBookingRepository
 import com.example.bot.data.db.Clubs
-import com.example.bot.di.DefaultPaymentsService
-import com.example.bot.di.PaymentsService
 import com.example.bot.data.repo.PaymentsRepositoryImpl
 import com.example.bot.data.repo.PaymentsRepositoryImpl.PaymentActionsTable
-import com.example.bot.payments.PaymentsRepository
+import com.example.bot.di.DefaultPaymentsService
+import com.example.bot.di.PaymentsService
 import com.example.bot.payments.finalize.PaymentsFinalizeService
 import com.example.bot.testing.PostgresAppTest
 import kotlinx.coroutines.runBlocking
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.count
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.count
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -34,86 +33,89 @@ import java.util.UUID
 
 @RequiresDocker
 class PaymentsPersistenceTest : PostgresAppTest() {
-
     @Test
-    fun `cancel persists action and updates booking`() = runBlocking {
-        val service = createService()
-        val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 1L, idemKey = "booking-1")
+    fun `cancel persists action and updates booking`() =
+        runBlocking {
+            val service = createService()
+            val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 1L, idemKey = "booking-1")
 
-        val result =
-            service.service.cancel(
-                clubId = booking.clubId,
-                bookingId = booking.id,
-                reason = "guest_request",
-                idemKey = "cancel-1",
-                actorUserId = 42L,
-            )
+            val result =
+                service.service.cancel(
+                    clubId = booking.clubId,
+                    bookingId = booking.id,
+                    reason = "guest_request",
+                    idemKey = "cancel-1",
+                    actorUserId = 42L,
+                )
 
-        assertEquals(false, result.idempotent)
-        assertEquals(false, result.alreadyCancelled)
+            assertEquals(false, result.idempotent)
+            assertEquals(false, result.alreadyCancelled)
 
-        val saved = service.paymentsRepo.findActionByIdempotencyKey("cancel-1")
-        assertNotNull(saved)
-        assertEquals(PaymentsRepository.Result.Status.OK, saved!!.result.status)
-        assertEquals("guest_request", saved.result.reason)
+            val saved = service.paymentsRepo.findActionByIdempotencyKey("cancel-1")
+            assertNotNull(saved)
+            assertEquals(PaymentsRepository.Result.Status.OK, saved!!.result.status)
+            assertEquals("guest_request", saved.result.reason)
 
-        val status = currentBookingStatus(booking.id)
-        assertEquals(BookingStatus.CANCELLED, status)
-    }
-
-    @Test
-    fun `cancel idempotency returns stored result`() = runBlocking {
-        val service = createService()
-        val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 2L, idemKey = "booking-2")
-
-        service.service.cancel(booking.clubId, booking.id, null, "cancel-repeat", 7L)
-        val second = service.service.cancel(booking.clubId, booking.id, null, "cancel-repeat", 7L)
-
-        assertTrue(second.idempotent)
-        assertEquals(false, second.alreadyCancelled)
-
-        val saved = service.paymentsRepo.findActionByIdempotencyKey("cancel-repeat")
-        assertNotNull(saved)
-        assertEquals(PaymentsRepository.Result.Status.OK, saved!!.result.status)
-
-        val actionsCount = transaction(database) { PaymentActionsTable.selectAll().count() }
-        assertEquals(1, actionsCount)
-    }
-
-    @Test
-    fun `cancel conflict persists conflict status`() = runBlocking {
-        val service = createService()
-        val booking = seedBooking(status = BookingStatus.SEATED, clubId = 3L, idemKey = "booking-3")
-
-        try {
-            service.service.cancel(booking.clubId, booking.id, null, "cancel-conflict", 9L)
-            fail("expected conflict")
-        } catch (conflict: PaymentsService.ConflictException) {
-            assertTrue(conflict.message?.contains("status") == true)
+            val status = currentBookingStatus(booking.id)
+            assertEquals(BookingStatus.CANCELLED, status)
         }
 
-        val saved = service.paymentsRepo.findActionByIdempotencyKey("cancel-conflict")
-        assertNotNull(saved)
-        assertEquals(PaymentsRepository.Result.Status.CONFLICT, saved!!.result.status)
-        assertTrue(saved.result.reason!!.contains("SEATED"))
-    }
+    @Test
+    fun `cancel idempotency returns stored result`() =
+        runBlocking {
+            val service = createService()
+            val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 2L, idemKey = "booking-2")
+
+            service.service.cancel(booking.clubId, booking.id, null, "cancel-repeat", 7L)
+            val second = service.service.cancel(booking.clubId, booking.id, null, "cancel-repeat", 7L)
+
+            assertTrue(second.idempotent)
+            assertEquals(false, second.alreadyCancelled)
+
+            val saved = service.paymentsRepo.findActionByIdempotencyKey("cancel-repeat")
+            assertNotNull(saved)
+            assertEquals(PaymentsRepository.Result.Status.OK, saved!!.result.status)
+
+            val actionsCount = transaction(database) { PaymentActionsTable.selectAll().count() }
+            assertEquals(1, actionsCount)
+        }
 
     @Test
-    fun `cancel idempotency survives new service instance`() = runBlocking {
-        val first = createService()
-        val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 4L, idemKey = "booking-4")
+    fun `cancel conflict persists conflict status`() =
+        runBlocking {
+            val service = createService()
+            val booking = seedBooking(status = BookingStatus.SEATED, clubId = 3L, idemKey = "booking-3")
 
-        first.service.cancel(booking.clubId, booking.id, null, "cancel-restart", 11L)
+            try {
+                service.service.cancel(booking.clubId, booking.id, null, "cancel-conflict", 9L)
+                fail("expected conflict")
+            } catch (conflict: PaymentsService.ConflictException) {
+                assertTrue(conflict.message?.contains("status") == true)
+            }
 
-        val second = createService()
-        val result = second.service.cancel(booking.clubId, booking.id, null, "cancel-restart", 11L)
+            val saved = service.paymentsRepo.findActionByIdempotencyKey("cancel-conflict")
+            assertNotNull(saved)
+            assertEquals(PaymentsRepository.Result.Status.CONFLICT, saved!!.result.status)
+            assertTrue(saved.result.reason!!.contains("SEATED"))
+        }
 
-        assertTrue(result.idempotent)
-        assertEquals(BookingStatus.CANCELLED, currentBookingStatus(booking.id))
-    }
+    @Test
+    fun `cancel idempotency survives new service instance`() =
+        runBlocking {
+            val first = createService()
+            val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 4L, idemKey = "booking-4")
 
-    private fun currentBookingStatus(id: UUID): BookingStatus {
-        return transaction(database) {
+            first.service.cancel(booking.clubId, booking.id, null, "cancel-restart", 11L)
+
+            val second = createService()
+            val result = second.service.cancel(booking.clubId, booking.id, null, "cancel-restart", 11L)
+
+            assertTrue(result.idempotent)
+            assertEquals(BookingStatus.CANCELLED, currentBookingStatus(booking.id))
+        }
+
+    private fun currentBookingStatus(id: UUID): BookingStatus =
+        transaction(database) {
             val row =
                 BookingsTable
                     .selectAll()
@@ -121,7 +123,6 @@ class PaymentsPersistenceTest : PostgresAppTest() {
                     .firstOrNull() ?: fail("booking not found")
             BookingStatus.valueOf(row[BookingsTable.status])
         }
-    }
 
     private fun createService(): ServiceContext {
         val paymentsRepo = PaymentsRepositoryImpl(database)
@@ -203,10 +204,10 @@ class PaymentsPersistenceTest : PostgresAppTest() {
         val paymentsRepo: PaymentsRepository,
     )
 
-private data class BookingSeed(
-    val id: UUID,
-    val clubId: Long,
-)
+    private data class BookingSeed(
+        val id: UUID,
+        val clubId: Long,
+    )
 
     private object NoopFinalizeService : PaymentsFinalizeService {
         override suspend fun finalize(
@@ -215,8 +216,6 @@ private data class BookingSeed(
             paymentToken: String?,
             idemKey: String,
             actorUserId: Long,
-        ): PaymentsFinalizeService.FinalizeResult {
-            return PaymentsFinalizeService.FinalizeResult("NOOP")
-        }
+        ): PaymentsFinalizeService.FinalizeResult = PaymentsFinalizeService.FinalizeResult("NOOP")
     }
 }

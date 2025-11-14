@@ -11,9 +11,11 @@ import org.jetbrains.exposed.sql.transactions.transaction
 /**
  * Exposed-based implementation of [ClubRepository].
  */
-class ExposedClubRepository(private val database: Database) : ClubRepository {
-    override suspend fun listClubs(limit: Int): List<ClubDto> {
-        return withTxRetry {
+class ExposedClubRepository(
+    private val database: Database,
+) : ClubRepository {
+    override suspend fun listClubs(limit: Int): List<ClubDto> =
+        withTxRetry {
             transaction(database) {
                 Clubs
                     .selectAll()
@@ -22,13 +24,11 @@ class ExposedClubRepository(private val database: Database) : ClubRepository {
                     .map { it.toClubDto() }
             }
         }
-    }
 
-    private fun ResultRow.toClubDto(): ClubDto {
-        return ClubDto(
+    private fun ResultRow.toClubDto(): ClubDto =
+        ClubDto(
             id = this[Clubs.id].value.toLong(),
             name = this[Clubs.name],
             shortDescription = this[Clubs.description],
         )
-    }
 }

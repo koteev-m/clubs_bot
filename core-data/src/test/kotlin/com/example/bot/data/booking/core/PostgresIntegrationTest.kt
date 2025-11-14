@@ -31,8 +31,7 @@ abstract class PostgresIntegrationTest {
             .locations(
                 "classpath:db/migration/common",
                 "classpath:db/migration/postgresql",
-            )
-            .baselineOnMigrate(true)
+            ).baselineOnMigrate(true)
             .load()
             .migrate()
         database =
@@ -59,8 +58,7 @@ abstract class PostgresIntegrationTest {
                     tables,
                     clubs
                 RESTART IDENTITY CASCADE
-                """
-                    .trimIndent(),
+                """.trimIndent(),
             )
         }
     }

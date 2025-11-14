@@ -7,13 +7,13 @@ import com.example.bot.data.booking.core.PaymentsBookingRepository
 import com.example.bot.di.DefaultPaymentsService
 import com.example.bot.di.PaymentsService
 import com.example.bot.observability.MetricsProvider
+import com.example.bot.payments.PaymentsRepository
 import com.example.bot.plugins.TelegramMiniUser
+import com.example.bot.plugins.metricsRoute
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.plugins.withMiniAppAuth
-import com.example.bot.plugins.metricsRoute
 import com.example.bot.telemetry.PaymentsMetrics
-import com.example.bot.payments.PaymentsRepository
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.core.test.TestCase
 import io.kotest.core.test.TestResult
@@ -32,8 +32,8 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.plugins.callid.CallId
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.testing.testApplication
 import io.ktor.server.routing.routing
+import io.ktor.server.testing.testApplication
 import io.micrometer.prometheus.PrometheusMeterRegistry
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -55,7 +55,10 @@ class PaymentsObservabilitySmokeTest : StringSpec() {
         overrideMiniAppValidatorForTesting { _, _ -> user }
     }
 
-    override suspend fun afterEach(testCase: TestCase, result: TestResult) {
+    override suspend fun afterEach(
+        testCase: TestCase,
+        result: TestResult,
+    ) {
         PaymentsMetrics.resetForTest()
         resetMiniAppValidator()
     }
@@ -66,16 +69,18 @@ class PaymentsObservabilitySmokeTest : StringSpec() {
             val metricsProvider = MetricsProvider(registry)
             val paymentsRepository = InMemoryPaymentsRepository()
             val bookingId = UUID.randomUUID()
-            val bookingRepository = TestPaymentsBookingRepository().apply {
-                seed(bookingId = bookingId, clubId = 1L, status = BookingStatus.BOOKED)
-            }
-            val service = DefaultPaymentsService(
-                finalizeService = FakeFinalizeService(),
-                paymentsRepository = paymentsRepository,
-                bookingRepository = bookingRepository,
-                metricsProvider = metricsProvider,
-                tracer = null,
-            )
+            val bookingRepository =
+                TestPaymentsBookingRepository().apply {
+                    seed(bookingId = bookingId, clubId = 1L, status = BookingStatus.BOOKED)
+                }
+            val service =
+                DefaultPaymentsService(
+                    finalizeService = FakeFinalizeService(),
+                    paymentsRepository = paymentsRepository,
+                    bookingRepository = bookingRepository,
+                    metricsProvider = metricsProvider,
+                    tracer = null,
+                )
 
             service.seedLedger(
                 clubId = 1L,
@@ -95,39 +100,45 @@ class PaymentsObservabilitySmokeTest : StringSpec() {
                 }
 
                 val cancelPayload = Json.encodeToString(CancelRequest(reason = "test"))
-                val cancelUrl = "/api/clubs/1/bookings/${bookingId}/cancel"
-                val refundUrl = "/api/clubs/1/bookings/${bookingId}/refund"
+                val cancelUrl = "/api/clubs/1/bookings/$bookingId/cancel"
+                val refundUrl = "/api/clubs/1/bookings/$bookingId/refund"
 
-                client.post(cancelUrl) {
-                    header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                    header(HttpHeaders.Accept, ContentType.Application.Json.toString())
-                    header("Idempotency-Key", "idem-cancel")
-                    header("X-Telegram-Init-Data", "stub")
-                    setBody(cancelPayload)
-                }.status shouldBe HttpStatusCode.OK
+                client
+                    .post(cancelUrl) {
+                        header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                        header(HttpHeaders.Accept, ContentType.Application.Json.toString())
+                        header("Idempotency-Key", "idem-cancel")
+                        header("X-Telegram-Init-Data", "stub")
+                        setBody(cancelPayload)
+                    }.status shouldBe HttpStatusCode.OK
 
-                client.post(cancelUrl) {
-                    header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                    header(HttpHeaders.Accept, ContentType.Application.Json.toString())
-                    header("Idempotency-Key", "idem-cancel")
-                    header("X-Telegram-Init-Data", "stub")
-                    setBody(cancelPayload)
-                }.status shouldBe HttpStatusCode.OK
+                client
+                    .post(cancelUrl) {
+                        header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                        header(HttpHeaders.Accept, ContentType.Application.Json.toString())
+                        header("Idempotency-Key", "idem-cancel")
+                        header("X-Telegram-Init-Data", "stub")
+                        setBody(cancelPayload)
+                    }.status shouldBe HttpStatusCode.OK
 
-                client.post(refundUrl) {
-                    header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-                    header(HttpHeaders.Accept, ContentType.Application.Json.toString())
-                    header("Idempotency-Key", "idem-refund")
-                    header("X-Telegram-Init-Data", "stub")
-                    setBody(Json.encodeToString(RefundRequest(amountMinor = 2_000)))
-                }.status shouldBe HttpStatusCode.UnprocessableEntity
+                client
+                    .post(refundUrl) {
+                        header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                        header(HttpHeaders.Accept, ContentType.Application.Json.toString())
+                        header("Idempotency-Key", "idem-refund")
+                        header("X-Telegram-Init-Data", "stub")
+                        setBody(Json.encodeToString(RefundRequest(amountMinor = 2_000)))
+                    }.status shouldBe HttpStatusCode.UnprocessableEntity
 
                 val metricsBody =
-                    client.get("/metrics") {
-                        header("X-Telegram-Init-Data", "stub")
-                    }.bodyAsText()
+                    client
+                        .get("/metrics") {
+                            header("X-Telegram-Init-Data", "stub")
+                        }.bodyAsText()
 
-                metricsBody.shouldContain("payments_cancel_duration_seconds_count{path=\"cancel\",result=\"ok\",source=\"miniapp\"")
+                metricsBody.shouldContain(
+                    "payments_cancel_duration_seconds_count{path=\"cancel\",result=\"ok\",source=\"miniapp\"",
+                )
                 metricsBody.shouldContain("payments_idempotent_hit_total{path=\"cancel\"")
                 val errorLineOne = "payments_errors_total{kind=\"unprocessable\",path=\"refund\""
                 val errorLineTwo = "payments_errors_total{path=\"refund\",kind=\"unprocessable\""
@@ -172,34 +183,24 @@ private class InMemoryPaymentsRepository : PaymentsRepository {
         amountMinor: Long,
         payload: String,
         idempotencyKey: String,
-    ): PaymentsRepository.PaymentRecord {
-        throw UnsupportedOperationException("not used in test")
-    }
+    ): PaymentsRepository.PaymentRecord = throw UnsupportedOperationException("not used in test")
 
-    override suspend fun markPending(id: UUID) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    override suspend fun markPending(id: UUID): Unit = throw UnsupportedOperationException("not used in test")
 
     override suspend fun markCaptured(
         id: UUID,
         externalId: String?,
-    ) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    ): Unit = throw UnsupportedOperationException("not used in test")
 
     override suspend fun markDeclined(
         id: UUID,
         reason: String,
-    ) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    ): Unit = throw UnsupportedOperationException("not used in test")
 
     override suspend fun markRefunded(
         id: UUID,
         externalId: String?,
-    ) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    ): Unit = throw UnsupportedOperationException("not used in test")
 
     override suspend fun findByPayload(payload: String): PaymentsRepository.PaymentRecord? = null
 
@@ -209,9 +210,7 @@ private class InMemoryPaymentsRepository : PaymentsRepository {
         id: UUID,
         status: String,
         externalId: String?,
-    ) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    ): Unit = throw UnsupportedOperationException("not used in test")
 
     override suspend fun recordAction(
         bookingId: UUID,
@@ -267,8 +266,8 @@ private class TestPaymentsBookingRepository : PaymentsBookingRepository {
         bookingId: UUID,
         clubId: Long,
         status: BookingStatus,
-    ): BookingRecord {
-        return BookingRecord(
+    ): BookingRecord =
+        BookingRecord(
             id = bookingId,
             clubId = clubId,
             tableId = 1L,
@@ -285,7 +284,6 @@ private class TestPaymentsBookingRepository : PaymentsBookingRepository {
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
         )
-    }
 }
 
 private class FakeFinalizeService : com.example.bot.payments.finalize.PaymentsFinalizeService {
@@ -295,13 +293,17 @@ private class FakeFinalizeService : com.example.bot.payments.finalize.PaymentsFi
         paymentToken: String?,
         idemKey: String,
         actorUserId: Long,
-    ): com.example.bot.payments.finalize.PaymentsFinalizeService.FinalizeResult {
-        return com.example.bot.payments.finalize.PaymentsFinalizeService.FinalizeResult(paymentStatus = "TEST")
-    }
+    ): com.example.bot.payments.finalize.PaymentsFinalizeService.FinalizeResult =
+        com.example.bot.payments.finalize.PaymentsFinalizeService
+            .FinalizeResult(paymentStatus = "TEST")
 }
 
 @kotlinx.serialization.Serializable
-private data class CancelRequest(val reason: String? = null)
+private data class CancelRequest(
+    val reason: String? = null,
+)
 
 @kotlinx.serialization.Serializable
-private data class RefundRequest(val amountMinor: Long? = null)
+private data class RefundRequest(
+    val amountMinor: Long? = null,
+)

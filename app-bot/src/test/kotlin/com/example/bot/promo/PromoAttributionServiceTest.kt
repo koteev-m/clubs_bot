@@ -77,7 +77,9 @@ class PromoAttributionServiceTest {
         }
 }
 
-private class StaticPromoLinkRepository(private val link: PromoLink) : PromoLinkRepository {
+private class StaticPromoLinkRepository(
+    private val link: PromoLink,
+) : PromoLinkRepository {
     override suspend fun issueLink(
         promoterUserId: Long,
         clubId: Long?,
@@ -97,7 +99,9 @@ private class StaticPromoLinkRepository(private val link: PromoLink) : PromoLink
     override suspend fun deactivate(id: Long) = throw UnsupportedOperationException("deactivate should not be called")
 }
 
-private class StaticUserRepository(private val users: Map<Long, User>) : UserRepository {
+private class StaticUserRepository(
+    private val users: Map<Long, User>,
+) : UserRepository {
     override suspend fun getByTelegramId(id: Long): User? = users[id]
 }
 
@@ -110,7 +114,9 @@ private class StaticUserRoleRepository(
     override suspend fun listClubIdsFor(userId: Long): Set<Long> = clubIds[userId] ?: emptySet()
 }
 
-private class RecordingPromoAttributionRepository(private val clock: Clock) : PromoAttributionRepository {
+private class RecordingPromoAttributionRepository(
+    private val clock: Clock,
+) : PromoAttributionRepository {
     data class Call(
         val bookingId: UUID,
         val promoLinkId: Long,

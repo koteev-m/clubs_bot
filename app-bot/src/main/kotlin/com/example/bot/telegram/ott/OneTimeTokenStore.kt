@@ -15,7 +15,11 @@ import kotlin.math.min
 sealed interface OttPayload
 
 /** Пример payload’а: действие «забронировать стол». */
-data class BookTableAction(val clubId: Long, val startUtc: String, val tableId: Long) : OttPayload
+data class BookTableAction(
+    val clubId: Long,
+    val startUtc: String,
+    val tableId: Long,
+) : OttPayload
 
 /** Простейшие метрики стора. */
 object OttMetrics {
@@ -45,7 +49,10 @@ class InMemoryOneTimeTokenStore(
         System.getenv("OTT_TTL_SECONDS")?.toLongOrNull() ?: BotLimits.ottTokenTtl.seconds,
     maxEntries: Int = System.getenv("OTT_MAX_ENTRIES")?.toIntOrNull() ?: BotLimits.ottMaxEntries,
 ) : OneTimeTokenStore {
-    private data class Entry(val payload: OttPayload, val expiresAt: Instant)
+    private data class Entry(
+        val payload: OttPayload,
+        val expiresAt: Instant,
+    )
 
     private val ttl: Duration =
         Duration.ofSeconds(ttlSeconds).let { duration ->

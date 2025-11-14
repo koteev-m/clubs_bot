@@ -12,13 +12,18 @@ import kotlin.time.DurationUnit
 import kotlin.time.toDuration
 
 object PaymentsMetrics {
-    enum class Path(val tag: String, internal val metricName: String) {
+    enum class Path(
+        val tag: String,
+        internal val metricName: String,
+    ) {
         Finalize("finalize", "payments.finalize.duration"),
         Cancel("cancel", "payments.cancel.duration"),
         Refund("refund", "payments.refund.duration"),
     }
 
-    enum class Result(val tag: String) {
+    enum class Result(
+        val tag: String,
+    ) {
         Ok("ok"),
         Validation("validation"),
         Conflict("conflict"),
@@ -26,12 +31,16 @@ object PaymentsMetrics {
         Unexpected("unexpected"),
     }
 
-    enum class Source(val tag: String) {
+    enum class Source(
+        val tag: String,
+    ) {
         MiniApp("miniapp"),
         Api("api"),
     }
 
-    enum class ErrorKind(val tag: String) {
+    enum class ErrorKind(
+        val tag: String,
+    ) {
         Validation("validation"),
         State("state"),
         Repository("repository"),
@@ -95,11 +104,12 @@ object PaymentsMetrics {
             return
         }
         val key = "$clubId:$bookingIdLabel"
-        val holder = remainderGauges.computeIfAbsent(key) {
-            val atomic = AtomicLong(remainderMinor)
-            registerGauge(provider, clubId, bookingIdLabel, atomic)
-            atomic
-        }
+        val holder =
+            remainderGauges.computeIfAbsent(key) {
+                val atomic = AtomicLong(remainderMinor)
+                registerGauge(provider, clubId, bookingIdLabel, atomic)
+                atomic
+            }
         holder.set(remainderMinor)
     }
 
@@ -129,7 +139,10 @@ object PaymentsMetrics {
     private fun holderSupplier(holder: AtomicLong): java.util.function.Supplier<Number> =
         java.util.function.Supplier { holder.get().toDouble() }
 
-    private fun buildList(path: Path, source: Source?): Array<String> {
+    private fun buildList(
+        path: Path,
+        source: Source?,
+    ): Array<String> {
         val tags = mutableListOf("path", path.tag)
         if (source != null) {
             tags += listOf("source", source.tag)
@@ -140,16 +153,28 @@ object PaymentsMetrics {
     sealed interface TimerSample {
         fun record(result: Result)
 
-        fun record(result: Result, duration: Duration)
+        fun record(
+            result: Result,
+            duration: Duration,
+        )
 
-        fun <T> record(result: Result, block: () -> T): T
+        fun <T> record(
+            result: Result,
+            block: () -> T,
+        ): T
 
         object Noop : TimerSample {
             override fun record(result: Result) {}
 
-            override fun record(result: Result, duration: Duration) {}
+            override fun record(
+                result: Result,
+                duration: Duration,
+            ) {}
 
-            override fun <T> record(result: Result, block: () -> T): T = block()
+            override fun <T> record(
+                result: Result,
+                block: () -> T,
+            ): T = block()
         }
 
         class Real(
@@ -165,7 +190,10 @@ object PaymentsMetrics {
                 record(result, elapsed)
             }
 
-            override fun record(result: Result, duration: Duration) {
+            override fun record(
+                result: Result,
+                duration: Duration,
+            ) {
                 if (!recorded.compareAndSet(false, true)) {
                     return
                 }
@@ -173,9 +201,10 @@ object PaymentsMetrics {
                 timer.record(duration.toLong(DurationUnit.NANOSECONDS), TimeUnit.NANOSECONDS)
             }
 
-            override fun <T> record(result: Result, block: () -> T): T {
-                return block().also { record(result) }
-            }
+            override fun <T> record(
+                result: Result,
+                block: () -> T,
+            ): T = block().also { record(result) }
 
             private fun locateTimer(result: Result): Timer {
                 val tags = mutableListOf("path", path.tag, "result", result.tag)

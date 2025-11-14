@@ -19,8 +19,8 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.time.Clock
@@ -30,7 +30,9 @@ import java.time.Instant
 private val DEFAULT_QR_TTL: Duration = Duration.ofHours(12)
 
 @Serializable
-private data class ScanPayload(val qr: String)
+private data class ScanPayload(
+    val qr: String,
+)
 
 fun Application.checkinRoutes(
     repository: GuestListRepository,
@@ -130,7 +132,12 @@ fun Application.checkinRoutes(
                             if (entry.listId != list.id) {
                                 UiCheckinMetrics.incError()
                                 logger.warn(
-                                    "checkin.scan error=entry_list_mismatch clubId={} listId={} entryListId={} entryId={}",
+                                    "checkin.scan " +
+                                        "error=entry_list_mismatch " +
+                                        "clubId={} " +
+                                        "listId={} " +
+                                        "entryListId={} " +
+                                        "entryId={}",
                                     clubId,
                                     list.id,
                                     entry.listId,
@@ -147,7 +154,7 @@ fun Application.checkinRoutes(
                                 UiCheckinMetrics.incError()
                                 call.respond(HttpStatusCode.Conflict, "outside_arrival_window")
                                 return@timeScanSuspend
-                            } else if (!withinWindow /* and CALLED */) {
+                            } else if (!withinWindow) {
                                 UiCheckinMetrics.incLateOverride()
                             }
 
@@ -167,7 +174,12 @@ fun Application.checkinRoutes(
                                 return@timeScanSuspend
                             }
 
-                            logger.info("checkin.scan status=arrived clubId={} listId={} entryId={}", clubId, list.id, entry.id)
+                            logger.info(
+                                "checkin.scan status=arrived clubId={} listId={} entryId={}",
+                                clubId,
+                                list.id,
+                                entry.id,
+                            )
                             call.respond(HttpStatusCode.OK, mapOf("status" to "ARRIVED"))
                         }
                     }
@@ -185,7 +197,9 @@ fun Application.checkinRoutes(
                                     }
 
                             @Serializable
-                            data class ByNameArrivePayload(val entryId: Long)
+                            data class ByNameArrivePayload(
+                                val entryId: Long,
+                            )
 
                             val payload =
                                 runCatching { call.receive<ByNameArrivePayload>() }.getOrNull()
@@ -241,11 +255,14 @@ fun Application.checkinRoutes(
                             // arrival_window
                             val now = Instant.now(clock)
                             val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
-                            if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
+                            val outsideArrivalWindow = !withinWindow
+                            val isCalled = entry.status == GuestListEntryStatus.CALLED
+                            if (outsideArrivalWindow && !isCalled) {
                                 UiCheckinMetrics.incByNameError()
                                 call.respond(HttpStatusCode.Conflict, "outside_arrival_window")
                                 return@timeByNameSuspend
-                            } else if (!withinWindow /* and CALLED */) {
+                            } else if (outsideArrivalWindow && isCalled) {
+                                // Вне окна, но статус CALLED — разрешаем с учётом позднего прихода.
                                 UiCheckinMetrics.incLateOverride()
                             }
 
@@ -281,9 +298,10 @@ fun Application.checkinRoutes(
     }
 }
 
-private suspend fun ApplicationCall.receiveScanPayloadOrNull(): ScanPayload? {
-    return runCatching { receive<ScanPayload>() }.getOrNull()
-}
+private suspend fun ApplicationCall.receiveScanPayloadOrNull(): ScanPayload? =
+    runCatching {
+        receive<ScanPayload>()
+    }.getOrNull()
 
 private fun isWithinWindow(
     now: Instant,

@@ -9,25 +9,26 @@ import org.slf4j.MDC
 
 private const val ACTOR_ID_KEY = "actor_id"
 
-val ActorMdcPlugin = createApplicationPlugin(name = "ActorMdcPlugin") {
-    onCall { call ->
-        val actorId =
-            runCatching {
-                val context = call.rbacContext()
-                context.user.id.toString()
-            }.getOrNull()
-        if (actorId.isNullOrBlank()) {
-            return@onCall
-        }
-        val closeable = MDC.putCloseable(ACTOR_ID_KEY, actorId)
-        val job = call.coroutineContext[Job]
-        if (job == null) {
-            closeable.close()
-        } else {
-            job.invokeOnCompletion { closeable.close() }
+val ActorMdcPlugin =
+    createApplicationPlugin(name = "ActorMdcPlugin") {
+        onCall { call ->
+            val actorId =
+                runCatching {
+                    val context = call.rbacContext()
+                    context.user.id.toString()
+                }.getOrNull()
+            if (actorId.isNullOrBlank()) {
+                return@onCall
+            }
+            val closeable = MDC.putCloseable(ACTOR_ID_KEY, actorId)
+            val job = call.coroutineContext[Job]
+            if (job == null) {
+                closeable.close()
+            } else {
+                job.invokeOnCompletion { closeable.close() }
+            }
         }
     }
-}
 
 fun Application.installActorMdcPlugin() {
     install(ActorMdcPlugin)

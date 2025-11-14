@@ -23,72 +23,78 @@ import io.ktor.server.testing.testApplication
 import io.mockk.coEvery
 import io.mockk.mockk
 
-class RbacFeatureFlagTest : FunSpec({
-    val auditRepo = mockk<AuditLogRepository>(relaxed = true)
-    coEvery { auditRepo.log(any(), any(), any(), any(), any(), any(), any()) } returns 1L
+class RbacFeatureFlagTest :
+    FunSpec({
+        val auditRepo = mockk<AuditLogRepository>(relaxed = true)
+        coEvery { auditRepo.log(any(), any(), any(), any(), any(), any(), any()) } returns 1L
 
-    fun configFor(enabled: Boolean): MapApplicationConfig =
-        MapApplicationConfig("app.RBAC_ENABLED" to enabled.toString())
+        fun configFor(enabled: Boolean): MapApplicationConfig =
+            MapApplicationConfig("app.RBAC_ENABLED" to enabled.toString())
 
-    test("rbac route returns 403 without role and 200 with role when enabled") {
-        val users =
-            mapOf(
-                1L to User(id = 1L, telegramId = 1L, username = "admin"),
-                2L to User(id = 2L, telegramId = 2L, username = "guest"),
-            )
-        val roles = mapOf(1L to setOf(Role.MANAGER))
-        val clubs = emptyMap<Long, Set<Long>>()
+        test("rbac route returns 403 without role and 200 with role when enabled") {
+            val users =
+                mapOf(
+                    1L to User(id = 1L, telegramId = 1L, username = "admin"),
+                    2L to User(id = 2L, telegramId = 2L, username = "guest"),
+                )
+            val roles = mapOf(1L to setOf(Role.MANAGER))
+            val clubs = emptyMap<Long, Set<Long>>()
 
-        testApplication {
-            environment {
-                config = configFor(true)
-            }
-            application {
-                install(ContentNegotiation) { json() }
-                install(RbacPlugin) {
-                    userRepository = InMemoryUserRepository(users)
-                    userRoleRepository = InMemoryUserRoleRepository(roles, clubs)
-                    auditLogRepository = auditRepo
-                    principalExtractor = { call ->
-                        call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { TelegramPrincipal(it, null) }
+            testApplication {
+                environment {
+                    config = configFor(true)
+                }
+                application {
+                    install(ContentNegotiation) { json() }
+                    install(RbacPlugin) {
+                        userRepository = InMemoryUserRepository(users)
+                        userRoleRepository = InMemoryUserRoleRepository(roles, clubs)
+                        auditLogRepository = auditRepo
+                        principalExtractor = { call ->
+                            call.request
+                                .header("X-Telegram-Id")
+                                ?.toLongOrNull()
+                                ?.let { TelegramPrincipal(it, null) }
+                        }
                     }
+                    installRbacIfEnabled()
+                    rbacSampleRoute()
                 }
-                installRbacIfEnabled()
-                rbacSampleRoute()
+
+                val forbidden =
+                    client.get("/api/secure/ping") {
+                        header("X-Telegram-Id", "2")
+                    }
+                forbidden.status shouldBe HttpStatusCode.Forbidden
+
+                val allowed =
+                    client.get("/api/secure/ping") {
+                        header("X-Telegram-Id", "1")
+                    }
+                allowed.status shouldBe HttpStatusCode.OK
             }
-
-            val forbidden =
-                client.get("/api/secure/ping") {
-                    header("X-Telegram-Id", "2")
-                }
-            forbidden.status shouldBe HttpStatusCode.Forbidden
-
-            val allowed =
-                client.get("/api/secure/ping") {
-                    header("X-Telegram-Id", "1")
-                }
-            allowed.status shouldBe HttpStatusCode.OK
         }
-    }
 
-    test("rbac route is absent when flag disabled") {
-        testApplication {
-            environment {
-                config = configFor(false)
-            }
-            application {
-                install(ContentNegotiation) { json() }
-                installRbacIfEnabled()
-                rbacSampleRoute()
-            }
+        test("rbac route is absent when flag disabled") {
+            testApplication {
+                environment {
+                    config = configFor(false)
+                }
+                application {
+                    install(ContentNegotiation) { json() }
+                    installRbacIfEnabled()
+                    rbacSampleRoute()
+                }
 
-            val response =
-                client.get("/api/secure/ping")
-            response.status shouldBe HttpStatusCode.NotFound
+                val response =
+                    client.get("/api/secure/ping")
+                response.status shouldBe HttpStatusCode.NotFound
+            }
         }
-    }
-}) {
-    private class InMemoryUserRepository(private val users: Map<Long, User>) : UserRepository {
+    }) {
+    private class InMemoryUserRepository(
+        private val users: Map<Long, User>,
+    ) : UserRepository {
         override suspend fun getByTelegramId(id: Long): User? = users[id]
     }
 

@@ -52,10 +52,9 @@ class AppEnvFilter : Filter<ILoggingEvent>() {
         return ctxEnv ?: systemProp ?: envVar ?: DEFAULT_ENV
     }
 
-    private fun parseReply(value: String): FilterReply {
-        return runCatching { FilterReply.valueOf(value.trim().uppercase()) }
+    private fun parseReply(value: String): FilterReply =
+        runCatching { FilterReply.valueOf(value.trim().uppercase()) }
             .getOrDefault(FilterReply.NEUTRAL)
-    }
 
     companion object {
         private const val APP_ENV_PROPERTY = "APP_ENV"

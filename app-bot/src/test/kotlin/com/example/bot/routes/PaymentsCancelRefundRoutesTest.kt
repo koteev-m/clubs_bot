@@ -36,20 +36,30 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
         overrideMiniAppValidatorForTesting { _, _ -> user }
     }
 
-    override suspend fun afterEach(testCase: TestCase, result: TestResult) {
+    override suspend fun afterEach(
+        testCase: TestCase,
+        result: TestResult,
+    ) {
         resetMiniAppValidator()
     }
 
     init {
         "cancel booking happy path and idempotency" {
             val bookingId = UUID.randomUUID()
-            val service = FakePaymentsService().apply { seed(clubId = 1L, bookingId = bookingId, capturedMinor = 1_000) }
+            val service =
+                FakePaymentsService().apply {
+                    seed(
+                        clubId = 1L,
+                        bookingId = bookingId,
+                        capturedMinor = 1_000,
+                    )
+                }
             testApplication {
                 application { configureForTest(service) }
 
                 val payload = "{\"reason\":\"guest_cancelled\"}"
                 val first =
-                    client.post("/api/clubs/1/bookings/${bookingId}/cancel") {
+                    client.post("/api/clubs/1/bookings/$bookingId/cancel") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-cancel-1")
@@ -64,7 +74,7 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
                 firstBody.alreadyCancelled shouldBe false
 
                 val second =
-                    client.post("/api/clubs/1/bookings/${bookingId}/cancel") {
+                    client.post("/api/clubs/1/bookings/$bookingId/cancel") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-cancel-1")
@@ -86,7 +96,7 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
 
                 val payload = "{\"amountMinor\":null}"
                 val response =
-                    client.post("/api/clubs/1/bookings/${bookingId}/refund") {
+                    client.post("/api/clubs/1/bookings/$bookingId/refund") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-refund-full")
@@ -109,7 +119,7 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
 
                 val payload = "{\"amountMinor\":700}"
                 val first =
-                    client.post("/api/clubs/1/bookings/${bookingId}/refund") {
+                    client.post("/api/clubs/1/bookings/$bookingId/refund") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-refund-partial")
@@ -122,7 +132,7 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
                 firstBody.idempotent shouldBe false
 
                 val second =
-                    client.post("/api/clubs/1/bookings/${bookingId}/refund") {
+                    client.post("/api/clubs/1/bookings/$bookingId/refund") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-refund-partial")
@@ -143,7 +153,7 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
                 application { configureForTest(service) }
 
                 val response =
-                    client.post("/api/clubs/1/bookings/${bookingId}/cancel") {
+                    client.post("/api/clubs/1/bookings/$bookingId/cancel") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-unauth")
@@ -155,12 +165,19 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
 
         "state conflict returns 409" {
             val bookingId = UUID.randomUUID()
-            val service = FakePaymentsService().apply { seed(1L, bookingId, status = FakePaymentsService.BookingStatus.CANCELLED) }
+            val service =
+                FakePaymentsService().apply {
+                    seed(
+                        1L,
+                        bookingId,
+                        status = FakePaymentsService.BookingStatus.CANCELLED,
+                    )
+                }
             testApplication {
                 application { configureForTest(service) }
 
                 val response =
-                    client.post("/api/clubs/1/bookings/${bookingId}/cancel") {
+                    client.post("/api/clubs/1/bookings/$bookingId/cancel") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-conflict")
@@ -173,14 +190,15 @@ class PaymentsCancelRefundRoutesTest : StringSpec() {
 
         "partial amount exceeding remainder yields 422" {
             val bookingId = UUID.randomUUID()
-            val service = FakePaymentsService().apply {
-                seed(1L, bookingId, capturedMinor = 900, refundedMinor = 400)
-            }
+            val service =
+                FakePaymentsService().apply {
+                    seed(1L, bookingId, capturedMinor = 900, refundedMinor = 400)
+                }
             testApplication {
                 application { configureForTest(service) }
 
                 val response =
-                    client.post("/api/clubs/1/bookings/${bookingId}/refund") {
+                    client.post("/api/clubs/1/bookings/$bookingId/refund") {
                         header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                         header(HttpHeaders.Accept, ContentType.Application.Json.toString())
                         header("Idempotency-Key", "idem-refund-422")
@@ -246,9 +264,7 @@ private class FakePaymentsService : PaymentsService {
         paymentToken: String?,
         idemKey: String,
         actorUserId: Long,
-    ): PaymentsService.FinalizeResult {
-        return PaymentsService.FinalizeResult("NOOP")
-    }
+    ): PaymentsService.FinalizeResult = PaymentsService.FinalizeResult("NOOP")
 
     override suspend fun cancel(
         clubId: Long,

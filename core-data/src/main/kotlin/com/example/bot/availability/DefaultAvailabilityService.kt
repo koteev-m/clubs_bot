@@ -30,13 +30,12 @@ import java.time.ZoneOffset
 class DefaultAvailabilityService(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
-) :
-    AvailabilityService(
-            UnsupportedAvailabilityRepository,
-            OperatingRulesResolver(UnsupportedAvailabilityRepository, clock),
-            CutoffPolicy(),
-            clock,
-        ) {
+) : AvailabilityService(
+        UnsupportedAvailabilityRepository,
+        OperatingRulesResolver(UnsupportedAvailabilityRepository, clock),
+        CutoffPolicy(),
+        clock,
+    ) {
     override suspend fun listOpenNights(
         clubId: Long,
         limit: Int,
@@ -87,8 +86,7 @@ class DefaultAvailabilityService(
                         .selectAll()
                         .where {
                             (EventsTable.clubId eq clubId) and (EventsTable.startAt eq start)
-                        }
-                        .limit(1)
+                        }.limit(1)
                         .firstOrNull()
                         ?: return@newSuspendedTransaction emptyList()
 
@@ -131,8 +129,7 @@ class DefaultAvailabilityService(
                             (TablesTable.active eq true) and
                             not(bookedExists) and
                             not(heldExists)
-                    }
-                    .orderBy(TablesTable.tableNumber, SortOrder.ASC)
+                    }.orderBy(TablesTable.tableNumber, SortOrder.ASC)
                     .map { row ->
                         val tableId = row[TablesTable.id]
                         val number = row[TablesTable.tableNumber]

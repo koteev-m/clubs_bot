@@ -20,6 +20,11 @@ class WaitlistRepositoryImpl(
     private val database: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) : WaitlistRepository {
+    companion object {
+        /** Минимальная/максимальная длительность окна для прихода после вызова (в минутах). */
+        private const val MIN_RESERVE_MINUTES: Int = 5
+        private const val MAX_RESERVE_MINUTES: Int = 120
+    }
 
     override suspend fun enqueue(
         clubId: Long,
@@ -42,8 +47,7 @@ class WaitlistRepositoryImpl(
                             it[WaitlistTable.calledAt] = null
                             it[WaitlistTable.expiresAt] = null
                             it[WaitlistTable.status] = WaitlistStatus.WAITING.name
-                        }
-                        .resultedValues!!
+                        }.resultedValues!!
                         .single()
                 inserted.toDomain()
             }
@@ -53,8 +57,8 @@ class WaitlistRepositoryImpl(
     override suspend fun listQueue(
         clubId: Long,
         eventId: Long,
-    ): List<WaitlistEntry> {
-        return withTxRetry {
+    ): List<WaitlistEntry> =
+        withTxRetry {
             transaction(database) {
                 WaitlistTable
                     .selectAll()
@@ -63,19 +67,19 @@ class WaitlistRepositoryImpl(
                             (WaitlistTable.eventId eq eventId) and
                             (WaitlistTable.status neq WaitlistStatus.CANCELLED.name) and
                             (WaitlistTable.status neq WaitlistStatus.EXPIRED.name)
-                    }
-                    .orderBy(WaitlistTable.createdAt, SortOrder.ASC)
+                    }.orderBy(WaitlistTable.createdAt, SortOrder.ASC)
                     .map { it.toDomain() }
             }
         }
-    }
 
     override suspend fun callEntry(
         clubId: Long,
         id: Long,
         reserveMinutes: Int,
     ): WaitlistEntry? {
-        require(reserveMinutes in 5..120) { "reserveMinutes must be between 5 and 120" }
+        require(reserveMinutes in MIN_RESERVE_MINUTES..MAX_RESERVE_MINUTES) {
+            "reserveMinutes must be between $MIN_RESERVE_MINUTES and $MAX_RESERVE_MINUTES"
+        }
         return withTxRetry {
             transaction(database) {
                 val now = clock.instant().atOffset(ZoneOffset.UTC)
@@ -128,8 +132,8 @@ class WaitlistRepositoryImpl(
         }
     }
 
-    override suspend fun get(id: Long): WaitlistEntry? {
-        return withTxRetry {
+    override suspend fun get(id: Long): WaitlistEntry? =
+        withTxRetry {
             transaction(database) {
                 WaitlistTable
                     .selectAll()
@@ -138,7 +142,6 @@ class WaitlistRepositoryImpl(
                     ?.toDomain()
             }
         }
-    }
 
     private fun ResultRow.toDomain(): WaitlistEntry =
         WaitlistEntry(

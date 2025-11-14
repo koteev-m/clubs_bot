@@ -2,6 +2,7 @@ import com.example.build.LogsPolicyScanTask
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -161,50 +162,86 @@ val runMigrations by tasks.registering(JavaExec::class) {
     mainClass.set("com.example.bot.tools.MigrateMainKt")
 }
 
-// SEC-02: quality gate — тесты + точечный rg-скан логвызовов
+// ----------------------------------------------------------------------
+// SEC-02: quality gate — CC-friendly LogsPolicyScanTask
+// ----------------------------------------------------------------------
 tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
     group = "verification"
-    description = "SEC-02: run tests and scan logs for PII/secret patterns (streamed ripgrep)"
+    description = "SEC-02: scan sources for sensitive logging patterns (ripgrep-based)"
 
-    // сначала тесты (включая KtorMdcTest), затем скан
+    // Сначала тесты (содержат проверки MDC)
     dependsOn("test")
 
-    // Ограничиваем область поиска и включаем PCRE2 (-P) для сложных паттернов
-    includeArgs.set(
-        listOf(
-            "-n", "--hidden", "-P",
-            "-g", "!**/build/**",
-            "-g", "!**/.gradle/**",
-            "-g", "!**/.idea/**",
-            "-g", "!**/.git/**",
-            "-g", "!**/*.iml",
-            "-g", "!**/src/test/**",
-            "-g", "!**/test/**",
-            "-g", "!**/fixtures/**",
-            "-g", "!**/resources/**",
-            "-g", "!miniapp/dist/**"
-        )
+    // КЛЮЧЕВОЕ: сузить inputs до исходников — без build/*
+    // ConfigurableFileCollection → используем setFrom(...)
+    sourceDirs.setFrom(
+        // исходники текущего модуля
+        layout.projectDirectory.dir("src"),
+        // фронтовые исходники; если у вас другая структура, поменяйте путь
+        rootProject.layout.projectDirectory.dir("miniapp"),
     )
 
-    // Матчим ТОЛЬКО строки, где одновременно есть вызов логгера и подозрительный шаблон
+    // Ищем только исходные файлы (паттерны применяются внутри каждого sourceDir)
+    includeGlobs.set(
+        listOf(
+            "**/*.kt",
+            "**/*.kts",
+            "**/*.java",
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.js",
+        ),
+    )
+
+    // Исключаем артефакты и «тяжёлые» директории
+    excludeGlobs.set(
+        listOf(
+            "**/build/**",
+            "dist/**",
+            "node_modules/**",
+            "**/.gradle/**",
+            "**/.idea/**",
+            "**/.git/**",
+            "**/*.iml",
+            "**/test/**",
+            "**/src/test/**",
+            "**/fixtures/**",
+            "**/resources/**",
+        ),
+    )
+
+    // Полные PCRE2‑паттерны (те же, что раньше)
     patterns.set(
         listOf(
-            // qr=
-            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*safe)(?=.*\\bqr=)",
-            // start_param=
-            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*safe)(?=.*\\bstart_param=)",
-            // idempotencyKey
-            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*safe)(?=.*\\bidempotencyKey\\b)",
-            // телефоны
-            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*masked)(?=.*\\+?\\d[\\d \\-\\(\\)]{8,}\\d)",
-            // имена/ФИО
-            "(?i)(?=.*\\b(?:logger|log)\\.(?:info|warn|error|debug|trace)\\()(?!.*masked)(?=.*\\b(?:ФИО|fullName|fio|name)\\s*=)"
-        )
+            // logger.*( ... qr= ... )
+            "(?<!\\w)(?:logger|log|LOG|LOGGER)\\." +
+                "(?:trace|debug|info|warn|error)\\([^\\n]*qr=",
+            // logger.*( ... start_param= ... )
+            "(?<!\\w)(?:logger|log|LOG|LOGGER)\\." +
+                "(?:trace|debug|info|warn|error)\\([^\\n]*start_param=",
+            // logger.*( ... idempotencyKey ... )
+            "(?<!\\w)(?:logger|log|LOG|LOGGER)\\." +
+                "(?:trace|debug|info|warn|error)\\([^\\n]*\\bidempotencyKey\\b",
+            // "голые" Telegram bot tokens
+            "(?<!\\w)(?:logger|log|LOG|LOGGER)\\." +
+                "(?:trace|debug|info|warn|error)\\([^\\n]*\\b\\d{6,12}:[A-Za-z0-9_-]{30,}\\b",
+            // сырые телефоны
+            "(?<!\\w)(?:logger|log|LOG|LOGGER)\\." +
+                "(?:trace|debug|info|warn|error)\\([^\\n]*\\+?\\d[\\d \\-\\(\\)]{8,}\\d",
+            // ключи с именами
+            "(?<!\\w)(?:logger|log|LOG|LOGGER)\\." +
+                "(?:trace|debug|info|warn|error)\\([^\\n]*\\b(ФИО|fullName|fio|name)\\s*=",
+        ),
     )
-// Включаем политику в стандартную проверку модуля
-tasks.named("check").configure {
-    dependsOn("checkLogsPolicy")
+
+    // При необходимости можно задать путь к rg:
+    // ripgrepExecutable.set("/usr/local/bin/rg")
+
+    // Можно сохранить отчёт:
+    // reportFile.set(layout.buildDirectory.file("reports/logspolicy/scan.txt"))
 }
 
 // Включаем гейт в фазу проверки модуля
-tasks.named("check") { dependsOn("checkLogsPolicy") }
+tasks.named("check") {
+    dependsOn("checkLogsPolicy")
+}

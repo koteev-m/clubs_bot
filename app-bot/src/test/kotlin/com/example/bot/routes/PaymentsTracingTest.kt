@@ -13,40 +13,41 @@ import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
 
-class PaymentsTracingTest : StringSpec({
-    beforeTest { PaymentsObservability.overrideEnabled(true) }
-    afterTest { PaymentsObservability.resetOverrides() }
+class PaymentsTracingTest :
+    StringSpec({
+        beforeTest { PaymentsObservability.overrideEnabled(true) }
+        afterTest { PaymentsObservability.resetOverrides() }
 
-    "finalize emits tracing span" {
-        val exporter = InMemorySpanExporter.create()
-        val tracing = TracingProvider.create(exporter)
-        try {
-            val service =
-                DefaultPaymentsService(
-                    finalizeService = SuccessFinalizeService(),
-                    paymentsRepository = NoopPaymentsRepository(),
-                    bookingRepository = NoopPaymentsBookingRepository(),
-                    metricsProvider = null,
-                    tracer = tracing.tracer,
-                )
+        "finalize emits tracing span" {
+            val exporter = InMemorySpanExporter.create()
+            val tracing = TracingProvider.create(exporter)
+            try {
+                val service =
+                    DefaultPaymentsService(
+                        finalizeService = SuccessFinalizeService(),
+                        paymentsRepository = NoopPaymentsRepository(),
+                        bookingRepository = NoopPaymentsBookingRepository(),
+                        metricsProvider = null,
+                        tracer = tracing.tracer,
+                    )
 
-            runBlocking {
-                service.finalize(
-                    clubId = 7L,
-                    bookingId = UUID.randomUUID(),
-                    paymentToken = null,
-                    idemKey = "trace-test",
-                    actorUserId = 13L,
-                )
+                runBlocking {
+                    service.finalize(
+                        clubId = 7L,
+                        bookingId = UUID.randomUUID(),
+                        paymentToken = null,
+                        idemKey = "trace-test",
+                        actorUserId = 13L,
+                    )
+                }
+
+                exporter.finishedSpanItems.any { it.name == "payments.finalize" }.shouldBeTrue()
+            } finally {
+                tracing.sdk.close()
+                exporter.reset()
             }
-
-            exporter.finishedSpanItems.any { it.name == "payments.finalize" }.shouldBeTrue()
-        } finally {
-            tracing.sdk.close()
-            exporter.reset()
         }
-    }
-})
+    })
 
 private class SuccessFinalizeService : PaymentsFinalizeService {
     override suspend fun finalize(
@@ -55,9 +56,7 @@ private class SuccessFinalizeService : PaymentsFinalizeService {
         paymentToken: String?,
         idemKey: String,
         actorUserId: Long,
-    ): PaymentsFinalizeService.FinalizeResult {
-        return PaymentsFinalizeService.FinalizeResult(paymentStatus = "CAPTURED")
-    }
+    ): PaymentsFinalizeService.FinalizeResult = PaymentsFinalizeService.FinalizeResult(paymentStatus = "CAPTURED")
 }
 
 private class NoopPaymentsRepository : PaymentsRepository {
@@ -68,54 +67,51 @@ private class NoopPaymentsRepository : PaymentsRepository {
         amountMinor: Long,
         payload: String,
         idempotencyKey: String,
-    ): PaymentsRepository.PaymentRecord {
-        throw UnsupportedOperationException("not used in test")
-    }
+    ): PaymentsRepository.PaymentRecord = throw UnsupportedOperationException("not used in test")
 
-    override suspend fun markPending(id: UUID) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    override suspend fun markPending(id: UUID): Unit = throw UnsupportedOperationException("not used in test")
 
-    override suspend fun markCaptured(id: UUID, externalId: String?) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    override suspend fun markCaptured(
+        id: UUID,
+        externalId: String?,
+    ): Unit = throw UnsupportedOperationException("not used in test")
 
-    override suspend fun markDeclined(id: UUID, reason: String) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    override suspend fun markDeclined(
+        id: UUID,
+        reason: String,
+    ): Unit = throw UnsupportedOperationException("not used in test")
 
-    override suspend fun markRefunded(id: UUID, externalId: String?) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    override suspend fun markRefunded(
+        id: UUID,
+        externalId: String?,
+    ): Unit = throw UnsupportedOperationException("not used in test")
 
-    override suspend fun findByPayload(payload: String): PaymentsRepository.PaymentRecord? {
+    override suspend fun findByPayload(payload: String): PaymentsRepository.PaymentRecord? =
         throw UnsupportedOperationException("not used in test")
-    }
 
-    override suspend fun findByIdempotencyKey(idempotencyKey: String): PaymentsRepository.PaymentRecord? {
+    override suspend fun findByIdempotencyKey(idempotencyKey: String): PaymentsRepository.PaymentRecord? =
         throw UnsupportedOperationException("not used in test")
-    }
 
     override suspend fun recordAction(
         bookingId: UUID,
         key: String,
         action: PaymentsRepository.Action,
         result: PaymentsRepository.Result,
-    ): PaymentsRepository.SavedAction {
-        throw UnsupportedOperationException("not used in test")
-    }
+    ): PaymentsRepository.SavedAction = throw UnsupportedOperationException("not used in test")
 
-    override suspend fun findActionByIdempotencyKey(key: String): PaymentsRepository.SavedAction? {
+    override suspend fun findActionByIdempotencyKey(key: String): PaymentsRepository.SavedAction? =
         throw UnsupportedOperationException("not used in test")
-    }
 
-    override suspend fun updateStatus(id: UUID, status: String, externalId: String?) {
-        throw UnsupportedOperationException("not used in test")
-    }
+    override suspend fun updateStatus(
+        id: UUID,
+        status: String,
+        externalId: String?,
+    ): Unit = throw UnsupportedOperationException("not used in test")
 }
 
 private class NoopPaymentsBookingRepository : PaymentsBookingRepository {
-    override suspend fun cancel(bookingId: UUID, clubId: Long): BookingCancellationResult {
-        return BookingCancellationResult.NotFound
-    }
+    override suspend fun cancel(
+        bookingId: UUID,
+        clubId: Long,
+    ): BookingCancellationResult = BookingCancellationResult.NotFound
 }

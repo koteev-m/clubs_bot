@@ -38,8 +38,12 @@ data class InvoiceInfo(
 /** Result of confirmation attempt. */
 sealed interface ConfirmResult {
     /** Confirmation is pending payment; [invoice] should be sent to user. */
-    data class PendingPayment(val invoice: InvoiceInfo) : ConfirmResult
+    data class PendingPayment(
+        val invoice: InvoiceInfo,
+    ) : ConfirmResult
 
     /** Booking has been confirmed immediately. */
-    data class Confirmed(val booking: BookingSummary) : ConfirmResult
+    data class Confirmed(
+        val booking: BookingSummary,
+    ) : ConfirmResult
 }

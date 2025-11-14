@@ -1,9 +1,19 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package com.example.bot.data.repo
 
 import com.example.bot.data.booking.core.BookingOutboxTable
 import com.example.bot.data.booking.core.OutboxMessageStatus
 import com.example.bot.data.notifications.NotificationsOutboxTable
 import com.example.bot.data.notifications.OutboxStatus
+import kotlinx.coroutines.Dispatchers
+import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.statements.api.PreparedStatementApi
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.sql.update
 import java.sql.ResultSet
 import java.time.Clock
 import java.time.Instant
@@ -11,18 +21,25 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.HashMap
 import java.util.LinkedHashMap
-import kotlinx.coroutines.Dispatchers
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.selectAll
-import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
-import org.jetbrains.exposed.sql.update
-import org.jetbrains.exposed.sql.statements.api.PreparedStatementApi
+
+/**
+ * Файл‑уровневые константы (убираем "магические числа" и "функцию с константой").
+ */
+private const val PRIMARY_KEY_COLUMN: String = "id"
+private const val MIN_REPLAY_LIMIT: Int = 1
+private const val MAX_REPLAY_LIMIT: Int = 10_000
 
 interface OutboxAdminRepository {
-    suspend fun list(filter: AdminFilter, page: Page): Paged<OutboxRecord>
+    suspend fun list(
+        filter: AdminFilter,
+        page: Page,
+    ): Paged<OutboxRecord>
 
-    suspend fun markForReplayByIds(ids: List<Long>, actor: String, dryRun: Boolean): ReplayResult
+    suspend fun markForReplayByIds(
+        ids: List<Long>,
+        actor: String,
+        dryRun: Boolean,
+    ): ReplayResult
 
     suspend fun markForReplayByFilter(
         filter: AdminFilter,
@@ -42,15 +59,25 @@ data class AdminFilter(
     val idIn: List<Long>? = null,
 )
 
-data class Page(val limit: Int, val offset: Int, val sort: Sort)
+data class Page(
+    val limit: Int,
+    val offset: Int,
+    val sort: Sort,
+)
 
-data class Sort(val field: SortField, val direction: SortDirection)
+data class Sort(
+    val field: SortField,
+    val direction: SortDirection,
+)
 
 enum class SortField { CreatedAt, Attempts, Id }
 
 enum class SortDirection { ASC, DESC }
 
-data class Paged<T>(val items: List<T>, val total: Long)
+data class Paged<T>(
+    val items: List<T>,
+    val total: Long,
+)
 
 data class ReplayResult(
     val totalCandidates: Int,
@@ -100,7 +127,23 @@ private data class SqlConditions(
     val clauses: List<String> = emptyList(),
     val params: List<SqlParameter> = emptyList(),
 ) {
-    fun and(clause: String, vararg additional: SqlParameter): SqlConditions {
+    fun and(
+        clause: String,
+        vararg additional: SqlParameter,
+    ): SqlConditions {
+        if (clause.isBlank()) return this
+        val newClauses = clauses + clause
+        val newParams = params + additional
+        return SqlConditions(newClauses, newParams)
+    }
+
+    /**
+     * Перегрузка без vararg — чтобы не использовать spread-оператор.
+     */
+    fun and(
+        clause: String,
+        additional: List<SqlParameter>,
+    ): SqlConditions {
         if (clause.isBlank()) return this
         val newClauses = clauses + clause
         val newParams = params + additional
@@ -116,28 +159,51 @@ private data class SqlConditions(
 }
 
 private sealed interface SqlParameter {
-    fun bind(statement: PreparedStatementApi, index: Int)
+    fun bind(
+        statement: PreparedStatementApi,
+        index: Int,
+    )
 
-    data class StringParam(val value: String) : SqlParameter {
-        override fun bind(statement: PreparedStatementApi, index: Int) {
+    data class StringParam(
+        val value: String,
+    ) : SqlParameter {
+        override fun bind(
+            statement: PreparedStatementApi,
+            index: Int,
+        ) {
             statement[index] = value
         }
     }
 
-    data class IntParam(val value: Int) : SqlParameter {
-        override fun bind(statement: PreparedStatementApi, index: Int) {
+    data class IntParam(
+        val value: Int,
+    ) : SqlParameter {
+        override fun bind(
+            statement: PreparedStatementApi,
+            index: Int,
+        ) {
             statement[index] = value
         }
     }
 
-    data class LongParam(val value: Long) : SqlParameter {
-        override fun bind(statement: PreparedStatementApi, index: Int) {
+    data class LongParam(
+        val value: Long,
+    ) : SqlParameter {
+        override fun bind(
+            statement: PreparedStatementApi,
+            index: Int,
+        ) {
             statement[index] = value
         }
     }
 
-    data class InstantParam(val value: Instant) : SqlParameter {
-        override fun bind(statement: PreparedStatementApi, index: Int) {
+    data class InstantParam(
+        val value: Instant,
+    ) : SqlParameter {
+        override fun bind(
+            statement: PreparedStatementApi,
+            index: Int,
+        ) {
             val offset = OffsetDateTime.ofInstant(value, ZoneOffset.UTC)
             statement[index] = offset
         }
@@ -150,11 +216,14 @@ private fun SqlConditions.andIn(
 ): SqlConditions {
     if (values.isEmpty()) return this
     val placeholders = values.joinToString(",") { "?" }
-    val params = values.map { SqlParameter.StringParam(it) }.toTypedArray()
-    return and("$column IN ($placeholders)", *params)
+    val params: List<SqlParameter> = values.map { SqlParameter.StringParam(it) }
+    return and("$column IN ($placeholders)", params) // без spread-оператора
 }
 
-private fun buildConditions(filter: AdminFilter, spec: TableSpec): SqlConditions {
+private fun buildConditions(
+    filter: AdminFilter,
+    spec: TableSpec,
+): SqlConditions {
     var conditions = SqlConditions()
     filter.topic?.takeIf { it.isNotBlank() }?.let { topic ->
         conditions = conditions.and("${spec.topicColumn} = ?", SqlParameter.StringParam(topic))
@@ -174,13 +243,11 @@ private fun buildConditions(filter: AdminFilter, spec: TableSpec): SqlConditions
     }
     filter.idIn?.filter { it > 0 }?.distinct()?.takeIf { it.isNotEmpty() }?.let { ids ->
         val placeholders = ids.joinToString(",") { "?" }
-        val params = ids.map { SqlParameter.LongParam(it) }.toTypedArray()
-        conditions = conditions.and("${specPrimaryKey(spec)} IN ($placeholders)", *params)
+        val params: List<SqlParameter> = ids.map { SqlParameter.LongParam(it) }
+        conditions = conditions.and("$PRIMARY_KEY_COLUMN IN ($placeholders)", params) // без spread-оператора
     }
     return conditions
 }
-
-private fun specPrimaryKey(spec: TableSpec): String = "id"
 
 private fun SqlConditions.restrictToStatuses(
     spec: TableSpec,
@@ -225,7 +292,10 @@ class OutboxAdminRepositoryImpl(
             "PERM_ERROR",
         )
 
-    override suspend fun list(filter: AdminFilter, page: Page): Paged<OutboxRecord> {
+    override suspend fun list(
+        filter: AdminFilter,
+        page: Page,
+    ): Paged<OutboxRecord> {
         val sortColumn =
             when (page.sort.field) {
                 SortField.CreatedAt -> "created_at"
@@ -272,93 +342,91 @@ class OutboxAdminRepositoryImpl(
         actor: String,
         dryRun: Boolean,
     ): ReplayResult {
-        if (ids.isEmpty()) {
-            return ReplayResult(totalCandidates = 0, affected = 0, dryRun = dryRun, topic = null)
-        }
-
-        val uniqueIds = ids.filter { it > 0 }.distinct()
-        if (uniqueIds.isEmpty()) {
-            return ReplayResult(totalCandidates = 0, affected = 0, dryRun = dryRun, topic = null)
-        }
-
-        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            val bookingRows =
-                BookingOutboxTable
-                    .selectAll()
-                    .where { (BookingOutboxTable.id inList uniqueIds) and (BookingOutboxTable.status inList allowedReplayStatuses) }
-                    .map { row ->
-                        ReplayCandidate(
-                            id = row[BookingOutboxTable.id],
-                            topic = row[BookingOutboxTable.topic],
-                            createdAt = row[BookingOutboxTable.createdAt].toInstant(),
-                            source = OutboxSource.BOOKING,
-                        )
-                    }
-            val notificationRows =
-                NotificationsOutboxTable
-                    .selectAll()
-                    .where {
-                        (NotificationsOutboxTable.id inList uniqueIds) and
-                            (NotificationsOutboxTable.status inList allowedReplayStatuses)
-                    }
-                    .map { row ->
-                        ReplayCandidate(
-                            id = row[NotificationsOutboxTable.id],
-                            topic = row[NotificationsOutboxTable.kind],
-                            createdAt = row[NotificationsOutboxTable.createdAt].toInstant(),
-                            source = OutboxSource.NOTIFICATIONS,
-                        )
-                    }
-
-            val candidates = bookingRows + notificationRows
-            if (candidates.isEmpty()) {
-                return@newSuspendedTransaction ReplayResult(0, 0, dryRun, null)
-            }
-
-            val affected =
-                if (dryRun) {
-                    0
+        val result: ReplayResult =
+            if (ids.isEmpty()) {
+                ReplayResult(totalCandidates = 0, affected = 0, dryRun = dryRun, topic = null)
+            } else {
+                val uniqueIds = ids.filter { it > 0 }.distinct()
+                if (uniqueIds.isEmpty()) {
+                    ReplayResult(totalCandidates = 0, affected = 0, dryRun = dryRun, topic = null)
                 } else {
-                    val now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
-                    val bookingAffected =
-                        if (bookingRows.isEmpty()) {
-                            0
-                        } else {
-                            BookingOutboxTable.update({
-                                (BookingOutboxTable.id inList bookingRows.map { it.id }) and
-                                    (BookingOutboxTable.status inList allowedReplayStatuses)
-                            }) { statement ->
-                                statement[BookingOutboxTable.status] = OutboxMessageStatus.NEW.name
-                                statement[BookingOutboxTable.nextAttemptAt] = now
-                                statement[BookingOutboxTable.lastError] = null
-                                statement[BookingOutboxTable.updatedAt] = now
-                            }
-                        }
-                    val notificationAffected =
-                        if (notificationRows.isEmpty()) {
-                            0
-                        } else {
-                            NotificationsOutboxTable.update({
-                                (NotificationsOutboxTable.id inList notificationRows.map { it.id }) and
-                                    (NotificationsOutboxTable.status inList allowedReplayStatuses)
-                            }) { statement ->
-                                statement[NotificationsOutboxTable.status] = OutboxStatus.NEW.name
-                                statement[NotificationsOutboxTable.nextAttemptAt] = now
-                                statement[NotificationsOutboxTable.lastError] = null
-                            }
-                        }
-                    bookingAffected + notificationAffected
-                }
+                    newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                        val bookingRows =
+                            BookingOutboxTable
+                                .selectAll()
+                                .where {
+                                    (BookingOutboxTable.id inList uniqueIds) and
+                                        (BookingOutboxTable.status inList allowedReplayStatuses)
+                                }.map { row ->
+                                    ReplayCandidate(
+                                        id = row[BookingOutboxTable.id],
+                                        topic = row[BookingOutboxTable.topic],
+                                        createdAt = row[BookingOutboxTable.createdAt].toInstant(),
+                                        source = OutboxSource.BOOKING,
+                                    )
+                                }
+                        val notificationRows =
+                            NotificationsOutboxTable
+                                .selectAll()
+                                .where {
+                                    (NotificationsOutboxTable.id inList uniqueIds) and
+                                        (NotificationsOutboxTable.status inList allowedReplayStatuses)
+                                }.map { row ->
+                                    ReplayCandidate(
+                                        id = row[NotificationsOutboxTable.id],
+                                        topic = row[NotificationsOutboxTable.kind],
+                                        createdAt = row[NotificationsOutboxTable.createdAt].toInstant(),
+                                        source = OutboxSource.NOTIFICATIONS,
+                                    )
+                                }
 
-            val topic =
-                candidates.map { it.topic }.distinct().singleOrNull()
-            ReplayResult(
-                totalCandidates = candidates.size,
-                affected = affected,
-                dryRun = dryRun,
-                topic = topic,
-            )
-        }
+                        val candidates = bookingRows + notificationRows
+                        val affected =
+                            if (dryRun || candidates.isEmpty()) {
+                                0
+                            } else {
+                                val now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)
+                                val bookingAffected =
+                                    if (bookingRows.isEmpty()) {
+                                        0
+                                    } else {
+                                        BookingOutboxTable.update({
+                                            (BookingOutboxTable.id inList bookingRows.map { it.id }) and
+                                                (BookingOutboxTable.status inList allowedReplayStatuses)
+                                        }) { statement ->
+                                            statement[BookingOutboxTable.status] = OutboxMessageStatus.NEW.name
+                                            statement[BookingOutboxTable.nextAttemptAt] = now
+                                            statement[BookingOutboxTable.lastError] = null
+                                            statement[BookingOutboxTable.updatedAt] = now
+                                        }
+                                    }
+                                val notificationAffected =
+                                    if (notificationRows.isEmpty()) {
+                                        0
+                                    } else {
+                                        NotificationsOutboxTable.update({
+                                            (NotificationsOutboxTable.id inList notificationRows.map { it.id }) and
+                                                (NotificationsOutboxTable.status inList allowedReplayStatuses)
+                                        }) { statement ->
+                                            statement[NotificationsOutboxTable.status] = OutboxStatus.NEW.name
+                                            statement[NotificationsOutboxTable.nextAttemptAt] = now
+                                            statement[NotificationsOutboxTable.lastError] = null
+                                        }
+                                    }
+                                bookingAffected + notificationAffected
+                            }
+
+                        val topic = candidates.map { it.topic }.distinct().singleOrNull()
+                        ReplayResult(
+                            totalCandidates = candidates.size,
+                            affected = affected,
+                            dryRun = dryRun,
+                            topic = topic,
+                        )
+                    }
+                }
+            }
+        return result
     }
 
     override suspend fun markForReplayByFilter(
@@ -367,9 +435,17 @@ class OutboxAdminRepositoryImpl(
         actor: String,
         dryRun: Boolean,
     ): ReplayResult {
-        val limit = maxRows.coerceIn(1, 10_000)
-        val bookingConditions = buildConditions(filter, bookingSpec).restrictToStatuses(bookingSpec, allowedReplayStatuses)
-        val notificationConditions = buildConditions(filter, notificationsSpec).restrictToStatuses(notificationsSpec, allowedReplayStatuses)
+        val limit = maxRows.coerceIn(MIN_REPLAY_LIMIT, MAX_REPLAY_LIMIT)
+        val bookingConditions =
+            buildConditions(
+                filter,
+                bookingSpec,
+            ).restrictToStatuses(bookingSpec, allowedReplayStatuses)
+        val notificationConditions =
+            buildConditions(
+                filter,
+                notificationsSpec,
+            ).restrictToStatuses(notificationsSpec, allowedReplayStatuses)
 
         return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             val bookingCount = count(bookingSpec, bookingConditions)
@@ -448,14 +524,21 @@ class OutboxAdminRepositoryImpl(
         }
     }
 
-    private fun mergeCounts(first: Map<String, Long>, second: Map<String, Long>): Map<String, Long> {
-        if (first.isEmpty()) return second
-        if (second.isEmpty()) return first
-        val result = HashMap<String, Long>(first.size + second.size)
-        first.forEach { (key, value) -> result[key] = (result[key] ?: 0L) + value }
-        second.forEach { (key, value) -> result[key] = (result[key] ?: 0L) + value }
-        return result
-    }
+    private fun mergeCounts(
+        first: Map<String, Long>,
+        second: Map<String, Long>,
+    ): Map<String, Long> =
+        when {
+            first.isEmpty() && second.isEmpty() -> emptyMap()
+            first.isEmpty() -> second
+            second.isEmpty() -> first
+            else -> {
+                val result = HashMap<String, Long>(first.size + second.size)
+                first.forEach { (key, value) -> result[key] = (result[key] ?: 0L) + value }
+                second.forEach { (key, value) -> result[key] = (result[key] ?: 0L) + value }
+                result
+            }
+        }
 
     private fun org.jetbrains.exposed.sql.Transaction.fetch(
         sql: String,
@@ -498,12 +581,13 @@ class OutboxAdminRepositoryImpl(
                 val result = mutableListOf<ReplayCandidate>()
                 while (rs.next()) {
                     val created = rs.getTimestamp("created_at")?.toInstant() ?: Instant.EPOCH
-                    result += ReplayCandidate(
-                        id = rs.getLong("id"),
-                        topic = rs.getString("topic"),
-                        createdAt = created,
-                        source = spec.source,
-                    )
+                    result +=
+                        ReplayCandidate(
+                            id = rs.getLong("id"),
+                            topic = rs.getString("topic"),
+                            createdAt = created,
+                            source = spec.source,
+                        )
                 }
                 return result
             }

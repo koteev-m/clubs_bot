@@ -28,27 +28,27 @@ data class ClubNotify(
     val systemTopicId: Int?,
 )
 
-class NotifyEndpointRepository(private val db: Database) {
-    suspend fun loadHq(): HqEndpoints? {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+class NotifyEndpointRepository(
+    private val db: Database,
+) {
+    suspend fun loadHq(): HqEndpoints? =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             HqNotify
                 .selectAll()
                 .limit(1)
                 .firstOrNull()
                 ?.toHqEndpoints()
         }
-    }
 
-    suspend fun listClubs(): List<ClubNotify> {
-        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+    suspend fun listClubs(): List<ClubNotify> =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             Clubs
                 .selectAll()
                 .map { it.toClubNotify() }
         }
-    }
 
-    private fun ResultRow.toHqEndpoints(): HqEndpoints {
-        return HqEndpoints(
+    private fun ResultRow.toHqEndpoints(): HqEndpoints =
+        HqEndpoints(
             chatId = this[HqNotify.chatId],
             general = this[HqNotify.generalTopicId],
             bookings = this[HqNotify.bookingsTopicId],
@@ -56,10 +56,9 @@ class NotifyEndpointRepository(private val db: Database) {
             qa = this[HqNotify.qaTopicId],
             system = this[HqNotify.systemTopicId],
         )
-    }
 
-    private fun ResultRow.toClubNotify(): ClubNotify {
-        return ClubNotify(
+    private fun ResultRow.toClubNotify(): ClubNotify =
+        ClubNotify(
             clubId = this[Clubs.id].value,
             adminChatId = this[Clubs.adminChatId],
             generalTopicId = this[Clubs.generalTopicId],
@@ -69,5 +68,4 @@ class NotifyEndpointRepository(private val db: Database) {
             mediaTopicId = this[Clubs.mediaTopicId],
             systemTopicId = this[Clubs.systemTopicId],
         )
-    }
 }

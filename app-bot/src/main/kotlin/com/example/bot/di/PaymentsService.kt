@@ -3,7 +3,10 @@ package com.example.bot.di
 import java.util.UUID
 
 interface PaymentsService {
-    data class FinalizeResult(val paymentStatus: String)
+    data class FinalizeResult(
+        val paymentStatus: String,
+    )
+
     data class CancelResult(
         val bookingId: UUID,
         val idempotent: Boolean,
@@ -15,9 +18,17 @@ interface PaymentsService {
         val idempotent: Boolean,
     )
 
-    class ValidationException(message: String) : RuntimeException(message)
-    class ConflictException(message: String) : RuntimeException(message)
-    class UnprocessableException(message: String) : RuntimeException(message)
+    class ValidationException(
+        message: String,
+    ) : RuntimeException(message)
+
+    class ConflictException(
+        message: String,
+    ) : RuntimeException(message)
+
+    class UnprocessableException(
+        message: String,
+    ) : RuntimeException(message)
 
     suspend fun finalize(
         clubId: Long,

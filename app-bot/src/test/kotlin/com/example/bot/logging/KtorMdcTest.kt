@@ -35,7 +35,6 @@ private val testSecureRandom = SecureRandom()
 private val requestIdRegex = Regex("^[A-Za-z0-9._-]{1,64}")
 
 class KtorMdcTest {
-
     private lateinit var rootLogger: Logger
     private lateinit var appender: ListAppender<ILoggingEvent>
 
@@ -53,52 +52,55 @@ class KtorMdcTest {
     }
 
     @Test
-    fun `generates X-Request-Id and propagates to MDC`() = testApplication {
-        application { configureTestApp(withActorMdc = false) }
+    fun `generates X-Request-Id and propagates to MDC`() =
+        testApplication {
+            application { configureTestApp(withActorMdc = false) }
 
-        val response = client.get("/ping")
-        val generatedId = response.headers[HttpHeaders.XRequestId]
-        assertFalse(generatedId.isNullOrBlank(), "X-Request-Id header must be present")
+            val response = client.get("/ping")
+            val generatedId = response.headers[HttpHeaders.XRequestId]
+            assertFalse(generatedId.isNullOrBlank(), "X-Request-Id header must be present")
 
-        val events = eventsByRequestId(generatedId!!)
-        assertTrue(events.isNotEmpty(), "Expected log events for generated request id")
-        assertTrue(events.all { it.mdcPropertyMap["request_id"] == generatedId })
-    }
-
-    @Test
-    fun `reuses incoming X-Request-Id`() = testApplication {
-        application { configureTestApp(withActorMdc = false) }
-
-        val incoming = "abc-123-xyz"
-        val response = client.get("/ping") {
-            header(HttpHeaders.XRequestId, incoming)
+            val events = eventsByRequestId(generatedId!!)
+            assertTrue(events.isNotEmpty(), "Expected log events for generated request id")
+            assertTrue(events.all { it.mdcPropertyMap["request_id"] == generatedId })
         }
 
-        assertEquals(incoming, response.headers[HttpHeaders.XRequestId])
+    @Test
+    fun `reuses incoming X-Request-Id`() =
+        testApplication {
+            application { configureTestApp(withActorMdc = false) }
 
-        val events = eventsByRequestId(incoming)
-        assertTrue(events.isNotEmpty(), "Expected log events for provided request id")
-        assertTrue(events.all { it.mdcPropertyMap["request_id"] == incoming })
-    }
+            val incoming = "abc-123-xyz"
+            val response =
+                client.get("/ping") {
+                    header(HttpHeaders.XRequestId, incoming)
+                }
+
+            assertEquals(incoming, response.headers[HttpHeaders.XRequestId])
+
+            val events = eventsByRequestId(incoming)
+            assertTrue(events.isNotEmpty(), "Expected log events for provided request id")
+            assertTrue(events.all { it.mdcPropertyMap["request_id"] == incoming })
+        }
 
     @Test
-    fun `authenticated request adds actor_id to MDC`() = testApplication {
-        application { configureTestApp(withActorMdc = true) }
+    fun `authenticated request adds actor_id to MDC`() =
+        testApplication {
+            application { configureTestApp(withActorMdc = true) }
 
-        val response = client.get("/auth/ping")
-        assertEquals(200, response.status.value)
+            val response = client.get("/auth/ping")
+            assertEquals(200, response.status.value)
 
-        val requestId = response.headers[HttpHeaders.XRequestId]
-        assertNotNull(requestId)
+            val requestId = response.headers[HttpHeaders.XRequestId]
+            assertNotNull(requestId)
 
-        val events = eventsByRequestId(requestId)
-        assertTrue(events.isNotEmpty(), "Expected log events for authenticated request")
-        assertTrue(events.any { it.mdcPropertyMap["actor_id"] == TEST_USER_ID.toString() })
-    }
+            val events = eventsByRequestId(requestId)
+            assertTrue(events.isNotEmpty(), "Expected log events for authenticated request")
+            assertTrue(events.any { it.mdcPropertyMap["actor_id"] == TEST_USER_ID.toString() })
+        }
 
-    private fun eventsByRequestId(requestId: String): List<ILoggingEvent> {
-        return appender.list.filter { event -> event.mdcPropertyMap["request_id"] == requestId }
-    }
+    private fun eventsByRequestId(requestId: String): List<ILoggingEvent> =
+        appender.list.filter { event -> event.mdcPropertyMap["request_id"] == requestId }
 }
 
 private fun Application.configureTestApp(withActorMdc: Boolean) {
@@ -134,26 +136,29 @@ private fun generateRequestId(): String {
 
 private const val TEST_USER_ID: Long = 100L
 
-private val TestRbacInjectorPlugin = createApplicationPlugin(name = "TestRbacInjector") {
-    @Suppress("UNCHECKED_CAST")
-    val rbacResolutionKey: AttributeKey<Any> =
-        Class.forName("com.example.bot.security.rbac.RbacPluginKt")
-            .getDeclaredField("rbacResolutionKey")
-            .apply { isAccessible = true }
-            .get(null) as AttributeKey<Any>
+private val TestRbacInjectorPlugin =
+    createApplicationPlugin(name = "TestRbacInjector") {
+        @Suppress("UNCHECKED_CAST")
+        val rbacResolutionKey: AttributeKey<Any> =
+            Class
+                .forName("com.example.bot.security.rbac.RbacPluginKt")
+                .getDeclaredField("rbacResolutionKey")
+                .apply { isAccessible = true }
+                .get(null) as AttributeKey<Any>
 
-    val successConstructor =
-        Class.forName("com.example.bot.security.rbac.RbacResolution\$Success")
-            .declaredConstructors
-            .first()
-            .apply { isAccessible = true }
+        val successConstructor =
+            Class
+                .forName("com.example.bot.security.rbac.RbacResolution\$Success")
+                .declaredConstructors
+                .first()
+                .apply { isAccessible = true }
 
-    onCall { call ->
-        val principal = TelegramPrincipal(TEST_USER_ID, "tester")
-        val user = User(id = TEST_USER_ID, telegramId = TEST_USER_ID, username = "tester")
-        val roles: Set<Role> = setOf(Role.MANAGER)
-        val clubs: Set<Long> = setOf(77L)
-        val successInstance = successConstructor.newInstance(principal, user, roles, clubs)
-        call.attributes.put(rbacResolutionKey, successInstance)
+        onCall { call ->
+            val principal = TelegramPrincipal(TEST_USER_ID, "tester")
+            val user = User(id = TEST_USER_ID, telegramId = TEST_USER_ID, username = "tester")
+            val roles: Set<Role> = setOf(Role.MANAGER)
+            val clubs: Set<Long> = setOf(77L)
+            val successInstance = successConstructor.newInstance(principal, user, roles, clubs)
+            call.attributes.put(rbacResolutionKey, successInstance)
+        }
     }
-}

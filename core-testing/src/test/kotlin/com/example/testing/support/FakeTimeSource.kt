@@ -7,7 +7,9 @@ interface TimeSource {
     fun nowMs(): Long
 }
 
-class FakeTimeSource(startMs: Long = 0L) : TimeSource {
+class FakeTimeSource(
+    startMs: Long = 0L,
+) : TimeSource {
     private val t = AtomicLong(startMs)
 
     override fun nowMs(): Long = t.get()

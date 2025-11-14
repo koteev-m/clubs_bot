@@ -14,37 +14,38 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 
-class InitDataAuthPluginTest : StringSpec({
+class InitDataAuthPluginTest :
+    StringSpec({
 
-    "401 when initData missing" {
-        testApplication {
-            application {
-                install(ContentNegotiation) { json() }
-                routing {
-                    route("/api/miniapp") {
-                        withMiniAppAuth { "test-bot-token" }
-                        get("/me") { call.respondText("ok") }
+        "401 when initData missing" {
+            testApplication {
+                application {
+                    install(ContentNegotiation) { json() }
+                    routing {
+                        route("/api/miniapp") {
+                            withMiniAppAuth { "test-bot-token" }
+                            get("/me") { call.respondText("ok") }
+                        }
                     }
                 }
+                val res = client.get("/api/miniapp/me")
+                res.status shouldBe HttpStatusCode.Unauthorized
             }
-            val res = client.get("/api/miniapp/me")
-            res.status shouldBe HttpStatusCode.Unauthorized
         }
-    }
 
-    "401 when initData invalid" {
-        testApplication {
-            application {
-                install(ContentNegotiation) { json() }
-                routing {
-                    route("/api/miniapp") {
-                        withMiniAppAuth { "test-bot-token" }
-                        get("/me") { call.respondText("ok") }
+        "401 when initData invalid" {
+            testApplication {
+                application {
+                    install(ContentNegotiation) { json() }
+                    routing {
+                        route("/api/miniapp") {
+                            withMiniAppAuth { "test-bot-token" }
+                            get("/me") { call.respondText("ok") }
+                        }
                     }
                 }
+                val res = client.get("/api/miniapp/me?initData=bad")
+                res.status shouldBe HttpStatusCode.Unauthorized
             }
-            val res = client.get("/api/miniapp/me?initData=bad")
-            res.status shouldBe HttpStatusCode.Unauthorized
         }
-    }
-})
+    })

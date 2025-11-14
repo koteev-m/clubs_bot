@@ -11,10 +11,17 @@ import javax.sql.DataSource
 enum class CheckStatus { UP, DOWN }
 
 @Serializable
-data class HealthCheck(val name: String, val status: CheckStatus, val details: Map<String, String>? = null)
+data class HealthCheck(
+    val name: String,
+    val status: CheckStatus,
+    val details: Map<String, String>? = null,
+)
 
 @Serializable
-data class HealthReport(val status: CheckStatus, val checks: List<HealthCheck>)
+data class HealthReport(
+    val status: CheckStatus,
+    val checks: List<HealthCheck>,
+)
 
 interface HealthService {
     suspend fun health(): HealthReport
