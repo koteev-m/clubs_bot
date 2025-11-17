@@ -16,9 +16,9 @@ object MigrationState {
 
 /**
  * Единый DataSource + миграции Flyway + подключение Exposed.
- * - Локации миграций: env -> application.conf -> авто-детект по JDBC (H2/PG).
- * - Для корректной загрузки ресурсов Flyway выполняется под TCCL приложения.
- * - Пул соединений корректно закрывается на ApplicationStopped.
+ * - Локации миграций берутся так: ENV(Flyway) -> application.conf -> авто-детект по JDBC (H2/PG).
+ * - Любые "многозначные" локации нормализуются до одной вендорной (h2|postgresql), чтобы избежать конфликтов V1.
+ * - Flyway выполняется под TCCL приложения, пул соединений закрывается на ApplicationStopped.
  */
 fun Application.installMigrationsAndDatabase() {
     val log = LoggerFactory.getLogger("Migrations")
@@ -27,40 +27,53 @@ fun Application.installMigrationsAndDatabase() {
     val dbCfg: DbConfig = DbConfig.fromEnv()
     val ds: DataSource = HikariFactory.dataSource(dbCfg)
 
-    // 2) Локации миграций
-    val locations: Array<String> = run {
-        // Явная переопределялка через env/config
-        val explicit: String? =
-            System.getenv("FLYWAY_LOCATIONS")
-                ?: environment.config.propertyOrNull("flyway.locations")?.getString()
+    // 2) Определяем "сырые" локации и вендор из JDBC
+    val rawLocations: String? =
+        System.getenv("FLYWAY_LOCATIONS")
+            ?: environment.config.propertyOrNull("flyway.locations")?.getString()
 
-        if (!explicit.isNullOrBlank()) {
-            explicit.split(',')
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .toTypedArray()
-        } else {
-            // Авто-детект по JDBC URL: выбираем ровно ОДИН вендорский каталог,
-            // чтобы избежать конфликта «Found more than one migration with version 1».
-            val jdbc = (
-                System.getenv("DATABASE_URL")
-                    ?: environment.config.propertyOrNull("db.jdbcUrl")?.getString()
-                    ?: ""
-                ).lowercase()
+    val jdbcLower: String =
+        (System.getenv("DATABASE_URL")
+            ?: environment.config.propertyOrNull("db.jdbcUrl")?.getString()
+            ?: "").lowercase()
 
-            val isH2 = jdbc.startsWith("jdbc:h2:")
-            if (isH2) {
-                arrayOf("classpath:db/migration/h2")
-            } else {
-                arrayOf("classpath:db/migration/postgresql")
-            }
-        }
+    val vendor: String = when {
+        jdbcLower.startsWith("jdbc:h2:") -> "h2"
+        jdbcLower.contains("postgres") || jdbcLower.startsWith("jdbc:postgresql:") -> "postgresql"
+        else -> "postgresql" // дефолт: PG
     }
 
-    log.info("Flyway locations: {}", locations.joinToString(","))
+    // 3) Нормализуем локации: оставляем ровно один вендор
+    fun sanitizeLocations(raw: String?, vendor: String): Array<String> {
+        if (raw.isNullOrBlank()) {
+            return arrayOf("classpath:db/migration/$vendor")
+        }
+        // Разбиваем по запятым и приводим к нормальному виду
+        val parts = raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
+        // Если указаны явные вендорные локации — оставляем только нашу
+        val vendorOnly = parts.filter { it.endsWith("/$vendor") || it.contains("/$vendor/") }
+        if (vendorOnly.isNotEmpty()) {
+            return vendorOnly.distinct().toTypedArray()
+        }
+
+        // Если указан корень 'db/migration' — заменяем его на вендор
+        val hasRoot = parts.any { it.endsWith("db/migration") || it.endsWith("db/migration/") }
+        if (hasRoot) {
+            return arrayOf("classpath:db/migration/$vendor")
+        }
+
+        // Иначе оставляем как есть (но это редкий случай для сторонних путей)
+        return parts.distinct().toTypedArray()
+    }
+
+    val locations: Array<String> = sanitizeLocations(rawLocations, vendor)
+
+    log.info("Flyway locations (raw): {}", rawLocations ?: "<auto>")
+    log.info("Flyway locations (effective): {}", locations.joinToString(","))
 
     try {
-        // 3) Выполняем миграции под класслоадером приложения
+        // 4) Выполняем миграции под класслоадером приложения (важно для загрузки ресурсов из JAR)
         val appCl = this::class.java.classLoader ?: Thread.currentThread().contextClassLoader
         val originalCl = Thread.currentThread().contextClassLoader
         Thread.currentThread().contextClassLoader = appCl
@@ -87,12 +100,12 @@ fun Application.installMigrationsAndDatabase() {
         throw e
     }
 
-    // 4) Подключаем Exposed к уже инициализированному DataSource и сохраняем его в holder
+    // 5) Подключаем Exposed к уже инициализированному DataSource и сохраняем его в holder
     Database.connect(ds)
     DataSourceHolder.dataSource = ds
 
-    // 5) Закрываем пул при остановке приложения
-    monitor.subscribe(ApplicationStopped) {
+    // 6) Закрываем пул при остановке приложения
+    this.environment.monitor.subscribe(ApplicationStopped) {
         try {
             (ds as? AutoCloseable)?.close()
         } catch (_: Throwable) {

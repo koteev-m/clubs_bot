@@ -30,24 +30,20 @@ import java.time.Instant
 private val DEFAULT_QR_TTL: Duration = Duration.ofHours(12)
 
 @Serializable
-private data class ScanPayload(
-    val qr: String,
-)
+private data class ScanPayload(val qr: String)
 
 fun Application.checkinRoutes(
     repository: GuestListRepository,
     initDataAuth: InitDataAuthConfig.() -> Unit,
-    qrSecretProvider: () -> String = {
-        System.getenv("QR_SECRET") ?: error("QR_SECRET missing")
-    },
+    qrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: error("QR_SECRET missing") },
     clock: Clock = Clock.systemUTC(),
     qrTtl: Duration = DEFAULT_QR_TTL,
 ) {
     val logger = LoggerFactory.getLogger("CheckinRoutes")
 
     routing {
-        // Mini-App auth только на /api/clubs/{clubId}/checkin
         route("/api/clubs/{clubId}/checkin") {
+            // Вешаем Telegram WebApp auth на подпути чек‑ина
             install(InitDataAuthPlugin, initDataAuth)
 
             authorize(Role.CLUB_ADMIN, Role.MANAGER, Role.ENTRY_MANAGER) {
@@ -55,13 +51,12 @@ fun Application.checkinRoutes(
                     post("/scan") {
                         UiCheckinMetrics.incTotal()
                         UiCheckinMetrics.timeScanSuspend {
-                            val clubId =
-                                call.parameters["clubId"]?.toLongOrNull()
-                                    ?: run {
-                                        UiCheckinMetrics.incError()
-                                        call.respond(HttpStatusCode.BadRequest, "invalid_club_id")
-                                        return@timeScanSuspend
-                                    }
+                            val clubId = call.parameters["clubId"]?.toLongOrNull()
+                                ?: run {
+                                    UiCheckinMetrics.incError()
+                                    call.respond(HttpStatusCode.BadRequest, "invalid_club_id")
+                                    return@timeScanSuspend
+                                }
 
                             val payload = call.receiveScanPayloadOrNull()
                             if (payload == null) {
@@ -81,10 +76,9 @@ fun Application.checkinRoutes(
 
                             val secret = qrSecretProvider()
                             val verificationInstant = Instant.now(clock)
-                            val decoded =
-                                runCatching {
-                                    QrGuestListCodec.verify(qr, verificationInstant, qrTtl, secret)
-                                }.getOrNull()
+                            val decoded = runCatching {
+                                QrGuestListCodec.verify(qr, verificationInstant, qrTtl, secret)
+                            }.getOrNull()
                             if (decoded == null) {
                                 UiCheckinMetrics.incError()
                                 logger.warn("checkin.scan error=invalid_or_expired_qr clubId={}", clubId)
@@ -92,62 +86,43 @@ fun Application.checkinRoutes(
                                 return@timeScanSuspend
                             }
 
-                            val list =
-                                withContext(Dispatchers.IO + MDCContext()) { repository.getList(decoded.listId) }
-                                    ?: run {
-                                        UiCheckinMetrics.incError()
-                                        logger.warn(
-                                            "checkin.scan error=list_not_found clubId={} listId={}",
-                                            clubId,
-                                            decoded.listId,
-                                        )
-                                        call.respond(HttpStatusCode.NotFound, "list_not_found")
-                                        return@timeScanSuspend
-                                    }
+                            val list = withContext(Dispatchers.IO + MDCContext()) { repository.getList(decoded.listId) }
+                                ?: run {
+                                    UiCheckinMetrics.incError()
+                                    logger.warn("checkin.scan error=list_not_found clubId={} listId={}", clubId, decoded.listId)
+                                    call.respond(HttpStatusCode.NotFound, "list_not_found")
+                                    return@timeScanSuspend
+                                }
                             if (list.clubId != clubId) {
                                 UiCheckinMetrics.incError()
                                 logger.warn(
                                     "checkin.scan error=club_scope_mismatch clubId={} listId={} listClubId={}",
-                                    clubId,
-                                    list.id,
-                                    list.clubId,
+                                    clubId, list.id, list.clubId
                                 )
                                 call.respond(HttpStatusCode.Forbidden, "club_scope_mismatch")
                                 return@timeScanSuspend
                             }
 
-                            val entry =
-                                withContext(Dispatchers.IO + MDCContext()) { repository.findEntry(decoded.entryId) }
-                                    ?: run {
-                                        UiCheckinMetrics.incError()
-                                        logger.warn(
-                                            "checkin.scan error=entry_not_found clubId={} listId={} entryId={}",
-                                            clubId,
-                                            decoded.listId,
-                                            decoded.entryId,
-                                        )
-                                        call.respond(HttpStatusCode.NotFound, "entry_not_found")
-                                        return@timeScanSuspend
-                                    }
+                            val entry = withContext(Dispatchers.IO + MDCContext()) { repository.findEntry(decoded.entryId) }
+                                ?: run {
+                                    UiCheckinMetrics.incError()
+                                    logger.warn(
+                                        "checkin.scan error=entry_not_found clubId={} listId={} entryId={}",
+                                        clubId, decoded.listId, decoded.entryId
+                                    )
+                                    call.respond(HttpStatusCode.NotFound, "entry_not_found")
+                                    return@timeScanSuspend
+                                }
                             if (entry.listId != list.id) {
                                 UiCheckinMetrics.incError()
                                 logger.warn(
-                                    "checkin.scan " +
-                                        "error=entry_list_mismatch " +
-                                        "clubId={} " +
-                                        "listId={} " +
-                                        "entryListId={} " +
-                                        "entryId={}",
-                                    clubId,
-                                    list.id,
-                                    entry.listId,
-                                    entry.id,
+                                    "checkin.scan error=entry_list_mismatch clubId={} listId={} entryListId={} entryId={}",
+                                    clubId, list.id, entry.listId, entry.id
                                 )
                                 call.respond(HttpStatusCode.BadRequest, "entry_list_mismatch")
                                 return@timeScanSuspend
                             }
 
-                            // arrival_window enforcement
                             val now = Instant.now(clock)
                             val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
                             if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
@@ -158,137 +133,19 @@ fun Application.checkinRoutes(
                                 UiCheckinMetrics.incLateOverride()
                             }
 
-                            val marked =
-                                withContext(Dispatchers.IO + MDCContext()) {
-                                    repository.markArrived(entry.id, Instant.now(clock))
-                                }
+                            val marked = withContext(Dispatchers.IO + MDCContext()) {
+                                repository.markArrived(entry.id, Instant.now(clock))
+                            }
                             if (!marked) {
                                 UiCheckinMetrics.incError()
-                                logger.warn(
-                                    "checkin.scan error=unable_to_mark clubId={} listId={} entryId={}",
-                                    clubId,
-                                    list.id,
-                                    entry.id,
-                                )
+                                logger.warn("checkin.scan error=unable_to_mark clubId={} listId={} entryId={}",
+                                    clubId, list.id, entry.id)
                                 call.respond(HttpStatusCode.Conflict, "unable_to_mark")
                                 return@timeScanSuspend
                             }
 
-                            logger.info(
-                                "checkin.scan status=arrived clubId={} listId={} entryId={}",
-                                clubId,
-                                list.id,
-                                entry.id,
-                            )
-                            call.respond(HttpStatusCode.OK, mapOf("status" to "ARRIVED"))
-                        }
-                    }
-
-                    // --- Ручной чек-ин по entryId (альтернатива QR: поиск по ФИО -> arrive)
-                    post("/by-name") {
-                        UiCheckinMetrics.incByNameTotal()
-                        UiCheckinMetrics.timeByNameSuspend {
-                            val clubId =
-                                call.parameters["clubId"]?.toLongOrNull()
-                                    ?: run {
-                                        UiCheckinMetrics.incByNameError()
-                                        call.respond(HttpStatusCode.BadRequest, "invalid_club_id")
-                                        return@timeByNameSuspend
-                                    }
-
-                            @Serializable
-                            data class ByNameArrivePayload(
-                                val entryId: Long,
-                            )
-
-                            val payload =
-                                runCatching { call.receive<ByNameArrivePayload>() }.getOrNull()
-                                    ?: run {
-                                        UiCheckinMetrics.incByNameError()
-                                        call.application.environment.log.warn(
-                                            "checkin.by_name error=malformed_json clubId={}",
-                                            clubId,
-                                        )
-                                        call.respond(HttpStatusCode.BadRequest, "invalid_json")
-                                        return@timeByNameSuspend
-                                    }
-
-                            val entry =
-                                withContext(Dispatchers.IO + MDCContext()) { repository.findEntry(payload.entryId) }
-                                    ?: run {
-                                        UiCheckinMetrics.incByNameError()
-                                        call.application.environment.log.warn(
-                                            "checkin.by_name error=entry_not_found clubId={} entryId={}",
-                                            clubId,
-                                            payload.entryId,
-                                        )
-                                        call.respond(HttpStatusCode.NotFound, "entry_not_found")
-                                        return@timeByNameSuspend
-                                    }
-
-                            val list =
-                                withContext(Dispatchers.IO + MDCContext()) { repository.getList(entry.listId) }
-                                    ?: run {
-                                        UiCheckinMetrics.incByNameError()
-                                        call.application.environment.log.warn(
-                                            "checkin.by_name error=list_not_found clubId={} listId={} entryId={}",
-                                            clubId,
-                                            entry.listId,
-                                            entry.id,
-                                        )
-                                        call.respond(HttpStatusCode.NotFound, "list_not_found")
-                                        return@timeByNameSuspend
-                                    }
-
-                            if (list.clubId != clubId) {
-                                UiCheckinMetrics.incByNameError()
-                                call.application.environment.log.warn(
-                                    "checkin.by_name error=club_scope_mismatch clubId={} listId={} listClubId={}",
-                                    clubId,
-                                    list.id,
-                                    list.clubId,
-                                )
-                                call.respond(HttpStatusCode.Forbidden, "club_scope_mismatch")
-                                return@timeByNameSuspend
-                            }
-
-                            // arrival_window
-                            val now = Instant.now(clock)
-                            val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
-                            val outsideArrivalWindow = !withinWindow
-                            val isCalled = entry.status == GuestListEntryStatus.CALLED
-                            if (outsideArrivalWindow && !isCalled) {
-                                UiCheckinMetrics.incByNameError()
-                                call.respond(HttpStatusCode.Conflict, "outside_arrival_window")
-                                return@timeByNameSuspend
-                            } else if (outsideArrivalWindow && isCalled) {
-                                // Вне окна, но статус CALLED — разрешаем с учётом позднего прихода.
-                                UiCheckinMetrics.incLateOverride()
-                            }
-
-                            val marked =
-                                withContext(Dispatchers.IO + MDCContext()) {
-                                    repository.markArrived(entry.id, Instant.now(clock))
-                                }
-
-                            if (!marked) {
-                                UiCheckinMetrics.incByNameError()
-                                call.application.environment.log.warn(
-                                    "checkin.by_name error=unable_to_mark clubId={} listId={} entryId={}",
-                                    clubId,
-                                    list.id,
-                                    entry.id,
-                                )
-                                call.respond(HttpStatusCode.Conflict, "unable_to_mark")
-                                return@timeByNameSuspend
-                            }
-
-                            call.application.environment.log.info(
-                                "checkin.by_name status=arrived clubId={} listId={} entryId={}",
-                                clubId,
-                                list.id,
-                                entry.id,
-                            )
+                            logger.info("checkin.scan status=arrived clubId={} listId={} entryId={}",
+                                clubId, list.id, entry.id)
                             call.respond(HttpStatusCode.OK, mapOf("status" to "ARRIVED"))
                         }
                     }
@@ -299,15 +156,9 @@ fun Application.checkinRoutes(
 }
 
 private suspend fun ApplicationCall.receiveScanPayloadOrNull(): ScanPayload? =
-    runCatching {
-        receive<ScanPayload>()
-    }.getOrNull()
+    runCatching { receive<ScanPayload>() }.getOrNull()
 
-private fun isWithinWindow(
-    now: Instant,
-    start: Instant?,
-    end: Instant?,
-): Boolean {
+private fun isWithinWindow(now: Instant, start: Instant?, end: Instant?): Boolean {
     val afterStart = start?.let { !now.isBefore(it) } ?: true
     val beforeEnd = end?.let { !now.isAfter(it) } ?: true
     return afterStart && beforeEnd

@@ -29,39 +29,54 @@ class InitDataAuthConfig {
     }
 }
 
-val InitDataPrincipalKey: AttributeKey<TelegramPrincipal> = AttributeKey("webapp.principal")
+val InitDataPrincipalKey: AttributeKey<TelegramPrincipal> =
+    AttributeKey("webapp.principal")
 
-val InitDataAuthPlugin =
-    createRouteScopedPlugin("InitDataAuthPlugin", ::InitDataAuthConfig) {
-        pluginConfig.validate()
-        val logger = LoggerFactory.getLogger("InitDataAuth")
+/**
+ * Route-scoped плагин для валидации Telegram WebApp initData.
+ * Ищет заголовок X-Telegram-Init-Data (либо его алиасы), проверяет подпись/время,
+ * и кладёт в attributes проверенного пользователя.
+ */
+val InitDataAuthPlugin = createRouteScopedPlugin(
+    name = "InitDataAuthPlugin",
+    createConfiguration = ::InitDataAuthConfig
+) {
+    pluginConfig.validate()
+    val logger = LoggerFactory.getLogger("InitDataAuth")
 
-        onCall { call ->
-            val header =
-                sequenceOf(pluginConfig.headerName)
-                    .plus(pluginConfig.headerAliases)
-                    .mapNotNull { headerName -> call.request.headers[headerName] }
-                    .firstOrNull()
-            if (header == null || header.length > MAX_HEADER_LENGTH) {
-                logger.warn("initData header missing or too large")
-                call.respond(HttpStatusCode.Unauthorized)
-                return@onCall
-            }
-            val botToken = pluginConfig.botTokenProvider.invoke()
-            val verified =
-                WebAppInitDataVerifier.verify(header, botToken, pluginConfig.maxAge, pluginConfig.clock)
-            if (verified == null) {
-                logger.warn("initData verification failed")
-                call.respond(HttpStatusCode.Unauthorized)
-                return@onCall
-            }
-            val principal =
-                TelegramPrincipal(
-                    userId = verified.userId,
-                    username = verified.username,
-                    firstName = verified.firstName,
-                    lastName = verified.lastName,
-                )
-            call.attributes.put(InitDataPrincipalKey, principal)
+    onCall { call ->
+        val header =
+            sequenceOf(pluginConfig.headerName)
+                .plus(pluginConfig.headerAliases)
+                .mapNotNull { name -> call.request.headers[name] }
+                .firstOrNull()
+
+        if (header == null || header.length > MAX_HEADER_LENGTH) {
+            logger.warn("initData header missing or too large")
+            call.respond(HttpStatusCode.Unauthorized)
+            return@onCall
         }
+
+        val botToken = pluginConfig.botTokenProvider.invoke()
+        val verified = WebAppInitDataVerifier.verify(
+            initData = header,
+            botToken = botToken,
+            maxAge = pluginConfig.maxAge,
+            clock = pluginConfig.clock
+        )
+
+        if (verified == null) {
+            logger.warn("initData verification failed")
+            call.respond(HttpStatusCode.Unauthorized)
+            return@onCall
+        }
+
+        val principal = TelegramPrincipal(
+            userId = verified.userId,
+            username = verified.username,
+            firstName = verified.firstName,
+            lastName = verified.lastName,
+        )
+        call.attributes.put(InitDataPrincipalKey, principal)
     }
+}

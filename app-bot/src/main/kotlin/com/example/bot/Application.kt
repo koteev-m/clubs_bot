@@ -7,14 +7,13 @@ import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.metrics.UiWaitlistMetrics
 import com.example.bot.music.MusicService
-
 import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.configureLoggingAndRequestId
 import com.example.bot.plugins.configureSecurity
 import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
-
+import com.example.bot.plugins.installWebUi
 import com.example.bot.routes.checkinRoutes
 import com.example.bot.routes.guestListInviteRoutes
 import com.example.bot.routes.guestListRoutes
@@ -22,41 +21,40 @@ import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.waitlistRoutes
-
+import com.example.bot.web.installBookingWebApp
 import com.example.bot.webapp.InitDataAuthConfig
-
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
-
 import io.micrometer.core.instrument.Metrics
-
 import org.koin.core.logger.Level
 import org.koin.core.module.Module
 import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
-
 import java.io.File
-import java.lang.reflect.Modifier
 import java.net.JarURLConnection
 import java.net.URL
 import java.util.jar.JarFile
 
 @Suppress("unused")
 fun Application.module() {
-    // 1) Базовые плагины, не зависящие от DI
+    // 1) Базовые плагины
     configureLoggingAndRequestId()
     installAppConfig()
-    installMetrics()              // даёт /metrics и регистрирует Micrometer registry
+    installMetrics()
     install(ActorMdcPlugin)
 
-    // 2) База данных и миграции (инициализирует DataSourceHolder)
+    // 2) БД и миграции
     installMigrationsAndDatabase()
 
-    // 3) DI через Koin — обязательно ДО любых `by inject`
+    // 3) Простой UI и мини‑приложение
+    installWebUi()
+    installBookingWebApp()
+
+    // 4) DI через Koin
     val isDev: Boolean =
         environment.config.propertyOrNull("ktor.deployment.development")
             ?.getString()?.toBooleanStrictOrNull()
@@ -77,74 +75,51 @@ fun Application.module() {
     }
     environment.log.info("Koin: loaded ${koinModules.size} module(s)")
 
-    // 4) Глобальная безопасность
+    // 5) Security на уровне приложения
     configureSecurity()
 
-    // 5) Инжектим зависимости из Koin
+    // 6) Инжект сервисов
     val guestListRepository by inject<GuestListRepository>()
     val guestListCsvParser by inject<GuestListCsvParser>()
     val bookingService by inject<BookingService>()
     val musicService by inject<MusicService>()
     val waitlistRepository by inject<WaitlistRepository>()
 
-    // 6) Доп. метрики
+    // 7) Метрики
     val registry = Metrics.globalRegistry
     UiCheckinMetrics.bind(registry)
     UiWaitlistMetrics.bind(registry)
 
-    // 7) Общая конфигурация Mini App auth
+    // 8) Общая конфигурация MiniApp‑авторизации (одна на все роуты)
     val initDataAuth: InitDataAuthConfig.() -> Unit = {
         botTokenProvider = {
-            System.getenv("TELEGRAM_BOT_TOKEN")
-                ?: error("TELEGRAM_BOT_TOKEN missing")
+            System.getenv("TELEGRAM_BOT_TOKEN") ?: error("TELEGRAM_BOT_TOKEN missing")
         }
+        // maxAge/clock оставляем по умолчанию
     }
 
-    // 8) Роуты уровня приложения
-    pingRoute() // /ping для быстрых проверок
-    guestListRoutes(
-        repository = guestListRepository,
-        parser = guestListCsvParser,
-        initDataAuth = initDataAuth,
-    )
-    checkinRoutes(
-        repository = guestListRepository,
-        initDataAuth = initDataAuth,
-    )
+    // 9) Роуты
+    pingRoute()
+    guestListRoutes( repository = guestListRepository, parser = guestListCsvParser, initDataAuth = initDataAuth )
+    checkinRoutes( repository = guestListRepository, initDataAuth = initDataAuth )
     musicRoutes(service = musicService)
-    guestListInviteRoutes(
-        repository = guestListRepository,
-        initDataAuth = initDataAuth,
-    )
-    waitlistRoutes(
-        repository = waitlistRepository,
-        initDataAuth = initDataAuth,
-    )
+    guestListInviteRoutes( repository = guestListRepository, initDataAuth = initDataAuth )
+    waitlistRoutes( repository = waitlistRepository, initDataAuth = initDataAuth )
 
-    // 9) Верхнеуровневые роуты
     routing {
         securedBookingRoutes(bookingService)
         get("/health") { call.respondText("OK") }
     }
 }
 
-/**
- * Универсальный загрузчик Koin-модулей:
- *  - сканирует пакет `com.example.bot.di` на classpath (в т.ч. внутри JAR);
- *  - берёт все top‑level Kotlin‑классы `*Kt` и вызывает любые public static методы/геттеры без параметров,
- *    которые возвращают `Module` или `List<Module>`;
- *  - поддерживает как функции (`appModules()`, `bookingModules()`), так и `val` (через геттеры `getAppModules()` и т.п.)
- *    и даже статические поля c `@JvmField`.
- */
+/* Сканер Koin‑модулей в пакете com.example.bot.di */
 private fun loadKoinModulesReflectively(): List<Module> {
     val result = mutableListOf<Module>()
     val cl = Thread.currentThread().contextClassLoader
     val pkgPath = "com/example/bot/di"
 
-    // Собираем имена классов внутри пакета com.example.bot.di
     val classNames = mutableSetOf<String>()
     val resources = cl.getResources(pkgPath)
-
     val seenJars = mutableSetOf<String>()
     while (resources.hasMoreElements()) {
         val url: URL = resources.nextElement()
@@ -178,9 +153,6 @@ private fun loadKoinModulesReflectively(): List<Module> {
                         }
                 }
             }
-            else -> {
-                // игнорируем экзотические протоколы
-            }
         }
     }
 
@@ -194,31 +166,28 @@ private fun loadKoinModulesReflectively(): List<Module> {
     for (cn in classNames) {
         val kls = runCatching { Class.forName(cn) }.getOrNull() ?: continue
 
-        // 1) public static методы без параметров
         kls.methods
-            .filter { Modifier.isStatic(it.modifiers) && it.parameterCount == 0 }
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.parameterCount == 0 }
             .forEach { m ->
-                // Немного сузим по имени/возврату, чтобы не трогать посторонние методы
                 val returnsModuleLike =
                     Module::class.java.isAssignableFrom(m.returnType) ||
                         List::class.java.isAssignableFrom(m.returnType)
-                val looksLikeModuleName = m.name.contains("module", ignoreCase = true)
-                    || m.name.contains("modules", ignoreCase = true)
-                    || m.name.startsWith("get") // геттер для top-level val
+                val looksLikeModuleName = m.name.contains("module", ignoreCase = true) ||
+                    m.name.contains("modules", ignoreCase = true) ||
+                    m.name.startsWith("get")
                 if (returnsModuleLike || looksLikeModuleName) {
                     collectFrom(runCatching { m.invoke(null) }.getOrNull())
                 }
             }
 
-        // 2) статические поля (если кто-то сделал @JvmField val …)
         kls.fields
-            .filter { Modifier.isStatic(it.modifiers) }
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) }
             .forEach { f ->
                 val typeOk =
                     Module::class.java.isAssignableFrom(f.type) ||
                         List::class.java.isAssignableFrom(f.type)
-                val nameOk = f.name.contains("module", ignoreCase = true)
-                    || f.name.contains("modules", ignoreCase = true)
+                val nameOk = f.name.contains("module", ignoreCase = true) ||
+                    f.name.contains("modules", ignoreCase = true)
                 if (typeOk || nameOk) {
                     collectFrom(runCatching { f.get(null) }.getOrNull())
                 }

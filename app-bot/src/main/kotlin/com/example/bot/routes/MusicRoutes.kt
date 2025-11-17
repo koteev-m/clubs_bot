@@ -5,8 +5,6 @@ import com.example.bot.webapp.InitDataAuthPlugin
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
-import io.ktor.server.application.call
-import io.ktor.server.application.install
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
