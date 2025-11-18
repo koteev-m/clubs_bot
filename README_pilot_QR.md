@@ -10,7 +10,8 @@
 
 ## Check-in API
 - `POST /api/clubs/{clubId}/checkin/scan` accepts a QR payload and marks the guest as arrived.
-- The request **must** include an `X-Telegram-Init-Data` header; it is verified by `InitDataAuthPlugin` before RBAC is applied.
+- The request **must** include an `X-Telegram-Init-Data` header; it is verified by `withMiniAppAuth` before RBAC is applied.
+- Init data older than 24 hours or more than 2 minutes ahead of the server clock is rejected to avoid replays/time skew.
 
 ## RBAC & scoping
 - Allowed roles: `ENTRY_MANAGER`, `CLUB_ADMIN`, `MANAGER`.

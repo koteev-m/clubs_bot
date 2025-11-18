@@ -12,6 +12,7 @@ import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.plugins.DataSourceHolder
+import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.routes.guestListRoutes
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
@@ -19,7 +20,6 @@ import com.example.bot.testing.applicationDev
 import com.example.bot.testing.defaultRequest
 import com.example.bot.testing.header
 import com.example.bot.testing.withInitData
-import com.example.bot.webapp.InitDataPrincipalKey
 import com.example.bot.webapp.TEST_BOT_TOKEN
 import com.example.bot.webapp.WebAppInitDataTestHelper
 import io.kotest.core.spec.style.StringSpec
@@ -110,20 +110,19 @@ class GuestListRoutesTest :
 
                 install(Koin) { modules(testModule) }
 
-                // ВАЖНО: не ставим InitDataAuthPlugin глобально — его поставит guestListRoutes по initDataAuth.
                 install(RbacPlugin) {
                     userRepository = get()
                     userRoleRepository = get()
                     auditLogRepository = get()
                     principalExtractor = { call ->
                         val initDataPrincipal =
-                            if (call.attributes.contains(InitDataPrincipalKey)) {
-                                call.attributes[InitDataPrincipalKey]
+                            if (call.attributes.contains(MiniAppUserKey)) {
+                                call.attributes[MiniAppUserKey]
                             } else {
                                 null
                             }
                         if (initDataPrincipal != null) {
-                            TelegramPrincipal(initDataPrincipal.userId, initDataPrincipal.username)
+                            TelegramPrincipal(initDataPrincipal.id, initDataPrincipal.username)
                         } else {
                             call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { id ->
                                 TelegramPrincipal(id, call.request.header("X-Telegram-Username"))
@@ -132,11 +131,11 @@ class GuestListRoutesTest :
                     }
                 }
 
-                // Сами маршруты списка гостей (+ InitDataAuthPlugin внутри)
+                // Сами маршруты списка гостей (+ withMiniAppAuth внутри)
                 guestListRoutes(
                     repository = get(),
                     parser = parser,
-                    initDataAuth = { botTokenProvider = { TEST_BOT_TOKEN } },
+                    botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
 

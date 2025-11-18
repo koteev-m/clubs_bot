@@ -78,7 +78,7 @@ fun Application.paymentsCancelRefundRoutes(miniAppBotTokenProvider: () -> String
     val koin = getKoin()
 
     routing {
-        // Корневой узел оставляем без InitDataAuthPlugin,
+        // Корневой узел оставляем без withMiniAppAuth,
         // чтобы избежать DuplicatePluginException
         route("/api/clubs/{clubId}/bookings") {
             val registerHandlers: RbacRouteWrapper =

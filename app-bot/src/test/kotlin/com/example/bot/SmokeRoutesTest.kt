@@ -5,7 +5,6 @@ import com.example.bot.data.repo.ClubRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
-import com.example.bot.guestlists.GuestListRepository
 import com.example.bot.observability.DefaultHealthService
 import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.plugins.MigrationState
@@ -88,11 +87,7 @@ class SmokeRoutesTest {
                         },
                 )
 
-                checkinCompatRoutes(
-                    repository = mockk<GuestListRepository>(relaxed = true),
-                    initDataBotTokenProvider = { "test-bot-token" },
-                    qrSecretProvider = { "test-qr-secret" },
-                )
+                checkinCompatRoutes()
             }
 
             try {

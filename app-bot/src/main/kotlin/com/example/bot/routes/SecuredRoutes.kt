@@ -2,13 +2,11 @@ package com.example.bot.routes
 
 import com.example.bot.booking.BookingService
 import com.example.bot.data.security.Role
+import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
-import com.example.bot.webapp.InitDataAuthConfig
-import com.example.bot.webapp.InitDataAuthPlugin
 import io.ktor.server.application.Application
-import io.ktor.server.application.DuplicatePluginException
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -17,22 +15,18 @@ import io.ktor.server.routing.routing
 
 /**
  * Пример защищённых HTTP-маршрутов с RBAC.
- * Важно: плагин InitDataAuthPlugin больше не ставится на корневой узел,
+ * Важно: Mini App авторизация больше не ставится на корневой узел,
  * чтобы не перехватывать /health, /ready и не конфликтовать с другими ветками.
  */
 fun Application.securedRoutes(
     bookingService: BookingService,
-    initDataAuth: InitDataAuthConfig.() -> Unit,
+    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN")!! },
 ) {
     routing {
         // Админская зона
         route("/api/admin") {
             // Безопасная установка плагина ровно на эту ветку
-            try {
-                install(InitDataAuthPlugin, initDataAuth)
-            } catch (_: DuplicatePluginException) {
-                // Плагин уже установлен на том же pipeline — игнорируем
-            }
+            withMiniAppAuth { botTokenProvider() }
 
             authorize(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER) {
                 get("/overview") {
@@ -44,11 +38,7 @@ fun Application.securedRoutes(
         // Клубные маршруты
         route("/api/clubs/{clubId}") {
             // Точно так же ставим плагин только на ветку клуба
-            try {
-                install(InitDataAuthPlugin, initDataAuth)
-            } catch (_: DuplicatePluginException) {
-                // Уже установлен — пропускаем
-            }
+            withMiniAppAuth { botTokenProvider() }
 
             // Пример защищённого GET
             authorize(Role.CLUB_ADMIN, Role.MANAGER, Role.ENTRY_MANAGER) {

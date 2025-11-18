@@ -10,11 +10,10 @@ import com.example.bot.club.RejectedRow
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.security.Role
 import com.example.bot.metrics.UiCheckinMetrics
+import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
-import com.example.bot.webapp.InitDataAuthConfig
-import com.example.bot.webapp.InitDataAuthPlugin
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -42,12 +41,12 @@ import kotlin.io.use
 fun Application.guestListRoutes(
     repository: GuestListRepository,
     parser: GuestListCsvParser,
-    initDataAuth: InitDataAuthConfig.() -> Unit,
+    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN")!! },
 ) {
     routing {
         // Плагин ставим ТОЛЬКО на ветку /api/guest-lists, чтобы /health, /ready и пр. остались публичными
         route("/api/guest-lists") {
-            install(InitDataAuthPlugin, initDataAuth)
+            withMiniAppAuth { botTokenProvider() }
 
             authorize(
                 Role.OWNER,

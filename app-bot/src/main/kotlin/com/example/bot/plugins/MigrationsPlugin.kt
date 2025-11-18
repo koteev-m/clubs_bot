@@ -33,18 +33,24 @@ fun Application.installMigrationsAndDatabase() {
             ?: environment.config.propertyOrNull("flyway.locations")?.getString()
 
     val jdbcLower: String =
-        (System.getenv("DATABASE_URL")
-            ?: environment.config.propertyOrNull("db.jdbcUrl")?.getString()
-            ?: "").lowercase()
+        (
+            System.getenv("DATABASE_URL")
+                ?: environment.config.propertyOrNull("db.jdbcUrl")?.getString()
+                ?: ""
+        ).lowercase()
 
-    val vendor: String = when {
-        jdbcLower.startsWith("jdbc:h2:") -> "h2"
-        jdbcLower.contains("postgres") || jdbcLower.startsWith("jdbc:postgresql:") -> "postgresql"
-        else -> "postgresql" // дефолт: PG
-    }
+    val vendor: String =
+        when {
+            jdbcLower.startsWith("jdbc:h2:") -> "h2"
+            jdbcLower.contains("postgres") || jdbcLower.startsWith("jdbc:postgresql:") -> "postgresql"
+            else -> "postgresql" // дефолт: PG
+        }
 
     // 3) Нормализуем локации: оставляем ровно один вендор
-    fun sanitizeLocations(raw: String?, vendor: String): Array<String> {
+    fun sanitizeLocations(
+        raw: String?,
+        vendor: String,
+    ): Array<String> {
         if (raw.isNullOrBlank()) {
             return arrayOf("classpath:db/migration/$vendor")
         }
@@ -53,18 +59,14 @@ fun Application.installMigrationsAndDatabase() {
 
         // Если указаны явные вендорные локации — оставляем только нашу
         val vendorOnly = parts.filter { it.endsWith("/$vendor") || it.contains("/$vendor/") }
-        if (vendorOnly.isNotEmpty()) {
-            return vendorOnly.distinct().toTypedArray()
-        }
 
         // Если указан корень 'db/migration' — заменяем его на вендор
         val hasRoot = parts.any { it.endsWith("db/migration") || it.endsWith("db/migration/") }
-        if (hasRoot) {
-            return arrayOf("classpath:db/migration/$vendor")
+        return when {
+            vendorOnly.isNotEmpty() -> vendorOnly.distinct().toTypedArray()
+            hasRoot -> arrayOf("classpath:db/migration/$vendor")
+            else -> parts.distinct().toTypedArray() // Иначе оставляем как есть (редко)
         }
-
-        // Иначе оставляем как есть (но это редкий случай для сторонних путей)
-        return parts.distinct().toTypedArray()
     }
 
     val locations: Array<String> = sanitizeLocations(rawLocations, vendor)
@@ -95,7 +97,11 @@ fun Application.installMigrationsAndDatabase() {
         log.error("Migrations failed, stopping application", e)
         // Закрываем пул, если упали
         (ds as? AutoCloseable)?.let {
-            try { it.close() } catch (_: Throwable) { /* ignore */ }
+            try {
+                it.close()
+            } catch (_: Throwable) {
+                // ignore
+            }
         }
         throw e
     }

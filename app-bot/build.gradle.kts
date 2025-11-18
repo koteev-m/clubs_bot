@@ -37,7 +37,7 @@ tasks.withType<Test>().configureEach {
     // Для Kotest: явно не глушим stdout
     systemProperty("kotest.framework.dump.test.stdout", "true")
 
-    // Нужен для InitDataAuth в тестах
+    // Нужен для Mini App авторизации в тестах
     environment("TELEGRAM_BOT_TOKEN", "111111:TEST_BOT_TOKEN")
     environment("NOTIFICATIONS_ENABLED", "false")
 
@@ -198,7 +198,7 @@ tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
         listOf(
             "**/build/**",
             "dist/**",
-            "node_modules/**",
+            "**/node_modules/**",
             "**/.gradle/**",
             "**/.idea/**",
             "**/.git/**",

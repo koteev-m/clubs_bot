@@ -1,7 +1,7 @@
 package com.example.bot.routes
 
 import com.example.bot.music.MusicService
-import com.example.bot.webapp.InitDataAuthPlugin
+import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -19,11 +19,8 @@ fun Application.musicRoutes(service: MusicService) {
 
     routing {
         route("/api/music") {
-            install(InitDataAuthPlugin) {
-                botTokenProvider = {
-                    System.getenv("TELEGRAM_BOT_TOKEN")
-                        ?: error("TELEGRAM_BOT_TOKEN missing")
-                }
+            withMiniAppAuth {
+                System.getenv("TELEGRAM_BOT_TOKEN")!!
             }
 
             get("/items") {

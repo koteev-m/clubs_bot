@@ -11,13 +11,13 @@ import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.plugins.DataSourceHolder
+import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.applicationDev
 import com.example.bot.testing.defaultRequest
 import com.example.bot.testing.withInitData
-import com.example.bot.webapp.InitDataAuthPlugin
-import com.example.bot.webapp.InitDataPrincipalKey
 import com.example.bot.webapp.TEST_BOT_TOKEN
 import com.example.bot.webapp.WebAppInitDataTestHelper
 import io.kotest.core.spec.style.StringSpec
@@ -233,9 +233,6 @@ class SecuredBookingRoutesTest :
                 }
             install(Koin) { modules(testModule) }
 
-            // InitData только внутри этого приложения
-            install(InitDataAuthPlugin) { botTokenProvider = { TEST_BOT_TOKEN } }
-
             // RBAC, principal из InitData или из заголовков X-Telegram-*
             install(RbacPlugin) {
                 userRepository = get()
@@ -243,13 +240,13 @@ class SecuredBookingRoutesTest :
                 auditLogRepository = get()
                 principalExtractor = { call ->
                     val p =
-                        if (call.attributes.contains(InitDataPrincipalKey)) {
-                            call.attributes[InitDataPrincipalKey]
+                        if (call.attributes.contains(MiniAppUserKey)) {
+                            call.attributes[MiniAppUserKey]
                         } else {
                             null
                         }
                     if (p != null) {
-                        TelegramPrincipal(p.userId, p.username)
+                        TelegramPrincipal(p.id, p.username)
                     } else {
                         call.request.serverHeader("X-Telegram-Id")?.toLongOrNull()?.let { uid ->
                             TelegramPrincipal(
@@ -264,6 +261,7 @@ class SecuredBookingRoutesTest :
             // сами REST-маршруты
             routing {
                 route("") {
+                    withMiniAppAuth { TEST_BOT_TOKEN }
                     securedBookingRoutes(service)
                 }
             }

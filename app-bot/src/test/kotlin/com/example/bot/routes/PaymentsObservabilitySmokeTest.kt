@@ -9,7 +9,6 @@ import com.example.bot.di.PaymentsService
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.payments.PaymentsRepository
 import com.example.bot.plugins.TelegramMiniUser
-import com.example.bot.plugins.metricsRoute
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.plugins.withMiniAppAuth
@@ -29,9 +28,12 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.plugins.callid.CallId
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.micrometer.prometheus.PrometheusMeterRegistry
@@ -307,3 +309,14 @@ private data class CancelRequest(
 private data class RefundRequest(
     val amountMinor: Long? = null,
 )
+
+private fun Application.metricsRoute(registry: PrometheusMeterRegistry) {
+    routing {
+        get("/metrics") {
+            call.respondText(
+                registry.scrape(),
+                ContentType.parse("text/plain; version=0.0.4; charset=utf-8"),
+            )
+        }
+    }
+}

@@ -1,3 +1,8 @@
+@file:Suppress(
+    "ktlint:standard:string-template-indent",
+    "ktlint:standard:multiline-expression-wrapping",
+)
+
 package com.example.bot.plugins
 
 import io.ktor.http.ContentType

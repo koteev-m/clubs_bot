@@ -2,7 +2,6 @@ package com.example.bot.wiring
 
 import com.example.bot.club.GuestListRepository
 import com.example.bot.routes.guestListInviteRoutes
-import com.example.bot.webapp.InitDataAuthConfig
 import io.ktor.server.application.Application
 import org.koin.ktor.ext.inject
 
@@ -19,15 +18,7 @@ import org.koin.ktor.ext.inject
 fun Application.installGuestListInviteRoute() {
     val guestListRepository by inject<GuestListRepository>()
 
-    val initDataAuth: InitDataAuthConfig.() -> Unit = {
-        botTokenProvider = {
-            System.getenv("TELEGRAM_BOT_TOKEN")
-                ?: error("TELEGRAM_BOT_TOKEN missing")
-        }
-    }
-
     guestListInviteRoutes(
         repository = guestListRepository,
-        initDataAuth = initDataAuth,
     )
 }
