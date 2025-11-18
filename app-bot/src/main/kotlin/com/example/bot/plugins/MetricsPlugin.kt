@@ -36,7 +36,7 @@ fun Application.installMetrics() {
             val body = promRegistry.scrape()
             call.respondText(
                 body,
-                ContentType.parse("text/plain; version=0.0.4; charset=utf-8")
+                ContentType.parse("text/plain; version=0.0.4; charset=utf-8"),
             )
         }
     }

@@ -9,9 +9,6 @@
     <ID>ObjectLiteralToLambda:RefundOutboxWorkerTest.kt$RefundOutboxWorkerTest$object : ProviderRefundClient { override suspend fun send(command: ProviderRefundCommand): ProviderRefundResult = sender(command) }</ID>
     <ID>UnnecessaryAbstractClass:PostgresAppTest.kt$PostgresAppTest$PostgresAppTest</ID>
     <ID>UnnecessaryNotNullOperator:QrGuestListCodecTest.kt$QrGuestListCodecTest$decoded!!</ID>
-    <ID>UnnecessaryNotNullOperator:WebAppInitDataVerifierTest.kt$WebAppInitDataVerifierTest$verified!!</ID>
-    <ID>UnnecessaryNotNullOperator:WebAppInitDataVerifierTest.kt$WebAppInitDataVerifierTest$verifiedFirst!!</ID>
-    <ID>UnnecessaryNotNullOperator:WebAppInitDataVerifierTest.kt$WebAppInitDataVerifierTest$verifiedSecond!!</ID>
     <ID>UseOrEmpty:EntryManagerCheckInSmokeTest.kt$(registry as? PrometheusMeterRegistry)?.scrape() ?: ""</ID>
     <ID>UseOrEmpty:PromoAttributionServiceTest.kt$StaticUserRoleRepository$clubIds[userId] ?: emptySet()</ID>
     <ID>UseOrEmpty:PromoAttributionServiceTest.kt$StaticUserRoleRepository$roles[userId] ?: emptySet()</ID>

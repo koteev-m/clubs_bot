@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:no-multi-spaces")
+
 package com.example.bot.dev
 
 import io.ktor.server.application.Application

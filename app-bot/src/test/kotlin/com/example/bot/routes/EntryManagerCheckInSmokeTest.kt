@@ -18,16 +18,15 @@ import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.guestlists.GuestListRepository
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.metrics.AppMetricsBinder
+import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.installMetrics
-import com.example.bot.plugins.meterRegistry
+import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.applicationDev
 import com.example.bot.testing.withInitData
-import com.example.bot.webapp.InitDataPrincipalKey
 import com.example.bot.webapp.TEST_BOT_TOKEN
 import com.example.bot.webapp.WebAppInitDataTestHelper
-import com.example.bot.webapp.WebAppInitDataVerifier
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -40,6 +39,8 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.header
 import io.ktor.server.testing.testApplication
+import io.micrometer.core.instrument.Metrics
+import io.micrometer.prometheus.PrometheusConfig
 import io.micrometer.prometheus.PrometheusMeterRegistry
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -302,14 +303,14 @@ private fun Application.emConfigureApp(module: Module) {
         auditLogRepository = get()
         principalExtractor = { call ->
             val initAttr =
-                if (call.attributes.contains(InitDataPrincipalKey)) {
-                    call.attributes[InitDataPrincipalKey]
+                if (call.attributes.contains(MiniAppUserKey)) {
+                    call.attributes[MiniAppUserKey]
                 } else {
                     null
                 }
 
             if (initAttr != null) {
-                TelegramPrincipal(initAttr.userId, initAttr.username)
+                TelegramPrincipal(initAttr.id, initAttr.username)
             } else {
                 val header =
                     sequenceOf(
@@ -322,9 +323,9 @@ private fun Application.emConfigureApp(module: Module) {
                         .firstOrNull()
 
                 val verified =
-                    header?.let { value -> WebAppInitDataVerifier.verify(value, TEST_BOT_TOKEN) }
+                    header?.let { value -> InitDataValidator.validate(value, TEST_BOT_TOKEN) }
 
-                verified?.let { TelegramPrincipal(it.userId, it.username) }
+                verified?.let { TelegramPrincipal(it.id, it.username) }
             }
         }
     }
@@ -334,7 +335,7 @@ private fun Application.emConfigureApp(module: Module) {
         qrSecretProvider = { EM_QR_SECRET },
         clock = EM_FIXED_CLOCK,
         qrTtl = EM_QR_TTL,
-        initDataAuth = { botTokenProvider = { TEST_BOT_TOKEN } },
+        botTokenProvider = { TEST_BOT_TOKEN },
     )
 }
 
@@ -504,6 +505,12 @@ private fun emCurrentPrometheusSnapshot(): String {
     val registry = meterRegistry()
     return (registry as? PrometheusMeterRegistry)?.scrape() ?: ""
 }
+
+private val testPrometheusRegistry: PrometheusMeterRegistry by lazy {
+    PrometheusMeterRegistry(PrometheusConfig.DEFAULT).also { Metrics.addRegistry(it) }
+}
+
+private fun meterRegistry(): PrometheusMeterRegistry = testPrometheusRegistry
 
 private fun emTamperLastCharacter(value: String): String {
     if (value.isEmpty()) return value

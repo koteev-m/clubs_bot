@@ -6,11 +6,10 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.data.security.Role
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.guestlists.StartParamGuestListCodec
+import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
-import com.example.bot.webapp.InitDataAuthConfig
-import com.example.bot.webapp.InitDataAuthPlugin
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -33,7 +32,7 @@ import java.time.Instant
  */
 fun Application.guestListInviteRoutes(
     repository: GuestListRepository,
-    initDataAuth: InitDataAuthConfig.() -> Unit,
+    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN")!! },
     clock: Clock = Clock.systemUTC(),
     qrTtl: Duration = Duration.ofHours(12),
     botUsernameProvider: () -> String? = { System.getenv("TELEGRAM_BOT_USERNAME") },
@@ -41,7 +40,7 @@ fun Application.guestListInviteRoutes(
 ) {
     routing {
         route("/api/guest-lists/{listId}/entries/{entryId}") {
-            install(InitDataAuthPlugin, initDataAuth)
+            withMiniAppAuth { botTokenProvider() }
 
             authorize(
                 Role.OWNER,

@@ -18,7 +18,7 @@ Telegram WebApp (Entry UI)
     │  fetch POST /api/clubs/{clubId}/checkin/scan
     ▼
 Ktor Service (app-bot)
-    │  InitDataAuthPlugin → TelegramPrincipal
+    │  withMiniAppAuth → TelegramPrincipal
     ▼
 RBAC & clubScoped (core-security)
     │  authorize roles & clubId
@@ -83,11 +83,11 @@ Postgres (guest list entries)
 
 # Безопасность
 
-- **InitData HMAC:** `InitDataAuthPlugin` пересчитывает подпись по `TELEGRAM_BOT_TOKEN`, отклоняет `401` при неверном HMAC или `auth_date` старше 24 ч.
+- **InitData HMAC:** `withMiniAppAuth` пересчитывает подпись по `TELEGRAM_BOT_TOKEN`, отклоняет `401` при неверном HMAC, `auth_date` старше 24 ч или сдвинутый вперёд более чем на 2 минуты.
 - **QR токен:** `QrGuestListCodec` ожидает формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`; TTL 12 ч, допускается ≤2 мин сдвига времени, сравнение подписи constant-time.
 - **RBAC + clubScope:** `authorize(Role.CLUB_ADMIN | MANAGER | ENTRY_MANAGER)` и `clubScoped(ClubScope.Own)` разрешают доступ только своему `clubId` (глобальные роли проходят вне зависимости от списка).
 - **PII:** В логах используем только числовые `clubId`, `listId`, `entryId`, `reason`; `logback.xml` маскирует номера телефонов. Запрещено выводить initData, имя гостя или QR.
-- **Rate limiting:** `RateLimitPlugin` считает ключ по `InitDataPrincipal.userId`; для путей `/api/clubs/` применяются subject-лимиты и IP-лимиты. При превышении — `429` с `Retry-After`.
+- **Rate limiting:** `RateLimitPlugin` считает ключ по `MiniAppUserKey` (Telegram user id); для путей `/api/clubs/` применяются subject-лимиты и IP-лимиты. При превышении — `429` с `Retry-After`.
 
 # API контракты
 
@@ -171,7 +171,7 @@ http POST http://localhost:8080/api/clubs/42/checkin/scan \
 
 # Ссылки по коду
 
-- InitData плагин: `app-bot/src/main/kotlin/com/example/bot/webapp/InitDataAuthPlugin.kt`
+- MiniApp авторизация: `withMiniAppAuth` (см. `app-bot/src/main/kotlin/com/example/bot/plugins/InitDataAuth.kt`)
 - Check-in маршруты: `app-bot/src/main/kotlin/com/example/bot/routes/CheckinRoutes.kt`
 - Метрики UI: `app-bot/src/main/kotlin/com/example/bot/metrics/UiCheckinMetrics.kt`
 - QR кодек: `app-bot/src/main/kotlin/com/example/bot/guestlists/QrGuestListCodec.kt`

@@ -5,7 +5,6 @@ import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
-import com.example.bot.webapp.InitDataPrincipalKey
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
@@ -21,7 +20,7 @@ import org.jetbrains.exposed.sql.Database
  * StatusPages ставим один раз, с обработчиками:
  * - BadRequestException -> 400
  * - Throwable -> 500
- * - MiniAppAuthAbort -> проглатываем (401 уже отдан в InitDataAuth)
+ * - MiniAppAuthAbort -> проглатываем (401 уже отдан в withMiniAppAuth)
  */
 fun Application.configureSecurity() {
     val dataSource = DataSourceHolder.dataSource ?: error("DataSource is not initialised")
@@ -35,9 +34,9 @@ fun Application.configureSecurity() {
         this.userRoleRepository = userRoleRepository
         this.auditLogRepository = auditLogRepository
         principalExtractor = { call ->
-            if (call.attributes.contains(InitDataPrincipalKey)) {
-                val principal = call.attributes[InitDataPrincipalKey]
-                TelegramPrincipal(principal.userId, principal.username)
+            if (call.attributes.contains(MiniAppUserKey)) {
+                val principal = call.attributes[MiniAppUserKey]
+                TelegramPrincipal(principal.id, principal.username)
             } else {
                 call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { id ->
                     TelegramPrincipal(id, call.request.header("X-Telegram-Username"))
@@ -52,7 +51,7 @@ fun Application.configureSecurity() {
                 call.respond(HttpStatusCode.BadRequest, mapOf("error" to (cause.message ?: "bad_request")))
             }
             exception<MiniAppAuthAbort> { _, _ ->
-                // 401 уже отправлен в InitDataAuth
+                // 401 уже отправлен в withMiniAppAuth
             }
             exception<Throwable> { call, cause ->
                 call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (cause.message ?: "error")))

@@ -60,7 +60,7 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
     val koin = getKoin()
 
     routing {
-        // Общий корневой узел БЕЗ установки InitDataAuthPlugin
+        // Общий корневой узел БЕЗ установки withMiniAppAuth
         route("/api/clubs/{clubId}/bookings") {
             // Плагин ставим на дочерний узел /finalize, чтобы не конфликтовать с другими модулями
             route("/finalize") {

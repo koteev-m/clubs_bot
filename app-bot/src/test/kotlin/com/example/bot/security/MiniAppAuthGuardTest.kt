@@ -14,7 +14,7 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 
-class InitDataAuthPluginTest :
+class MiniAppAuthGuardTest :
     StringSpec({
 
         "401 when initData missing" {

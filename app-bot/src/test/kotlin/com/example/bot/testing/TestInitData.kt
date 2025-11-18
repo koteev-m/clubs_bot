@@ -1,38 +1,28 @@
 package com.example.bot.testing
 
+import com.example.bot.webapp.TEST_BOT_TOKEN
+import com.example.bot.webapp.WebAppInitDataTestHelper
 import io.ktor.client.request.HttpRequestBuilder
-import java.util.Base64
-import kotlin.text.Charsets.UTF_8
 
 /**
- * Утилиты initData для тестов. Подпись не проверяется (профиль TEST).
+ * Утилиты initData для тестов. initData подписывается тем же токеном, что и боевое окружение.
  */
 public fun createInitData(
     userId: Long = 123_456_789L,
     username: String? = "test_user",
     clubId: Long? = null,
 ): String {
-    val encoder = Base64.getEncoder()
-    val userJson =
-        buildString {
-            append('{')
-            append("\"id\":")
-            append(userId)
-            if (username != null) {
-                append(',')
-                append("\"username\":\"")
-                append(username)
-                append('\"')
-            }
-            append('}')
-        }
+    val params =
+        linkedMapOf(
+            "user" to WebAppInitDataTestHelper.encodeUser(id = userId, username = username),
+            "auth_date" to System.currentTimeMillis().div(1000).toString(),
+        )
 
-    val parts = mutableListOf("user=${encoder.encodeToString(userJson.toByteArray(UTF_8))}")
-    clubId?.let { club ->
-        val stateJson = """{"clubId":$club}"""
-        parts += "state=${encoder.encodeToString(stateJson.toByteArray(UTF_8))}"
+    if (clubId != null) {
+        params += "state" to """{"clubId":$clubId}"""
     }
-    return parts.joinToString("&")
+
+    return WebAppInitDataTestHelper.createInitData(TEST_BOT_TOKEN, params)
 }
 
 /**

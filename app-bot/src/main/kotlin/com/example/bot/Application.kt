@@ -22,7 +22,6 @@ import com.example.bot.routes.pingRoute
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.web.installBookingWebApp
-import com.example.bot.webapp.InitDataAuthConfig
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.response.respondText
@@ -35,6 +34,7 @@ import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
 import java.io.File
+import java.lang.reflect.Modifier
 import java.net.JarURLConnection
 import java.net.URL
 import java.util.jar.JarFile
@@ -50,7 +50,7 @@ fun Application.module() {
     // 2) БД и миграции
     installMigrationsAndDatabase()
 
-    // 3) Простой UI и мини‑приложение
+    // 3) UI и мини‑приложение
     installWebUi()
     installBookingWebApp()
 
@@ -65,7 +65,7 @@ fun Application.module() {
         error(
             "Koin modules aggregator not found. " +
                 "Добавьте функцию/свойство, возвращающее List<Module>, в пакет com.example.bot.di " +
-                "и подключите её явно: install(Koin) { modules(<ВАША_ФУНКЦИЯ_ИЛИ_val>()) }."
+                "и подключите её явно: install(Koin) { modules(<ВАША_ФУНКЦИЯ_ИЛИ_val>()) }.",
         )
     }
 
@@ -75,7 +75,7 @@ fun Application.module() {
     }
     environment.log.info("Koin: loaded ${koinModules.size} module(s)")
 
-    // 5) Security на уровне приложения
+    // 5) Security
     configureSecurity()
 
     // 6) Инжект сервисов
@@ -90,29 +90,23 @@ fun Application.module() {
     UiCheckinMetrics.bind(registry)
     UiWaitlistMetrics.bind(registry)
 
-    // 8) Общая конфигурация MiniApp‑авторизации (одна на все роуты)
-    val initDataAuth: InitDataAuthConfig.() -> Unit = {
-        botTokenProvider = {
-            System.getenv("TELEGRAM_BOT_TOKEN") ?: error("TELEGRAM_BOT_TOKEN missing")
-        }
-        // maxAge/clock оставляем по умолчанию
-    }
-
-    // 9) Роуты
+    // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
     pingRoute()
-    guestListRoutes( repository = guestListRepository, parser = guestListCsvParser, initDataAuth = initDataAuth )
-    checkinRoutes( repository = guestListRepository, initDataAuth = initDataAuth )
+    guestListRoutes(repository = guestListRepository, parser = guestListCsvParser)
+    checkinRoutes(repository = guestListRepository)
     musicRoutes(service = musicService)
-    guestListInviteRoutes( repository = guestListRepository, initDataAuth = initDataAuth )
-    waitlistRoutes( repository = waitlistRepository, initDataAuth = initDataAuth )
+    guestListInviteRoutes(repository = guestListRepository)
+    waitlistRoutes(repository = waitlistRepository)
 
+    // 9) Прочее
     routing {
         securedBookingRoutes(bookingService)
         get("/health") { call.respondText("OK") }
     }
 }
 
-/* Сканер Koin‑модулей в пакете com.example.bot.di */
+// Сканер Koin‑модулей в пакете com.example.bot.di
+@Suppress("NestedBlockDepth")
 private fun loadKoinModulesReflectively(): List<Module> {
     val result = mutableListOf<Module>()
     val cl = Thread.currentThread().contextClassLoader
@@ -166,28 +160,32 @@ private fun loadKoinModulesReflectively(): List<Module> {
     for (cn in classNames) {
         val kls = runCatching { Class.forName(cn) }.getOrNull() ?: continue
 
+        // public static методы без параметров
         kls.methods
-            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.parameterCount == 0 }
+            .filter { Modifier.isStatic(it.modifiers) && it.parameterCount == 0 }
             .forEach { m ->
                 val returnsModuleLike =
                     Module::class.java.isAssignableFrom(m.returnType) ||
                         List::class.java.isAssignableFrom(m.returnType)
-                val looksLikeModuleName = m.name.contains("module", ignoreCase = true) ||
-                    m.name.contains("modules", ignoreCase = true) ||
-                    m.name.startsWith("get")
+                val looksLikeModuleName =
+                    m.name.contains("module", ignoreCase = true) ||
+                        m.name.contains("modules", ignoreCase = true) ||
+                        m.name.startsWith("get")
                 if (returnsModuleLike || looksLikeModuleName) {
                     collectFrom(runCatching { m.invoke(null) }.getOrNull())
                 }
             }
 
+        // статические поля (если кто-то сделал @JvmField val …)
         kls.fields
-            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) }
+            .filter { Modifier.isStatic(it.modifiers) }
             .forEach { f ->
                 val typeOk =
                     Module::class.java.isAssignableFrom(f.type) ||
                         List::class.java.isAssignableFrom(f.type)
-                val nameOk = f.name.contains("module", ignoreCase = true) ||
-                    f.name.contains("modules", ignoreCase = true)
+                val nameOk =
+                    f.name.contains("module", ignoreCase = true) ||
+                        f.name.contains("modules", ignoreCase = true)
                 if (typeOk || nameOk) {
                     collectFrom(runCatching { f.get(null) }.getOrNull())
                 }

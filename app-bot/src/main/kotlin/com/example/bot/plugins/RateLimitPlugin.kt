@@ -3,7 +3,6 @@ package com.example.bot.plugins
 import com.example.bot.config.BotLimits
 import com.example.bot.ratelimit.SubjectBucketStore
 import com.example.bot.ratelimit.TokenBucket
-import com.example.bot.webapp.InitDataPrincipalKey
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -184,12 +183,12 @@ fun Application.installRateLimitPluginDefaults() {
 
         subjectKeyExtractor = { call ->
             val initDataPrincipal =
-                if (call.attributes.contains(InitDataPrincipalKey)) {
-                    call.attributes[InitDataPrincipalKey]
+                if (call.attributes.contains(MiniAppUserKey)) {
+                    call.attributes[MiniAppUserKey]
                 } else {
                     null
                 }
-            initDataPrincipal?.userId?.toString()
+            initDataPrincipal?.id?.toString()
                 ?: call.request.header("X-Chat-Id")
                 ?: call.request.header("X-Telegram-Chat-Id")
                 ?: call.request.queryParameters["chatId"]

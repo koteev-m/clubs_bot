@@ -34,12 +34,12 @@ internal object WebAppInitDataTestHelper {
     ): String {
         val secretKey =
             hmacSha256(
-                botToken.toByteArray(StandardCharsets.UTF_8),
                 "WebAppData".toByteArray(StandardCharsets.UTF_8),
+                botToken.toByteArray(StandardCharsets.UTF_8),
             )
         val dataCheckString =
             rawParams
-                .filterKeys { it != "hash" }
+                .filterKeys { it != "hash" && it != "signature" }
                 .toSortedMap()
                 .entries
                 .joinToString("\n") { (key, value) -> "$key=$value" }

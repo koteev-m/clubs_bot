@@ -4,12 +4,11 @@ import com.example.bot.club.WaitlistEntry
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.security.Role
 import com.example.bot.metrics.UiWaitlistMetrics
+import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
 import com.example.bot.security.rbac.rbacContext
-import com.example.bot.webapp.InitDataAuthConfig
-import com.example.bot.webapp.InitDataAuthPlugin
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.request.receive
@@ -22,11 +21,11 @@ import kotlinx.serialization.Serializable
 
 fun Application.waitlistRoutes(
     repository: WaitlistRepository,
-    initDataAuth: InitDataAuthConfig.() -> Unit,
+    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN")!! },
 ) {
     routing {
         route("/api/clubs/{clubId}/waitlist") {
-            install(InitDataAuthPlugin, initDataAuth)
+            withMiniAppAuth { botTokenProvider() }
 
             // --- GET: текущая очередь (Host / менеджмент) ---
             authorize(
