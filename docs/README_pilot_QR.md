@@ -35,7 +35,10 @@ Postgres (guest list entries)
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Проверка `X-Telegram-Init-Data` (HMAC Bot API токена). | `123456:bot-token-placeholder` |
 | `QR_SECRET` | Секрет для HMAC QR-токенов гостя. | `qr-secret-placeholder` |
+| `QR_OLD_SECRET` | Опциональный предыдущий секрет для плавной ротации. | *(можно оставить пустым)* |
 | `APP_PROFILE` | Профиль конфигурации (`dev`/`stage`/`prod`). | `stage` |
+| `CORS_ALLOWED_ORIGINS` | Разрешённые origin'ы Mini App (через запятую). | `https://t.me, https://web.telegram.org` |
+| `CORS_PREFLIGHT_MAX_AGE_SECONDS` | TTL preflight-кэша (секунды, 60–86400). | `600` |
 | `DATABASE_URL` | JDBC строка подключения. | `jdbc:postgresql://db.internal:5432/club` |
 | `DATABASE_USER` | Пользователь БД. | `bot_app` |
 | `DATABASE_PASSWORD` | Пароль БД. | `********` |
@@ -43,6 +46,18 @@ Postgres (guest list entries)
 | `CHAT_RPS` | Лимит на чат/пользователя. | `30` |
 
 > **Хранение секретов:** Все чувствительные значения (бот-токен, QR-секрет, пароли) грузим из Vault/Secret Manager или CI/CD переменных. Не логируем и не коммитим.
+
+### CORS / Telegram WebApp
+
+- `CORS_ALLOWED_ORIGINS` обязателен в `STAGE/PROD`; сервис не стартует без whitelist. Пример значения: `https://t.me, https://web.telegram.org` (пробелы допустимы — триммируются).
+- Dev-профиль по умолчанию включает `anyHost()` (без `allowCredentials`).
+- Preflight ответы возвращают `Access-Control-Max-Age: 600` (можно переопределить через `CORS_PREFLIGHT_MAX_AGE_SECONDS`, диапазон 60–86400 секунд), `Access-Control-Allow-Headers: X-Telegram-Init-Data, X-Telegram-InitData, Content-Type, Authorization` и `Vary: Origin`.
+- Если origin отсутствует в whitelist, сервер отвечает `403` на `OPTIONS` и не выставляет `Access-Control-Allow-Origin`, поэтому браузер заблокирует кросс-доменные запросы.
+
+### Ротация QR-секретов
+
+- При смене `QR_SECRET` задайте старое значение в `QR_OLD_SECRET` (ENV, docker-compose, Kubernetes secret). Сервер сначала проверяет QR новым ключом и, если он не подошёл, пробует старый.
+- Держите оверлап минимум `TTL QR` (12 часов) + запас на час-другой, чтобы все уже выданные коды успели погаснуть. После окна ротации очистите `QR_OLD_SECRET`.
 
 # Сборка и запуск
 
@@ -131,9 +146,14 @@ http POST http://localhost:8080/api/clubs/42/checkin/scan \
   - `ui_checkin_scan_total` — общее количество попыток.
   - `ui_checkin_scan_error_total` — количество ошибок.
   - `ui_checkin_scan_duration_ms_seconds_bucket|sum|count` — гистограмма Micrometer (p50/p95/p99).
-- **Алерты (пример):**
+  - `ui_checkin_old_secret_total` — сколько успешных чек-инов прошло через fallback по старому QR-секрету.
+  - ⚠️ Micrometer экспортирует метрики с точками как имена с подчёркиваниями (`ui.checkin.old_secret_total` → `ui_checkin_old_secret_total`). В алёртах и запросах используем underscore-варианты, как в `/metrics`.
+- **Алерты (пример):** (готовый набор правил лежит в [`observability/prometheus/alerts/checkin.yml`](../observability/prometheus/alerts/checkin.yml))
   - `p95(ui_checkin_scan_duration_ms_seconds) > 1.5s` в течение 5 мин.
-  - `rate(ui_checkin_scan_error_total[5m]) / rate(ui_checkin_scan_total[5m]) > 0.02`.
+  - `rate(ui_checkin_scan_error_total[5m]) / clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.02`.
+  - `rate(ui_checkin_old_secret_total[5m]) > 0` — всплеск использования fallback-секрета.
+  - `rate(ui_checkin_old_secret_total[5m]) / clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.01` — более 1% чек-инов идут по старому секрету.
+  - `(hour() >= 18 && hour() <= 23) && sum(rate(ui_checkin_scan_total[15m])) < 0.001` — нет чек-инов в рабочее окно (30 минут подряд).
 - **Логи:**
   - INFO: `checkin.arrived clubId=<id> listId=<id> entryId=<id>`.
   - WARN: `checkin.error reason=<code> clubId=<id> [listId=<id> entryId=<id>]` где `<code>` ∈ {`invalid_or_expired_qr`, `list_not_found`, `entry_not_found`, `scope_mismatch`, `malformed_json`, `missing_qr`}.

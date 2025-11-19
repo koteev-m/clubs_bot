@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:46258a3eb38adf37e77ca5bd41f93ca8b1034f925cf37190a7a8015ba151f3ca
     container_name: bot_postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-botdb}
@@ -52,6 +52,7 @@ services:
       TELEGRAM_WEBHOOK_PUBLIC_PATH: ${TELEGRAM_WEBHOOK_PUBLIC_PATH:-/telegram/webhook}
       OWNER_TELEGRAM_ID: ${OWNER_TELEGRAM_ID}
       QR_SECRET: ${QR_SECRET}
+      QR_OLD_SECRET: ${QR_OLD_SECRET}
 
       # --- public urls ---
       BASE_URL: ${BASE_URL}
@@ -83,7 +84,7 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5c18f4b845cd8f2cbb344ffa6fe0391d8c975ed921848c9968298f1eb8940a97
     container_name: bot_caddy
     depends_on:
       - app

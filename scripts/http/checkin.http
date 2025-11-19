@@ -1,0 +1,20 @@
+@host={{HOST}}        // пример: http://localhost:8080
+@clubId={{CLUB_ID}}   // пример: 42
+
+### Health
+GET {{host}}/health
+
+### Check-in (valid QR, X-Telegram-Init-Data required)
+POST {{host}}/api/clubs/{{clubId}}/checkin/scan
+Content-Type: application/json
+X-Telegram-Init-Data: {{INIT_DATA}}
+
+{
+  "qr": "{{QR_TOKEN}}"
+}
+
+### Preflight (CORS sanity)
+OPTIONS {{host}}/api/clubs/{{clubId}}/checkin/scan
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: X-Telegram-Init-Data, Content-Type
+Origin: https://t.me

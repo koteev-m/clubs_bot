@@ -5,9 +5,48 @@ import io.ktor.http.HttpMethod
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.plugins.cors.routing.CORS
+import org.slf4j.LoggerFactory
 
-fun Application.installCorsFromEnv() {
+private val corsLogger = LoggerFactory.getLogger("CorsPlugin")
+fun Application.installCorsFromEnv(envProvider: (String) -> String? = System::getenv) {
+    val allowedOrigins =
+        envProvider("CORS_ALLOWED_ORIGINS")
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: emptyList()
+
+    val preflightMaxAge =
+        envProvider("CORS_PREFLIGHT_MAX_AGE_SECONDS")
+            ?.takeIf { it.isNotBlank() }
+            ?.toLongOrNull()
+            ?.coerceIn(60, 86_400)
+            ?: 600L
+
+    val profile = envProvider("APP_PROFILE")?.takeIf { it.isNotBlank() }?.uppercase() ?: "DEV"
+    val prodLike = profile == "PROD" || profile == "STAGE"
+
+    if (allowedOrigins.isEmpty() && prodLike) {
+        corsLogger.error("CORS_ALLOWED_ORIGINS is empty in {} profile; refusing to start", profile)
+        throw IllegalStateException("CORS_ALLOWED_ORIGINS must be configured for $profile")
+    }
+
+    if (allowedOrigins.isEmpty()) {
+        corsLogger.info("CORS_ALLOWED_ORIGINS is empty; defaulting to anyHost() for profile {}", profile)
+    }
+
+    if (allowedOrigins.isNotEmpty()) {
+        corsLogger.info(
+            "CORS whitelist for profile {}: {}",
+            profile,
+            allowedOrigins.joinToString(separator = ",")
+        )
+    }
+
+    corsLogger.info("CORS preflight max-age set to {} seconds (profile {})", preflightMaxAge, profile)
+
     install(CORS) {
+        maxAgeInSeconds = preflightMaxAge
         // Заголовки/методы, необходимые Mini App
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
@@ -19,22 +58,16 @@ fun Application.installCorsFromEnv() {
         allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Put)
         allowMethod(HttpMethod.Delete)
+        allowMethod(HttpMethod.Patch)
         allowNonSimpleContentTypes = true
 
         // Разрешённые origin'ы из ENV (через запятую). В dev — anyHost().
-        val origins =
-            System.getenv("CORS_ALLOWED_ORIGINS")
-                ?.split(',')
-                ?.map { it.trim() }
-                ?.filter { it.isNotEmpty() }
-                ?: emptyList()
-
-        if (origins.isEmpty()) {
+        if (allowedOrigins.isEmpty()) {
             anyHost() // безопасно в dev. Для prod задайте CORS_ALLOWED_ORIGINS.
             // В dev не включаем allowCredentials, чтобы избежать предупреждений.
         } else {
             allowOrigins { origin ->
-                origins.any { origin.equals(it, ignoreCase = true) }
+                allowedOrigins.any { origin.equals(it, ignoreCase = true) }
             }
             // В проде, когда origin-ы заданы явно, можно включить креды.
             allowCredentials = true

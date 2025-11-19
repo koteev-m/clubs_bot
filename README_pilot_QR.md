@@ -25,5 +25,8 @@
   - https://t.me
   - https://web.telegram.org
   - (если используете desktop/webview — добавьте соответствующие origin'ы)
-- В dev `CORS_ALLOWED_ORIGINS` можно оставить пустым, и сервер включит `anyHost()`.
+- В dev `CORS_ALLOWED_ORIGINS` можно оставить пустым, и сервер включит `anyHost()`. В `STAGE/PROD` приложение не стартует без whitelist.
+- Preflight ответы кэшируются на 10 минут (`Access-Control-Max-Age: 600`). Таймаут можно переопределить через `CORS_PREFLIGHT_MAX_AGE_SECONDS` (60–86400 секунд).
+- Список заголовков включает `X-Telegram-Init-Data`, `X-Telegram-InitData`, `Content-Type` и `Authorization`; убедитесь, что reverse-proxy их не отбрасывает и что переменная окружения не пуста на staging/production.
+- Если origin отсутствует в whitelist, CORS отвечает `403` без `Access-Control-Allow-Origin`, поэтому браузер блокирует запросы автоматически.
 - Для reverse-proxy/ingress обязательно увеличьте буферы заголовков (см. `docs/ops/ingress.md`), т.к. `X-Telegram-Init-Data` может быть длинным.

@@ -1,0 +1,73 @@
+# Prometheus alert examples for the Entry Manager check-in flow.
+# Dashboards and automation can import this file as-is or copy individual rules.
+groups:
+  - name: checkin-alerts
+    rules:
+      - alert: CheckinHighP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(ui_checkin_scan_duration_ms_seconds_bucket[5m])) by (le)
+          ) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Check-in scan p95 latency > 1.5s"
+          description: |
+            Check-in handlers are taking longer than expected (p95 latency over the last
+            five minutes is above 1.5 seconds). Investigate DB load, downstream services,
+            or traffic spikes in Telegram Mini Apps.
+
+      - alert: CheckinErrorRateHigh
+        expr: |
+          rate(ui_checkin_scan_error_total[5m])
+            /
+          clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.02
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Check-in error rate > 2%"
+          description: |
+            More than 2% of scans are failing. Inspect ui_checkin_scan_error_total logs to
+            determine whether QR expirations, RBAC failures, or backend outages are causing
+            the spike.
+
+      - alert: CheckinOldSecretSpike
+        expr: rate(ui_checkin_old_secret_total[5m]) > 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Fallback QR secret is in use"
+          description: |
+            Scans verified via QR_OLD_SECRET. Confirm that a rotation is in progress and
+            that the overlap window is intentional.
+
+      - alert: CheckinOldSecretShareHigh
+        expr: |
+          rate(ui_checkin_old_secret_total[5m])
+            /
+          clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fallback QR secret accounts for >1% of scans"
+          description: |
+            More than 1% of scans require QR_OLD_SECRET. If the rotation window should have
+            closed already, validate that all QR codes were reissued.
+
+      - alert: CheckinNoTrafficDuringOpenHours
+        expr: |
+          (hour() >= 18 and hour() <= 23)
+            and sum(rate(ui_checkin_scan_total[15m])) < 0.001
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No check-in traffic during open hours"
+          description: |
+            No scans were observed for 30 minutes during the 18:00–23:59 window. Verify ingress,
+            DB connectivity, and Telegram Mini App availability.
