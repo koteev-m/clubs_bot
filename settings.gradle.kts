@@ -6,21 +6,29 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
         mavenCentral()
-        maven("https://cache-redirector.jetbrains.com/maven-central")
-        maven("https://repo1.maven.org/maven2")
-        maven("https://maven-central.storage-download.googleapis.com/maven2")
-        mavenLocal()
+        // Fallback на mirror Google, если repo.maven.apache.org даёт 5xx
+        maven("https://maven-central.storage-download.googleapis.com/maven2") {
+            content {
+                // Kotlin Gradle Plugin и родственные артефакты
+                includeGroupByRegex("org\\.jetbrains(\\..+)?")
+                // Если потребуется, сюда можно добавить другие используемые плагины
+                includeGroup("io.ktor")
+            }
+        }
     }
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         mavenCentral()
-        maven("https://cache-redirector.jetbrains.com/maven-central")
-        maven("https://repo1.maven.org/maven2")
-        maven("https://maven-central.storage-download.googleapis.com/maven2")
-        mavenLocal()
+        // Тот же fallback на mirror Google — ограничиваем контентом, чтобы не «ловить» чужие группы
+        maven("https://maven-central.storage-download.googleapis.com/maven2") {
+            content {
+                includeGroupByRegex("org\\.jetbrains(\\..+)?") // Kotlin, kotlinx, compose и т.д.
+                includeGroup("io.ktor")
+            }
+        }
     }
 }
 

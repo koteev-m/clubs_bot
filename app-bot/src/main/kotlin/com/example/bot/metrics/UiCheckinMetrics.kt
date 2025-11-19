@@ -18,6 +18,8 @@ object UiCheckinMetrics {
 
     @Volatile private var cScanError: Counter? = null
 
+    @Volatile private var cOldSecretFallback: Counter? = null
+
     // by-name (ручной чек-ин)
     @Volatile private var cByNameTotal: Counter? = null
 
@@ -42,6 +44,13 @@ object UiCheckinMetrics {
                 ?: Counter
                     .builder("ui.checkin.scan.error")
                     .description("Failed check-in scans (any error)")
+                    .register(registry)
+
+        cOldSecretFallback =
+            registry.find("ui.checkin.old_secret_total").counter()
+                ?: Counter
+                    .builder("ui.checkin.old_secret_total")
+                    .description("Check-in scans validated with QR_OLD_SECRET")
                     .register(registry)
 
         checkinScanTimer =
@@ -92,6 +101,10 @@ object UiCheckinMetrics {
 
     fun incError() {
         cScanError?.increment()
+    }
+
+    fun incOldSecretFallback() {
+        cOldSecretFallback?.increment()
     }
 
     /** Несуспендящая версия (для не‑Ktor кода). */

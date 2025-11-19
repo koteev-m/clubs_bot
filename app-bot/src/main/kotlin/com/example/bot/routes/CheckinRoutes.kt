@@ -35,6 +35,7 @@ fun Application.checkinRoutes(
     repository: GuestListRepository,
     botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: error("TELEGRAM_BOT_TOKEN missing") },
     qrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: error("QR_SECRET missing") },
+    oldQrSecretProvider: () -> String? = { System.getenv("QR_OLD_SECRET") },
     clock: Clock = Clock.systemUTC(),
     qrTtl: Duration = DEFAULT_QR_TTL,
 ) {
@@ -75,12 +76,23 @@ fun Application.checkinRoutes(
                                 return@timeScanSuspend
                             }
 
-                            val secret = qrSecretProvider()
+                            val primarySecret = qrSecretProvider()
+                            val oldSecret =
+                                oldQrSecretProvider()?.takeIf {
+                                    it.isNotBlank() && it != primarySecret
+                                }
                             val now = Instant.now(clock)
                             val decoded =
                                 runCatching {
-                                    QrGuestListCodec.verify(qr, now, qrTtl, secret)
+                                    QrGuestListCodec.verify(qr, now, qrTtl, primarySecret)
                                 }.getOrNull()
+                                    ?: oldSecret?.let {
+                                        runCatching {
+                                            QrGuestListCodec.verify(qr, now, qrTtl, it)
+                                        }.getOrNull()?.also {
+                                            UiCheckinMetrics.incOldSecretFallback()
+                                        }
+                                    }
                             if (decoded == null) {
                                 UiCheckinMetrics.incError()
                                 logger.warn("checkin.scan error=invalid_or_expired_qr clubId={}", clubId)
