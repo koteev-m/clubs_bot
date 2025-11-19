@@ -56,6 +56,7 @@ services:
       # --- public urls ---
       BASE_URL: ${BASE_URL}
       WEBAPP_ORIGIN: ${WEBAPP_ORIGIN}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
 
       # --- feature flags ---
       RATE_LIMIT_ENABLED: "true"
@@ -63,6 +64,13 @@ services:
       RBAC_ENABLED: "true"
       USE_NOTIFY_SENDER: "true"
       NOTIFY_ROUTES_ENABLED: "true"
+      RL_IP_ENABLED: ${RL_IP_ENABLED}
+      RL_SUBJECT_ENABLED: ${RL_SUBJECT_ENABLED}
+      RL_SUBJECT_RPS: ${RL_SUBJECT_RPS}
+      RL_SUBJECT_BURST: ${RL_SUBJECT_BURST}
+      RL_SUBJECT_TTL_SECONDS: ${RL_SUBJECT_TTL_SECONDS}
+      RL_RETRY_AFTER_SECONDS: ${RL_RETRY_AFTER_SECONDS}
+      RL_SUBJECT_PATH_PREFIXES: ${RL_SUBJECT_PATH_PREFIXES}
 
     expose:
       - "8080"

@@ -11,6 +11,8 @@ import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.configureLoggingAndRequestId
 import com.example.bot.plugins.configureSecurity
 import com.example.bot.plugins.installAppConfig
+import com.example.bot.plugins.installCorsFromEnv
+import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
 import com.example.bot.plugins.installWebUi
@@ -46,6 +48,7 @@ fun Application.module() {
     installAppConfig()
     installMetrics()
     install(ActorMdcPlugin)
+    installCorsFromEnv()
 
     // 2) БД и миграции
     installMigrationsAndDatabase()
@@ -74,6 +77,10 @@ fun Application.module() {
         modules(koinModules)
     }
     environment.log.info("Koin: loaded ${koinModules.size} module(s)")
+
+    if (isDev) {
+        installDiagTime()
+    }
 
     // 5) Security
     configureSecurity()

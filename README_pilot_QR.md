@@ -19,3 +19,11 @@
 
 ## Rate limiting
 - Check-in requests are covered by the subject rate limiter (see `RateLimitPlugin` configuration) to protect against repeated scans.
+
+## CORS для Mini App
+- В проде задайте `CORS_ALLOWED_ORIGINS`, например:
+  - https://t.me
+  - https://web.telegram.org
+  - (если используете desktop/webview — добавьте соответствующие origin'ы)
+- В dev `CORS_ALLOWED_ORIGINS` можно оставить пустым, и сервер включит `anyHost()`.
+- Для reverse-proxy/ingress обязательно увеличьте буферы заголовков (см. `docs/ops/ingress.md`), т.к. `X-Telegram-Init-Data` может быть длинным.
