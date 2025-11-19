@@ -60,6 +60,13 @@ jobs:
           CI: "true"
         run: ./gradlew test -PrunIT=true --console=plain
 
+      - name: Logs policy scan (SEC-02)
+        run: ./gradlew :app-bot:checkLogsPolicy --no-daemon --stacktrace
+        env:
+          TELEGRAM_BOT_TOKEN: 111111:TEST_BOT_TOKEN
+          NOTIFICATIONS_ENABLED: "false"
+          FLYWAY_LOCATIONS: classpath:db/migration/h2
+
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
