@@ -30,3 +30,9 @@
 - Список заголовков включает `X-Telegram-Init-Data`, `X-Telegram-InitData`, `Content-Type` и `Authorization`; убедитесь, что reverse-proxy их не отбрасывает и что переменная окружения не пуста на staging/production.
 - Если origin отсутствует в whitelist, CORS отвечает `403` без `Access-Control-Allow-Origin`, поэтому браузер блокирует запросы автоматически.
 - Для reverse-proxy/ingress обязательно увеличьте буферы заголовков (см. `docs/ops/ingress.md`), т.к. `X-Telegram-Init-Data` может быть длинным.
+
+## HTTP заголовки безопасности
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: no-referrer`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` — только в профилях `STAGE/PROD`.

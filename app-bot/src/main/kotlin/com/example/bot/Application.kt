@@ -13,6 +13,7 @@ import com.example.bot.plugins.configureSecurity
 import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installCorsFromEnv
 import com.example.bot.plugins.installDiagTime
+import com.example.bot.plugins.installHttpSecurityFromEnv
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
 import com.example.bot.plugins.installWebUi
@@ -49,6 +50,7 @@ fun Application.module() {
     installMetrics()
     install(ActorMdcPlugin)
     installCorsFromEnv()
+    installHttpSecurityFromEnv()
 
     // 2) БД и миграции
     installMigrationsAndDatabase()
