@@ -45,6 +45,12 @@ Postgres (guest list entries)
 | `GLOBAL_RPS` | Общий лимит запросов (см. `BotLimits`). | `200` |
 | `CHAT_RPS` | Лимит на чат/пользователя. | `30` |
 
+## HTTP заголовки безопасности
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: no-referrer`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` — только в профилях `STAGE/PROD`.
+
 > **Хранение секретов:** Все чувствительные значения (бот-токен, QR-секрет, пароли) грузим из Vault/Secret Manager или CI/CD переменных. Не логируем и не коммитим.
 
 ### CORS / Telegram WebApp
