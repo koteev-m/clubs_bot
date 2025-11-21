@@ -51,3 +51,18 @@
 - `Referrer-Policy: no-referrer`
 - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains` — только в профилях `STAGE/PROD`.
+
+## Smoke‑проверка заголовков
+
+Быстрая локальная/стендовая проверка основных заголовков (HSTS, Referrer‑Policy, X‑Content‑Type‑Options, Permissions‑Policy, CSP) и кэша статики:
+
+```bash
+./tools/smoke_headers.sh https://your-host
+```
+
+По умолчанию скрипт бьёт в `http://localhost:8080`:
+```bash
+./tools/smoke_headers.sh || true
+```
+
+> В dev HSTS может быть отключён (ожидаемо); см. пример базового конфига Caddy в `deploy/caddy/Caddyfile`.

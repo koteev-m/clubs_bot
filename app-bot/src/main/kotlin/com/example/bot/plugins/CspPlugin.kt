@@ -61,3 +61,10 @@ fun Application.installWebAppCspFromEnv(envProvider: (String) -> String? = Syste
         }
     }
 }
+
+/**
+ * Алиас для единообразия именования: делегирует в [installWebAppCspFromEnv].
+ * Сохраняем совместимость с прежним названием installCspFromEnv().
+ */
+fun Application.installCspFromEnv(envProvider: (String) -> String? = System::getenv) =
+    installWebAppCspFromEnv(envProvider)
