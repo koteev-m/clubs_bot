@@ -5,6 +5,9 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.data.security.Role
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.metrics.UiCheckinMetrics
+import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
+import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
+import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
@@ -12,6 +15,8 @@ import com.example.bot.security.rbac.clubScoped
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.plugins.requestsize.RequestSizeLimit
+import io.ktor.server.plugins.requestsize.maxRequestSize
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.post
@@ -48,6 +53,12 @@ fun Application.checkinRoutes(
 
             authorize(Role.CLUB_ADMIN, Role.MANAGER, Role.ENTRY_MANAGER) {
                 clubScoped(ClubScope.Own) {
+                    val maxBytes: Long = (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
+                        ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
+                    install(RequestSizeLimit) {
+                        maxRequestSize = maxBytes
+                    }
+
                     post("/scan") {
                         UiCheckinMetrics.incTotal()
                         UiCheckinMetrics.timeScanSuspend {

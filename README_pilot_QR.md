@@ -20,6 +20,10 @@
 ## Rate limiting
 - Check-in requests are covered by the subject rate limiter (see `RateLimitPlugin` configuration) to protect against repeated scans.
 
+## Валидация и защита от перегрузки
+- Тело запроса чек-ина ограничено по размеру (по умолчанию 4 KB, настройка через `CHECKIN_MAX_BODY_BYTES`, допустимо 512–32768 байт).
+- Глобальный таймаут обработки HTTP-запросов задаётся `HTTP_REQUEST_TIMEOUT_MS` (по умолчанию 3000 мс); превышение даёт `408 Request Timeout`.
+
 ## CORS для Mini App
 - В проде задайте `CORS_ALLOWED_ORIGINS`, например:
   - https://t.me
