@@ -60,6 +60,8 @@ dependencies {
     implementation(libs.ktor.server.status.pages)
     implementation(libs.ktor.server.compression)
     implementation(libs.ktor.server.default.headers)
+    implementation(libs.ktor.server.auto.head.response)
+    implementation(libs.ktor.server.conditional.headers)
     implementation(libs.ktor.server.call.logging)
     implementation(libs.ktor.server.call.id)
     implementation(libs.ktor.server.metrics.micrometer)
