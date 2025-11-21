@@ -125,6 +125,10 @@ Postgres (guest list entries)
 - **PII:** В логах используем только числовые `clubId`, `listId`, `entryId`, `reason`; `logback.xml` маскирует номера телефонов. Запрещено выводить initData, имя гостя или QR.
 - **Rate limiting:** `RateLimitPlugin` считает ключ по `MiniAppUserKey` (Telegram user id); для путей `/api/clubs/` применяются subject-лимиты и IP-лимиты. При превышении — `429` с `Retry-After`.
 
+## Валидация и защита от перегрузки
+- Лимит тела чек-ина: по умолчанию 4 KB, настраивается через `CHECKIN_MAX_BODY_BYTES` (диапазон 512–32768 байт).
+- Таймаут обработки HTTP-запросов: `HTTP_REQUEST_TIMEOUT_MS`, по умолчанию 3000 мс, при превышении возвращается `408 Request Timeout`.
+
 # API контракты
 
 `POST /api/clubs/{clubId}/checkin/scan`
