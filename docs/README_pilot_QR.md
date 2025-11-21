@@ -45,6 +45,21 @@ Postgres (guest list entries)
 | `GLOBAL_RPS` | Общий лимит запросов (см. `BotLimits`). | `200` |
 | `CHAT_RPS` | Лимит на чат/пользователя. | `30` |
 
+## CSP (для статического WebApp)
+- Управляется ENV: `CSP_ENABLED`, `CSP_REPORT_ONLY`, `CSP_VALUE`, `WEBAPP_CSP_PATH_PREFIX` (по умолчанию `/webapp/entry`).
+- Рекомендуемый дефолт:
+  ```
+  default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://t.me https://telegram.org;
+  ```
+- Стартуйте с `CSP_ENABLED=true` и `CSP_REPORT_ONLY=true`, соберите репорты/логи, затем переведите в enforce (`CSP_REPORT_ONLY=false`).
+- Не используйте `frame-ancestors` из-за Telegram WebView.
+
+## Кэширование статики WebApp
+- Для `/webapp/entry/*` сервер ставит `Cache-Control` только на успешные (2xx/304) ответы.
+- HTML (`/webapp/entry` или `*.html`) — короткий кэш с `must-revalidate`.
+- Ассеты с fingerprint в имени — `public, max-age=<TTL>, immutable` (TTL задаёт `WEBAPP_ENTRY_CACHE_SECONDS`, 60–31536000, по умолчанию 31536000); выдаём слабый ETag `W/"<fingerprint>"` → честные 304 по `If-None-Match`.
+- Не‑фингерпринтнутые ассеты получают короткий кэш (`max-age=300, must-revalidate`).
+
 ## HTTP заголовки безопасности
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: no-referrer`
