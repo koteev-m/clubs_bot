@@ -127,9 +127,10 @@ Postgres (guest list entries)
 
 ## Валидация и защита от перегрузки
 - Лимит тела чек-ина: по умолчанию 4 KB, настраивается через `CHECKIN_MAX_BODY_BYTES` (диапазон 512–32768 байт).
- - Таймаут обработки HTTP-запросов: `HTTP_REQUEST_TIMEOUT_MS` (диапазон 100–30000 мс, по умолчанию 3000 мс), при превышении возвращается `408 Request Timeout`.
+- Таймаут обработки HTTP-запросов: `HTTP_REQUEST_TIMEOUT_MS` (диапазон 100–30000 мс, по умолчанию 3000 мс), при превышении возвращается `408 Request Timeout`.
 - Сервис принимает `X-Request-Id` и отражает его в ответе; RequestId прокидывается в MDC/логи (корреляция ошибок/метрик).
-- QR валидируется ранним чекером: длина MIN_QR_LEN..MAX_QR_LEN, формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`; при нарушении — быстрый 400 с кодом `"invalid_qr_length"`/`"invalid_qr_format"`/`"empty_qr"`.
+- QR валидируется ранним чекером: длина **12..512** символов, формат `GL:<listId>:<entryId>:<ts>:<hmacHex>` (HMAC — минимум 16 hex‑символов); при нарушении — быстрый 400 с кодом `"invalid_qr_length"`/`"invalid_qr_format"`/`"empty_qr"`.
+- Контент‑тип: `Content-Type: application/json` обязателен; иначе — **415 `unsupported_media_type`**.
 
 # API контракты
 
@@ -143,12 +144,13 @@ Postgres (guest list entries)
   - `qr` должен иметь формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`.
   - Пример валидного QR: `GL:123:456:1732390400:deadbeefdeadbeef`.
   - Пример невалидного QR: `GL:abc:1:2:zz` → ответ `400 invalid_qr_format`.
-- Ответы:
-  - `200 {"status":"ARRIVED"}` — успех или повтор.
-  - `400` — `"invalid_or_expired_qr"`, `"invalid_json"`, `"entry_list_mismatch"`, `"empty_qr"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_club_id"`.
-  - `401` — неверная подпись initData.
-  - `403 "club_scope_mismatch"` — чужой клуб.
-  - `404` — `"list_not_found"` или `"entry_not_found"`.
+  - Ответы:
+    - `200 {"status":"ARRIVED"}` — успех или повтор.
+    - `400` — `"invalid_or_expired_qr"`, `"invalid_json"`, `"entry_list_mismatch"`, `"empty_qr"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_club_id"`.
+    - `415` — `"unsupported_media_type"` — заголовок `Content-Type` должен быть `application/json`.
+    - `401` — неверная подпись initData.
+    - `403 "club_scope_mismatch"` — чужой клуб.
+    - `404` — `"list_not_found"` или `"entry_not_found"`.
 
 Примеры:
 ```bash

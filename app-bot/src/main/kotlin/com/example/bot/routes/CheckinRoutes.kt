@@ -12,11 +12,13 @@ import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.requestsize.RequestSizeLimit
 import io.ktor.server.plugins.requestsize.maxRequestSize
+import io.ktor.server.request.contentType
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.post
@@ -60,7 +62,17 @@ fun Application.checkinRoutes(
                     }
 
                     post("/scan") {
+                        // Считаем каждую попытку сканирования (включая ранние отказы)
                         UiCheckinMetrics.incTotal()
+                        // Быстрый отказ, если не JSON
+                        val ct = call.request.contentType()
+                        if (!ct.match(ContentType.Application.Json)) {
+                            UiCheckinMetrics.incError()
+                            logger.warn("checkin.scan error=unsupported_media_type clubId={}", call.parameters["clubId"])
+                            call.respond(HttpStatusCode.UnsupportedMediaType, "unsupported_media_type")
+                            return@post
+                        }
+
                         UiCheckinMetrics.timeScanSuspend {
                             val clubId =
                                 call.parameters["clubId"]?.toLongOrNull()
