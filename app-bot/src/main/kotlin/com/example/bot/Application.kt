@@ -14,6 +14,8 @@ import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installCorsFromEnv
 import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installHttpSecurityFromEnv
+import com.example.bot.plugins.CspPlugin
+import com.example.bot.plugins.WebAppStaticCachePlugin
 import com.example.bot.plugins.installRequestGuardsFromEnv
 import com.example.bot.plugins.installWebAppCspFromEnv
 import com.example.bot.plugins.installWebAppEtagForFingerprints
@@ -60,6 +62,8 @@ fun Application.module() {
     install(ActorMdcPlugin)
     installCorsFromEnv()
     installHttpSecurityFromEnv()
+    install(CspPlugin)
+    install(WebAppStaticCachePlugin)
     installRequestGuardsFromEnv()
     installWebAppCspFromEnv()
     installWebAppImmutableCacheFromEnv()
