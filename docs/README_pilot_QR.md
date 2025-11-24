@@ -45,6 +45,21 @@ Postgres (guest list entries)
 | `GLOBAL_RPS` | Общий лимит запросов (см. `BotLimits`). | `200` |
 | `CHAT_RPS` | Лимит на чат/пользователя. | `30` |
 
+## CSP (для статического WebApp)
+- Управляется ENV: `CSP_ENABLED`, `CSP_REPORT_ONLY`, `CSP_VALUE`, `WEBAPP_CSP_PATH_PREFIX` (по умолчанию `/webapp/entry`).
+- Рекомендуемый дефолт:
+  ```
+  default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://t.me https://telegram.org;
+  ```
+- Стартуйте с `CSP_ENABLED=true` и `CSP_REPORT_ONLY=true`, соберите репорты/логи, затем переведите в enforce (`CSP_REPORT_ONLY=false`).
+- Не используйте `frame-ancestors` из-за Telegram WebView.
+
+## Кэширование статики WebApp
+- Для `/webapp/entry/*` сервер ставит `Cache-Control` только на успешные (2xx/304) ответы.
+- HTML (`/webapp/entry` или `*.html`) — короткий кэш с `must-revalidate`.
+- Ассеты с fingerprint в имени — `public, max-age=<TTL>, immutable` (TTL задаёт `WEBAPP_ENTRY_CACHE_SECONDS`, 60–31536000, по умолчанию 31536000); выдаём слабый ETag `W/"<fingerprint>"` → честные 304 по `If-None-Match`.
+- Не‑фингерпринтнутые ассеты получают короткий кэш (`max-age=300, must-revalidate`).
+
 ## HTTP заголовки безопасности
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: no-referrer`
@@ -110,6 +125,12 @@ Postgres (guest list entries)
 - **PII:** В логах используем только числовые `clubId`, `listId`, `entryId`, `reason`; `logback.xml` маскирует номера телефонов. Запрещено выводить initData, имя гостя или QR.
 - **Rate limiting:** `RateLimitPlugin` считает ключ по `MiniAppUserKey` (Telegram user id); для путей `/api/clubs/` применяются subject-лимиты и IP-лимиты. При превышении — `429` с `Retry-After`.
 
+## Валидация и защита от перегрузки
+- Лимит тела чек-ина: по умолчанию 4 KB, настраивается через `CHECKIN_MAX_BODY_BYTES` (диапазон 512–32768 байт).
+ - Таймаут обработки HTTP-запросов: `HTTP_REQUEST_TIMEOUT_MS` (диапазон 100–30000 мс, по умолчанию 3000 мс), при превышении возвращается `408 Request Timeout`.
+- Сервис принимает `X-Request-Id` и отражает его в ответе; RequestId прокидывается в MDC/логи (корреляция ошибок/метрик).
+- QR валидируется ранним чекером: длина MIN_QR_LEN..MAX_QR_LEN, формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`; при нарушении — быстрый 400 с кодом `"invalid_qr_length"`/`"invalid_qr_format"`/`"empty_qr"`.
+
 # API контракты
 
 `POST /api/clubs/{clubId}/checkin/scan`
@@ -119,12 +140,15 @@ Postgres (guest list entries)
   ```json
   { "qr": "GL:12345:67890:1732390400:0a1b2c..." }
   ```
+  - `qr` должен иметь формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`.
+  - Пример валидного QR: `GL:123:456:1732390400:deadbeefdeadbeef`.
+  - Пример невалидного QR: `GL:abc:1:2:zz` → ответ `400 invalid_qr_format`.
 - Ответы:
   - `200 {"status":"ARRIVED"}` — успех или повтор.
-  - `400` — `"Invalid or expired QR"`, `"Invalid JSON"`, `"Entry-list mismatch"`, `"Empty QR"`.
+  - `400` — `"invalid_or_expired_qr"`, `"invalid_json"`, `"entry_list_mismatch"`, `"empty_qr"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_club_id"`.
   - `401` — неверная подпись initData.
-  - `403 "club scope mismatch"` — чужой клуб.
-  - `404` — `"List not found"` или `"Entry not found"`.
+  - `403 "club_scope_mismatch"` — чужой клуб.
+  - `404` — `"list_not_found"` или `"entry_not_found"`.
 
 Примеры:
 ```bash
@@ -162,7 +186,7 @@ http POST http://localhost:8080/api/clubs/42/checkin/scan \
   - `(hour() >= 18 && hour() <= 23) && sum(rate(ui_checkin_scan_total[15m])) < 0.001` — нет чек-инов в рабочее окно (30 минут подряд).
 - **Логи:**
   - INFO: `checkin.arrived clubId=<id> listId=<id> entryId=<id>`.
-  - WARN: `checkin.error reason=<code> clubId=<id> [listId=<id> entryId=<id>]` где `<code>` ∈ {`invalid_or_expired_qr`, `list_not_found`, `entry_not_found`, `scope_mismatch`, `malformed_json`, `missing_qr`}.
+  - WARN: `checkin.error reason=<code> clubId=<id> [listId=<id> entryId=<id>]` где `<code>` ∈ {`invalid_or_expired_qr`, `list_not_found`, `entry_not_found`, `club_scope_mismatch`, `invalid_json`, `entry_list_mismatch`, `empty_qr`, `invalid_qr_length`, `invalid_qr_format`, `invalid_club_id`}.
 - **Троттлинг:** IP и subject-лимиты управляются переменными `RL_SUBJECT_RPS`, `RL_SUBJECT_BURST`, `RL_SUBJECT_TTL_SECONDS`, `RL_RETRY_AFTER_SECONDS`, `RL_IP_RPS`, `RL_IP_BURST`. При всплесках ошибок проверяем частоту 429 на `/metrics` и записи `Too Many Requests` в логах; временное повышение лимитов согласовываем с Security.
 - **Резервные сценарии:**
   - Камера не работает — использовать поиск в админке по имени/телефону (`/app` → список гостей) и вручную поставить `ARRIVED`.
@@ -174,7 +198,7 @@ http POST http://localhost:8080/api/clubs/42/checkin/scan \
 
 - `GET /ready` → `200 OK`, `GET /health` → `200 OK`, `/metrics` доступен.
 - WebApp открывается, `Сканировать` вызывает нативное окно Telegram.
-- QR happy-path: валидный токен → `200 ARRIVED`; испорченный токен → `400 Invalid or expired QR`; токен другого клуба → `403`; повторное сканирование → `200 ARRIVED`.
+- QR happy-path: валидный токен → `200 ARRIVED`; испорченный токен → `400 invalid_or_expired_qr`; токен другого клуба → `403`; повторное сканирование → `200 ARRIVED`.
 - После каждой операции счётчики `ui_checkin_scan_total`/`ui_checkin_scan_error_total` увеличиваются на `/metrics`.
 
 # Траблшутинг
@@ -182,7 +206,7 @@ http POST http://localhost:8080/api/clubs/42/checkin/scan \
 | Симптом | Что проверить | Команда / действие | Ожидаемый результат |
 | --- | --- | --- | --- |
 | `401 Unauthorized` | Свежесть `initData`, верность `TELEGRAM_BOT_TOKEN` | Открыть Mini App заново; `kubectl exec`/`docker compose exec app` и проверить переменную | Новый запуск выдаёт `200` |
-| `400 Invalid or expired QR` | Время выпуска QR и корректность токена | `docker compose logs app | grep invalid_or_expired_qr`; сверить `issuedAt` с `docker compose exec app date` | Обнаруживаем просрочку или опечатку и перевыпускаем QR |
+| `400 invalid_or_expired_qr` | Время выпуска QR и корректность токена | `docker compose logs app | grep invalid_or_expired_qr`; сверить `issuedAt` с `docker compose exec app date` | Обнаруживаем просрочку или опечатку и перевыпускаем QR |
 | `403 club scope mismatch` | Роли пользователя, соответствие `clubId` | Проверить RBAC в админке; `./gradlew :core-data:run --args='user-roles <userId>'` (если доступно) | Пользователь видит только свой клуб |
 | `404 List/Entry not found` | Гость удалён или список закрыт | Проверить статус в панели гостевых списков | Решить через ручной чек-ин или восстановить запись |
 | `5xx` на API | Состояние БД/серверов | `kubectl logs` или `docker compose logs app` → искать stacktrace; проверить `/ready` | После восстановления сервис отвечает 200 |

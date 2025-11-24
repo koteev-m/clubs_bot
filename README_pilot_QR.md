@@ -10,6 +10,12 @@
 
 ## Check-in API
 - `POST /api/clubs/{clubId}/checkin/scan` accepts a QR payload and marks the guest as arrived.
+  - Body field `qr` ожидает строку формата `GL:<listId>:<entryId>:<ts>:<hmacHex>`.
+  - Пример валидного значения: `GL:123:456:1732390400:deadbeefdeadbeef`.
+  - Пример невалидного значения: `GL:abc:1:2:zz` → ответ `400 invalid_qr_format`.
+  - Ответы:
+    - `200 {"status":"ARRIVED"}` — успех или повтор.
+    - `400` — `"invalid_json"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_or_expired_qr"`, `"empty_qr"`, `"invalid_club_id"`.
 - The request **must** include an `X-Telegram-Init-Data` header; it is verified by `withMiniAppAuth` before RBAC is applied.
 - Init data older than 24 hours or more than 2 minutes ahead of the server clock is rejected to avoid replays/time skew.
 
@@ -19,6 +25,12 @@
 
 ## Rate limiting
 - Check-in requests are covered by the subject rate limiter (see `RateLimitPlugin` configuration) to protect against repeated scans.
+
+## Валидация и защита от перегрузки
+- Тело запроса чек-ина ограничено по размеру (по умолчанию 4 KB, настройка через `CHECKIN_MAX_BODY_BYTES`, допустимо 512–32768 байт).
+- Глобальный таймаут обработки HTTP-запросов задаётся `HTTP_REQUEST_TIMEOUT_MS` (диапазон 100–30000 мс, по умолчанию 3000 мс); превышение даёт `408 Request Timeout`.
+- Сервис принимает `X-Request-Id` и отражает его в ответе; RequestId прокидывается в MDC/логи (корреляция ошибок/метрик).
+- QR валидируется ранним чекером: длина MIN_QR_LEN..MAX_QR_LEN, формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`; при нарушении — быстрый 400 с кодом `"invalid_qr_length"`/`"invalid_qr_format"`/`"empty_qr"`.
 
 ## CORS для Mini App
 - В проде задайте `CORS_ALLOWED_ORIGINS`, например:
@@ -31,8 +43,38 @@
 - Если origin отсутствует в whitelist, CORS отвечает `403` без `Access-Control-Allow-Origin`, поэтому браузер блокирует запросы автоматически.
 - Для reverse-proxy/ingress обязательно увеличьте буферы заголовков (см. `docs/ops/ingress.md`), т.к. `X-Telegram-Init-Data` может быть длинным.
 
+## CSP (для статического WebApp)
+- Управляется ENV: `CSP_ENABLED`, `CSP_REPORT_ONLY`, `CSP_VALUE`, `WEBAPP_CSP_PATH_PREFIX` (по умолчанию `/webapp/entry`).
+- Рекомендуемый дефолт:
+  ```
+  default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://t.me https://telegram.org;
+  ```
+- Стартуйте с `CSP_ENABLED=true` и `CSP_REPORT_ONLY=true`, соберите репорты/логи, затем переведите в enforce (`CSP_REPORT_ONLY=false`).
+- Не используйте `frame-ancestors` из-за Telegram WebView.
+
+## Кэширование статики WebApp
+- Для `/webapp/entry/*` сервер ставит `Cache-Control` только на успешные (2xx/304) ответы.
+- HTML (`/webapp/entry` или `*.html`) — короткий кэш с `must-revalidate`.
+- Ассеты с fingerprint в имени — `public, max-age=<TTL>, immutable` (TTL задаёт `WEBAPP_ENTRY_CACHE_SECONDS`, 60–31536000, по умолчанию 31536000); выдаём слабый ETag `W/"<fingerprint>"` → честные 304 по `If-None-Match`.
+- Не‑фингерпринтнутые ассеты получают короткий кэш (`max-age=300, must-revalidate`).
+
 ## HTTP заголовки безопасности
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: no-referrer`
 - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains` — только в профилях `STAGE/PROD`.
+
+## Smoke‑проверка заголовков
+
+Быстрая локальная/стендовая проверка основных заголовков (HSTS, Referrer‑Policy, X‑Content‑Type‑Options, Permissions‑Policy, CSP) и кэша статики:
+
+```bash
+./tools/smoke_headers.sh https://your-host
+```
+
+По умолчанию скрипт бьёт в `http://localhost:8080`:
+```bash
+./tools/smoke_headers.sh || true
+```
+
+> В dev HSTS может быть отключён (ожидаемо); см. пример базового конфига Caddy в `deploy/caddy/Caddyfile`.

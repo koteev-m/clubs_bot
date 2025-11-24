@@ -16,6 +16,10 @@ import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installHttpSecurityFromEnv
 import com.example.bot.plugins.CspPlugin
 import com.example.bot.plugins.WebAppStaticCachePlugin
+import com.example.bot.plugins.installRequestGuardsFromEnv
+import com.example.bot.plugins.installWebAppCspFromEnv
+import com.example.bot.plugins.installWebAppEtagForFingerprints
+import com.example.bot.plugins.installWebAppImmutableCacheFromEnv
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
 import com.example.bot.plugins.installWebUi
@@ -29,6 +33,8 @@ import com.example.bot.routes.waitlistRoutes
 import com.example.bot.web.installBookingWebApp
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.plugins.autohead.AutoHeadResponse
+import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
@@ -49,12 +55,18 @@ fun Application.module() {
     // 1) Базовые плагины
     configureLoggingAndRequestId()
     installAppConfig()
+    install(AutoHeadResponse)
+    installWebAppEtagForFingerprints()
+    install(ConditionalHeaders)
     installMetrics()
     install(ActorMdcPlugin)
     installCorsFromEnv()
     installHttpSecurityFromEnv()
     install(CspPlugin)
     install(WebAppStaticCachePlugin)
+    installRequestGuardsFromEnv()
+    installWebAppCspFromEnv()
+    installWebAppImmutableCacheFromEnv()
 
     // 2) БД и миграции
     installMigrationsAndDatabase()

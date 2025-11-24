@@ -54,9 +54,12 @@ ktor-server-auth                = { module = "io.ktor:ktor-server-auth",        
 ktor-server-status-pages        = { module = "io.ktor:ktor-server-status-pages",       version.ref = "ktor" }
 ktor-server-compression         = { module = "io.ktor:ktor-server-compression",        version.ref = "ktor" }
 ktor-server-default-headers     = { module = "io.ktor:ktor-server-default-headers",    version.ref = "ktor" }
+ktor-server-auto-head-response  = { module = "io.ktor:ktor-server-auto-head-response", version.ref = "ktor" }
+ktor-server-conditional-headers = { module = "io.ktor:ktor-server-conditional-headers",version.ref = "ktor" }
 ktor-server-double-receive      = { module = "io.ktor:ktor-server-double-receive",     version.ref = "ktor" }
 ktor-server-call-logging        = { module = "io.ktor:ktor-server-call-logging",       version.ref = "ktor" }
 ktor-server-call-id             = { module = "io.ktor:ktor-server-call-id",            version.ref = "ktor" }
+ktor-server-request-size-limit  = { module = "io.ktor:ktor-server-body-limit",        version.ref = "ktor" }
 ktor-server-metrics-micrometer  = { module = "io.ktor:ktor-server-metrics-micrometer", version.ref = "ktor" }
 ktor-server-host-common         = { module = "io.ktor:ktor-server-host-common",        version.ref = "ktor" }
 ktor-server-test-host           = { module = "io.ktor:ktor-server-test-host",          version.ref = "ktor" }
