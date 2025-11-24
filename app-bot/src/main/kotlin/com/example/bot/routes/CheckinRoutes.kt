@@ -79,14 +79,15 @@ fun Application.checkinRoutes(
                                         return@timeScanSuspend
                                     }
 
-                            val qr = payload.qr.trim()
-                            if (qr.isEmpty()) {
+                            val qrValidation = com.example.bot.guestlists.quickValidateQr(payload.qr)
+                            if (qrValidation != null) {
                                 UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error=empty_qr clubId={}", clubId)
-                                call.respond(HttpStatusCode.BadRequest, "empty_qr")
+                                logger.warn("checkin.scan error={} clubId={}", qrValidation, clubId)
+                                call.respond(HttpStatusCode.BadRequest, qrValidation)
                                 return@timeScanSuspend
                             }
 
+                            val qr = payload.qr.trim()
                             val primarySecret = qrSecretProvider()
                             val oldSecret =
                                 oldQrSecretProvider()?.takeIf {
