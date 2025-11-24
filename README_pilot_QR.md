@@ -16,6 +16,7 @@
   - Ответы:
     - `200 {"status":"ARRIVED"}` — успех или повтор.
     - `400` — `"invalid_json"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_or_expired_qr"`, `"empty_qr"`, `"invalid_club_id"`.
+    - `415` — `"unsupported_media_type"` — заголовок `Content-Type` должен быть `application/json`.
 - The request **must** include an `X-Telegram-Init-Data` header; it is verified by `withMiniAppAuth` before RBAC is applied.
 - Init data older than 24 hours or more than 2 minutes ahead of the server clock is rejected to avoid replays/time skew.
 
@@ -30,7 +31,8 @@
 - Тело запроса чек-ина ограничено по размеру (по умолчанию 4 KB, настройка через `CHECKIN_MAX_BODY_BYTES`, допустимо 512–32768 байт).
 - Глобальный таймаут обработки HTTP-запросов задаётся `HTTP_REQUEST_TIMEOUT_MS` (диапазон 100–30000 мс, по умолчанию 3000 мс); превышение даёт `408 Request Timeout`.
 - Сервис принимает `X-Request-Id` и отражает его в ответе; RequestId прокидывается в MDC/логи (корреляция ошибок/метрик).
-- QR валидируется ранним чекером: длина MIN_QR_LEN..MAX_QR_LEN, формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`; при нарушении — быстрый 400 с кодом `"invalid_qr_length"`/`"invalid_qr_format"`/`"empty_qr"`.
+- QR валидируется ранним чекером: длина **12..512** символов, формат `GL:<listId>:<entryId>:<ts>:<hmacHex>` (HMAC — минимум 16 hex‑символов); при нарушении — быстрый 400 с кодом `"invalid_qr_length"`/`"invalid_qr_format"`/`"empty_qr"`.
+- Контент‑тип: `Content-Type: application/json` обязателен; иначе — **415 `unsupported_media_type`**.
 
 ## CORS для Mini App
 - В проде задайте `CORS_ALLOWED_ORIGINS`, например:
