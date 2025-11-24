@@ -10,6 +10,12 @@
 
 ## Check-in API
 - `POST /api/clubs/{clubId}/checkin/scan` accepts a QR payload and marks the guest as arrived.
+  - Body field `qr` ожидает строку формата `GL:<listId>:<entryId>:<ts>:<hmacHex>`.
+  - Пример валидного значения: `GL:123:456:1732390400:deadbeefdeadbeef`.
+  - Пример невалидного значения: `GL:abc:1:2:zz` → ответ `400 invalid_qr_format`.
+  - Ответы:
+    - `200 {"status":"ARRIVED"}` — успех или повтор.
+    - `400` — `"invalid_json"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_or_expired_qr"`, `"empty_qr"`, `"invalid_club_id"`.
 - The request **must** include an `X-Telegram-Init-Data` header; it is verified by `withMiniAppAuth` before RBAC is applied.
 - Init data older than 24 hours or more than 2 minutes ahead of the server clock is rejected to avoid replays/time skew.
 
@@ -22,7 +28,9 @@
 
 ## Валидация и защита от перегрузки
 - Тело запроса чек-ина ограничено по размеру (по умолчанию 4 KB, настройка через `CHECKIN_MAX_BODY_BYTES`, допустимо 512–32768 байт).
-- Глобальный таймаут обработки HTTP-запросов задаётся `HTTP_REQUEST_TIMEOUT_MS` (по умолчанию 3000 мс); превышение даёт `408 Request Timeout`.
+- Глобальный таймаут обработки HTTP-запросов задаётся `HTTP_REQUEST_TIMEOUT_MS` (диапазон 100–30000 мс, по умолчанию 3000 мс); превышение даёт `408 Request Timeout`.
+- Сервис принимает `X-Request-Id` и отражает его в ответе; RequestId прокидывается в MDC/логи (корреляция ошибок/метрик).
+- QR валидируется ранним чекером: длина MIN_QR_LEN..MAX_QR_LEN, формат `GL:<listId>:<entryId>:<ts>:<hmacHex>`; при нарушении — быстрый 400 с кодом `"invalid_qr_length"`/`"invalid_qr_format"`/`"empty_qr"`.
 
 ## CORS для Mini App
 - В проде задайте `CORS_ALLOWED_ORIGINS`, например:
