@@ -14,6 +14,8 @@ import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installCorsFromEnv
 import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installHttpSecurityFromEnv
+import com.example.bot.plugins.CspPlugin
+import com.example.bot.plugins.WebAppStaticCachePlugin
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
 import com.example.bot.plugins.installWebUi
@@ -51,6 +53,8 @@ fun Application.module() {
     install(ActorMdcPlugin)
     installCorsFromEnv()
     installHttpSecurityFromEnv()
+    install(CspPlugin)
+    install(WebAppStaticCachePlugin)
 
     // 2) БД и миграции
     installMigrationsAndDatabase()
