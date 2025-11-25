@@ -16,7 +16,18 @@
   - Ответы:
     - `200 {"status":"ARRIVED"}` — успех или повтор.
     - `400` — `"invalid_json"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_or_expired_qr"`, `"empty_qr"`, `"invalid_club_id"`.
+    - `409` — `"outside_arrival_window"`, `"unable_to_mark"` — в едином JSON-формате (см. пример ниже), message опционален.
     - `415` — `"unsupported_media_type"` — заголовок `Content-Type` должен быть `application/json`.
+    - Прочие ошибки в `/api/*` также возвращаются в едином JSON-формате: `404 not_found`, `401 unauthorized` (с сохранением `WWW-Authenticate`, если задан), `403 forbidden`, `429 rate_limited (с Retry-After)`, `408 request_timeout`, `413 payload_too_large`, `500 internal_error`.
+    - Единый формат ошибок (JSON):
+      ```json
+      {
+        "code": "invalid_qr_format",
+        "requestId": "abcd-1234-...",
+        "status": 400
+      }
+      ```
+      message — опционален; клиенты должны полагаться на поле code.
 - The request **must** include an `X-Telegram-Init-Data` header; it is verified by `withMiniAppAuth` before RBAC is applied.
 - Init data older than 24 hours or more than 2 minutes ahead of the server clock is rejected to avoid replays/time skew.
 

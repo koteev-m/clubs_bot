@@ -1,6 +1,7 @@
 package io.ktor.server.plugins.requesttimeout
 
 import io.ktor.http.HttpStatusCode
+import com.example.bot.http.ApiError
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.call
@@ -27,7 +28,16 @@ public val RequestTimeout = createApplicationPlugin(
             withTimeout(timeout) { proceed() }
         } catch (_: TimeoutCancellationException) {
             logger.warn("request timeout {}", call.callId ?: "-")
-            call.respond(HttpStatusCode.RequestTimeout)
+            call.respond(
+                HttpStatusCode.RequestTimeout,
+                ApiError(
+                    code = "request_timeout",
+                    message = "Request timed out",
+                    requestId = call.callId,
+                    status = HttpStatusCode.RequestTimeout.value,
+                    details = null,
+                ),
+            )
         }
     }
 }
