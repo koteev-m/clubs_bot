@@ -5,7 +5,10 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
+import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.call
+import io.ktor.server.application.install
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.requestsize.RequestSizeLimit
 import io.ktor.server.plugins.requestsize.maxRequestSize
 import io.ktor.server.request.receiveText
@@ -25,6 +28,7 @@ class RequestGuardsPluginTest {
         val env = mapOf("CHECKIN_MAX_BODY_BYTES" to "32")
 
         application {
+            install(ContentNegotiation) { json() }
             routing {
                 route("/api/clubs/{clubId}/checkin") {
                     val maxBytes: Long = (env["CHECKIN_MAX_BODY_BYTES"]?.toLongOrNull()
@@ -53,6 +57,7 @@ class RequestGuardsPluginTest {
         val env = mapOf("CHECKIN_MAX_BODY_BYTES" to "32")
 
         application {
+            install(ContentNegotiation) { json() }
             routing {
                 route("/api/clubs/{clubId}/checkin") {
                     val maxBytes: Long = (env["CHECKIN_MAX_BODY_BYTES"]?.toLongOrNull()
@@ -86,6 +91,7 @@ class RequestGuardsPluginTest {
         val env = mapOf("HTTP_REQUEST_TIMEOUT_MS" to "100")
 
         application {
+            install(ContentNegotiation) { json() }
             installRequestGuardsFromEnv { key -> env[key] }
             routing {
                 post("/api/clubs/{clubId}/checkin/scan") {

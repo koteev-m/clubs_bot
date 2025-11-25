@@ -14,6 +14,7 @@ import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installCorsFromEnv
 import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installHttpSecurityFromEnv
+import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
 import com.example.bot.plugins.installRequestGuardsFromEnv
@@ -29,10 +30,12 @@ import com.example.bot.routes.pingRoute
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.web.installBookingWebApp
+import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
@@ -60,7 +63,9 @@ fun Application.module() {
     install(ActorMdcPlugin)
     installCorsFromEnv()
     installHttpSecurityFromEnv()
+    install(ContentNegotiation) { json() }
     installRequestGuardsFromEnv()
+    installJsonErrorPages()
     installWebAppCspFromEnv()
     installWebAppImmutableCacheFromEnv()
 
