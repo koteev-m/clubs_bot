@@ -3,6 +3,7 @@ package com.example.bot.routes
 import com.example.bot.club.GuestListEntryStatus
 import com.example.bot.club.GuestListRepository
 import com.example.bot.data.security.Role
+import com.example.bot.http.ErrorCodes
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
@@ -69,8 +70,12 @@ fun Application.checkinRoutes(
                         val ct = call.request.contentType()
                         if (!ct.match(ContentType.Application.Json)) {
                             UiCheckinMetrics.incError()
-                            logger.warn("checkin.scan error=unsupported_media_type clubId={}", call.parameters["clubId"])
-                            call.respondError(HttpStatusCode.UnsupportedMediaType, "unsupported_media_type")
+                            logger.warn(
+                                "checkin.scan error={} clubId={}",
+                                ErrorCodes.unsupported_media_type,
+                                call.parameters["clubId"],
+                            )
+                            call.respondError(HttpStatusCode.UnsupportedMediaType, ErrorCodes.unsupported_media_type)
                             return@post
                         }
 
@@ -79,7 +84,7 @@ fun Application.checkinRoutes(
                                 call.parameters["clubId"]?.toLongOrNull()
                                     ?: run {
                                         UiCheckinMetrics.incError()
-                                        call.respondError(HttpStatusCode.BadRequest, "invalid_club_id")
+                                        call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_club_id)
                                         return@timeScanSuspend
                                     }
 
@@ -87,8 +92,8 @@ fun Application.checkinRoutes(
                                 call.receiveScanPayloadOrNull()
                                     ?: run {
                                         UiCheckinMetrics.incError()
-                                        logger.warn("checkin.scan error=invalid_json clubId={}", clubId)
-                                        call.respondError(HttpStatusCode.BadRequest, "invalid_json")
+                                        logger.warn("checkin.scan error={} clubId={}", ErrorCodes.invalid_json, clubId)
+                                        call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
                                         return@timeScanSuspend
                                     }
 
@@ -120,8 +125,8 @@ fun Application.checkinRoutes(
                                     }
                             if (decoded == null) {
                                 UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error=invalid_or_expired_qr clubId={}", clubId)
-                                call.respondError(HttpStatusCode.BadRequest, "invalid_or_expired_qr")
+                                logger.warn("checkin.scan error={} clubId={}", ErrorCodes.invalid_or_expired_qr, clubId)
+                                call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
                                 return@timeScanSuspend
                             }
 
@@ -132,23 +137,25 @@ fun Application.checkinRoutes(
                                     ?: run {
                                         UiCheckinMetrics.incError()
                                         logger.warn(
-                                            "checkin.scan error=list_not_found clubId={} listId={}",
+                                            "checkin.scan error={} clubId={} listId={}",
+                                            ErrorCodes.list_not_found,
                                             clubId,
                                             decoded.listId,
                                         )
-                                        call.respondError(HttpStatusCode.NotFound, "list_not_found")
+                                        call.respondError(HttpStatusCode.NotFound, ErrorCodes.list_not_found)
                                         return@timeScanSuspend
                                     }
 
                             if (list.clubId != clubId) {
                                 UiCheckinMetrics.incError()
                                 logger.warn(
-                                    "checkin.scan error=club_scope_mismatch clubId={} listId={} listClubId={}",
+                                    "checkin.scan error={} clubId={} listId={} listClubId={}",
+                                    ErrorCodes.club_scope_mismatch,
                                     clubId,
                                     list.id,
                                     list.clubId,
                                 )
-                                call.respondError(HttpStatusCode.Forbidden, "club_scope_mismatch")
+                                call.respondError(HttpStatusCode.Forbidden, ErrorCodes.club_scope_mismatch)
                                 return@timeScanSuspend
                             }
 
@@ -159,33 +166,34 @@ fun Application.checkinRoutes(
                                     ?: run {
                                         UiCheckinMetrics.incError()
                                         logger.warn(
-                                            "checkin.scan error=entry_not_found clubId={} listId={} entryId={}",
+                                            "checkin.scan error={} clubId={} listId={} entryId={}",
+                                            ErrorCodes.entry_not_found,
                                             clubId,
                                             decoded.listId,
                                             decoded.entryId,
                                         )
-                                        call.respondError(HttpStatusCode.NotFound, "entry_not_found")
+                                        call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
                                         return@timeScanSuspend
                                     }
 
                             if (entry.listId != list.id) {
                                 UiCheckinMetrics.incError()
                                 logger.warn(
-                                    "checkin.scan error=entry_list_mismatch clubId={} listId={} " +
-                                        "entryListId={} entryId={}",
+                                    "checkin.scan error={} clubId={} listId={} entryListId={} entryId={}",
+                                    ErrorCodes.entry_list_mismatch,
                                     clubId,
                                     list.id,
                                     entry.listId,
                                     entry.id,
                                 )
-                                call.respondError(HttpStatusCode.BadRequest, "entry_list_mismatch")
+                                call.respondError(HttpStatusCode.BadRequest, ErrorCodes.entry_list_mismatch)
                                 return@timeScanSuspend
                             }
 
                             val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
                             if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
                                 UiCheckinMetrics.incError()
-                                call.respondError(HttpStatusCode.Conflict, "outside_arrival_window")
+                                call.respondError(HttpStatusCode.Conflict, ErrorCodes.outside_arrival_window)
                                 return@timeScanSuspend
                             } else if (!withinWindow) {
                                 UiCheckinMetrics.incLateOverride()
@@ -198,12 +206,13 @@ fun Application.checkinRoutes(
                             if (!marked) {
                                 UiCheckinMetrics.incError()
                                 logger.warn(
-                                    "checkin.scan error=unable_to_mark clubId={} listId={} entryId={}",
+                                    "checkin.scan error={} clubId={} listId={} entryId={}",
+                                    ErrorCodes.unable_to_mark,
                                     clubId,
                                     list.id,
                                     entry.id,
                                 )
-                                call.respondError(HttpStatusCode.Conflict, "unable_to_mark")
+                                call.respondError(HttpStatusCode.Conflict, ErrorCodes.unable_to_mark)
                                 return@timeScanSuspend
                             }
 
