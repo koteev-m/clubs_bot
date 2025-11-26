@@ -148,8 +148,8 @@ Postgres (guest list entries)
     - `200 {"status":"ARRIVED"}` — успех или повтор.
     - `400` — `"invalid_or_expired_qr"`, `"invalid_json"`, `"entry_list_mismatch"`, `"empty_qr"`, `"invalid_qr_length"`, `"invalid_qr_format"`, `"invalid_club_id"`.
     - `409` — `"outside_arrival_window"`, `"unable_to_mark"` — в едином JSON-формате (см. пример ниже), message опционален.
-    - `415` — `"unsupported_media_type"` — заголовок `Content-Type` должен быть `application/json`.
-    - Прочие ошибки в `/api/*` также возвращаются в едином JSON-формате: `404 not_found`, `401 unauthorized` (с сохранением `WWW-Authenticate`, если задан), `403 forbidden`, `429 rate_limited (с Retry-After)`, `408 request_timeout`, `413 payload_too_large`, `500 internal_error`.
+    - `415` — `"unsupported_media_type"` — заголовок `Content-Type` должен быть `application/json` (параметр `charset` допустим).
+    - Прочие ошибки в `/api/*` также возвращаются в едином JSON-формате: `404 not_found`, `401 unauthorized` (с сохранением `WWW-Authenticate`, если задан), `403 forbidden`, `429 rate_limited (с Retry-After)`, `408 request_timeout`, `413 payload_too_large`, `500 internal_error`. Полный список кодов и статусов публикуется в `/api/.well-known/errors`.
     - Единый формат ошибок (JSON):
       ```json
       {
@@ -159,6 +159,23 @@ Postgres (guest list entries)
       }
       ```
       message — опционален; клиенты должны полагаться на поле code.
+    - Стабильность кодов ошибок:
+      - Коды стабильны в рамках минорных релизов; новые коды добавляются без изменения существующих.
+      - Удаление или семантические изменения допускаются только в мажорных версиях.
+    - Реестр с версияцией: `GET /api/.well-known/errors` (payload `version`, `codes` со статусами и флагами стабильности/депрекации).
+      - Любое изменение состава кодов или их статусных маппингов требует увеличить `version` и `ETag` (`error-codes-v<version>`).
+      - Пример conditional-запроса: `GET /api/.well-known/errors` с `If-None-Match: "error-codes-v1"` → `304 Not Modified`.
+      - Пример ответа с флагами стабильности:
+        ```json
+        {
+          "version": 1,
+          "codes": [
+            { "code": "invalid_json", "http": 400, "stable": true, "deprecated": false },
+            { "code": "rate_limited", "http": 429, "stable": true, "deprecated": false }
+          ]
+        }
+        ```
+        message в `ApiError` остаётся опциональным — клиенты должны полагаться на `code`.
     - `401` — неверная подпись initData.
     - `403 "club_scope_mismatch"` — чужой клуб.
     - `404` — `"list_not_found"` или `"entry_not_found"`.

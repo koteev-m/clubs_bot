@@ -23,6 +23,7 @@ import com.example.bot.plugins.installWebAppEtagForFingerprints
 import com.example.bot.plugins.installWebAppImmutableCacheFromEnv
 import com.example.bot.plugins.installWebUi
 import com.example.bot.routes.checkinRoutes
+import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
 import com.example.bot.routes.guestListRoutes
 import com.example.bot.routes.musicRoutes
@@ -117,6 +118,7 @@ fun Application.module() {
     UiWaitlistMetrics.bind(registry)
 
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
+    errorCodesRoutes()
     pingRoute()
     guestListRoutes(repository = guestListRepository, parser = guestListCsvParser)
     checkinRoutes(repository = guestListRepository)
