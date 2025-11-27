@@ -6,6 +6,7 @@ fun appModules(): List<Module> =
     buildList {
         add(bookingModule)
         add(availabilityModule)
+        add(clubsModule)
         add(healthModule)
         add(musicModule)
         add(notifyModule)

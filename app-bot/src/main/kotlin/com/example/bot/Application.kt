@@ -4,6 +4,8 @@ import com.example.bot.booking.BookingService
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.club.GuestListCsvParser
+import com.example.bot.clubs.ClubsRepository
+import com.example.bot.clubs.EventsRepository
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.metrics.UiWaitlistMetrics
 import com.example.bot.music.MusicService
@@ -23,6 +25,7 @@ import com.example.bot.plugins.installWebAppEtagForFingerprints
 import com.example.bot.plugins.installWebAppImmutableCacheFromEnv
 import com.example.bot.plugins.installWebUi
 import com.example.bot.routes.checkinRoutes
+import com.example.bot.routes.clubsRoutes
 import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
 import com.example.bot.routes.guestListRoutes
@@ -109,6 +112,8 @@ fun Application.module() {
     val guestListRepository by inject<GuestListRepository>()
     val guestListCsvParser by inject<GuestListCsvParser>()
     val bookingService by inject<BookingService>()
+    val clubsRepository by inject<ClubsRepository>()
+    val eventsRepository by inject<EventsRepository>()
     val musicService by inject<MusicService>()
     val waitlistRepository by inject<WaitlistRepository>()
 
@@ -122,6 +127,7 @@ fun Application.module() {
     pingRoute()
     guestListRoutes(repository = guestListRepository, parser = guestListCsvParser)
     checkinRoutes(repository = guestListRepository)
+    clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     musicRoutes(service = musicService)
     guestListInviteRoutes(repository = guestListRepository)
     waitlistRoutes(repository = waitlistRepository)
