@@ -18,6 +18,8 @@ Exposed 0.49 and Micrometer, targets JDK 21 and is packaged as a self-contained
 | `miniapp` | Static Mini App assets served via `webAppRoutes()`. |
 | `tools` | Auxiliary utilities (perf harness, smoke checks). |
 
+Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
+
 Related documentation:
 
 - [Полная документация пилота QR](docs/README_pilot_QR.md)
