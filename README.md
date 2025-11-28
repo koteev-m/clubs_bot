@@ -20,6 +20,21 @@ Exposed 0.49 and Micrometer, targets JDK 21 and is packaged as a self-contained
 
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 
+`GET /api/clubs?city=&q=&tag=&genre=&date=&page=&size=` accepts optional filters:
+
+- `date` — `YYYY-MM-DD`, interpreted as a UTC day window (inclusive).
+- `genre` — exact membership in `Club.genres` (case-insensitive).
+- `tag=quiet_day` — recommended label to mark a "тихий день".
+- Invalid `date` strings are ignored; when no other filters are present this results in an empty array (the endpoint still returns
+  cache headers).
+
+Supplying only `date` is treated as a valid filter: the endpoint returns clubs with events on that day when they exist.
+
+ETags rely on repository-level `lastUpdatedAt` watermarks for both clubs and (when `date` is specified) events. These timestamps
+must advance for any meaningful change to the underlying data (not just inserts/deletes) so cache validators remain stable. The
+ETag seed additionally includes filter parameters (city/tag/genre/q/date/page/size), and responses continue to ship with
+`Cache-Control: max-age=60, must-revalidate` and `Vary: X-Telegram-Init-Data`.
+
 Related documentation:
 
 - [Полная документация пилота QR](docs/README_pilot_QR.md)

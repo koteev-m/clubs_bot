@@ -25,6 +25,7 @@ interface ClubsRepository {
         city: String?,
         query: String?,
         tag: String?,
+        genre: String?,
         offset: Int,
         limit: Int,
     ): List<Club>
@@ -53,6 +54,7 @@ class InMemoryClubsRepository(
         city: String?,
         query: String?,
         tag: String?,
+        genre: String?,
         offset: Int,
         limit: Int,
     ): List<Club> {
@@ -60,6 +62,7 @@ class InMemoryClubsRepository(
             .asSequence()
             .filter { city == null || it.city.equals(city, ignoreCase = true) }
             .filter { tag == null || it.tags.any { t -> t.equals(tag, ignoreCase = true) } }
+            .filter { genre == null || it.genres.any { g -> g.equals(genre, ignoreCase = true) } }
             .filter {
                 query == null ||
                     it.name.contains(query, ignoreCase = true) ||

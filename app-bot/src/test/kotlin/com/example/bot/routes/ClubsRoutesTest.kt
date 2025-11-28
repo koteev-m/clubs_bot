@@ -1,6 +1,7 @@
 package com.example.bot.routes
 
 import com.example.bot.clubs.Club
+import com.example.bot.clubs.ClubTags
 import com.example.bot.clubs.Event
 import com.example.bot.clubs.InMemoryClubsRepository
 import com.example.bot.clubs.InMemoryEventsRepository
@@ -26,6 +27,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 
 class ClubsRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -57,6 +59,14 @@ class ClubsRoutesTest {
                 tags = listOf("vip"),
                 logoUrl = null,
             ),
+            Club(
+                id = 4,
+                city = "Moscow",
+                name = "Quiet Club",
+                genres = listOf("ambient"),
+                tags = listOf(ClubTags.QUIET_DAY),
+                logoUrl = null,
+            ),
         )
 
     private val events =
@@ -84,6 +94,14 @@ class ClubsRoutesTest {
                 endUtc = Instant.parse("2024-01-12T23:00:00Z"),
                 title = "Party B",
                 isSpecial = true,
+            ),
+            Event(
+                id = 13,
+                clubId = 4,
+                startUtc = Instant.parse("2024-01-12T10:00:00Z"),
+                endUtc = Instant.parse("2024-01-12T12:00:00Z"),
+                title = "Ambient Morning",
+                isSpecial = false,
             ),
         )
 
@@ -116,6 +134,249 @@ class ClubsRoutesTest {
             assertEquals(HttpStatusCode.OK, secondPage.status)
             val secondPayload = json.parseToJsonElement(secondPage.bodyAsText()).jsonArray
             assertEquals(1, secondPayload.size)
+        }
+
+    @Test
+    fun `invalid date is ignored`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val response =
+                client.get("/api/clubs?date=not-a-date") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertEquals(0, payload.size)
+        }
+
+    @Test
+    fun `filters clubs by date`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val response =
+                client.get("/api/clubs?city=Moscow&date=2024-01-12") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals("max-age=60, must-revalidate", response.headers[HttpHeaders.CacheControl])
+            assertEquals("application/json; charset=UTF-8", response.headers[HttpHeaders.ContentType])
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertEquals(2, payload.size)
+            val names = payload.map { it.jsonObject["name"]!!.jsonPrimitive.content }
+            assertEquals(listOf("B Club", "Quiet Club"), names)
+        }
+
+    @Test
+    fun `filters clubs by date and additional params`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val response =
+                client.get("/api/clubs?city=Moscow&date=2024-01-12&genre=ambient") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            val names = payload.map { it.jsonObject["name"]!!.jsonPrimitive.content }
+            assertEquals(listOf("Quiet Club"), names)
+        }
+
+    @Test
+    fun `filters clubs by genre`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val response =
+                client.get("/api/clubs?city=Moscow&genre=HoUsE") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertEquals(1, payload.size)
+            assertEquals("A Club", payload.first().jsonObject["name"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `genre only counts as filter`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val response =
+                client.get("/api/clubs?genre=house") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertEquals(1, payload.size)
+            assertEquals("A Club", payload.first().jsonObject["name"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `quiet day tag is supported`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val response =
+                client.get("/api/clubs?tag=${ClubTags.QUIET_DAY}") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertEquals(1, payload.size)
+            assertEquals("Quiet Club", payload.first().jsonObject["name"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun `date affects clubs etag`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val firstResponse =
+                client.get("/api/clubs?city=Moscow&date=2024-01-10") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, firstResponse.status)
+            val firstEtag = firstResponse.headers[HttpHeaders.ETag]
+            assertNotNull(firstEtag)
+
+            val cached =
+                client.get("/api/clubs?city=Moscow&date=2024-01-10") {
+                    withInitData(createInitData())
+                    header(HttpHeaders.IfNoneMatch, firstEtag)
+                }
+
+            assertEquals(HttpStatusCode.NotModified, cached.status)
+
+            val secondResponse =
+                client.get("/api/clubs?city=Moscow&date=2024-01-12") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, secondResponse.status)
+            val secondEtag = secondResponse.headers[HttpHeaders.ETag]
+            assertNotNull(secondEtag)
+            assertNotEquals(firstEtag, secondEtag)
+        }
+
+    @Test
+    fun `clubs etag changes with events updated at when date filter is applied`() {
+        var etag1: String? = null
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository =
+                        InMemoryEventsRepository(
+                            events,
+                            clubs.associateBy { it.id },
+                            updatedAt = Instant.parse("2024-01-02T00:00:00Z"),
+                        ),
+                )
+            }
+
+            etag1 =
+                client.get("/api/clubs?date=2024-01-10") {
+                    withInitData(createInitData())
+                }.headers[HttpHeaders.ETag]
+        }
+
+        var etag2: String? = null
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository =
+                        InMemoryEventsRepository(
+                            events,
+                            clubs.associateBy { it.id },
+                            updatedAt = Instant.parse("2024-01-03T00:00:00Z"),
+                        ),
+                )
+            }
+
+            etag2 =
+                client.get("/api/clubs?date=2024-01-10") {
+                    withInitData(createInitData())
+                }.headers[HttpHeaders.ETag]
+        }
+
+        assertNotNull(etag1)
+        assertNotNull(etag2)
+        assertNotEquals(etag1, etag2)
+    }
+
+    @Test
+    fun `date only counts as filter`() =
+        testApplication {
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                clubsRoutes(
+                    clubsRepository = InMemoryClubsRepository(clubs, updatedAt = clock.instant()),
+                    eventsRepository = InMemoryEventsRepository(events, clubs.associateBy { it.id }, updatedAt = clock.instant()),
+                )
+            }
+
+            val response =
+                client.get("/api/clubs?date=2024-01-10") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertEquals(1, payload.size)
         }
 
     @Test
@@ -166,7 +427,7 @@ class ClubsRoutesTest {
             assertNotNull(etag)
 
             val eventsPayload = json.parseToJsonElement(firstResponse.bodyAsText()).jsonArray
-            assertEquals(2, eventsPayload.size)
+            assertEquals(3, eventsPayload.size)
 
             val cachedResponse =
                 client.get("/api/events?city=Moscow&from=$from&to=$to") {
@@ -280,9 +541,9 @@ class ClubsRoutesTest {
 
             assertEquals(HttpStatusCode.OK, response.status)
             val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
-            assertEquals(2, payload.size)
+            assertEquals(3, payload.size)
             val ids = payload.map { it.jsonObject["id"]!!.jsonPrimitive.content.toLong() }
-            assertEquals(listOf(10L, 11L), ids)
+            assertEquals(listOf(10L, 13L, 11L), ids)
         }
 
     @Test
@@ -304,7 +565,7 @@ class ClubsRoutesTest {
             assertEquals(HttpStatusCode.OK, response.status)
             val payload = json.parseToJsonElement(response.bodyAsText()).jsonArray
             val ids = payload.map { it.jsonObject["id"]!!.jsonPrimitive.content.toLong() }
-            assertEquals(listOf(10L, 11L), ids)
+            assertEquals(listOf(10L, 13L, 11L), ids)
         }
 
     @Test
