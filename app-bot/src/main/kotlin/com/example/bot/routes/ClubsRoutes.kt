@@ -92,32 +92,94 @@ fun Application.clubsRoutes(
                 val params = call.request.queryParameters
                 val city = params["city"]?.takeIf { it.isNotBlank() }
                 val tag = params["tag"]?.takeIf { it.isNotBlank() }
+                val genre = params["genre"]?.takeIf { it.isNotBlank() }
                 val query = params["q"]?.takeIf { it.isNotBlank() }
+                val date = params["date"]?.takeIf { it.isNotBlank() }
                 val page = params["page"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
                 val size = params["size"]?.toIntOrNull()?.coerceIn(1, MAX_PAGE_SIZE) ?: DEFAULT_PAGE_SIZE
                 val offset = page * size
 
-                val hasFilters = city != null || query != null || tag != null
+                val dateRange = parseDateRange(date)
+                val dateSeed = dateRange?.first?.atOffset(ZoneOffset.UTC)?.toLocalDate()?.toString()
+
+                val hasFilters = city != null || query != null || tag != null || genre != null || dateRange != null
                 val clubs =
                     if (!hasFilters) {
                         emptyList()
                     } else {
+                        val allowedClubIds =
+                            dateRange?.let { (from, to) ->
+                                withContext(Dispatchers.IO + MDCContext()) {
+                                    eventsRepository.list(
+                                        clubId = null,
+                                        city = city,
+                                        from = from,
+                                        to = to,
+                                        offset = 0,
+                                        limit = Int.MAX_VALUE,
+                                    )
+                                }.map { it.clubId }.distinct().toSet()
+                            }
+
+                        if (dateRange != null && allowedClubIds?.isEmpty() == true) {
+                            val clubsUpdatedAt = clubsRepository.lastUpdatedAt()
+                            val eventsUpdatedAt = eventsRepository.lastUpdatedAt()
+                            val effectiveUpdatedAt = maxInstant(clubsUpdatedAt, eventsUpdatedAt)
+                            val etag =
+                                etagFor(
+                                    effectiveUpdatedAt,
+                                    0,
+                                    "clubs|$city|$tag|$genre|$query|$dateSeed|$page|$size",
+                                )
+                            return@get call.respondWithCache(etag, logger) { emptyList<ClubDto>() }
+                        }
+
                         withContext(Dispatchers.IO + MDCContext()) {
-                            clubsRepository.list(city, query, tag, offset, size)
+                            val initialClubs =
+                                clubsRepository.list(
+                                    city = city,
+                                    query = query,
+                                    tag = tag,
+                                    genre = genre,
+                                    offset = if (dateRange != null) 0 else offset,
+                                    limit = if (dateRange != null) Int.MAX_VALUE else size,
+                                )
+
+                            val filteredByDate =
+                                allowedClubIds?.let { allowed ->
+                                    initialClubs.filter { allowed.contains(it.id) }
+                                } ?: initialClubs
+
+                            if (dateRange != null) {
+                                filteredByDate.drop(offset).take(size)
+                            } else {
+                                filteredByDate
+                            }
                         }
                     }
 
                 logger.debug(
-                    "clubs_api.ok city={} tag={} q={} page={} size={} count={}",
+                    "clubs_api.ok city={} tag={} genre={} date={} dateSeed={} q={} page={} size={} count={}",
                     city,
                     tag,
+                    genre,
+                    date,
+                    dateSeed,
                     query,
                     page,
                     size,
                     clubs.size,
                 )
 
-                val etag = etagFor(clubsRepository.lastUpdatedAt(), clubs.size, "clubs|$city|$tag|$query|$page|$size")
+                val clubsUpdatedAt = clubsRepository.lastUpdatedAt()
+                val eventsUpdatedAt = if (dateRange != null) eventsRepository.lastUpdatedAt() else null
+                val effectiveUpdatedAt = maxInstant(clubsUpdatedAt, eventsUpdatedAt)
+                val etag =
+                    etagFor(
+                        effectiveUpdatedAt,
+                        clubs.size,
+                        "clubs|$city|$tag|$genre|$query|$dateSeed|$page|$size",
+                    )
 
                 call.respondWithCache(
                     etag = etag,
@@ -192,6 +254,24 @@ private fun parseInstant(value: String?): Instant? {
             runCatching { LocalDate.parse(value).atStartOfDay().toInstant(ZoneOffset.UTC) }.getOrNull()
         }
 }
+
+private fun parseDateRange(value: String?): Pair<Instant, Instant>? {
+    if (value == null) return null
+
+    return runCatching {
+        val localDate = LocalDate.parse(value)
+        val from = localDate.atStartOfDay().toInstant(ZoneOffset.UTC)
+        val to = localDate.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC).minusNanos(1)
+        from to to
+    }.getOrNull()
+}
+
+private fun maxInstant(a: Instant?, b: Instant?): Instant? =
+    when {
+        a == null -> b
+        b == null -> a
+        else -> if (a.isAfter(b)) a else b
+    }
 
 private suspend fun ApplicationCall.callRespond(etag: String, payload: Any) {
     response.header(HttpHeaders.ETag, etag)
