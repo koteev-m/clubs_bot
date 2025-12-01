@@ -6,6 +6,7 @@ import com.example.bot.clubs.Event
 import com.example.bot.clubs.EventsRepository
 import com.example.bot.http.etagFor
 import com.example.bot.http.matchesEtag
+import com.example.bot.metrics.RouteCacheMetrics
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -131,7 +132,7 @@ fun Application.clubsRoutes(
                                     0,
                                     "clubs|$city|$tag|$genre|$query|$dateSeed|$page|$size",
                                 )
-                            return@get call.respondWithCache(etag, logger) { emptyList<ClubDto>() }
+                            return@get call.respondWithCache(etag, logger, "clubs_api") { emptyList<ClubDto>() }
                         }
 
                         withContext(Dispatchers.IO + MDCContext()) {
@@ -184,6 +185,7 @@ fun Application.clubsRoutes(
                 call.respondWithCache(
                     etag = etag,
                     logger = logger,
+                    routeTag = "clubs_api",
                 ) {
                     clubs.map { it.toDto() }
                 }
@@ -238,6 +240,7 @@ fun Application.clubsRoutes(
                 call.respondWithCache(
                     etag = etag,
                     logger = logger,
+                    routeTag = "clubs_api",
                 ) {
                     events.map { it.toDto() }
                 }
@@ -284,6 +287,7 @@ private suspend fun ApplicationCall.callRespond(etag: String, payload: Any) {
 private suspend fun ApplicationCall.respondWithCache(
     etag: String,
     logger: org.slf4j.Logger,
+    routeTag: String,
     payloadProvider: suspend () -> Any,
 ) {
     val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
@@ -294,8 +298,10 @@ private suspend fun ApplicationCall.respondWithCache(
         response.header(HttpHeaders.Vary, VARY_HEADER)
         response.header(HttpHeaders.ContentType, JSON_CONTENT_TYPE)
         respond(HttpStatusCode.NotModified)
+        RouteCacheMetrics.recordNotModified(routeTag)
         return
     }
 
+    RouteCacheMetrics.recordOk(routeTag)
     callRespond(etag, payloadProvider())
 }

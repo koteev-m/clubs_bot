@@ -1,4 +1,5 @@
 import com.example.build.LogsPolicyScanTask
+import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
@@ -128,14 +129,17 @@ dependencies {
 // =========================
 
 val miniAppDistDir = rootProject.layout.projectDirectory.dir("miniapp/dist")
+val miniAppStaticDir = rootProject.layout.projectDirectory.dir("miniapp/src/main/resources/miniapp")
 
 tasks.register<Copy>("copyMiniAppDist") {
     description = "Copy Mini App compiled assets into resources so Ktor can serve them from the JAR."
     group = "build"
-    from(miniAppDistDir)
-    include("**/*")
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    from(miniAppDistDir) { include("**/*") }
+    from(miniAppStaticDir) { include("**/*") }
     into(layout.buildDirectory.dir("generated/miniapp/webapp/app"))
     inputs.dir(miniAppDistDir).optional()
+    inputs.dir(miniAppStaticDir).optional()
 }
 
 tasks.named<ProcessResources>("processResources") {
