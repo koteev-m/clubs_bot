@@ -35,6 +35,14 @@ must advance for any meaningful change to the underlying data (not just inserts/
 ETag seed additionally includes filter parameters (city/tag/genre/q/date/page/size), and responses continue to ship with
 `Cache-Control: max-age=60, must-revalidate` and `Vary: X-Telegram-Init-Data`.
 
+`GET /api/clubs/{id}/layout?eventId=` mirrors the same caching contract (JSON UTF-8 content type, `Cache-Control: max-age=60,
+must-revalidate`, `Vary: X-Telegram-Init-Data`) and emits stable ETags derived from the layout fingerprint, eventId and
+payload sizes. Layout zones are sorted by `order`, tables — by `zoneId` then `id` to keep responses deterministic.
+Geometry for the interactive map is served from `/assets/layouts/{clubId}/{fingerprint}.json`, where `fingerprint` is a
+SHA-256 base64url hash of the geometry JSON. These immutable assets return `Cache-Control: public, max-age=31536000,
+immutable`, `ETag: {fingerprint}` and intentionally omit `Vary` to stay CDN-friendly; new geometry produces a new fingerprint
+and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) and invalid inputs respond with 404.
+
 Related documentation:
 
 - [Полная документация пилота QR](docs/README_pilot_QR.md)
