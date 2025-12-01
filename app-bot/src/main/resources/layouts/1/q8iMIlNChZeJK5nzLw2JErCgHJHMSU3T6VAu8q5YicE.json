@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "zones": [
+    { "id": "vip", "name": "VIP", "polygon": [[0,0], [4,0], [4,4], [0,4]] },
+    { "id": "dancefloor", "name": "Dancefloor", "polygon": [[5,0], [12,0], [12,6], [5,6]] },
+    { "id": "balcony", "name": "Balcony", "polygon": [[0,5], [4,5], [4,9], [0,9]] }
+  ],
+  "tables": [
+    { "id": 1, "zoneId": "vip", "x": 1.0, "y": 1.0 },
+    { "id": 2, "zoneId": "vip", "x": 3.0, "y": 1.0 },
+    { "id": 3, "zoneId": "dancefloor", "x": 6.0, "y": 1.0 },
+    { "id": 4, "zoneId": "dancefloor", "x": 8.0, "y": 2.5 },
+    { "id": 5, "zoneId": "dancefloor", "x": 10.5, "y": 4.5 },
+    { "id": 6, "zoneId": "balcony", "x": 1.0, "y": 6.0 },
+    { "id": 7, "zoneId": "balcony", "x": 3.0, "y": 7.5 }
+  ]
+}

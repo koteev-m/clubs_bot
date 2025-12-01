@@ -26,6 +26,7 @@ fun matchesEtag(ifNoneMatch: String?, etag: String): Boolean {
         .split(',')
         .map { it.trim() }
         .any { candidate ->
+            if (candidate == "*") return true
             val weakStripped = candidate.removePrefix("W/").removePrefix("w/").trim()
             val unquoted = weakStripped.trim('"')
             unquoted == etag

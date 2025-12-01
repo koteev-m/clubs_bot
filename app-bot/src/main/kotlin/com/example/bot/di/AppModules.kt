@@ -7,6 +7,7 @@ fun appModules(): List<Module> =
         add(bookingModule)
         add(availabilityModule)
         add(clubsModule)
+        add(layoutModule)
         add(healthModule)
         add(musicModule)
         add(notifyModule)
