@@ -43,6 +43,30 @@ SHA-256 base64url hash of the geometry JSON. These immutable assets return `Cach
 immutable`, `ETag: {fingerprint}` and intentionally omit `Vary` to stay CDN-friendly; new geometry produces a new fingerprint
 and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) and invalid inputs respond with 404.
 
+## Mini App UI
+
+The static Mini App lives under `miniapp/src/main/resources/miniapp` and is shipped with the Ktor app through
+`webAppRoutes()`. Run the server (`./gradlew :app-bot:run` or your preferred entrypoint) and open:
+
+- `http://localhost:8080/app/index.html` — browse clubs/events with filters (city, **UTC date in YYYY-MM-DD**, genre, quiet day
+  toggle → `tag=quiet_day`, debounced search), pagination and a "Показать ещё" loader. Requests reuse server-side caching:
+  client-side helpers store `{etag, payload}` in **sessionStorage** keyed by `METHOD URL` and send `If-None-Match`. On
+  `304 Not Modified` the cached payload is rendered (⚡ indicator near the heading) without extra drawings; a rare `304` without
+  a warm cache falls back to a plain GET. Filter selections are mirrored into the query-string so the URL stays shareable and
+  restores the state on reload.
+- `http://localhost:8080/app/layout.html?clubId=1&eventId=100` — renders the hall map. Layout JSON is fetched with the same
+  ETag-aware helper; the immutable geometry asset (`/assets/layouts/{clubId}/{fingerprint}.json`) is then loaded and drawn as
+  an SVG with table coloring by status (FREE/HOLD/BOOKED), viewBox scaling and tooltips. Client-side filters work locally (VIP,
+  near_stage, capacity floor, exact minimumTier selector) and switching eventId triggers a cached `/api/clubs/{id}/layout`
+  call; a matching ETag yields a 304 and skips re-rendering. The current clubId/eventId and client filters are also reflected
+  in the query-string for shareable URLs.
+
+Both pages automatically forward `X-Telegram-Init-Data: window.Telegram.WebApp.initData` on every request, mirroring the API
+contract (`Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data`, tolerant ETags and 304 flows). Layout
+assets remain immutable by fingerprint (`Cache-Control: public, max-age=31536000, immutable`, `ETag: {fingerprint}`, no `Vary`),
+so browsers/CDNs can cache them safely. The behavior stays friendly to server validators (no ad-hoc TTLs), leaving freshness
+control to the existing headers.
+
 Related documentation:
 
 - [Полная документация пилота QR](docs/README_pilot_QR.md)

@@ -9,12 +9,15 @@ import com.example.bot.testing.applicationDev
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
 import io.ktor.client.request.get
+import io.ktor.client.request.head
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.testApplication
 import kotlinx.serialization.json.Json
@@ -34,6 +37,12 @@ import kotlin.test.assertNull
 class LayoutRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
     private val clock: Clock = Clock.fixed(Instant.parse("2024-06-01T12:00:00Z"), ZoneOffset.UTC)
+
+    private fun Application.installLayoutRoutes(repo: LayoutRepository) {
+        install(ContentNegotiation) { json() }
+        install(AutoHeadResponse)
+        layoutRoutes(repo)
+    }
 
     private fun repository(
         eventWatermarks: Map<Long?, Instant> = emptyMap(),
@@ -84,8 +93,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val response =
@@ -122,8 +130,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val initial =
@@ -147,12 +154,32 @@ class LayoutRoutesTest {
         }
 
     @Test
+    fun `layout HEAD exposes cache headers`() =
+        testApplication {
+            val repo = repository()
+            applicationDev {
+                installLayoutRoutes(repo)
+            }
+
+            val head =
+                client.head("/api/clubs/1/layout?eventId=100") {
+                    withInitData(createInitData())
+                }
+
+            assertEquals(HttpStatusCode.OK, head.status)
+            assertEquals("max-age=60, must-revalidate", head.headers[HttpHeaders.CacheControl])
+            assertEquals("application/json; charset=UTF-8", head.headers[HttpHeaders.ContentType])
+            assertEquals("X-Telegram-Init-Data", head.headers[HttpHeaders.Vary])
+            assertNotNull(head.headers[HttpHeaders.ETag])
+            assertEquals("", head.bodyAsText())
+        }
+
+    @Test
     fun `layout api etag tolerates quotes and weak validators`() =
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val initial =
@@ -183,8 +210,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val initial =
@@ -209,8 +235,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val initial =
@@ -234,8 +259,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val first =
@@ -279,8 +303,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository(eventWatermarks = initialWatermarks)
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             etagFirst =
@@ -293,8 +316,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository(eventWatermarks = updatedWatermarks)
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             etagSecond =
@@ -314,8 +336,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository(eventWatermarks = emptyMap(), updatedAt = clock.instant())
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             etagFirst =
@@ -328,8 +349,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository(eventWatermarks = emptyMap(), updatedAt = clock.instant().plusSeconds(86_400))
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             etagSecond =
@@ -348,8 +368,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val layout = repo.getLayout(clubId = 1, eventId = 100)!!
@@ -376,8 +395,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val layout = repo.getLayout(clubId = 1, eventId = 100)!!
@@ -395,12 +413,29 @@ class LayoutRoutesTest {
         }
 
     @Test
+    fun `asset HEAD exposes cache headers`() =
+        testApplication {
+            val repo = repository()
+            applicationDev {
+                installLayoutRoutes(repo)
+            }
+
+            val layout = repo.getLayout(clubId = 1, eventId = 100)!!
+            val assetUrl = layout.assets.geometryUrl
+
+            val headResponse = client.head(assetUrl)
+            assertEquals(HttpStatusCode.OK, headResponse.status)
+            assertEquals("public, max-age=31536000, immutable", headResponse.headers[HttpHeaders.CacheControl])
+            assertEquals("application/json; charset=UTF-8", headResponse.headers[HttpHeaders.ContentType])
+            assertNotNull(headResponse.headers[HttpHeaders.ETag])
+        }
+
+    @Test
     fun `asset respects If-None-Match star`() =
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val layout = repo.getLayout(clubId = 1, eventId = 100)!!
@@ -417,8 +452,7 @@ class LayoutRoutesTest {
     fun `asset returns 404 when missing`() =
         testApplication {
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repository())
+                installLayoutRoutes(repository())
             }
 
             val response = client.get("/assets/layouts/1/nonexistent.json")
@@ -430,8 +464,7 @@ class LayoutRoutesTest {
     fun `asset rejects invalid clubId and fingerprint`() =
         testApplication {
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repository())
+                installLayoutRoutes(repository())
             }
 
             assertEquals(HttpStatusCode.NotFound, client.get("/assets/layouts/../1/abc.json").status)
@@ -445,8 +478,7 @@ class LayoutRoutesTest {
         testApplication {
             val repo = repository()
             applicationDev {
-                install(ContentNegotiation) { json() }
-                layoutRoutes(repo)
+                installLayoutRoutes(repo)
             }
 
             val response =

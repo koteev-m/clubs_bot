@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Куда пойдём?</title>
+  <link rel="stylesheet" href="./assets/css/app.css" />
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>Куда пойдём?</h1>
+      <p class="small">Мини-приложение для поиска клубов и событий (ETag/304‑дружественное)</p>
+    </div>
+  </header>
+  <main>
+    <div class="container">
+      <section class="card">
+        <div class="flex-between">
+          <h2>Фильтры</h2>
+          <div class="flash" id="cache-hint" hidden>
+            <span class="icon">⚡</span>
+            <span class="small">ответ из кэша</span>
+          </div>
+        </div>
+        <form id="filters" class="row" autocomplete="off">
+          <div class="form-control">
+            <label for="city">Город</label>
+            <input type="text" id="city" name="city" placeholder="Москва" />
+          </div>
+          <div class="form-control">
+            <label for="date">Дата (UTC)</label>
+            <input type="date" id="date" name="date" />
+          </div>
+          <div class="form-control">
+            <label for="genre">Жанр</label>
+            <select id="genre" name="genre">
+              <option value="">Любой</option>
+              <option value="house">House</option>
+              <option value="techno">Techno</option>
+              <option value="hip-hop">Hip-hop</option>
+              <option value="jazz">Jazz</option>
+            </select>
+          </div>
+          <div class="form-control">
+            <label for="search">Поиск</label>
+            <input type="text" id="search" name="q" placeholder="Название" />
+          </div>
+          <div class="form-control">
+            <label for="quiet">Тихий день</label>
+            <div class="row">
+              <label class="small"><input type="checkbox" id="quiet" /> quiet_day</label>
+            </div>
+          </div>
+          <div class="form-control">
+            <label for="size">Размер страницы</label>
+            <select id="size" name="size">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+            </select>
+          </div>
+          <div class="form-control" style="align-self: flex-end;">
+            <button class="primary" type="submit">Искать</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="flex-between">
+          <h2>Клубы</h2>
+          <span class="small" id="clubs-status" role="status" aria-live="polite"></span>
+        </div>
+        <div id="clubs-list" class="grid"></div>
+        <div id="clubs-empty" class="notice" hidden>Ничего не найдено.</div>
+        <div class="row" style="margin-top: 12px;">
+          <button id="load-more" class="secondary">Показать ещё</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="flex-between">
+          <h2>Ивенты</h2>
+          <span class="small" id="events-status" role="status" aria-live="polite"></span>
+        </div>
+        <div id="events-list" class="grid"></div>
+        <div id="events-empty" class="notice" hidden>Выберите клуб, чтобы увидеть ивенты.</div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="./assets/js/browse.js"></script>
+</body>
+</html>

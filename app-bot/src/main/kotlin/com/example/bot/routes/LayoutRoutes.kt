@@ -8,6 +8,7 @@ import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
 import com.example.bot.layout.Zone
+import com.example.bot.metrics.RouteCacheMetrics
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -176,6 +177,7 @@ private suspend fun ApplicationCall.respondLayout(etag: String, payload: Any) {
     response.header(HttpHeaders.CacheControl, CACHE_CONTROL)
     response.header(HttpHeaders.Vary, VARY_HEADER)
     response.header(HttpHeaders.ContentType, JSON_CONTENT_TYPE)
+    RouteCacheMetrics.recordOk("layout_api")
     respond(status = HttpStatusCode.OK, message = payload)
 }
 
@@ -184,6 +186,7 @@ private suspend fun ApplicationCall.respondLayoutNotModified(etag: String) {
     response.header(HttpHeaders.CacheControl, CACHE_CONTROL)
     response.header(HttpHeaders.Vary, VARY_HEADER)
     response.header(HttpHeaders.ContentType, JSON_CONTENT_TYPE)
+    RouteCacheMetrics.recordNotModified("layout_api")
     respond(HttpStatusCode.NotModified)
 }
 
@@ -224,6 +227,7 @@ private fun Route.layoutAssetsRoutes(logger: Logger) {
 private suspend fun ApplicationCall.respondLayoutAsset(etag: String, bytes: ByteArray) {
     response.header(HttpHeaders.ETag, etag)
     response.header(HttpHeaders.CacheControl, ASSETS_CACHE_CONTROL)
+    RouteCacheMetrics.recordOk("layout_asset")
     respondBytes(bytes, ContentType.Application.Json.withCharset(Charsets.UTF_8))
 }
 
@@ -231,5 +235,6 @@ private suspend fun ApplicationCall.respondLayoutAssetNotModified(etag: String) 
     response.header(HttpHeaders.ETag, etag)
     response.header(HttpHeaders.CacheControl, ASSETS_CACHE_CONTROL)
     response.header(HttpHeaders.ContentType, JSON_CONTENT_TYPE)
+    RouteCacheMetrics.recordNotModified("layout_asset")
     respond(HttpStatusCode.NotModified)
 }
