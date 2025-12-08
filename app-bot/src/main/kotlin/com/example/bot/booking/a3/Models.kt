@@ -60,6 +60,21 @@ data class BookingView(
 )
 
 @kotlinx.serialization.Serializable
+data class MyBookingView(
+    val booking: BookingView,
+    val arrivalWindow: List<String>,
+    val latePlusOneAllowedUntil: String?,
+    val canPlusOne: Boolean,
+    val isPast: Boolean,
+    val arriveBy: String,
+)
+
+@kotlinx.serialization.Serializable
+data class MeBookingsResponse(
+    val bookings: List<MyBookingView>,
+)
+
+@kotlinx.serialization.Serializable
 data class PlusOneCanonicalPayload(
     val bookingId: Long,
     val op: String = "plus-one",
