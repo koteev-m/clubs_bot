@@ -252,6 +252,22 @@ class BookingState(
         return PlusOneResult.Success(booking, body, bodyJson, cached = false)
     }
 
+    fun findBookingById(bookingId: Long): Booking? {
+        val now = Instant.now(clock)
+        cleanupExpired(now)
+        return bookings[bookingId]?.copy()
+    }
+
+    fun findUserBookings(userId: Long): List<Booking> {
+        val now = Instant.now(clock)
+        cleanupExpired(now)
+        return bookings.values.filter { it.userId == userId }.map { it.copy() }
+    }
+
+    fun now(): Instant = Instant.now(clock)
+
+    fun snapshotOf(booking: Booking): BookingResponseSnapshot = booking.toSnapshot()
+
     fun tableStatus(eventId: Long, tableId: Long): TableStatus {
         val now = Instant.now(clock)
         val key = eventId to tableId

@@ -43,7 +43,7 @@ SHA-256 base64url hash of the geometry JSON. These immutable assets return `Cach
 immutable`, `ETag: {fingerprint}` and intentionally omit `Vary` to stay CDN-friendly; new geometry produces a new fingerprint
 and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) and invalid inputs respond with 404.
 
-### Booking API (A3)
+### Booking API (A3/A4)
 
 - `POST /api/clubs/{clubId}/bookings/hold` — body `{ tableId, eventId, guestCount }`, requires `Idempotency-Key` and
   Mini App headers. Returns `{ booking, arrivalWindow: [from, to], latePlusOneAllowedUntil }` with `Cache-Control: no-store`,
@@ -55,6 +55,17 @@ and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) a
 - `POST /api/bookings/{id}/plus-one` — one-off +1 per booking while `latePlusOneAllowedUntil` has not passed; rejects with
 `late_plus_one_expired`/`plus_one_already_used` otherwise. Capacity is checked for holds and +1 (409 `capacity_exceeded`) using
 the captured `capacityAtHold` when present.
+- `GET /api/me/bookings?status=upcoming|past` (A4) — personal list of confirmed bookings for the Mini App user. Defaults to
+  `upcoming`, returns `{ bookings: [ { booking: BookingView, arrivalWindow, latePlusOneAllowedUntil, canPlusOne, isPast, arriveBy } ] }`
+  with `Cache-Control: no-store`, `Vary: X-Telegram-Init-Data`. Status accepts only `upcoming|past` (`validation_error` on other
+  values).
+- `GET /api/bookings/{id}/qr` (A4) — QR payload for check-in, only for the booking owner and only when `status=BOOKED`. Responds
+  with `{ bookingId, clubId, eventId, qrPayload }`, `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data`,
+  strong `ETag` with 304 support; blank `QR_SECRET` yields `internal_error`. Errors are always `no-store` (`not_found`,
+  `forbidden`, `invalid_state`).
+- `GET /api/bookings/{id}/ics` (A4) — iCalendar export for the booking owner. Returns `text/calendar; charset=utf-8`, `Cache-Control:
+  max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data`, strong `ETag`/304, errors as `no-store`. Body contains a single VEVENT
+  with UID `booking-{id}@clubs`, DTSTART/DTEND from the arrival window and SUMMARY from the event/club names.
 
 Idempotency is scoped by user + path + key with a 15‑minute TTL; keys must match `^[A-Za-z0-9._~:-]{1,128}$` and are echoed back
 as `Idempotency-Key` (even on conflicts) plus `Idempotency-Replay: true` when the snapshot comes from cache. Sending the same key

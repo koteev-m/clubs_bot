@@ -33,6 +33,7 @@ import com.example.bot.routes.guestListRoutes
 import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.pingRoute
+import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.bookingA3Routes
@@ -133,6 +134,12 @@ fun Application.module() {
     pingRoute()
     guestListRoutes(repository = guestListRepository, parser = guestListCsvParser)
     bookingA3Routes(bookingState = bookingState, meterRegistry = registry)
+    meBookingsRoutes(
+        bookingState = bookingState,
+        eventsRepository = eventsRepository,
+        clubsRepository = clubsRepository,
+        meterRegistry = registry,
+    )
     checkinRoutes(repository = guestListRepository)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository)
