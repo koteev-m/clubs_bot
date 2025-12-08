@@ -44,6 +44,8 @@ interface EventsRepository {
     ): List<Event>
 
     suspend fun lastUpdatedAt(): Instant?
+
+    suspend fun findById(clubId: Long, eventId: Long): Event?
 }
 
 class InMemoryClubsRepository(
@@ -103,4 +105,7 @@ class InMemoryEventsRepository(
     }
 
     override suspend fun lastUpdatedAt(): Instant? = updatedAt
+
+    override suspend fun findById(clubId: Long, eventId: Long): Event? =
+        events.firstOrNull { it.clubId == clubId && it.id == eventId }
 }

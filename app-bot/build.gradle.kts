@@ -108,10 +108,12 @@ dependencies {
     implementation(libs.koin.logger.slf4j)
 
     // Tests
+    testImplementation(platform(libs.junit.bom))
     testImplementation(kotlin("test"))
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.junit.jupiter.api)
     testRuntimeOnly(libs.junit.jupiter.engine)
+    testRuntimeOnly(libs.junit.vintage.engine)
     testImplementation(libs.kotest.runner)
     testImplementation(libs.kotest.assertions)
     testImplementation(libs.mockk)

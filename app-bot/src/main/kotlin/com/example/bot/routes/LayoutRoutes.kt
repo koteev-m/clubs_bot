@@ -20,8 +20,9 @@ import io.ktor.server.application.call
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.header
-import io.ktor.server.routing.get
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.get
+import io.ktor.server.routing.head
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
@@ -92,52 +93,65 @@ fun Application.layoutRoutes(layoutRepository: LayoutRepository) {
         route("/api") {
             withMiniAppAuth { System.getenv("TELEGRAM_BOT_TOKEN")!! }
 
-            get("/clubs/{id}/layout") {
-                val clubId = call.parameters["id"]?.toLongOrNull()
-                if (clubId == null) {
-                    call.respond(HttpStatusCode.NotFound)
-                    return@get
-                }
-
-                val eventId = call.request.queryParameters["eventId"]?.toLongOrNull()
-                val layout =
-                    withContext(Dispatchers.IO + MDCContext()) {
-                        layoutRepository.getLayout(clubId, eventId)
-                    }
-                        ?: run {
-                            call.respond(HttpStatusCode.NotFound)
-                            return@get
-                        }
-
-                val etag =
-                    etagFor(
-                        layoutRepository.lastUpdatedAt(clubId, eventId),
-                        layout.zones.size + layout.tables.size,
-                        "layout|$clubId|$eventId|${layout.assets.fingerprint}|zones=${layout.zones.size}|tables=${layout.tables.size}",
-                    )
-
-                val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
-                if (matchesEtag(ifNoneMatch, etag)) {
-                    logger.debug("layout_api.not_modified clubId={} eventId={} etag={}", clubId, eventId, etag)
-                    call.respondLayoutNotModified(etag)
-                    return@get
-                }
-
-                logger.debug(
-                    "layout_api.ok clubId={} eventId={} zones={} tables={} fingerprint={} etag={}",
-                    clubId,
-                    eventId,
-                    layout.zones.size,
-                    layout.tables.size,
-                    layout.assets.fingerprint,
-                    etag,
-                )
-
-                call.respondLayout(etag, layout.toDto())
+            route("/clubs/{id}/layout") {
+                get { call.handleLayout(layoutRepository, logger, respondBody = true) }
+                head { call.handleLayout(layoutRepository, logger, respondBody = false) }
             }
         }
 
         layoutAssetsRoutes(logger)
+    }
+}
+
+private suspend fun ApplicationCall.handleLayout(
+    layoutRepository: LayoutRepository,
+    logger: Logger,
+    respondBody: Boolean,
+) {
+    val clubId = parameters["id"]?.toLongOrNull()
+    if (clubId == null) {
+        respond(HttpStatusCode.NotFound)
+        return
+    }
+
+    val eventId = request.queryParameters["eventId"]?.toLongOrNull()
+    val layout =
+        withContext(Dispatchers.IO + MDCContext()) {
+            layoutRepository.getLayout(clubId, eventId)
+        }
+            ?: run {
+                respond(HttpStatusCode.NotFound)
+                return
+            }
+
+    val etag =
+        etagFor(
+            layoutRepository.lastUpdatedAt(clubId, eventId),
+            layout.zones.size + layout.tables.size,
+            "layout|$clubId|$eventId|${layout.assets.fingerprint}|zones=${layout.zones.size}|tables=${layout.tables.size}",
+        )
+
+    val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
+    if (matchesEtag(ifNoneMatch, etag)) {
+        logger.debug("layout_api.not_modified clubId={} eventId={} etag={}", clubId, eventId, etag)
+        respondLayoutNotModified(etag)
+        return
+    }
+
+    logger.debug(
+        "layout_api.ok clubId={} eventId={} zones={} tables={} fingerprint={} etag={}",
+        clubId,
+        eventId,
+        layout.zones.size,
+        layout.tables.size,
+        layout.assets.fingerprint,
+        etag,
+    )
+
+    if (respondBody) {
+        respondLayout(etag, layout.toDto())
+    } else {
+        respondLayoutHead(etag)
     }
 }
 
@@ -179,6 +193,15 @@ private suspend fun ApplicationCall.respondLayout(etag: String, payload: Any) {
     response.header(HttpHeaders.ContentType, JSON_CONTENT_TYPE)
     RouteCacheMetrics.recordOk("layout_api")
     respond(status = HttpStatusCode.OK, message = payload)
+}
+
+private suspend fun ApplicationCall.respondLayoutHead(etag: String) {
+    response.header(HttpHeaders.ETag, etag)
+    response.header(HttpHeaders.CacheControl, CACHE_CONTROL)
+    response.header(HttpHeaders.Vary, VARY_HEADER)
+    response.header(HttpHeaders.ContentType, JSON_CONTENT_TYPE)
+    RouteCacheMetrics.recordOk("layout_api")
+    respond(HttpStatusCode.OK)
 }
 
 private suspend fun ApplicationCall.respondLayoutNotModified(etag: String) {

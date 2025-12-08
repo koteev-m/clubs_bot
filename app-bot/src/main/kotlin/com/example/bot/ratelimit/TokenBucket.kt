@@ -10,6 +10,12 @@ import kotlin.math.min
 
 private val ONE_SECOND_NANOS: Double = Duration.ofSeconds(1).toNanos().toDouble()
 
+data class RateLimitSnapshot(
+    val limit: Double,
+    val remaining: Double,
+    val retryAfterSeconds: Double,
+)
+
 /**
  * Простой потокобезопасный токен-бакет:
  *  - capacity: максимум токенов (burst)
@@ -40,6 +46,19 @@ class TokenBucket(
         } else {
             false
         }
+    }
+
+    @Synchronized
+    fun snapshot(nowNanos: Long = System.nanoTime()): RateLimitSnapshot {
+        refill(nowNanos)
+        val remaining = tokens
+        val retryAfter = if (tokens >= BotLimits.RateLimit.TOKEN_BUCKET_COST) {
+            0.0
+        } else {
+            val deficit = BotLimits.RateLimit.TOKEN_BUCKET_COST - tokens
+            deficit / refillPerSec
+        }
+        return RateLimitSnapshot(capacity, remaining, retryAfter)
     }
 
     @Synchronized

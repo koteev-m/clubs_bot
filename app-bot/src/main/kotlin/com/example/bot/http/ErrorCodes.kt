@@ -22,4 +22,15 @@ object ErrorCodes {
     const val club_scope_mismatch: String = "club_scope_mismatch"
     const val outside_arrival_window: String = "outside_arrival_window"
     const val unable_to_mark: String = "unable_to_mark"
+
+    // Booking (A3)
+    const val table_not_available: String = "table_not_available"
+    const val validation_error: String = "validation_error"
+    const val idempotency_conflict: String = "idempotency_conflict"
+    const val missing_idempotency_key: String = "missing_idempotency_key"
+    const val hold_expired: String = "hold_expired"
+    const val invalid_state: String = "invalid_state"
+    const val late_plus_one_expired: String = "late_plus_one_expired"
+    const val plus_one_already_used: String = "plus_one_already_used"
+    const val capacity_exceeded: String = "capacity_exceeded"
 }

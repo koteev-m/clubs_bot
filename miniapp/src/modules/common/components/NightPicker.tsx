@@ -15,8 +15,13 @@ export default function NightPicker() {
 
   if (!selectedClub) return null;
 
+  const onChange = (value: string) => {
+    const match = nights.find((n) => n.startUtc === value);
+    setNight(value, match?.eventId);
+  };
+
   return (
-    <select value={selectedNight ?? ''} onChange={(e) => setNight(e.target.value)} className="p-2">
+    <select value={selectedNight ?? ''} onChange={(e) => onChange(e.target.value)} className="p-2">
       <option value="" disabled>
         Select night
       </option>

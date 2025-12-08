@@ -23,6 +23,7 @@ private const val MAX_LIMIT = 50
 
 @Serializable
 data class ApiNightDto(
+    val eventId: Long?,
     val startUtc: String,
     val name: String,
 )
@@ -84,6 +85,7 @@ private fun NightDto.toApiDto(): ApiNightDto {
     val name = if (isSpecial) "✨ $baseName" else baseName
 
     return ApiNightDto(
+        eventId = eventId,
         startUtc = eventStartUtc.toString(),
         name = name,
     )

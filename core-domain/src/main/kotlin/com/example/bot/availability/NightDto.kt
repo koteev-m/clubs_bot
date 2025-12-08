@@ -11,6 +11,7 @@ import java.time.LocalDateTime
  */
 @Serializable
 data class NightDto(
+    val eventId: Long? = null,
     val eventStartUtc: @Contextual Instant,
     val eventEndUtc: @Contextual Instant,
     val isSpecial: Boolean,
@@ -58,6 +59,7 @@ data class Table(
  */
 fun NightSlot.toDto(arrivalBy: Instant): NightDto =
     NightDto(
+        eventId = null,
         eventStartUtc = eventStartUtc,
         eventEndUtc = eventEndUtc,
         isSpecial = isSpecial,
