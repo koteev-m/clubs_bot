@@ -35,9 +35,11 @@ import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.waitlistRoutes
+import com.example.bot.routes.bookingA3Routes
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
@@ -114,6 +116,7 @@ fun Application.module() {
     val guestListRepository by inject<GuestListRepository>()
     val guestListCsvParser by inject<GuestListCsvParser>()
     val bookingService by inject<BookingService>()
+    val bookingState by inject<com.example.bot.booking.a3.BookingState>()
     val clubsRepository by inject<ClubsRepository>()
     val eventsRepository by inject<EventsRepository>()
     val layoutRepository by inject<LayoutRepository>()
@@ -129,6 +132,7 @@ fun Application.module() {
     errorCodesRoutes()
     pingRoute()
     guestListRoutes(repository = guestListRepository, parser = guestListCsvParser)
+    bookingA3Routes(bookingState = bookingState, meterRegistry = registry)
     checkinRoutes(repository = guestListRepository)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository)
@@ -140,6 +144,10 @@ fun Application.module() {
     routing {
         securedBookingRoutes(bookingService)
         get("/health") { call.respondText("OK") }
+    }
+
+    environment.monitor.subscribe(ApplicationStopped) {
+        bookingState.close()
     }
 }
 

@@ -84,7 +84,11 @@ open class AvailabilityService(
         val nights =
             slots
                 .filter { cutoffPolicy.isOnlineBookingOpen(it, now) }
-                .map { slot -> slot.toDto(cutoffPolicy.arrivalBy(slot)) }
+                .map { slot ->
+                    val dto = slot.toDto(cutoffPolicy.arrivalBy(slot))
+                    val eventId = repository.findEvent(clubId, slot.eventStartUtc)?.id
+                    dto.copy(eventId = eventId)
+                }
                 .take(limit)
         nightsCache.put(clubId, nights)
         return nights

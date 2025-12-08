@@ -4,6 +4,7 @@ export interface ClubDto {
 }
 
 export interface NightDto {
+  eventId?: number;
   startUtc: string;
   name: string;
 }

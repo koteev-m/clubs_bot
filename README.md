@@ -43,6 +43,39 @@ SHA-256 base64url hash of the geometry JSON. These immutable assets return `Cach
 immutable`, `ETag: {fingerprint}` and intentionally omit `Vary` to stay CDN-friendly; new geometry produces a new fingerprint
 and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) and invalid inputs respond with 404.
 
+### Booking API (A3)
+
+- `POST /api/clubs/{clubId}/bookings/hold` — body `{ tableId, eventId, guestCount }`, requires `Idempotency-Key` and
+  Mini App headers. Returns `{ booking, arrivalWindow: [from, to], latePlusOneAllowedUntil }` with `Cache-Control: no-store`,
+  `Vary: X-Telegram-Init-Data` and **no** ETag. Conflicts/errors surface as `{ "error": { "code", "message" } }` using the
+  registry codes (e.g. `table_not_available`, `idempotency_conflict`, `validation_error`).
+- `POST /api/clubs/{clubId}/bookings/confirm` — body `{ bookingId }`, same idempotency rules and headers; transitions HOLD →
+  BOOKED or returns `hold_expired`/`invalid_state`. Booking ownership is enforced — only the creator can confirm within the same
+  club scope (403 `forbidden`; `club_scope_mismatch` is used when path `clubId` differs from the booking).
+- `POST /api/bookings/{id}/plus-one` — one-off +1 per booking while `latePlusOneAllowedUntil` has not passed; rejects with
+`late_plus_one_expired`/`plus_one_already_used` otherwise. Capacity is checked for holds and +1 (409 `capacity_exceeded`) using
+the captured `capacityAtHold` when present.
+
+Idempotency is scoped by user + path + key with a 15‑minute TTL; keys must match `^[A-Za-z0-9._~:-]{1,128}$` and are echoed back
+as `Idempotency-Key` (even on conflicts) plus `Idempotency-Replay: true` when the snapshot comes from cache. Sending the same key
+with a different payload yields `idempotency_conflict (409)`. Table occupancy (FREE/HOLD/BOOKED) is tracked per event with a
+configurable hold TTL and feeds the layout `ETag` watermark to reflect current holds in the `/layout` responses. Booking records
+are retained for 48h after completion; event watermarks fall out after 7d, with background cleanup keeping memory bounded.
+
+Key environment knobs (ISO-8601 durations unless noted):
+
+- `BOOKING_HOLD_TTL` (default `PT10M`), `BOOKING_LATE_PLUS_ONE_OFFSET` (`PT30M`), `BOOKING_ARRIVAL_BEFORE` (`PT15M`),
+  `BOOKING_ARRIVAL_AFTER` (`PT45M`).
+- `BOOKING_IDEMPOTENCY_TTL` (`PT15M`), `BOOKING_RETENTION_TTL` (`PT48H`), `BOOKING_WATERMARK_TTL` (`P7D`).
+- Rate limits per route: `BOOKING_RATE_LIMIT_HOLD_CAPACITY`/`BOOKING_RATE_LIMIT_HOLD_REFILL`,
+  `BOOKING_RATE_LIMIT_CONFIRM_CAPACITY`/`BOOKING_RATE_LIMIT_CONFIRM_REFILL`,
+  `BOOKING_RATE_LIMIT_PLUS_CAPACITY`/`BOOKING_RATE_LIMIT_PLUS_REFILL` (defaults mirror 5 req / 10s for hold/confirm,
+  5 req / 30s for +1).
+
+Rate limits are enforced per user and route (e.g., 5 holds / 10s). Every response includes `X-RateLimit-Limit` and
+`X-RateLimit-Remaining`; a throttled response adds `Retry-After` with seconds to wait. These headers are returned even for early
+validation errors so clients can surface them consistently.
+
 ## Mini App UI
 
 The static Mini App lives under `miniapp/src/main/resources/miniapp` and is shipped with the Ktor app through

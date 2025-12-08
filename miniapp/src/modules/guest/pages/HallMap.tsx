@@ -33,7 +33,7 @@ export default function HallMap() {
               fill={color}
               fillOpacity={0.4}
               stroke="black"
-              onClick={() => setTable(t.id)}
+              onClick={() => setTable(t.id, t.capacity)}
             />
           );
         })}

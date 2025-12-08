@@ -5,9 +5,10 @@ describe('guest.store', () => {
     const store = useGuestStore.getState();
     store.setClub(1);
     store.setNight('2024');
-    store.setTable(2);
+    store.setTable(2, 5);
     store.setGuests(3);
     expect(useGuestStore.getState().guests).toBe(3);
+    expect(useGuestStore.getState().selectedTableCapacity).toBe(5);
     store.clear();
     expect(useGuestStore.getState().selectedClub).toBeUndefined();
     expect(useGuestStore.getState().guests).toBe(1);

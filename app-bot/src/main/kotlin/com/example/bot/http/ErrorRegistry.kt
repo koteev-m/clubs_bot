@@ -48,7 +48,19 @@ object ErrorRegistry {
         ErrorCodeInfo(ErrorCodes.unable_to_mark, HttpStatusCode.Conflict.value),
     ).sortedBy { it.code }
 
-    val codes: List<ErrorCodeInfo> = common + checkin
+    val booking: List<ErrorCodeInfo> = listOf(
+        ErrorCodeInfo(ErrorCodes.table_not_available, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.validation_error, HttpStatusCode.BadRequest.value),
+        ErrorCodeInfo(ErrorCodes.idempotency_conflict, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.missing_idempotency_key, HttpStatusCode.BadRequest.value),
+        ErrorCodeInfo(ErrorCodes.hold_expired, HttpStatusCode.Gone.value),
+        ErrorCodeInfo(ErrorCodes.invalid_state, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.late_plus_one_expired, HttpStatusCode.Gone.value),
+        ErrorCodeInfo(ErrorCodes.plus_one_already_used, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.capacity_exceeded, HttpStatusCode.Conflict.value),
+    ).sortedBy { it.code }
+
+    val codes: List<ErrorCodeInfo> = common + checkin + booking
 
     init {
         val duplicateCodes = codes
