@@ -35,10 +35,12 @@ import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.securedBookingRoutes
+import com.example.bot.routes.promoterRatingRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.bookingA3Routes
 import com.example.bot.web.installBookingWebApp
 import com.example.bot.promoter.invites.PromoterInviteService
+import com.example.bot.promoter.rating.PromoterRatingService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.routes.promoterInvitesRoutes
 import com.example.bot.routes.promoterQuotasAdminRoutes
@@ -128,6 +130,7 @@ fun Application.module() {
     val musicService by inject<MusicService>()
     val waitlistRepository by inject<WaitlistRepository>()
     val promoterInviteService by inject<PromoterInviteService>()
+    val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
 
     // 7) Метрики
@@ -148,6 +151,7 @@ fun Application.module() {
     )
     checkinRoutes(repository = guestListRepository, promoterInviteService = promoterInviteService)
     promoterInvitesRoutes(promoterInviteService = promoterInviteService, meterRegistry = registry)
+    promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository)

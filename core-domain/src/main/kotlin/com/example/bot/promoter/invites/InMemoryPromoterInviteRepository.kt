@@ -17,11 +17,26 @@ class InMemoryPromoterInviteRepository : PromoterInviteRepository {
 
     override fun findById(id: Long): PromoterInvite? = storage[id]?.copySnapshot()
 
+    override fun listByPromoter(promoterId: Long): List<PromoterInvite> =
+        storage.values
+            .asSequence()
+            .filter { it.promoterId == promoterId }
+            .map { it.copySnapshot() }
+            .toList()
+
     override fun listByPromoterAndEvent(promoterId: Long, eventId: Long?): List<PromoterInvite> {
         return storage.values
             .asSequence()
             .filter { it.promoterId == promoterId }
             .filter { eventId == null || it.eventId == eventId }
+            .map { it.copySnapshot() }
+            .toList()
+    }
+
+    override fun listByClub(clubId: Long): List<PromoterInvite> {
+        return storage.values
+            .asSequence()
+            .filter { it.clubId == clubId }
             .map { it.copySnapshot() }
             .toList()
     }
