@@ -87,6 +87,40 @@ Rate limits are enforced per user and route (e.g., 5 holds / 10s). Every respons
 `X-RateLimit-Remaining`; a throttled response adds `Retry-After` with seconds to wait. These headers are returned even for early
 validation errors so clients can surface them consistently.
 
+### Promoter API (B1)
+
+**Statuses and timeline**
+
+- Current B1 statuses: `ISSUED` (after POST /invites), `ARRIVED` (after check-in scan), `REVOKED` (manual revoke).
+- Reserved for future features: `OPENED`, `CONFIRMED`, `NO_SHOW`.
+- `PromoterInviteView.status` is always lowercase from the set `issued|opened|confirmed|arrived|no_show|revoked`.
+- `timeline` is a chronological list of `{ type, at }` derived from non-null timestamps: `issued` is always present;
+  `opened|confirmed|arrived|no_show|revoked` appear only when their `*_at` is set, strictly ordered by time.
+
+**Endpoints**
+
+- `POST /api/promoter/invites` — issue a QR invite for a specific event. Body `{ clubId, eventId, guestName, guestCount }`
+  (name 1–100 chars, guestCount 1–10, ids > 0). Responds `201 Created` with
+  `{ invite: PromoterInviteView, qr: { payload: "INV:...", format: "text" } }`, `Cache-Control: no-store`,
+  `Vary: X-Telegram-Init-Data`. Errors: `invalid_json` (malformed body), `validation_error` (ids/name/count),
+  `internal_error` (missing QR secret or other server failure).
+- `GET /api/promoter/invites?eventId=` — list invites for the current promoter and event, newest first. Returns
+  `{ invites: [PromoterInviteView] }` with `no-store`/`Vary` headers.
+- `POST /api/promoter/invites/{id}/revoke` — revoke an invite owned by the promoter. `409 invalid_state` for ARRIVED/REVOKED/NO_SHOW,
+  `403 forbidden` for foreign invites, `404 not_found` for missing ids. Success returns the updated `PromoterInviteView`.
+- `GET /api/promoter/invites/export.csv?eventId=` — UTF-8 CSV export with header
+  `inviteId,promoterId,clubId,eventId,guestName,guestCount,status,issuedAt,openedAt,confirmedAt,arrivedAt,noShowAt,revokedAt`.
+  Null timestamps are empty strings; text fields (e.g., `guestName`, timestamps) are CSV-escaped when they contain commas/quotes/newlines; per-user data is `no-store` and `Vary` is always `X-Telegram-Init-Data`.
+
+`PromoterInviteView` surfaces all timestamps plus the derived timeline; the QR format is `INV:<inviteId>:<eventId>:<ts>:<hmacHex>` where
+`hmacHex = HMAC_SHA256("inviteId:eventId:ts", derivedKey(secret="QrPromoterInvite"))`. The same `QR_SECRET` env var used for
+booking QR codes signs promoter invites (rotation via `QR_OLD_SECRET` is honored on scan).
+
+Check-in integration: `/api/clubs/{clubId}/checkin/scan` recognizes `INV:` payloads and marks the invite as
+`arrived` (idempotent) and responds with `{ status: "ARRIVED", type: "promoter_invite", inviteId }` on success.
+Invalid or revoked invites return `409 invalid_state`; QR decode failures return
+`400 invalid_or_expired_qr`. Guest list QR behavior is unchanged.
+
 ## Mini App UI
 
 The static Mini App lives under `miniapp/src/main/resources/miniapp` and is shipped with the Ktor app through
