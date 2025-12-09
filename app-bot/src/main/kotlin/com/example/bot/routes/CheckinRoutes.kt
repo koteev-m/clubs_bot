@@ -6,6 +6,8 @@ import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.metrics.UiCheckinMetrics
+import com.example.bot.promoter.invites.PromoterInviteQrCodec
+import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
@@ -37,11 +39,22 @@ import java.time.Instant
 
 private val DEFAULT_QR_TTL: Duration = Duration.ofHours(12)
 
+private const val SCAN_TYPE_PROMOTER_INVITE = "promoter_invite"
+private const val SCAN_STATUS_ARRIVED = "ARRIVED"
+
 @Serializable
 private data class ScanPayload(val qr: String)
 
+@Serializable
+private data class PromoterInviteScanResponse(
+    val status: String,
+    val type: String,
+    val inviteId: Long,
+)
+
 fun Application.checkinRoutes(
     repository: GuestListRepository,
+    promoterInviteService: PromoterInviteService? = null,
     botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: error("TELEGRAM_BOT_TOKEN missing") },
     qrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: error("QR_SECRET missing") },
     oldQrSecretProvider: () -> String? = { System.getenv("QR_OLD_SECRET") },
@@ -97,14 +110,6 @@ fun Application.checkinRoutes(
                                         return@timeScanSuspend
                                     }
 
-                            val qrValidation = com.example.bot.guestlists.quickValidateQr(payload.qr)
-                            if (qrValidation != null) {
-                                UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error={} clubId={}", qrValidation, clubId)
-                                call.respondError(HttpStatusCode.BadRequest, qrValidation)
-                                return@timeScanSuspend
-                            }
-
                             val qr = payload.qr.trim()
                             val primarySecret = qrSecretProvider()
                             val oldSecret =
@@ -112,6 +117,63 @@ fun Application.checkinRoutes(
                                     it.isNotBlank() && it != primarySecret
                                 }
                             val now = Instant.now(clock)
+                            if (qr.startsWith("INV:")) {
+                                val decodedInvite =
+                                    PromoterInviteQrCodec.tryDecode(qr, primarySecret)
+                                        ?: oldSecret?.let {
+                                            PromoterInviteQrCodec.tryDecode(qr, it)?.also {
+                                                UiCheckinMetrics.incOldSecretFallback()
+                                            }
+                                        }
+                                if (decodedInvite == null) {
+                                    UiCheckinMetrics.incError()
+                                    logger.warn(
+                                        "checkin.scan promoter_invite error={} clubId={}",
+                                        ErrorCodes.invalid_or_expired_qr,
+                                        clubId,
+                                    )
+                                    call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
+                                    return@timeScanSuspend
+                                }
+
+                                val marked = promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false
+                                if (!marked) {
+                                    UiCheckinMetrics.incError()
+                                    logger.warn(
+                                        "checkin.scan promoter_invite error={} clubId={} inviteId={}",
+                                        ErrorCodes.invalid_state,
+                                        clubId,
+                                        decodedInvite.inviteId,
+                                    )
+                                    call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                                    return@timeScanSuspend
+                                }
+
+                                logger.info(
+                                    "checkin.scan promoter_invite status=arrived clubId={} inviteId={} eventId={}",
+                                    clubId,
+                                    decodedInvite.inviteId,
+                                    decodedInvite.eventId,
+                                )
+                                call.respond(
+                                    HttpStatusCode.OK,
+                                    PromoterInviteScanResponse(
+                                        status = SCAN_STATUS_ARRIVED,
+                                        type = SCAN_TYPE_PROMOTER_INVITE,
+                                        inviteId = decodedInvite.inviteId,
+                                    ),
+                                )
+                                return@timeScanSuspend
+                            }
+
+                            val qrValidation = com.example.bot.guestlists.quickValidateQr(qr)
+                            if (qrValidation != null) {
+                                UiCheckinMetrics.incError()
+                                logger.warn("checkin.scan error={} clubId={}", qrValidation, clubId)
+                                call.respondError(HttpStatusCode.BadRequest, qrValidation)
+                                return@timeScanSuspend
+                            }
+
                             val decoded =
                                 runCatching {
                                     QrGuestListCodec.verify(qr, now, qrTtl, primarySecret)

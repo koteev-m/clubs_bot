@@ -38,6 +38,8 @@ import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.bookingA3Routes
 import com.example.bot.web.installBookingWebApp
+import com.example.bot.promoter.invites.PromoterInviteService
+import com.example.bot.routes.promoterInvitesRoutes
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
@@ -123,6 +125,7 @@ fun Application.module() {
     val layoutRepository by inject<LayoutRepository>()
     val musicService by inject<MusicService>()
     val waitlistRepository by inject<WaitlistRepository>()
+    val promoterInviteService by inject<PromoterInviteService>()
 
     // 7) Метрики
     val registry = Metrics.globalRegistry
@@ -140,7 +143,8 @@ fun Application.module() {
         clubsRepository = clubsRepository,
         meterRegistry = registry,
     )
-    checkinRoutes(repository = guestListRepository)
+    checkinRoutes(repository = guestListRepository, promoterInviteService = promoterInviteService)
+    promoterInvitesRoutes(promoterInviteService = promoterInviteService, meterRegistry = registry)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository)
     musicRoutes(service = musicService)
