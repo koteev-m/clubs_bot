@@ -27,23 +27,27 @@ import com.example.bot.plugins.installWebAppImmutableCacheFromEnv
 import com.example.bot.plugins.installWebUi
 import com.example.bot.routes.checkinRoutes
 import com.example.bot.routes.clubsRoutes
+import com.example.bot.booking.a3.Booking
+import com.example.bot.host.BookingProvider
+import com.example.bot.host.HostEntranceService
+import com.example.bot.promoter.invites.PromoterInviteService
+import com.example.bot.promoter.quotas.PromoterQuotaService
+import com.example.bot.promoter.rating.PromoterRatingService
+import com.example.bot.routes.bookingA3Routes
 import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
 import com.example.bot.routes.guestListRoutes
-import com.example.bot.routes.musicRoutes
+import com.example.bot.routes.hostEntranceRoutes
 import com.example.bot.routes.layoutRoutes
-import com.example.bot.routes.pingRoute
 import com.example.bot.routes.meBookingsRoutes
-import com.example.bot.routes.securedBookingRoutes
-import com.example.bot.routes.promoterRatingRoutes
-import com.example.bot.routes.waitlistRoutes
-import com.example.bot.routes.bookingA3Routes
-import com.example.bot.web.installBookingWebApp
-import com.example.bot.promoter.invites.PromoterInviteService
-import com.example.bot.promoter.rating.PromoterRatingService
-import com.example.bot.promoter.quotas.PromoterQuotaService
+import com.example.bot.routes.musicRoutes
+import com.example.bot.routes.pingRoute
 import com.example.bot.routes.promoterInvitesRoutes
 import com.example.bot.routes.promoterQuotasAdminRoutes
+import com.example.bot.routes.promoterRatingRoutes
+import com.example.bot.routes.securedBookingRoutes
+import com.example.bot.routes.waitlistRoutes
+import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
@@ -132,6 +136,17 @@ fun Application.module() {
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
+    val hostEntranceService =
+        HostEntranceService(
+            guestListRepository = guestListRepository,
+            waitlistRepository = waitlistRepository,
+            bookingProvider =
+                object : BookingProvider {
+                    override fun findBookingsForEvent(clubId: Long, eventId: Long): List<Booking> =
+                        bookingState.findBookingsForEvent(clubId, eventId)
+                },
+            eventsRepository = eventsRepository,
+        )
 
     // 7) Метрики
     val registry = Metrics.globalRegistry
@@ -158,6 +173,7 @@ fun Application.module() {
     musicRoutes(service = musicService)
     guestListInviteRoutes(repository = guestListRepository)
     waitlistRoutes(repository = waitlistRepository)
+    hostEntranceRoutes(service = hostEntranceService)
 
     // 9) Прочее
     routing {

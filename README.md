@@ -92,6 +92,25 @@ Rate limits are enforced per user and route (e.g., 5 holds / 10s). Every respons
 `X-RateLimit-Remaining`; a throttled response adds `Retry-After` with seconds to wait. These headers are returned even for early
 validation errors so clients can surface them consistently.
 
+### Host entrance aggregate (C1)
+
+- `GET /api/host/entrance?clubId=&eventId=` — агрегат «Вход сегодня» для ролей ENTRY_MANAGER+. Возвращает ожидаемых гостей по
+  каналам (guest list, bookings, прочие), текущие статусы (expected/arrived/notArrived/noShow) по каждому каналу, активный
+  waitlist и суммарные counts. Успешные ответы всегда с `Cache-Control: no-store`, `Vary: X-Telegram-Init-Data` и ISO-временем
+  `now` (UTC). Ошибки: `validation_error` для невалидных параметров, `forbidden` при недостаточных правах, `not_found` при
+  отсутствии события/клуба.
+  - `expected` — списки ожидаемых гостей: guest list записи (id, имя, guestCount, статус, hasQr), bookings (bookingId,
+    guestCount, статус, опциональные имя/стол) и `other` (резервная секция, сейчас пустая). Статусы на проводе всегда
+    в lower-case: guest list — из `GuestListEntryStatus` (`planned|checked_in|no_show|expired|...`), bookings — из
+    `BookingStatus` (`hold|booked|canceled`), waitlist — из `WaitlistStatus` (`waiting|called|expired|cancelled|...`).
+    `expected.guestList[*].hasQr` сейчас всегда `false` до явной привязки QR к гостевой записи.
+  - `status` — агрегаты по каналам: expectedGuests, arrivedGuests, notArrivedGuests, noShowGuests. Guest list expected — все
+    не-EXPIRED записи; arrived — CHECKED_IN; noShow — NO_SHOW; notArrived = max(expected - arrived - noShow, 0). Bookings
+    expected — все НЕ-CANCELED; arrived/noShow = 0 (пока без чек-ина по booking), notArrived = expected. `counts` — сумма
+    expected/arrived/noShow по каналам без дедупликации между ними.
+  - `waitlist` — активные записи очереди ожидания (id, clubId, eventId, userId, partySize, статус, createdAt, calledAt,
+    expiresAt) и `activeCount` (size списка).
+
 ### Promoter API (B1)
 
 **Statuses and timeline**
