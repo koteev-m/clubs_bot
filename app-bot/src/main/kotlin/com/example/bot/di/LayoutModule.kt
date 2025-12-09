@@ -7,6 +7,7 @@ import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
 import com.example.bot.layout.Zone
+import com.example.bot.promoter.quotas.PromoterQuotaService
 import io.micrometer.core.instrument.Metrics
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
@@ -73,6 +74,7 @@ val layoutModule =
             BookingState(
                 get(named("baseLayout")),
                 get(),
+                get<PromoterQuotaService>(),
                 holdTtl = holdTtl,
                 latePlusOneOffset = latePlusOne,
                 arrivalWindowBefore = arrivalBefore,

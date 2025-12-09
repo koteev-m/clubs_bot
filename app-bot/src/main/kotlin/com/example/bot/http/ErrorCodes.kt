@@ -33,4 +33,5 @@ object ErrorCodes {
     const val late_plus_one_expired: String = "late_plus_one_expired"
     const val plus_one_already_used: String = "plus_one_already_used"
     const val capacity_exceeded: String = "capacity_exceeded"
+    const val promoter_quota_exhausted: String = "promoter_quota_exhausted"
 }

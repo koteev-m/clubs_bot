@@ -3,6 +3,8 @@ package com.example.bot.booking.a3
 import com.example.bot.clubs.EventsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.TableStatus
+import com.example.bot.promoter.quotas.HoldQuotaResult
+import com.example.bot.promoter.quotas.PromoterQuotaService
 import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +27,7 @@ import org.slf4j.LoggerFactory
 class BookingState(
     private val layoutRepository: LayoutRepository,
     private val eventsRepository: EventsRepository,
+    private val promoterQuotaService: PromoterQuotaService? = null,
     private val clock: Clock = Clock.systemUTC(),
     private val holdTtl: Duration = Duration.ofMinutes(10),
     private val latePlusOneOffset: Duration = Duration.ofMinutes(30),
@@ -70,6 +73,7 @@ class BookingState(
         guestCount: Int,
         idempotencyKey: String,
         requestHash: String,
+        promoterId: Long? = null,
     ): HoldResult {
         val layout = layoutRepository.getLayout(clubId, eventId) ?: return HoldResult.Error(BookingError.NOT_FOUND)
         val table = layout.tables.find { it.id == tableId } ?: return HoldResult.Error(BookingError.NOT_FOUND)
@@ -100,6 +104,18 @@ class BookingState(
         val bookingId = sequence.getAndIncrement()
         val expiresAt = now.plus(holdTtl)
         val key = eventId to tableId
+        var quotaReserved = false
+        when (
+            if (promoterId != null) {
+                promoterQuotaService?.checkAndReserveHold(clubId, promoterId, tableId, now)
+            } else {
+                null
+            }
+        ) {
+            HoldQuotaResult.Allowed -> quotaReserved = true
+            HoldQuotaResult.Exhausted -> return HoldResult.Error(BookingError.PROMOTER_QUOTA_EXHAUSTED)
+            HoldQuotaResult.NoQuotaConfigured, null -> Unit
+        }
         val tookHold: Boolean =
             tableLocks.compute(key) { _, prev ->
                 val cur = prev?.evictIfExpired(now) ?: TableState.free()
@@ -109,11 +125,17 @@ class BookingState(
                 }
             }?.bookingId == bookingId
 
-        if (!tookHold) return HoldResult.Error(BookingError.TABLE_NOT_AVAILABLE)
+        if (!tookHold) {
+            if (quotaReserved && promoterId != null) {
+                promoterQuotaService?.releaseHoldIfTracked(clubId, promoterId, tableId, now)
+            }
+            return HoldResult.Error(BookingError.TABLE_NOT_AVAILABLE)
+        }
 
         val booking = Booking(
             id = bookingId,
             userId = userId,
+            promoterId = promoterId,
             clubId = clubId,
             tableId = tableId,
             eventId = eventId,
@@ -168,9 +190,12 @@ class BookingState(
         val state = tableLocks[key]?.evictIfExpired(now)
         if (state == null || state.status != TableOccupancy.HOLD || state.bookingId != bookingId) {
             tableLocks[key] = TableState.free()
+            releasePromoterHold(booking, now)
+            expireBooking(booking, now)
             return ConfirmResult.Error(BookingError.HOLD_EXPIRED)
         }
         if (booking.holdExpiresAt != null && booking.holdExpiresAt.isBefore(now)) {
+            releasePromoterHold(booking, now)
             expireBooking(booking, now)
             tableLocks[key] = TableState.free()
             return ConfirmResult.Error(BookingError.HOLD_EXPIRED)
@@ -181,6 +206,7 @@ class BookingState(
         tableLocks[key] = TableState(TableOccupancy.BOOKED, booking.id, null)
         lastUpdated[key] = now
         bumpWatermark(booking.eventId, now)
+        releasePromoterHold(booking, now)
         val body = booking.toSnapshot()
         val bodyJson = CanonJson.encodeToString(body)
         idempotency[idemKey] = StoredIdempotentResponse(requestHash, 200, bodyJson, body, now)
@@ -308,8 +334,16 @@ class BookingState(
         val iterator = tableLocks.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
-            val evicted = entry.value.evictIfExpired(now)
+            val state = entry.value
+            val evicted = state.evictIfExpired(now)
             if (evicted == null || evicted.status == TableOccupancy.FREE) {
+                if (evicted == null && state.status == TableOccupancy.HOLD) {
+                    state.bookingId?.let { bookingId ->
+                        bookings[bookingId]?.takeIf { it.status == BookingStatus.HOLD }?.let { booking ->
+                            releasePromoterHold(booking, now)
+                        }
+                    }
+                }
                 iterator.remove()
                 bumpWatermark(entry.key.first, now)
                 removedLocks += 1
@@ -375,6 +409,17 @@ class BookingState(
     ) {
         booking.status = BookingStatus.CANCELED
         booking.updatedAt = now
+    }
+
+    private fun releasePromoterHold(
+        booking: Booking,
+        now: Instant,
+    ) {
+        val promoterId = booking.promoterId ?: return
+        // Releases the reserved quota slot for promoter HOLDs. Safe to call
+        // multiple times across confirm/cleanup flows because the quota service
+        // is idempotent for expired/missing quotas.
+        promoterQuotaService?.releaseHoldIfTracked(booking.clubId, promoterId, booking.tableId, now)
     }
 
     private fun bumpWatermark(eventId: Long, now: Instant) {
@@ -444,7 +489,13 @@ private fun Booking.toSnapshot(): BookingResponseSnapshot {
             createdAt = createdAt.toString(),
             updatedAt = updatedAt.toString(),
         )
-    return BookingResponseSnapshot(view, latePlusOneAllowedUntil?.toString(), arrival, userId)
+    return BookingResponseSnapshot(
+        view,
+        latePlusOneAllowedUntil?.toString(),
+        arrival,
+        userId,
+        promoterId,
+    )
 }
 
 private fun BookingResponseSnapshot.toBooking(): Booking {
@@ -453,6 +504,7 @@ private fun BookingResponseSnapshot.toBooking(): Booking {
     return Booking(
         id = booking.id,
         userId = userId,
+        promoterId = promoterId,
         clubId = booking.clubId,
         tableId = booking.tableId,
         eventId = booking.eventId,

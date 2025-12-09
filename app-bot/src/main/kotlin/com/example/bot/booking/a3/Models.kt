@@ -7,6 +7,7 @@ enum class BookingStatus { HOLD, BOOKED, CANCELED }
 data class Booking(
     val id: Long,
     val userId: Long,
+    val promoterId: Long? = null,
     val clubId: Long,
     val tableId: Long,
     val eventId: Long,
@@ -41,6 +42,7 @@ data class BookingResponseSnapshot(
     val latePlusOneAllowedUntil: String?,
     val arrivalWindow: List<String>,
     @kotlinx.serialization.Transient val userId: Long = 0,
+    @kotlinx.serialization.Transient val promoterId: Long? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -122,4 +124,5 @@ enum class BookingError {
     FORBIDDEN,
     CAPACITY_EXCEEDED,
     CLUB_SCOPE_MISMATCH,
+    PROMOTER_QUOTA_EXHAUSTED,
 }
