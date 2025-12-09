@@ -7,11 +7,13 @@ import com.example.bot.booking.a3.HoldResult
 import com.example.bot.booking.a3.PlusOneCanonicalPayload
 import com.example.bot.booking.a3.PlusOneResult
 import com.example.bot.booking.a3.hashRequestCanonical
+import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.ratelimit.RateLimitSnapshot
 import com.example.bot.ratelimit.TokenBucket
+import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -35,6 +37,8 @@ private val JSON = ContentType.Application.Json.withCharset(Charsets.UTF_8)
 private const val VARY_HEADER = "X-Telegram-Init-Data"
 private const val NO_CACHE = "no-store"
 private val IDEM_KEY = Regex("^[A-Za-z0-9._~:-]{1,128}$")
+private val PROMOTER_ROLES =
+    setOf(Role.PROMOTER, Role.CLUB_ADMIN, Role.HEAD_MANAGER, Role.OWNER, Role.GLOBAL_ADMIN)
 private val holdRateLimit = rateLimitConfig("BOOKING_RATE_LIMIT_HOLD_CAPACITY", "BOOKING_RATE_LIMIT_HOLD_REFILL", 5.0, 0.5)
 private val confirmRateLimit =
     rateLimitConfig("BOOKING_RATE_LIMIT_CONFIRM_CAPACITY", "BOOKING_RATE_LIMIT_CONFIRM_REFILL", 5.0, 0.5)
@@ -72,6 +76,7 @@ fun Application.bookingA3Routes(
                             capacity = holdRateLimit.capacity,
                             refillPerSec = holdRateLimit.refillPerSec,
                         )
+                    val promoterId = call.promoterIdOrNull()
                     val clubId = call.parameters["clubId"]?.toLongOrNull()
                         ?: run {
                             call.applyRateLimitHeaders(ratePeek)
@@ -131,6 +136,7 @@ fun Application.bookingA3Routes(
                             guestCount = payload.guestCount,
                             idempotencyKey = idem,
                             requestHash = hash,
+                            promoterId = promoterId,
                         )
                     when (result) {
                         is HoldResult.Success -> {
@@ -437,6 +443,30 @@ private fun ApplicationCall.applyIdempotencyHeaders(idem: String, replay: Boolea
 
 private fun String.isValidIdemKey(): Boolean = IDEM_KEY.matches(this)
 
+/**
+ * Returns the promoterId when the caller has any of [PROMOTER_ROLES]. Intended
+ * for promoter HOLD flows; falls back to test headers (X-Debug-Roles) when
+ * running without full RBAC wiring.
+ */
+private fun ApplicationCall.promoterIdOrNull(): Long? =
+    runCatching { rbacContext() }
+        .getOrNull()
+        ?.takeIf { ctx -> ctx.roles.any { it in PROMOTER_ROLES } }
+        ?.principal
+        ?.userId
+        ?: run {
+            val headerRoles =
+                request.headers["X-Debug-Roles"]
+                    ?.split(',')
+                    ?.mapNotNull { value -> runCatching { Role.valueOf(value.trim()) }.getOrNull() }
+                    ?: emptyList()
+            if (headerRoles.any { it in PROMOTER_ROLES }) {
+                attributes[MiniAppUserKey].id
+            } else {
+                null
+            }
+        }
+
 private data class RateLimitConfig(val capacity: Double, val refillPerSec: Double)
 
 private fun rateLimitConfig(capacityEnv: String, refillEnv: String, defaultCap: Double, defaultRefill: Double): RateLimitConfig {
@@ -458,6 +488,7 @@ private fun BookingError.toHttp(): Pair<HttpStatusCode, String> =
         BookingError.FORBIDDEN -> HttpStatusCode.Forbidden to ErrorCodes.forbidden
         BookingError.CAPACITY_EXCEEDED -> HttpStatusCode.Conflict to ErrorCodes.capacity_exceeded
         BookingError.CLUB_SCOPE_MISMATCH -> HttpStatusCode.Forbidden to ErrorCodes.club_scope_mismatch
+        BookingError.PROMOTER_QUOTA_EXHAUSTED -> HttpStatusCode.Conflict to ErrorCodes.promoter_quota_exhausted
     }
 
 private class RouteRateLimiter {

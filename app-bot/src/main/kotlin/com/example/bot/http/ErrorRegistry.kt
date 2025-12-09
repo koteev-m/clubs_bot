@@ -13,12 +13,12 @@ data class ErrorCodeInfo(
 
 @Serializable
 data class ErrorCodesPayload(
-    val version: Int = 1,
+    val version: Int = 2,
     val codes: List<ErrorCodeInfo>,
 )
 
 object ErrorRegistry {
-    const val version: Int = 1
+    const val version: Int = 2
     val etag: String = "\"error-codes-v$version\""
     const val cacheControl: String = "public, max-age=300, stale-while-revalidate=30, stale-if-error=86400"
 
@@ -58,6 +58,7 @@ object ErrorRegistry {
         ErrorCodeInfo(ErrorCodes.late_plus_one_expired, HttpStatusCode.Gone.value),
         ErrorCodeInfo(ErrorCodes.plus_one_already_used, HttpStatusCode.Conflict.value),
         ErrorCodeInfo(ErrorCodes.capacity_exceeded, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.promoter_quota_exhausted, HttpStatusCode.Conflict.value),
     ).sortedBy { it.code }
 
     val codes: List<ErrorCodeInfo> = common + checkin + booking

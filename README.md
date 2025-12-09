@@ -49,6 +49,11 @@ and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) a
   Mini App headers. Returns `{ booking, arrivalWindow: [from, to], latePlusOneAllowedUntil }` with `Cache-Control: no-store`,
   `Vary: X-Telegram-Init-Data` and **no** ETag. Conflicts/errors surface as `{ "error": { "code", "message" } }` using the
   registry codes (e.g. `table_not_available`, `idempotency_conflict`, `validation_error`).
+- Promoter HOLDs (Role.PROMOTER/admins) can be limited by per-table `PromoterQuota`; if a quota is exhausted the hold
+  responds with `409 promoter_quota_exhausted`, while expired quotas auto-reset and no longer restrict HOLDs. Quotas are
+  configured per `(clubId, promoterId, tableId)` via `/api/admin/quotas` (no-store/Vary headers); POST replaces with
+  `held=0`, PUT updates `quota`/`expiresAt` preserving the current `held` counter. Quotas apply only to promoter HOLDs — guests
+  remain unaffected.
 - `POST /api/clubs/{clubId}/bookings/confirm` — body `{ bookingId }`, same idempotency rules and headers; transitions HOLD →
   BOOKED or returns `hold_expired`/`invalid_state`. Booking ownership is enforced — only the creator can confirm within the same
   club scope (403 `forbidden`; `club_scope_mismatch` is used when path `clubId` differs from the booking).
@@ -111,6 +116,9 @@ validation errors so clients can surface them consistently.
 - `GET /api/promoter/invites/export.csv?eventId=` — UTF-8 CSV export with header
   `inviteId,promoterId,clubId,eventId,guestName,guestCount,status,issuedAt,openedAt,confirmedAt,arrivedAt,noShowAt,revokedAt`.
   Null timestamps are empty strings; text fields (e.g., `guestName`, timestamps) are CSV-escaped when they contain commas/quotes/newlines; per-user data is `no-store` and `Vary` is always `X-Telegram-Init-Data`.
+- Admins can configure promoter HOLD micro-quotas via `/api/admin/quotas` (no-store/Vary headers) to cap simultaneous HOLDs per
+  club/promoter/table; POST creates/resets (`held=0`), PUT updates without dropping the current `held`, GET lists quotas by
+  `clubId`.
 
 `PromoterInviteView` surfaces all timestamps plus the derived timeline; the QR format is `INV:<inviteId>:<eventId>:<ts>:<hmacHex>` where
 `hmacHex = HMAC_SHA256("inviteId:eventId:ts", derivedKey(secret="QrPromoterInvite"))`. The same `QR_SECRET` env var used for
