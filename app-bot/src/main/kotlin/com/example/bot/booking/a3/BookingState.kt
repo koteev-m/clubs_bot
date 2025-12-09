@@ -290,6 +290,21 @@ class BookingState(
         return bookings.values.filter { it.userId == userId }.map { it.copy() }
     }
 
+    /**
+     * Returns a snapshot of all bookings for the given club and event.
+     *
+     * The internal state is first cleaned up with [cleanupExpired] using the current [clock],
+     * and the returned list contains defensive copies, so callers can safely aggregate
+     * and expose them without risking mutations of the internal state.
+     */
+    fun findBookingsForEvent(clubId: Long, eventId: Long): List<Booking> {
+        val now = Instant.now(clock)
+        cleanupExpired(now)
+        return bookings.values
+            .filter { it.clubId == clubId && it.eventId == eventId }
+            .map { it.copy() }
+    }
+
     fun now(): Instant = Instant.now(clock)
 
     fun snapshotOf(booking: Booking): BookingResponseSnapshot = booking.toSnapshot()
