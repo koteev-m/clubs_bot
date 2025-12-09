@@ -129,6 +129,68 @@ Check-in integration: `/api/clubs/{clubId}/checkin/scan` recognizes `INV:` paylo
 Invalid or revoked invites return `409 invalid_state`; QR decode failures return
 `400 invalid_or_expired_qr`. Guest list QR behavior is unchanged.
 
+### Promoter rating (B3)
+
+- Periods are sliding windows in UTC: `week` → `[now - 7d, now)`, `month` → `[now - 30d, now)`.
+- Source data: promoter invites and their events; only invites whose `event.startUtc` falls inside the chosen window are
+  considered.
+- Metrics:
+  - `invited` — sum of `guestCount` for invites not in `REVOKED`.
+  - `arrivals` — sum of `guestCount` where status is `ARRIVED` (or `arrivedAt` is set).
+  - `noShows` — for events with `endUtc < now`, sum `guestCount` for invites that are neither `ARRIVED` nor `REVOKED`.
+    Invites for ongoing/future events do not contribute to no-shows.
+  - `conversionScore` — `0.0` when `arrivals + noShows == 0`, otherwise `arrivals / (arrivals + noShows)`.
+- Endpoints (all responses use `Cache-Control: no-store` and `Vary: X-Telegram-Init-Data`):
+  - `GET /api/promoter/scorecard?period=week|month` — personal metrics for the current promoter, returns
+    `{ period, from, to, invited, arrivals, noShows, conversionScore }` with `from/to` serialized as ISO instants.
+  - `GET /api/admin/promoters/rating?clubId=&period=&page=&size=` — club-level rating for admins/owners/global admins.
+    Pagination defaults to `page=1`, `size=20` (range `1..100`). Sorting is deterministic: by `conversionScore` desc,
+    then `arrivals` desc, then `promoterId` asc. Response contains `{ clubId, period, from, to, page, size, total, items }`
+    where `items` are `{ promoterId, invited, arrivals, noShows, conversionScore }`.
+- Analytics are read-only: no invite statuses are mutated and no NO_SHOW flags are persisted.
+
+Example responses (structures match the live API, values are illustrative only):
+
+```json
+{
+  "period": "week",
+  "from": "2024-06-01T00:00:00Z",
+  "to": "2024-06-08T00:00:00Z",
+  "invited": 42,
+  "arrivals": 30,
+  "noShows": 12,
+  "conversionScore": 0.7142857
+}
+```
+
+```json
+{
+  "clubId": 1,
+  "period": "week",
+  "from": "2024-06-01T00:00:00Z",
+  "to": "2024-06-08T00:00:00Z",
+  "page": 1,
+  "size": 2,
+  "total": 5,
+  "items": [
+    {
+      "promoterId": 10,
+      "invited": 20,
+      "arrivals": 18,
+      "noShows": 2,
+      "conversionScore": 0.9
+    },
+    {
+      "promoterId": 5,
+      "invited": 15,
+      "arrivals": 10,
+      "noShows": 5,
+      "conversionScore": 0.6666667
+    }
+  ]
+}
+```
+
 ## Mini App UI
 
 The static Mini App lives under `miniapp/src/main/resources/miniapp` and is shipped with the Ktor app through

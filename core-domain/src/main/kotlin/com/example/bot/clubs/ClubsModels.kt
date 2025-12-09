@@ -45,7 +45,12 @@ interface EventsRepository {
 
     suspend fun lastUpdatedAt(): Instant?
 
-    suspend fun findById(clubId: Long, eventId: Long): Event?
+    /**
+     * Synchronous lookup for a single event; keep aligned with the blocking repository implementations.
+     * If an async driver is introduced, consider converting this to a suspending call alongside the
+     * rest of the API for consistency.
+     */
+    fun findById(clubId: Long, eventId: Long): Event?
 }
 
 class InMemoryClubsRepository(
@@ -106,6 +111,6 @@ class InMemoryEventsRepository(
 
     override suspend fun lastUpdatedAt(): Instant? = updatedAt
 
-    override suspend fun findById(clubId: Long, eventId: Long): Event? =
+    override fun findById(clubId: Long, eventId: Long): Event? =
         events.firstOrNull { it.clubId == clubId && it.id == eventId }
 }
