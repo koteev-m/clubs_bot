@@ -108,8 +108,26 @@ validation errors so clients can surface them consistently.
     не-EXPIRED записи; arrived — CHECKED_IN; noShow — NO_SHOW; notArrived = max(expected - arrived - noShow, 0). Bookings
     expected — все НЕ-CANCELED; arrived/noShow = 0 (пока без чек-ина по booking), notArrived = expected. `counts` — сумма
     expected/arrived/noShow по каналам без дедупликации между ними.
-  - `waitlist` — активные записи очереди ожидания (id, clubId, eventId, userId, partySize, статус, createdAt, calledAt,
-    expiresAt) и `activeCount` (size списка).
+  - `waitlist` — активные записи очереди ожидания (`id`, `clubId`, `eventId`, `userId`, `partySize`, `status`,
+    `createdAt`, `calledAt`, `expiresAt`) и `activeCount` (size списка).
+
+### Waitlist API (/api/clubs/{clubId}/waitlist)
+
+- `GET /api/clubs/{clubId}/waitlist?eventId=` — список записей очереди для события.
+- `POST /api/clubs/{clubId}/waitlist` — постановка гостя в очередь для указанного события.
+- `POST /api/clubs/{clubId}/waitlist/{id}/call` — вызов гостя с резервом на N минут.
+- `POST /api/clubs/{clubId}/waitlist/{id}/expire?close=` — истечение резерва: вернуть в очередь или закрыть запись.
+
+Ответы содержат `Cache-Control: no-store`, `Vary: X-Telegram-Init-Data` и объекты очереди в формате:
+
+- базовые поля: `id`, `clubId`, `eventId`, `userId`, `partySize`, `status`, `createdAt`, `calledAt`, `expiresAt` (ISO, UTC);
+- SLA-подсказки:
+  - `reserveExpiresAt` — ISO-строка (UTC) до какого момента держится резерв после call; `null`, если `expiresAt == null`;
+  - `remainingSeconds` — количество секунд до `reserveExpiresAt` на момент ответа: `null`, если резерва нет, `0`, если окно
+    уже истекло.
+
+Новые поля (`reserveExpiresAt`, `remainingSeconds`) добавлены поверх существующего контракта без изменений уже
+возвращавшихся полей.
 
 ### Host shift checklist (C2)
 
