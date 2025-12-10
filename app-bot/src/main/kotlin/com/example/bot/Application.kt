@@ -30,6 +30,8 @@ import com.example.bot.routes.clubsRoutes
 import com.example.bot.booking.a3.Booking
 import com.example.bot.host.BookingProvider
 import com.example.bot.host.HostEntranceService
+import com.example.bot.notifications.LoggingNotificationService
+import com.example.bot.notifications.NotificationService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
@@ -140,6 +142,7 @@ fun Application.module() {
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
     val appClock = Clock.systemUTC()
+    val notificationService: NotificationService = LoggingNotificationService()
     val hostEntranceService =
         HostEntranceService(
             guestListRepository = guestListRepository,
@@ -177,7 +180,11 @@ fun Application.module() {
     layoutRoutes(layoutRepository = layoutRepository)
     musicRoutes(service = musicService)
     guestListInviteRoutes(repository = guestListRepository)
-    waitlistRoutes(repository = waitlistRepository)
+    waitlistRoutes(
+        repository = waitlistRepository,
+        notificationService = notificationService,
+        clock = appClock,
+    )
     hostEntranceRoutes(service = hostEntranceService)
     hostChecklistRoutes(
         checklistService = shiftChecklistService,
