@@ -111,6 +111,30 @@ validation errors so clients can surface them consistently.
   - `waitlist` — активные записи очереди ожидания (id, clubId, eventId, userId, partySize, статус, createdAt, calledAt,
     expiresAt) и `activeCount` (size списка).
 
+### Host shift checklist (C2)
+
+- `GET /api/host/checklist?clubId=&eventId=` — чек-лист смены для ролей ENTRY_MANAGER+. Возвращает
+  шаблон задач с текущим состоянием для пары (clubId, eventId). Ответ всегда `Cache-Control: no-store`,
+  `Vary: X-Telegram-Init-Data` и содержит:
+
+  - `clubId`, `eventId`, `now` (ISO-строка в UTC).
+  - `items` — список `{ id, section, text, done, updatedAt, actorId }`:
+    - `id` — стабильный идентификатор задачи (snake_case), используется как ключ состояния.
+    - `section` — логическая секция (например, `entrance`, `sound`, `misc`).
+    - `text` — текст задачи.
+    - `done` — флаг выполнения.
+    - `updatedAt` — ISO-строка или `null`, когда флаг меняли в последний раз.
+    - `actorId` — идентификатор пользователя (Telegram id), который последним менял задачу, или `null`.
+  - Шаблон устойчив к обновлениям: новые задачи автоматически появляются с `done=false`, `updatedAt=null`, `actorId=null`,
+    состояние хранится только по `id`.
+
+- `POST /api/host/checklist?clubId=&eventId=` — обновляет флаг `done` для одной задачи:
+
+  - Тело `{ itemId, done }` (оба поля обязательны).
+  - Ошибки: `invalid_json` (повреждённое тело), `validation_error` (невалидные параметры, неизвестный `itemId`),
+    `forbidden` (недостаточно прав), `not_found` (ивент не существует или не принадлежит клубу).
+  - В случае успеха возвращает актуальный снимок чек-листа в том же формате, что и `GET`.
+
 ### Promoter API (B1)
 
 **Statuses and timeline**

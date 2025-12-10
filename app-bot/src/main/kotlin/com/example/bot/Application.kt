@@ -38,6 +38,7 @@ import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
 import com.example.bot.routes.guestListRoutes
 import com.example.bot.routes.hostEntranceRoutes
+import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.musicRoutes
@@ -69,6 +70,8 @@ import java.lang.reflect.Modifier
 import java.net.JarURLConnection
 import java.net.URL
 import java.util.jar.JarFile
+import com.example.bot.host.ShiftChecklistService
+import java.time.Clock
 
 @Suppress("unused")
 fun Application.module() {
@@ -136,6 +139,7 @@ fun Application.module() {
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
+    val appClock = Clock.systemUTC()
     val hostEntranceService =
         HostEntranceService(
             guestListRepository = guestListRepository,
@@ -147,6 +151,7 @@ fun Application.module() {
                 },
             eventsRepository = eventsRepository,
         )
+    val shiftChecklistService = ShiftChecklistService(clock = appClock)
 
     // 7) Метрики
     val registry = Metrics.globalRegistry
@@ -174,6 +179,11 @@ fun Application.module() {
     guestListInviteRoutes(repository = guestListRepository)
     waitlistRoutes(repository = waitlistRepository)
     hostEntranceRoutes(service = hostEntranceService)
+    hostChecklistRoutes(
+        checklistService = shiftChecklistService,
+        eventsRepository = eventsRepository,
+        clock = appClock,
+    )
 
     // 9) Прочее
     routing {
