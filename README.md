@@ -153,6 +153,17 @@ validation errors so clients can surface them consistently.
     `forbidden` (недостаточно прав), `not_found` (ивент не существует или не принадлежит клубу).
   - В случае успеха возвращает актуальный снимок чек-листа в том же формате, что и `GET`.
 
+### Music likes and weekly mixtape (D1)
+
+- `POST /api/music/items/{id}/like` — ставит лайк текущего пользователя на трек. Идемпотентен: повторные вызовы сохраняют
+  первоначальную отметку и `likedAt`. Ответ `200 OK` с `{ itemId, liked: true, likedAt }` (ISO UTC). Невалидный id (не число,
+  ≤ 0) возвращает `400 { "error": "invalid_item_id" }`.
+- `DELETE /api/music/items/{id}/like` — снимает лайк; идемпотентен, всегда `200 OK` с `{ itemId, liked: false }`.
+- `GET /api/me/mixtape` — персональный «микстейп недели» для текущего пользователя. Ответ содержит `userId`, `weekStart`
+  (понедельник 00:00 UTC текущей недели), `items` (лайкнутые за последние 7 дней + рекомендации, без дублей) и `generatedAt`
+  (текущее время). Все ответы для этих маршрутов устанавливают `Cache-Control: no-store`, `Vary: X-Telegram-Init-Data` и
+  `ETag`. При совпадении `If-None-Match` сервер возвращает `304 Not Modified` без тела, но с теми же заголовками.
+
 ### Promoter API (B1)
 
 **Statuses and timeline**

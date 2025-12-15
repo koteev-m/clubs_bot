@@ -49,8 +49,12 @@ object MusicPlaylistItemsTable : Table("music_playlist_items") {
 }
 
 object MusicLikesTable : Table("music_likes") {
-    val itemId = long("item_id") references MusicItemsTable.id
     val userId = long("user_id")
+    val itemId = long("item_id") references MusicItemsTable.id
     val likedAt = timestampWithTimeZone("liked_at").defaultExpression(CurrentTimestamp())
-    override val primaryKey = PrimaryKey(itemId, userId)
+    override val primaryKey = PrimaryKey(userId, itemId)
+
+    init {
+        uniqueIndex("ux_music_likes_user_item", userId, itemId)
+    }
 }

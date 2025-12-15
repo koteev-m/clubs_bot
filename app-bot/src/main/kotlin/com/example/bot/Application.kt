@@ -8,7 +8,9 @@ import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.metrics.UiWaitlistMetrics
+import com.example.bot.music.MusicLikesRepository
 import com.example.bot.music.MusicService
+import com.example.bot.music.MixtapeService
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.configureLoggingAndRequestId
@@ -44,6 +46,7 @@ import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.musicRoutes
+import com.example.bot.routes.musicLikesRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.promoterInvitesRoutes
 import com.example.bot.routes.promoterQuotasAdminRoutes
@@ -137,6 +140,8 @@ fun Application.module() {
     val eventsRepository by inject<EventsRepository>()
     val layoutRepository by inject<LayoutRepository>()
     val musicService by inject<MusicService>()
+    val musicLikesRepository by inject<MusicLikesRepository>()
+    val mixtapeService by inject<MixtapeService>()
     val waitlistRepository by inject<WaitlistRepository>()
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
@@ -179,6 +184,11 @@ fun Application.module() {
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository)
     musicRoutes(service = musicService)
+    musicLikesRoutes(
+        likesRepository = musicLikesRepository,
+        mixtapeService = mixtapeService,
+        clock = appClock,
+    )
     guestListInviteRoutes(repository = guestListRepository)
     waitlistRoutes(
         repository = waitlistRepository,
