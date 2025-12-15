@@ -63,3 +63,21 @@ data class PlaylistFullView(
 
 /** Identifier of the user. */
 typealias UserId = Long
+
+/**
+ * Music like placed by a user for a specific item.
+ */
+data class Like(
+    val userId: Long,
+    val itemId: Long,
+    val createdAt: Instant,
+)
+
+/**
+ * Weekly mixtape assembled for a user.
+ */
+data class Mixtape(
+    val userId: Long,
+    val items: List<Long>,
+    val weekStart: Instant,
+)

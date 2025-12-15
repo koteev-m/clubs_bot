@@ -43,3 +43,31 @@ interface MusicPlaylistRepository {
 
     suspend fun lastUpdatedAt(): Instant?
 }
+
+/** Repository for music likes. */
+interface MusicLikesRepository {
+    /**
+     * Places like [userId] → [itemId]. Returns true when the like is created, false when it already exists.
+     */
+    suspend fun like(userId: Long, itemId: Long, now: Instant): Boolean
+
+    /**
+     * Removes like [userId] → [itemId]. Returns true if a like was deleted, false if nothing changed.
+     */
+    suspend fun unlike(userId: Long, itemId: Long): Boolean
+
+    /**
+     * Returns likes of the given user in the inclusive range [since; now].
+     */
+    suspend fun findUserLikesSince(userId: Long, since: Instant): List<Like>
+
+    /**
+     * Returns likes of all users in the inclusive range [since; now].
+     */
+    suspend fun findAllLikesSince(since: Instant): List<Like>
+
+    /**
+     * Returns a specific like if present.
+     */
+    suspend fun find(userId: Long, itemId: Long): Like?
+}
