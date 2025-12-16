@@ -31,6 +31,7 @@ data class MusicItemView(
     val coverUrl: String?,
     val tags: List<String>?,
     val publishedAt: Instant?,
+    val isTrackOfNight: Boolean = false,
 )
 
 /** Request to create playlist. */
@@ -80,4 +81,11 @@ data class Mixtape(
     val userId: Long,
     val items: List<Long>,
     val weekStart: Instant,
+)
+
+data class TrackOfNight(
+    val setId: Long,
+    val trackId: Long,
+    val markedBy: Long,
+    val markedAt: Instant,
 )

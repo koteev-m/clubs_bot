@@ -17,6 +17,8 @@ import com.example.bot.music.MusicService
 import com.example.bot.music.PlaylistCreate
 import com.example.bot.music.PlaylistFullView
 import com.example.bot.music.PlaylistView
+import com.example.bot.music.TrackOfNight
+import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.music.UserId
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
@@ -195,7 +197,13 @@ class MusicLikesRoutesTest {
                 mixtapeService
                     ?: MixtapeService(
                         likesRepository = emptyLikesRepository,
-                        musicService = MusicService(FakeItemRepo(), FakePlaylistRepo(), clock = clock),
+                        musicService =
+                            MusicService(
+                                itemsRepo = FakeItemRepo(),
+                                playlistsRepo = FakePlaylistRepo(),
+                                clock = clock,
+                                trackOfNightRepository = EmptyTrackOfNightRepository(),
+                            ),
                         clock = clock,
                     )
             musicLikesRoutes(
@@ -272,6 +280,23 @@ class MusicLikesRoutesTest {
         override suspend fun itemsCount(playlistIds: Collection<Long>): Map<Long, Int> = emptyMap()
         override suspend fun getFull(id: Long): PlaylistFullView? = null
         override suspend fun lastUpdatedAt(): Instant? = null
+    }
+
+    private class EmptyTrackOfNightRepository : TrackOfNightRepository {
+        override suspend fun setTrackOfNight(
+            setId: Long,
+            trackId: Long,
+            actorId: Long,
+            markedAt: Instant,
+        ): TrackOfNight = throw UnsupportedOperationException()
+
+        override suspend fun currentForSet(setId: Long): TrackOfNight? = null
+
+        override suspend fun currentTracksForSets(setIds: Collection<Long>): Map<Long, Long> = emptyMap()
+
+        override suspend fun lastUpdatedAt(): Instant? = null
+
+        override suspend fun currentGlobal(): TrackOfNight? = null
     }
 
     private fun relaxedAuditRepository(): AuditLogRepository = io.mockk.mockk(relaxed = true)

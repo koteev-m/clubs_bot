@@ -71,3 +71,28 @@ interface MusicLikesRepository {
      */
     suspend fun find(userId: Long, itemId: Long): Like?
 }
+
+interface TrackOfNightRepository {
+    /**
+     * Sets track of night for [setId]. The operation is idempotent for the same track within the set.
+     * Returns the actual state after the operation.
+     */
+    suspend fun setTrackOfNight(
+        setId: Long,
+        trackId: Long,
+        actorId: Long,
+        markedAt: Instant,
+    ): TrackOfNight
+
+    /** Current track of night for the given [setId] if present. */
+    suspend fun currentForSet(setId: Long): TrackOfNight?
+
+    /** Current track of night ids for provided [setIds]. */
+    suspend fun currentTracksForSets(setIds: Collection<Long>): Map<Long, Long>
+
+    /** Latest update timestamp for any track of night. */
+    suspend fun lastUpdatedAt(): Instant?
+
+    /** Latest track of night across all sets if available. */
+    suspend fun currentGlobal(): TrackOfNight?
+}

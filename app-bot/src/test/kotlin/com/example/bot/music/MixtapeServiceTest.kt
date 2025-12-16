@@ -8,6 +8,8 @@ import com.example.bot.music.MusicSource
 import com.example.bot.music.PlaylistCreate
 import com.example.bot.music.PlaylistFullView
 import com.example.bot.music.PlaylistView
+import com.example.bot.music.TrackOfNight
+import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.music.UserId
 import java.time.Clock
 import java.time.Instant
@@ -104,6 +106,7 @@ class MixtapeServiceTest {
                 itemsRepo = FakeMusicItemRepository(items, updatedAt = now),
                 playlistsRepo = FakeMusicPlaylistRepository(updatedAt = now),
                 clock = clock,
+                trackOfNightRepository = EmptyTrackOfNightRepository(),
             )
         return MixtapeService(likesRepository, musicService, clock)
     }
@@ -180,5 +183,22 @@ class MixtapeServiceTest {
         override suspend fun getFull(id: Long): PlaylistFullView? = null
 
         override suspend fun lastUpdatedAt(): Instant? = updatedAt
+    }
+
+    private class EmptyTrackOfNightRepository : TrackOfNightRepository {
+        override suspend fun setTrackOfNight(
+            setId: Long,
+            trackId: Long,
+            actorId: Long,
+            markedAt: Instant,
+        ): TrackOfNight = throw UnsupportedOperationException()
+
+        override suspend fun currentForSet(setId: Long): TrackOfNight? = null
+
+        override suspend fun currentTracksForSets(setIds: Collection<Long>): Map<Long, Long> = emptyMap()
+
+        override suspend fun lastUpdatedAt(): Instant? = null
+
+        override suspend fun currentGlobal(): TrackOfNight? = null
     }
 }

@@ -164,6 +164,48 @@ validation errors so clients can surface them consistently.
   (текущее время). Все ответы для этих маршрутов устанавливают `Cache-Control: no-store`, `Vary: X-Telegram-Init-Data` и
   `ETag`. При совпадении `If-None-Match` сервер возвращает `304 Not Modified` без тела, но с теми же заголовками.
 
+### Track of night (D2)
+
+- `POST /api/music/sets/{setId}/track-of-night` — помечает трек как «трек ночи» внутри конкретного сета/плейлиста.
+  - RBAC: роли уровня DJ/админа — `OWNER`, `GLOBAL_ADMIN`, `HEAD_MANAGER`, `CLUB_ADMIN`, `MANAGER`. Гости/промоутеры не имеют доступа.
+  - Тело запроса: `{ trackId }` (обязательное поле, `trackId > 0`).
+  - Идемпотентность:
+    - Повторный вызов с тем же `trackId` для того же `setId` не меняет `markedAt` и не пробивает ETag.
+    - Вызов с другим `trackId` для того же `setId` заменяет предыдущий «трек ночи».
+  - Проверка владения:
+    - Если у сета/плейлиста есть `clubId`, пользователь должен иметь доступ к этому клубу (через RBAC), иначе `403 forbidden`.
+    - Глобальные роли (`OWNER`, `GLOBAL_ADMIN`) могут работать с любым клубом.
+  - Ответ `200 OK`:
+    - `{ setId, trackId, isTrackOfNight: true, markedAt }`, где `markedAt` — ISO-строка в UTC.
+  - Заголовки:
+    - `Cache-Control: no-store`
+    - `Vary: X-Telegram-Init-Data`
+  - Ошибки:
+    - `400 { "error": "invalid_set_id" }` — нечисловой или `<= 0` `setId`.
+    - `400 { "error": "invalid_track_id" }` — `trackId` отсутствует или `<= 0`.
+    - `400 { "error": "track_not_in_set" }` — указанный `trackId` не входит в сет.
+    - `400 { "error": "invalid_json" }` — повреждённое тело.
+    - `403 { "error": "forbidden" }` — сет принадлежит чужому клубу и у пользователя нет нужной роли/доступа.
+    - `404 { "error": "not_found" }` — сет/плейлист не найден.
+
+- `GET /api/music/items` — публичный музыкальный фид.
+  - Ответ `200 OK` — JSON-массив треков `[MusicItemDto]` без обёртки:
+    `[{ id, title, artist, durationSec, coverUrl, isTrackOfNight }, ...]`.
+  - ETag для этого ресурса отдаётся в заголовке `ETag`; клиенты могут использовать `If-None-Match` для условных запросов.
+    При совпадении ETag сервер возвращает `304 Not Modified` без тела.
+  - Каждый элемент имеет структуру `{ id, title, artist, durationSec, coverUrl, isTrackOfNight }`:
+    - `isTrackOfNight` — булевый флаг, отмечает текущий «трек ночи» (если он задан глобально). В обычном случае либо все элементы
+      имеют `isTrackOfNight=false`, либо ровно один трек помечен `true`.
+
+- `GET /api/music/playlists/{id}` — детали сета/плейлиста.
+  - Возвращает метаданные плейлиста и массив `items`, где у каждого трека есть поле `isTrackOfNight`:
+    - `true` только для трека, помеченного как «трек ночи» для этого сета (если такой есть).
+    - `false` для всех остальных треков.
+
+- Кеширование фида и плейлистов учитывает «трек ночи»: расчёт `ETag` для `GET /api/music/items` и `GET /api/music/playlists/{id}`
+  включает время последнего обновления `TrackOfNightRepository`, поэтому смена трека ночи выдаёт новый `ETag`, а повторное
+  помечание того же трека — нет.
+
 ### Promoter API (B1)
 
 **Statuses and timeline**

@@ -9,8 +9,10 @@ import com.example.bot.clubs.EventsRepository
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.metrics.UiWaitlistMetrics
 import com.example.bot.music.MusicLikesRepository
+import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.MusicService
 import com.example.bot.music.MixtapeService
+import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.configureLoggingAndRequestId
@@ -52,6 +54,7 @@ import com.example.bot.routes.promoterInvitesRoutes
 import com.example.bot.routes.promoterQuotasAdminRoutes
 import com.example.bot.routes.promoterRatingRoutes
 import com.example.bot.routes.securedBookingRoutes
+import com.example.bot.routes.trackOfNightRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
@@ -142,6 +145,8 @@ fun Application.module() {
     val musicService by inject<MusicService>()
     val musicLikesRepository by inject<MusicLikesRepository>()
     val mixtapeService by inject<MixtapeService>()
+    val musicPlaylistRepository by inject<MusicPlaylistRepository>()
+    val trackOfNightRepository by inject<TrackOfNightRepository>()
     val waitlistRepository by inject<WaitlistRepository>()
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
@@ -187,6 +192,11 @@ fun Application.module() {
     musicLikesRoutes(
         likesRepository = musicLikesRepository,
         mixtapeService = mixtapeService,
+        clock = appClock,
+    )
+    trackOfNightRoutes(
+        trackOfNightRepository = trackOfNightRepository,
+        playlistsRepository = musicPlaylistRepository,
         clock = appClock,
     )
     guestListInviteRoutes(repository = guestListRepository)
