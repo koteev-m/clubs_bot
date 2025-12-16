@@ -43,6 +43,19 @@ SHA-256 base64url hash of the geometry JSON. These immutable assets return `Cach
 immutable`, `ETag: {fingerprint}` and intentionally omit `Vary` to stay CDN-friendly; new geometry produces a new fingerprint
 and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) and invalid inputs respond with 404.
 
+### Admin tables (E1)
+
+- `GET /api/admin/tables?clubId=` — список правил столов для клуба.
+- `POST /api/admin/tables?clubId=` — создание правил столика.
+- `PUT /api/admin/tables?clubId=` — обновление правил столика по `id` в теле запроса.
+
+Роли: OWNER, GLOBAL_ADMIN, HEAD_MANAGER, CLUB_ADMIN (CLUB_ADMIN только в рамках clubIds из RBAC-контекста). Все ответы содержат
+`Cache-Control: no-store` и `Vary: X-Telegram-Init-Data` и требуют mini-app авторизации.
+
+Тело запросов/ответов содержит поля `label`, `minDeposit`, `capacity`, `zone`, `arrivalWindow` (формат `HH:mm-HH:mm`),
+`mysteryEligible`. Поле `zone` соответствует `Zone.id` из layout, а не произвольному названию. Эти значения используются
+layout/booking, поэтому изменения через Admin API сразу видны в схеме и логике бронирования.
+
 ### Booking API (A3/A4)
 
 - `POST /api/clubs/{clubId}/bookings/hold` — body `{ tableId, eventId, guestCount }`, requires `Idempotency-Key` and

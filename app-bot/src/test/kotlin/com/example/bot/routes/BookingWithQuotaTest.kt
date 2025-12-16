@@ -222,11 +222,12 @@ class BookingWithQuotaTest {
                         statusOverrides = emptyMap(),
                     ),
                 ),
-            updatedAt = now,
+            baseUpdatedAt = now,
             eventUpdatedAt = mapOf(eventId to now),
+            clock = clock,
         )
     }
- }
+}
 
 private suspend fun io.ktor.client.statement.HttpResponse.bodyAsJson(): JsonObject =
     Json.parseToJsonElement(bodyAsText()).jsonObject

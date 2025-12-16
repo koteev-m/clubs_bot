@@ -8,6 +8,7 @@ import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
 import com.example.bot.layout.Zone
+import com.example.bot.layout.toRangeString
 import com.example.bot.metrics.RouteCacheMetrics
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.ContentType
@@ -56,6 +57,10 @@ private data class TableDto(
     val label: String,
     val capacity: Int,
     val minimumTier: String,
+    val minDeposit: Long,
+    val zone: String?,
+    val arrivalWindow: String?,
+    val mysteryEligible: Boolean,
     val status: TableStatusDto,
 )
 
@@ -173,6 +178,10 @@ private fun Table.toDto(): TableDto =
         label = label,
         capacity = capacity,
         minimumTier = minimumTier,
+        minDeposit = minDeposit,
+        zone = zone,
+        arrivalWindow = arrivalWindow?.toRangeString(),
+        mysteryEligible = mysteryEligible,
         status = status.toDto(),
     )
 

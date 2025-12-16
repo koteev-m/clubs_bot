@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS layout_tables (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    club_id BIGINT NOT NULL,
+    label VARCHAR(255) NOT NULL,
+    zone_id VARCHAR(64) NOT NULL,
+    minimum_tier VARCHAR(64) NOT NULL,
+    min_deposit BIGINT NOT NULL DEFAULT 0,
+    capacity INT NOT NULL DEFAULT 0,
+    zone VARCHAR(64),
+    arrival_window VARCHAR(32),
+    mystery_eligible BOOLEAN NOT NULL DEFAULT FALSE
+);

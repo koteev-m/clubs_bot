@@ -584,6 +584,7 @@ class BookingA3RoutesTest {
                             geometryJson = InMemoryLayoutRepository.DEFAULT_GEOMETRY_JSON,
                         ),
                     ),
+                clock = clock,
             )
         val events: EventsRepository =
             InMemoryEventsRepository(

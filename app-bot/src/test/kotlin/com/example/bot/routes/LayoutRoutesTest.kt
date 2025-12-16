@@ -83,8 +83,9 @@ class LayoutRoutesTest {
                         statusOverrides = statusOverrides,
                     ),
                 ),
-            updatedAt = updatedAt,
+            baseUpdatedAt = updatedAt,
             eventUpdatedAt = eventWatermarks,
+            clock = clock,
         )
     }
 
@@ -334,7 +335,7 @@ class LayoutRoutesTest {
     fun `layout api works without eventId and uses base watermark`() {
         var etagFirst: String? = null
         testApplication {
-            val repo = repository(eventWatermarks = emptyMap(), updatedAt = clock.instant())
+        val repo = repository(eventWatermarks = emptyMap(), updatedAt = clock.instant())
             applicationDev {
                 installLayoutRoutes(repo)
             }
@@ -347,7 +348,7 @@ class LayoutRoutesTest {
 
         var etagSecond: String? = null
         testApplication {
-            val repo = repository(eventWatermarks = emptyMap(), updatedAt = clock.instant().plusSeconds(86_400))
+        val repo = repository(eventWatermarks = emptyMap(), updatedAt = clock.instant().plusSeconds(86_400))
             applicationDev {
                 installLayoutRoutes(repo)
             }
