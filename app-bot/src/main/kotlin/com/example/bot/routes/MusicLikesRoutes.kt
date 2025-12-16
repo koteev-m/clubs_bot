@@ -2,6 +2,7 @@ package com.example.bot.routes
 
 import com.example.bot.booking.a3.CanonJson
 import com.example.bot.data.security.Role
+import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.matchesEtag
 import com.example.bot.music.Mixtape
 import com.example.bot.music.MixtapeService
@@ -28,9 +29,6 @@ import java.time.Instant
 import kotlinx.serialization.Serializable
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-
-private const val VARY_HEADER = "X-Telegram-Init-Data"
-private const val NO_STORE = "no-store"
 
 @Serializable
 private data class LikeResponse(
@@ -60,7 +58,7 @@ fun Application.musicLikesRoutes(
 
     routing {
         route("/api/music") {
-            intercept(ApplicationCallPipeline.Setup) { call.applyPersonalHeaders() }
+            intercept(ApplicationCallPipeline.Setup) { call.ensureMiniAppNoStoreHeaders() }
             withMiniAppAuth { botTokenProvider() }
 
             authorize(
@@ -110,7 +108,7 @@ fun Application.musicLikesRoutes(
         }
 
         route("/api/me") {
-            intercept(ApplicationCallPipeline.Setup) { call.applyPersonalHeaders() }
+            intercept(ApplicationCallPipeline.Setup) { call.ensureMiniAppNoStoreHeaders() }
             withMiniAppAuth { botTokenProvider() }
             authorize(
                 Role.OWNER,
@@ -144,16 +142,6 @@ fun Application.musicLikesRoutes(
                 }
             }
         }
-    }
-}
-
-private fun ApplicationCall.applyPersonalHeaders() {
-    val headers = response.headers
-    if (headers[HttpHeaders.CacheControl] == null) {
-        headers.append(HttpHeaders.CacheControl, NO_STORE)
-    }
-    if (headers[HttpHeaders.Vary] == null) {
-        headers.append(HttpHeaders.Vary, VARY_HEADER)
     }
 }
 

@@ -202,6 +202,31 @@ class TrackOfNightTest {
         }
 
     @Test
+    fun `global admin can mark track of night for foreign club`() =
+        withTrackOfNightApp(
+            roles = setOf(Role.GLOBAL_ADMIN),
+            clubIds = emptySet(),
+            playlists = mapOf(2L to playlist(clubId = 2)),
+        ) { repo, service ->
+            val response =
+                client.post("/api/music/sets/2/track-of-night") {
+                    header("X-Telegram-Init-Data", "init")
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"trackId":10}""")
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            response.assertNoStoreHeaders()
+
+            val stored = repo.currentForSet(2)
+            assertNotNull(stored)
+            assertEquals(10L, stored.trackId)
+
+            val feed = service.listItems(limit = 10).second
+            assertTrue(feed.first { it.id == 10L }.isTrackOfNight)
+        }
+
+    @Test
     fun `invalid set id`() =
         withTrackOfNightApp() { _, _ ->
             val response = client.post("/api/music/sets/foo/track-of-night") { header("X-Telegram-Init-Data", "init") }

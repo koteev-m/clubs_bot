@@ -31,7 +31,6 @@ data class MusicItemView(
     val coverUrl: String?,
     val tags: List<String>?,
     val publishedAt: Instant?,
-    val isTrackOfNight: Boolean = false,
 )
 
 /** Request to create playlist. */
