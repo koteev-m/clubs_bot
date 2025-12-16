@@ -406,6 +406,7 @@ class MeBookingsRoutesTest {
                             geometryJson = InMemoryLayoutRepository.DEFAULT_GEOMETRY_JSON,
                         ),
                     ),
+                clock = clock,
             )
         val clubs = InMemoryClubsRepository(listOf(Club(id = 1, city = "msc", name = "Club", genres = emptyList(), tags = emptyList(), logoUrl = null)))
         val events: EventsRepository =

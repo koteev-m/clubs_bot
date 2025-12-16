@@ -1,6 +1,7 @@
 package com.example.bot.di
 
 import com.example.bot.booking.a3.BookingState
+import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.BookingAwareLayoutRepository
 import com.example.bot.layout.InMemoryLayoutRepository
 import com.example.bot.layout.LayoutRepository
@@ -11,12 +12,14 @@ import com.example.bot.promoter.quotas.PromoterQuotaService
 import io.micrometer.core.instrument.Metrics
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 
 val layoutModule =
     module {
         single<LayoutRepository>(named("baseLayout")) {
+            val clock = runCatching { get<Clock>() }.getOrElse { Clock.systemUTC() }
             val zones =
                 listOf(
                     Zone(id = "vip", name = "VIP", tags = listOf("vip"), order = 1),
@@ -58,10 +61,13 @@ val layoutModule =
                             statusOverrides = statusOverrides,
                         ),
                     ),
-                updatedAt = Instant.parse("2024-05-01T00:00:00Z"),
+                baseUpdatedAt = Instant.parse("2024-05-01T00:00:00Z"),
                 eventUpdatedAt = eventWatermarks,
+                clock = clock,
             )
         }
+
+        single<AdminTablesRepository> { get<LayoutRepository>(named("baseLayout")) as AdminTablesRepository }
 
         single {
             val holdTtl = envDuration("BOOKING_HOLD_TTL", Duration.ofMinutes(10))

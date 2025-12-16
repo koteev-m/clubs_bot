@@ -242,6 +242,7 @@ class HostEntranceRoutesTest {
                         geometryJson = InMemoryLayoutRepository.DEFAULT_GEOMETRY_JSON,
                     ),
                 ),
+                clock = clock,
             )
         val bookingState = BookingState(layout, eventsRepository, clock = clock)
 
