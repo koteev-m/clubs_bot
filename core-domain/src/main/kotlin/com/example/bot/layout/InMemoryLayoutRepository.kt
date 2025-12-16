@@ -90,6 +90,16 @@ class InMemoryLayoutRepository(
         return updated
     }
 
+    override suspend fun delete(clubId: Long, id: Long): Boolean {
+        val seed = layoutsByClub[clubId] ?: return false
+        val updatedTables = seed.tables.filterNot { it.id == id }
+        if (updatedTables.size == seed.tables.size) return false
+
+        layoutsByClub[clubId] = seed.copy(tables = updatedTables)
+        touch()
+        return true
+    }
+
     override suspend fun lastUpdatedAt(clubId: Long): Instant? = updatedAt
 
     private fun touch() {

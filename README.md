@@ -45,16 +45,21 @@ and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) a
 
 ### Admin tables (E1)
 
-- `GET /api/admin/tables?clubId=` — список правил столов для клуба.
+- `GET /api/admin/tables?clubId=&page=&size=` — список правил столов для клуба.
 - `POST /api/admin/tables?clubId=` — создание правил столика.
 - `PUT /api/admin/tables?clubId=` — обновление правил столика по `id` в теле запроса.
+- `DELETE /api/admin/tables/{id}?clubId=` — удаление правила столика.
 
 Роли: OWNER, GLOBAL_ADMIN, HEAD_MANAGER, CLUB_ADMIN (CLUB_ADMIN только в рамках clubIds из RBAC-контекста). Все ответы содержат
 `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data` и требуют mini-app авторизации.
 
-Тело запросов/ответов содержит поля `label`, `minDeposit`, `capacity`, `zone`, `arrivalWindow` (формат `HH:mm-HH:mm`),
-`mysteryEligible`. Поле `zone` соответствует `Zone.id` из layout, а не произвольному названию. Эти значения используются
-layout/booking, поэтому изменения через Admin API сразу видны в схеме и логике бронирования.
+`page` — номер страницы (по умолчанию 0, `>=0`), `size` — размер страницы (`1..200`, по умолчанию 50). Ответ — JSON-массив
+объектов в детерминированном порядке (сначала по `zone`, затем по `id`), нарезанный по `page/size`.
+
+Тело запросов/ответов содержит поля `label`, `minDeposit`, `capacity`, `zone`, `zoneName`, `arrivalWindow` (формат
+`HH:mm-HH:mm`), `mysteryEligible`. Поле `zone` соответствует `Zone.id` из layout, а `zoneName` — человекочитаемому имени зоны
+(`Zone.name`). Эти значения используются layout/booking, поэтому изменения через Admin API сразу видны в схеме и логике
+бронирования.
 
 ### Booking API (A3/A4)
 

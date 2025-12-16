@@ -21,6 +21,7 @@ import io.ktor.server.application.call
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
@@ -64,6 +65,8 @@ private data class AdminTableResponse(
     val capacity: Int,
     /** Zone identifier (Zone.id) from the layout. */
     val zone: String?,
+    /** Человеко-понятное имя зоны (Zone.name) для UI, может быть null если зона не найдена. */
+    val zoneName: String?,
     val arrivalWindow: String?,
     val mysteryEligible: Boolean,
 )
@@ -87,8 +90,15 @@ fun Application.adminTablesRoutes(
                             return@get call.respondForbidden()
                         }
 
+                        val page = call.requirePageOrNull() ?: return@get
+                        val size = call.requireSizeOrNull() ?: return@get
+
+                        val zones = adminTablesRepository.listZonesForClub(clubId)
                         val tables = adminTablesRepository.listForClub(clubId)
-                        call.respond(HttpStatusCode.OK, tables.map { it.toResponse(clubId) })
+                        val sorted = tables.sortedWith(compareBy<com.example.bot.layout.Table> { it.zoneId }.thenBy { it.id })
+                        val offset = page * size
+                        val pageItems = if (offset >= sorted.size) emptyList() else sorted.drop(offset).take(size)
+                        call.respond(HttpStatusCode.OK, pageItems.map { it.toResponse(clubId, zones) })
                     }
 
                     post {
@@ -125,11 +135,11 @@ fun Application.adminTablesRoutes(
                                     capacity = payload.capacity,
                                     zone = zone,
                                     arrivalWindow = arrivalWindow,
-                                    mysteryEligible = payload.mysteryEligible,
-                                ),
-                            )
+                                mysteryEligible = payload.mysteryEligible,
+                            ),
+                        )
                         logger.info("admin.tables.create club_id={} table_id={} by={}", clubId, created.id, call.rbacContext().user.id)
-                        call.respond(HttpStatusCode.Created, created.toResponse(clubId))
+                        call.respond(HttpStatusCode.Created, created.toResponse(clubId, zones))
                     }
 
                     put {
@@ -172,7 +182,26 @@ fun Application.adminTablesRoutes(
                             )
                                 ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         logger.info("admin.tables.update club_id={} table_id={} by={}", clubId, updated.id, call.rbacContext().user.id)
-                        call.respond(HttpStatusCode.OK, updated.toResponse(clubId))
+                        call.respond(HttpStatusCode.OK, updated.toResponse(clubId, zones))
+                    }
+
+                    delete("/{id}") {
+                        val clubId = call.requireClubId() ?: return@delete
+                        if (!call.isClubAllowed(clubId)) {
+                            return@delete call.respondForbidden()
+                        }
+
+                        val id = call.parameters["id"]?.toLongOrNull()
+                        if (id == null || id <= 0) {
+                            return@delete call.respondValidationErrors(mapOf("id" to "must_be_positive"))
+                        }
+
+                        val deleted = adminTablesRepository.delete(clubId, id)
+                        if (!deleted) {
+                            return@delete call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                        }
+
+                        call.respond(HttpStatusCode.NoContent, Unit)
                     }
                 }
             }
@@ -228,20 +257,48 @@ private suspend fun ApplicationCall.requireClubId(): Long? {
     return clubId
 }
 
+private suspend fun ApplicationCall.requirePageOrNull(): Int? {
+    val raw = request.queryParameters["page"] ?: return 0
+    val page = raw.toIntOrNull()
+    if (page == null || page < 0) {
+        respondValidationErrors(mapOf("page" to "must_be_non_negative"))
+        return null
+    }
+    return page
+}
+
+private suspend fun ApplicationCall.requireSizeOrNull(): Int? {
+    val raw = request.queryParameters["size"] ?: return 50
+    val size = raw.toIntOrNull()
+    if (size == null || size !in 1..200) {
+        respondValidationErrors(mapOf("size" to "must_be_between_1_200"))
+        return null
+    }
+    return size
+}
+
 private fun ApplicationCall.isClubAllowed(clubId: Long): Boolean {
     val context = rbacContext()
     val elevated = context.roles.any { it in setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER) }
     return elevated || clubId in context.clubIds
 }
 
-private fun com.example.bot.layout.Table.toResponse(clubId: Long): AdminTableResponse =
-    AdminTableResponse(
+private fun com.example.bot.layout.Table.toResponse(
+    clubId: Long,
+    zones: List<com.example.bot.layout.Zone>,
+): AdminTableResponse {
+    val effectiveZoneId = zone ?: zoneId
+    val zoneName = zones.firstOrNull { it.id == effectiveZoneId }?.name
+
+    return AdminTableResponse(
         id = id,
         clubId = clubId,
         label = label,
         minDeposit = minDeposit,
         capacity = capacity,
-        zone = zone,
+        zone = effectiveZoneId,
+        zoneName = zoneName,
         arrivalWindow = arrivalWindow?.toRangeString(),
         mysteryEligible = mysteryEligible,
     )
+}
