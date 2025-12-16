@@ -32,6 +32,8 @@ interface AdminTablesRepository {
 
     suspend fun update(request: AdminTableUpdate): Table?
 
+    suspend fun delete(clubId: Long, id: Long): Boolean
+
     /**
      * Watermark for admin table modifications for the given club.
      * Should advance whenever tables are created or updated so layout caches can react to changes.

@@ -22,6 +22,7 @@ import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -102,6 +103,7 @@ class AdminTablesRoutesTest {
         assertEquals(4, createdPayload["capacity"]!!.jsonPrimitive.long)
         assertEquals(1000, createdPayload["minDeposit"]!!.jsonPrimitive.long)
         assertEquals("vip", createdPayload["zone"]!!.jsonPrimitive.content)
+        assertEquals("VIP", createdPayload["zoneName"]!!.jsonPrimitive.content)
         assertEquals("22:00-23:00", createdPayload["arrivalWindow"]!!.jsonPrimitive.content)
         assertTrue(createdPayload["mysteryEligible"]!!.jsonPrimitive.boolean)
         assertTrue(repo.listForClub(1).isNotEmpty())
@@ -115,7 +117,165 @@ class AdminTablesRoutesTest {
         assertEquals("22:00-23:00", first["arrivalWindow"]!!.jsonPrimitive.content)
         assertEquals(1000, first["minDeposit"]!!.jsonPrimitive.long)
         assertEquals("vip", first["zone"]!!.jsonPrimitive.content)
+        assertEquals("VIP", first["zoneName"]!!.jsonPrimitive.content)
         assertTrue(first["mysteryEligible"]!!.jsonPrimitive.content.toBoolean())
+    }
+
+    @Test
+    fun `in-memory repo assigns default zone when missing`() = withInMemoryApp { _ ->
+        val create =
+            client.post("/api/admin/tables?clubId=1") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody("""{"label":"Table 1","capacity":4}""")
+            }
+
+        assertEquals(HttpStatusCode.Created, create.status)
+        val created = json.parseToJsonElement(create.bodyAsText()).jsonObject
+        assertEquals("vip", created["zone"]!!.jsonPrimitive.content)
+        assertEquals("VIP", created["zoneName"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `delete removes table`() = withApp() { repo, _ ->
+        val table =
+            repo.create(
+                AdminTableCreate(
+                    clubId = 1,
+                    label = "A",
+                    minDeposit = 0,
+                    capacity = 2,
+                    zone = "vip",
+                    arrivalWindow = null,
+                    mysteryEligible = false,
+                ),
+            )
+        assertEquals(1, repo.listForClub(1).size)
+
+        val response =
+            client.delete("/api/admin/tables/${table.id}?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.NoContent, response.status)
+        response.assertNoStoreHeaders()
+        assertTrue(repo.listForClub(1).isEmpty())
+    }
+
+    @Test
+    fun `delete invalid id`() = withApp() { _, _ ->
+        val nonNumeric = client.delete("/api/admin/tables/foo?clubId=1") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.BadRequest, nonNumeric.status)
+        assertEquals("must_be_positive", nonNumeric.bodyAsText().jsonError("id"))
+
+        val zero = client.delete("/api/admin/tables/0?clubId=1") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.BadRequest, zero.status)
+        assertEquals("must_be_positive", zero.bodyAsText().jsonError("id"))
+    }
+
+    @Test
+    fun `delete not found`() = withApp() { _, _ ->
+        val response = client.delete("/api/admin/tables/999?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+    }
+
+    @Test
+    fun `delete respects rbac`() {
+        withApp(roles = emptySet()) { _, _ ->
+            val response = client.delete("/api/admin/tables/1?clubId=1") { header("X-Telegram-Init-Data", "init") }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+        }
+
+        withApp(clubIds = setOf(1)) { _, _ ->
+            val response = client.delete("/api/admin/tables/1?clubId=2") { header("X-Telegram-Init-Data", "init") }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+        }
+    }
+
+    @Test
+    fun `get tables supports pagination`() = withApp() { repo, _ ->
+        repeat(5) { idx ->
+            repo.create(
+                AdminTableCreate(
+                    clubId = 1,
+                    label = "T${idx + 1}",
+                    minDeposit = 0,
+                    capacity = 2,
+                    zone = "vip",
+                    arrivalWindow = null,
+                    mysteryEligible = false,
+                ),
+            )
+        }
+
+        val page0 = client.get("/api/admin/tables?clubId=1&page=0&size=2") { header("X-Telegram-Init-Data", "init") }
+        val page1 = client.get("/api/admin/tables?clubId=1&page=1&size=2") { header("X-Telegram-Init-Data", "init") }
+
+        val items0 = json.parseToJsonElement(page0.bodyAsText()).jsonArray
+        val items1 = json.parseToJsonElement(page1.bodyAsText()).jsonArray
+
+        assertEquals(2, items0.size)
+        assertEquals(2, items1.size)
+        assertNotEquals(items0.first().jsonObject["id"], items1.first().jsonObject["id"])
+    }
+
+    @Test
+    fun `get tables invalid page and size`() = withApp() { _, _ ->
+        val negativePage = client.get("/api/admin/tables?clubId=1&page=-1") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.BadRequest, negativePage.status)
+        assertEquals("must_be_non_negative", negativePage.bodyAsText().jsonError("page"))
+
+        val zeroSize = client.get("/api/admin/tables?clubId=1&size=0") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.BadRequest, zeroSize.status)
+        assertEquals("must_be_between_1_200", zeroSize.bodyAsText().jsonError("size"))
+
+        val hugeSize = client.get("/api/admin/tables?clubId=1&size=1000") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.BadRequest, hugeSize.status)
+        assertEquals("must_be_between_1_200", hugeSize.bodyAsText().jsonError("size"))
+    }
+
+    @Test
+    fun `get tables with large page returns empty list`() = withApp() { repo, _ ->
+        repo.create(
+            AdminTableCreate(
+                clubId = 1,
+                label = "A",
+                minDeposit = 0,
+                capacity = 2,
+                zone = "vip",
+                arrivalWindow = null,
+                mysteryEligible = false,
+            ),
+        )
+
+        val response = client.get("/api/admin/tables?clubId=1&page=10&size=5") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(json.parseToJsonElement(response.bodyAsText()).jsonArray.isEmpty())
+    }
+
+    @Test
+    fun `layout etag changes after delete`() = withInMemoryApp(roles = setOf(Role.GLOBAL_ADMIN)) { repo ->
+        val table =
+            repo.create(
+                AdminTableCreate(
+                    clubId = 1,
+                    label = "A",
+                    minDeposit = 0,
+                    capacity = 2,
+                    zone = "vip",
+                    arrivalWindow = null,
+                    mysteryEligible = false,
+                ),
+            )
+
+        val initialLayout = client.get("/api/clubs/1/layout") { header("X-Telegram-Init-Data", "init") }
+        val initialEtag = initialLayout.headers[HttpHeaders.ETag]
+
+        client.delete("/api/admin/tables/${table.id}?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        val afterLayout = client.get("/api/clubs/1/layout") { header("X-Telegram-Init-Data", "init") }
+        val afterEtag = afterLayout.headers[HttpHeaders.ETag]
+
+        assertNotEquals(initialEtag, afterEtag)
     }
 
     @Test
@@ -254,25 +414,6 @@ class AdminTablesRoutesTest {
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertEquals("length_1_50", response.bodyAsText().jsonError("zone"))
-    }
-
-    @Test
-    fun `in-memory repo assigns default zone when missing`() = withInMemoryApp { repo ->
-        val create =
-            client.post("/api/admin/tables?clubId=1") {
-                header("X-Telegram-Init-Data", "init")
-                contentType(ContentType.Application.Json)
-                setBody("""{"label":"NoZone","capacity":2}""")
-            }
-
-        assertEquals(HttpStatusCode.Created, create.status)
-        val created = json.parseToJsonElement(create.bodyAsText()).jsonObject
-        assertEquals("vip", created["zone"]!!.jsonPrimitive.content)
-
-        val layout = client.get("/api/clubs/1/layout") { header("X-Telegram-Init-Data", "init") }
-        assertEquals(HttpStatusCode.OK, layout.status)
-        val table = json.parseToJsonElement(layout.bodyAsText()).jsonObject["tables"]!!.jsonArray.first().jsonObject
-        assertEquals("vip", table["zone"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -473,6 +614,14 @@ class AdminTablesRoutesTest {
             list.replaceAll { if (it.id == request.id) updated else it }
             touch()
             return updated
+        }
+
+        override suspend fun delete(clubId: Long, id: Long): Boolean {
+            val list = tablesByClub[clubId] ?: return false
+            val removed = list.removeIf { it.id == id }
+            if (!removed) return false
+            touch()
+            return true
         }
 
         override suspend fun lastUpdatedAt(clubId: Long): Instant? = updatedAt
