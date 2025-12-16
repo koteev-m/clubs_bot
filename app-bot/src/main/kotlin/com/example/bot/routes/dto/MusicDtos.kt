@@ -11,6 +11,7 @@ data class MusicItemDto(
     val artist: String? = null,
     val durationSec: Int? = null,
     val coverUrl: String? = null,
+    val isTrackOfNight: Boolean = false,
 )
 
 @Serializable

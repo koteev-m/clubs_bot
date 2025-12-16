@@ -3,6 +3,7 @@ package com.example.bot.music
 import com.example.bot.routes.dto.MusicItemDto
 import com.example.bot.routes.dto.MusicPlaylistDetailsDto
 import com.example.bot.routes.dto.MusicPlaylistDto
+import com.example.bot.music.TrackOfNightRepository
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -12,6 +13,7 @@ class MusicService(
     private val itemsRepo: MusicItemRepository,
     private val playlistsRepo: MusicPlaylistRepository,
     private val clock: Clock,
+    private val trackOfNightRepository: TrackOfNightRepository,
 ) {
     suspend fun listItems(limit: Int = 100): Pair<String, List<MusicItemDto>> {
         val items =
@@ -23,9 +25,12 @@ class MusicService(
                 q = null,
             )
 
+        val trackOfNight = trackOfNightRepository.currentGlobal()
+        val trackOfNightId = trackOfNight?.trackId
+
         val etag =
             etagFor(
-                updatedAt = itemsRepo.lastUpdatedAt(),
+                updatedAt = listOfNotNull(itemsRepo.lastUpdatedAt(), trackOfNightRepository.lastUpdatedAt()).maxOrNull(),
                 count = items.size,
                 seed = "items",
             )
@@ -38,6 +43,7 @@ class MusicService(
                     artist = it.dj,
                     durationSec = it.durationSec,
                     coverUrl = it.coverUrl,
+                    isTrackOfNight = it.id == trackOfNightId,
                 )
             }
 
@@ -71,10 +77,12 @@ class MusicService(
 
     suspend fun getPlaylist(id: Long): Pair<String, MusicPlaylistDetailsDto>? {
         val playlist = playlistsRepo.getFull(id) ?: return null
+        val trackOfNight = trackOfNightRepository.currentForSet(id)
+        val trackOfNightId = trackOfNight?.trackId
 
         val etag =
             etagFor(
-                updatedAt = playlistsRepo.lastUpdatedAt(),
+                updatedAt = listOfNotNull(playlistsRepo.lastUpdatedAt(), trackOfNightRepository.lastUpdatedAt()).maxOrNull(),
                 count = playlist.items.size,
                 seed = "playlist:$id",
             )
@@ -93,6 +101,7 @@ class MusicService(
                             artist = it.dj,
                             durationSec = it.durationSec,
                             coverUrl = it.coverUrl,
+                            isTrackOfNight = it.id == trackOfNightId,
                         )
                     },
             )

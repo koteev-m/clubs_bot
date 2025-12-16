@@ -9,6 +9,8 @@ import com.example.bot.music.MusicSource
 import com.example.bot.music.PlaylistCreate
 import com.example.bot.music.PlaylistFullView
 import com.example.bot.music.PlaylistView
+import com.example.bot.music.TrackOfNight
+import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.music.UserId
 import com.example.bot.testing.applicationDev
 import com.example.bot.testing.withInitData
@@ -87,6 +89,7 @@ class MusicRoutesTest {
             itemsRepo = FakeMusicItemRepository(items, updatedAt),
             playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
             clock = fixedClock,
+            trackOfNightRepository = EmptyTrackOfNightRepository(),
         )
 
     @Test
@@ -235,5 +238,22 @@ class MusicRoutesTest {
         }
 
         override suspend fun lastUpdatedAt(): Instant? = updatedAt
+    }
+
+    private class EmptyTrackOfNightRepository : TrackOfNightRepository {
+        override suspend fun setTrackOfNight(
+            setId: Long,
+            trackId: Long,
+            actorId: Long,
+            markedAt: Instant,
+        ): TrackOfNight = throw UnsupportedOperationException("Not implemented")
+
+        override suspend fun currentForSet(setId: Long): TrackOfNight? = null
+
+        override suspend fun currentTracksForSets(setIds: Collection<Long>): Map<Long, Long> = emptyMap()
+
+        override suspend fun lastUpdatedAt(): Instant? = null
+
+        override suspend fun currentGlobal(): TrackOfNight? = null
     }
 }

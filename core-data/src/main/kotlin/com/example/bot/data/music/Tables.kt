@@ -58,3 +58,16 @@ object MusicLikesTable : Table("music_likes") {
         uniqueIndex("ux_music_likes_user_item", userId, itemId)
     }
 }
+
+object MusicTrackOfNightTable : Table("music_track_of_night") {
+    val setId = long("set_id") references MusicPlaylistsTable.id
+    val trackId = long("track_id") references MusicItemsTable.id
+    val markedBy = long("marked_by").nullable()
+    val markedAt = timestampWithTimeZone("marked_at").defaultExpression(CurrentTimestamp())
+
+    override val primaryKey = PrimaryKey(setId)
+
+    init {
+        index("idx_music_track_of_night_marked_at", false, markedAt)
+    }
+}
