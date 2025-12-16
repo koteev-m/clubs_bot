@@ -1,15 +1,14 @@
 package com.example.bot.routes
 
 import com.example.bot.data.security.Role
+import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
-import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.request.receive
@@ -22,9 +21,6 @@ import java.time.Instant
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 
-private const val VARY_HEADER = "X-Telegram-Init-Data"
-private const val NO_STORE = "no-store"
-
 fun Application.trackOfNightRoutes(
     trackOfNightRepository: TrackOfNightRepository,
     playlistsRepository: MusicPlaylistRepository,
@@ -35,7 +31,7 @@ fun Application.trackOfNightRoutes(
 
     routing {
         route("/api/music") {
-            intercept(ApplicationCallPipeline.Setup) { call.applyNoStoreHeaders() }
+            intercept(ApplicationCallPipeline.Setup) { call.ensureMiniAppNoStoreHeaders() }
             withMiniAppAuth { botTokenProvider() }
 
             authorize(
@@ -109,16 +105,6 @@ fun Application.trackOfNightRoutes(
                 }
             }
         }
-    }
-}
-
-private fun ApplicationCall.applyNoStoreHeaders() {
-    val headers = response.headers
-    if (headers[HttpHeaders.CacheControl] == null) {
-        headers.append(HttpHeaders.CacheControl, NO_STORE)
-    }
-    if (headers[HttpHeaders.Vary] == null) {
-        headers.append(HttpHeaders.Vary, VARY_HEADER)
     }
 }
 
