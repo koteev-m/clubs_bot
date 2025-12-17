@@ -16,5 +16,6 @@ fun appModules(): List<Module> =
         add(refundWorkerModule)
         add(securityModule)
         add(promoterModule)
+        add(ownerModule)
         add(webAppModule)
     }
