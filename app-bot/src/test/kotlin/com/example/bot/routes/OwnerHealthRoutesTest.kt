@@ -51,6 +51,7 @@ class OwnerHealthRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
     private val telegramId = 321L
     private val clock: Clock = Clock.fixed(Instant.parse("2024-05-05T00:00:00Z"), ZoneOffset.UTC)
+    private val byEventLimit = 10
 
     @BeforeTest
     fun setup() {
@@ -118,11 +119,40 @@ class OwnerHealthRoutesTest {
         assertEquals(etag, second.headers[HttpHeaders.ETag])
     }
 
+    @Test
+    fun `tables aggregates include all events and limit byEvent`() =
+        withApp(fixtureFactory = { buildFixtureWithManyEvents() }) { fixture ->
+            val response = client.get("/api/owner/health?clubId=1&period=week&granularity=full") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val tables = payload["tables"]!!.jsonObject
+
+            val expectedEventsCount = fixture.events.size
+            val expectedTotalCapacity = expectedEventsCount * 10
+            val expectedBookedSeats = fixture.events.mapIndexed { index, _ -> (index % 4) + 1 + (index % 5) + 1 }.sum()
+
+            assertEquals(expectedEventsCount, tables["eventsCount"]!!.jsonPrimitive.content.toInt())
+            assertEquals(expectedTotalCapacity, tables["totalTableCapacity"]!!.jsonPrimitive.content.toInt())
+            assertEquals(expectedBookedSeats, tables["bookedSeats"]!!.jsonPrimitive.content.toInt())
+
+            val byEvent = tables["byEvent"]!!.jsonArray
+            val expectedEventIds = fixture.events.sortedBy { it.startUtc }.take(byEventLimit).map { it.id }
+            val returnedEventIds = byEvent.map { it.jsonObject["eventId"]!!.jsonPrimitive.content.toLong() }
+
+            assertTrue(byEvent.size <= byEventLimit)
+            assertEquals(expectedEventIds, returnedEventIds)
+        }
+
     private fun withApp(
         roles: Set<Role> = setOf(Role.OWNER),
+        fixtureFactory: () -> Fixture = { buildFixture() },
         block: suspend ApplicationTestBuilder.(Fixture) -> Unit,
     ) {
-        val fixture = buildFixture()
+        val fixture = fixtureFactory()
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
@@ -205,7 +235,69 @@ class OwnerHealthRoutesTest {
                 clock = clock,
             )
 
-        return Fixture(layoutRepository, guestListRepository, service)
+        return Fixture(layoutRepository, guestListRepository, service, events)
+    }
+
+    private fun buildFixtureWithManyEvents(): Fixture {
+        val events =
+            (1..12).map { index ->
+                val start = Instant.parse("2024-05-01T12:00:00Z").plus(Duration.ofHours(index.toLong()))
+                Event(
+                    id = 200L + index.toLong(),
+                    clubId = 1,
+                    startUtc = start,
+                    endUtc = start.plus(Duration.ofHours(3)),
+                    title = "Event $index",
+                    isSpecial = false,
+                )
+            }
+        val eventsRepository = InMemoryEventsRepository(events)
+        val layoutRepository =
+            InMemoryLayoutRepository(
+                listOf(
+                    InMemoryLayoutRepository.LayoutSeed(
+                        clubId = 1,
+                        zones = listOf(Zone(id = "main", name = "Main", tags = emptyList(), order = 0)),
+                        tables =
+                            listOf(
+                                Table(id = 1, zoneId = "main", label = "T1", capacity = 4, minimumTier = "std", status = TableStatus.FREE),
+                                Table(id = 2, zoneId = "main", label = "T2", capacity = 6, minimumTier = "std", status = TableStatus.FREE),
+                            ),
+                        geometryJson = InMemoryLayoutRepository.DEFAULT_GEOMETRY_JSON,
+                    ),
+                ),
+                clock = clock,
+            )
+
+        val bookingState = BookingState(layoutRepository, eventsRepository, clock = clock)
+        val guestListRepository = InMemoryGuestListRepository(clock)
+
+        runBlockingBookings(bookingState) {
+            events.forEachIndexed { index, event ->
+                val firstCount = (index % 4) + 1
+                val secondCount = (index % 5) + 1
+                val hold = bookingState.hold(userId = 20L + index.toLong(), clubId = 1, tableId = 1L, eventId = event.id, guestCount = firstCount, idempotencyKey = "h${event.id}-1", requestHash = "h${event.id}-1")
+                if (hold is HoldResult.Success) {
+                    bookingState.confirm(userId = 20L + index.toLong(), clubId = 1, bookingId = hold.booking.id, idempotencyKey = "c${event.id}-1", requestHash = "h${event.id}-1")
+                }
+
+                val hold2 = bookingState.hold(userId = 200L + index.toLong(), clubId = 1, tableId = 2L, eventId = event.id, guestCount = secondCount, idempotencyKey = "h${event.id}-2", requestHash = "h${event.id}-2")
+                if (hold2 is HoldResult.Success) {
+                    bookingState.confirm(userId = 200L + index.toLong(), clubId = 1, bookingId = hold2.booking.id, idempotencyKey = "c${event.id}-2", requestHash = "h${event.id}-2")
+                }
+            }
+        }
+
+        val service: OwnerHealthService =
+            OwnerHealthServiceImpl(
+                layoutRepository = layoutRepository,
+                eventsRepository = eventsRepository,
+                bookingState = bookingState,
+                guestListRepository = guestListRepository,
+                clock = clock,
+            )
+
+        return Fixture(layoutRepository, guestListRepository, service, events)
     }
 
     private inline fun runBlockingBookings(state: BookingState, crossinline block: suspend () -> Unit) {
@@ -343,6 +435,7 @@ class OwnerHealthRoutesTest {
         val layoutRepository: InMemoryLayoutRepository,
         val guestListRepository: GuestListRepository,
         val service: OwnerHealthService,
+        val events: List<Event>,
     )
 
     private suspend fun io.ktor.client.statement.HttpResponse.errorCode(): String {
