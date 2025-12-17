@@ -101,6 +101,24 @@ fun Application.adminTablesRoutes(
                         call.respond(HttpStatusCode.OK, pageItems.map { it.toResponse(clubId, zones) })
                     }
 
+                    get("/{id}") {
+                        val clubId = call.requireClubId() ?: return@get
+                        if (!call.isClubAllowed(clubId)) {
+                            return@get call.respondForbidden()
+                        }
+
+                        val id = call.parameters["id"]?.toLongOrNull()
+                        if (id == null || id <= 0) {
+                            return@get call.respondValidationErrors(mapOf("id" to "must_be_positive"))
+                        }
+
+                        val zones = adminTablesRepository.listZonesForClub(clubId)
+                        val table = adminTablesRepository.findById(clubId, id)
+                            ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+
+                        call.respond(HttpStatusCode.OK, table.toResponse(clubId, zones))
+                    }
+
                     post {
                         val clubId = call.requireClubId() ?: return@post
                         if (!call.isClubAllowed(clubId)) {

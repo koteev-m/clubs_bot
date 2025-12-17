@@ -48,6 +48,9 @@ class InMemoryLayoutRepository(
     override suspend fun listZonesForClub(clubId: Long): List<Zone> =
         layoutsByClub[clubId]?.zones ?: emptyList()
 
+    override suspend fun findById(clubId: Long, id: Long): Table? =
+        layoutsByClub[clubId]?.tables?.firstOrNull { it.id == id }
+
     override suspend fun create(request: AdminTableCreate): Table {
         val seed = layoutsByClub[request.clubId] ?: LayoutSeed(request.clubId, emptyList(), emptyList(), DEFAULT_GEOMETRY_JSON)
         val nextId = (seed.tables.maxOfOrNull { it.id } ?: 0L) + 1

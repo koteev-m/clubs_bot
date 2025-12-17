@@ -28,6 +28,8 @@ interface AdminTablesRepository {
 
     suspend fun listZonesForClub(clubId: Long): List<Zone>
 
+    suspend fun findById(clubId: Long, id: Long): Table?
+
     suspend fun create(request: AdminTableCreate): Table
 
     suspend fun update(request: AdminTableUpdate): Table?

@@ -40,6 +40,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneOffset
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -76,6 +77,37 @@ class AdminTablesRoutesTest {
 
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals(0, json.parseToJsonElement(response.bodyAsText()).jsonArray.size)
+        response.assertNoStoreHeaders()
+    }
+
+    @Test
+    fun `get by id returns table`() = withApp() { repo, _ ->
+        val created =
+            repo.create(
+                AdminTableCreate(
+                    clubId = 1,
+                    label = "Table 1",
+                    minDeposit = 1000,
+                    capacity = 4,
+                    zone = "vip",
+                    arrivalWindow = ArrivalWindow(LocalTime.of(22, 0), LocalTime.of(23, 0)),
+                    mysteryEligible = true,
+                ),
+            )
+
+        val response = client.get("/api/admin/tables/${created.id}?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(created.id, payload["id"]!!.jsonPrimitive.long)
+        assertEquals(1L, payload["clubId"]!!.jsonPrimitive.long)
+        assertEquals("Table 1", payload["label"]!!.jsonPrimitive.content)
+        assertEquals(1000, payload["minDeposit"]!!.jsonPrimitive.long)
+        assertEquals(4, payload["capacity"]!!.jsonPrimitive.long)
+        assertEquals("vip", payload["zone"]!!.jsonPrimitive.content)
+        assertEquals("VIP", payload["zoneName"]!!.jsonPrimitive.content)
+        assertEquals("22:00-23:00", payload["arrivalWindow"]!!.jsonPrimitive.content)
+        assertTrue(payload["mysteryEligible"]!!.jsonPrimitive.boolean)
         response.assertNoStoreHeaders()
     }
 
@@ -316,6 +348,63 @@ class AdminTablesRoutesTest {
         assertEquals(2000, updated.minDeposit)
         assertEquals("20:00-21:00", updated.arrivalWindow?.toRangeString())
         response.assertNoStoreHeaders()
+    }
+
+    @Test
+    fun `get by id not found`() = withApp() { _, _ ->
+        val response = client.get("/api/admin/tables/999?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertEquals(ErrorCodes.not_found, response.errorCode())
+    }
+
+    @Test
+    fun `get by id invalid id`() = withApp() { _, _ ->
+        val nonNumeric = client.get("/api/admin/tables/foo?clubId=1") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.BadRequest, nonNumeric.status)
+        assertEquals("must_be_positive", nonNumeric.bodyAsText().jsonError("id"))
+
+        val zero = client.get("/api/admin/tables/0?clubId=1") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.BadRequest, zero.status)
+        assertEquals("must_be_positive", zero.bodyAsText().jsonError("id"))
+    }
+
+    @Test
+    fun `get by id respects rbac`() {
+        withApp(roles = emptySet()) { _, _ ->
+            val response = client.get("/api/admin/tables/1?clubId=1") { header("X-Telegram-Init-Data", "init") }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+        }
+
+        withApp(clubIds = setOf(1)) { _, _ ->
+            val response = client.get("/api/admin/tables/1?clubId=2") { header("X-Telegram-Init-Data", "init") }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+        }
+    }
+
+    @Test
+    fun `get by id includes zone name consistent with list`() = withApp() { repo, _ ->
+        val created =
+            repo.create(
+                AdminTableCreate(
+                    clubId = 1,
+                    label = "VIP table",
+                    minDeposit = 0,
+                    capacity = 2,
+                    zone = "vip",
+                    arrivalWindow = null,
+                    mysteryEligible = false,
+                ),
+            )
+
+        val list = client.get("/api/admin/tables?clubId=1") { header("X-Telegram-Init-Data", "init") }
+        val listFirst = json.parseToJsonElement(list.bodyAsText()).jsonArray.first().jsonObject
+
+        val single = client.get("/api/admin/tables/${created.id}?clubId=1") { header("X-Telegram-Init-Data", "init") }
+        val payload = json.parseToJsonElement(single.bodyAsText()).jsonObject
+
+        assertEquals(listFirst["zone"]!!.jsonPrimitive.content, payload["zone"]!!.jsonPrimitive.content)
+        assertEquals(listFirst["zoneName"]!!.jsonPrimitive.content, payload["zoneName"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -574,6 +663,9 @@ class AdminTablesRoutesTest {
         override suspend fun listForClub(clubId: Long): List<Table> = tablesByClub[clubId]?.sortedBy { it.id } ?: emptyList()
 
         override suspend fun listZonesForClub(clubId: Long): List<Zone> = zonesByClub[clubId] ?: emptyList()
+
+        override suspend fun findById(clubId: Long, id: Long): Table? =
+            tablesByClub[clubId]?.firstOrNull { it.id == id }
 
         override suspend fun create(request: AdminTableCreate): Table {
             val list = tablesByClub.getOrPut(request.clubId) { mutableListOf() }

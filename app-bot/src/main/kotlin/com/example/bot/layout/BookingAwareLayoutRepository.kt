@@ -32,6 +32,12 @@ class BookingAwareLayoutRepository(
     ): Instant? {
         val base = delegate.lastUpdatedAt(clubId, eventId)
         val bookingUpdated = eventId?.let { bookingState.lastUpdatedAt(it) }
-        return listOfNotNull(base, bookingUpdated).maxOrNull()
+        return when {
+            bookingUpdated == null -> base
+            base == null -> bookingUpdated
+            bookingUpdated.isAfter(base) -> bookingUpdated
+            base.isAfter(bookingUpdated) -> base
+            else -> bookingUpdated.plusNanos(1)
+        }
     }
 }
