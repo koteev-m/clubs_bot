@@ -18,6 +18,9 @@ private const val HIGH_NOSHOW_THRESHOLD = 0.4
 private const val WEAK_PROMOTER_NOSHOW_THRESHOLD = 0.5
 private const val MIN_PROMOTER_INVITED_FOR_ALERT = 5
 
+/** Max events exposed in tables.byEvent; totals are always over all events. */
+private const val MAX_EVENTS_IN_BY_EVENT = 10
+
 class OwnerHealthServiceImpl(
     private val layoutRepository: LayoutRepository,
     private val eventsRepository: EventsRepository,
@@ -33,7 +36,7 @@ class OwnerHealthServiceImpl(
         }
 
         val metaGeneratedAt = Instant.now(clock)
-        val eventSummaries = mutableListOf<EventTablesHealth>()
+        val allEventSummaries = mutableListOf<EventTablesHealth>()
         val zoneAggregates = mutableMapOf<String, ZoneAccumulator>()
 
         var totalCapacity = 0
@@ -47,7 +50,7 @@ class OwnerHealthServiceImpl(
             event.id to bookings
         }
 
-        for (event in events.take(10)) {
+        for (event in events) {
             val layout = layoutRepository.getLayout(request.clubId, event.id)
             if (layout == null) {
                 incomplete = true
@@ -71,7 +74,7 @@ class OwnerHealthServiceImpl(
                 accumulator.booked += bookedInZone
             }
 
-            eventSummaries +=
+            allEventSummaries +=
                 EventTablesHealth(
                     eventId = event.id,
                     startUtc = event.startUtc.toString(),
@@ -86,9 +89,11 @@ class OwnerHealthServiceImpl(
             .sortedWith(compareBy<ZoneAccumulator> { it.zoneId }.thenBy { it.zoneName ?: "" })
             .map { it.toHealth() }
 
+        val byEvent = allEventSummaries.sortedBy { it.startUtc }.take(MAX_EVENTS_IN_BY_EVENT)
+
         val attendance = attendanceFor(events, bookingsByEvent, guestListsByEvent)
         val promoters = promotersFor(bookingsByEvent, guestListsByEvent)
-        val alerts = alertsFor(eventSummaries, attendance.events, promoters.byPromoter)
+        val alerts = alertsFor(allEventSummaries, attendance.events, promoters.byPromoter)
 
         val tablesHealth =
             TablesHealth(
@@ -97,7 +102,7 @@ class OwnerHealthServiceImpl(
                 bookedSeats = totalBooked,
                 occupancyRate = safeRate(totalBooked, totalCapacity),
                 byZone = zoneHealth,
-                byEvent = eventSummaries,
+                byEvent = byEvent,
             )
 
         val trend =

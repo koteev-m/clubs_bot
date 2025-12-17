@@ -43,6 +43,7 @@ data class OwnerHealthMeta(
 
 @Serializable
 data class TablesHealth(
+    /** Number of events in the requested period, not only those with layout. */
     val eventsCount: Int,
     val totalTableCapacity: Int,
     val bookedSeats: Int,
