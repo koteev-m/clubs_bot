@@ -46,6 +46,7 @@ and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) a
 ### Admin tables (E1)
 
 - `GET /api/admin/tables?clubId=&page=&size=` — список правил столов для клуба.
+- `GET /api/admin/tables/{id}?clubId=` — получить одно правило столика по `id` для клуба.
 - `POST /api/admin/tables?clubId=` — создание правил столика.
 - `PUT /api/admin/tables?clubId=` — обновление правил столика по `id` в теле запроса.
 - `DELETE /api/admin/tables/{id}?clubId=` — удаление правила столика.
@@ -58,8 +59,9 @@ and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) a
 
 Тело запросов/ответов содержит поля `label`, `minDeposit`, `capacity`, `zone`, `zoneName`, `arrivalWindow` (формат
 `HH:mm-HH:mm`), `mysteryEligible`. Поле `zone` соответствует `Zone.id` из layout, а `zoneName` — человекочитаемому имени зоны
-(`Zone.name`). Эти значения используются layout/booking, поэтому изменения через Admin API сразу видны в схеме и логике
-бронирования.
+(`Zone.name`). Ответ `GET /api/admin/tables/{id}?clubId=` — тот же объект, что и элементы массива в
+`GET /api/admin/tables?clubId=&page=&size=`. Эти значения используются layout/booking, поэтому изменения через Admin API сразу
+видны в схеме и логике бронирования.
 
 ### Booking API (A3/A4)
 
