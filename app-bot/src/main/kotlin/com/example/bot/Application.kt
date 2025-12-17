@@ -51,6 +51,7 @@ import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.musicLikesRoutes
+import com.example.bot.routes.ownerHealthRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.promoterInvitesRoutes
 import com.example.bot.routes.promoterQuotasAdminRoutes
@@ -154,6 +155,7 @@ fun Application.module() {
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
+    val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
     val hostEntranceService =
@@ -192,6 +194,11 @@ fun Application.module() {
     adminTablesRoutes(adminTablesRepository = adminTablesRepository)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository)
+    ownerHealthRoutes(
+        service = ownerHealthService,
+        layoutRepository = layoutRepository,
+        clock = appClock,
+    )
     musicRoutes(service = musicService)
     musicLikesRoutes(
         likesRepository = musicLikesRepository,
