@@ -152,6 +152,9 @@ class OwnerHealthRoutesTest {
             assertTrue(alerts["lowOccupancyEvents"]!!.jsonArray.isEmpty())
             assertTrue(alerts["highNoShowEvents"]!!.jsonArray.isEmpty())
 
+            val breakdowns = payload["breakdowns"]!!.jsonObject
+            assertTrue(breakdowns["byWeekday"]!!.jsonArray.isEmpty())
+
             val period = payload["period"]!!.jsonObject
             val trend = payload["trend"]!!.jsonObject
             val baseline = trend["baselinePeriod"]!!.jsonObject
@@ -205,7 +208,50 @@ class OwnerHealthRoutesTest {
         assertTrue(alerts["lowOccupancyEvents"]!!.jsonArray.size <= 1)
         assertTrue(alerts["highNoShowEvents"]!!.jsonArray.size <= 1)
         assertTrue(alerts["weakPromoters"]!!.jsonArray.size <= 1)
+
+        val breakdowns = payload["breakdowns"]!!.jsonObject
+        assertTrue(breakdowns["byWeekday"]!!.jsonArray.isEmpty())
     }
+
+    @Test
+    fun `weekday breakdown aggregates friday and saturday separately`() =
+        withApp(fixtureFactory = { buildFixtureForWeekdayBreakdown() }) { _ ->
+            val response =
+                client.get("/api/owner/health?clubId=1&period=week&granularity=full") {
+                    header("X-Telegram-Init-Data", "init")
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val breakdowns = payload["breakdowns"]!!.jsonObject
+            val byWeekday = breakdowns["byWeekday"]!!.jsonArray
+
+            val friday =
+                byWeekday
+                    .map { it.jsonObject }
+                    .first { it["dayOfWeek"]!!.jsonPrimitive.content == "FRIDAY" }
+            val saturday =
+                byWeekday
+                    .map { it.jsonObject }
+                    .first { it["dayOfWeek"]!!.jsonPrimitive.content == "SATURDAY" }
+
+            assertEquals(1, friday["eventsCount"]!!.jsonPrimitive.content.toInt())
+            assertEquals(1, saturday["eventsCount"]!!.jsonPrimitive.content.toInt())
+
+            val fridayTables = friday["tables"]!!.jsonObject
+            val saturdayTables = saturday["tables"]!!.jsonObject
+
+            assertEquals(10, fridayTables["totalTableCapacity"]!!.jsonPrimitive.content.toInt())
+            assertEquals(10, saturdayTables["totalTableCapacity"]!!.jsonPrimitive.content.toInt())
+            assertEquals(4, fridayTables["bookedSeats"]!!.jsonPrimitive.content.toInt())
+            assertEquals(8, saturdayTables["bookedSeats"]!!.jsonPrimitive.content.toInt())
+
+            val friOcc = fridayTables["occupancyRate"]!!.jsonPrimitive.content.toDouble()
+            val satOcc = saturdayTables["occupancyRate"]!!.jsonPrimitive.content.toDouble()
+            assertTrue(satOcc > friOcc)
+        }
+
 
     @Test
     fun `validation errors when clubId missing`() = withApp() { _ ->
@@ -337,6 +383,76 @@ class OwnerHealthRoutesTest {
             val list = guestListRepository.createList(clubId = 1, eventId = 100, ownerType = com.example.bot.club.GuestListOwnerType.ADMIN, ownerUserId = 1, title = "Main", capacity = 50, arrivalWindowStart = null, arrivalWindowEnd = null)
             guestListRepository.addEntry(list.id, "Alice", null, 3, null, GuestListEntryStatus.PLANNED)
             guestListRepository.addEntry(list.id, "Bob", null, 2, null, GuestListEntryStatus.CHECKED_IN)
+        }
+
+        val service: OwnerHealthService =
+            OwnerHealthServiceImpl(
+                layoutRepository = layoutRepository,
+                eventsRepository = eventsRepository,
+                bookingState = bookingState,
+                guestListRepository = guestListRepository,
+                clock = clock,
+            )
+
+        return Fixture(layoutRepository, guestListRepository, service, events)
+    }
+
+    private fun buildFixtureForWeekdayBreakdown(): Fixture {
+        val events =
+            listOf(
+                Event(
+                    id = 400,
+                    clubId = 1,
+                    startUtc = Instant.parse("2024-05-03T20:00:00Z"),
+                    endUtc = Instant.parse("2024-05-04T02:00:00Z"),
+                    title = "Friday party",
+                    isSpecial = false,
+                ),
+                Event(
+                    id = 401,
+                    clubId = 1,
+                    startUtc = Instant.parse("2024-05-04T20:00:00Z"),
+                    endUtc = Instant.parse("2024-05-05T02:00:00Z"),
+                    title = "Saturday party",
+                    isSpecial = false,
+                ),
+            )
+
+        val eventsRepository = InMemoryEventsRepository(events)
+        val layoutRepository =
+            InMemoryLayoutRepository(
+                listOf(
+                    InMemoryLayoutRepository.LayoutSeed(
+                        clubId = 1,
+                        zones = listOf(Zone(id = "main", name = "Main", tags = emptyList(), order = 0)),
+                        tables =
+                            listOf(
+                                Table(id = 1, zoneId = "main", label = "T1", capacity = 4, minimumTier = "std", status = TableStatus.FREE),
+                                Table(id = 2, zoneId = "main", label = "T2", capacity = 6, minimumTier = "std", status = TableStatus.FREE),
+                            ),
+                        geometryJson = InMemoryLayoutRepository.DEFAULT_GEOMETRY_JSON,
+                    ),
+                ),
+                clock = clock,
+            )
+
+        val bookingState = BookingState(layoutRepository, eventsRepository, clock = clock)
+        val guestListRepository = InMemoryGuestListRepository(clock)
+
+        runBlockingBookings(bookingState) {
+            val fridayHold = bookingState.hold(userId = 1, clubId = 1, tableId = 1, eventId = 400, guestCount = 4, idempotencyKey = "fri-1", requestHash = "fri-1")
+            if (fridayHold is HoldResult.Success) {
+                bookingState.confirm(userId = 1, clubId = 1, bookingId = fridayHold.booking.id, idempotencyKey = "fri-c1", requestHash = "fri-1")
+            }
+
+            val satHold1 = bookingState.hold(userId = 2, clubId = 1, tableId = 1, eventId = 401, guestCount = 4, idempotencyKey = "sat-1", requestHash = "sat-1")
+            if (satHold1 is HoldResult.Success) {
+                bookingState.confirm(userId = 2, clubId = 1, bookingId = satHold1.booking.id, idempotencyKey = "sat-c1", requestHash = "sat-1")
+            }
+            val satHold2 = bookingState.hold(userId = 3, clubId = 1, tableId = 2, eventId = 401, guestCount = 4, idempotencyKey = "sat-2", requestHash = "sat-2")
+            if (satHold2 is HoldResult.Success) {
+                bookingState.confirm(userId = 3, clubId = 1, bookingId = satHold2.booking.id, idempotencyKey = "sat-c2", requestHash = "sat-2")
+            }
         }
 
         val service: OwnerHealthService =
