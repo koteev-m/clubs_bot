@@ -63,12 +63,16 @@ class OwnerHealthServiceImpl(
             totalCapacity += capacity
             totalBooked += bookedSeats
 
+            val zoneIdByTableId = layout.tables.associate { it.id to it.zoneId }
+            val bookedByZone = mutableMapOf<String, Int>()
+            for (booking in bookings) {
+                val zoneId = zoneIdByTableId[booking.tableId] ?: continue
+                bookedByZone[zoneId] = (bookedByZone[zoneId] ?: 0) + booking.guestCount
+            }
             val byZone = layout.tables.groupBy(Table::zoneId)
             byZone.forEach { (zoneId, tables) ->
                 val zoneCapacity = tables.sumOf(Table::capacity)
-                val bookedInZone = bookings.filter { booking ->
-                    tables.any { it.id == booking.tableId }
-                }.sumOf { it.guestCount }
+                val bookedInZone = bookedByZone[zoneId] ?: 0
                 val accumulator = zoneAggregates.getOrPut(zoneId) { ZoneAccumulator(zoneId, layout.zones) }
                 accumulator.capacity += zoneCapacity
                 accumulator.booked += bookedInZone
@@ -92,7 +96,7 @@ class OwnerHealthServiceImpl(
         val byEvent = allEventSummaries.sortedBy { it.startUtc }.take(MAX_EVENTS_IN_BY_EVENT)
 
         val attendance = attendanceFor(events, bookingsByEvent, guestListsByEvent)
-        val promoters = promotersFor(bookingsByEvent, guestListsByEvent)
+        val promoters = promotersFor(bookingsByEvent)
         val alerts = alertsFor(allEventSummaries, attendance.events, promoters.byPromoter)
 
         val tablesHealth =
@@ -144,11 +148,15 @@ class OwnerHealthServiceImpl(
 
     private fun currentWindow(request: OwnerHealthRequest): Pair<Instant, Instant> {
         val now = request.now
-        return when (request.period) {
-            OwnerHealthPeriod.WEEK -> now.minus(Duration.ofDays(7)) to now
-            OwnerHealthPeriod.MONTH -> now.minus(Duration.ofDays(30)) to now
-        }
+        val duration = periodDuration(request.period)
+        return now.minus(duration) to now
     }
+
+    private fun periodDuration(period: OwnerHealthPeriod): Duration =
+        when (period) {
+            OwnerHealthPeriod.WEEK -> Duration.ofDays(7)
+            OwnerHealthPeriod.MONTH -> Duration.ofDays(30)
+        }
 
     private suspend fun loadGuestEntries(clubId: Long, eventIds: List<Long>): Map<Long, List<com.example.bot.club.GuestListEntry>> {
         val result = mutableMapOf<Long, MutableList<com.example.bot.club.GuestListEntry>>()
@@ -192,11 +200,15 @@ class OwnerHealthServiceImpl(
         val guestLists: AttendanceChannel,
         val direct: AttendanceChannel,
         val promoterBookings: AttendanceChannel,
-        val guestListChannel: AttendanceChannel,
         val events: List<EventAttendance>,
     ) {
         val channels: AttendanceChannels
-            get() = AttendanceChannels(directBookings = direct, promoterBookings = promoterBookings, guestLists = guestListChannel)
+            get() =
+                AttendanceChannels(
+                    directBookings = direct,
+                    promoterBookings = promoterBookings,
+                    guestLists = guestLists,
+                )
 
         val channelsView: AttendanceHealth
             get() =
@@ -232,30 +244,40 @@ class OwnerHealthServiceImpl(
 
         for (event in events) {
             val bookings = bookingsByEvent[event.id].orEmpty().filter { it.status == BookingStatus.BOOKED }
-            val planned = bookings.sumOf { it.guestCount }
-            val arrived = 0
-            bookingsPlanned += planned
-            bookingsArrived += arrived
+            val bookingsPlannedEvent = bookings.sumOf { it.guestCount }
+            // TODO: Booking check-in semantics are not available; arrived guests per booking are assumed to be zero.
+            val bookingsArrivedEvent = 0
 
             val promoterBookings = bookings.filter { it.promoterId != null }
-            promoterPlanned += promoterBookings.sumOf { it.guestCount }
-            promoterArrived += 0
+            val promoterPlannedEvent = promoterBookings.sumOf { it.guestCount }
+            val promoterArrivedEvent = 0
 
             val directBookings = bookings.filter { it.promoterId == null }
-            directPlanned += directBookings.sumOf { it.guestCount }
-            directArrived += 0
+            val directPlannedEvent = directBookings.sumOf { it.guestCount }
+            val directArrivedEvent = 0
 
             val guestEntries = guestListsByEvent[event.id].orEmpty()
-            val guestPlannedEvent = guestEntries.filterNot { it.status == GuestListEntryStatus.EXPIRED }.sumOf { it.guestsCount }
-            val guestArrivedEvent = guestEntries.filter { it.status == GuestListEntryStatus.CHECKED_IN }.sumOf { it.guestsCount }
-            guestPlanned += guestPlannedEvent
-            guestArrived += guestArrivedEvent
+            val plannedGuestsEvent =
+                guestEntries.filterNot { it.status == GuestListEntryStatus.EXPIRED }.sumOf { it.guestsCount }
+            val arrivedGuestsEvent = guestEntries.filter { it.status == GuestListEntryStatus.CHECKED_IN }.sumOf { it.guestsCount }
+
+            bookingsPlanned += bookingsPlannedEvent
+            bookingsArrived += bookingsArrivedEvent
+
+            promoterPlanned += promoterPlannedEvent
+            promoterArrived += promoterArrivedEvent
+
+            directPlanned += directPlannedEvent
+            directArrived += directArrivedEvent
+
+            guestPlanned += plannedGuestsEvent
+            guestArrived += arrivedGuestsEvent
 
             perEventAttendance +=
                 EventAttendance(
                     eventId = event.id,
-                    planned = planned + guestPlannedEvent,
-                    arrived = arrived + guestArrivedEvent,
+                    planned = bookingsPlannedEvent + plannedGuestsEvent,
+                    arrived = bookingsArrivedEvent + arrivedGuestsEvent,
                 )
         }
 
@@ -269,29 +291,25 @@ class OwnerHealthServiceImpl(
             guestLists = guestListChannel,
             direct = directChannel,
             promoterBookings = promoterChannel,
-            guestListChannel = guestListChannel,
             events = perEventAttendance,
         )
     }
 
     private fun promotersFor(
         bookingsByEvent: Map<Long, List<Booking>>,
-        guestListsByEvent: Map<Long, List<com.example.bot.club.GuestListEntry>>,
     ): PromotersHealth {
         val promoterMap = mutableMapOf<Long, PromoterAccumulator>()
 
-        bookingsByEvent.values.flatten().filter { it.promoterId != null && it.status == BookingStatus.BOOKED }.forEach { booking ->
-            val accumulator = promoterMap.getOrPut(booking.promoterId!!) { PromoterAccumulator(booking.promoterId!!) }
-            accumulator.invited += booking.guestCount
-        }
-
-        guestListsByEvent.values.flatten().forEach { entry ->
-            val listId = entry.listId
-            // OwnerType is not available on entry, skip linkage for now
-            if (entry.status == GuestListEntryStatus.CHECKED_IN) {
-                promoterMap[listId]?.arrived = promoterMap[listId]?.arrived?.plus(entry.guestsCount) ?: entry.guestsCount
+        bookingsByEvent.values
+            .flatten()
+            .asSequence()
+            .filter { it.status == BookingStatus.BOOKED && it.promoterId != null }
+            .forEach { booking ->
+                val promoterId = booking.promoterId!!
+                val acc = promoterMap.getOrPut(promoterId) { PromoterAccumulator(promoterId) }
+                acc.invited += booking.guestCount
+                // TODO: when booking check-ins become available, also increment arrived here
             }
-        }
 
         val byPromoter = promoterMap.values
             .map { it.toHealth() }
@@ -381,11 +399,7 @@ class OwnerHealthServiceImpl(
     ): OwnerHealthTrend {
         val (currentFrom, currentTo) = currentWindow(request)
         val previousTo = currentFrom
-        val previousFrom =
-            when (request.period) {
-                OwnerHealthPeriod.WEEK -> previousTo.minus(Duration.ofDays(7))
-                OwnerHealthPeriod.MONTH -> previousTo.minus(Duration.ofDays(30))
-            }
+        val previousFrom = previousTo.minus(periodDuration(request.period))
 
         val previousEvents =
             runCatching {
@@ -401,6 +415,7 @@ class OwnerHealthServiceImpl(
 
         val bookingsByEvent = previousEvents.associate { event -> event.id to bookingState.findBookingsForEvent(request.clubId, event.id) }
         val guestLists = runCatching { loadGuestEntries(request.clubId, previousEvents.map { it.id }) }.getOrElse { emptyMap() }
+        val promotersPrev = promotersFor(bookingsByEvent)
         val attendancePrev = attendanceFor(previousEvents, bookingsByEvent, guestLists)
         var tablesPrevCapacity = 0
         var tablesPrevBooked = 0
@@ -415,7 +430,7 @@ class OwnerHealthServiceImpl(
         val prevBookingsPlanned = attendancePrev.bookings.plannedGuests
         val prevGuestNoShow = attendancePrev.guestLists.noShowGuests
         val prevGuestPlanned = attendancePrev.guestLists.plannedGuests
-        val prevPromoterRate = attendancePrev.promoterBookings.noShowRate
+        val prevPromoterRate = promotersPrev.totals.noShowRate
 
         return OwnerHealthTrend(
             baselinePeriod = BaselinePeriod(from = previousFrom.toString(), to = previousTo.toString()),
@@ -434,8 +449,6 @@ class OwnerHealthServiceImpl(
         return AttendanceChannel(plannedGuests = planned, arrivedGuests = arrived, noShowGuests = noShow, noShowRate = safeRate(noShow, planned))
     }
 
-    private fun safeRate(numerator: Int, denominator: Int): Double = if (denominator <= 0) 0.0 else numerator.toDouble() / denominator
-
     private fun OwnerHealthSnapshot.toSummary(): OwnerHealthSnapshot =
         copy(
             tables = tables.copy(byZone = emptyList(), byEvent = emptyList()),
@@ -445,6 +458,7 @@ class OwnerHealthServiceImpl(
 
     private fun emptySnapshot(request: OwnerHealthRequest, from: Instant, to: Instant): OwnerHealthSnapshot {
         val zeroChannel = AttendanceChannel(0, 0, 0, 0.0)
+        val baselineFrom = from.minus(periodDuration(request.period))
         return OwnerHealthSnapshot(
             clubId = request.clubId,
             period = OwnerHealthPeriodWindow(type = request.period.name.lowercase(), from = from.toString(), to = to.toString()),
@@ -454,7 +468,7 @@ class OwnerHealthServiceImpl(
             promoters = PromotersHealth(totals = PromoterTotals(0, 0, 0, 0.0), byPromoter = emptyList(), top = PromoterTop(emptyList(), emptyList())),
             alerts = OwnerHealthAlerts(emptyList(), emptyList(), emptyList()),
             trend = OwnerHealthTrend(
-                baselinePeriod = BaselinePeriod(from = from.minus(Duration.ofDays(7)).toString(), to = from.toString()),
+                baselinePeriod = BaselinePeriod(from = baselineFrom.toString(), to = from.toString()),
                 tables = TableTrend(occupancyRate = rateDelta(0.0, 0.0)),
                 attendance = AttendanceTrend(noShowRateBookings = rateDelta(0.0, 0.0), noShowRateGuestLists = rateDelta(0.0, 0.0)),
                 promoters = PromoterTrend(noShowRate = rateDelta(0.0, 0.0)),
@@ -462,6 +476,8 @@ class OwnerHealthServiceImpl(
         )
     }
 }
+
+private fun safeRate(numerator: Int, denominator: Int): Double = if (denominator <= 0) 0.0 else numerator.toDouble() / denominator
 
 private data class ZoneAccumulator(
     val zoneId: String,
@@ -478,7 +494,7 @@ private data class ZoneAccumulator(
             zoneName = zoneName,
             totalTableCapacity = capacity,
             bookedSeats = booked,
-            occupancyRate = if (capacity == 0) 0.0 else booked.toDouble() / capacity,
+            occupancyRate = safeRate(booked, capacity),
         )
 }
 
@@ -495,7 +511,7 @@ private data class PromoterAccumulator(
             invitedGuests = invited,
             arrivedGuests = arrived,
             noShowGuests = noShow,
-            noShowRate = if (invited == 0) 0.0 else noShow.toDouble() / invited,
+            noShowRate = safeRate(noShow, invited),
         )
     }
 }
