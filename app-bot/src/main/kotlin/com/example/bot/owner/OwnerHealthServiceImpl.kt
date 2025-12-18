@@ -12,6 +12,7 @@ import com.example.bot.layout.Zone
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneOffset
 
 private const val LOW_OCCUPANCY_THRESHOLD = 0.5
 private const val HIGH_NOSHOW_THRESHOLD = 0.4
@@ -97,6 +98,7 @@ class OwnerHealthServiceImpl(
 
         val attendance = attendanceFor(events, bookingsByEvent, guestListsByEvent)
         val promoters = promotersFor(bookingsByEvent)
+        val breakdowns = weekdayBreakdownFor(events, bookingsByEvent, guestListsByEvent, allEventSummaries)
         val alerts = alertsFor(allEventSummaries, attendance.events, promoters.byPromoter)
 
         val tablesHealth =
@@ -138,6 +140,7 @@ class OwnerHealthServiceImpl(
                 promoters = promoters,
                 alerts = alerts,
                 trend = trend,
+                breakdowns = breakdowns,
             )
 
         return when (request.granularity) {
@@ -152,11 +155,65 @@ class OwnerHealthServiceImpl(
         return now.minus(duration) to now
     }
 
+    /**
+     * Logical duration for owner-health aggregation for a given period.
+     *
+     * New period types (e.g. DAY, CUSTOM_RANGE) should be wired here so that currentWindow,
+     * trend baselines, and empty snapshots remain consistent.
+     */
     private fun periodDuration(period: OwnerHealthPeriod): Duration =
         when (period) {
             OwnerHealthPeriod.WEEK -> Duration.ofDays(7)
             OwnerHealthPeriod.MONTH -> Duration.ofDays(30)
         }
+
+    private fun weekdayBreakdownFor(
+        events: List<com.example.bot.clubs.Event>,
+        bookingsByEvent: Map<Long, List<Booking>>,
+        guestListsByEvent: Map<Long, List<com.example.bot.club.GuestListEntry>>,
+        eventSummaries: List<EventTablesHealth>,
+    ): OwnerHealthBreakdowns {
+        val summariesByEventId = eventSummaries.associateBy { it.eventId }
+        val eventsByDay = events.groupBy { event -> event.startUtc.atOffset(ZoneOffset.UTC).dayOfWeek }
+
+        val byWeekday =
+            eventsByDay.entries
+                .sortedBy { it.key }
+                .map { (dayOfWeek, dayEvents) ->
+                    val eventIds = dayEvents.map { it.id }.toSet()
+
+                    val dayTablesCapacity = dayEvents.sumOf { summariesByEventId[it.id]?.totalTableCapacity ?: 0 }
+                    val dayTablesBooked = dayEvents.sumOf { summariesByEventId[it.id]?.bookedSeats ?: 0 }
+
+                    val attendanceDay =
+                        attendanceFor(
+                            events = dayEvents,
+                            bookingsByEvent = bookingsByEvent,
+                            guestListsByEvent = guestListsByEvent,
+                        )
+
+                    val promotersDay = promotersFor(bookingsByEvent.filterKeys { it in eventIds })
+
+                    WeekdayHealth(
+                        dayOfWeek = dayOfWeek.name,
+                        eventsCount = dayEvents.size,
+                        tables =
+                            WeekdayTablesHealth(
+                                totalTableCapacity = dayTablesCapacity,
+                                bookedSeats = dayTablesBooked,
+                                occupancyRate = safeRate(dayTablesBooked, dayTablesCapacity),
+                            ),
+                        attendance =
+                            WeekdayAttendanceHealth(
+                                bookings = attendanceDay.bookings,
+                                guestLists = attendanceDay.guestLists,
+                            ),
+                        promoters = promotersDay.totals,
+                    )
+                }
+
+        return OwnerHealthBreakdowns(byWeekday = byWeekday)
+    }
 
     private suspend fun loadGuestEntries(clubId: Long, eventIds: List<Long>): Map<Long, List<com.example.bot.club.GuestListEntry>> {
         val result = mutableMapOf<Long, MutableList<com.example.bot.club.GuestListEntry>>()
@@ -454,6 +511,7 @@ class OwnerHealthServiceImpl(
             tables = tables.copy(byZone = emptyList(), byEvent = emptyList()),
             promoters = promoters.copy(byPromoter = emptyList(), top = PromoterTop(byArrivedGuests = emptyList(), byInvitedGuests = emptyList())),
             alerts = alerts.copy(lowOccupancyEvents = alerts.lowOccupancyEvents.take(1), highNoShowEvents = alerts.highNoShowEvents.take(1), weakPromoters = alerts.weakPromoters.take(1)),
+            breakdowns = breakdowns?.copy(byWeekday = emptyList()),
         )
 
     private fun emptySnapshot(request: OwnerHealthRequest, from: Instant, to: Instant): OwnerHealthSnapshot {
@@ -473,6 +531,7 @@ class OwnerHealthServiceImpl(
                 attendance = AttendanceTrend(noShowRateBookings = rateDelta(0.0, 0.0), noShowRateGuestLists = rateDelta(0.0, 0.0)),
                 promoters = PromoterTrend(noShowRate = rateDelta(0.0, 0.0)),
             ),
+            breakdowns = OwnerHealthBreakdowns(),
         )
     }
 }

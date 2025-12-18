@@ -22,6 +22,7 @@ data class OwnerHealthRequest(
  * - [promoters] summarizes promoter performance metrics.
  * - [alerts] highlights issues like low occupancy, high no-show, or weak promoters.
  * - [trend] compares current metrics to the previous comparable period.
+ * - [breakdowns] optional drilldowns within the requested window (e.g., by weekday).
  */
 @Serializable
 data class OwnerHealthSnapshot(
@@ -33,6 +34,53 @@ data class OwnerHealthSnapshot(
     val promoters: PromotersHealth,
     val alerts: OwnerHealthAlerts,
     val trend: OwnerHealthTrend,
+    /** Optional drilldowns for the requested period (e.g., by weekday). */
+    val breakdowns: OwnerHealthBreakdowns? = null,
+)
+
+@Serializable
+data class OwnerHealthBreakdowns(
+    /** Aggregated metrics grouped by ISO day-of-week within the requested period. */
+    val byWeekday: List<WeekdayHealth> = emptyList(),
+)
+
+/**
+ * Aggregated health metrics for all events that fall on a given day-of-week.
+ *
+ * dayOfWeek uses the ISO-8601 name from java.time.DayOfWeek (e.g. "MONDAY", "FRIDAY").
+ */
+@Serializable
+data class WeekdayHealth(
+    val dayOfWeek: String, // e.g. "FRIDAY"
+    val eventsCount: Int,
+    val tables: WeekdayTablesHealth,
+    val attendance: WeekdayAttendanceHealth,
+    val promoters: PromoterTotals,
+)
+
+/**
+ * Simplified table metrics for a weekday slice.
+ *
+ * occupancyRate = bookedSeats / totalTableCapacity (0.0 when totalTableCapacity == 0).
+ */
+@Serializable
+data class WeekdayTablesHealth(
+    val totalTableCapacity: Int,
+    val bookedSeats: Int,
+    val occupancyRate: Double,
+)
+
+/**
+ * Simplified attendance metrics for a weekday slice.
+ *
+ * bookings = all table reservations (direct + promoter).
+ * guestLists = all guest list entries.
+ * Channels inside each are computed with the same semantics as in the top-level AttendanceHealth.
+ */
+@Serializable
+data class WeekdayAttendanceHealth(
+    val bookings: AttendanceChannel,
+    val guestLists: AttendanceChannel,
 )
 
 @Serializable
