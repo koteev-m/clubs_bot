@@ -11,7 +11,9 @@ import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.club.GuestListEntryStatus
 import com.example.bot.club.GuestListRepository
 import com.example.bot.http.ErrorCodes
+import com.example.bot.layout.ClubLayout
 import com.example.bot.layout.InMemoryLayoutRepository
+import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
 import com.example.bot.layout.Zone
@@ -76,8 +78,16 @@ class OwnerHealthRoutesTest {
         val attendance = payload["attendance"]!!.jsonObject
         val bookings = attendance["bookings"]!!.jsonObject
         assertEquals(6, bookings["plannedGuests"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, bookings["arrivedGuests"]!!.jsonPrimitive.content.toInt())
         val guestLists = attendance["guestLists"]!!.jsonObject
         assertEquals(5, guestLists["plannedGuests"]!!.jsonPrimitive.content.toInt())
+        assertEquals(2, guestLists["arrivedGuests"]!!.jsonPrimitive.content.toInt())
+
+        val channels = attendance["channels"]!!.jsonObject
+        val directBookings = channels["directBookings"]!!.jsonObject
+        assertTrue(directBookings["plannedGuests"]!!.jsonPrimitive.content.toInt() > 0)
+        val promoterBookings = channels["promoterBookings"]!!.jsonObject
+        assertTrue(promoterBookings["plannedGuests"]!!.jsonPrimitive.content.toInt() > 0)
 
         val alerts = payload["alerts"]!!.jsonObject
         assertTrue(alerts["highNoShowEvents"]!!.jsonArray.isNotEmpty())
@@ -86,12 +96,115 @@ class OwnerHealthRoutesTest {
     }
 
     @Test
+    fun `promoters totals reflect invited guests from bookings`() = withApp() { _ ->
+        val response = client.get("/api/owner/health?clubId=1&period=week&granularity=full") {
+            header("X-Telegram-Init-Data", "init")
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+
+        val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        val promoters = payload["promoters"]!!.jsonObject
+        val totals = promoters["totals"]!!.jsonObject
+
+        // In the fixture we have exactly one promoter booking with 2 guests
+        assertEquals(2, totals["invitedGuests"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, totals["arrivedGuests"]!!.jsonPrimitive.content.toInt())
+        assertEquals(2, totals["noShowGuests"]!!.jsonPrimitive.content.toInt())
+
+        val byPromoter = promoters["byPromoter"]!!.jsonArray
+        assertEquals(1, byPromoter.size)
+
+        val p0 = byPromoter.first().jsonObject
+        assertEquals(99L, p0["promoterId"]!!.jsonPrimitive.content.toLong())
+        assertEquals(2, p0["invitedGuests"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, p0["arrivedGuests"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `no events in period returns empty snapshot`() =
+        withApp(fixtureFactory = { buildFixtureWithNoEvents() }) { _ ->
+            val response = client.get("/api/owner/health?clubId=1&period=week&granularity=full") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+
+            val meta = payload["meta"]!!.jsonObject
+            assertEquals(0, meta["eventsCount"]!!.jsonPrimitive.content.toInt())
+
+            val tables = payload["tables"]!!.jsonObject
+            assertEquals(0, tables["eventsCount"]!!.jsonPrimitive.content.toInt())
+            assertEquals(0, tables["totalTableCapacity"]!!.jsonPrimitive.content.toInt())
+            assertEquals(0, tables["bookedSeats"]!!.jsonPrimitive.content.toInt())
+            assertEquals(0.0, tables["occupancyRate"]!!.jsonPrimitive.content.toDouble())
+
+            val attendance = payload["attendance"]!!.jsonObject
+            assertEquals(0, attendance["bookings"]!!.jsonObject["plannedGuests"]!!.jsonPrimitive.content.toInt())
+            assertEquals(0, attendance["guestLists"]!!.jsonObject["plannedGuests"]!!.jsonPrimitive.content.toInt())
+
+            val promoters = payload["promoters"]!!.jsonObject
+            assertEquals(0, promoters["totals"]!!.jsonObject["invitedGuests"]!!.jsonPrimitive.content.toInt())
+
+            val alerts = payload["alerts"]!!.jsonObject
+            assertTrue(alerts["lowOccupancyEvents"]!!.jsonArray.isEmpty())
+            assertTrue(alerts["highNoShowEvents"]!!.jsonArray.isEmpty())
+
+            val period = payload["period"]!!.jsonObject
+            val trend = payload["trend"]!!.jsonObject
+            val baseline = trend["baselinePeriod"]!!.jsonObject
+
+            val periodFrom = Instant.parse(period["from"]!!.jsonPrimitive.content)
+            val baselineFrom = Instant.parse(baseline["from"]!!.jsonPrimitive.content)
+            val baselineTo = Instant.parse(baseline["to"]!!.jsonPrimitive.content)
+
+            assertEquals(periodFrom, baselineTo)
+            assertEquals(Duration.ofDays(7), Duration.between(baselineFrom, baselineTo))
+        }
+
+    @Test
+    fun `event without layout is marked as incomplete`() =
+        withApp(fixtureFactory = { buildFixtureWithoutLayout() }) { _ ->
+            val response = client.get("/api/owner/health?clubId=1&period=week&granularity=full") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+
+            val meta = payload["meta"]!!.jsonObject
+            assertEquals(1, meta["eventsCount"]!!.jsonPrimitive.content.toInt())
+            assertTrue(meta["hasIncompleteData"]!!.jsonPrimitive.content.toBooleanStrict())
+
+            val tables = payload["tables"]!!.jsonObject
+            assertEquals(0, tables["totalTableCapacity"]!!.jsonPrimitive.content.toInt())
+            assertEquals(0, tables["bookedSeats"]!!.jsonPrimitive.content.toInt())
+            assertEquals(0.0, tables["occupancyRate"]!!.jsonPrimitive.content.toDouble())
+        }
+
+    @Test
     fun `summary trims details`() = withApp() { _ ->
         val response = client.get("/api/owner/health?clubId=1&period=week&granularity=summary") { header("X-Telegram-Init-Data", "init") }
         assertEquals(HttpStatusCode.OK, response.status)
         val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
         val tables = payload["tables"]!!.jsonObject
         assertTrue(tables["byZone"]!!.jsonArray.isEmpty())
+        assertTrue(tables["byEvent"]!!.jsonArray.isEmpty())
+
+        val promoters = payload["promoters"]!!.jsonObject
+        assertTrue(promoters["byPromoter"]!!.jsonArray.isEmpty())
+
+        val top = promoters["top"]!!.jsonObject
+        assertTrue(top["byArrivedGuests"]!!.jsonArray.isEmpty())
+        assertTrue(top["byInvitedGuests"]!!.jsonArray.isEmpty())
+
+        val alerts = payload["alerts"]!!.jsonObject
+        assertTrue(alerts["lowOccupancyEvents"]!!.jsonArray.size <= 1)
+        assertTrue(alerts["highNoShowEvents"]!!.jsonArray.size <= 1)
+        assertTrue(alerts["weakPromoters"]!!.jsonArray.size <= 1)
     }
 
     @Test
@@ -300,6 +413,60 @@ class OwnerHealthRoutesTest {
         return Fixture(layoutRepository, guestListRepository, service, events)
     }
 
+    private fun buildFixtureWithNoEvents(): Fixture {
+        val events = emptyList<Event>()
+        val eventsRepository = InMemoryEventsRepository(events)
+        val layoutRepository = InMemoryLayoutRepository(emptyList(), clock = clock)
+        val bookingState = BookingState(layoutRepository, eventsRepository, clock = clock)
+        val guestListRepository = InMemoryGuestListRepository(clock)
+
+        val service: OwnerHealthService =
+            OwnerHealthServiceImpl(
+                layoutRepository = layoutRepository,
+                eventsRepository = eventsRepository,
+                bookingState = bookingState,
+                guestListRepository = guestListRepository,
+                clock = clock,
+            )
+
+        return Fixture(layoutRepository, guestListRepository, service, events)
+    }
+
+    private fun buildFixtureWithoutLayout(): Fixture {
+        val events =
+            listOf(
+                Event(
+                    id = 300,
+                    clubId = 1,
+                    startUtc = clock.instant().minus(Duration.ofDays(1)),
+                    endUtc = clock.instant(),
+                    title = "Layoutless",
+                    isSpecial = false,
+                ),
+            )
+
+        val eventsRepository = InMemoryEventsRepository(events)
+        val layoutRepository =
+            object : LayoutRepository {
+                override suspend fun getLayout(clubId: Long, eventId: Long?): ClubLayout? = null
+
+                override suspend fun lastUpdatedAt(clubId: Long, eventId: Long?): Instant? = null
+            }
+        val bookingState = BookingState(layoutRepository, eventsRepository, clock = clock)
+        val guestListRepository = InMemoryGuestListRepository(clock)
+
+        val service: OwnerHealthService =
+            OwnerHealthServiceImpl(
+                layoutRepository = layoutRepository,
+                eventsRepository = eventsRepository,
+                bookingState = bookingState,
+                guestListRepository = guestListRepository,
+                clock = clock,
+            )
+
+        return Fixture(layoutRepository, guestListRepository, service, events)
+    }
+
     private inline fun runBlockingBookings(state: BookingState, crossinline block: suspend () -> Unit) {
         kotlinx.coroutines.runBlocking { block() }
     }
@@ -432,7 +599,7 @@ class OwnerHealthRoutesTest {
     }
 
     private data class Fixture(
-        val layoutRepository: InMemoryLayoutRepository,
+        val layoutRepository: LayoutRepository,
         val guestListRepository: GuestListRepository,
         val service: OwnerHealthService,
         val events: List<Event>,

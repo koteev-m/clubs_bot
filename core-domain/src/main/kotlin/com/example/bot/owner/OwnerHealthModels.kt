@@ -14,6 +14,15 @@ data class OwnerHealthRequest(
     val now: Instant,
 )
 
+/**
+ * Aggregated view of a club's health for a given period.
+ *
+ * - [tables] captures table capacity and occupancy (overall, by zone, by event).
+ * - [attendance] reflects planned vs. arrived guests across bookings and guest lists with channel splits.
+ * - [promoters] summarizes promoter performance metrics.
+ * - [alerts] highlights issues like low occupancy, high no-show, or weak promoters.
+ * - [trend] compares current metrics to the previous comparable period.
+ */
 @Serializable
 data class OwnerHealthSnapshot(
     val clubId: Long,
@@ -28,6 +37,7 @@ data class OwnerHealthSnapshot(
 
 @Serializable
 data class OwnerHealthPeriodWindow(
+    /** "week" или "month" — нижний регистр, соответствует OwnerHealthPeriod. */
     val type: String,
     val from: String,
     val to: String,
@@ -36,6 +46,7 @@ data class OwnerHealthPeriodWindow(
 @Serializable
 data class OwnerHealthMeta(
     val generatedAt: String,
+    /** "summary" или "full" — нижний регистр, соответствует OwnerHealthGranularity. */
     val granularity: String,
     val eventsCount: Int,
     val hasIncompleteData: Boolean,
@@ -47,6 +58,7 @@ data class TablesHealth(
     val eventsCount: Int,
     val totalTableCapacity: Int,
     val bookedSeats: Int,
+    /** occupancyRate = bookedSeats / totalTableCapacity (0.0 when totalTableCapacity == 0). */
     val occupancyRate: Double,
     val byZone: List<ZoneTablesHealth>,
     val byEvent: List<EventTablesHealth>,
@@ -58,6 +70,7 @@ data class ZoneTablesHealth(
     val zoneName: String?,
     val totalTableCapacity: Int,
     val bookedSeats: Int,
+    /** occupancyRate = bookedSeats / totalTableCapacity (0.0 when totalTableCapacity == 0). */
     val occupancyRate: Double,
 )
 
@@ -68,6 +81,7 @@ data class EventTablesHealth(
     val title: String?,
     val totalTableCapacity: Int,
     val bookedSeats: Int,
+    /** occupancyRate = bookedSeats / totalTableCapacity (0.0 when totalTableCapacity == 0). */
     val occupancyRate: Double,
 )
 
@@ -87,9 +101,13 @@ data class AttendanceChannels(
 
 @Serializable
 data class AttendanceChannel(
+    /** Planned guests for the channel (booked or listed). */
     val plannedGuests: Int,
+    /** Guests that actually arrived. */
     val arrivedGuests: Int,
+    /** noShowGuests = max(plannedGuests - arrivedGuests, 0). */
     val noShowGuests: Int,
+    /** noShowRate = noShowGuests / plannedGuests (0.0 when plannedGuests == 0). */
     val noShowRate: Double,
 )
 
@@ -100,6 +118,13 @@ data class PromotersHealth(
     val top: PromoterTop,
 )
 
+/**
+ * Summary metrics for promoter performance.
+ *
+ * Arrivals are currently derived only from bookings with a promoterId; guest-list check-ins are not
+ * mapped to promoters yet. As a result, arrivedGuests is generally zero and noShowRate reflects that
+ * limitation.
+ */
 @Serializable
 data class PromoterTotals(
     val invitedGuests: Int,
