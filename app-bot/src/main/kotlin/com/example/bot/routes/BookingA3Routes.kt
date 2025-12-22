@@ -17,6 +17,10 @@ import com.example.bot.ratelimit.RateLimitSnapshot
 import com.example.bot.ratelimit.TokenBucket
 import com.example.bot.security.rbac.rbacContext
 import com.example.bot.telemetry.Tracing
+import com.example.bot.telemetry.BookingConfirmResult
+import com.example.bot.telemetry.BookingHoldResult
+import com.example.bot.telemetry.setBookingConfirmResult
+import com.example.bot.telemetry.setBookingHoldResult
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -108,10 +112,10 @@ fun Application.bookingA3Routes(
                         tracer.spanSuspended("booking.hold") { span ->
                             span.setAttribute("club.id", clubId)
                             span.setAttribute("booking.requested_guests", payload.guestCount.toLong())
-                            var spanResult = "unknown"
-                            fun setResult(result: String) {
+                            var spanResult = BookingHoldResult.REJECTED
+                            fun setResult(result: BookingHoldResult) {
                                 spanResult = result
-                                span.setAttribute("booking.hold.result", result)
+                                span.setBookingHoldResult(result)
                             }
 
                             val rate =
@@ -124,7 +128,7 @@ fun Application.bookingA3Routes(
                                 meterRegistry
                                     ?.counter("bookings.rate_limited", "route", "hold", "club_id", clubId.toString())
                                     ?.increment()
-                                setResult("rejected")
+                                setResult(BookingHoldResult.RATE_LIMITED)
                                 logger.warn(
                                     "booking.hold failed status={} error_code={} table={} event={} user={}",
                                     HttpStatusCode.TooManyRequests,
@@ -166,7 +170,7 @@ fun Application.bookingA3Routes(
                                         )
                                         ?.increment()
                                     call.applyIdempotencyHeaders(idem, result.cached)
-                                    setResult("success")
+                                    setResult(BookingHoldResult.SUCCESS)
                                     span.setAttribute("booking.id", result.booking.id)
                                     MdcContext.withIds(bookingId = result.booking.id, clubId = clubId) {
                                         logger.info(
@@ -198,11 +202,11 @@ fun Application.bookingA3Routes(
                                         ?.increment()
                                     setResult(
                                         when (result.code) {
-                                            BookingError.TABLE_NOT_AVAILABLE -> "overbooked"
-                                            BookingError.INVALID_STATE -> "invalid_state"
-                                            BookingError.CAPACITY_EXCEEDED -> "capacity_exceeded"
-                                            BookingError.PROMOTER_QUOTA_EXHAUSTED -> "rejected"
-                                            else -> "rejected"
+                                            BookingError.TABLE_NOT_AVAILABLE -> BookingHoldResult.OVERBOOKED
+                                            BookingError.INVALID_STATE -> BookingHoldResult.INVALID_STATE
+                                            BookingError.CAPACITY_EXCEEDED -> BookingHoldResult.CAPACITY_EXCEEDED
+                                            BookingError.PROMOTER_QUOTA_EXHAUSTED -> BookingHoldResult.QUOTA_EXHAUSTED
+                                            else -> BookingHoldResult.REJECTED
                                         },
                                     )
                                     logger.warn(
@@ -216,7 +220,7 @@ fun Application.bookingA3Routes(
                                     call.respondError(status, code, idem)
                                 }
                             }
-                            span.setAttribute("booking.hold.result", spanResult)
+                            span.setBookingHoldResult(spanResult)
                         }
                     }
                 }
@@ -283,10 +287,10 @@ fun Application.bookingA3Routes(
                         tracer.spanSuspended("booking.confirm") { span ->
                             span.setAttribute("club.id", clubId)
                             span.setAttribute("booking.id", payload.bookingId)
-                            var spanResult = "unknown"
-                            fun setResult(result: String) {
+                            var spanResult = BookingConfirmResult.REJECTED
+                            fun setResult(result: BookingConfirmResult) {
                                 spanResult = result
-                                span.setAttribute("booking.confirm.result", result)
+                                span.setBookingConfirmResult(result)
                             }
                             val result = bookingState.confirm(user.id, clubId, payload.bookingId, idem, hash)
                             when (result) {
@@ -302,7 +306,7 @@ fun Application.bookingA3Routes(
                                         )
                                         ?.increment()
                                     call.applyIdempotencyHeaders(idem, result.cached)
-                                    setResult("success")
+                                    setResult(BookingConfirmResult.SUCCESS)
                                     span.setAttribute("booking.status.before", "HOLD")
                                     span.setAttribute("booking.status.after", result.booking.status.toString())
                                     MdcContext.withIds(bookingId = result.booking.id, clubId = clubId) {
@@ -335,12 +339,12 @@ fun Application.bookingA3Routes(
                                         ?.increment()
                                     setResult(
                                         when (result.code) {
-                                            BookingError.INVALID_STATE -> "invalid_state"
-                                            BookingError.HOLD_EXPIRED -> "expired"
+                                            BookingError.INVALID_STATE -> BookingConfirmResult.INVALID_STATE
+                                            BookingError.HOLD_EXPIRED -> BookingConfirmResult.EXPIRED
                                             BookingError.FORBIDDEN,
-                                            BookingError.CLUB_SCOPE_MISMATCH -> "scope_mismatch"
-                                            BookingError.NOT_FOUND -> "not_found"
-                                            else -> "rejected"
+                                            BookingError.CLUB_SCOPE_MISMATCH -> BookingConfirmResult.SCOPE_MISMATCH
+                                            BookingError.NOT_FOUND -> BookingConfirmResult.NOT_FOUND
+                                            else -> BookingConfirmResult.REJECTED
                                         },
                                     )
                                     logger.warn(
@@ -353,7 +357,7 @@ fun Application.bookingA3Routes(
                                     call.respondError(status, code, idem)
                                 }
                             }
-                            span.setAttribute("booking.confirm.result", spanResult)
+                            span.setBookingConfirmResult(spanResult)
                         }
                     }
                 }

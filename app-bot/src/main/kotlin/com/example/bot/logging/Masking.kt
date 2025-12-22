@@ -4,10 +4,10 @@ fun maskQrToken(raw: String?): String {
     if (raw.isNullOrBlank()) return ""
     val trimmed = raw.trim()
     if (trimmed.startsWith("GL:")) {
-        return "GL:***"
+        return "***"
     }
     if (trimmed.startsWith("INV:")) {
-        return "INV:***"
+        return "***"
     }
     return when {
         trimmed.length <= 6 -> "***"
