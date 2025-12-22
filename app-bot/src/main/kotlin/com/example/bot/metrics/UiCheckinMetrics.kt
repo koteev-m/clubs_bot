@@ -2,6 +2,7 @@ package com.example.bot.metrics
 
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.Timer
 import java.util.concurrent.TimeUnit
 
@@ -20,6 +21,16 @@ object UiCheckinMetrics {
 
     @Volatile private var cOldSecretFallback: Counter? = null
 
+    @Volatile private var qrInvalidCounter: Counter? = null
+
+    @Volatile private var qrExpiredCounter: Counter? = null
+
+    @Volatile private var qrScopeMismatchCounter: Counter? = null
+
+    @Volatile private var rotationActiveGauge: Gauge? = null
+
+    @Volatile private var rotationDeadlineGauge: Gauge? = null
+
     // by-name (ручной чек-ин)
     @Volatile private var cByNameTotal: Counter? = null
 
@@ -31,7 +42,30 @@ object UiCheckinMetrics {
     // late override (вне окна прибытия по статусу CALLED и т.п.)
     @Volatile private var cLateOverride: Counter? = null
 
-    fun bind(registry: MeterRegistry) {
+    fun bind(
+        registry: MeterRegistry,
+        rotationConfig: QrRotationConfig = QrRotationConfig.fromEnv(),
+    ) {
+        val rotationActive = rotationConfig.rotationActive
+        rotationActiveGauge =
+            registry.find("ui_checkin_rotation_active").gauge()
+                ?: Gauge
+                    .builder("ui_checkin_rotation_active") { if (rotationActive) 1.0 else 0.0 }
+                    .description("QR rotation window is active (1) when old secret is configured")
+                    .strongReference(true)
+                    .register(registry)
+
+        val rotationDeadlineSeconds = rotationConfig.rotationDeadlineEpochSeconds?.toDouble()
+        rotationDeadlineGauge =
+            rotationDeadlineSeconds?.let { seconds ->
+                registry.find("ui_checkin_rotation_deadline_seconds").gauge()
+                    ?: Gauge
+                        .builder("ui_checkin_rotation_deadline_seconds") { seconds }
+                        .description("Deadline for QR rotation window as epoch seconds")
+                        .strongReference(true)
+                        .register(registry)
+            }
+
         cScanTotal =
             registry.find("ui.checkin.scan.total").counter()
                 ?: Counter
@@ -47,9 +81,9 @@ object UiCheckinMetrics {
                     .register(registry)
 
         cOldSecretFallback =
-            registry.find("ui.checkin.old_secret_total").counter()
+            registry.find("ui_checkin_old_secret_fallback_total").counter()
                 ?: Counter
-                    .builder("ui.checkin.old_secret_total")
+                    .builder("ui_checkin_old_secret_fallback_total")
                     .description("Check-in scans validated with QR_OLD_SECRET")
                     .register(registry)
 
@@ -93,6 +127,27 @@ object UiCheckinMetrics {
                     .builder("ui.arrival.late_override_total")
                     .description("Arrivals outside arrival_window with override (e.g., CALLED)")
                     .register(registry)
+
+        qrInvalidCounter =
+            registry.find("ui_checkin_qr_invalid_total").counter()
+                ?: Counter
+                    .builder("ui_checkin_qr_invalid_total")
+                    .description("Total invalid UI check-in QR attempts")
+                    .register(registry)
+
+        qrExpiredCounter =
+            registry.find("ui_checkin_qr_expired_total").counter()
+                ?: Counter
+                    .builder("ui_checkin_qr_expired_total")
+                    .description("Total expired UI check-in QR attempts")
+                    .register(registry)
+
+        qrScopeMismatchCounter =
+            registry.find("ui_checkin_qr_scope_mismatch_total").counter()
+                ?: Counter
+                    .builder("ui_checkin_qr_scope_mismatch_total")
+                    .description("Total UI check-in QR attempts with scope mismatch")
+                    .register(registry)
     }
 
     fun incTotal() {
@@ -105,6 +160,18 @@ object UiCheckinMetrics {
 
     fun incOldSecretFallback() {
         cOldSecretFallback?.increment()
+    }
+
+    fun incQrInvalid() {
+        qrInvalidCounter?.increment()
+    }
+
+    fun incQrExpired() {
+        qrExpiredCounter?.increment()
+    }
+
+    fun incQrScopeMismatch() {
+        qrScopeMismatchCounter?.increment()
     }
 
     /** Несуспендящая версия (для не‑Ktor кода). */

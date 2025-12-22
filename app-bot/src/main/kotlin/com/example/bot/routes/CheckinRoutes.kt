@@ -5,6 +5,7 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.guestlists.QrGuestListCodec
+import com.example.bot.guestlists.QrVerificationResult
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.promoter.invites.PromoterInviteQrCodec
 import com.example.bot.promoter.invites.PromoterInviteService
@@ -13,6 +14,7 @@ import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.http.respondError
+import com.example.bot.metrics.QrRotationConfig
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
@@ -57,7 +59,8 @@ fun Application.checkinRoutes(
     promoterInviteService: PromoterInviteService? = null,
     botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: error("TELEGRAM_BOT_TOKEN missing") },
     qrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: error("QR_SECRET missing") },
-    oldQrSecretProvider: () -> String? = { System.getenv("QR_OLD_SECRET") },
+    rotationConfig: QrRotationConfig = QrRotationConfig.fromEnv(),
+    oldQrSecretProvider: () -> String? = { rotationConfig.oldSecret },
     clock: Clock = Clock.systemUTC(),
     qrTtl: Duration = DEFAULT_QR_TTL,
 ) {
@@ -126,6 +129,7 @@ fun Application.checkinRoutes(
                                             }
                                         }
                                 if (decodedInvite == null) {
+                                    UiCheckinMetrics.incQrInvalid()
                                     UiCheckinMetrics.incError()
                                     logger.warn(
                                         "checkin.scan promoter_invite error={} clubId={}",
@@ -168,24 +172,42 @@ fun Application.checkinRoutes(
 
                             val qrValidation = com.example.bot.guestlists.quickValidateQr(qr)
                             if (qrValidation != null) {
+                                UiCheckinMetrics.incQrInvalid()
                                 UiCheckinMetrics.incError()
                                 logger.warn("checkin.scan error={} clubId={}", qrValidation, clubId)
                                 call.respondError(HttpStatusCode.BadRequest, qrValidation)
                                 return@timeScanSuspend
                             }
 
-                            val decoded =
+                            val primaryVerification =
                                 runCatching {
-                                    QrGuestListCodec.verify(qr, now, qrTtl, primarySecret)
-                                }.getOrNull()
-                                    ?: oldSecret?.let {
+                                    QrGuestListCodec.verifyWithReason(qr, now, qrTtl, primarySecret)
+                                }.getOrDefault(QrVerificationResult.Invalid)
+                            val oldSecretVerification =
+                                if (primaryVerification is QrVerificationResult.Valid) {
+                                    null
+                                } else {
+                                    oldSecret?.let {
                                         runCatching {
-                                            QrGuestListCodec.verify(qr, now, qrTtl, it)
-                                        }.getOrNull()?.also {
-                                            UiCheckinMetrics.incOldSecretFallback()
-                                        }
+                                            QrGuestListCodec.verifyWithReason(qr, now, qrTtl, it)
+                                        }.getOrDefault(QrVerificationResult.Invalid)
                                     }
+                                }
+                            val decoded =
+                                when {
+                                    primaryVerification is QrVerificationResult.Valid -> primaryVerification.decoded
+                                    oldSecretVerification is QrVerificationResult.Valid -> {
+                                        UiCheckinMetrics.incOldSecretFallback()
+                                        oldSecretVerification.decoded
+                                    }
+                                    else -> null
+                                }
                             if (decoded == null) {
+                                when {
+                                    primaryVerification is QrVerificationResult.Expired ||
+                                        oldSecretVerification is QrVerificationResult.Expired -> UiCheckinMetrics.incQrExpired()
+                                    else -> UiCheckinMetrics.incQrInvalid()
+                                }
                                 UiCheckinMetrics.incError()
                                 logger.warn("checkin.scan error={} clubId={}", ErrorCodes.invalid_or_expired_qr, clubId)
                                 call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
@@ -209,6 +231,7 @@ fun Application.checkinRoutes(
                                     }
 
                             if (list.clubId != clubId) {
+                                UiCheckinMetrics.incQrScopeMismatch()
                                 UiCheckinMetrics.incError()
                                 logger.warn(
                                     "checkin.scan error={} clubId={} listId={} listClubId={}",
@@ -239,6 +262,7 @@ fun Application.checkinRoutes(
                                     }
 
                             if (entry.listId != list.id) {
+                                UiCheckinMetrics.incQrScopeMismatch()
                                 UiCheckinMetrics.incError()
                                 logger.warn(
                                     "checkin.scan error={} clubId={} listId={} entryListId={} entryId={}",

@@ -17,6 +17,17 @@ data class QrDecoded(
 )
 
 /**
+ * Результат верификации QR‑токена.
+ */
+sealed interface QrVerificationResult {
+    data class Valid(val decoded: QrDecoded) : QrVerificationResult
+
+    data object Invalid : QrVerificationResult
+
+    data object Expired : QrVerificationResult
+}
+
+/**
  * Кодек QR для гостевых списков.
  *
  * Формат токена (ASCII):
@@ -97,17 +108,27 @@ object QrGuestListCodec {
         ttl: Duration,
         secret: String,
         maxClockSkew: Duration = Duration.ofMinutes(2),
-    ): QrDecoded? {
+    ): QrDecoded? =
+        when (val verification = verifyWithReason(token, now, ttl, secret, maxClockSkew)) {
+            is QrVerificationResult.Valid -> verification.decoded
+            else -> null
+        }
+
+    /**
+     * Проверка токена с фиксацией причины отказа.
+     */
+    fun verifyWithReason(
+        token: String,
+        now: Instant,
+        ttl: Duration,
+        secret: String,
+        maxClockSkew: Duration = Duration.ofMinutes(2),
+    ): QrVerificationResult {
         val secretPresent = secret.isNotEmpty()
         val ttlValid = !ttl.isZero && !ttl.isNegative
         val skewValid = !maxClockSkew.isNegative
         val parametersValid = secretPresent && ttlValid && skewValid
-        val parsed =
-            if (parametersValid) {
-                parseToken(token)
-            } else {
-                null
-            }
+        val parsed = if (parametersValid) parseToken(token) else null
         return parsed?.let { parsedToken ->
             val derivedKey = deriveKey(secret)
             val expectedHmac = hmacSha256(parsedToken.message, derivedKey)
@@ -120,12 +141,14 @@ object QrGuestListCodec {
                     Duration.between(parsedToken.issuedAt, now)
                 }
             val notExpired = age.compareTo(ttl) <= 0
-            if (withinSkew && hmacValid && notExpired) {
-                QrDecoded(parsedToken.listId, parsedToken.entryId, parsedToken.issuedAt)
-            } else {
-                null
+            when {
+                !withinSkew || !hmacValid -> QrVerificationResult.Invalid
+                !notExpired -> QrVerificationResult.Expired
+                else -> QrVerificationResult.Valid(
+                    QrDecoded(parsedToken.listId, parsedToken.entryId, parsedToken.issuedAt),
+                )
             }
-        }
+        } ?: QrVerificationResult.Invalid
     }
 
     private fun parseToken(token: String): ParsedToken? {

@@ -10,8 +10,9 @@ import io.micrometer.core.instrument.MeterRegistry
  */
 object AppMetricsBinder {
     fun bindAll(registry: MeterRegistry) {
+        val rotationConfig = QrRotationConfig.fromEnv()
         UiBookingMetrics.bind(registry)
-        UiCheckinMetrics.bind(registry)
+        UiCheckinMetrics.bind(registry, rotationConfig)
         RateLimitMicrometerMetrics.bind(registry)
     }
 }
