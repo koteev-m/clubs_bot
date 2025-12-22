@@ -1,0 +1,17 @@
+# Supply-chain / CI critical files
+/Dockerfile                                @org/infra-team
+/Caddyfile                                 @org/infra-team
+/.github/workflows/*                       @org/infra-team
+
+# Build tooling ownership
+/settings.gradle.kts                       @org/backend-leads
+/gradle/verification-metadata.xml          @org/backend-leads
+/gradle/libs.versions.toml                 @org/backend-leads
+/build.gradle.kts                          @org/backend-leads
+
+# Security and provenance configuration
+/.github/CODEOWNERS                        @org/infra-team
+/docs/supply-chain.md                      @org/infra-team
+/.trivyignore                              @org/infra-team
+/.github/workflows/security-scan.yml       @org/infra-team
+/.github/workflows/ci-guards.yml           @org/infra-team

@@ -7,21 +7,21 @@ jobs:
   detekt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
         with:
           distribution: 'temurin'
           java-version: '21'
       - name: Gradle cache
-        uses: gradle/actions/setup-gradle@45b52564f44a4a311f3e621e74c7c97dd0c5696a
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
       - name: Run detekt
         run: ./gradlew detekt --console=plain
       - name: Upload detekt HTML report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: detekt-html
           path: "**/build/reports/detekt/detekt.html"
       - name: Upload detekt SARIF to Code Scanning
-        uses: github/codeql-action/upload-sarif@fb2a9d4376843ba94460a73c39ca9a98b33a12ac
+        uses: github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9
         with:
           sarif_file: "**/build/reports/detekt/detekt.sarif"

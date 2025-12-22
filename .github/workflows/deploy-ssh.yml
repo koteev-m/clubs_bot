@@ -58,7 +58,7 @@ jobs:
           echo "service_url=${SERVICE_URL}" >> "$GITHUB_OUTPUT"
 
       - name: Setup SSH agent
-        uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387
+        uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387 # v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 

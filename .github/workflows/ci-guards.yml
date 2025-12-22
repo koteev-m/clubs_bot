@@ -1,0 +1,66 @@
+name: CI Guard (Pinned Actions)
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  verify-actions-pinned:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Ensure all GitHub Actions are pinned by SHA
+        run: |
+          set -euo pipefail
+          files=$(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml' || true)
+          [ -z "$files" ] && exit 0
+
+          violations=0
+          for f in $files; do
+            while IFS= read -r line; do
+              # Skip full-line comments
+              trimmed="${line#"${line%%[![:space:]]*}"}"
+              if [[ "$trimmed" =~ ^# ]]; then
+                continue
+              fi
+              case "$line" in
+                *uses:*)
+                  if ! grep -q '@' <<<"$line"; then
+                    continue
+                  fi
+                  ref=$(printf '%s\n' "$line" | sed -nE 's/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*[^@]+@([^[:space:]#]+).*$/\1/p')
+                  if [ -z "$ref" ]; then
+                    continue
+                  fi
+                  ref=${ref%%#*}
+                  ref=$(printf '%s' "$ref" | sed -E 's/[[:space:]]+$//')
+                  ref="${ref%\"}"
+                  ref="${ref#\"}"
+                  ref="${ref%\'}"
+                  ref="${ref#\'}"
+                  if [[ "$ref" == "main" || "$ref" == "master" || "$ref" == "HEAD" ]]; then
+                    echo "::error file=$f::Unpinned action reference (main/master/HEAD) is not allowed; pin to commit SHA with a version comment"
+                    violations=1
+                    continue
+                  fi
+                  if [[ "$ref" =~ ^v[0-9] ]]; then
+                    echo "::error file=$f::Version tag in actions must be replaced by commit SHA with the tag left only as a comment"
+                    violations=1
+                    continue
+                  fi
+                  if ! grep -qE '^[0-9a-fA-F]{40}$' <<<"$ref"; then
+                    echo "::error file=$f::Non-SHA action reference is not allowed; pin to a 40-char hex commit SHA and add the version as a comment"
+                    violations=1
+                  fi
+                  ;;
+                *)
+                  ;;
+              esac
+            done < "$f"
+          done
+
+          exit $violations
