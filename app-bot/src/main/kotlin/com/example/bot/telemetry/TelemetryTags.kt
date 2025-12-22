@@ -14,6 +14,7 @@ enum class CheckinScanResult {
     ENTRY_LIST_MISMATCH,
     OUTSIDE_ARRIVAL_WINDOW,
     UNABLE_TO_MARK,
+    INVALID_STATE,
 }
 
 enum class BookingHoldResult {

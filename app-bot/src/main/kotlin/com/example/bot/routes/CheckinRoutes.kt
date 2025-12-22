@@ -170,7 +170,7 @@ fun Application.checkinRoutes(
                                         val marked = promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false
                                         if (!marked) {
                                             UiCheckinMetrics.incError()
-                                        setResult(CheckinScanResult.INVALID)
+                                            setResult(CheckinScanResult.INVALID_STATE)
                                             logger.warn(
                                                 "checkin.scan promoter_invite error={} clubId={} inviteId={}",
                                                 ErrorCodes.invalid_state,

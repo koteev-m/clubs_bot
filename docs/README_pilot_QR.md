@@ -197,7 +197,10 @@ http POST http://localhost:8080/api/clubs/42/checkin/scan \
 - Формат: `GL:<listId>:<entryId>:<issuedEpochSeconds>:<HMAC_HEX>`.
 - TTL: 12 часов от времени генерации; допускается 2 минуты положительного рассинхрона.
 - Генерация: `QrGuestListCodec.encode(listId, entryId, issuedAt, QR_SECRET)` (см. `app-bot/src/main/kotlin/com/example/bot/guestlists/QrGuestListCodec.kt`).
-- Распространение: QR печатаем/отправляем гостю, **не** логируем токен в полном виде; при дебаге используем маску `GL:***`.
+- Распространение: QR печатаем/отправляем гостю, **не** логируем токен в полном виде. В логах:
+  - гостевые листы/инвайты маскируются как `***`;
+  - прочие токены выводятся с несколькими первыми символами и окончанием `...[masked]` (см. `maskQrToken`).
+- Для отладки QR‑проблем используем `clubId`/`listId`/`entryId` в MDC и span'ах, а также `checkin.scan.result` и коды ошибок (`invalid_or_expired_qr`, `list_not_found`, `entry_not_found`, `invalid_state` и др.).
 
 # Операционный раздел (Runbook)
 
