@@ -1,6 +1,6 @@
 package com.example.bot.plugins
 
-import com.example.bot.observability.TracingProvider
+import com.example.bot.logging.MdcKeys
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.ApplicationStopped
@@ -10,6 +10,7 @@ import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.micrometer.tracing.Tracer
 import org.slf4j.MDC
+import com.example.bot.observability.TracingProvider
 
 private const val REQUEST_ID_KEY = "requestId"
 private const val CALL_ID_KEY = "callId"
@@ -20,8 +21,8 @@ fun Application.installTracing(tracer: Tracer) {
         val scope = tracer.withSpan(span)
         try {
             val ctx = span.context()
-            MDC.put("traceId", ctx.traceId())
-            MDC.put("spanId", ctx.spanId())
+            MDC.put(MdcKeys.TRACE_ID, ctx.traceId())
+            MDC.put(MdcKeys.SPAN_ID, ctx.spanId())
 
             val callId = call.callId
             val requestId =
@@ -41,11 +42,15 @@ fun Application.installTracing(tracer: Tracer) {
 
             span.tag("http.method", call.request.httpMethod.value)
             span.tag("http.target", call.request.path())
+            span.tag("http.route", call.request.path())
+            call.parameters["clubId"]?.let { clubId ->
+                span.tag("club.id", clubId)
+            }
 
             proceed()
         } finally {
-            MDC.remove("traceId")
-            MDC.remove("spanId")
+            MDC.remove(MdcKeys.TRACE_ID)
+            MDC.remove(MdcKeys.SPAN_ID)
             MDC.remove(CALL_ID_KEY)
             MDC.remove(REQUEST_ID_KEY)
             scope.close()

@@ -6,6 +6,9 @@ import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.guestlists.QrVerificationResult
+import com.example.bot.logging.MdcContext
+import com.example.bot.logging.maskQrToken
+import com.example.bot.logging.spanSuspended
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.promoter.invites.PromoterInviteQrCodec
 import com.example.bot.promoter.invites.PromoterInviteService
@@ -18,6 +21,7 @@ import com.example.bot.metrics.QrRotationConfig
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
+import com.example.bot.telemetry.Tracing
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -71,11 +75,11 @@ fun Application.checkinRoutes(
             // ЕДИНЫЙ механизм WebApp-авторизации
             withMiniAppAuth { botTokenProvider() }
 
-            authorize(Role.CLUB_ADMIN, Role.MANAGER, Role.ENTRY_MANAGER) {
-                clubScoped(ClubScope.Own) {
-                    val maxBytes: Long = (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
-                        ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
-                    install(RequestSizeLimit) {
+                authorize(Role.CLUB_ADMIN, Role.MANAGER, Role.ENTRY_MANAGER) {
+                    clubScoped(ClubScope.Own) {
+                        val maxBytes: Long = (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
+                            ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
+                        install(RequestSizeLimit) {
                         maxRequestSize = maxBytes
                     }
 
@@ -104,211 +108,270 @@ fun Application.checkinRoutes(
                                         return@timeScanSuspend
                                     }
 
-                            val payload =
-                                call.receiveScanPayloadOrNull()
-                                    ?: run {
-                                        UiCheckinMetrics.incError()
-                                        logger.warn("checkin.scan error={} clubId={}", ErrorCodes.invalid_json, clubId)
-                                        call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-                                        return@timeScanSuspend
+                            MdcContext.withIds(clubId = clubId) {
+                                val tracer = Tracing.tracer
+                                tracer.spanSuspended("checkin.scan") { span ->
+                                    span.setAttribute("club.id", clubId.toLong())
+                                    var scanResult = "unknown"
+                                    fun setResult(result: String) {
+                                        scanResult = result
+                                        span.setAttribute("checkin.scan.result", result)
                                     }
 
-                            val qr = payload.qr.trim()
-                            val primarySecret = qrSecretProvider()
-                            val oldSecret =
-                                oldQrSecretProvider()?.takeIf {
-                                    it.isNotBlank() && it != primarySecret
-                                }
-                            val now = Instant.now(clock)
-                            if (qr.startsWith("INV:")) {
-                                val decodedInvite =
-                                    PromoterInviteQrCodec.tryDecode(qr, primarySecret)
-                                        ?: oldSecret?.let {
-                                            PromoterInviteQrCodec.tryDecode(qr, it)?.also {
-                                                UiCheckinMetrics.incOldSecretFallback()
+                                    val payload =
+                                        call.receiveScanPayloadOrNull()
+                                            ?: run {
+                                                UiCheckinMetrics.incError()
+                                                setResult("invalid_json")
+                                                logger.warn(
+                                                    "checkin.scan error={} clubId={}",
+                                                    ErrorCodes.invalid_json,
+                                                    clubId,
+                                                )
+                                                call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                                                return@spanSuspended
+                                            }
+
+                                    val qr = payload.qr.trim()
+                                    span.setAttribute(
+                                        "checkin.scan.type",
+                                        if (qr.startsWith("INV:")) SCAN_TYPE_PROMOTER_INVITE else "guestlist",
+                                    )
+                                    val primarySecret = qrSecretProvider()
+                                    val oldSecret =
+                                        oldQrSecretProvider()?.takeIf {
+                                            it.isNotBlank() && it != primarySecret
+                                        }
+                                    val now = Instant.now(clock)
+                                    if (qr.startsWith("INV:")) {
+                                        val decodedInvite =
+                                            PromoterInviteQrCodec.tryDecode(qr, primarySecret)
+                                                ?: oldSecret?.let {
+                                                    PromoterInviteQrCodec.tryDecode(qr, it)?.also {
+                                                        UiCheckinMetrics.incOldSecretFallback()
+                                                    }
+                                                }
+                                        if (decodedInvite == null) {
+                                            UiCheckinMetrics.incQrInvalid()
+                                            UiCheckinMetrics.incError()
+                                            setResult("invalid")
+                                            logger.warn(
+                                                "checkin.scan promoter_invite error={} clubId={} qr={}",
+                                                ErrorCodes.invalid_or_expired_qr,
+                                                clubId,
+                                                maskQrToken(qr),
+                                            )
+                                            call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
+                                            return@spanSuspended
+                                        }
+
+                                        val marked = promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false
+                                        if (!marked) {
+                                            UiCheckinMetrics.incError()
+                                            setResult("invalid_state")
+                                            logger.warn(
+                                                "checkin.scan promoter_invite error={} clubId={} inviteId={}",
+                                                ErrorCodes.invalid_state,
+                                                clubId,
+                                                decodedInvite.inviteId,
+                                            )
+                                            call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                                            return@spanSuspended
+                                        }
+
+                                        setResult("success")
+                                        logger.info(
+                                            "checkin.scan promoter_invite status=arrived clubId={} inviteId={} eventId={}",
+                                            clubId,
+                                            decodedInvite.inviteId,
+                                            decodedInvite.eventId,
+                                        )
+                                        call.respond(
+                                            HttpStatusCode.OK,
+                                            PromoterInviteScanResponse(
+                                                status = SCAN_STATUS_ARRIVED,
+                                                type = SCAN_TYPE_PROMOTER_INVITE,
+                                                inviteId = decodedInvite.inviteId,
+                                            ),
+                                        )
+                                        return@spanSuspended
+                                    }
+
+                                    val qrValidation = com.example.bot.guestlists.quickValidateQr(qr)
+                                    if (qrValidation != null) {
+                                        UiCheckinMetrics.incQrInvalid()
+                                        UiCheckinMetrics.incError()
+                                        setResult("invalid_format")
+                                        logger.warn(
+                                            "checkin.scan error={} clubId={} qr={}",
+                                            qrValidation,
+                                            clubId,
+                                            maskQrToken(qr),
+                                        )
+                                        call.respondError(HttpStatusCode.BadRequest, qrValidation)
+                                        return@spanSuspended
+                                    }
+
+                                    val primaryVerification =
+                                        runCatching {
+                                            QrGuestListCodec.verifyWithReason(qr, now, qrTtl, primarySecret)
+                                        }.getOrDefault(QrVerificationResult.Invalid)
+                                    val oldSecretVerification =
+                                        if (primaryVerification is QrVerificationResult.Valid) {
+                                            null
+                                        } else {
+                                            oldSecret?.let {
+                                                runCatching {
+                                                    QrGuestListCodec.verifyWithReason(qr, now, qrTtl, it)
+                                                }.getOrDefault(QrVerificationResult.Invalid)
                                             }
                                         }
-                                if (decodedInvite == null) {
-                                    UiCheckinMetrics.incQrInvalid()
-                                    UiCheckinMetrics.incError()
-                                    logger.warn(
-                                        "checkin.scan promoter_invite error={} clubId={}",
-                                        ErrorCodes.invalid_or_expired_qr,
-                                        clubId,
-                                    )
-                                    call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
-                                    return@timeScanSuspend
-                                }
-
-                                val marked = promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false
-                                if (!marked) {
-                                    UiCheckinMetrics.incError()
-                                    logger.warn(
-                                        "checkin.scan promoter_invite error={} clubId={} inviteId={}",
-                                        ErrorCodes.invalid_state,
-                                        clubId,
-                                        decodedInvite.inviteId,
-                                    )
-                                    call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
-                                    return@timeScanSuspend
-                                }
-
-                                logger.info(
-                                    "checkin.scan promoter_invite status=arrived clubId={} inviteId={} eventId={}",
-                                    clubId,
-                                    decodedInvite.inviteId,
-                                    decodedInvite.eventId,
-                                )
-                                call.respond(
-                                    HttpStatusCode.OK,
-                                    PromoterInviteScanResponse(
-                                        status = SCAN_STATUS_ARRIVED,
-                                        type = SCAN_TYPE_PROMOTER_INVITE,
-                                        inviteId = decodedInvite.inviteId,
-                                    ),
-                                )
-                                return@timeScanSuspend
-                            }
-
-                            val qrValidation = com.example.bot.guestlists.quickValidateQr(qr)
-                            if (qrValidation != null) {
-                                UiCheckinMetrics.incQrInvalid()
-                                UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error={} clubId={}", qrValidation, clubId)
-                                call.respondError(HttpStatusCode.BadRequest, qrValidation)
-                                return@timeScanSuspend
-                            }
-
-                            val primaryVerification =
-                                runCatching {
-                                    QrGuestListCodec.verifyWithReason(qr, now, qrTtl, primarySecret)
-                                }.getOrDefault(QrVerificationResult.Invalid)
-                            val oldSecretVerification =
-                                if (primaryVerification is QrVerificationResult.Valid) {
-                                    null
-                                } else {
-                                    oldSecret?.let {
-                                        runCatching {
-                                            QrGuestListCodec.verifyWithReason(qr, now, qrTtl, it)
-                                        }.getOrDefault(QrVerificationResult.Invalid)
-                                    }
-                                }
-                            val decoded =
-                                when {
-                                    primaryVerification is QrVerificationResult.Valid -> primaryVerification.decoded
-                                    oldSecretVerification is QrVerificationResult.Valid -> {
-                                        UiCheckinMetrics.incOldSecretFallback()
-                                        oldSecretVerification.decoded
-                                    }
-                                    else -> null
-                                }
-                            if (decoded == null) {
-                                when {
-                                    primaryVerification is QrVerificationResult.Expired ||
-                                        oldSecretVerification is QrVerificationResult.Expired -> UiCheckinMetrics.incQrExpired()
-                                    else -> UiCheckinMetrics.incQrInvalid()
-                                }
-                                UiCheckinMetrics.incError()
-                                logger.warn("checkin.scan error={} clubId={}", ErrorCodes.invalid_or_expired_qr, clubId)
-                                call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
-                                return@timeScanSuspend
-                            }
-
-                            val list =
-                                withContext(Dispatchers.IO + MDCContext()) {
-                                    repository.getList(decoded.listId)
-                                }
-                                    ?: run {
+                                    val decoded =
+                                        when {
+                                            primaryVerification is QrVerificationResult.Valid -> primaryVerification.decoded
+                                            oldSecretVerification is QrVerificationResult.Valid -> {
+                                                UiCheckinMetrics.incOldSecretFallback()
+                                                oldSecretVerification.decoded
+                                            }
+                                            else -> null
+                                        }
+                                    if (decoded == null) {
+                                        when {
+                                            primaryVerification is QrVerificationResult.Expired ||
+                                                oldSecretVerification is QrVerificationResult.Expired -> {
+                                                UiCheckinMetrics.incQrExpired()
+                                                setResult("expired")
+                                            }
+                                            else -> {
+                                                UiCheckinMetrics.incQrInvalid()
+                                                setResult("invalid")
+                                            }
+                                        }
                                         UiCheckinMetrics.incError()
                                         logger.warn(
-                                            "checkin.scan error={} clubId={} listId={}",
-                                            ErrorCodes.list_not_found,
+                                            "checkin.scan error={} clubId={} qr={}",
+                                            ErrorCodes.invalid_or_expired_qr,
                                             clubId,
-                                            decoded.listId,
+                                            maskQrToken(qr),
                                         )
-                                        call.respondError(HttpStatusCode.NotFound, ErrorCodes.list_not_found)
-                                        return@timeScanSuspend
+                                        call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
+                                        return@spanSuspended
                                     }
 
-                            if (list.clubId != clubId) {
-                                UiCheckinMetrics.incQrScopeMismatch()
-                                UiCheckinMetrics.incError()
-                                logger.warn(
-                                    "checkin.scan error={} clubId={} listId={} listClubId={}",
-                                    ErrorCodes.club_scope_mismatch,
-                                    clubId,
-                                    list.id,
-                                    list.clubId,
-                                )
-                                call.respondError(HttpStatusCode.Forbidden, ErrorCodes.club_scope_mismatch)
-                                return@timeScanSuspend
-                            }
+                                    span.setAttribute("guestlist.list_id", decoded.listId)
+                                    span.setAttribute("guestlist.entry_id", decoded.entryId)
+                                    var currentResult = scanResult
+                                    MdcContext.withIds(listId = decoded.listId, entryId = decoded.entryId) {
+                                        val list =
+                                            withContext(Dispatchers.IO + MDCContext()) {
+                                                repository.getList(decoded.listId)
+                                            }
+                                                ?: run {
+                                                    UiCheckinMetrics.incError()
+                                                    currentResult = "list_not_found"
+                                                    logger.warn(
+                                                        "checkin.scan error={} clubId={} listId={}",
+                                                        ErrorCodes.list_not_found,
+                                                        clubId,
+                                                        decoded.listId,
+                                                    )
+                                                    call.respondError(HttpStatusCode.NotFound, ErrorCodes.list_not_found)
+                                                    return@withIds
+                                                }
 
-                            val entry =
-                                withContext(Dispatchers.IO + MDCContext()) {
-                                    repository.findEntry(decoded.entryId)
-                                }
-                                    ?: run {
-                                        UiCheckinMetrics.incError()
-                                        logger.warn(
-                                            "checkin.scan error={} clubId={} listId={} entryId={}",
-                                            ErrorCodes.entry_not_found,
+                                        if (list.clubId != clubId) {
+                                            UiCheckinMetrics.incQrScopeMismatch()
+                                            UiCheckinMetrics.incError()
+                                            currentResult = "scope_mismatch"
+                                            logger.warn(
+                                                "checkin.scan error={} clubId={} listId={} listClubId={}",
+                                                ErrorCodes.club_scope_mismatch,
+                                                clubId,
+                                                list.id,
+                                                list.clubId,
+                                            )
+                                            call.respondError(HttpStatusCode.Forbidden, ErrorCodes.club_scope_mismatch)
+                                            return@withIds
+                                        }
+
+                                        val entry =
+                                            withContext(Dispatchers.IO + MDCContext()) {
+                                                repository.findEntry(decoded.entryId)
+                                            }
+                                                ?: run {
+                                                    UiCheckinMetrics.incError()
+                                                    currentResult = "entry_not_found"
+                                                    logger.warn(
+                                                        "checkin.scan error={} clubId={} listId={} entryId={}",
+                                                        ErrorCodes.entry_not_found,
+                                                        clubId,
+                                                        decoded.listId,
+                                                        decoded.entryId,
+                                                    )
+                                                    call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
+                                                    return@withIds
+                                                }
+
+                                        if (entry.listId != list.id) {
+                                            UiCheckinMetrics.incQrScopeMismatch()
+                                            UiCheckinMetrics.incError()
+                                            currentResult = "entry_list_mismatch"
+                                            logger.warn(
+                                                "checkin.scan error={} clubId={} listId={} entryListId={} entryId={}",
+                                                ErrorCodes.entry_list_mismatch,
+                                                clubId,
+                                                list.id,
+                                                entry.listId,
+                                                entry.id,
+                                            )
+                                            call.respondError(HttpStatusCode.BadRequest, ErrorCodes.entry_list_mismatch)
+                                            return@withIds
+                                        }
+
+                                        val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
+                                        if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
+                                            UiCheckinMetrics.incError()
+                                            currentResult = "outside_arrival_window"
+                                            call.respondError(
+                                                HttpStatusCode.Conflict,
+                                                ErrorCodes.outside_arrival_window,
+                                            )
+                                            return@withIds
+                                        } else if (!withinWindow) {
+                                            UiCheckinMetrics.incLateOverride()
+                                        }
+
+                                        val marked =
+                                            withContext(Dispatchers.IO + MDCContext()) {
+                                                repository.markArrived(entry.id, Instant.now(clock))
+                                            }
+                                        if (!marked) {
+                                            UiCheckinMetrics.incError()
+                                            currentResult = "unable_to_mark"
+                                            logger.warn(
+                                                "checkin.scan error={} clubId={} listId={} entryId={}",
+                                                ErrorCodes.unable_to_mark,
+                                                clubId,
+                                                list.id,
+                                                entry.id,
+                                            )
+                                            call.respondError(HttpStatusCode.Conflict, ErrorCodes.unable_to_mark)
+                                            return@withIds
+                                        }
+
+                                        currentResult = "success"
+                                        logger.info(
+                                            "checkin.scan status=arrived clubId={} listId={} entryId={}",
                                             clubId,
-                                            decoded.listId,
-                                            decoded.entryId,
+                                            list.id,
+                                            entry.id,
                                         )
-                                        call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
-                                        return@timeScanSuspend
+                                        call.respond(HttpStatusCode.OK, mapOf("status" to "ARRIVED"))
                                     }
-
-                            if (entry.listId != list.id) {
-                                UiCheckinMetrics.incQrScopeMismatch()
-                                UiCheckinMetrics.incError()
-                                logger.warn(
-                                    "checkin.scan error={} clubId={} listId={} entryListId={} entryId={}",
-                                    ErrorCodes.entry_list_mismatch,
-                                    clubId,
-                                    list.id,
-                                    entry.listId,
-                                    entry.id,
-                                )
-                                call.respondError(HttpStatusCode.BadRequest, ErrorCodes.entry_list_mismatch)
-                                return@timeScanSuspend
-                            }
-
-                            val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
-                            if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
-                                UiCheckinMetrics.incError()
-                                call.respondError(HttpStatusCode.Conflict, ErrorCodes.outside_arrival_window)
-                                return@timeScanSuspend
-                            } else if (!withinWindow) {
-                                UiCheckinMetrics.incLateOverride()
-                            }
-
-                            val marked =
-                                withContext(Dispatchers.IO + MDCContext()) {
-                                    repository.markArrived(entry.id, Instant.now(clock))
+                                    scanResult = currentResult
+                                    span.setAttribute("checkin.scan.result", scanResult)
                                 }
-                            if (!marked) {
-                                UiCheckinMetrics.incError()
-                                logger.warn(
-                                    "checkin.scan error={} clubId={} listId={} entryId={}",
-                                    ErrorCodes.unable_to_mark,
-                                    clubId,
-                                    list.id,
-                                    entry.id,
-                                )
-                                call.respondError(HttpStatusCode.Conflict, ErrorCodes.unable_to_mark)
-                                return@timeScanSuspend
                             }
-
-                            logger.info(
-                                "checkin.scan status=arrived clubId={} listId={} entryId={}",
-                                clubId,
-                                list.id,
-                                entry.id,
-                            )
-                            call.respond(HttpStatusCode.OK, mapOf("status" to "ARRIVED"))
                         }
                     }
                 }

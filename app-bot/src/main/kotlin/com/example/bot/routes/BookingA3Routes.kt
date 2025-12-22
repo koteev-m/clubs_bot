@@ -9,11 +9,14 @@ import com.example.bot.booking.a3.PlusOneResult
 import com.example.bot.booking.a3.hashRequestCanonical
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
+import com.example.bot.logging.MdcContext
+import com.example.bot.logging.spanSuspended
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.ratelimit.RateLimitSnapshot
 import com.example.bot.ratelimit.TokenBucket
 import com.example.bot.security.rbac.rbacContext
+import com.example.bot.telemetry.Tracing
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -100,92 +103,120 @@ fun Application.bookingA3Routes(
                                 idem,
                             )
                         }
-                    val rate =
-                        rateLimiter.acquire(
-                            "hold:${user.id}",
-                            capacity = holdRateLimit.capacity,
-                            refillPerSec = holdRateLimit.refillPerSec,
-                        )
-                    if (!rate.allowed) {
-                        meterRegistry
-                            ?.counter("bookings.rate_limited", "route", "hold", "club_id", clubId.toString())
-                            ?.increment()
-                        logger.warn(
-                            "booking.hold failed status={} error_code={} table={} event={} user={}",
-                            HttpStatusCode.TooManyRequests,
-                            ErrorCodes.rate_limited,
-                            payload.tableId,
-                            payload.eventId,
-                            user.id,
-                        )
-                        call.applyRateLimitHeaders(rate.snapshot, includeRetryAfter = true)
-                        return@post call.respondError(
-                            HttpStatusCode.TooManyRequests,
-                            ErrorCodes.rate_limited,
-                            idem,
-                        )
-                    }
-                    call.applyRateLimitHeaders(rate.snapshot)
-                    val hash = hashRequestCanonical(payload)
-                    val result =
-                        bookingState.hold(
-                            userId = user.id,
-                            clubId = clubId,
-                            tableId = payload.tableId,
-                            eventId = payload.eventId,
-                            guestCount = payload.guestCount,
-                            idempotencyKey = idem,
-                            requestHash = hash,
-                            promoterId = promoterId,
-                        )
-                    when (result) {
-                        is HoldResult.Success -> {
-                            val replayTag = if (result.cached) "true" else "false"
-                            meterRegistry
-                                ?.counter(
-                                    "bookings.hold.created",
-                                    "club_id",
-                                    clubId.toString(),
-                                    "replay",
-                                    replayTag,
-                                )
-                                ?.increment()
-                            call.applyIdempotencyHeaders(idem, result.cached)
-                            logger.info(
-                                "booking.audit source=miniapp user_id={} club_id={} booking_id={} table_id={} event_id={} status={}->{}",
-                                user.id,
-                                clubId,
-                                result.booking.id,
-                                payload.tableId,
-                                payload.eventId,
-                                if (result.cached) result.booking.status else "FREE",
-                                result.booking.status,
-                            )
-                            call.respondBooking(result.bodyJson)
-                        }
+                    MdcContext.withIds(clubId = clubId) {
+                        val tracer = Tracing.tracer
+                        tracer.spanSuspended("booking.hold") { span ->
+                            span.setAttribute("club.id", clubId)
+                            span.setAttribute("booking.requested_guests", payload.guestCount.toLong())
+                            var spanResult = "unknown"
+                            fun setResult(result: String) {
+                                spanResult = result
+                                span.setAttribute("booking.hold.result", result)
+                            }
 
-                        is HoldResult.Error -> {
-                            val (status, code) = result.code.toHttp()
-                            meterRegistry
-                                ?.counter(
-                                    "bookings.hold.failed",
-                                    "error_code",
-                                    code,
-                                    "club_id",
-                                    clubId.toString(),
-                                    "replay",
-                                    "false",
+                            val rate =
+                                rateLimiter.acquire(
+                                    "hold:${user.id}",
+                                    capacity = holdRateLimit.capacity,
+                                    refillPerSec = holdRateLimit.refillPerSec,
                                 )
-                                ?.increment()
-                            logger.warn(
-                                "booking.hold failed status={} error_code={} table={} event={} user={}",
-                                status,
-                                code,
-                                payload.tableId,
-                                payload.eventId,
-                                user.id,
-                            )
-                            call.respondError(status, code, idem)
+                            if (!rate.allowed) {
+                                meterRegistry
+                                    ?.counter("bookings.rate_limited", "route", "hold", "club_id", clubId.toString())
+                                    ?.increment()
+                                setResult("rejected")
+                                logger.warn(
+                                    "booking.hold failed status={} error_code={} table={} event={} user={}",
+                                    HttpStatusCode.TooManyRequests,
+                                    ErrorCodes.rate_limited,
+                                    payload.tableId,
+                                    payload.eventId,
+                                    user.id,
+                                )
+                                call.applyRateLimitHeaders(rate.snapshot, includeRetryAfter = true)
+                                return@spanSuspended call.respondError(
+                                    HttpStatusCode.TooManyRequests,
+                                    ErrorCodes.rate_limited,
+                                    idem,
+                                )
+                            }
+                            call.applyRateLimitHeaders(rate.snapshot)
+                            val hash = hashRequestCanonical(payload)
+                            val result =
+                                bookingState.hold(
+                                    userId = user.id,
+                                    clubId = clubId,
+                                    tableId = payload.tableId,
+                                    eventId = payload.eventId,
+                                    guestCount = payload.guestCount,
+                                    idempotencyKey = idem,
+                                    requestHash = hash,
+                                    promoterId = promoterId,
+                                )
+                            when (result) {
+                                is HoldResult.Success -> {
+                                    val replayTag = if (result.cached) "true" else "false"
+                                    meterRegistry
+                                        ?.counter(
+                                            "bookings.hold.created",
+                                            "club_id",
+                                            clubId.toString(),
+                                            "replay",
+                                            replayTag,
+                                        )
+                                        ?.increment()
+                                    call.applyIdempotencyHeaders(idem, result.cached)
+                                    setResult("success")
+                                    span.setAttribute("booking.id", result.booking.id)
+                                    MdcContext.withIds(bookingId = result.booking.id, clubId = clubId) {
+                                        logger.info(
+                                            "booking.audit source=miniapp user_id={} club_id={} booking_id={} table_id={} event_id={} status={}->{}",
+                                            user.id,
+                                            clubId,
+                                            result.booking.id,
+                                            payload.tableId,
+                                            payload.eventId,
+                                            if (result.cached) result.booking.status else "FREE",
+                                            result.booking.status,
+                                        )
+                                    }
+                                    call.respondBooking(result.bodyJson)
+                                }
+
+                                is HoldResult.Error -> {
+                                    val (status, code) = result.code.toHttp()
+                                    meterRegistry
+                                        ?.counter(
+                                            "bookings.hold.failed",
+                                            "error_code",
+                                            code,
+                                            "club_id",
+                                            clubId.toString(),
+                                            "replay",
+                                            "false",
+                                        )
+                                        ?.increment()
+                                    setResult(
+                                        when (result.code) {
+                                            BookingError.TABLE_NOT_AVAILABLE -> "overbooked"
+                                            BookingError.INVALID_STATE -> "invalid_state"
+                                            BookingError.CAPACITY_EXCEEDED -> "capacity_exceeded"
+                                            BookingError.PROMOTER_QUOTA_EXHAUSTED -> "rejected"
+                                            else -> "rejected"
+                                        },
+                                    )
+                                    logger.warn(
+                                        "booking.hold failed status={} error_code={} table={} event={} user={}",
+                                        status,
+                                        code,
+                                        payload.tableId,
+                                        payload.eventId,
+                                        user.id,
+                                    )
+                                    call.respondError(status, code, idem)
+                                }
+                            }
+                            span.setAttribute("booking.hold.result", spanResult)
                         }
                     }
                 }
@@ -247,54 +278,82 @@ fun Application.bookingA3Routes(
                     }
                     call.applyRateLimitHeaders(rate.snapshot)
                     val hash = hashRequestCanonical(payload)
-                    val result = bookingState.confirm(user.id, clubId, payload.bookingId, idem, hash)
-                    when (result) {
-                        is ConfirmResult.Success -> {
-                            val replayTag = if (result.cached) "true" else "false"
-                            meterRegistry
-                                ?.counter(
-                                    "bookings.confirm.success",
-                                    "club_id",
-                                    clubId.toString(),
-                                    "replay",
-                                    replayTag,
-                                )
-                                ?.increment()
-                            call.applyIdempotencyHeaders(idem, result.cached)
-                            logger.info(
-                                "booking.audit source=miniapp user_id={} club_id={} booking_id={} table_id={} event_id={} status={}->{}",
-                                user.id,
-                                clubId,
-                                result.booking.id,
-                                result.booking.tableId,
-                                result.booking.eventId,
-                                "HOLD",
-                                result.booking.status,
-                            )
-                            call.respondBooking(result.bodyJson)
-                        }
+                    MdcContext.withIds(clubId = clubId, bookingId = payload.bookingId) {
+                        val tracer = Tracing.tracer
+                        tracer.spanSuspended("booking.confirm") { span ->
+                            span.setAttribute("club.id", clubId)
+                            span.setAttribute("booking.id", payload.bookingId)
+                            var spanResult = "unknown"
+                            fun setResult(result: String) {
+                                spanResult = result
+                                span.setAttribute("booking.confirm.result", result)
+                            }
+                            val result = bookingState.confirm(user.id, clubId, payload.bookingId, idem, hash)
+                            when (result) {
+                                is ConfirmResult.Success -> {
+                                    val replayTag = if (result.cached) "true" else "false"
+                                    meterRegistry
+                                        ?.counter(
+                                            "bookings.confirm.success",
+                                            "club_id",
+                                            clubId.toString(),
+                                            "replay",
+                                            replayTag,
+                                        )
+                                        ?.increment()
+                                    call.applyIdempotencyHeaders(idem, result.cached)
+                                    setResult("success")
+                                    span.setAttribute("booking.status.before", "HOLD")
+                                    span.setAttribute("booking.status.after", result.booking.status.toString())
+                                    MdcContext.withIds(bookingId = result.booking.id, clubId = clubId) {
+                                        logger.info(
+                                            "booking.audit source=miniapp user_id={} club_id={} booking_id={} table_id={} event_id={} status={}->{}",
+                                            user.id,
+                                            clubId,
+                                            result.booking.id,
+                                            result.booking.tableId,
+                                            result.booking.eventId,
+                                            "HOLD",
+                                            result.booking.status,
+                                        )
+                                    }
+                                    call.respondBooking(result.bodyJson)
+                                }
 
-                        is ConfirmResult.Error -> {
-                            val (status, code) = result.code.toHttp()
-                            meterRegistry
-                                ?.counter(
-                                    "bookings.confirm.failed",
-                                    "error_code",
-                                    code,
-                                    "club_id",
-                                    clubId.toString(),
-                                    "replay",
-                                    "false",
-                                )
-                                ?.increment()
-                            logger.warn(
-                                "booking.confirm failed status={} error_code={} bookingId={} user={}",
-                                status,
-                                code,
-                                payload.bookingId,
-                                user.id,
-                            )
-                            call.respondError(status, code, idem)
+                                is ConfirmResult.Error -> {
+                                    val (status, code) = result.code.toHttp()
+                                    meterRegistry
+                                        ?.counter(
+                                            "bookings.confirm.failed",
+                                            "error_code",
+                                            code,
+                                            "club_id",
+                                            clubId.toString(),
+                                            "replay",
+                                            "false",
+                                        )
+                                        ?.increment()
+                                    setResult(
+                                        when (result.code) {
+                                            BookingError.INVALID_STATE -> "invalid_state"
+                                            BookingError.HOLD_EXPIRED -> "expired"
+                                            BookingError.FORBIDDEN,
+                                            BookingError.CLUB_SCOPE_MISMATCH -> "scope_mismatch"
+                                            BookingError.NOT_FOUND -> "not_found"
+                                            else -> "rejected"
+                                        },
+                                    )
+                                    logger.warn(
+                                        "booking.confirm failed status={} error_code={} bookingId={} user={}",
+                                        status,
+                                        code,
+                                        payload.bookingId,
+                                        user.id,
+                                    )
+                                    call.respondError(status, code, idem)
+                                }
+                            }
+                            span.setAttribute("booking.confirm.result", spanResult)
                         }
                     }
                 }
