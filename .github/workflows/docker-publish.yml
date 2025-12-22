@@ -22,20 +22,22 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    outputs:
+      image-ref: ${{ steps.image-ref.outputs.image }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
       - name: Set up QEMU (multi-arch emulation)
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 # v3.8.0
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893
+        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
@@ -50,7 +52,7 @@ jobs:
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -58,7 +60,7 @@ jobs:
 
       - name: Build & (optionally) Push
         id: build
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         with:
           context: .
           file: Dockerfile
@@ -72,7 +74,7 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@6e04d228eb30da1757ee4e1dd75a0ec73a653e06
+        uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
 
       - name: Sign image (keyless)
         if: github.event_name != 'pull_request'
@@ -80,18 +82,54 @@ jobs:
           COSIGN_EXPERIMENTAL: "true"
         run: cosign sign --yes ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
-      - name: Verify image signature (keyless)
+      - name: Capture image reference
+        id: image-ref
         if: github.event_name != 'pull_request'
+        run: echo "image=${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SBOM (CycloneDX via Syft)
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@251a468eed47e5082b105c3ba6ee500c0e65a764 # v0.17.6
+        with:
+          image: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Upload SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: sbom
+          path: sbom.cdx.json
+
+  verify-and-provenance:
+    if: github.event_name != 'pull_request'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
+
+      - name: Verify image signature (keyless)
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign verify \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
-            ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+            ${{ needs.build-and-push.outputs.image-ref }}
+
+      - name: Download SLSA provenance attestation
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: cosign download attestation --type slsaprovenance ${{ needs.build-and-push.outputs.image-ref }} > provenance.jsonl
 
       - name: Verify SLSA provenance attestation
-        if: github.event_name != 'pull_request'
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
@@ -99,4 +137,46 @@ jobs:
             --type slsaprovenance \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
-            ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+            ${{ needs.build-and-push.outputs.image-ref }}
+
+      - name: Upload provenance attestation
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: slsa-provenance
+          path: provenance.jsonl
+
+  trivy-image:
+    if: github.event_name != 'pull_request'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
+        with:
+          scan-type: image
+          image-ref: ${{ needs.build-and-push.outputs.image-ref }}
+          severity: HIGH,CRITICAL
+          ignorefile: .trivyignore
+          format: sarif
+          output: trivy-image-results.sarif
+          exit-code: 1
+
+      - name: Upload Trivy image SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9
+        with:
+          sarif_file: trivy-image-results.sarif
+
+      - name: Persist Trivy image report artifact
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: trivy-image-report
+          path: trivy-image-results.sarif

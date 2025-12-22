@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout (full history)
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           fetch-depth: 0
 
@@ -59,7 +59,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: ${{ steps.vars.outputs.tag }}
@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload CHANGELOG.md as asset
         if: always()
-        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           files: CHANGELOG.md

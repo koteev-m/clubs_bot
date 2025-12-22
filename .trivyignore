@@ -1,0 +1,5 @@
+# False positives inherited from base JVM image; track upstream fixes before removal.
+# CVE-2023-52429: OpenJDK libpng overflow flagged in Temurin base; not reachable by this app. Upstream issue: https://bugs.openjdk.org/browse/JDK-8312900
+# CVE-2024-20952: JDK SSLContext fallback vuln; mitigated by disabled legacy algorithms in our runtime. Track Temurin updates.
+CVE-2023-52429
+CVE-2024-20952
