@@ -18,6 +18,8 @@ object TracingMdc {
 }
 
 inline fun <T> Tracer.span(name: String, block: (Span) -> T): T {
+    val previousTrace = MDC.get(MdcKeys.TRACE_ID)
+    val previousSpan = MDC.get(MdcKeys.SPAN_ID)
     val span = spanBuilder(name).startSpan()
     TracingMdc.updateFromSpan(span)
     val scope = span.makeCurrent()
@@ -28,12 +30,15 @@ inline fun <T> Tracer.span(name: String, block: (Span) -> T): T {
         span.setStatus(StatusCode.ERROR)
         throw t
     } finally {
+        restoreTraceMdc(previousTrace, previousSpan)
         scope.close()
         span.end()
     }
 }
 
 suspend inline fun <T> Tracer.spanSuspended(name: String, crossinline block: suspend (Span) -> T): T {
+    val previousTrace = MDC.get(MdcKeys.TRACE_ID)
+    val previousSpan = MDC.get(MdcKeys.SPAN_ID)
     val span = spanBuilder(name).startSpan()
     TracingMdc.updateFromSpan(span)
     val scope = span.makeCurrent()
@@ -44,7 +49,14 @@ suspend inline fun <T> Tracer.spanSuspended(name: String, crossinline block: sus
         span.setStatus(StatusCode.ERROR)
         throw t
     } finally {
+        restoreTraceMdc(previousTrace, previousSpan)
         scope.close()
         span.end()
     }
+}
+
+@PublishedApi
+internal fun restoreTraceMdc(previousTrace: String?, previousSpan: String?) {
+    if (previousTrace == null) MDC.remove(MdcKeys.TRACE_ID) else MDC.put(MdcKeys.TRACE_ID, previousTrace)
+    if (previousSpan == null) MDC.remove(MdcKeys.SPAN_ID) else MDC.put(MdcKeys.SPAN_ID, previousSpan)
 }
