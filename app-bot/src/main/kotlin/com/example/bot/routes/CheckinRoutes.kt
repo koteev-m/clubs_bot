@@ -22,6 +22,8 @@ import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
 import com.example.bot.telemetry.Tracing
+import com.example.bot.telemetry.CheckinScanResult
+import com.example.bot.telemetry.setCheckinResult
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -112,17 +114,17 @@ fun Application.checkinRoutes(
                                 val tracer = Tracing.tracer
                                 tracer.spanSuspended("checkin.scan") { span ->
                                     span.setAttribute("club.id", clubId.toLong())
-                                    var scanResult = "unknown"
-                                    fun setResult(result: String) {
+                                    var scanResult = CheckinScanResult.INVALID
+                                    fun setResult(result: CheckinScanResult) {
                                         scanResult = result
-                                        span.setAttribute("checkin.scan.result", result)
+                                        span.setCheckinResult(result)
                                     }
 
                                     val payload =
                                         call.receiveScanPayloadOrNull()
                                             ?: run {
                                                 UiCheckinMetrics.incError()
-                                                setResult("invalid_json")
+                                                setResult(CheckinScanResult.INVALID_JSON)
                                                 logger.warn(
                                                     "checkin.scan error={} clubId={}",
                                                     ErrorCodes.invalid_json,
@@ -154,7 +156,7 @@ fun Application.checkinRoutes(
                                         if (decodedInvite == null) {
                                             UiCheckinMetrics.incQrInvalid()
                                             UiCheckinMetrics.incError()
-                                            setResult("invalid")
+                                            setResult(CheckinScanResult.INVALID)
                                             logger.warn(
                                                 "checkin.scan promoter_invite error={} clubId={} qr={}",
                                                 ErrorCodes.invalid_or_expired_qr,
@@ -168,7 +170,7 @@ fun Application.checkinRoutes(
                                         val marked = promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false
                                         if (!marked) {
                                             UiCheckinMetrics.incError()
-                                            setResult("invalid_state")
+                                        setResult(CheckinScanResult.INVALID)
                                             logger.warn(
                                                 "checkin.scan promoter_invite error={} clubId={} inviteId={}",
                                                 ErrorCodes.invalid_state,
@@ -179,7 +181,7 @@ fun Application.checkinRoutes(
                                             return@spanSuspended
                                         }
 
-                                        setResult("success")
+                                        setResult(CheckinScanResult.SUCCESS)
                                         logger.info(
                                             "checkin.scan promoter_invite status=arrived clubId={} inviteId={} eventId={}",
                                             clubId,
@@ -201,7 +203,7 @@ fun Application.checkinRoutes(
                                     if (qrValidation != null) {
                                         UiCheckinMetrics.incQrInvalid()
                                         UiCheckinMetrics.incError()
-                                        setResult("invalid_format")
+                                        setResult(CheckinScanResult.INVALID_FORMAT)
                                         logger.warn(
                                             "checkin.scan error={} clubId={} qr={}",
                                             qrValidation,
@@ -240,11 +242,11 @@ fun Application.checkinRoutes(
                                             primaryVerification is QrVerificationResult.Expired ||
                                                 oldSecretVerification is QrVerificationResult.Expired -> {
                                                 UiCheckinMetrics.incQrExpired()
-                                                setResult("expired")
+                                                setResult(CheckinScanResult.EXPIRED)
                                             }
                                             else -> {
                                                 UiCheckinMetrics.incQrInvalid()
-                                                setResult("invalid")
+                                                setResult(CheckinScanResult.INVALID)
                                             }
                                         }
                                         UiCheckinMetrics.incError()
@@ -268,7 +270,7 @@ fun Application.checkinRoutes(
                                             }
                                                 ?: run {
                                                     UiCheckinMetrics.incError()
-                                                    currentResult = "list_not_found"
+                                                    currentResult = CheckinScanResult.LIST_NOT_FOUND
                                                     logger.warn(
                                                         "checkin.scan error={} clubId={} listId={}",
                                                         ErrorCodes.list_not_found,
@@ -282,7 +284,7 @@ fun Application.checkinRoutes(
                                         if (list.clubId != clubId) {
                                             UiCheckinMetrics.incQrScopeMismatch()
                                             UiCheckinMetrics.incError()
-                                            currentResult = "scope_mismatch"
+                                            currentResult = CheckinScanResult.SCOPE_MISMATCH
                                             logger.warn(
                                                 "checkin.scan error={} clubId={} listId={} listClubId={}",
                                                 ErrorCodes.club_scope_mismatch,
@@ -300,7 +302,7 @@ fun Application.checkinRoutes(
                                             }
                                                 ?: run {
                                                     UiCheckinMetrics.incError()
-                                                    currentResult = "entry_not_found"
+                                                    currentResult = CheckinScanResult.ENTRY_NOT_FOUND
                                                     logger.warn(
                                                         "checkin.scan error={} clubId={} listId={} entryId={}",
                                                         ErrorCodes.entry_not_found,
@@ -315,7 +317,7 @@ fun Application.checkinRoutes(
                                         if (entry.listId != list.id) {
                                             UiCheckinMetrics.incQrScopeMismatch()
                                             UiCheckinMetrics.incError()
-                                            currentResult = "entry_list_mismatch"
+                                            currentResult = CheckinScanResult.ENTRY_LIST_MISMATCH
                                             logger.warn(
                                                 "checkin.scan error={} clubId={} listId={} entryListId={} entryId={}",
                                                 ErrorCodes.entry_list_mismatch,
@@ -331,7 +333,7 @@ fun Application.checkinRoutes(
                                         val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
                                         if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
                                             UiCheckinMetrics.incError()
-                                            currentResult = "outside_arrival_window"
+                                            currentResult = CheckinScanResult.OUTSIDE_ARRIVAL_WINDOW
                                             call.respondError(
                                                 HttpStatusCode.Conflict,
                                                 ErrorCodes.outside_arrival_window,
@@ -347,7 +349,7 @@ fun Application.checkinRoutes(
                                             }
                                         if (!marked) {
                                             UiCheckinMetrics.incError()
-                                            currentResult = "unable_to_mark"
+                                            currentResult = CheckinScanResult.UNABLE_TO_MARK
                                             logger.warn(
                                                 "checkin.scan error={} clubId={} listId={} entryId={}",
                                                 ErrorCodes.unable_to_mark,
@@ -359,7 +361,7 @@ fun Application.checkinRoutes(
                                             return@withIds
                                         }
 
-                                        currentResult = "success"
+                                        currentResult = CheckinScanResult.SUCCESS
                                         logger.info(
                                             "checkin.scan status=arrived clubId={} listId={} entryId={}",
                                             clubId,
@@ -369,7 +371,7 @@ fun Application.checkinRoutes(
                                         call.respond(HttpStatusCode.OK, mapOf("status" to "ARRIVED"))
                                     }
                                     scanResult = currentResult
-                                    span.setAttribute("checkin.scan.result", scanResult)
+                                    span.setCheckinResult(scanResult)
                                 }
                             }
                         }

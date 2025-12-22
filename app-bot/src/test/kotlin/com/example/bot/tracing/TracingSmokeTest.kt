@@ -10,6 +10,20 @@ import com.example.bot.booking.a3.BookingState
 import com.example.bot.booking.a3.BookingStatus
 import com.example.bot.booking.a3.BookingView
 import com.example.bot.booking.a3.HoldResult
+import com.example.bot.club.GuestList
+import com.example.bot.club.GuestListEntry
+import com.example.bot.club.GuestListEntryPage
+import com.example.bot.club.GuestListEntrySearch
+import com.example.bot.club.GuestListEntryStatus
+import com.example.bot.club.GuestListOwnerType
+import com.example.bot.club.GuestListRepository
+import com.example.bot.club.GuestListStatus
+import com.example.bot.club.ParsedGuest
+import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.data.security.Role
+import com.example.bot.data.security.User
+import com.example.bot.data.security.UserRepository
+import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.logging.MdcKeys
 import com.example.bot.observability.TracingProvider
 import com.example.bot.plugins.TelegramMiniUser
@@ -18,6 +32,9 @@ import com.example.bot.plugins.installTracing
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.routes.bookingA3Routes
+import com.example.bot.routes.checkinRoutes
+import com.example.bot.security.rbac.RbacPlugin
+import com.example.bot.security.auth.TelegramPrincipal
 import io.ktor.server.application.install
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
@@ -25,11 +42,13 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotBeBlank
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.request.headers
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.testApplication
@@ -164,4 +183,150 @@ class TracingSmokeTest :
                 resetMiniAppValidator()
             }
         }
+
+        "checkin logging emits trace, clubId and masked QR" {
+            GlobalOpenTelemetry.resetForTest()
+            val exporter = InMemorySpanExporter.create()
+            val tracing = TracingProvider.create(exporter)
+            val loggerContext = LoggerFactory.getILoggerFactory() as LoggerContext
+            val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+            loggerContext.turboFilterList.clear()
+            val rootLogger = loggerContext.getLogger(Logger.ROOT_LOGGER_NAME) as Logger
+            rootLogger.addAppender(listAppender)
+            (loggerContext.getLogger("CheckinRoutes") as Logger).addAppender(listAppender)
+
+            overrideMiniAppValidatorForTesting { _, _ -> TelegramMiniUser(id = 101) }
+            val guestListRepository = NoopGuestListRepository()
+
+            try {
+                testApplication {
+                    application {
+                        install(ContentNegotiation) {
+                            json()
+                        }
+                        installTracing(tracing.tracer)
+                        installMiniAppAuthStatusPage()
+                        install(RbacPlugin) {
+                            userRepository =
+                                object : UserRepository {
+                                    override suspend fun getByTelegramId(id: Long): User =
+                                        User(id = id, telegramId = id, username = "tester")
+                                }
+                            userRoleRepository =
+                                object : UserRoleRepository {
+                                    override suspend fun listRoles(userId: Long): Set<Role> = setOf(Role.MANAGER)
+
+                                    override suspend fun listClubIdsFor(userId: Long): Set<Long> = setOf(1L)
+                                }
+                            auditLogRepository = mockk<AuditLogRepository>(relaxed = true)
+                            principalExtractor = { TelegramPrincipal(101, "tester") }
+                        }
+
+                        checkinRoutes(
+                            repository = guestListRepository,
+                            promoterInviteService = null,
+                            botTokenProvider = { "test-token" },
+                            qrSecretProvider = { "secret" },
+                            oldQrSecretProvider = { null },
+                        )
+                    }
+
+                    val response =
+                        client.post("/api/clubs/1/checkin/scan") {
+                            headers {
+                                append(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                                append("X-Telegram-InitData", "test-init-data")
+                            }
+                            setBody("""{"qr":"GL:bad"}""")
+                        }
+                    response.status shouldBe HttpStatusCode.BadRequest
+                }
+
+                val loggedEvent =
+                    listAppender
+                        .list
+                        .firstOrNull { event ->
+                            event.formattedMessage.contains("checkin.scan")
+                        }
+                        ?: error("No checkin.scan log found, events=${listAppender.list.map { it.formattedMessage }}")
+
+                val mdc = loggedEvent.mdcPropertyMap
+                mdc[MdcKeys.TRACE_ID].shouldNotBeNull().shouldNotBeBlank()
+                mdc[MdcKeys.SPAN_ID].shouldNotBeNull().shouldNotBeBlank()
+                mdc[MdcKeys.CLUB_ID] shouldBe "1"
+                loggedEvent.formattedMessage.shouldNotContain("GL:")
+                loggedEvent.formattedMessage.shouldNotContain("INV:")
+            } finally {
+                (loggerContext.getLogger("CheckinRoutes") as Logger).detachAppender(listAppender)
+                rootLogger.detachAppender(listAppender)
+                listAppender.stop()
+                tracing.sdk.close()
+                exporter.reset()
+                resetMiniAppValidator()
+            }
+        }
     })
+
+private class NoopGuestListRepository : GuestListRepository {
+    override suspend fun createList(
+        clubId: Long,
+        eventId: Long,
+        ownerType: GuestListOwnerType,
+        ownerUserId: Long,
+        title: String,
+        capacity: Int,
+        arrivalWindowStart: Instant?,
+        arrivalWindowEnd: Instant?,
+        status: GuestListStatus,
+    ): GuestList = throw UnsupportedOperationException("createList not used")
+
+    override suspend fun getList(id: Long): GuestList? = null
+
+    override suspend fun findEntry(id: Long): GuestListEntry? = null
+
+    override suspend fun listListsByClub(
+        clubId: Long,
+        page: Int,
+        size: Int,
+    ): List<GuestList> = emptyList()
+
+    override suspend fun addEntry(
+        listId: Long,
+        fullName: String,
+        phone: String?,
+        guestsCount: Int,
+        notes: String?,
+        status: GuestListEntryStatus,
+    ): GuestListEntry = throw UnsupportedOperationException("addEntry not used")
+
+    override suspend fun setEntryStatus(
+        entryId: Long,
+        status: GuestListEntryStatus,
+        checkedInBy: Long?,
+        at: Instant?,
+    ): GuestListEntry? = null
+
+    override suspend fun listEntries(
+        listId: Long,
+        page: Int,
+        size: Int,
+        statusFilter: GuestListEntryStatus?,
+    ): List<GuestListEntry> = emptyList()
+
+    override suspend fun markArrived(
+        entryId: Long,
+        at: Instant,
+    ): Boolean = false
+
+    override suspend fun bulkImport(
+        listId: Long,
+        rows: List<ParsedGuest>,
+        dryRun: Boolean,
+    ): GuestListEntryPage = GuestListEntryPage(emptyList(), 0)
+
+    override suspend fun searchEntries(
+        filter: GuestListEntrySearch,
+        page: Int,
+        size: Int,
+    ): GuestListEntryPage = GuestListEntryPage(emptyList(), 0)
+}

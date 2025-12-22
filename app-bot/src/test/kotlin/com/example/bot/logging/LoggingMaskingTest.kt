@@ -12,10 +12,11 @@ class LoggingMaskingTest :
 
             val masked = maskQrToken(original)
 
-            masked shouldBe "GL:***"
+            masked shouldBe "***"
             masked shouldNotContain "42"
             masked shouldNotContain "1001"
             masked shouldNotContain "deadbeef"
+            masked shouldNotContain("GL:")
         }
 
         "maskQrToken masks INV tokens" {
@@ -23,8 +24,9 @@ class LoggingMaskingTest :
 
             val masked = maskQrToken(original)
 
-            masked shouldBe "INV:***"
+            masked shouldBe "***"
             masked shouldNotContain "12345"
+            masked shouldNotContain("INV:")
         }
 
         "maskQrToken masks arbitrary tokens" {

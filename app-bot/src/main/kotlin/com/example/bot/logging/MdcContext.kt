@@ -3,6 +3,14 @@ package com.example.bot.logging
 import org.slf4j.MDC
 
 object MdcContext {
+    /**
+     * Executes [block] with business identifiers stored in MDC.
+     *
+     * This helper intentionally manages only business IDs (club, list, entry, booking) and does
+     * not touch tracing attributes such as traceId or spanId. It is safe to nest: each invocation
+     * captures the current MDC snapshot and restores it afterwards, even when inner scopes add or
+     * override IDs.
+     */
     inline fun <T> withIds(
         clubId: Long? = null,
         listId: Long? = null,
@@ -25,26 +33,36 @@ object MdcContext {
     @PublishedApi
     internal fun captureCurrent(): MdcSnapshot =
         MdcSnapshot(
-            mapOf(
-                MdcKeys.CLUB_ID to MDC.get(MdcKeys.CLUB_ID),
-                MdcKeys.LIST_ID to MDC.get(MdcKeys.LIST_ID),
-                MdcKeys.ENTRY_ID to MDC.get(MdcKeys.ENTRY_ID),
-                MdcKeys.BOOKING_ID to MDC.get(MdcKeys.BOOKING_ID),
-                MdcKeys.TRACE_ID to MDC.get(MdcKeys.TRACE_ID),
-                MdcKeys.SPAN_ID to MDC.get(MdcKeys.SPAN_ID),
-            ),
+            clubId = MDC.get(MdcKeys.CLUB_ID),
+            listId = MDC.get(MdcKeys.LIST_ID),
+            entryId = MDC.get(MdcKeys.ENTRY_ID),
+            bookingId = MDC.get(MdcKeys.BOOKING_ID),
         )
 
     @PublishedApi
     internal fun restore(snapshot: MdcSnapshot) {
-        snapshot.values.forEach { (key, value) ->
-            if (value == null) {
-                MDC.remove(key)
-            } else {
-                MDC.put(key, value)
-            }
+        restoreKey(MdcKeys.CLUB_ID, snapshot.clubId)
+        restoreKey(MdcKeys.LIST_ID, snapshot.listId)
+        restoreKey(MdcKeys.ENTRY_ID, snapshot.entryId)
+        restoreKey(MdcKeys.BOOKING_ID, snapshot.bookingId)
+    }
+
+    private fun restoreKey(
+        key: String,
+        value: String?,
+    ) {
+        if (value == null) {
+            MDC.remove(key)
+        } else {
+            MDC.put(key, value)
         }
     }
 }
 
-internal data class MdcSnapshot(val values: Map<String, String?>)
+@PublishedApi
+internal data class MdcSnapshot(
+    val clubId: String?,
+    val listId: String?,
+    val entryId: String?,
+    val bookingId: String?,
+)
