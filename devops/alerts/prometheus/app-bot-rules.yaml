@@ -1,0 +1,79 @@
+groups:
+  - name: app-bot.rules
+    rules:
+      # clamp_min защищает от деления на ноль и NaN/Inf при некорректной конфигурации метрик.
+      # Высокий процент ответов 5xx.
+      - alert: ApiHigh5xxRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 1e-9)
+            > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: app-bot
+          component: http
+        annotations:
+          summary: "Высокий уровень 5xx на API"
+          description: "Больше 5% ответов с кодом 5xx за последние 5 минут. Проверьте логи и зависимости."
+          runbook_url: "https://github.com/example/clubs_bot/blob/main/docs/observability.md#apihigh5xxrate"
+
+      # Спайк ответов 401/403 (авторизация).
+      - alert: ApiAuthErrorsSpike
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"401|403"}[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: app-bot
+          component: http
+        annotations:
+          summary: "Спайк 401/403 на API"
+          description: "Частые ответы 401/403 (более ~30 запросов в минуту) за последние 10 минут. Возможны проблемы с авторизацией или атаки."
+          runbook_url: "https://github.com/example/clubs_bot/blob/main/docs/observability.md#apiautherrorsspike"
+
+      # Спайк rate limiting (429).
+      - alert: ApiRateLimitSpike
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status="429"}[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: app-bot
+          component: http
+        annotations:
+          summary: "Спайк 429 (rate limiting)"
+          description: "Много ответов 429 (более ~30 запросов в минуту) за последние 10 минут. Проверьте лимиты и клиентов."
+          runbook_url: "https://github.com/example/clubs_bot/blob/main/docs/observability.md#apiratelimitspike"
+
+      # Нет входящего трафика.
+      - alert: ApiNoTraffic
+        expr: |
+          sum(rate(http_server_requests_seconds_count[5m])) == 0
+        for: 15m
+        labels:
+          severity: critical
+          service: app-bot
+          component: http
+        annotations:
+          summary: "Нет входящего трафика на API"
+          description: "За последние 15 минут на сервис не пришло ни одного HTTP-запроса. Проверьте доступность балансера и сервиса."
+          runbook_url: "https://github.com/example/clubs_bot/blob/main/docs/observability.md#apinotraffic"
+
+      # Пул БД почти исчерпан.
+      - alert: DbPoolExhausted
+        expr: |
+          db_pool_active_connections{pool="primary"}
+            /
+          clamp_min(db_pool_max_connections{pool="primary"}, 1e-9)
+            > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          service: app-bot
+          component: db
+        annotations:
+          summary: "Пул БД почти исчерпан"
+          description: "Активные соединения пула primary превышают 90% от максимума более 5 минут. Возможны ошибки подключения."
+          runbook_url: "https://github.com/example/clubs_bot/blob/main/docs/observability.md#dbpoolexhausted"
