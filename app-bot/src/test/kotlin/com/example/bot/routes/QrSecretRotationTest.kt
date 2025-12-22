@@ -18,6 +18,7 @@ import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.metrics.UiCheckinMetrics
+import com.example.bot.metrics.QrRotationConfig
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.auth.TelegramPrincipal
@@ -192,9 +193,15 @@ private fun Application.configureRotationApp(
         }
     }
 
+    val rotationConfig =
+        QrRotationConfig(
+            oldSecret = oldSecretProvider(),
+            rotationDeadlineEpochSeconds = null,
+        )
     checkinRoutes(
         repository = get(),
         qrSecretProvider = { PRIMARY_QR_SECRET },
+        rotationConfig = rotationConfig,
         oldQrSecretProvider = oldSecretProvider,
         clock = ROTATION_FIXED_CLOCK,
         qrTtl = ROTATION_QR_TTL,
@@ -316,4 +323,4 @@ private fun rotationInitData(): String {
 }
 
 private fun SimpleMeterRegistry.oldSecretMetricCount(): Double =
-    find("ui.checkin.old_secret_total").counter()?.count() ?: 0.0
+    find("ui_checkin_old_secret_fallback_total").counter()?.count() ?: 0.0

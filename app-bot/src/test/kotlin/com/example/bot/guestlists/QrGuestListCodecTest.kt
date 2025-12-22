@@ -164,4 +164,61 @@ class QrGuestListCodecTest {
 
         assertNull(QrGuestListCodec.verify(mutated, now, ttl, secret, skew))
     }
+
+    @Test
+    fun `verifyWithReason returns Valid for a fresh token`() {
+        val token =
+            QrGuestListCodec.encode(
+                listId = 111,
+                entryId = 222,
+                issuedAt = fixedIssued,
+                secret = secret,
+            )
+
+        val result = QrGuestListCodec.verifyWithReason(token, fixedIssued.plusSeconds(60), ttl, secret, skew)
+
+        assertTrue(result is QrVerificationResult.Valid)
+        val decoded = (result as QrVerificationResult.Valid).decoded
+        assertEquals(111L, decoded.listId)
+        assertEquals(222L, decoded.entryId)
+        assertEquals(fixedIssued, decoded.issuedAt)
+    }
+
+    @Test
+    fun `verifyWithReason returns Expired when TTL elapsed`() {
+        val token =
+            QrGuestListCodec.encode(
+                listId = 111,
+                entryId = 222,
+                issuedAt = fixedIssued,
+                secret = secret,
+            )
+
+        val result =
+            QrGuestListCodec.verifyWithReason(
+                token,
+                fixedIssued.plus(ttl).plusSeconds(5),
+                ttl,
+                secret,
+                skew,
+            )
+
+        assertTrue(result is QrVerificationResult.Expired)
+    }
+
+    @Test
+    fun `verifyWithReason returns Invalid for tampered token`() {
+        val token =
+            QrGuestListCodec.encode(
+                listId = 111,
+                entryId = 222,
+                issuedAt = fixedIssued,
+                secret = secret,
+            )
+        val tampered = token.replaceFirst("GL:", "GX:")
+
+        val result = QrGuestListCodec.verifyWithReason(tampered, fixedIssued.plusSeconds(60), ttl, secret, skew)
+
+        assertTrue(result is QrVerificationResult.Invalid)
+    }
 }

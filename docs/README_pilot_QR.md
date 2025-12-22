@@ -206,13 +206,17 @@ http POST http://localhost:8080/api/clubs/42/checkin/scan \
   - `ui_checkin_scan_total` — общее количество попыток.
   - `ui_checkin_scan_error_total` — количество ошибок.
   - `ui_checkin_scan_duration_ms_seconds_bucket|sum|count` — гистограмма Micrometer (p50/p95/p99).
-  - `ui_checkin_old_secret_total` — сколько успешных чек-инов прошло через fallback по старому QR-секрету.
-  - ⚠️ Micrometer экспортирует метрики с точками как имена с подчёркиваниями (`ui.checkin.old_secret_total` → `ui_checkin_old_secret_total`). В алёртах и запросах используем underscore-варианты, как в `/metrics`.
+  - `ui_checkin_old_secret_fallback_total` — сколько успешных чек-инов прошло через fallback по старому QR-секрету.
+  - `ui_checkin_rotation_active` — флаг активности окна ротации (1, если задан старый секрет).
+  - `ui_checkin_rotation_deadline_seconds` — дедлайн ротации в epoch seconds (опционально).
+  - `ui_checkin_qr_invalid_total` — число попыток с некорректным QR (формат/подпись/мусор).
+  - `ui_checkin_qr_expired_total` — число попыток с просроченным QR (TTL/окно ротации).
+  - `ui_checkin_qr_scope_mismatch_total` — число попыток с неверным скоупом (чужой клуб/лист/инстанс).
 - **Алерты (пример):** (готовый набор правил лежит в [`observability/prometheus/alerts/checkin.yml`](../observability/prometheus/alerts/checkin.yml))
   - `p95(ui_checkin_scan_duration_ms_seconds) > 1.5s` в течение 5 мин.
   - `rate(ui_checkin_scan_error_total[5m]) / clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.02`.
-  - `rate(ui_checkin_old_secret_total[5m]) > 0` — всплеск использования fallback-секрета.
-  - `rate(ui_checkin_old_secret_total[5m]) / clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.01` — более 1% чек-инов идут по старому секрету.
+  - `rate(ui_checkin_old_secret_fallback_total[5m]) > 0` — всплеск использования fallback-секрета.
+  - `rate(ui_checkin_old_secret_fallback_total[5m]) / clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.01` — более 1% чек-инов идут по старому секрету.
   - `(hour() >= 18 && hour() <= 23) && sum(rate(ui_checkin_scan_total[15m])) < 0.001` — нет чек-инов в рабочее окно (30 минут подряд).
 - **Логи:**
   - INFO: `checkin.arrived clubId=<id> listId=<id> entryId=<id>`.

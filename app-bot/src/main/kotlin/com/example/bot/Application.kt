@@ -173,7 +173,8 @@ fun Application.module() {
 
     // 7) Метрики
     val registry = Metrics.globalRegistry
-    UiCheckinMetrics.bind(registry)
+    val rotationConfig = com.example.bot.metrics.QrRotationConfig.fromEnv()
+    UiCheckinMetrics.bind(registry, rotationConfig)
     UiWaitlistMetrics.bind(registry)
 
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
@@ -187,7 +188,11 @@ fun Application.module() {
         clubsRepository = clubsRepository,
         meterRegistry = registry,
     )
-    checkinRoutes(repository = guestListRepository, promoterInviteService = promoterInviteService)
+    checkinRoutes(
+        repository = guestListRepository,
+        promoterInviteService = promoterInviteService,
+        rotationConfig = rotationConfig,
+    )
     promoterInvitesRoutes(promoterInviteService = promoterInviteService, meterRegistry = registry)
     promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)

@@ -22,16 +22,26 @@ class UiCheckinMetricsTest {
 
         UiCheckinMetrics.incTotal()
         UiCheckinMetrics.incError()
+        UiCheckinMetrics.incQrInvalid()
+        UiCheckinMetrics.incQrExpired()
+        UiCheckinMetrics.incQrScopeMismatch()
         UiCheckinMetrics.timeScan {
             Thread.sleep(5)
         }
 
         val totalCounter = requireNotNull(registry.find("ui.checkin.scan.total").counter())
         val errorCounter = requireNotNull(registry.find("ui.checkin.scan.error").counter())
+        val invalidCounter = requireNotNull(registry.find("ui_checkin_qr_invalid_total").counter())
+        val expiredCounter = requireNotNull(registry.find("ui_checkin_qr_expired_total").counter())
+        val scopeMismatchCounter =
+            requireNotNull(registry.find("ui_checkin_qr_scope_mismatch_total").counter())
         val timer = requireNotNull(registry.find("ui.checkin.scan.duration.ms").timer())
 
         assertTrue(totalCounter.count() > 0.0)
         assertTrue(errorCounter.count() > 0.0)
+        assertTrue(invalidCounter.count() > 0.0)
+        assertTrue(expiredCounter.count() > 0.0)
+        assertTrue(scopeMismatchCounter.count() > 0.0)
         assertTrue(timer.count() > 0)
     }
 

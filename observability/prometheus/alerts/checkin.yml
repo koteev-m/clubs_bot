@@ -35,7 +35,7 @@ groups:
             the spike.
 
       - alert: CheckinOldSecretSpike
-        expr: rate(ui_checkin_old_secret_total[5m]) > 0
+        expr: rate(ui_checkin_old_secret_fallback_total[5m]) > 0
         for: 10m
         labels:
           severity: info
@@ -47,7 +47,7 @@ groups:
 
       - alert: CheckinOldSecretShareHigh
         expr: |
-          rate(ui_checkin_old_secret_total[5m])
+          rate(ui_checkin_old_secret_fallback_total[5m])
             /
           clamp_min(rate(ui_checkin_scan_total[5m]), 1e-9) > 0.01
         for: 5m
