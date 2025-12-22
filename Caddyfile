@@ -3,7 +3,25 @@
 }
 
 nightconcierge.help {
-  encode gzip
+  encode zstd gzip
+
+  @deny_methods {
+    method DELETE PATCH PUT TRACE TRACK
+  }
+  respond @deny_methods 405
+
+  @hsts expression {env.ENABLE_HSTS} == "true"
+  header @hsts Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+  @entry_assets path_regexp entryAssets ^/webapp/entry/.+[._-][0-9a-fA-F]{8,}\.(css|js)$
+  header @entry_assets Cache-Control "public, max-age=31536000, immutable"
+
+  # Short-cache for root and all .html pages
+  @html_root path / /index.html
+  @html_files path_regexp htmlFiles ^/(?!index\.html$).+\.html$
+  header @html_root Cache-Control "max-age=60, must-revalidate"
+  header @html_files Cache-Control "max-age=60, must-revalidate"
+
   reverse_proxy app:8080
 
   @health path /health
