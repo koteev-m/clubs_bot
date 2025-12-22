@@ -1,7 +1,10 @@
 package com.example.bot.plugins
 
+import com.example.bot.metrics.HikariMetrics
+import com.zaxxer.hikari.HikariDataSource
 import io.ktor.http.ContentType
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.install
 import io.ktor.server.metrics.micrometer.MicrometerMetrics
 import io.ktor.server.response.respondText
@@ -39,5 +42,23 @@ fun Application.installMetrics() {
                 ContentType.parse("text/plain; version=0.0.4; charset=utf-8"),
             )
         }
+    }
+
+    fun bindHikariMetricsIfPresent() {
+        val ds = DataSourceHolder.dataSource
+        val hikari = ds as? HikariDataSource ?: return
+        runCatching {
+            HikariMetrics(hikari).bindTo(Metrics.globalRegistry)
+        }.onSuccess {
+            log.info("Hikari metrics registered for pool {}", hikari.poolName)
+        }.onFailure {
+            log.warn("Failed to register Hikari metrics: {}", it.message)
+        }
+    }
+
+    // Пробуем сразу (для тестов с заранее инициализированным DataSource) и повторяем при старте.
+    bindHikariMetricsIfPresent()
+    environment.monitor.subscribe(ApplicationStarted) {
+        bindHikariMetricsIfPresent()
     }
 }

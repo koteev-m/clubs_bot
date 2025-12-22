@@ -80,6 +80,7 @@ dependencies {
 
     // DB (Exposed в core-data; тут подстрахуем драйвер PG на runtime)
     implementation(libs.exposed.jdbc)
+    implementation(libs.hikari)
     runtimeOnly(libs.postgres)
 
     // Миграции — НУЖНО в main (иначе org.flywaydb.core.Flyway не резолвится)
