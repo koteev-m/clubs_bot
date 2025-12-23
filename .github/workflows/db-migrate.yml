@@ -1,0 +1,53 @@
+name: db-migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_env:
+        description: "Target APP_ENV (prod|stage|dev|local)"
+        required: true
+        default: "prod"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=true -Dorg.gradle.parallel=false -Dorg.gradle.caching=true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Gradle cache & setup
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        with:
+          cache-disabled: false
+          gradle-version: wrapper
+          cache-read-only: false
+          cache-key-prefix: >
+            ${{ runner.os }}-gradle-
+            ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Gradle wrapper validate
+        uses: gradle/wrapper-validation-action@460a3ca55fc5d559238a0efc7fa9f7465df8585d # v3.3.0
+
+      - name: Flyway migrate (managed via CI)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          APP_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.app_env || 'prod' }}
+          FLYWAY_MODE: migrate-and-validate
+        run: ./gradlew flywayMigrate --no-parallel --console=plain
