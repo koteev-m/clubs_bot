@@ -23,6 +23,7 @@ plugins {
     kotlin("plugin.serialization") version "2.2.20" apply false
     id("io.gitlab.arturbosch.detekt") version "1.23.8" apply false
     id("org.jlleitschuh.gradle.ktlint") version "12.1.0" apply false
+    alias(libs.plugins.versionsPlugin)
 }
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
