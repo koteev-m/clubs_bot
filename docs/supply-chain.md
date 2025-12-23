@@ -54,6 +54,7 @@ Strengthen CI/CD and delivery security so that critical build surfaces are owned
   2. Resolve its commit SHA (`git ls-remote https://github.com/<owner>/<repo>.git <tag>`).
   3. Replace the `uses:` reference with that SHA, keep the tag only as a trailing comment for readability.
 - Format: 40-character hexadecimal SHA (upper or lower case) without refs/tags prefixes; guard ignores commented lines (`# ...`) and local actions (`uses: ./...`) but validates all other external `uses:` statements.
+- Prod/stage миграции базы выполняются через pinned workflow `.github/workflows/db-migrate.yml` (`workflow_dispatch` или релизный тег) с `FLYWAY_MODE=migrate-and-validate` и тем же набором действий `checkout`/`setup-java`/`setup-gradle`.
 
 ## Dependency drift report
 - Workflow: `.github/workflows/dependency-drift.yml` (scheduled weekdays at 04:00 UTC and manual via `workflow_dispatch`).

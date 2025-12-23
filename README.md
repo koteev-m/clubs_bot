@@ -539,8 +539,17 @@ DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
 ./gradlew flywayMigrate --console=plain
 ```
 
-`MigrationState.migrationsApplied` guards the readiness probe and the Docker
-entrypoint fails fast when migrations cannot be applied.
+- `FLYWAY_MODE` controls the startup policy: `validate` (default for `APP_ENV=prod|production|stage|staging`),
+  `migrate-and-validate` (default for `APP_ENV=local|dev`), or `off`.
+- In prod/stage the application only calls `flyway.validate()` on startup and fails fast when
+  pending migrations exist (no implicit `migrate()` calls). Out-of-order migrations are disabled
+  unless `APP_ENV` is `local|dev` **and** `FLYWAY_OUT_OF_ORDER=true`.
+- Prod/Stage migrations are executed via `.github/workflows/db-migrate.yml` (manual dispatch or
+  release tag) with `FLYWAY_MODE=migrate-and-validate`.
+- See `docs/dr.md` for DR/runbook details and pool tuning defaults.
+
+`MigrationState.migrationsApplied` guards the readiness probe and the Docker entrypoint fails fast
+when migrations cannot be applied.
 
 ## Telegram bot
 

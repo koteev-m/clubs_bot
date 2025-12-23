@@ -70,3 +70,7 @@ spec:
 # Привязка к HEALTHCHECK / livenessProbe
 
 В Dockerfile уже настроен `HEALTHCHECK` на HTTP `GET /health` (порт `8080`). В Kubernetes можно использовать тот же endpoint в `livenessProbe`/`readinessProbe`, чтобы повторять текущую схему проверки без изменений бизнес-логики.
+
+# DR и бэкапы
+
+Политика бэкапов/PITR, правила запуска миграций и параметры пула подключений описаны в `docs/dr.md`. Для prod/stage приложение валидирует схему на старте, а миграции запускаются только из CI (`db-migrate` workflow).
