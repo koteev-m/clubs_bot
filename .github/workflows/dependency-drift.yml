@@ -1,21 +1,17 @@
-name: Build & Static
+name: Dependency Drift Report
 
 on:
-  pull_request:
-  push:
-    branches: [ main ]
+  schedule:
+    - cron: '0 4 * * 1-5'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: build-static-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-static:
+  dependency-drift:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -37,32 +33,14 @@ jobs:
             ${{ runner.os }}-gradle-
             ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
 
-      - name: Gradle format (non-fatal)
-        run: ./gradlew -q formatAll || true
+      - name: Generate dependency drift report
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
+        run: ./gradlew dependencyUpdates --no-parallel --console=plain
 
-      - name: Static check + build
-        run: ./gradlew staticCheck build --console=plain
-
-      - name: Upload detekt reports
+      - name: Upload dependency drift report
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: detekt-reports
-          path: "**/build/reports/detekt/*.*"
-          if-no-files-found: ignore
-
-      - name: Upload ktlint reports
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: ktlint-reports
-          path: "**/build/reports/ktlint/*.*"
-          if-no-files-found: ignore
-
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: test-reports
-          path: "**/build/reports/tests/**"
+          name: dependency-drift-report
+          path: "**/build/dependencyUpdates/**"
           if-no-files-found: ignore

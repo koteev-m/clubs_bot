@@ -55,6 +55,15 @@ Strengthen CI/CD and delivery security so that critical build surfaces are owned
   3. Replace the `uses:` reference with that SHA, keep the tag only as a trailing comment for readability.
 - Format: 40-character hexadecimal SHA (upper or lower case) without refs/tags prefixes; guard ignores commented lines (`# ...`) and local actions (`uses: ./...`) but validates all other external `uses:` statements.
 
+## Dependency drift report
+- Workflow: `.github/workflows/dependency-drift.yml` (scheduled weekdays at 04:00 UTC and manual via `workflow_dispatch`).
+- Output: `dependency-drift-report` artifact with Gradle Versions Plugin output from `build/dependencyUpdates`.
+- Scope: read-only reporting; no automatic upgrades.
+
+## Conventional commits & releases
+- Commit format: enforced by `.github/workflows/commitlint.yml` using `commitlint.config.cjs` (extends `@commitlint/config-conventional`).
+- Release notes: `.github/workflows/release.yml` now builds `CHANGELOG.md` via `conventional-changelog` using the conventional commits in the current tag range.
+
 ## Runbook
 - Trivy fails on new CVE: confirm it is legitimate, patch dependency or base image; if unavoidable, add to `.trivyignore` with rationale and get `@org/infra-team` approval.
 - cosign verification fails: ensure the image digest matches the pushed artifact, confirm `id-token: write` permissions, and re-run the workflow to refresh the Fulcio certificate.

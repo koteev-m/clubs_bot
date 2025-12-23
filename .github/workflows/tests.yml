@@ -14,31 +14,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tests:
+  unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       GRADLE_OPTS: "-Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=60000"
 
-    services:
-      postgres:
-        image: postgres:16-alpine@sha256:46258a3eb38adf37e77ca5bd41f93ca8b1034f925cf37190a7a8015ba151f3ca
-        ports: [ "5432:5432" ]
-        env:
-          POSTGRES_DB: botdb
-          POSTGRES_USER: botuser
-          POSTGRES_PASSWORD: botpass
-        options: >-
-          --health-cmd "pg_isready -U botuser -d botdb"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
     steps:
-      - name: Checkout
+      - &checkout
+        name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
-      - name: Guard: no project-level repositories
+      - &guard-no-project-repositories
+        name: Guard: no project-level repositories
         run: |
           set -euo pipefail
           files=$(git ls-files '**/build.gradle' '**/build.gradle.kts' || true)
@@ -89,7 +77,8 @@ jobs:
           rm -f "$tmp"
           exit $violations
 
-      - name: Guard: no dynamic dependency versions
+      - &guard-no-dynamic-versions
+        name: Guard: no dynamic dependency versions
         run: |
           set -euo pipefail
           files=$(git ls-files '**/*.gradle' '**/*.gradle.kts' 'settings.gradle' 'settings.gradle.kts' || true)
@@ -120,7 +109,7 @@ jobs:
               violations=1
             fi
 
-            if grep -nE "['\"]\[[^'\"]+[\)\]]["\']" "$tmp"; then
+            if grep -nE "['\"]\[[^'\"]+[\)\]]['\"]" "$tmp"; then
               echo "::error file=$f::Version ranges are not allowed"
               violations=1
             fi
@@ -128,7 +117,8 @@ jobs:
           rm -f "$tmp"
           exit $violations
 
-      - name: Guard: no dynamic versions in plugin blocks
+      - &guard-no-dynamic-plugins
+        name: Guard: no dynamic versions in plugin blocks
         run: |
           set -euo pipefail
           files=$(git ls-files '**/build.gradle' '**/build.gradle.kts' 'settings.gradle' 'settings.gradle.kts' || true)
@@ -139,7 +129,7 @@ jobs:
           for f in $files; do
             sed -E ':a;/\/\*/{N;/\*\//!ba;s/\/\*.*\*\///g}; s,//.*$,,' "$f" > "$tmp"
 
-            if grep -nE "id\([^)]+\)[[:space:]]*(\.|)[[:space:]]*version\([[:space:]]*['\"][^'\"]*\+['\"][[:space:]]*\)" "$tmp"; then
+            if grep -nE "id([^)]+)[[:space:]]*(\.|)[[:space:]]*version\([[:space:]]*['\"][^'\"]*\+['\"][[:space:]]*\)" "$tmp"; then
               echo "::error file=$f::Dynamic plugin version (+) is not allowed (Kotlin DSL)"
               violations=1
             fi
@@ -159,7 +149,7 @@ jobs:
               violations=1
             fi
 
-            if grep -nE "version\([[:space:]]*['\"]\[[^'\"]+[\)\]]["\'][[:space:]]*\)" "$tmp"; then
+            if grep -nE "version\([[:space:]]*['\"]\[[^'\"]+[\)\]]['\"][[:space:]]*\)" "$tmp"; then
               echo "::error file=$f::Version ranges are not allowed in plugin DSL"
               violations=1
             fi
@@ -174,7 +164,7 @@ jobs:
               violations=1
             fi
 
-            if grep -nE "version[[:space:]]+['\"]\[[^'\"]+[\)\]]["\']" "$tmp"; then
+            if grep -nE "version[[:space:]]+['\"]\[[^'\"]+[\)\]]['\"]" "$tmp"; then
               echo "::error file=$f::Version ranges are not allowed in plugin DSL"
               violations=1
             fi
@@ -182,7 +172,8 @@ jobs:
           rm -f "$tmp"
           exit $violations
 
-      - name: Guard: no dynamic versions in version catalogs
+      - &guard-no-dynamic-catalogs
+        name: Guard: no dynamic versions in version catalogs
         run: |
           set -euo pipefail
           files=$(git ls-files 'gradle/libs.versions.toml' || true)
@@ -206,28 +197,33 @@ jobs:
 
           exit $violations
 
-      - name: Validate Gradle Wrapper
+      - &validate-wrapper
+        name: Validate Gradle Wrapper
         uses: gradle/wrapper-validation-action@460a3ca55fc5d559238a0efc7fa9f7465df8585d # v3.3.0
 
-      - name: Set up JDK 21
+      - &setup-jdk
+        name: Set up JDK 21
         uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
-      - name: Env versions
+      - &setup-gradle
+        name: Gradle cache & setup
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        with:
+          cache-disabled: false
+          gradle-version: wrapper
+          cache-read-only: false
+          cache-key-prefix: >
+            ${{ runner.os }}-gradle-
+            ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+
+      - &env-versions
+        name: Env versions
         run: |
           java -version
           ./gradlew --version
-
-      - name: Wait for Postgres (5432)
-        run: |
-          for i in {1..60}; do
-            nc -z 127.0.0.1 5432 && echo "postgres OK" && exit 0
-            sleep 1
-          done
-          echo "postgres not ready" && exit 1
 
       - name: Run unit tests (retry x3)
         env:
@@ -246,6 +242,53 @@ jobs:
             sleep 20
           done
           exit 1
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: unit-test-reports
+          path: "**/build/reports/tests/**"
+          if-no-files-found: ignore
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.internal.http.socketTimeout=120000 -Dorg.gradle.internal.http.connectionTimeout=60000"
+
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:46258a3eb38adf37e77ca5bd41f93ca8b1034f925cf37190a7a8015ba151f3ca
+        ports: [ "5432:5432" ]
+        env:
+          POSTGRES_DB: botdb
+          POSTGRES_USER: botuser
+          POSTGRES_PASSWORD: botpass
+        options: >-
+          --health-cmd "pg_isready -U botuser -d botdb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - *checkout
+      - *guard-no-project-repositories
+      - *guard-no-dynamic-versions
+      - *guard-no-dynamic-plugins
+      - *guard-no-dynamic-catalogs
+      - *validate-wrapper
+      - *setup-jdk
+      - *setup-gradle
+      - *env-versions
+
+      - name: Wait for Postgres (5432)
+        run: |
+          for i in {1..60}; do
+            nc -z 127.0.0.1 5432 && echo "postgres OK" && exit 0
+            sleep 1
+          done
+          echo "postgres not ready" && exit 1
 
       - name: Run integration tests (retry x3)
         env:
@@ -285,11 +328,11 @@ jobs:
           done
           exit 1
 
-      - name: Upload test reports
+      - name: Upload integration test reports
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: test-reports
+          name: integration-test-reports
           path: "**/build/reports/tests/**"
           if-no-files-found: ignore
 

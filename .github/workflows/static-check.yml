@@ -12,8 +12,15 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-      - name: Gradle cache
+      - name: Gradle cache & setup
         uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        with:
+          cache-disabled: false
+          gradle-version: wrapper
+          cache-read-only: false
+          cache-key-prefix: >
+            ${{ runner.os }}-gradle-
+            ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Run detekt
         run: ./gradlew detekt --console=plain
       - name: Upload detekt HTML report

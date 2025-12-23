@@ -11,6 +11,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Gradle cache & setup
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        with:
+          cache-disabled: false
+          gradle-version: wrapper
+          cache-read-only: false
+          cache-key-prefix: >
+            ${{ runner.os }}-gradle-
+            ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
       - run: ./gradlew ktlintCheck detekt -x test || true
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:

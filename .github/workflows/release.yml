@@ -21,6 +21,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node
+        uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+        with:
+          node-version: '20'
+
       - name: Derive current and previous tag
         id: vars
         shell: bash
@@ -31,6 +36,10 @@ jobs:
           PREV="$(git tag --list 'v*' --sort=-creatordate | grep -v "^${TAG}$" | head -n1 || true)"
           echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
 
+      - name: Install conventional-changelog
+        run: |
+          npm install -g conventional-changelog-cli
+
       - name: Generate changelog
         id: changelog
         shell: bash
@@ -39,9 +48,9 @@ jobs:
           TAG="${{ steps.vars.outputs.tag }}"
           PREV="${{ steps.vars.outputs.prev }}"
           if [[ -n "${PREV}" ]]; then
-            git log --pretty=format:"- %h %s" "${PREV}..${TAG}" > CHANGELOG.md
+            conventional-changelog -p angular -o CHANGELOG.md --from "${PREV}" --to "${TAG}"
           else
-            git log -n 50 --pretty=format:"- %h %s" > CHANGELOG.md
+            conventional-changelog -p angular -o CHANGELOG.md
           fi
           {
             echo "body<<'EOF'"
