@@ -21,7 +21,15 @@ fun main() {
         FlywayConfig.fromEnv(
             locationsOverride = locationsRaw,
         )
-    log.info("Flyway locations (resolved): ${flywayConfig.locations.joinToString()}")
+    log.info(
+        "Flyway config: appEnv={} mode={} effectiveMode={} outOfOrder={} locations={} schemas={}",
+        flywayConfig.appEnv,
+        flywayConfig.mode,
+        flywayConfig.effectiveMode,
+        flywayConfig.outOfOrderEnabled,
+        flywayConfig.locations.joinToString(","),
+        flywayConfig.schemas.joinToString(",").ifEmpty { "<default>" },
+    )
     val flyway =
         configureFlyway(
             org.flywaydb.core.Flyway.configure().dataSource(url, user, pass),
@@ -30,12 +38,15 @@ fun main() {
 
     if (flywayConfig.effectiveMode != FlywayMode.MIGRATE_AND_VALIDATE) {
         error(
-            "Flyway mode is ${flywayConfig.effectiveMode}; set FLYWAY_MODE=migrate-and-validate " +
-                "when running the standalone migration tool",
+            "Flyway mode is ${flywayConfig.effectiveMode}; set FLYWAY_MODE=migrate-and-validate and APP_ENV=dev/local (or another non-production value) " +
+                "when running the standalone migration tool; migrate is not allowed for prod/stage",
         )
     }
 
     val result = flyway.migrate()
-    flyway.validateWithResult()
+    val validation = flyway.validateWithResult()
+    if (!validation.validationSuccessful) {
+        error("Flyway validation failed after migrate: ${validation.errorDetails?.errorMessage}")
+    }
     log.info("Migrations applied: ${result.migrationsExecuted}")
 }

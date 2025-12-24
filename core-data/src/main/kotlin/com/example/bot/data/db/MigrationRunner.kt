@@ -31,20 +31,6 @@ class MigrationRunner(
             return null
         }
 
-        val effectiveMode = cfg.effectiveMode
-        if (cfg.mode == FlywayMode.MIGRATE_AND_VALIDATE && cfg.appEnv.isProdLike) {
-            log.warn(
-                "Flyway migrate-and-validate mode is not allowed for {} environment, falling back to validate-only",
-                cfg.appEnv,
-            )
-        }
-        if (cfg.outOfOrderEnabled) {
-            log.warn("Flyway out-of-order migrations enabled for {}", cfg.appEnv)
-        }
-        if (cfg.outOfOrderRequested && !cfg.appEnv.allowsOutOfOrder) {
-            log.warn("Out-of-order migrations are disabled in {} environment", cfg.appEnv)
-        }
-
         val flyway = flywayFactory(dataSource, cfg)
         val metadata =
             runCatching {
@@ -61,9 +47,10 @@ class MigrationRunner(
         val flywayVersion = Flyway::class.java.`package`?.implementationVersion ?: "unknown"
 
         log.info(
-            "Flyway start: mode={} validateOnMigrate={} outOfOrder={} version={} url={} locations={} schemas={} schema={} catalog={}",
-            effectiveMode,
-            true,
+            "Flyway start: mode={} effectiveMode={} appEnv={} outOfOrder={} version={} url={} locations={} schemas={} schema={} catalog={}",
+            cfg.mode,
+            cfg.effectiveMode,
+            cfg.appEnv,
             cfg.outOfOrderEnabled,
             flywayVersion,
             jdbcUrl ?: "unknown",
@@ -73,7 +60,7 @@ class MigrationRunner(
             currentCatalog ?: "",
         )
 
-        if (effectiveMode == FlywayMode.OFF) {
+        if (cfg.effectiveMode == FlywayMode.OFF) {
             log.info("Flyway mode=off, skipping migrate/validate")
             return null
         }
@@ -90,7 +77,7 @@ class MigrationRunner(
             log.debug("Flyway available migrations: {}", migrations)
         }
 
-        return when (effectiveMode) {
+        return when (cfg.effectiveMode) {
             FlywayMode.VALIDATE -> validateOnly(flyway)
             FlywayMode.MIGRATE_AND_VALIDATE -> migrateAndValidate(flyway)
             FlywayMode.OFF -> null

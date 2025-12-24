@@ -55,6 +55,7 @@ Strengthen CI/CD and delivery security so that critical build surfaces are owned
   3. Replace the `uses:` reference with that SHA, keep the tag only as a trailing comment for readability.
 - Format: 40-character hexadecimal SHA (upper or lower case) without refs/tags prefixes; guard ignores commented lines (`# ...`) and local actions (`uses: ./...`) but validates all other external `uses:` statements.
 - Prod/stage миграции базы выполняются через pinned workflow `.github/workflows/db-migrate.yml` (`workflow_dispatch` или релизный тег) с `FLYWAY_MODE=migrate-and-validate` и тем же набором действий `checkout`/`setup-java`/`setup-gradle`.
+- Миграционный workflow (`.github/workflows/db-migrate.yml`) входит в supply-chain: он единственный источник истины для prod/stage миграций, использует pinned actions и управляется секьюрными секретами БД; политика и доп. ограничения описаны в `docs/dr.md`.
 
 ## Dependency drift report
 - Workflow: `.github/workflows/dependency-drift.yml` (scheduled weekdays at 04:00 UTC and manual via `workflow_dispatch`).
