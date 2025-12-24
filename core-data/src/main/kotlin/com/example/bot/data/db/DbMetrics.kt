@@ -2,13 +2,51 @@ package com.example.bot.data.db
 
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * Простейшие счётчики. При желании их можно связать с Micrometer.
- */
-object DbMetrics {
-    val txRetries: AtomicLong = AtomicLong(0)
-    val slowQueryCount: AtomicLong = AtomicLong(0)
+interface DbMetrics {
+    fun recordTxRetry(reason: String)
+    fun recordTxFailure(reason: String)
+    fun recordTxDuration(readOnly: Boolean, durationMillis: Long)
+    fun markBreakerOpened()
+}
 
-    // Пример интегратора с Micrometer (по желанию):
-    // fun maybeBindMicrometer(registry: io.micrometer.core.instrument.MeterRegistry) { ... }
+object DbMetricsHolder {
+    @Volatile
+    var metrics: DbMetrics = NoOpDbMetrics
+
+    fun configure(metrics: DbMetrics) {
+        this.metrics = metrics
+    }
+}
+
+object NoOpDbMetrics : DbMetrics {
+    override fun recordTxRetry(reason: String) {}
+
+    override fun recordTxFailure(reason: String) {}
+
+    override fun recordTxDuration(readOnly: Boolean, durationMillis: Long) {}
+
+    override fun markBreakerOpened() {}
+}
+
+class InMemoryDbMetrics : DbMetrics {
+    val retries: AtomicLong = AtomicLong()
+    val failures: AtomicLong = AtomicLong()
+    val breakerOpens: AtomicLong = AtomicLong()
+    val durations: MutableList<Pair<Boolean, Long>> = mutableListOf()
+
+    override fun recordTxRetry(reason: String) {
+        retries.incrementAndGet()
+    }
+
+    override fun recordTxFailure(reason: String) {
+        failures.incrementAndGet()
+    }
+
+    override fun recordTxDuration(readOnly: Boolean, durationMillis: Long) {
+        durations += readOnly to durationMillis
+    }
+
+    override fun markBreakerOpened() {
+        breakerOpens.incrementAndGet()
+    }
 }

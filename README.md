@@ -547,6 +547,7 @@ DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
 - Prod/Stage migrations are executed via `.github/workflows/db-migrate.yml` (manual dispatch or
   release tag) with `FLYWAY_MODE=migrate-and-validate`.
 - See `docs/dr.md` for DR/runbook details and pool tuning defaults.
+- DB resiliency (retries, backoff, circuit breaker, metrics): `docs/runtime-db-resiliency.md`.
 
 `MigrationState.migrationsApplied` guards the readiness probe and the Docker entrypoint fails fast
 when migrations cannot be applied.
