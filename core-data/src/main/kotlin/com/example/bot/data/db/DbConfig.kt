@@ -1,7 +1,6 @@
 package com.example.bot.data.db
 
 import java.util.Locale
-import org.slf4j.LoggerFactory
 
 data class DbConfig(
     val url: String,
@@ -60,19 +59,24 @@ data class FlywayConfig(
     val outOfOrderRequested: Boolean = false,
     val rawAppEnv: String? = null,
 ) {
-    val effectiveMode: FlywayMode
-        get() =
-            if (appEnv.isProdLike && mode == FlywayMode.MIGRATE_AND_VALIDATE) {
-                FlywayMode.VALIDATE
-            } else {
-                mode
-            }
+    val effectiveMode: FlywayMode = computeEffectiveMode()
 
-    val outOfOrderEnabled: Boolean
-        get() = outOfOrderRequested && appEnv.allowsOutOfOrder
+    val outOfOrderEnabled: Boolean = computeOutOfOrderEnabled()
+
+    private fun computeEffectiveMode(): FlywayMode =
+        if (appEnv.isProdLike && mode == FlywayMode.MIGRATE_AND_VALIDATE) {
+            FlywayMode.VALIDATE
+        } else {
+            mode
+        }
+
+    private fun computeOutOfOrderEnabled(): Boolean =
+        outOfOrderRequested && appEnv.allowsOutOfOrder
 
     companion object {
-        private val log = LoggerFactory.getLogger(FlywayConfig::class.java)
+        private const val DEFAULT_LOCATION = "classpath:db/migration"
+        private const val POSTGRES_VENDOR = "postgresql"
+        private const val H2_VENDOR = "h2"
 
         fun fromEnv(
             envProvider: (String) -> String? = System::getenv,
@@ -88,16 +92,13 @@ data class FlywayConfig(
             val url = propertyProvider("DATABASE_URL") ?: envProvider("DATABASE_URL")
             val vendor =
                 when {
-                    url?.startsWith("jdbc:postgresql", ignoreCase = true) == true -> "postgresql"
-                    url?.startsWith("jdbc:h2", ignoreCase = true) == true -> "h2"
+                    url?.startsWith("jdbc:postgresql", ignoreCase = true) == true -> POSTGRES_VENDOR
+                    url?.startsWith("jdbc:h2", ignoreCase = true) == true -> H2_VENDOR
                     else -> null
-                } ?: "postgresql"
+                } ?: POSTGRES_VENDOR
 
-            val resolvedLocations =
-                resolveLocations(
-                    locationsOverride ?: propertyProvider("FLYWAY_LOCATIONS") ?: envProvider("FLYWAY_LOCATIONS"),
-                    vendor,
-                )
+            val rawLocations = locationsOverride ?: propertyProvider("FLYWAY_LOCATIONS") ?: envProvider("FLYWAY_LOCATIONS")
+            val resolvedLocations = resolveLocations(rawLocations, vendor)
 
             val enabled =
                 propertyProvider("FLYWAY_ENABLED")?.toBooleanStrictOrNull()
@@ -126,10 +127,6 @@ data class FlywayConfig(
                 propertyProvider("FLYWAY_OUT_OF_ORDER")?.toBooleanStrictOrNull()
                     ?: envProvider("FLYWAY_OUT_OF_ORDER")?.toBooleanStrictOrNull()
                     ?: false
-
-            if (validateOnly && requestedMode != FlywayMode.VALIDATE) {
-                log.info("FLYWAY_VALIDATE_ONLY is set, forcing flyway mode=validate")
-            }
 
             return FlywayConfig(
                 enabled = enabled,
@@ -180,19 +177,43 @@ data class FlywayConfig(
                 return listOf("$DEFAULT_LOCATION/$vendor")
             }
 
-            val vendorOnly = trimmedLocations.filter { it.endsWith("/$vendor") || it.contains("/$vendor/") }
-            val hasRoot = trimmedLocations.any { it.endsWith("db/migration") || it.endsWith("db/migration/") }
-            return when {
-                vendorOnly.isNotEmpty() -> (vendorOnly.distinct() + trimmedLocations.filterNot { it in vendorOnly }).distinct()
-                hasRoot -> {
-                    val extras = trimmedLocations.filterNot { it.endsWith("db/migration") || it.endsWith("db/migration/") }
-                    (listOf("$DEFAULT_LOCATION/$vendor") + extras).distinct()
-                }
-                else -> trimmedLocations.distinct()
+            val prioritized = prioritizeVendorLocations(trimmedLocations, vendor)
+            val normalized = LinkedHashSet<String>()
+            val hasRoot = prioritized.any { isRootLocation(it) }
+            val vendorLocations = prioritized.filter { isVendorLocation(it, vendor) }
+
+            if (vendorLocations.isNotEmpty()) {
+                normalized.addAll(vendorLocations)
+            } else if (hasRoot) {
+                normalized.add("$DEFAULT_LOCATION/$vendor")
             }
+
+            prioritized.forEach { normalized.add(it) }
+
+            return normalized.toList()
         }
 
-        private const val DEFAULT_LOCATION = "classpath:db/migration"
+        private fun prioritizeVendorLocations(
+            parsed: List<String>,
+            vendor: String,
+        ): List<String> {
+            val normalized = LinkedHashSet<String>()
+            val vendorLocations = parsed.filter { isVendorLocation(it, vendor) }
+            if (vendorLocations.isNotEmpty()) {
+                normalized.addAll(vendorLocations)
+            }
+            parsed.forEach { normalized.add(it) }
+
+            return normalized.toList()
+        }
+
+        private fun isVendorLocation(
+            location: String,
+            vendor: String,
+        ): Boolean = location.endsWith("/$vendor") || location.contains("/$vendor/")
+
+        private fun isRootLocation(location: String): Boolean =
+            location.endsWith("db/migration") || location.endsWith("db/migration/")
     }
 }
 

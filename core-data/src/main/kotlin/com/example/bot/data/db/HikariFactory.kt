@@ -50,7 +50,7 @@ object HikariFactory {
                     ENV_MIN_IDLE,
                     DEFAULT_MIN_IDLE,
                     min = 0,
-                    max = maxPoolSize,
+                    max = 50,
                     envProvider = envProvider,
                     log = log,
                 )
@@ -90,12 +90,22 @@ object HikariFactory {
                     envProvider = envProvider,
                     log = log,
                 )
+            val leakLabel = if (leakDetectionMs == 0L) "0 (disabled)" else leakDetectionMs.toString()
 
             maximumPoolSize = maxPoolSize
             minimumIdle = minIdle
             connectionTimeout = connectionTimeoutMs
             validationTimeout = validationTimeoutMs
             leakDetectionThreshold = leakDetectionMs
+
+            log.info(
+                "Hikari config: maxPoolSize={} minIdle={} connTimeoutMs={} validationTimeoutMs={} leakDetection={}",
+                maxPoolSize,
+                minIdle,
+                connectionTimeoutMs,
+                validationTimeoutMs,
+                leakLabel,
+            )
 
             isAutoCommit = false
             transactionIsolation = "TRANSACTION_REPEATABLE_READ"

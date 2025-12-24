@@ -12,6 +12,7 @@ import org.flywaydb.core.api.MigrationVersion
 import org.flywaydb.core.api.configuration.Configuration
 import org.flywaydb.core.api.output.MigrateResult
 import org.flywaydb.core.api.output.ValidateResult
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -74,6 +75,26 @@ class MigrationRunnerTest {
         assertTrue(result is MigrationRunner.Result.Migrated)
         verify(exactly = 1) { flyway.migrate() }
         verify(exactly = 1) { flyway.validateWithResult() }
+    }
+
+    @Test
+    fun `off mode skips migrate and validate`() {
+        val flyway = mockFlyway()
+        every { flyway.validateWithResult() } throws AssertionError("must not be called")
+        every { flyway.migrate() } throws AssertionError("must not be called")
+
+        val runner =
+            MigrationRunner(
+                dataSource = mockDataSource(),
+                cfg = FlywayConfig(mode = FlywayMode.OFF),
+                flywayFactory = { _, _ -> flyway },
+            )
+
+        val result = runner.run()
+
+        assertNull(result)
+        verify(exactly = 0) { flyway.migrate() }
+        verify(exactly = 0) { flyway.validateWithResult() }
     }
 
     private fun mockDataSource(): DataSource {

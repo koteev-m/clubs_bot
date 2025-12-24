@@ -13,14 +13,14 @@ internal fun envInt(
     val raw = envProvider(name) ?: return default
     val parsed = raw.toIntOrNull()
     if (parsed == null) {
-        log.warn("Invalid int value for {}='{}', using default {}", name, raw, default)
+        log.warn("Invalid int value for {}='{}', expected range [{}; {}], using default {}", name, raw, min ?: "-", max ?: "-", default)
         return default
     }
     if (min != null && parsed < min || max != null && parsed > max) {
         log.warn(
-            "Value for {}={} is outside allowed range [{}; {}], using default {}",
+            "Value for {}='{}' is outside allowed range [{}; {}], using default {}",
             name,
-            parsed,
+            raw,
             min ?: "-",
             max ?: "-",
             default,
@@ -41,14 +41,14 @@ internal fun envLong(
     val raw = envProvider(name) ?: return default
     val parsed = raw.toLongOrNull()
     if (parsed == null) {
-        log.warn("Invalid long value for {}='{}', using default {}", name, raw, default)
+        log.warn("Invalid long value for {}='{}', expected range [{}; {}], using default {}", name, raw, min ?: "-", max ?: "-", default)
         return default
     }
     if (min != null && parsed < min || max != null && parsed > max) {
         log.warn(
-            "Value for {}={} is outside allowed range [{}; {}], using default {}",
+            "Value for {}='{}' is outside allowed range [{}; {}], using default {}",
             name,
-            parsed,
+            raw,
             min ?: "-",
             max ?: "-",
             default,

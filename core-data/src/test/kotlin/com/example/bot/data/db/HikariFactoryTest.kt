@@ -37,7 +37,7 @@ class HikariFactoryTest {
         val env =
             mapOf(
                 "HIKARI_MAX_POOL_SIZE" to "-1",
-                "HIKARI_MIN_IDLE" to "99",
+                "HIKARI_MIN_IDLE" to "-5",
                 "HIKARI_CONN_TIMEOUT_MS" to "abc",
                 "HIKARI_VALIDATION_TIMEOUT_MS" to "10",
                 "HIKARI_LEAK_DETECTION_MS" to "9999999",
@@ -50,5 +50,19 @@ class HikariFactoryTest {
         assertEquals(5_000, cfg.connectionTimeout)
         assertEquals(2_000, cfg.validationTimeout)
         assertEquals(10_000, cfg.leakDetectionThreshold)
+    }
+
+    @Test
+    fun `min idle is clamped to max pool size`() {
+        val env =
+            mapOf(
+                "HIKARI_MAX_POOL_SIZE" to "5",
+                "HIKARI_MIN_IDLE" to "10",
+            )
+
+        val cfg: HikariConfig = HikariFactory.buildHikariConfig(dbConfig) { env[it] }
+
+        assertEquals(5, cfg.maximumPoolSize)
+        assertEquals(5, cfg.minimumIdle)
     }
 }

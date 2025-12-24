@@ -1,9 +1,9 @@
 package com.example.bot.plugins
 
 import com.example.bot.data.db.DbConfig
+import com.example.bot.data.db.HikariFactory
 import com.example.bot.data.db.FlywayConfig
 import com.example.bot.data.db.MigrationRunner
-import com.example.bot.data.db.HikariFactory
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
 import org.jetbrains.exposed.sql.Database
@@ -17,9 +17,10 @@ object MigrationState {
 
 /**
  * Единый DataSource + миграции Flyway + подключение Exposed.
- * - Локации миграций берутся так: ENV(Flyway) -> application.conf -> авто-детект по JDBC (H2/PG).
- * - Любые "многозначные" локации нормализуются до одной вендорной (h2|postgresql), чтобы избежать конфликтов V1.
- * - Flyway выполняется под TCCL приложения, пул соединений закрывается на ApplicationStopped.
+ * - Конфигурация Flyway берётся из FlywayConfig (APP_ENV/APP_PROFILE, FLYWAY_MODE, FLYWAY_OUT_OF_ORDER, FLYWAY_LOCATIONS, FLYWAY_SCHEMAS, FLYWAY_BASELINE_ON_MIGRATE).
+ * - Локации миграций: ENV(Flyway) -> application.conf -> авто-детект по JDBC (H2/PG) с нормализацией до вендорных путей.
+ * - Prod/Stage: на старте только validate, при pending миграциях старт запрещён; реальные миграции идут через CI workflow db-migrate.
+ * - Flyway выполняется под TCCL приложения; пул соединений закрывается на ApplicationStopped, DataSourceHolder очищается при ошибках.
  */
 fun Application.installMigrationsAndDatabase() {
     val log = LoggerFactory.getLogger("Migrations")
@@ -30,17 +31,22 @@ fun Application.installMigrationsAndDatabase() {
 
     // 2) Локации миграций (ENV/HOCON)
     val rawLocations: String? =
-        System.getenv("FLYWAY_LOCATIONS")
-            ?: environment.config.propertyOrNull("flyway.locations")?.getString()
+        System.getenv("FLYWAY_LOCATIONS") ?: environment.config.propertyOrNull("flyway.locations")?.getString()
     val flywayConfig =
         FlywayConfig.fromEnv(
             envProvider = System::getenv,
             propertyProvider = System::getProperty,
             locationsOverride = rawLocations,
         )
-
-    log.info("Flyway locations (raw): {}", rawLocations ?: "<auto>")
-    log.info("Flyway locations (effective): {}", flywayConfig.locations.joinToString(","))
+    log.info(
+        "Flyway config: appEnv={} mode={} effectiveMode={} outOfOrder={} locations={} schemas={}",
+        flywayConfig.appEnv,
+        flywayConfig.mode,
+        flywayConfig.effectiveMode,
+        flywayConfig.outOfOrderEnabled,
+        flywayConfig.locations.joinToString(","),
+        flywayConfig.schemas.joinToString(",").ifEmpty { "<default>" },
+    )
 
     try {
         // 3) Выполняем миграции под класслоадером приложения (важно для загрузки ресурсов из JAR)
@@ -67,6 +73,7 @@ fun Application.installMigrationsAndDatabase() {
                 // ignore
             }
         }
+        DataSourceHolder.dataSource = null
         throw e
     }
 
