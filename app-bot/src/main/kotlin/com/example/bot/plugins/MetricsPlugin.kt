@@ -1,6 +1,8 @@
 package com.example.bot.plugins
 
+import com.example.bot.data.db.DbMetricsHolder
 import com.example.bot.metrics.HikariMetrics
+import com.example.bot.metrics.MicrometerDbMetrics
 import com.zaxxer.hikari.HikariDataSource
 import io.ktor.http.ContentType
 import io.ktor.server.application.Application
@@ -24,6 +26,13 @@ fun Application.installMetrics() {
     val promRegistry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     Metrics.addRegistry(promRegistry)
     log.info("PrometheusMeterRegistry registered")
+
+    runCatching {
+        DbMetricsHolder.configure(MicrometerDbMetrics(Metrics.globalRegistry))
+        log.info("DB metrics bound to Micrometer")
+    }.onFailure {
+        log.warn("Failed to bind DB metrics: {}", it.message)
+    }
 
     try {
         install(MicrometerMetrics) {
