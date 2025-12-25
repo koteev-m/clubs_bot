@@ -554,6 +554,15 @@ DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
 `MigrationState.migrationsApplied` guards the readiness probe and the Docker entrypoint fails fast
 when migrations cannot be applied.
 
+## Runbooks и эксплуатация
+
+- DR и миграции БД: [docs/dr.md](docs/dr.md)
+- Runtime устойчивость БД и circuit breaker: [docs/runtime-db-resiliency.md](docs/runtime-db-resiliency.md)
+- HTTP заголовки и кэширование: [docs/headers-and-cache.md](docs/headers-and-cache.md)
+- Алерты, SLO/SLA и каналы уведомлений: [docs/alerts.md](docs/alerts.md)
+- Ротация QR-кодов (мониторинг и runbook): [docs/qr-rotation.md](docs/qr-rotation.md)
+- Error Registry и /api/.well-known/errors: [docs/error-registry.md](docs/error-registry.md)
+
 ## Telegram bot
 
 The Telegram adapter uses the pengrad client. By default the demo long-polling
