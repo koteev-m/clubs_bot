@@ -1,11 +1,11 @@
 package com.example.bot.data.db
 
+import com.example.bot.data.db.DbErrorClassifier
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.MigrationInfo
 import org.flywaydb.core.api.output.MigrateResult
 import org.flywaydb.core.api.output.ValidateResult
 import org.slf4j.LoggerFactory
-import java.sql.SQLException
 import javax.sql.DataSource
 
 class MigrationRunner(
@@ -91,6 +91,7 @@ class MigrationRunner(
                 FlywayMode.OFF -> null
             }
         }.onSuccess { result ->
+            // Метрики и summary-лог используют одно и то же актуальное значение pending после выполнения режима
             val pending = pendingMigrations(flyway).size
             when (result) {
                 is Result.Validated ->
@@ -123,12 +124,14 @@ class MigrationRunner(
                     )
             }
         }.onFailure { t ->
+            val classification = DbErrorClassifier.classify(t)
             log.error(
-                "Flyway failed: mode={} effectiveMode={} appEnv={} sqlState={}",
+                "Flyway failed: mode={} effectiveMode={} appEnv={} reason={} sqlState={}",
                 cfg.mode,
                 cfg.effectiveMode,
                 cfg.appEnv,
-                (t as? SQLException)?.sqlState ?: (t.cause as? SQLException)?.sqlState,
+                classification.reason,
+                classification.sqlState ?: "<none>",
                 t,
             )
         }.getOrThrow()
@@ -187,8 +190,9 @@ class MigrationRunner(
             throw IllegalStateException("Flyway validation failed after migrate")
         }
 
+        val pendingMigrations = pendingMigrations(flyway)
         DbMigrationMetricsHolder.metrics.recordMigrateSuccess(res.migrationsExecuted)
-        DbMigrationMetricsHolder.metrics.recordValidationSuccess(pendingCount = 0)
+        DbMigrationMetricsHolder.metrics.recordValidationSuccess(pendingMigrations.size)
         return Result.Migrated(res)
     }
 

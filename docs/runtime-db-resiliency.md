@@ -43,8 +43,9 @@ Not retryable:
 При старте приложение логирует эффективные значения retry/backoff/slow-query/breaker конфигурации, чтобы упростить диагностику окружения.
 
 ## Migration metrics
-- В core-слое есть no-op интерфейс `DbMigrationMetrics`, Micrometer-биндинг настраивается в `MetricsPlugin` (см. `app-bot`), поэтому при отсутствии Micrometer/Prometheus зависимость не тянется.
-- Метрики `db.migrations.validate.success|failure`, `db.migrations.migrate.success|failure` обновляются при `validate` и `migrate-and-validate` соответственно, `db.migrations.pending` хранит последнее известное количество отложенных миграций.
+- В core-слое используется `NoOpDbMigrationMetrics` по умолчанию; Micrometer-биндинг `MicrometerDbMigrationMetrics` подключается в `MetricsPlugin` (модуль `app-bot`).
+- Метрики `db.migrations.validate.success|failure` инкрементируются при `validate`, `db.migrations.migrate.success|failure` — при `migrate-and-validate`; gauge `db.migrations.pending` сохраняет последнее известное количество отложенных миграций.
+- `db.migrations.migrate.success` аккумулирует общее число применённых миграций (`migrationsExecuted`), при `appliedCount=0` счётчик не меняется.
 - Прод/стейдж-политика не меняется: приложение лишь валидирует схему, миграции для prod/stage выполняются через CI (`.github/workflows/db-migrate.yml`) или `MigrateMain` в непроизводственных окружениях.
 
 ## Использование
