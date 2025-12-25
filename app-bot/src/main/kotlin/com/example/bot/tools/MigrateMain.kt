@@ -37,9 +37,15 @@ fun main() {
         )
 
     if (flywayConfig.effectiveMode != FlywayMode.MIGRATE_AND_VALIDATE) {
+        val rawAppEnv = flywayConfig.rawAppEnv ?: System.getenv("APP_ENV") ?: System.getenv("APP_PROFILE")
+        val rawFlywayMode = System.getenv("FLYWAY_MODE") ?: flywayConfig.mode
         error(
-            "Flyway mode is ${flywayConfig.effectiveMode}; set FLYWAY_MODE=migrate-and-validate and APP_ENV=dev/local (or another non-production value) " +
-                "when running the standalone migration tool; migrate is not allowed for prod/stage",
+            """
+            Flyway migrate is not allowed: effectiveMode=${flywayConfig.effectiveMode} appEnv=${flywayConfig.appEnv} (raw=${rawAppEnv}) flywayMode=${rawFlywayMode}
+            Use APP_ENV=dev or APP_ENV=local together with FLYWAY_MODE=migrate-and-validate when running the standalone migration tool.
+            For prod/stage use CI workflow .github/workflows/db-migrate.yml which runs migrate-and-validate in a controlled pipeline.
+            """
+                .trimIndent(),
         )
     }
 
