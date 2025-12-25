@@ -34,6 +34,7 @@
 - Out-of-order (`FLYWAY_OUT_OF_ORDER=true`) разрешается только для dev/local; в prod/stage флаг игнорируется.
 - Миграции для prod/stage запускаются исключительно из CI джобы `.github/workflows/db-migrate.yml` с `FLYWAY_MODE=migrate-and-validate` (ручной `workflow_dispatch` или пуш релизного тега). CLI-инструмент `MigrateMain` требует режим `migrate-and-validate` и не позволит миграцию при `APP_ENV=prod/stage`.
 - Вспомогательные переменные: `FLYWAY_LOCATIONS` (список путей через запятую, вендорные `classpath:db/migration/<vendor>` подставляются автоматически), `FLYWAY_BASELINE_ON_MIGRATE` (по умолчанию `true`), `FLYWAY_ENABLED` (по умолчанию `true`), `FLYWAY_SCHEMAS` (при необходимости явных схем).
+- CI workflow `db-migrate` дополнительно логирует текущие `APP_ENV`/`FLYWAY_MODE` и ссылку на исходный `GITHUB_REF`; эти логи считаются источником правды при разборе проблем с применением миграций и должны прикладываться к инцидентам.
 
 ## Пул подключений (Hikari)
 - Значения берутся из env; невалидные/вне диапазона значения логируются и заменяются на дефолт.

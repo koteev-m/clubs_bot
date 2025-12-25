@@ -12,6 +12,8 @@ import org.flywaydb.core.api.MigrationVersion
 import org.flywaydb.core.api.configuration.Configuration
 import org.flywaydb.core.api.output.MigrateResult
 import org.flywaydb.core.api.output.ValidateResult
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -21,6 +23,11 @@ import java.sql.DatabaseMetaData
 import javax.sql.DataSource
 
 class MigrationRunnerTest {
+    @AfterEach
+    fun tearDown() {
+        DbMigrationMetricsHolder.configure(NoOpDbMigrationMetrics)
+    }
+
     @Test
     fun `prod validate mode fails on pending migrations without migrating`() {
         val flyway = mockFlyway()
@@ -29,6 +36,9 @@ class MigrationRunnerTest {
         every { pendingMigration.version } returns MigrationVersion.fromVersion("1.2")
         val pending = arrayOf(pendingMigration)
         val validateResult = ValidateResult("11.14.0", "jdbc:postgresql://localhost/test", null, true, 1, emptyList(), emptyList())
+
+        val metrics = FakeDbMigrationMetrics()
+        DbMigrationMetricsHolder.configure(metrics)
 
         every { flyway.validateWithResult() } returns validateResult
         every { flyway.info() } returns info
@@ -41,11 +51,13 @@ class MigrationRunnerTest {
                 dataSource = mockDataSource(),
                 cfg = FlywayConfig(mode = FlywayMode.VALIDATE, appEnv = AppEnvironment.PROD),
                 flywayFactory = { _, _ -> flyway },
-            )
+        )
 
         assertThrows<IllegalStateException> { runner.run() }
         verify(exactly = 1) { flyway.validateWithResult() }
         verify(exactly = 0) { flyway.migrate() }
+        assertNull(metrics.validationSuccessPendingCount)
+        assertEquals(pending.size, metrics.validationFailurePendingCount)
     }
 
     @Test
@@ -56,6 +68,9 @@ class MigrationRunnerTest {
         val migrateResult = MigrateResult("11.14.0", "jdbc:postgresql://localhost/test", "public", "1").apply {
             migrationsExecuted = 2
         }
+
+        val metrics = FakeDbMigrationMetrics()
+        DbMigrationMetricsHolder.configure(metrics)
 
         every { flyway.validateWithResult() } returns validateResult
         every { flyway.migrate() } returns migrateResult
@@ -75,6 +90,10 @@ class MigrationRunnerTest {
         assertTrue(result is MigrationRunner.Result.Migrated)
         verify(exactly = 1) { flyway.migrate() }
         verify(exactly = 1) { flyway.validateWithResult() }
+        assertEquals(2, metrics.migrateSuccessAppliedCount)
+        assertEquals(0, metrics.validationSuccessPendingCount)
+        assertNull(metrics.validationFailurePendingCount)
+        assertEquals(0, metrics.migrateFailureCount)
     }
 
     @Test
@@ -120,5 +139,28 @@ class MigrationRunnerTest {
         val flyway = mockk<Flyway>()
         every { flyway.configuration } returns configuration
         return flyway
+    }
+}
+
+private class FakeDbMigrationMetrics : DbMigrationMetrics {
+    var validationSuccessPendingCount: Int? = null
+    var validationFailurePendingCount: Int? = null
+    var migrateSuccessAppliedCount: Int? = null
+    var migrateFailureCount: Int = 0
+
+    override fun recordValidationSuccess(pendingCount: Int) {
+        validationSuccessPendingCount = pendingCount
+    }
+
+    override fun recordValidationFailure(pendingCount: Int?) {
+        validationFailurePendingCount = pendingCount
+    }
+
+    override fun recordMigrateSuccess(appliedCount: Int) {
+        migrateSuccessAppliedCount = appliedCount
+    }
+
+    override fun recordMigrateFailure() {
+        migrateFailureCount++
     }
 }

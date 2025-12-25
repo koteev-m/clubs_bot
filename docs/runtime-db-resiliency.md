@@ -36,10 +36,16 @@ Not retryable:
 * `db.tx.failures{reason="deadlock|serialization|connection|constraint|other"}` — счётчик падений.
 * `db.tx.duration{readOnly="true|false"}` — длительность транзакций.
 * `db.breaker.opened` — сколько раз circuit breaker переходил в состояние open (открывался) после серии connection-ошибок.
+* `db.migrations.validate.success|failure`, `db.migrations.migrate.success|failure`, `db.migrations.pending` — метрики для валидации/применения Flyway миграций (см. раздел ниже).
 
 Порог для логирования медленных транзакций задаётся через `DB_SLOW_QUERY_MS` (по умолчанию 200 мс). Значение > 0 включает `WARN` при превышении порога; `DB_SLOW_QUERY_MS=0` отключает предупреждения, оставляя только метрику `db.tx.duration`.
 
 При старте приложение логирует эффективные значения retry/backoff/slow-query/breaker конфигурации, чтобы упростить диагностику окружения.
+
+## Migration metrics
+- В core-слое есть no-op интерфейс `DbMigrationMetrics`, Micrometer-биндинг настраивается в `MetricsPlugin` (см. `app-bot`), поэтому при отсутствии Micrometer/Prometheus зависимость не тянется.
+- Метрики `db.migrations.validate.success|failure`, `db.migrations.migrate.success|failure` обновляются при `validate` и `migrate-and-validate` соответственно, `db.migrations.pending` хранит последнее известное количество отложенных миграций.
+- Прод/стейдж-политика не меняется: приложение лишь валидирует схему, миграции для prod/stage выполняются через CI (`.github/workflows/db-migrate.yml`) или `MigrateMain` в непроизводственных окружениях.
 
 ## Использование
 * Новый API: `withRetriedTx(name = "label", readOnly = true) { /* Exposed DSL */ }` — helper сам открывает транзакцию и применяет retry/backoff.

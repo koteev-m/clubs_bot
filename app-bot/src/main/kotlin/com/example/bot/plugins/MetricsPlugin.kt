@@ -1,8 +1,10 @@
 package com.example.bot.plugins
 
 import com.example.bot.data.db.DbMetricsHolder
+import com.example.bot.data.db.DbMigrationMetricsHolder
 import com.example.bot.metrics.HikariMetrics
 import com.example.bot.metrics.MicrometerDbMetrics
+import com.example.bot.metrics.MicrometerDbMigrationMetrics
 import com.zaxxer.hikari.HikariDataSource
 import io.ktor.http.ContentType
 import io.ktor.server.application.Application
@@ -32,6 +34,13 @@ fun Application.installMetrics() {
         log.info("DB metrics bound to Micrometer")
     }.onFailure {
         log.warn("Failed to bind DB metrics: {}", it.message)
+    }
+
+    runCatching {
+        DbMigrationMetricsHolder.configure(MicrometerDbMigrationMetrics(Metrics.globalRegistry))
+        log.info("DB migration metrics bound to Micrometer")
+    }.onFailure {
+        log.warn("Failed to bind DB migration metrics: {}", it.message)
     }
 
     try {

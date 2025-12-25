@@ -49,6 +49,9 @@ jobs:
             ${{ runner.os }}-gradle-
             ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
 
+      - name: Show migration config
+        run: echo "APP_ENV=${APP_ENV} FLYWAY_MODE=${FLYWAY_MODE} GITHUB_REF=${GITHUB_REF}"
+
       - name: Flyway migrate (managed via CI)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
