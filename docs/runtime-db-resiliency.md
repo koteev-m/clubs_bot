@@ -13,11 +13,15 @@
 ## Классификация ошибок
 Retryable:
 * PostgreSQL `SQLState` 40001 (serialization failure) и 40P01 (deadlock detected).
-* Подключенческие/временные ошибки (`SQLTransientException`, `SQLTransientConnectionException`, `PSQLException.isTransient == true`, `SQLState` класса 08).
+* Подключенческие/временные ошибки (`SQLTransientException`, `SQLTransientConnectionException`, `SQLState` класса 08).
 
 Not retryable:
 * Ошибки ограничений (`SQLState` 23xxx, например 23505 unique_violation).
 * Бизнес-исключения и прочие runtime-ошибки.
+
+Дополнительно для бизнес-кода доступны помощники:
+* `isUniqueViolation()` — проверяет наличие `SQLState=23505` в стеке причин.
+* `isRetryLimitExceeded()` — возвращает `true`, если в стеке есть `SQLState` 40001 или 40P01 (serialization/deadlock), что удобно, когда все ретраи уже исчерпаны.
 
 ## Circuit breaker
 При серии connection-ошибок helper открывает breaker и быстро отвечает `DatabaseUnavailableException` без попытки создания новых транзакций.
@@ -31,7 +35,11 @@ Not retryable:
 * `db.tx.retries{reason="deadlock|serialization|connection"}` — счётчик ретраев.
 * `db.tx.failures{reason="deadlock|serialization|connection|constraint|other"}` — счётчик падений.
 * `db.tx.duration{readOnly="true|false"}` — длительность транзакций.
-* `db.breaker.opened` — сколько раз открывался circuit breaker.
+* `db.breaker.opened` — сколько раз circuit breaker переходил в состояние open (открывался) после серии connection-ошибок.
+
+Порог для логирования медленных транзакций задаётся через `DB_SLOW_QUERY_MS` (по умолчанию 200 мс). Значение > 0 включает `WARN` при превышении порога; `DB_SLOW_QUERY_MS=0` отключает предупреждения, оставляя только метрику `db.tx.duration`.
+
+При старте приложение логирует эффективные значения retry/backoff/slow-query/breaker конфигурации, чтобы упростить диагностику окружения.
 
 ## Использование
 * Новый API: `withRetriedTx(name = "label", readOnly = true) { /* Exposed DSL */ }` — helper сам открывает транзакцию и применяет retry/backoff.

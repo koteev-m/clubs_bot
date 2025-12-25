@@ -62,9 +62,19 @@ object DbErrorClassifier {
     }
 }
 
-fun Throwable.isUniqueViolation(): Boolean = DbErrorClassifier.classify(this).reason == DbErrorReason.CONSTRAINT
+fun Throwable.isUniqueViolation(): Boolean =
+    generateSequence(this) { it.cause }
+        .filterIsInstance<SQLException>()
+        .any { it.sqlState == "23505" }
 
-fun Throwable.isRetryLimitExceeded(): Boolean = DbErrorClassifier.classify(this).retryable
+fun Throwable.isRetryLimitExceeded(): Boolean {
+    val state =
+        generateSequence(this) { it.cause }
+            .filterIsInstance<SQLException>()
+            .firstOrNull()
+            ?.sqlState
+    return state == "40001" || state == "40P01"
+}
 
 private fun Throwable.sqlException(): SQLException? =
     generateSequence(this) { it.cause }
