@@ -546,8 +546,8 @@ DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
   unless `APP_ENV` is `local|dev` **and** `FLYWAY_OUT_OF_ORDER=true`.
 - Prod/Stage migrations are executed via `.github/workflows/db-migrate.yml` (manual dispatch or
   release tag) with `FLYWAY_MODE=migrate-and-validate`.
-- Migration observability: Micrometer counters `db.migrations.*` record validation/migrate outcomes and the last seen pending
-  count (exposed on `/metrics`).
+- Migration observability: Micrometer counters `db.migrations.*` record validation/migrate outcomes (migrate-success считывает
+  общее число применённых миграций) и последнюю seen pending count (exposed on `/metrics`).
 - See `docs/dr.md` for DR/runbook details and pool tuning defaults.
 - DB resiliency (retries, backoff, circuit breaker, metrics): `docs/runtime-db-resiliency.md`.
 
