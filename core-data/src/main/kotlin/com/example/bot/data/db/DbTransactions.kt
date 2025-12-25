@@ -1,27 +1,26 @@
 package com.example.bot.data.db
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.util.concurrent.ThreadLocalRandom
 import kotlin.math.min
-import kotlin.system.measureNanoTime
 import kotlin.coroutines.cancellation.CancellationException
 
 private const val ENV_TX_MAX_RETRIES = "DB_TX_MAX_RETRIES"
 private const val ENV_TX_BASE_BACKOFF = "DB_TX_BASE_BACKOFF_MS"
 private const val ENV_TX_MAX_BACKOFF = "DB_TX_MAX_BACKOFF_MS"
 private const val ENV_TX_JITTER = "DB_TX_JITTER_MS"
+private const val ENV_SLOW_QUERY_MS = "DB_SLOW_QUERY_MS"
 
 private const val DEFAULT_MAX_RETRIES = 3
 private val DEFAULT_BASE_BACKOFF: Duration = Duration.ofMillis(500)
 private val DEFAULT_MAX_BACKOFF: Duration = Duration.ofSeconds(15)
 private val DEFAULT_JITTER: Duration = Duration.ofMillis(100)
+private const val DEFAULT_SLOW_QUERY_MS = 200L
 
 private val log = LoggerFactory.getLogger("DbTx")
 
@@ -42,16 +41,26 @@ private val retryConfig: RetryConfig =
         jitter = System.getenv(ENV_TX_JITTER)?.toLongOrNull()?.let(Duration::ofMillis) ?: DEFAULT_JITTER,
     )
 
+internal fun resolveSlowQueryThresholdMs(envValue: String?): Long? {
+    val parsed = envValue?.toLongOrNull()
+    return when {
+        envValue == null -> DEFAULT_SLOW_QUERY_MS
+        parsed == null -> DEFAULT_SLOW_QUERY_MS
+        parsed > 0 -> parsed
+        else -> null
+    }
+}
+
+private val slowQueryThresholdMs: Long? = resolveSlowQueryThresholdMs(System.getenv(ENV_SLOW_QUERY_MS))
+
 internal interface TransactionExecutor {
     suspend fun <T> execute(readOnly: Boolean, database: Database?, block: suspend () -> T): T
 }
 
 internal object ExposedTransactionExecutor : TransactionExecutor {
     override suspend fun <T> execute(readOnly: Boolean, database: Database?, block: suspend () -> T): T =
-        withContext(Dispatchers.IO) {
-            transaction(database) {
-                runBlocking { block() }
-            }
+        newSuspendedTransaction(context = Dispatchers.IO, db = database) {
+            block()
         }
 }
 
@@ -76,8 +85,26 @@ internal fun computeBackoffMillis(attempt: Int, config: RetryConfig = retryConfi
     return capped + jitter
 }
 
+private val circuitBreakerConfig: CircuitBreakerConfig = CircuitBreakerConfigProvider.fromEnv()
+
 @Volatile
-internal var circuitBreaker: DatabaseCircuitBreaker = DatabaseCircuitBreaker(CircuitBreakerConfigProvider.fromEnv())
+internal var circuitBreaker: DatabaseCircuitBreaker = DatabaseCircuitBreaker(circuitBreakerConfig)
+
+@Suppress("unused")
+private val configLog: Unit = run {
+    val slowQueryLabel = slowQueryThresholdMs?.toString() ?: "off"
+    log.info(
+        "DbTx config: maxRetries={} baseBackoffMs={} maxBackoffMs={} jitterMs={} slowQueryMs={} breaker(threshold={}, windowSec={}, openSec={})",
+        retryConfig.maxRetries,
+        retryConfig.baseBackoff.toMillis(),
+        retryConfig.maxBackoff.toMillis(),
+        retryConfig.jitter.toMillis(),
+        slowQueryLabel,
+        circuitBreakerConfig.failureThreshold,
+        circuitBreakerConfig.failureWindow.seconds,
+        circuitBreakerConfig.openDuration.seconds,
+    )
+}
 
 suspend fun <T> withRetriedTx(
     name: String? = null,
@@ -92,7 +119,6 @@ suspend fun <T> withRetriedTx(
 
     if (circuitBreaker.isOpen()) {
         metrics.recordTxFailure(DbErrorReason.CONNECTION.label)
-        metrics.markBreakerOpened()
         log.error("DB circuit breaker is open, rejecting transaction{}", txName)
         throw DatabaseUnavailableException("Database circuit breaker is open")
     }
@@ -102,17 +128,25 @@ suspend fun <T> withRetriedTx(
 
     while (attempt < totalAttempts) {
         try {
-            val elapsed: Long
             val result: T
-            elapsed = measureNanoTime {
-                result =
-                    if (manageTransaction) {
-                        transactionExecutor.execute(readOnly, database, block)
-                    } else {
-                        block()
-                    }
+            val started = System.nanoTime()
+            result =
+                if (manageTransaction) {
+                    transactionExecutor.execute(readOnly, database, block)
+                } else {
+                    block()
+                }
+            val elapsedNanos = System.nanoTime() - started
+            val elapsedMillis = Duration.ofNanos(elapsedNanos).toMillis()
+            metrics.recordTxDuration(readOnly, elapsedMillis)
+            if (slowQueryThresholdMs != null && elapsedMillis > slowQueryThresholdMs) {
+                log.warn(
+                    "Slow DB transaction{} took {} ms (>{} ms)",
+                    txName,
+                    elapsedMillis,
+                    slowQueryThresholdMs,
+                )
             }
-            metrics.recordTxDuration(readOnly, Duration.ofNanos(elapsed).toMillis())
             circuitBreaker.onSuccess()
             return result
         } catch (ex: Throwable) {

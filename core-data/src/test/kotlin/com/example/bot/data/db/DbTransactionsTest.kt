@@ -128,6 +128,27 @@ class DbErrorClassifierTest :
             DbErrorClassifier.classify(RuntimeException("boom")).retryable shouldBe false
         }
 
+        "detects unique violations only for 23505" {
+            RuntimeException(sqlException("23505")).isUniqueViolation() shouldBe true
+            RuntimeException(sqlException("23503")).isUniqueViolation() shouldBe false
+            RuntimeException(RuntimeException(sqlException("23505"))).isUniqueViolation() shouldBe true
+        }
+
+        "detects retry limit exceeded only for serialization/deadlock" {
+            sqlException("40001").isRetryLimitExceeded() shouldBe true
+            RuntimeException(sqlException("40P01")).isRetryLimitExceeded() shouldBe true
+            sqlException("08006").isRetryLimitExceeded() shouldBe false
+            RuntimeException("boom").isRetryLimitExceeded() shouldBe false
+        }
+
+        "resolves slow query threshold with disable and defaults" {
+            resolveSlowQueryThresholdMs(null) shouldBe 200
+            resolveSlowQueryThresholdMs("500") shouldBe 500
+            resolveSlowQueryThresholdMs("0") shouldBe null
+            resolveSlowQueryThresholdMs("-10") shouldBe null
+            resolveSlowQueryThresholdMs("oops") shouldBe 200
+        }
+
         "backoff is exponential without jitter" {
             val cfg = RetryConfig(maxRetries = 3, baseBackoff = Duration.ofMillis(10), maxBackoff = Duration.ofMillis(80), jitter = Duration.ZERO)
             computeBackoffMillis(1, cfg) shouldBe 10
