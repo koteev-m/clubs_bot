@@ -79,9 +79,18 @@ enum class GuestListOwnerType {
 enum class GuestListStatus {
     ACTIVE,
     CLOSED,
+    CANCELLED,
 }
 
 enum class GuestListEntryStatus {
+    ADDED,
+    INVITED,
+    CONFIRMED,
+    DECLINED,
+    ARRIVED,
+    LATE,
+    DENIED,
+
     PLANNED,
     CHECKED_IN,
     NO_SHOW,
@@ -165,3 +174,24 @@ data class GuestListEntryPage(
     val items: List<GuestListEntryView>,
     val total: Long,
 )
+
+enum class InvitationChannel {
+    TELEGRAM,
+    EXTERNAL,
+}
+
+enum class CheckinSubjectType {
+    BOOKING,
+    GUEST_LIST_ENTRY,
+}
+
+enum class CheckinMethod {
+    QR,
+    NAME,
+}
+
+enum class CheckinResultStatus {
+    ARRIVED,
+    LATE,
+    DENIED,
+}
