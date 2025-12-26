@@ -79,9 +79,18 @@ enum class GuestListOwnerType {
 enum class GuestListStatus {
     ACTIVE,
     CLOSED,
+    CANCELLED,
 }
 
 enum class GuestListEntryStatus {
+    ADDED,
+    INVITED,
+    CONFIRMED,
+    DECLINED,
+    ARRIVED,
+    LATE,
+    DENIED,
+
     PLANNED,
     CHECKED_IN,
     NO_SHOW,
@@ -94,6 +103,27 @@ enum class GuestListEntryStatus {
 
     /** Истёк резерв/окно или запись закрыта. */
     EXPIRED,
+}
+
+enum class InvitationChannel {
+    TELEGRAM,
+    EXTERNAL,
+}
+
+enum class CheckinSubjectType {
+    BOOKING,
+    GUEST_LIST_ENTRY,
+}
+
+enum class CheckinMethod {
+    QR,
+    NAME,
+}
+
+enum class CheckinResultStatus {
+    ARRIVED,
+    LATE,
+    DENIED,
 }
 
 data class GuestList(
@@ -164,4 +194,30 @@ data class GuestListEntryView(
 data class GuestListEntryPage(
     val items: List<GuestListEntryView>,
     val total: Long,
+)
+
+data class Invitation(
+    val id: Long,
+    val guestListEntryId: Long,
+    val tokenHash: String,
+    val channel: InvitationChannel,
+    val expiresAt: Instant,
+    val revokedAt: Instant?,
+    val usedAt: Instant?,
+    val createdBy: Long?,
+    val createdAt: Instant,
+)
+
+data class Checkin(
+    val id: Long,
+    val clubId: Long?,
+    val eventId: Long?,
+    val subjectType: CheckinSubjectType,
+    val subjectId: String,
+    val checkedBy: Long?,
+    val method: CheckinMethod,
+    val resultStatus: CheckinResultStatus,
+    val denyReason: String?,
+    val occurredAt: Instant,
+    val createdAt: Instant,
 )
