@@ -9,17 +9,20 @@ import kotlinx.coroutines.runBlocking
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Table
-import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
 
 class GuestListDbRepositoryH2Test {
     private lateinit var dataSource: HikariDataSource
@@ -30,200 +33,148 @@ class GuestListDbRepositoryH2Test {
 
     @BeforeEach
     fun setUp() {
+        val jdbcUrl = "jdbc:h2:mem:guest-list-db;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
+
+        val migrationDataSource =
+            HikariDataSource(
+                HikariConfig().apply {
+                    this.jdbcUrl = jdbcUrl
+                    driverClassName = "org.h2.Driver"
+                    username = "sa"
+                    password = ""
+                    maximumPoolSize = 3
+                },
+            )
+
+        val flyway =
+            Flyway
+                .configure()
+                .dataSource(migrationDataSource)
+                .locations(
+                    "filesystem:${Paths.get("core-data/src/main/resources/db/migration/common").toAbsolutePath()}",
+                    "filesystem:${prepareH2Migrations()}",
+                )
+                .cleanDisabled(false)
+                .load()
+
+        flyway.clean()
+        flyway.migrate()
+        migrationDataSource.close()
+
         dataSource =
             HikariDataSource(
                 HikariConfig().apply {
-                    jdbcUrl = "jdbc:h2:mem:guest-list-db;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
+                    this.jdbcUrl = jdbcUrl
                     driverClassName = "org.h2.Driver"
+                    username = "sa"
+                    password = ""
                     maximumPoolSize = 2
                 },
             )
 
-        val flywayBase =
-            Flyway
-                .configure()
-                .dataSource(dataSource)
-                .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-                .cleanDisabled(false)
-                .target("10")
-                .load()
-
-        flywayBase.clean()
-        flywayBase.migrate()
+        verifyGuestListMigrationsApplied()
 
         database = Database.connect(dataSource)
+    }
 
-        transaction(database) {
-            fun recordMigration(
-                version: String,
-                description: String,
-                script: String,
-                rank: Int,
-            ) {
-                val alreadyInserted =
-                    exec("SELECT 1 FROM flyway_schema_history WHERE version = '$version'") { rs ->
-                        rs.next()
-                    } ?: false
+    private fun prepareH2Migrations(): String {
+        val sourceDir =
+            Paths.get(
+                checkNotNull(javaClass.classLoader.getResource("db/migration/h2")) {
+                    "H2 migration resources not found"
+                }.toURI(),
+            )
+        val targetDir = Files.createTempDirectory("flyway-h2-migrations")
 
-                if (!alreadyInserted) {
-                    exec(
-                        """
-                        INSERT INTO flyway_schema_history (
-                            installed_rank, version, description, type, script, checksum, installed_by, installed_on, execution_time, success
-                        ) VALUES ($rank, '$version', '$description', 'SQL', '$script', NULL, 'test', CURRENT_TIMESTAMP, 0, TRUE)
-                        """.trimIndent(),
-                    )
-                }
+        Files.list(sourceDir).use { paths ->
+            paths.filter { Files.isRegularFile(it) }.forEach { path ->
+                val fileName = path.fileName.toString()
+                val content = Files.readString(path)
+                val patched =
+                    when (fileName) {
+                        "V017__guest_list_invites_checkins.sql" -> patchGuestListMigration(content)
+                        "V11__webhook_security.sql",
+                        "V12__promo_schema.sql",
+                        "V13__payments_actions.sql",
+                        "V016__admin_tables.sql",
+                        -> patchAutoIncrement(content)
+                        else -> content
+                    }
+
+                Files.writeString(targetDir.resolve(fileName), patched)
             }
-
-            exec(
-                """
-                CREATE TABLE IF NOT EXISTS suspicious_ips (
-                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    ip VARCHAR(255) NOT NULL,
-                    user_agent CLOB,
-                    reason VARCHAR(128) NOT NULL,
-                    details CLOB,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-                )
-                """.trimIndent(),
-            )
-
-            exec(
-                """
-                CREATE TABLE IF NOT EXISTS promo_links (
-                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    promoter_user_id BIGINT NOT NULL REFERENCES users(id),
-                    club_id BIGINT REFERENCES clubs(id),
-                    utm_source VARCHAR(255) NOT NULL,
-                    utm_medium VARCHAR(255) NOT NULL,
-                    utm_campaign VARCHAR(255) NOT NULL,
-                    utm_content VARCHAR(255),
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-                )
-                """.trimIndent(),
-            )
-            exec(
-                """
-                CREATE INDEX IF NOT EXISTS idx_promo_links_promoter_club ON promo_links (promoter_user_id, club_id)
-                """.trimIndent(),
-            )
-            exec(
-                """
-                CREATE TABLE IF NOT EXISTS promo_attribution (
-                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-                    promo_link_id BIGINT NOT NULL REFERENCES promo_links(id) ON DELETE CASCADE,
-                    promoter_user_id BIGINT NOT NULL REFERENCES users(id),
-                    utm_source VARCHAR(255) NOT NULL,
-                    utm_medium VARCHAR(255) NOT NULL,
-                    utm_campaign VARCHAR(255) NOT NULL,
-                    utm_content VARCHAR(255),
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-                    CONSTRAINT uq_promo_attribution_booking UNIQUE (booking_id)
-                )
-                """.trimIndent(),
-            )
-            exec("CREATE INDEX IF NOT EXISTS idx_promo_attribution_booking ON promo_attribution (booking_id)")
-
-            exec(
-                """
-                CREATE TABLE IF NOT EXISTS booking_templates (
-                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    promoter_user_id BIGINT NOT NULL REFERENCES users(id),
-                    club_id BIGINT NOT NULL REFERENCES clubs(id),
-                    table_capacity_min INTEGER NOT NULL,
-                    notes CLOB,
-                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-                )
-                """.trimIndent(),
-            )
-            exec(
-                """
-                CREATE INDEX IF NOT EXISTS idx_booking_templates_owner ON booking_templates (promoter_user_id, club_id, is_active)
-                """.trimIndent(),
-            )
-
-            exec(
-                """
-                CREATE TABLE IF NOT EXISTS payment_actions (
-                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    booking_id UUID NOT NULL,
-                    idempotency_key TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    reason TEXT,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT fk_payment_actions_booking FOREIGN KEY (booking_id) REFERENCES bookings(id)
-                )
-                """.trimIndent(),
-            )
-            exec(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS payment_actions_idempotency_key_idx ON payment_actions (idempotency_key)
-                """.trimIndent(),
-            )
-            exec(
-                """
-                CREATE INDEX IF NOT EXISTS payment_actions_booking_idx ON payment_actions (booking_id)
-                """.trimIndent(),
-            )
-
-            exec(
-                """
-                CREATE TABLE IF NOT EXISTS layout_tables (
-                    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    club_id BIGINT NOT NULL,
-                    label VARCHAR(255) NOT NULL,
-                    zone_id VARCHAR(64) NOT NULL,
-                    minimum_tier VARCHAR(64) NOT NULL,
-                    min_deposit BIGINT NOT NULL DEFAULT 0,
-                    capacity INT NOT NULL DEFAULT 0,
-                    zone VARCHAR(64),
-                    arrival_window VARCHAR(32),
-                    mystery_eligible BOOLEAN NOT NULL DEFAULT FALSE
-                )
-                """.trimIndent(),
-            )
-
-            SchemaUtils.createMissingTablesAndColumns(
-                GuestListsTable,
-                GuestListEntriesTable,
-                InvitationsTable,
-                CheckinsTable,
-            )
-
-            exec(
-                """
-                ALTER TABLE guest_list_entries DROP CONSTRAINT IF EXISTS guest_list_entries_status_check;
-                ALTER TABLE guest_list_entries DROP CONSTRAINT IF EXISTS chk_guest_list_entries_status;
-                ALTER TABLE guest_list_entries ADD CONSTRAINT guest_list_entries_status_check CHECK (
-                    status IN (
-                        'ADDED', 'INVITED', 'CONFIRMED', 'DECLINED', 'ARRIVED', 'LATE', 'DENIED',
-                        'PLANNED', 'CHECKED_IN', 'NO_SHOW', 'WAITLISTED', 'CALLED', 'EXPIRED'
-                    )
-                )
-                """.trimIndent(),
-            )
-
-            recordMigration("11", "webhook security", "V11__webhook_security.sql", rank = 11)
-            recordMigration("12", "promo schema", "V12__promo_schema.sql", rank = 12)
-            recordMigration("13", "payments actions", "V13__payments_actions.sql", rank = 13)
-            recordMigration("16", "admin tables", "V016__admin_tables.sql", rank = 16)
-            recordMigration("15", "music track of night", "V015__music_track_of_night.sql", rank = 15)
-            recordMigration("17", "guest list invites checkins", "V017__guest_list_invites_checkins.sql", rank = 17)
-            recordMigration("18", "guest list schema polish", "V018__guest_list_schema_polish.sql", rank = 18)
         }
 
-        Flyway
-            .configure()
-            .dataSource(dataSource)
-            .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-            .cleanDisabled(false)
-            .outOfOrder(true)
-            .load()
-            .migrate()
+        return targetDir.toAbsolutePath().toString()
+    }
+
+    private fun patchGuestListMigration(content: String): String =
+        content
+            .replace(
+                """
+                ALTER TABLE guest_lists
+                    ADD COLUMN IF NOT EXISTS promoter_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+                    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                    ADD COLUMN IF NOT EXISTS "limit" INT NULL;
+                """.trimIndent(),
+                """
+                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS promoter_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL;
+                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
+                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
+                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS "limit" INT NULL;
+                """.trimIndent(),
+            )
+            .replace(
+                """
+                ALTER TABLE guest_list_entries
+                    ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS telegram_user_id BIGINT NULL,
+                    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
+                """.trimIndent(),
+                """
+                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '';
+                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS telegram_user_id BIGINT NULL;
+                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
+                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
+                """.trimIndent(),
+            )
+            .replace(
+                """
+                ALTER TABLE guest_list_entries
+                    DROP CONSTRAINT IF EXISTS guest_list_entries_status_check;
+                """.trimIndent(),
+                """
+                ALTER TABLE guest_list_entries
+                    DROP CONSTRAINT IF EXISTS guest_list_entries_status_check;
+                ALTER TABLE guest_list_entries
+                    DROP CONSTRAINT IF EXISTS chk_guest_list_entries_status;
+                """.trimIndent(),
+            )
+
+    private fun patchAutoIncrement(content: String): String =
+        content.replace("AUTO_INCREMENT", "GENERATED BY DEFAULT AS IDENTITY")
+
+    private fun verifyGuestListMigrationsApplied() {
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                val versions =
+                    statement
+                        .executeQuery("SELECT version FROM flyway_schema_history")
+                        .use { resultSet ->
+                            buildList {
+                                while (resultSet.next()) {
+                                    add(resultSet.getString("version"))
+                                }
+                            }
+                        }
+
+                val normalizedVersions = versions.filterNotNull().map { it.trimStart('0') }.toSet()
+
+                assertTrue(normalizedVersions.containsAll(setOf("17", "18")), "Unexpected migration versions: $versions")
+            }
+        }
     }
 
     @AfterEach
@@ -275,6 +226,13 @@ class GuestListDbRepositoryH2Test {
 
             assertEquals(3, entries.size)
             assertEquals(3, entries.count { it.id > 0 })
+
+            assertEquals(fixedInstant, guestList.createdAt)
+            assertEquals(fixedInstant, guestList.updatedAt)
+            entries.forEach { entry ->
+                assertEquals(fixedInstant, entry.createdAt)
+                assertEquals(fixedInstant, entry.updatedAt)
+            }
 
             val first = entries.first()
             assertEquals(first, entryRepo.findById(first.id))
