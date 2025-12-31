@@ -12,15 +12,19 @@ import org.junit.jupiter.api.assertThrows
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
 import testing.RequiresDocker
+import java.time.OffsetDateTime
 import java.math.BigDecimal
 import java.sql.Connection
 import java.sql.SQLException
+import java.sql.Statement
+import java.sql.Types
 import java.util.UUID
 
 @RequiresDocker
 @Tag("it")
 class FlywayVendorSmokeTest {
     private val resourcesToClose = mutableListOf<AutoCloseable>()
+    private val baseTime = OffsetDateTime.parse("2024-01-01T12:00:00+00:00")
 
     companion object {
         @JvmStatic
@@ -53,6 +57,7 @@ class FlywayVendorSmokeTest {
             assertJsonColumnType(connection, expectedType = "json")
             assertGuestListLimitRemoved(connection)
             assertCheckinsSchema(connection)
+            assertGuestListStatuses(connection)
         }
     }
 
@@ -69,6 +74,7 @@ class FlywayVendorSmokeTest {
             assertGuestListLimitRemovedPostgres(connection)
             assertCheckinsSchemaPostgres(connection)
             assertCheckinsConstraintEnforcedPostgres(connection)
+            assertGuestListStatuses(connection)
         }
     }
 
@@ -233,6 +239,142 @@ class FlywayVendorSmokeTest {
             connection.createStatement().use { statement -> statement.executeUpdate(deniedWithoutReason) }
         }
     }
+
+    private fun assertGuestListStatuses(connection: Connection) {
+        val previousAutoCommit = connection.autoCommit
+        connection.autoCommit = true
+        try {
+            val fixture = insertBaseFixture(connection)
+
+            insertGuestList(connection, fixture, status = "CANCELLED")
+
+            val guestListForEntries = insertGuestList(connection, fixture, status = "ACTIVE")
+            insertGuestListEntry(connection, guestListForEntries, status = "ADDED")
+            insertGuestListEntry(connection, guestListForEntries, status = "CONFIRMED")
+
+            assertThrows<SQLException> {
+                insertGuestListEntry(connection, guestListForEntries, status = "BROKEN_STATUS")
+            }
+
+            assertThrows<SQLException> {
+                insertGuestList(connection, fixture, status = "BROKEN_STATUS")
+            }
+        } finally {
+            connection.autoCommit = previousAutoCommit
+        }
+    }
+
+    private fun insertBaseFixture(connection: Connection): GuestListFixture {
+        val userId = insertUser(connection)
+        val clubId = insertClub(connection)
+        val eventId = insertEvent(connection, clubId)
+        return GuestListFixture(userId = userId, clubId = clubId, eventId = eventId)
+    }
+
+    private fun insertUser(connection: Connection): Long =
+        connection.prepareStatement(
+            """
+            INSERT INTO users (username, display_name, telegram_user_id, phone_e164)
+            VALUES (?, ?, NULL, NULL)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setString(1, "smoke_user")
+            statement.setString(2, "Smoke User")
+            statement.executeUpdate()
+
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "User id not returned" }
+                keys.getLong(1)
+            }
+        }
+
+    private fun insertClub(connection: Connection): Long =
+        connection.prepareStatement(
+            """
+            INSERT INTO clubs (
+                name, description, timezone, admin_channel_id, bookings_topic_id, checkin_topic_id, qa_topic_id
+            ) VALUES (?, NULL, ?, NULL, NULL, NULL, NULL)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setString(1, "Smoke Club")
+            statement.setString(2, "Europe/Moscow")
+            statement.executeUpdate()
+
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "Club id not returned" }
+                keys.getLong(1)
+            }
+        }
+
+    private fun insertEvent(connection: Connection, clubId: Long): Long =
+        connection.prepareStatement(
+            """
+            INSERT INTO events (club_id, title, start_at, end_at, is_special, poster_url)
+            VALUES (?, ?, ?, ?, ?, NULL)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setLong(1, clubId)
+            statement.setString(2, "Smoke Event")
+            statement.setObject(3, baseTime)
+            statement.setObject(4, baseTime.plusHours(2))
+            statement.setBoolean(5, false)
+            statement.executeUpdate()
+
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "Event id not returned" }
+                keys.getLong(1)
+            }
+        }
+
+    private fun insertGuestList(connection: Connection, fixture: GuestListFixture, status: String): Long =
+        connection.prepareStatement(
+            """
+            INSERT INTO guest_lists (
+                club_id, event_id, owner_type, owner_user_id, title, capacity,
+                arrival_window_start, arrival_window_end, status
+            ) VALUES (?, ?, 'ADMIN', ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setLong(1, fixture.clubId)
+            statement.setLong(2, fixture.eventId)
+            statement.setLong(3, fixture.userId)
+            statement.setString(4, "Smoke list ${UUID.randomUUID()}")
+            statement.setInt(5, 10)
+            statement.setNull(6, Types.TIMESTAMP_WITH_TIMEZONE)
+            statement.setNull(7, Types.TIMESTAMP_WITH_TIMEZONE)
+            statement.setString(8, status)
+            statement.executeUpdate()
+
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "Guest list id not returned" }
+                keys.getLong(1)
+            }
+        }
+
+    private fun insertGuestListEntry(connection: Connection, guestListId: Long, status: String) {
+        connection.prepareStatement(
+            """
+            INSERT INTO guest_list_entries (guest_list_id, full_name, display_name, status)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setLong(1, guestListId)
+            statement.setString(2, "Smoke Guest")
+            statement.setString(3, "Smoke Guest")
+            statement.setString(4, status)
+            statement.executeUpdate()
+        }
+    }
+
+    private data class GuestListFixture(
+        val userId: Long,
+        val clubId: Long,
+        val eventId: Long,
+    )
 
     private fun assertGuestListLimitRemovedPostgres(connection: Connection) {
         connection.prepareStatement(
