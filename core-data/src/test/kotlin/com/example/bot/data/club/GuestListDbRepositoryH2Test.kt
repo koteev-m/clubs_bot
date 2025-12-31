@@ -20,9 +20,6 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 
 class GuestListDbRepositoryH2Test {
     private lateinit var dataSource: HikariDataSource
@@ -35,7 +32,7 @@ class GuestListDbRepositoryH2Test {
     fun setUp() {
         val jdbcUrl = "jdbc:h2:mem:guest-list-db;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
 
-        val migrationDataSource =
+        dataSource =
             HikariDataSource(
                 HikariConfig().apply {
                     this.jdbcUrl = jdbcUrl
@@ -46,115 +43,21 @@ class GuestListDbRepositoryH2Test {
                 },
             )
 
-        val flyway =
-            Flyway
-                .configure()
-                .dataSource(migrationDataSource)
-                .locations(
-                    "filesystem:${Paths.get("core-data/src/main/resources/db/migration/common").toAbsolutePath()}",
-                    "filesystem:${prepareH2Migrations()}",
-                )
-                .cleanDisabled(false)
-                .load()
-
-        flyway.clean()
-        flyway.migrate()
-        migrationDataSource.close()
-
-        dataSource =
-            HikariDataSource(
-                HikariConfig().apply {
-                    this.jdbcUrl = jdbcUrl
-                    driverClassName = "org.h2.Driver"
-                    username = "sa"
-                    password = ""
-                    maximumPoolSize = 2
-                },
-            )
+        Flyway
+            .configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/migration/common", "classpath:db/migration/h2")
+            .cleanDisabled(false)
+            .load()
+            .also { flyway ->
+                flyway.clean()
+                flyway.migrate()
+            }
 
         verifyGuestListMigrationsApplied()
 
         database = Database.connect(dataSource)
     }
-
-    private fun prepareH2Migrations(): String {
-        val sourceDir =
-            Paths.get(
-                checkNotNull(javaClass.classLoader.getResource("db/migration/h2")) {
-                    "H2 migration resources not found"
-                }.toURI(),
-            )
-        val targetDir = Files.createTempDirectory("flyway-h2-migrations")
-
-        Files.list(sourceDir).use { paths ->
-            paths.filter { Files.isRegularFile(it) }.forEach { path ->
-                val fileName = path.fileName.toString()
-                val content = Files.readString(path)
-                val patched =
-                    when (fileName) {
-                        "V017__guest_list_invites_checkins.sql" -> patchGuestListMigration(content)
-                        "V11__webhook_security.sql",
-                        "V12__promo_schema.sql",
-                        "V13__payments_actions.sql",
-                        "V016__admin_tables.sql",
-                        -> patchAutoIncrement(content)
-                        else -> content
-                    }
-
-                Files.writeString(targetDir.resolve(fileName), patched)
-            }
-        }
-
-        return targetDir.toAbsolutePath().toString()
-    }
-
-    private fun patchGuestListMigration(content: String): String =
-        content
-            .replace(
-                """
-                ALTER TABLE guest_lists
-                    ADD COLUMN IF NOT EXISTS promoter_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
-                    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-                    ADD COLUMN IF NOT EXISTS "limit" INT NULL;
-                """.trimIndent(),
-                """
-                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS promoter_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL;
-                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
-                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
-                ALTER TABLE guest_lists ADD COLUMN IF NOT EXISTS "limit" INT NULL;
-                """.trimIndent(),
-            )
-            .replace(
-                """
-                ALTER TABLE guest_list_entries
-                    ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
-                    ADD COLUMN IF NOT EXISTS telegram_user_id BIGINT NULL,
-                    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
-                """.trimIndent(),
-                """
-                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '';
-                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS telegram_user_id BIGINT NULL;
-                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
-                ALTER TABLE guest_list_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now();
-                """.trimIndent(),
-            )
-            .replace(
-                """
-                ALTER TABLE guest_list_entries
-                    DROP CONSTRAINT IF EXISTS guest_list_entries_status_check;
-                """.trimIndent(),
-                """
-                ALTER TABLE guest_list_entries
-                    DROP CONSTRAINT IF EXISTS guest_list_entries_status_check;
-                ALTER TABLE guest_list_entries
-                    DROP CONSTRAINT IF EXISTS chk_guest_list_entries_status;
-                """.trimIndent(),
-            )
-
-    private fun patchAutoIncrement(content: String): String =
-        content.replace("AUTO_INCREMENT", "GENERATED BY DEFAULT AS IDENTITY")
 
     private fun verifyGuestListMigrationsApplied() {
         dataSource.connection.use { connection ->
