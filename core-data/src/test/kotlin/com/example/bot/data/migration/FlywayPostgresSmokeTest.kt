@@ -50,6 +50,7 @@ class FlywayPostgresSmokeTest {
             assertGuestListLimitRemovedPostgres(connection)
             assertCheckinsSchemaPostgres(connection)
             assertCheckinsConstraintEnforcedPostgres(connection)
+            assertGuestListStatusConstraintPostgres(connection)
             assertGuestListStatuses(connection, baseTime)
         }
     }
