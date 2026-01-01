@@ -26,6 +26,7 @@ class FlywayH2SmokeTest {
             assertGuestListLimitRemoved(connection)
             assertCheckinsSchema(connection)
             assertCheckinsConstraintEnforced(connection)
+            assertGuestListStatusConstraintH2(connection)
             assertGuestListStatuses(connection, baseTime)
         }
     }

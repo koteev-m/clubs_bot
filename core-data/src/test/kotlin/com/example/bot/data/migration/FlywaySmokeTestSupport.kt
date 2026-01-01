@@ -154,6 +154,20 @@ internal fun assertCheckinsSchema(connection: Connection) {
     }
 }
 
+internal fun assertGuestListStatusConstraintH2(connection: Connection) {
+    connection.prepareStatement(
+        """
+        SELECT 1
+        FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
+        WHERE lower(CONSTRAINT_NAME) = 'guest_lists_status_check'
+        """,
+    ).use { statement ->
+        statement.executeQuery().use { rs ->
+            check(rs.next()) { "guest_lists_status_check constraint missing" }
+        }
+    }
+}
+
 internal fun assertCheckinsConstraintEnforced(connection: Connection) {
     val nonDeniedWithReason =
         """
@@ -371,6 +385,21 @@ internal fun assertCheckinsSchemaPostgres(connection: Connection) {
     ).use { statement ->
         statement.executeQuery().use { rs ->
             check(rs.next()) { "checkins_deny_reason_consistency constraint missing" }
+        }
+    }
+}
+
+internal fun assertGuestListStatusConstraintPostgres(connection: Connection) {
+    connection.prepareStatement(
+        """
+        SELECT 1
+        FROM information_schema.check_constraints
+        WHERE constraint_schema = current_schema()
+          AND constraint_name = 'guest_lists_status_check'
+        """,
+    ).use { statement ->
+        statement.executeQuery().use { rs ->
+            check(rs.next()) { "guest_lists_status_check constraint missing" }
         }
     }
 }
