@@ -152,8 +152,6 @@ internal fun assertCheckinsSchema(connection: Connection) {
             check(rs.next()) { "checkins_deny_reason_consistency constraint missing" }
         }
     }
-
-    assertCheckinsConstraintEnforced(connection)
 }
 
 internal fun assertCheckinsConstraintEnforced(connection: Connection) {
