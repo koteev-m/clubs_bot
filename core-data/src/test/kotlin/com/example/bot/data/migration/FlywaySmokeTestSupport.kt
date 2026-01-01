@@ -158,8 +158,10 @@ internal fun assertGuestListStatusConstraintH2(connection: Connection) {
     connection.prepareStatement(
         """
         SELECT 1
-        FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
+        FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
         WHERE lower(CONSTRAINT_NAME) = 'guest_lists_status_check'
+          AND lower(TABLE_NAME) = 'guest_lists'
+          AND upper(CONSTRAINT_TYPE) = 'CHECK'
         """,
     ).use { statement ->
         statement.executeQuery().use { rs ->
@@ -393,9 +395,11 @@ internal fun assertGuestListStatusConstraintPostgres(connection: Connection) {
     connection.prepareStatement(
         """
         SELECT 1
-        FROM information_schema.check_constraints
+        FROM information_schema.table_constraints
         WHERE constraint_schema = current_schema()
+          AND table_name = 'guest_lists'
           AND constraint_name = 'guest_lists_status_check'
+          AND constraint_type = 'CHECK'
         """,
     ).use { statement ->
         statement.executeQuery().use { rs ->
