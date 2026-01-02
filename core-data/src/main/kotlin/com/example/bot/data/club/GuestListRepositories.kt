@@ -16,6 +16,7 @@ import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -274,37 +275,25 @@ class GuestListEntryDbRepository(
         val now = now()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                entries.map { entry ->
-                    val id =
-                        GuestListEntriesTable.insert {
-                            it[guestListId] = listId
-                            it[GuestListEntriesTable.displayName] = entry.displayName
-                            it[GuestListEntriesTable.fullName] = entry.displayName
-                            it[GuestListEntriesTable.tgUsername] = null
-                            it[GuestListEntriesTable.phone] = null
-                            it[GuestListEntriesTable.telegramUserId] = entry.telegramUserId
-                            it[GuestListEntriesTable.plusOnesAllowed] = DEFAULT_PLUS_ONES_ALLOWED
-                            it[GuestListEntriesTable.plusOnesUsed] = DEFAULT_PLUS_ONES_USED
-                            it[GuestListEntriesTable.category] = DEFAULT_CATEGORY
-                            it[GuestListEntriesTable.comment] = null
-                            it[GuestListEntriesTable.status] = entry.status.name
-                            it[GuestListEntriesTable.checkedInAt] = null
-                            it[GuestListEntriesTable.checkedInBy] = null
-                            it[GuestListEntriesTable.createdAt] = now
-                            it[GuestListEntriesTable.updatedAt] = now
-                        } get GuestListEntriesTable.id
-
-                    GuestListEntryRecord(
-                        id = id,
-                        guestListId = listId,
-                        displayName = entry.displayName,
-                        fullName = entry.displayName,
-                        telegramUserId = entry.telegramUserId,
-                        status = entry.status,
-                        createdAt = now.toInstantUtc(),
-                        updatedAt = now.toInstantUtc(),
-                    )
-                }
+                GuestListEntriesTable
+                    .batchInsert(entries) { entry ->
+                        this[guestListId] = listId
+                        this[GuestListEntriesTable.displayName] = entry.displayName
+                        this[GuestListEntriesTable.fullName] = entry.displayName
+                        this[GuestListEntriesTable.tgUsername] = null
+                        this[GuestListEntriesTable.phone] = null
+                        this[GuestListEntriesTable.telegramUserId] = entry.telegramUserId
+                        this[GuestListEntriesTable.plusOnesAllowed] = DEFAULT_PLUS_ONES_ALLOWED
+                        this[GuestListEntriesTable.plusOnesUsed] = DEFAULT_PLUS_ONES_USED
+                        this[GuestListEntriesTable.category] = DEFAULT_CATEGORY
+                        this[GuestListEntriesTable.comment] = null
+                        this[GuestListEntriesTable.status] = entry.status.name
+                        this[GuestListEntriesTable.checkedInAt] = null
+                        this[GuestListEntriesTable.checkedInBy] = null
+                        this[GuestListEntriesTable.createdAt] = now
+                        this[GuestListEntriesTable.updatedAt] = now
+                    }
+                    .map { row -> row.toGuestListEntryRecord() }
             }
         }
     }
