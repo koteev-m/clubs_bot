@@ -297,15 +297,22 @@ class GuestListEntryDbRepository(
 
                 if (rows.size != entries.size) {
                     throw IllegalStateException(
-                        "batchInsert for guestListId=$listId returned ${rows.size} rows, expected ${entries.size} entries (shouldReturnGeneratedValues=true)"
+                        "guestListEntryInsertMany rowCountMismatch guestListId=$listId expectedRows=${entries.size} actualRows=${rows.size} shouldReturnGeneratedValues=true"
                     )
                 }
 
                 rows.zip(entries).mapIndexed { index, (row, entry) ->
                     val id = row[GuestListEntriesTable.id]
                     if (id <= 0) {
+                        val escapedDisplayName =
+                            entry.displayName
+                                .replace("\n", "\\n")
+                                .replace("\r", "\\r")
+                        val telegramUserId = entry.telegramUserId?.toString() ?: "null"
+                        val status = entry.status.name
                         throw IllegalStateException(
-                            "Generated id must be positive for guestListId=$listId: id=$id, entryIndex=$index, displayName=${entry.displayName}${entry.telegramUserId?.let { ", telegramUserId=$it" } ?: ""}"
+                            "guestListEntryInsertMany invalidGeneratedId " +
+                                "guestListId=$listId entryIndex=$index id=$id displayName=\"$escapedDisplayName\" telegramUserId=$telegramUserId status=$status"
                         )
                     }
                     GuestListEntryRecord(
