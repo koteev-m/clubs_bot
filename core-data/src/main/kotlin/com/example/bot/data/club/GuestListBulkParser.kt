@@ -24,7 +24,7 @@ class GuestListBulkParser {
         for (token in tokens) {
             val cleaned = collapseSpaces(token)
             if (cleaned.isEmpty()) continue
-            val normalizedKey = normalizeNameKey(cleaned)
+            val normalizedKey = cleaned.lowercase(Locale.ROOT)
             if (!seen.add(normalizedKey)) {
                 duplicates += 1
                 continue
@@ -41,13 +41,19 @@ class GuestListBulkParser {
             val char = input[index]
             if (char in SEPARATORS) {
                 if (start < index) {
-                    result += input.substring(start, index).trim()
+                    val token = input.substring(start, index).trim()
+                    if (token.isNotEmpty()) {
+                        result += token
+                    }
                 }
                 start = index + 1
             }
         }
         if (start < input.length) {
-            result += input.substring(start).trim()
+            val token = input.substring(start).trim()
+            if (token.isNotEmpty()) {
+                result += token
+            }
         }
         return result
     }
