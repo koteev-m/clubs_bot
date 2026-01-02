@@ -128,7 +128,9 @@ class GuestListServiceTest {
             is GuestListServiceResult.Success -> fail("expected failure on blank display name")
             is GuestListServiceResult.Failure -> assertEquals(GuestListServiceError.InvalidDisplayName, result.error)
         }
+        coVerify(exactly = 0) { entryRepo.listByGuestList(any()) }
         coVerify(exactly = 0) { entryRepo.insertOne(any(), any()) }
+        confirmVerified(entryRepo)
     }
 
     private fun listRecord(
