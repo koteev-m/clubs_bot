@@ -296,13 +296,17 @@ class GuestListEntryDbRepository(
                     }
 
                 if (rows.size != entries.size) {
-                    throw IllegalStateException("Expected ${entries.size} generated rows, but got ${rows.size}")
+                    throw IllegalStateException(
+                        "batchInsert for guestListId=$listId returned ${rows.size} rows, expected ${entries.size} entries (shouldReturnGeneratedValues=true)"
+                    )
                 }
 
-                rows.zip(entries).map { (row, entry) ->
+                rows.zip(entries).mapIndexed { index, (row, entry) ->
                     val id = row[GuestListEntriesTable.id]
                     if (id <= 0) {
-                        throw IllegalStateException("Generated id must be positive for guestListId=$listId")
+                        throw IllegalStateException(
+                            "Generated id must be positive for guestListId=$listId: id=$id, entryIndex=$index, displayName=${entry.displayName}${entry.telegramUserId?.let { ", telegramUserId=$it" } ?: ""}"
+                        )
                     }
                     GuestListEntryRecord(
                         id = id,
