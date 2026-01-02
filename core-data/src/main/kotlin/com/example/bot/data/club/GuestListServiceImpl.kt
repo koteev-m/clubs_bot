@@ -16,6 +16,12 @@ import java.time.Duration
 import java.time.Instant
 
 private const val DEFAULT_GUEST_LIST_TITLE: String = "Guest list"
+private val ARRIVED_STATUSES =
+    setOf(
+        GuestListEntryStatus.ARRIVED,
+        GuestListEntryStatus.LATE,
+        GuestListEntryStatus.CHECKED_IN,
+    )
 
 class GuestListServiceImpl(
     private val guestListRepo: GuestListDbRepository,
@@ -133,17 +139,11 @@ class GuestListServiceImpl(
         entries: List<GuestListEntryRecord>,
         now: Instant = Instant.now(clock),
     ): GuestListStats {
-        val added = entries.size
+        val totalCount = entries.size
         val invited = entries.count { it.status != GuestListEntryStatus.ADDED }
         val confirmed = entries.count { it.status == GuestListEntryStatus.CONFIRMED }
         val declined = entries.count { it.status == GuestListEntryStatus.DECLINED }
-        val arrivedStatuses =
-            setOf(
-                GuestListEntryStatus.ARRIVED,
-                GuestListEntryStatus.LATE,
-                GuestListEntryStatus.CHECKED_IN,
-            )
-        val arrived = entries.count { it.status in arrivedStatuses }
+        val arrived = entries.count { isArrivedStatus(it.status) }
         val explicitNoShow = entries.count { it.status == GuestListEntryStatus.NO_SHOW }
         val noShowDerived =
             if (arrivalWindowEnd == null) {
@@ -154,16 +154,14 @@ class GuestListServiceImpl(
                     0
                 } else {
                     entries.count {
-                        it.status !in arrivedStatuses &&
-                            it.status != GuestListEntryStatus.DECLINED &&
-                            it.status != GuestListEntryStatus.DENIED &&
-                            it.status != GuestListEntryStatus.NO_SHOW
+                        !isExcludedFromDerivedNoShow(it.status)
                     }
                 }
             }
         val noShow = explicitNoShow + noShowDerived
         return GuestListStats(
-            added = added,
+            // `added` stores the total number of entries in the guest list (not just status ADDED)
+            added = totalCount,
             invited = invited,
             confirmed = confirmed,
             declined = declined,
@@ -172,6 +170,14 @@ class GuestListServiceImpl(
         )
     }
 }
+
+private fun isArrivedStatus(status: GuestListEntryStatus): Boolean = status in ARRIVED_STATUSES
+
+private fun isExcludedFromDerivedNoShow(status: GuestListEntryStatus): Boolean =
+    isArrivedStatus(status) ||
+        status == GuestListEntryStatus.DECLINED ||
+        status == GuestListEntryStatus.DENIED ||
+        status == GuestListEntryStatus.NO_SHOW
 
 private fun GuestListRecord.toInfo(): GuestListInfo =
     GuestListInfo(
