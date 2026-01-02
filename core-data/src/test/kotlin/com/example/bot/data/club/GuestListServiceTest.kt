@@ -115,6 +115,33 @@ class GuestListServiceTest {
     }
 
     @Test
+    fun `derived no show uses strict cutoff`() = runBlocking {
+        val arrivalEnd = Instant.parse("2024-06-01T21:00:00Z")
+        val list = listRecord(capacity = 5, arrivalWindowEnd = arrivalEnd)
+        val entries =
+            listOf(
+                entryRecord(id = 1, listId = list.id, status = GuestListEntryStatus.ADDED, name = "Raw"),
+                entryRecord(id = 2, listId = list.id, status = GuestListEntryStatus.INVITED, name = "Invited"),
+                entryRecord(id = 3, listId = list.id, status = GuestListEntryStatus.CONFIRMED, name = "Confirmed"),
+                entryRecord(id = 4, listId = list.id, status = GuestListEntryStatus.DECLINED, name = "Declined"),
+                entryRecord(id = 5, listId = list.id, status = GuestListEntryStatus.ARRIVED, name = "Arrived"),
+            )
+        coEvery { guestListRepo.findById(list.id) } returns list
+        coEvery { entryRepo.listByGuestList(list.id) } returns entries
+
+        val service = GuestListServiceImpl(guestListRepo, entryRepo, config, fixedClock, GuestListBulkParser())
+
+        val cutoff = arrivalEnd.plusSeconds(config.noShowGraceMinutes.toLong() * 60)
+        val atCutoff = service.getStats(list.id, now = cutoff)
+        check(atCutoff is GuestListServiceResult.Success)
+        assertEquals(0, atCutoff.value.noShow)
+
+        val afterCutoff = service.getStats(list.id, now = cutoff.plusSeconds(1))
+        check(afterCutoff is GuestListServiceResult.Success)
+        assertEquals(3, afterCutoff.value.noShow)
+    }
+
+    @Test
     fun `single add returns domain error on blank display name`() = runBlocking {
         val list = listRecord(capacity = 5)
         coEvery { guestListRepo.findById(list.id) } returns list

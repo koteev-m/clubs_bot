@@ -139,11 +139,9 @@ class GuestListServiceImpl(
         entries: List<GuestListEntryRecord>,
         now: Instant = Instant.now(clock),
     ): GuestListStats {
-        val afterCutoff =
-            arrivalWindowEnd
-                ?.plus(Duration.ofMinutes(config.noShowGraceMinutes.toLong()))
-                ?.let { now > it }
-                ?: false
+        val grace = Duration.ofMinutes(config.noShowGraceMinutes.toLong())
+        val cutoff = arrivalWindowEnd?.plus(grace)
+        val afterCutoff = cutoff != null && now.isAfter(cutoff)
 
         var invited = 0
         var confirmed = 0
