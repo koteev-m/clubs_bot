@@ -26,6 +26,7 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
+private const val INSERT_MANY_LOG_PREFIX: String = "guestListEntryInsertMany"
 private const val DEFAULT_PLUS_ONES_ALLOWED: Int = 0
 
 data class GuestListRecord(
@@ -111,6 +112,13 @@ data class NewCheckin(
     val denyReason: String?,
     val occurredAt: Instant,
 )
+
+private fun escapeForLog(value: String): String =
+    value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
 
 class GuestListDbRepository(
     private val db: Database,
@@ -297,21 +305,18 @@ class GuestListEntryDbRepository(
 
                 if (rows.size != entries.size) {
                     throw IllegalStateException(
-                        "guestListEntryInsertMany rowCountMismatch guestListId=$listId expectedRows=${entries.size} actualRows=${rows.size} shouldReturnGeneratedValues=true"
+                        "$INSERT_MANY_LOG_PREFIX rowCountMismatch guestListId=$listId expectedRows=${entries.size} actualRows=${rows.size} shouldReturnGeneratedValues=true"
                     )
                 }
 
                 rows.zip(entries).mapIndexed { index, (row, entry) ->
                     val id = row[GuestListEntriesTable.id]
                     if (id <= 0) {
-                        val escapedDisplayName =
-                            entry.displayName
-                                .replace("\n", "\\n")
-                                .replace("\r", "\\r")
+                        val escapedDisplayName = escapeForLog(entry.displayName)
                         val telegramUserId = entry.telegramUserId?.toString() ?: "null"
                         val status = entry.status.name
                         throw IllegalStateException(
-                            "guestListEntryInsertMany invalidGeneratedId " +
+                            "$INSERT_MANY_LOG_PREFIX invalidGeneratedId " +
                                 "guestListId=$listId entryIndex=$index id=$id displayName=\"$escapedDisplayName\" telegramUserId=$telegramUserId status=$status"
                         )
                     }
