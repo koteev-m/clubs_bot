@@ -106,7 +106,9 @@ class GuestListServiceImpl(
             return GuestListServiceResult.Failure(GuestListServiceError.GuestListNotActive)
         }
         val normalizedName = collapseSpaces(displayName)
-        require(normalizedName.isNotEmpty()) { "Display name must not be blank" }
+        if (normalizedName.isEmpty()) {
+            return GuestListServiceResult.Failure(GuestListServiceError.InvalidDisplayName)
+        }
         val existingEntries = guestListEntryRepo.listByGuestList(listId)
         val normalizedKey = normalizeNameKey(normalizedName)
         val existing = existingEntries.firstOrNull { normalizeNameKey(it.displayName) == normalizedKey }
@@ -132,20 +134,18 @@ class GuestListServiceImpl(
         now: Instant = Instant.now(clock),
     ): GuestListStats {
         val added = entries.size
-        val invitedStatuses =
-            setOf(
-                GuestListEntryStatus.INVITED,
-                GuestListEntryStatus.CONFIRMED,
-                GuestListEntryStatus.DECLINED,
-                GuestListEntryStatus.ARRIVED,
-                GuestListEntryStatus.LATE,
-                GuestListEntryStatus.DENIED,
-            )
-        val invited = entries.count { it.status in invitedStatuses }
+        val invited = entries.count { it.status != GuestListEntryStatus.ADDED }
         val confirmed = entries.count { it.status == GuestListEntryStatus.CONFIRMED }
         val declined = entries.count { it.status == GuestListEntryStatus.DECLINED }
-        val arrived = entries.count { it.status == GuestListEntryStatus.ARRIVED || it.status == GuestListEntryStatus.LATE }
-        val noShow =
+        val arrivedStatuses =
+            setOf(
+                GuestListEntryStatus.ARRIVED,
+                GuestListEntryStatus.LATE,
+                GuestListEntryStatus.CHECKED_IN,
+            )
+        val arrived = entries.count { it.status in arrivedStatuses }
+        val explicitNoShow = entries.count { it.status == GuestListEntryStatus.NO_SHOW }
+        val noShowDerived =
             if (arrivalWindowEnd == null) {
                 0
             } else {
@@ -154,15 +154,14 @@ class GuestListServiceImpl(
                     0
                 } else {
                     entries.count {
-                        it.status !in setOf(
-                            GuestListEntryStatus.ARRIVED,
-                            GuestListEntryStatus.LATE,
-                            GuestListEntryStatus.DECLINED,
-                            GuestListEntryStatus.DENIED,
-                        )
+                        it.status !in arrivedStatuses &&
+                            it.status != GuestListEntryStatus.DECLINED &&
+                            it.status != GuestListEntryStatus.DENIED &&
+                            it.status != GuestListEntryStatus.NO_SHOW
                     }
                 }
             }
+        val noShow = explicitNoShow + noShowDerived
         return GuestListStats(
             added = added,
             invited = invited,
