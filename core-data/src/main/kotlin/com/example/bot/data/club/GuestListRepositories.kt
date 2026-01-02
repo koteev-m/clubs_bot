@@ -273,6 +273,7 @@ class GuestListEntryDbRepository(
     ): List<GuestListEntryRecord> {
         if (entries.isEmpty()) return emptyList()
         val now = now()
+        val createdAtInstant = now.toInstantUtc()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 val rows =
@@ -298,17 +299,20 @@ class GuestListEntryDbRepository(
                     throw IllegalStateException("Expected ${entries.size} generated rows, but got ${rows.size}")
                 }
 
-                entries.mapIndexed { index, entry ->
-                    val row = rows[index]
+                rows.zip(entries).map { (row, entry) ->
+                    val id = row[GuestListEntriesTable.id]
+                    if (id <= 0) {
+                        throw IllegalStateException("Generated id must be positive for guestListId=$listId")
+                    }
                     GuestListEntryRecord(
-                        id = row[GuestListEntriesTable.id],
+                        id = id,
                         guestListId = listId,
                         displayName = entry.displayName,
                         fullName = entry.displayName,
                         telegramUserId = entry.telegramUserId,
                         status = entry.status,
-                        createdAt = now.toInstantUtc(),
-                        updatedAt = now.toInstantUtc(),
+                        createdAt = createdAtInstant,
+                        updatedAt = createdAtInstant,
                     )
                 }
             }
