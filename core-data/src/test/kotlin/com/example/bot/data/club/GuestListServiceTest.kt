@@ -118,7 +118,6 @@ class GuestListServiceTest {
     fun `single add returns domain error on blank display name`() = runBlocking {
         val list = listRecord(capacity = 5)
         coEvery { guestListRepo.findById(list.id) } returns list
-        coEvery { entryRepo.listByGuestList(list.id) } returns emptyList()
 
         val service = GuestListServiceImpl(guestListRepo, entryRepo, config, fixedClock, GuestListBulkParser())
 
@@ -128,8 +127,10 @@ class GuestListServiceTest {
             is GuestListServiceResult.Success -> fail("expected failure on blank display name")
             is GuestListServiceResult.Failure -> assertEquals(GuestListServiceError.InvalidDisplayName, result.error)
         }
+        coVerify(exactly = 1) { guestListRepo.findById(list.id) }
         coVerify(exactly = 0) { entryRepo.listByGuestList(any()) }
         coVerify(exactly = 0) { entryRepo.insertOne(any(), any()) }
+        confirmVerified(guestListRepo)
         confirmVerified(entryRepo)
     }
 
