@@ -61,6 +61,9 @@ data class GuestListEntryInfo(
     val updatedAt: Instant,
 )
 
+/**
+ * @property added Общее количество записей в гостевом листе (а не число записей со статусом ADDED).
+ */
 data class GuestListStats(
     val added: Int,
     val invited: Int,

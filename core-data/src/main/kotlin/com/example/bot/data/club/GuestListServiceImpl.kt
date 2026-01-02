@@ -139,29 +139,43 @@ class GuestListServiceImpl(
         entries: List<GuestListEntryRecord>,
         now: Instant = Instant.now(clock),
     ): GuestListStats {
-        val totalCount = entries.size
-        val invited = entries.count { it.status != GuestListEntryStatus.ADDED }
-        val confirmed = entries.count { it.status == GuestListEntryStatus.CONFIRMED }
-        val declined = entries.count { it.status == GuestListEntryStatus.DECLINED }
-        val arrived = entries.count { isArrivedStatus(it.status) }
-        val explicitNoShow = entries.count { it.status == GuestListEntryStatus.NO_SHOW }
-        val noShowDerived =
-            if (arrivalWindowEnd == null) {
-                0
-            } else {
-                val cutoff = arrivalWindowEnd.plus(Duration.ofMinutes(config.noShowGraceMinutes.toLong()))
-                if (now <= cutoff) {
-                    0
-                } else {
-                    entries.count {
-                        !isExcludedFromDerivedNoShow(it.status)
-                    }
-                }
+        val afterCutoff =
+            arrivalWindowEnd
+                ?.plus(Duration.ofMinutes(config.noShowGraceMinutes.toLong()))
+                ?.let { now > it }
+                ?: false
+
+        var invited = 0
+        var confirmed = 0
+        var declined = 0
+        var arrived = 0
+        var explicitNoShow = 0
+        var noShowDerived = 0
+
+        for (entry in entries) {
+            val status = entry.status
+            if (status != GuestListEntryStatus.ADDED) {
+                invited += 1
             }
+            if (status == GuestListEntryStatus.CONFIRMED) {
+                confirmed += 1
+            }
+            if (status == GuestListEntryStatus.DECLINED) {
+                declined += 1
+            }
+            if (isArrivedStatus(status)) {
+                arrived += 1
+            }
+            if (status == GuestListEntryStatus.NO_SHOW) {
+                explicitNoShow += 1
+            }
+            if (afterCutoff && !isExcludedFromDerivedNoShow(status)) {
+                noShowDerived += 1
+            }
+        }
         val noShow = explicitNoShow + noShowDerived
         return GuestListStats(
-            // `added` stores the total number of entries in the guest list (not just status ADDED)
-            added = totalCount,
+            added = entries.size,
             invited = invited,
             confirmed = confirmed,
             declined = declined,
