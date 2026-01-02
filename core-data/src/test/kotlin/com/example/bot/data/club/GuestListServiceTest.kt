@@ -37,6 +37,33 @@ class GuestListServiceTest {
     }
 
     @Test
+    fun `bulk parser handles slashes and repeated delimiters`() {
+        val parser = GuestListBulkParser()
+
+        val slashWithoutSpaces = parser.parse("Alice/Bob")
+        assertEquals(listOf("Alice", "Bob"), slashWithoutSpaces.entries)
+        assertEquals(0, slashWithoutSpaces.skippedDuplicates)
+
+        val slashWithSpaces = parser.parse("Alice / Bob")
+        assertEquals(listOf("Alice", "Bob"), slashWithSpaces.entries)
+        assertEquals(0, slashWithSpaces.skippedDuplicates)
+
+        val consecutiveSeparators = parser.parse("Alice,,Bob;\n\nCarol")
+        assertEquals(listOf("Alice", "Bob", "Carol"), consecutiveSeparators.entries)
+        assertEquals(0, consecutiveSeparators.skippedDuplicates)
+    }
+
+    @Test
+    fun `bulk parser counts duplicates case-insensitively`() {
+        val parser = GuestListBulkParser()
+
+        val result = parser.parse("Alice, alice,ALICE")
+
+        assertEquals(listOf("Alice"), result.entries)
+        assertEquals(2, result.skippedDuplicates)
+    }
+
+    @Test
     fun `bulk add fails on limit after dedup`() = runBlocking {
         val list = listRecord(capacity = 3)
         coEvery { guestListRepo.findById(list.id) } returns list

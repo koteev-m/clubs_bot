@@ -3,6 +3,7 @@ package com.example.bot.data.club
 import java.util.Locale
 
 private val SEPARATORS: Set<Char> = setOf('\n', ',', ';', '/')
+private val WHITESPACE_RE = Regex("\\s+")
 
 data class BulkParseResult(
     val entries: List<String>,
@@ -40,23 +41,18 @@ class GuestListBulkParser {
             val char = input[index]
             if (char in SEPARATORS) {
                 if (start < index) {
-                    result += input.substring(start, index)
+                    result += input.substring(start, index).trim()
                 }
                 start = index + 1
             }
         }
         if (start < input.length) {
-            result += input.substring(start)
+            result += input.substring(start).trim()
         }
-        return result.flatMap { segment ->
-            segment
-                .split(" / ")
-                .flatMap { inner -> inner.split("/") }
-                .map { it.trim() }
-        }
+        return result
     }
 }
 
-internal fun collapseSpaces(value: String): String = value.trim().replace(Regex("\\s+"), " ")
+internal fun collapseSpaces(value: String): String = value.trim().replace(WHITESPACE_RE, " ")
 
 internal fun normalizeNameKey(value: String): String = collapseSpaces(value).lowercase(Locale.ROOT)
