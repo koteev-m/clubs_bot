@@ -26,6 +26,7 @@ sealed interface GuestListServiceError {
     data object BulkParseTooLarge : GuestListServiceError
     data object InvalidArrivalWindow : GuestListServiceError
     data object InvalidLimit : GuestListServiceError
+    data object InvalidDisplayName : GuestListServiceError
 }
 
 sealed interface GuestListServiceResult<out T> {

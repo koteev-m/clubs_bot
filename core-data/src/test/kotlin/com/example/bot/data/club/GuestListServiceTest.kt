@@ -72,6 +72,8 @@ class GuestListServiceTest {
                 entryRecord(id = 5, listId = list.id, status = GuestListEntryStatus.ARRIVED, name = "Arrived"),
                 entryRecord(id = 6, listId = list.id, status = GuestListEntryStatus.LATE, name = "Late"),
                 entryRecord(id = 7, listId = list.id, status = GuestListEntryStatus.DENIED, name = "Denied"),
+                entryRecord(id = 8, listId = list.id, status = GuestListEntryStatus.CHECKED_IN, name = "Checked in"),
+                entryRecord(id = 9, listId = list.id, status = GuestListEntryStatus.NO_SHOW, name = "No show"),
             )
 
         val service = GuestListServiceImpl(guestListRepo, entryRepo, config, fixedClock, GuestListBulkParser())
@@ -79,12 +81,54 @@ class GuestListServiceTest {
 
         check(result is GuestListServiceResult.Success)
         val stats = result.value
-        assertEquals(7, stats.added)
-        assertEquals(6, stats.invited)
+        assertEquals(9, stats.added)
+        assertEquals(8, stats.invited)
         assertEquals(1, stats.confirmed)
         assertEquals(1, stats.declined)
-        assertEquals(2, stats.arrived)
-        assertEquals(3, stats.noShow)
+        assertEquals(3, stats.arrived)
+        assertEquals(4, stats.noShow)
+    }
+
+    @Test
+    fun `explicit no show is counted before grace`() = runBlocking {
+        val arrivalEnd = Instant.parse("2024-06-01T21:00:00Z")
+        val list = listRecord(capacity = 3, arrivalWindowEnd = arrivalEnd)
+        coEvery { guestListRepo.findById(list.id) } returns list
+        coEvery { entryRepo.listByGuestList(list.id) } returns
+            listOf(
+                entryRecord(id = 1, listId = list.id, status = GuestListEntryStatus.NO_SHOW, name = "No show"),
+                entryRecord(id = 2, listId = list.id, status = GuestListEntryStatus.CONFIRMED, name = "Confirmed"),
+                entryRecord(id = 3, listId = list.id, status = GuestListEntryStatus.ADDED, name = "Added"),
+            )
+
+        val service = GuestListServiceImpl(guestListRepo, entryRepo, config, fixedClock, GuestListBulkParser())
+        val result = service.getStats(list.id, now = arrivalEnd.minusSeconds(600))
+
+        check(result is GuestListServiceResult.Success)
+        val stats = result.value
+        assertEquals(3, stats.added)
+        assertEquals(2, stats.invited)
+        assertEquals(1, stats.confirmed)
+        assertEquals(0, stats.declined)
+        assertEquals(0, stats.arrived)
+        assertEquals(1, stats.noShow)
+    }
+
+    @Test
+    fun `single add returns domain error on blank display name`() = runBlocking {
+        val list = listRecord(capacity = 5)
+        coEvery { guestListRepo.findById(list.id) } returns list
+        coEvery { entryRepo.listByGuestList(list.id) } returns emptyList()
+
+        val service = GuestListServiceImpl(guestListRepo, entryRepo, config, fixedClock, GuestListBulkParser())
+
+        val result = service.addEntrySingle(list.id, "   \t  ")
+
+        when (result) {
+            is GuestListServiceResult.Success -> fail("expected failure on blank display name")
+            is GuestListServiceResult.Failure -> assertEquals(GuestListServiceError.InvalidDisplayName, result.error)
+        }
+        coVerify(exactly = 0) { entryRepo.insertOne(any(), any()) }
     }
 
     private fun listRecord(
