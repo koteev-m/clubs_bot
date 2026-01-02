@@ -275,9 +275,9 @@ class GuestListEntryDbRepository(
         val now = now()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                GuestListEntriesTable
-                    .batchInsert(entries) { entry ->
-                        this[guestListId] = listId
+                val rows =
+                    GuestListEntriesTable.batchInsert(entries, shouldReturnGeneratedValues = true) { entry ->
+                        this[GuestListEntriesTable.guestListId] = listId
                         this[GuestListEntriesTable.displayName] = entry.displayName
                         this[GuestListEntriesTable.fullName] = entry.displayName
                         this[GuestListEntriesTable.tgUsername] = null
@@ -293,7 +293,24 @@ class GuestListEntryDbRepository(
                         this[GuestListEntriesTable.createdAt] = now
                         this[GuestListEntriesTable.updatedAt] = now
                     }
-                    .map { row -> row.toGuestListEntryRecord() }
+
+                if (rows.size != entries.size) {
+                    throw IllegalStateException("Expected ${entries.size} generated rows, but got ${rows.size}")
+                }
+
+                entries.mapIndexed { index, entry ->
+                    val row = rows[index]
+                    GuestListEntryRecord(
+                        id = row[GuestListEntriesTable.id],
+                        guestListId = listId,
+                        displayName = entry.displayName,
+                        fullName = entry.displayName,
+                        telegramUserId = entry.telegramUserId,
+                        status = entry.status,
+                        createdAt = now.toInstantUtc(),
+                        updatedAt = now.toInstantUtc(),
+                    )
+                }
             }
         }
     }
