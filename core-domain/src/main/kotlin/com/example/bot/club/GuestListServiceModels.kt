@@ -8,6 +8,15 @@ data class GuestListConfig(
     val bulkMaxChars: Int = envInt(ENV_GUEST_LIST_BULK_MAX_CHARS, DEFAULT_BULK_MAX_CHARS),
     val noShowGraceMinutes: Int = envInt(ENV_GUEST_LIST_NO_SHOW_GRACE_MINUTES, DEFAULT_NO_SHOW_GRACE_MINUTES),
 ) {
+    init {
+        require(bulkMaxChars > 0) {
+            "GUEST_LIST_BULK_MAX_CHARS must be positive (was $bulkMaxChars)"
+        }
+        require(noShowGraceMinutes >= 0) {
+            "GUEST_LIST_NO_SHOW_GRACE_MINUTES must be non-negative (was $noShowGraceMinutes)"
+        }
+    }
+
     companion object {
         const val ENV_GUEST_LIST_BULK_MAX_CHARS: String = "GUEST_LIST_BULK_MAX_CHARS"
         const val ENV_GUEST_LIST_NO_SHOW_GRACE_MINUTES: String = "GUEST_LIST_NO_SHOW_GRACE_MINUTES"
