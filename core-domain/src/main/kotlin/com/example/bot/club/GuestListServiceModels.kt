@@ -10,10 +10,10 @@ data class GuestListConfig(
 ) {
     init {
         require(bulkMaxChars > 0) {
-            "GUEST_LIST_BULK_MAX_CHARS must be positive (was $bulkMaxChars)"
+            "$ENV_GUEST_LIST_BULK_MAX_CHARS must be positive (was $bulkMaxChars)"
         }
         require(noShowGraceMinutes >= 0) {
-            "GUEST_LIST_NO_SHOW_GRACE_MINUTES must be non-negative (was $noShowGraceMinutes)"
+            "$ENV_GUEST_LIST_NO_SHOW_GRACE_MINUTES must be non-negative (was $noShowGraceMinutes)"
         }
     }
 

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.fail
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 
@@ -131,7 +132,8 @@ class GuestListServiceTest {
 
         val service = GuestListServiceImpl(guestListRepo, entryRepo, config, fixedClock, GuestListBulkParser())
 
-        val cutoff = arrivalEnd.plusSeconds(config.noShowGraceMinutes.toLong() * 60)
+        val grace = Duration.ofMinutes(config.noShowGraceMinutes.toLong())
+        val cutoff = arrivalEnd.plus(grace)
         val atCutoff = service.getStats(list.id, now = cutoff)
         check(atCutoff is GuestListServiceResult.Success)
         assertEquals(0, atCutoff.value.noShow)
