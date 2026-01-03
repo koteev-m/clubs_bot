@@ -393,6 +393,9 @@ class InvitationDbRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    val database: Database
+        get() = db
+
     suspend fun create(
         entryId: Long,
         tokenHash: String,
