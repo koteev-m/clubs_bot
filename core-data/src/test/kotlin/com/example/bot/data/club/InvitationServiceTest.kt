@@ -46,7 +46,6 @@ class InvitationServiceTest {
 
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
-        coEvery { invitationRepo.findLatestByEntryId(entry.id) } returns null
         coEvery { entryRepo.updateStatus(entry.id, GuestListEntryStatus.INVITED) } returns true
         coEvery {
             invitationRepo.create(entry.id, capture(tokenHashSlot), InvitationChannel.TELEGRAM, any(), createdBy = 42)
@@ -59,6 +58,7 @@ class InvitationServiceTest {
                 createdBy = 42,
             )
         }
+        coEvery { invitationRepo.revokeActiveByEntryIdExcept(entry.id, any(), any()) } returns 0
 
         val service =
             InvitationServiceImpl(
@@ -99,9 +99,9 @@ class InvitationServiceTest {
         val guestList = guestListRecord(arrivalWindowEnd = fixedClock.instant())
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
-        coEvery { invitationRepo.findLatestByEntryId(entry.id) } returns null
         coEvery { invitationRepo.create(any(), any(), any(), any(), any()) } returns
             invitationRecord(id = 11, entryId = entry.id, expiresAt = guestList.arrivalWindowEnd!!.plus(Duration.ofMinutes(30)))
+        coEvery { invitationRepo.revokeActiveByEntryIdExcept(entry.id, any(), any()) } returns 0
 
         val service = InvitationServiceImpl(
             invitationRepo,
@@ -126,13 +126,11 @@ class InvitationServiceTest {
     fun `reissue revokes active invitation`() = runBlocking {
         val entry = entryRecord(status = GuestListEntryStatus.ADDED)
         val guestList = guestListRecord()
-        val activeInvitation = invitationRecord(expiresAt = fixedClock.instant().plusSeconds(3600))
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
-        coEvery { invitationRepo.findLatestByEntryId(entry.id) } returns activeInvitation
-        coEvery { invitationRepo.revoke(activeInvitation.id, any()) } returns true
         coEvery { invitationRepo.create(any(), any(), any(), any(), any()) } returns
             invitationRecord(id = 12, entryId = entry.id, expiresAt = fixedClock.instant().plusSeconds(7200))
+        coEvery { invitationRepo.revokeActiveByEntryIdExcept(entry.id, 12, fixedClock.instant()) } returns 1
         coEvery { entryRepo.updateStatus(entry.id, GuestListEntryStatus.INVITED) } returns true
 
         val service = InvitationServiceImpl(
@@ -148,10 +146,12 @@ class InvitationServiceTest {
         service.createInvitation(entry.id, InvitationChannel.TELEGRAM, createdBy = 1)
 
         coVerify(exactly = 1) { invitationRepo.create(any(), any(), any(), any(), any()) }
-        coVerify(exactly = 1) { invitationRepo.revoke(activeInvitation.id, any()) }
+        coVerify(exactly = 1) {
+            invitationRepo.revokeActiveByEntryIdExcept(entry.id, 12, fixedClock.instant())
+        }
         coVerifyOrder {
             invitationRepo.create(any(), any(), any(), any(), any())
-            invitationRepo.revoke(activeInvitation.id, any())
+            invitationRepo.revokeActiveByEntryIdExcept(entry.id, 12, fixedClock.instant())
         }
     }
 
@@ -159,10 +159,8 @@ class InvitationServiceTest {
     fun `reissue does not revoke when creation fails`() = runBlocking {
         val entry = entryRecord(status = GuestListEntryStatus.ADDED)
         val guestList = guestListRecord()
-        val activeInvitation = invitationRecord(expiresAt = fixedClock.instant().plusSeconds(3600))
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
-        coEvery { invitationRepo.findLatestByEntryId(entry.id) } returns activeInvitation
         coEvery { invitationRepo.create(any(), any(), any(), any(), any()) } throws IllegalStateException("fail")
 
         val service = InvitationServiceImpl(
@@ -181,7 +179,7 @@ class InvitationServiceTest {
         } catch (_: IllegalStateException) {
         }
 
-        coVerify(exactly = 0) { invitationRepo.revoke(activeInvitation.id, any()) }
+        coVerify(exactly = 0) { invitationRepo.revokeActiveByEntryIdExcept(any(), any(), any()) }
     }
 
     @Test
@@ -194,7 +192,6 @@ class InvitationServiceTest {
 
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
-        coEvery { invitationRepo.findLatestByEntryId(entry.id) } returns null
         coEvery { entryRepo.updateStatus(entry.id, GuestListEntryStatus.INVITED) } returns true
         coEvery {
             invitationRepo.create(entry.id, capture(tokenHashSlot), InvitationChannel.TELEGRAM, any(), createdBy = 42)
@@ -207,6 +204,7 @@ class InvitationServiceTest {
                 createdBy = 42,
             )
         }
+        coEvery { invitationRepo.revokeActiveByEntryIdExcept(entry.id, any(), any()) } returns 0
 
         val normalizedConfig = InvitationConfig(ttlHours = 72, botUsername = "@clubbot ")
         val service =
@@ -263,7 +261,6 @@ class InvitationServiceTest {
 
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
-        coEvery { invitationRepo.findLatestByEntryId(entry.id) } returns null
 
         val service = InvitationServiceImpl(
             invitationRepo,
