@@ -13,11 +13,11 @@ data class BulkParseResult(
 /** Парсер для массового добавления гостей из произвольного текста. */
 class GuestListBulkParser {
     fun parse(rawText: String): BulkParseResult {
-        val normalized = rawText.trim()
-        if (normalized.isEmpty()) {
+        val trimmed = rawText.trim()
+        if (trimmed.isEmpty()) {
             return BulkParseResult(emptyList(), skippedDuplicates = 0)
         }
-        val tokens = tokenize(normalized)
+        val tokens = tokenize(trimmed)
         val deduped = mutableListOf<String>()
         val seen = LinkedHashSet<String>()
         var duplicates = 0
