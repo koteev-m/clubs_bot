@@ -61,15 +61,12 @@ class InvitationServiceImpl(
             if (!expiresAt.isAfter(now)) {
                 return@withRetriedTx InvitationServiceResult.Failure(InvitationServiceError.GUEST_LIST_NOT_ACTIVE)
             }
-            val latestInvitation = invitationRepo.findLatestByEntryId(entryId)
             val token = generateToken()
             val tokenHash = token.sha256Hex()
 
             val invitation = invitationRepo.create(entryId, tokenHash, channel, expiresAt, createdBy)
 
-            if (latestInvitation?.isActive(now) == true && latestInvitation.id != invitation.id) {
-                invitationRepo.revoke(latestInvitation.id, now)
-            }
+            invitationRepo.revokeActiveByEntryIdExcept(entryId, invitation.id, now)
             if (entry.status == GuestListEntryStatus.ADDED) {
                 guestListEntryRepo.updateStatus(entryId, GuestListEntryStatus.INVITED)
             }
@@ -201,9 +198,6 @@ class InvitationServiceImpl(
             .toHex()
 
     private fun ByteArray.toHex(): String = joinToString(separator = "") { eachByte -> "%02x".format(eachByte) }
-
-    private fun InvitationRecord.isActive(now: Instant): Boolean =
-        revokedAt == null && usedAt == null && expiresAt.isAfter(now)
 
     private data class ResolvedInvitation(
         val invitation: InvitationRecord,

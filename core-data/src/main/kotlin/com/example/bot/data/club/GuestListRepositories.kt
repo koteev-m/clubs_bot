@@ -14,7 +14,9 @@ import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
@@ -393,9 +395,6 @@ class InvitationDbRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    val database: Database
-        get() = db
-
     suspend fun create(
         entryId: Long,
         tokenHash: String,
@@ -432,6 +431,26 @@ class InvitationDbRepository(
             }
         }
     }
+
+    suspend fun revokeActiveByEntryIdExcept(
+        entryId: Long,
+        keepInvitationId: Long,
+        revokedAt: Instant,
+    ): Int =
+        withTxRetry {
+            val revokedAtOffset = revokedAt.toOffsetDateTime()
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                InvitationsTable.update({
+                    (InvitationsTable.guestListEntryId eq entryId) and
+                        InvitationsTable.revokedAt.isNull() and
+                        InvitationsTable.usedAt.isNull() and
+                        (InvitationsTable.expiresAt greater revokedAtOffset) and
+                        (InvitationsTable.id neq keepInvitationId)
+                }) {
+                    it[InvitationsTable.revokedAt] = revokedAtOffset
+                }
+            }
+        }
 
     suspend fun findByTokenHash(tokenHash: String): InvitationRecord? =
         withTxRetry {
