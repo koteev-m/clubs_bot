@@ -16,7 +16,7 @@ import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
@@ -432,7 +432,7 @@ class InvitationDbRepository(
         }
     }
 
-    suspend fun revokeActiveByEntryIdExcept(
+    suspend fun revokeOlderActiveByEntryId(
         entryId: Long,
         keepInvitationId: Long,
         revokedAt: Instant,
@@ -440,12 +440,13 @@ class InvitationDbRepository(
         withTxRetry {
             val revokedAtOffset = revokedAt.toOffsetDateTime()
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                // Ревокаем только более старые инвайты, чтобы параллельные create/reissue не отозвали свежий инвайт.
                 InvitationsTable.update({
                     (InvitationsTable.guestListEntryId eq entryId) and
                         InvitationsTable.revokedAt.isNull() and
                         InvitationsTable.usedAt.isNull() and
                         (InvitationsTable.expiresAt greater revokedAtOffset) and
-                        (InvitationsTable.id neq keepInvitationId)
+                        (InvitationsTable.id less keepInvitationId)
                 }) {
                     it[InvitationsTable.revokedAt] = revokedAtOffset
                 }
