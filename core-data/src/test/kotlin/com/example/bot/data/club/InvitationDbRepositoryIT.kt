@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.postgresql.util.PSQLException
@@ -160,7 +161,9 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             assertNull(invitations.getValue(created.id).usedAt)
             assertEquals(futureExpiry, invitations.getValue(created.id).expiresAt)
             assertNull(invitations.getValue(expiredInvite.id).revokedAt)
+            assertNull(invitations.getValue(expiredInvite.id).usedAt)
             assertEquals(alreadyRevokedAt, invitations.getValue(revokedInvite.id).revokedAt)
+            assertNull(invitations.getValue(revokedInvite.id).usedAt)
             assertEquals(fixedInstant.minusSeconds(30), invitations.getValue(usedInvite.id).usedAt)
             assertNull(invitations.getValue(usedInvite.id).revokedAt)
 
@@ -308,18 +311,16 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             )
 
         val exception =
-            kotlin.runCatching {
+            assertThrows<ExposedSQLException> {
                 transaction(database) {
                     InvitationsTable.update({ InvitationsTable.id eq invite.id }) {
                         it[revokedAt] = fixedInstant.atOffset(ZoneOffset.UTC)
                         it[usedAt] = fixedInstant.plusSeconds(60).atOffset(ZoneOffset.UTC)
                     }
                 }
-            }.exceptionOrNull()
+            }
 
-        assertNotNull(exception)
-        assertTrue(exception is ExposedSQLException)
-        val psqlException = generateSequence(exception) { it.cause }.filterIsInstance<PSQLException>().firstOrNull()
+        val psqlException = generateSequence(exception.cause) { it?.cause }.filterIsInstance<PSQLException>().firstOrNull()
         assertNotNull(psqlException)
         assertEquals("invitations_revoked_and_used_mutual_exclusion", psqlException?.serverErrorMessage?.constraint)
         assertEquals("23514", psqlException?.sqlState)

@@ -396,6 +396,11 @@ class InvitationDbRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    /**
+     * Блокируем запись списка гостей, переключаем статус ADDED → INVITED, создаем приглашение
+     * и отзываем прочие активные приглашения этой записи.
+     * Активное приглашение: revoked_at IS NULL, used_at IS NULL и expires_at > now().
+     */
     suspend fun createAndRevokeOtherActiveByEntryId(
         entryId: Long,
         tokenHash: String,
@@ -415,7 +420,8 @@ class InvitationDbRepository(
                     .slice(GuestListEntriesTable.id)
                     .select { GuestListEntriesTable.id eq entryId }
                     .forUpdate()
-                    .first()
+                    .firstOrNull() // лочим только для сериализации параллельных create/reissue для записи
+                    ?: error("Guest list entry not found: $entryId")
 
                 GuestListEntriesTable.update({
                     (GuestListEntriesTable.id eq entryId) and
