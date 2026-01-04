@@ -12,6 +12,7 @@ import com.example.bot.club.InvitationServiceResult
 import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.confirmVerified
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
@@ -177,6 +178,7 @@ class InvitationServiceTest {
                 now = fixedClock.instant(),
             )
         }
+        coVerify(exactly = 0) { entryRepo.updateStatus(any(), any()) }
     }
 
     @Test
@@ -212,6 +214,8 @@ class InvitationServiceTest {
         } catch (_: IllegalStateException) {
         }
 
+        coVerify(exactly = 1) { entryRepo.findById(entry.id) }
+        coVerify(exactly = 1) { guestListRepo.findById(entry.guestListId) }
         coVerify(exactly = 1) {
             invitationRepo.createAndRevokeOtherActiveByEntryId(
                 entry.id,
@@ -222,8 +226,8 @@ class InvitationServiceTest {
                 now = fixedClock.instant(),
             )
         }
-        coVerify(exactly = 0) { invitationRepo.revoke(any(), any()) }
         coVerify(exactly = 0) { entryRepo.updateStatus(any(), any()) }
+        confirmVerified(invitationRepo, entryRepo, guestListRepo)
     }
 
     @Test
