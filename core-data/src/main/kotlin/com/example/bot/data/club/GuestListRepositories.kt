@@ -20,6 +20,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -447,6 +448,43 @@ class InvitationDbRepository(
                         InvitationsTable.usedAt.isNull() and
                         (InvitationsTable.expiresAt greater revokedAtOffset) and
                         (InvitationsTable.id less keepInvitationId)
+                }) {
+                    it[InvitationsTable.revokedAt] = revokedAtOffset
+                }
+            }
+        }
+
+    suspend fun revokeOlderActiveByEntryIdKeepingLatest(
+        entryId: Long,
+        revokedAt: Instant,
+    ): Int =
+        withTxRetry {
+            val revokedAtOffset = revokedAt.toOffsetDateTime()
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val maxActiveId =
+                    InvitationsTable
+                        .slice(InvitationsTable.id)
+                        .select {
+                            (InvitationsTable.guestListEntryId eq entryId) and
+                                InvitationsTable.revokedAt.isNull() and
+                                InvitationsTable.usedAt.isNull() and
+                                (InvitationsTable.expiresAt greater revokedAtOffset)
+                        }
+                        .orderBy(InvitationsTable.id to SortOrder.DESC)
+                        .limit(1)
+                        .firstOrNull()
+                        ?.get(InvitationsTable.id)
+
+                if (maxActiveId == null) {
+                    return@newSuspendedTransaction 0
+                }
+
+                InvitationsTable.update({
+                    (InvitationsTable.guestListEntryId eq entryId) and
+                        InvitationsTable.revokedAt.isNull() and
+                        InvitationsTable.usedAt.isNull() and
+                        (InvitationsTable.expiresAt greater revokedAtOffset) and
+                        (InvitationsTable.id less maxActiveId)
                 }) {
                     it[InvitationsTable.revokedAt] = revokedAtOffset
                 }
