@@ -55,6 +55,7 @@ abstract class PostgresClubIntegrationTest {
                 """
                 TRUNCATE TABLE
                     guest_list_entries,
+                    invitations,
                     guest_lists,
                     bookings,
                     booking_holds,
