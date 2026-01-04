@@ -132,6 +132,7 @@ class GuestListRepositoryImpl(
                     GuestListEntriesTable
                         .insert {
                             it[GuestListEntriesTable.guestListId] = listId
+                            it[GuestListEntriesTable.displayName] = valid.name
                             it[GuestListEntriesTable.fullName] = valid.name
                             it[GuestListEntriesTable.phone] = valid.phone
                             it[GuestListEntriesTable.plusOnesAllowed] = valid.guestsCount - MIN_GUESTS_PER_ENTRY
@@ -279,8 +280,10 @@ class GuestListRepositoryImpl(
                 }
 
                 if (!dryRun && validRows.isNotEmpty()) {
+                    val now = clock.instant().atOffset(ZoneOffset.UTC)
                     GuestListEntriesTable.batchInsert(validRows) { valid ->
                         this[GuestListEntriesTable.guestListId] = listId
+                        this[GuestListEntriesTable.displayName] = valid.name
                         this[GuestListEntriesTable.fullName] = valid.name
                         this[GuestListEntriesTable.phone] = valid.phone
                         this[GuestListEntriesTable.plusOnesAllowed] = valid.guestsCount - MIN_GUESTS_PER_ENTRY
@@ -288,6 +291,8 @@ class GuestListRepositoryImpl(
                         this[GuestListEntriesTable.category] = DEFAULT_CATEGORY
                         this[GuestListEntriesTable.comment] = valid.notes
                         this[GuestListEntriesTable.status] = GuestListEntryStatus.PLANNED.name
+                        this[GuestListEntriesTable.createdAt] = now
+                        this[GuestListEntriesTable.updatedAt] = now
                         this[GuestListEntriesTable.checkedInAt] = null
                         this[GuestListEntriesTable.checkedInBy] = null
                     }

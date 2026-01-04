@@ -476,7 +476,6 @@ private fun prepareDatabase(): GLDbSetup {
         .configure()
         .dataSource(dataSource)
         .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-        .target("9")
         .load()
         .migrate()
     val database = Database.connect(dataSource)
