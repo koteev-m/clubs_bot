@@ -424,7 +424,10 @@ private fun RbacContext.canAccess(list: GuestList): Boolean {
 
 private fun ApplicationCall.wantsCsv(): Boolean {
     if (request.queryParameters["format"]?.equals("csv", ignoreCase = true) == true) return true
-    return request.acceptItems().any { it.value.equals(ContentType.Text.CSV.toString(), ignoreCase = true) }
+    return request
+        .acceptItems()
+        .mapNotNull { runCatching { ContentType.parse(it.value) }.getOrNull() }
+        .any { it.withoutParameters() == ContentType.Text.CSV }
 }
 
 private fun String?.toBooleanStrictOrNull(): Boolean? =
