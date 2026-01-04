@@ -136,13 +136,13 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
                     createdBy = ownerId,
                 )
 
-            val revokeCount = invitationRepo.revokeOlderActiveByEntryId(entry.id, inv2.id, revokedAt = fixedInstant)
+            val revokeCount = invitationRepo.revokeOlderActiveByEntryIdKeepingLatest(entry.id, revokedAt = fixedInstant)
 
-            assertEquals(1, revokeCount)
+            assertEquals(2, revokeCount)
 
             val invitations = loadInvitations(entry.id)
             assertEquals(fixedInstant, invitations.getValue(inv1.id).revokedAt)
-            assertNull(invitations.getValue(inv2.id).revokedAt)
+            assertEquals(fixedInstant, invitations.getValue(inv2.id).revokedAt)
             assertNull(invitations.getValue(inv3.id).revokedAt)
             assertNull(invitations.getValue(expiredInvite.id).revokedAt)
             assertEquals(alreadyRevokedAt, invitations.getValue(revokedInvite.id).revokedAt)

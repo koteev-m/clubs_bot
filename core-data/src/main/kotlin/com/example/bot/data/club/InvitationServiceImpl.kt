@@ -66,7 +66,7 @@ class InvitationServiceImpl(
 
             val invitation = invitationRepo.create(entryId, tokenHash, channel, expiresAt, createdBy)
 
-            invitationRepo.revokeOlderActiveByEntryId(entryId, invitation.id, now)
+            invitationRepo.revokeOlderActiveByEntryIdKeepingLatest(entryId, now)
             if (entry.status == GuestListEntryStatus.ADDED) {
                 guestListEntryRepo.updateStatus(entryId, GuestListEntryStatus.INVITED)
             }
