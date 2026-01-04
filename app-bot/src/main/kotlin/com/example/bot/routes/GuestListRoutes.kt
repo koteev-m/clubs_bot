@@ -426,6 +426,7 @@ private fun ApplicationCall.wantsCsv(): Boolean {
     if (request.queryParameters["format"]?.equals("csv", ignoreCase = true) == true) return true
     return request
         .acceptItems()
+        .filter { it.quality > 0.0 }
         .mapNotNull { runCatching { ContentType.parse(it.value) }.getOrNull() }
         .any { it.withoutParameters() == ContentType.Text.CSV }
 }

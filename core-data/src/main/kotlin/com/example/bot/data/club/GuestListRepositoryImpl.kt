@@ -128,6 +128,7 @@ class GuestListRepositoryImpl(
             }
         return withTxRetry {
             transaction(database) {
+                val now = clock.instant().atOffset(ZoneOffset.UTC)
                 val inserted =
                     GuestListEntriesTable
                         .insert {
@@ -140,8 +141,10 @@ class GuestListRepositoryImpl(
                             it[GuestListEntriesTable.category] = DEFAULT_CATEGORY
                             it[GuestListEntriesTable.comment] = valid.notes
                             it[GuestListEntriesTable.status] = valid.status.name
+                            it[GuestListEntriesTable.createdAt] = now
+                            it[GuestListEntriesTable.updatedAt] = now
                             if (valid.status == GuestListEntryStatus.CHECKED_IN) {
-                                it[GuestListEntriesTable.checkedInAt] = clock.instant().atOffset(ZoneOffset.UTC)
+                                it[GuestListEntriesTable.checkedInAt] = now
                                 it[GuestListEntriesTable.checkedInBy] = null
                             } else {
                                 it[GuestListEntriesTable.checkedInAt] = null
