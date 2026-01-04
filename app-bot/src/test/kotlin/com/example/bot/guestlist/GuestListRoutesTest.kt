@@ -263,11 +263,6 @@ class GuestListRoutesTest :
                             contentType(ContentType.Text.CSV)
                             setBody("name,phone,guests_count,notes\nAlice,+123456789,2,VIP\n")
                         }
-                    // Диагностика
-                    println(
-                        "DBG guestlists dry-run: status=${response.status} " +
-                            "body=${response.bodyAsText()}",
-                    )
                     response.status shouldBe HttpStatusCode.OK
                     val jsonBody = Json.parseToJsonElement(response.bodyAsText()).jsonObject
                     jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
@@ -303,13 +298,133 @@ class GuestListRoutesTest :
                             contentType(ContentType.Text.CSV)
                             setBody("name,phone,guests_count,notes\nBob,+123456700,3,\n")
                         }
-                    // Диагностика
-                    println(
-                        "DBG guestlists: status=${response.status} " +
-                            "body=${response.bodyAsText()}",
-                    )
                     response.status shouldBe HttpStatusCode.OK
-                    response.headers[HttpHeaders.ContentType]!!.startsWith("text/csv") shouldBe true
+                    val contentType =
+                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
+                    contentType shouldBe ContentType.Text.CSV
+                    val lines = response.bodyAsText().trimEnd().lines()
+                    lines shouldHaveSize 2
+                    lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
+                    lines[1] shouldBe "1,0"
+                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Accept text/csv;q=0 НЕ включает CSV" {
+                val clubId = createClub("Andromeda")
+                val eventId = createEvent(clubId, "Preview")
+                val ownerId = createDomainUser("owner3")
+                val list =
+                    repository.createList(
+                        clubId = clubId,
+                        eventId = eventId,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = ownerId,
+                        title = "Preview",
+                        capacity = 15,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                registerRbacUser(telegramId = 210L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = 210L)
+                    val response =
+                        authedClient.post("/api/guest-lists/${list.id}/import") {
+                            header(HttpHeaders.Accept, "text/csv;q=0, application/json;q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nCharlie,+123450000,1,\n")
+                        }
+
+                    response.status shouldBe HttpStatusCode.OK
+                    val contentType =
+                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
+                    contentType shouldBe ContentType.Application.Json
+                    val jsonBody = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Accept text/csv с параметрами включает CSV" {
+                val clubId = createClub("Lyra")
+                val eventId = createEvent(clubId, "Evening")
+                val ownerId = createDomainUser("owner4")
+                val list =
+                    repository.createList(
+                        clubId = clubId,
+                        eventId = eventId,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = ownerId,
+                        title = "Evening",
+                        capacity = 25,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                registerRbacUser(telegramId = 220L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = 220L)
+                    val response =
+                        authedClient.post("/api/guest-lists/${list.id}/import") {
+                            header(HttpHeaders.Accept, "text/csv; charset=utf-8; q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nDiana,+123450001,2,VIP\n")
+                        }
+
+                    response.status shouldBe HttpStatusCode.OK
+                    val contentType =
+                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
+                    contentType shouldBe ContentType.Text.CSV
+                    val body = response.bodyAsText()
+                    val lines = body.trimEnd().lines()
+                    lines shouldHaveSize 2
+                    lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
+                    lines[1] shouldBe "1,0"
+                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "format=csv overrides q=0 Accept" {
+                val clubId = createClub("Cassiopeia")
+                val eventId = createEvent(clubId, "Priority")
+                val ownerId = createDomainUser("owner5")
+                val list =
+                    repository.createList(
+                        clubId = clubId,
+                        eventId = eventId,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = ownerId,
+                        title = "Priority",
+                        capacity = 25,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                registerRbacUser(telegramId = 230L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = 230L)
+                    val response =
+                        authedClient.post("/api/guest-lists/${list.id}/import?format=csv") {
+                            header(HttpHeaders.Accept, "text/csv;q=0, application/json;q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nEli,+123450002,1,\n")
+                        }
+
+                    response.status shouldBe HttpStatusCode.OK
+                    val contentType =
+                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
+                    contentType shouldBe ContentType.Text.CSV
+                    val lines = response.bodyAsText().trimEnd().lines()
+                    lines shouldHaveSize 2
+                    lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
+                    lines[1] shouldBe "1,0"
                     repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
                 }
             }
