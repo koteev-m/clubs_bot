@@ -64,12 +64,15 @@ class InvitationServiceImpl(
             val token = generateToken()
             val tokenHash = token.sha256Hex()
 
-            val invitation = invitationRepo.create(entryId, tokenHash, channel, expiresAt, createdBy)
-
-            invitationRepo.revokeOlderActiveByEntryId(entryId, invitation.id, now)
-            if (entry.status == GuestListEntryStatus.ADDED) {
-                guestListEntryRepo.updateStatus(entryId, GuestListEntryStatus.INVITED)
-            }
+            val invitation =
+                invitationRepo.createAndRevokeOtherActiveByEntryId(
+                    entryId,
+                    tokenHash,
+                    channel,
+                    expiresAt,
+                    createdBy,
+                    now,
+                )
             val deepLink = buildDeepLink(token)
             InvitationServiceResult.Success(
                 InvitationCreateResult(

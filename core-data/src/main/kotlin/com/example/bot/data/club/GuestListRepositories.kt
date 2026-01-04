@@ -12,14 +12,14 @@ import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
-import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -395,7 +395,10 @@ class InvitationDbRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    suspend fun create(
+    /**
+     * Использовать только в тестах/утилитах. Боевой код должен идти через [createAndRevokeOtherActiveByEntryId].
+     */
+    internal suspend fun create(
         entryId: Long,
         tokenHash: String,
         channel: InvitationChannel,
@@ -432,24 +435,70 @@ class InvitationDbRepository(
         }
     }
 
-    suspend fun revokeOlderActiveByEntryId(
+    /**
+     * Берёт row-lock на guest_list_entries, при необходимости обновляет статус ADDED → INVITED,
+     * создаёт новый инвайт и отзывает остальные активные в одной транзакции.
+     */
+    suspend fun createAndRevokeOtherActiveByEntryId(
         entryId: Long,
-        keepInvitationId: Long,
-        revokedAt: Instant,
-    ): Int =
+        tokenHash: String,
+        channel: InvitationChannel,
+        expiresAt: Instant,
+        createdBy: Long?,
+        now: Instant,
+    ): InvitationRecord =
         withTxRetry {
-            val revokedAtOffset = revokedAt.toOffsetDateTime()
+            require(expiresAt.isAfter(now)) { "expiresAt must be after now" }
+                val nowOffset = now.toOffsetDateTime()
+            val expiresAtOffset = expiresAt.toOffsetDateTime()
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                // Ревокаем только более старые инвайты, чтобы параллельные create/reissue не отозвали свежий инвайт.
+                GuestListEntriesTable
+                    .slice(GuestListEntriesTable.id)
+                    .select { GuestListEntriesTable.id eq entryId }
+                    .forUpdate()
+                    .first() // lock only to serialize concurrent create/reissue for the entry
+
+                GuestListEntriesTable.update({
+                    (GuestListEntriesTable.id eq entryId) and
+                        (GuestListEntriesTable.status eq GuestListEntryStatus.ADDED.name)
+                }) {
+                    it[status] = GuestListEntryStatus.INVITED.name
+                    it[updatedAt] = nowOffset
+                }
+
+                val newInvitationId =
+                    InvitationsTable.insert {
+                        it[guestListEntryId] = entryId
+                        it[InvitationsTable.tokenHash] = tokenHash
+                        it[InvitationsTable.channel] = channel.name
+                        it[InvitationsTable.expiresAt] = expiresAtOffset
+                        it[InvitationsTable.revokedAt] = null
+                        it[InvitationsTable.usedAt] = null
+                        it[InvitationsTable.createdBy] = createdBy
+                        it[InvitationsTable.createdAt] = nowOffset
+                    } get InvitationsTable.id
+
                 InvitationsTable.update({
                     (InvitationsTable.guestListEntryId eq entryId) and
                         InvitationsTable.revokedAt.isNull() and
                         InvitationsTable.usedAt.isNull() and
-                        (InvitationsTable.expiresAt greater revokedAtOffset) and
-                        (InvitationsTable.id less keepInvitationId)
+                        (InvitationsTable.expiresAt greater nowOffset) and
+                        (InvitationsTable.id neq newInvitationId)
                 }) {
-                    it[InvitationsTable.revokedAt] = revokedAtOffset
+                    it[InvitationsTable.revokedAt] = nowOffset
                 }
+
+                InvitationRecord(
+                    id = newInvitationId,
+                    guestListEntryId = entryId,
+                    tokenHash = tokenHash,
+                    channel = channel,
+                    expiresAt = expiresAt,
+                    revokedAt = null,
+                    usedAt = null,
+                    createdBy = createdBy,
+                    createdAt = nowOffset.toInstantUtc(),
+                )
             }
         }
 
@@ -472,7 +521,9 @@ class InvitationDbRepository(
         withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 InvitationsTable.update({
-                    (InvitationsTable.id eq invitationId) and InvitationsTable.usedAt.isNull()
+                    (InvitationsTable.id eq invitationId) and
+                        InvitationsTable.usedAt.isNull() and
+                        InvitationsTable.revokedAt.isNull()
                 }) {
                     it[InvitationsTable.usedAt] = usedAt.toOffsetDateTime()
                 } > 0
@@ -486,7 +537,9 @@ class InvitationDbRepository(
         withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 InvitationsTable.update({
-                    (InvitationsTable.id eq invitationId) and InvitationsTable.revokedAt.isNull()
+                    (InvitationsTable.id eq invitationId) and
+                        InvitationsTable.revokedAt.isNull() and
+                        InvitationsTable.usedAt.isNull()
                 }) {
                     it[InvitationsTable.revokedAt] = revokedAt.toOffsetDateTime()
                 } > 0
