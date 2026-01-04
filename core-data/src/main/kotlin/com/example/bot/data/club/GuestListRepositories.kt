@@ -399,7 +399,7 @@ class InvitationDbRepository(
     /**
      * Блокируем запись списка гостей, переключаем статус ADDED → INVITED, создаем приглашение
      * и отзываем прочие активные приглашения этой записи.
-     * Активное приглашение: revoked_at IS NULL, used_at IS NULL и expires_at > now().
+     * Активное приглашение: revoked_at IS NULL, used_at IS NULL и expires_at > now (аргумент метода).
      */
     suspend fun createAndRevokeOtherActiveByEntryId(
         entryId: Long,
