@@ -153,13 +153,13 @@ fun Application.guestListRoutes(
                         }
 
                     val wantsCsv = call.wantsCsv()
-                    val acceptInvalid = call.attributes.getOrNull(AcceptInvalidAttribute) ?: false
+                    val acceptInvalid = call.attributes.getOrNull(AcceptInvalidImportAttribute) ?: false
 
                     if (wantsCsv) {
                         call.respondText(report.toCsv(), ContentType.Text.CSV)
                     } else {
                         if (acceptInvalid) {
-                            val jsonString = Json.encodeToString(report.toResponse())
+                            val jsonString = fallbackJson.encodeToString(report.toResponse())
                             call.respondText(jsonString, ContentType.Application.Json)
                         } else {
                             call.respond(report.toResponse())
@@ -434,7 +434,8 @@ private fun RbacContext.canAccess(list: GuestList): Boolean {
     }
 }
 
-private val AcceptInvalidAttribute = AttributeKey<Boolean>("AcceptInvalid")
+private val AcceptInvalidImportAttribute = AttributeKey<Boolean>("guestListImport.acceptInvalid")
+private val fallbackJson = Json { encodeDefaults = true }
 
 private const val PRECEDENCE_NONE = 0
 private const val PRECEDENCE_ANY = 1
@@ -451,7 +452,10 @@ private data class Best(var precedence: Int, var quality: Double) {
 }
 
 private fun ApplicationCall.wantsCsv(): Boolean {
-    if (request.queryParameters["format"]?.equals("csv", ignoreCase = true) == true) return true
+    if (request.queryParameters["format"]?.equals("csv", ignoreCase = true) == true) {
+        attributes.put(AcceptInvalidImportAttribute, false)
+        return true
+    }
 
     val acceptHeaderPresent = request.headers[HttpHeaders.Accept] != null
     val acceptItems = runCatching { request.acceptItems() }.getOrElse { emptyList() }
@@ -467,7 +471,7 @@ private fun ApplicationCall.wantsCsv(): Boolean {
     val invalidAccept = acceptHeaderPresent && parsedItems.isEmpty()
     val candidates = parsedItems.ifEmpty { listOf(ContentType.Any to 1.0) }
 
-    attributes.put(AcceptInvalidAttribute, invalidAccept)
+    attributes.put(AcceptInvalidImportAttribute, invalidAccept)
 
     val csv = bestMatch(candidates, ContentType.Text.CSV)
     val json = bestMatch(candidates, ContentType.Application.Json)
