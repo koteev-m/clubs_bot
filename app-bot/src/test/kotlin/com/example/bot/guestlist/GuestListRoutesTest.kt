@@ -535,6 +535,25 @@ class GuestListRoutesTest :
                 }
             }
 
+            "format=csv overrides invalid Accept" {
+                val context = prepareActiveListWithManager("Lycaon", "InvalidHeader", "InvalidHeader", telegramId = 231L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val lines =
+                        assertCsvImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nFern,+123450003,1,\n",
+                            accept = "not-a-media-type",
+                            query = "?format=csv",
+                        )
+                    lines shouldHaveSize 2
+                    lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
+                    lines[1] shouldBe "1,0"
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
             "manager sees only own club" {
                 val clubA = createClub("Nova")
                 val clubB = createClub("Pulse")
