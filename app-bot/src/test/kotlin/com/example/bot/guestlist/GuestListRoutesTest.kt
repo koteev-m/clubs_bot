@@ -26,10 +26,10 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.ktor.client.HttpClient
+import io.ktor.client.statement.bodyAsText
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -43,6 +43,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.mockk.mockk
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -152,6 +153,58 @@ class GuestListRoutesTest :
                     }
                 }
 
+            data class ActiveListContext(
+                val listId: Long,
+                val clubId: Long,
+                val telegramId: Long,
+            )
+
+            suspend fun ApplicationTestBuilder.assertJsonImport(
+                context: ActiveListContext,
+                body: String,
+                accept: String? = null,
+                query: String = "",
+            ): JsonObject {
+                val authedClient = authenticatedClient(telegramId = context.telegramId)
+                val response =
+                    authedClient.post("/api/guest-lists/${context.listId}/import$query") {
+                        if (accept != null) header(HttpHeaders.Accept, accept)
+                        contentType(ContentType.Text.CSV)
+                        setBody(body)
+                    }
+
+                response.status shouldBe HttpStatusCode.OK
+                val contentType =
+                    response.headers[HttpHeaders.ContentType]?.let { header ->
+                        ContentType.parse(header).withoutParameters()
+                    }
+                contentType shouldBe ContentType.Application.Json
+                return Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            }
+
+            suspend fun ApplicationTestBuilder.assertCsvImport(
+                context: ActiveListContext,
+                body: String,
+                accept: String? = null,
+                query: String = "",
+            ): List<String> {
+                val authedClient = authenticatedClient(telegramId = context.telegramId)
+                val response =
+                    authedClient.post("/api/guest-lists/${context.listId}/import$query") {
+                        if (accept != null) header(HttpHeaders.Accept, accept)
+                        contentType(ContentType.Text.CSV)
+                        setBody(body)
+                    }
+
+                response.status shouldBe HttpStatusCode.OK
+                val contentType =
+                    response.headers[HttpHeaders.ContentType]?.let { header ->
+                        ContentType.parse(header).withoutParameters()
+                    }
+                contentType shouldBe ContentType.Text.CSV
+                return response.bodyAsText().trimEnd().lines()
+            }
+
             fun createClub(name: String): Long =
                 transaction(database) {
                     GLClubsTable.insert {
@@ -237,195 +290,233 @@ class GuestListRoutesTest :
                     userId
                 }
 
-            "import dry run returns json report" {
-                val clubId = createClub("Nebula")
-                val eventId = createEvent(clubId, "Launch")
-                val ownerId = createDomainUser("owner1")
+            suspend fun prepareActiveListWithManager(
+                clubName: String,
+                eventTitle: String,
+                listTitle: String,
+                telegramId: Long,
+            ): ActiveListContext {
+                val clubId = createClub(clubName)
+                val eventId = createEvent(clubId, eventTitle)
+                val ownerId = createDomainUser("owner$telegramId")
                 val list =
                     repository.createList(
                         clubId = clubId,
                         eventId = eventId,
                         ownerType = GuestListOwnerType.MANAGER,
                         ownerUserId = ownerId,
-                        title = "VIP",
+                        title = listTitle,
                         capacity = 50,
                         arrivalWindowStart = null,
                         arrivalWindowEnd = null,
                         status = GuestListStatus.ACTIVE,
                     )
-                registerRbacUser(telegramId = 100L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                registerRbacUser(telegramId = telegramId, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                return ActiveListContext(list.id, clubId, telegramId)
+            }
+
+            "import dry run returns json report" {
+                val context = prepareActiveListWithManager("Nebula", "Launch", "VIP", telegramId = 100L)
 
                 testApplication {
                     applicationDev { testModule() }
-                    val authedClient = authenticatedClient(telegramId = 100L)
-                    val response =
-                        authedClient.post("/api/guest-lists/${list.id}/import?dry_run=true") {
-                            contentType(ContentType.Text.CSV)
-                            setBody("name,phone,guests_count,notes\nAlice,+123456789,2,VIP\n")
-                        }
-                    response.status shouldBe HttpStatusCode.OK
-                    val jsonBody = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nAlice,+123456789,2,VIP\n",
+                            query = "?dry_run=true",
+                        )
                     jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
                     jsonBody["rejected"]!!.jsonArray.size shouldBe 0
-                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 0
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 0
                 }
             }
 
             "commit import persists and returns csv" {
-                val clubId = createClub("Orion")
-                val eventId = createEvent(clubId, "Opening")
-                val ownerId = createDomainUser("owner2")
-                val list =
-                    repository.createList(
-                        clubId = clubId,
-                        eventId = eventId,
-                        ownerType = GuestListOwnerType.MANAGER,
-                        ownerUserId = ownerId,
-                        title = "Friends",
-                        capacity = 30,
-                        arrivalWindowStart = null,
-                        arrivalWindowEnd = null,
-                        status = GuestListStatus.ACTIVE,
-                    )
-                registerRbacUser(telegramId = 200L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                val context = prepareActiveListWithManager("Orion", "Opening", "Friends", telegramId = 200L)
 
                 testApplication {
                     applicationDev { testModule() }
-                    val authedClient = authenticatedClient(telegramId = 200L)
-                    val response =
-                        authedClient.post("/api/guest-lists/${list.id}/import") {
-                            header(HttpHeaders.Accept, ContentType.Text.CSV.toString())
-                            contentType(ContentType.Text.CSV)
-                            setBody("name,phone,guests_count,notes\nBob,+123456700,3,\n")
-                        }
-                    response.status shouldBe HttpStatusCode.OK
-                    val contentType =
-                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
-                    contentType shouldBe ContentType.Text.CSV
-                    val lines = response.bodyAsText().trimEnd().lines()
+                    val lines =
+                        assertCsvImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nBob,+123456700,3,\n",
+                            accept = ContentType.Text.CSV.toString(),
+                        )
                     lines shouldHaveSize 2
                     lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
                     lines[1] shouldBe "1,0"
-                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
                 }
             }
 
             "Accept text/csv;q=0 НЕ включает CSV" {
-                val clubId = createClub("Andromeda")
-                val eventId = createEvent(clubId, "Preview")
-                val ownerId = createDomainUser("owner3")
-                val list =
-                    repository.createList(
-                        clubId = clubId,
-                        eventId = eventId,
-                        ownerType = GuestListOwnerType.MANAGER,
-                        ownerUserId = ownerId,
-                        title = "Preview",
-                        capacity = 15,
-                        arrivalWindowStart = null,
-                        arrivalWindowEnd = null,
-                        status = GuestListStatus.ACTIVE,
-                    )
-                registerRbacUser(telegramId = 210L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                val context = prepareActiveListWithManager("Andromeda", "Preview", "Preview", telegramId = 210L)
 
                 testApplication {
                     applicationDev { testModule() }
-                    val authedClient = authenticatedClient(telegramId = 210L)
-                    val response =
-                        authedClient.post("/api/guest-lists/${list.id}/import") {
-                            header(HttpHeaders.Accept, "text/csv;q=0, application/json;q=1")
-                            contentType(ContentType.Text.CSV)
-                            setBody("name,phone,guests_count,notes\nCharlie,+123450000,1,\n")
-                        }
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nCharlie,+123450000,1,\n",
+                            accept = "text/csv;q=0, application/json;q=1",
+                        )
 
-                    response.status shouldBe HttpStatusCode.OK
-                    val contentType =
-                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
-                    contentType shouldBe ContentType.Application.Json
-                    val jsonBody = Json.parseToJsonElement(response.bodyAsText()).jsonObject
                     jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
-                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "JSON preferred when csv has lower q" {
+                val context = prepareActiveListWithManager("Eridanus", "ChooseJson", "ChooseJson", telegramId = 215L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nErin,+100000001,1,\n",
+                            accept = "text/csv;q=0.1, application/json;q=1",
+                        )
+                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "CSV preferred when quality above json" {
+                val context = prepareActiveListWithManager("Fornax", "ChooseCsv", "ChooseCsv", telegramId = 216L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val lines =
+                        assertCsvImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nChris,+100000002,1,\n",
+                            accept = "application/json;q=0.1, text/csv;q=1",
+                        )
+                    lines shouldHaveSize 2
+                    lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
+                    lines[1] shouldBe "1,0"
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Tie CSV and JSON defaults to JSON" {
+                val context = prepareActiveListWithManager("Gemini", "Tie", "Tie", telegramId = 217L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nGail,+100000003,1,\n",
+                            accept = "text/csv, application/json",
+                        )
+                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Invalid Accept header falls back to default (JSON)" {
+                val context = prepareActiveListWithManager("Hydra", "Invalid", "Invalid", telegramId = 218L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nHank,+100000004,1,\n",
+                            accept = "not-a-media-type",
+                        )
+                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "application/json;q=0, */*;q=1 yields CSV" {
+                val context = prepareActiveListWithManager("Indus", "WildcardCsv", "WildcardCsv", telegramId = 219L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val lines =
+                        assertCsvImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nIvy,+100000005,1,\n",
+                            accept = "application/json;q=0, */*;q=1",
+                        )
+                    lines shouldHaveSize 2
+                    lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
+                    lines[1] shouldBe "1,0"
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "*/*;q=1, text/csv;q=0.1 prefers JSON" {
+                val context = prepareActiveListWithManager("Janus", "WildcardJson", "WildcardJson", telegramId = 220L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nJay,+100000006,1,\n",
+                            accept = "*/*;q=1, text/csv;q=0.1",
+                        )
+                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "application/*;q=1, text/csv;q=0.5 prefers JSON" {
+                val context = prepareActiveListWithManager("Kite", "TypeWildcard", "TypeWildcard", telegramId = 221L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nKen,+100000007,1,\n",
+                            accept = "application/*;q=1, text/csv;q=0.5",
+                        )
+                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
                 }
             }
 
             "Accept text/csv с параметрами включает CSV" {
-                val clubId = createClub("Lyra")
-                val eventId = createEvent(clubId, "Evening")
-                val ownerId = createDomainUser("owner4")
-                val list =
-                    repository.createList(
-                        clubId = clubId,
-                        eventId = eventId,
-                        ownerType = GuestListOwnerType.MANAGER,
-                        ownerUserId = ownerId,
-                        title = "Evening",
-                        capacity = 25,
-                        arrivalWindowStart = null,
-                        arrivalWindowEnd = null,
-                        status = GuestListStatus.ACTIVE,
-                    )
-                registerRbacUser(telegramId = 220L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                val context = prepareActiveListWithManager("Lyra", "Evening", "Evening", telegramId = 220L)
 
                 testApplication {
                     applicationDev { testModule() }
-                    val authedClient = authenticatedClient(telegramId = 220L)
-                    val response =
-                        authedClient.post("/api/guest-lists/${list.id}/import") {
-                            header(HttpHeaders.Accept, "text/csv; charset=utf-8; q=1")
-                            contentType(ContentType.Text.CSV)
-                            setBody("name,phone,guests_count,notes\nDiana,+123450001,2,VIP\n")
-                        }
-
-                    response.status shouldBe HttpStatusCode.OK
-                    val contentType =
-                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
-                    contentType shouldBe ContentType.Text.CSV
-                    val body = response.bodyAsText()
-                    val lines = body.trimEnd().lines()
+                    val lines =
+                        assertCsvImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nDiana,+123450001,2,VIP\n",
+                            accept = "text/csv; charset=utf-8; q=1",
+                        )
                     lines shouldHaveSize 2
                     lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
                     lines[1] shouldBe "1,0"
-                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
                 }
             }
 
             "format=csv overrides q=0 Accept" {
-                val clubId = createClub("Cassiopeia")
-                val eventId = createEvent(clubId, "Priority")
-                val ownerId = createDomainUser("owner5")
-                val list =
-                    repository.createList(
-                        clubId = clubId,
-                        eventId = eventId,
-                        ownerType = GuestListOwnerType.MANAGER,
-                        ownerUserId = ownerId,
-                        title = "Priority",
-                        capacity = 25,
-                        arrivalWindowStart = null,
-                        arrivalWindowEnd = null,
-                        status = GuestListStatus.ACTIVE,
-                    )
-                registerRbacUser(telegramId = 230L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                val context = prepareActiveListWithManager("Cassiopeia", "Priority", "Priority", telegramId = 230L)
 
                 testApplication {
                     applicationDev { testModule() }
-                    val authedClient = authenticatedClient(telegramId = 230L)
-                    val response =
-                        authedClient.post("/api/guest-lists/${list.id}/import?format=csv") {
-                            header(HttpHeaders.Accept, "text/csv;q=0, application/json;q=1")
-                            contentType(ContentType.Text.CSV)
-                            setBody("name,phone,guests_count,notes\nEli,+123450002,1,\n")
-                        }
-
-                    response.status shouldBe HttpStatusCode.OK
-                    val contentType =
-                        response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
-                    contentType shouldBe ContentType.Text.CSV
-                    val lines = response.bodyAsText().trimEnd().lines()
+                    val lines =
+                        assertCsvImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nEli,+123450002,1,\n",
+                            accept = "text/csv;q=0, application/json;q=1",
+                            query = "?format=csv",
+                        )
                     lines shouldHaveSize 2
                     lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
                     lines[1] shouldBe "1,0"
-                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
                 }
             }
 

@@ -15,6 +15,7 @@ import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -29,7 +30,10 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.util.getOrFail
+import io.ktor.util.AttributeKey
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -148,10 +152,23 @@ fun Application.guestListRoutes(
                             return@post
                         }
 
-                    if (call.wantsCsv()) {
+                    val wantsCsv = call.wantsCsv()
+                    val acceptInvalid =
+                        if (call.attributes.contains(AcceptInvalidAttribute)) {
+                            call.attributes[AcceptInvalidAttribute]
+                        } else {
+                            false
+                        }
+
+                    if (wantsCsv) {
                         call.respondText(report.toCsv(), ContentType.Text.CSV)
                     } else {
-                        call.respond(report.toResponse())
+                        if (acceptInvalid) {
+                            val jsonString = Json.encodeToString(report.toResponse())
+                            call.respondText(jsonString, ContentType.Application.Json)
+                        } else {
+                            call.respond(report.toResponse())
+                        }
                     }
                 }
 
@@ -422,13 +439,69 @@ private fun RbacContext.canAccess(list: GuestList): Boolean {
     }
 }
 
+private val AcceptInvalidAttribute = AttributeKey<Boolean>("AcceptInvalid")
+
+private const val PRECEDENCE_NONE = 0
+private const val PRECEDENCE_ANY = 1
+private const val PRECEDENCE_TYPE = 2
+private const val PRECEDENCE_EXACT = 3
+
+private data class Best(var precedence: Int, var quality: Double) {
+    fun update(precedence: Int, quality: Double) {
+        if (precedence > this.precedence || (precedence == this.precedence && quality > this.quality)) {
+            this.precedence = precedence
+            this.quality = quality
+        }
+    }
+}
+
 private fun ApplicationCall.wantsCsv(): Boolean {
     if (request.queryParameters["format"]?.equals("csv", ignoreCase = true) == true) return true
-    return request
-        .acceptItems()
-        .filter { it.quality > 0.0 }
-        .mapNotNull { runCatching { ContentType.parse(it.value) }.getOrNull() }
-        .any { it.withoutParameters() == ContentType.Text.CSV }
+
+    val acceptHeaderPresent = request.headers[HttpHeaders.Accept] != null
+    val acceptItems = runCatching { request.acceptItems() }.getOrElse { emptyList() }
+    val parsedItems = mutableListOf<Pair<ContentType, Double>>()
+
+    for (item in acceptItems) {
+        val parsed = runCatching { ContentType.parse(item.value).withoutParameters() }.getOrNull()
+        if (parsed != null) {
+            parsedItems += parsed to item.quality
+        }
+    }
+
+    val invalidAccept = parsedItems.isEmpty() && acceptHeaderPresent
+    val candidates = parsedItems.ifEmpty { listOf(ContentType.Any to 1.0) }
+
+    if (invalidAccept) {
+        attributes.put(AcceptInvalidAttribute, true)
+    }
+
+    val csv = bestMatch(candidates, ContentType.Text.CSV)
+    val json = bestMatch(candidates, ContentType.Application.Json)
+
+    return csv.quality > 0.0 && csv.quality > json.quality
+}
+
+private fun bestMatch(candidates: List<Pair<ContentType, Double>>, target: ContentType): Best {
+    val best = Best(PRECEDENCE_NONE, 0.0)
+    for ((type, quality) in candidates) {
+        when (precedence(type, target)) {
+            PRECEDENCE_EXACT -> best.update(PRECEDENCE_EXACT, quality)
+            PRECEDENCE_TYPE -> best.update(PRECEDENCE_TYPE, quality)
+            PRECEDENCE_ANY -> best.update(PRECEDENCE_ANY, quality)
+            else -> {}
+        }
+    }
+    return best
+}
+
+private fun precedence(accept: ContentType, target: ContentType): Int {
+    return when {
+        accept.contentType == target.contentType && accept.contentSubtype == target.contentSubtype -> PRECEDENCE_EXACT
+        accept.contentType == target.contentType && accept.contentSubtype == "*" -> PRECEDENCE_TYPE
+        accept.contentType == "*" && accept.contentSubtype == "*" -> PRECEDENCE_ANY
+        else -> PRECEDENCE_NONE
+    }
 }
 
 private fun String?.toBooleanStrictOrNull(): Boolean? =
