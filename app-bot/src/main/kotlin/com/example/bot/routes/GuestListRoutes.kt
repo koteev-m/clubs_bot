@@ -153,12 +153,7 @@ fun Application.guestListRoutes(
                         }
 
                     val wantsCsv = call.wantsCsv()
-                    val acceptInvalid =
-                        if (call.attributes.contains(AcceptInvalidAttribute)) {
-                            call.attributes[AcceptInvalidAttribute]
-                        } else {
-                            false
-                        }
+                    val acceptInvalid = call.attributes.getOrNull(AcceptInvalidAttribute) ?: false
 
                     if (wantsCsv) {
                         call.respondText(report.toCsv(), ContentType.Text.CSV)
@@ -469,12 +464,10 @@ private fun ApplicationCall.wantsCsv(): Boolean {
         }
     }
 
-    val invalidAccept = parsedItems.isEmpty() && acceptHeaderPresent
+    val invalidAccept = acceptHeaderPresent && parsedItems.isEmpty()
     val candidates = parsedItems.ifEmpty { listOf(ContentType.Any to 1.0) }
 
-    if (invalidAccept) {
-        attributes.put(AcceptInvalidAttribute, true)
-    }
+    attributes.put(AcceptInvalidAttribute, invalidAccept)
 
     val csv = bestMatch(candidates, ContentType.Text.CSV)
     val json = bestMatch(candidates, ContentType.Application.Json)
