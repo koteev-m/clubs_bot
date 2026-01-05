@@ -433,6 +433,21 @@ class GuestListRoutesTest :
                 }
             }
 
+            "No Accept header defaults to JSON" {
+                val context = prepareActiveListWithManager("Ida", "Default", "Default", telegramId = 218L)
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val jsonBody =
+                        assertJsonImport(
+                            context = context,
+                            body = "name,phone,guests_count,notes\nHilda,+1000000041,1,\n",
+                        )
+                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    repository.listEntries(context.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
             "application/json;q=0, */*;q=1 yields CSV" {
                 val context = prepareActiveListWithManager("Indus", "WildcardCsv", "WildcardCsv", telegramId = 219L)
 
