@@ -15,6 +15,7 @@ import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -29,13 +30,17 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.util.getOrFail
+import io.ktor.util.AttributeKey
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlin.io.use
+import kotlin.math.max
 
 /** Registers guest list management routes. */
 fun Application.guestListRoutes(
@@ -148,10 +153,23 @@ fun Application.guestListRoutes(
                             return@post
                         }
 
-                    if (call.wantsCsv()) {
+                    val wantsCsv = call.wantsCsv()
+                    val acceptInvalid =
+                        if (call.attributes.contains(AcceptInvalidAttribute)) {
+                            call.attributes[AcceptInvalidAttribute]
+                        } else {
+                            false
+                        }
+
+                    if (wantsCsv) {
                         call.respondText(report.toCsv(), ContentType.Text.CSV)
                     } else {
-                        call.respond(report.toResponse())
+                        if (acceptInvalid) {
+                            val json = Json.encodeToString(report.toResponse())
+                            call.respondText(json, ContentType.Application.Json)
+                        } else {
+                            call.respond(report.toResponse())
+                        }
                     }
                 }
 
@@ -422,13 +440,66 @@ private fun RbacContext.canAccess(list: GuestList): Boolean {
     }
 }
 
+private const val PRECEDENCE_NONE = 0
+private const val PRECEDENCE_ANY = 1
+private const val PRECEDENCE_TYPE = 2
+private const val PRECEDENCE_EXACT = 3
+private val AcceptInvalidAttribute = AttributeKey<Boolean>("guestListAcceptInvalid")
+
+private data class Best(
+    var precedence: Int = PRECEDENCE_NONE,
+    var quality: Double = 0.0,
+) {
+    fun update(candidatePrecedence: Int, candidateQuality: Double) {
+        if (candidatePrecedence == PRECEDENCE_NONE) return
+        when {
+            candidatePrecedence > precedence -> {
+                precedence = candidatePrecedence
+                quality = candidateQuality
+            }
+            candidatePrecedence == precedence -> quality = max(quality, candidateQuality)
+        }
+    }
+}
+
 private fun ApplicationCall.wantsCsv(): Boolean {
     if (request.queryParameters["format"]?.equals("csv", ignoreCase = true) == true) return true
-    return request
-        .acceptItems()
-        .filter { it.quality > 0.0 }
-        .mapNotNull { runCatching { ContentType.parse(it.value) }.getOrNull() }
-        .any { it.withoutParameters() == ContentType.Text.CSV }
+
+    val items = runCatching { request.acceptItems() }.getOrElse { emptyList() }
+    val hasAcceptHeader = request.headers[HttpHeaders.Accept] != null
+
+    val csvBest = Best()
+    val jsonBest = Best()
+    var parsedAny = false
+
+    fun precedenceFor(baseType: ContentType, target: ContentType): Int =
+        when {
+            baseType == target -> PRECEDENCE_EXACT
+            baseType.contentType == target.contentType && baseType.contentSubtype == "*" -> PRECEDENCE_TYPE
+            baseType.contentType == "*" && baseType.contentSubtype == "*" -> PRECEDENCE_ANY
+            else -> PRECEDENCE_NONE
+        }
+
+    for (item in items) {
+        val type = runCatching { ContentType.parse(item.value) }.getOrNull() ?: continue
+        parsedAny = true
+        val baseType = type.withoutParameters()
+
+        csvBest.update(precedenceFor(baseType, ContentType.Text.CSV), item.quality)
+        jsonBest.update(precedenceFor(baseType, ContentType.Application.Json), item.quality)
+    }
+
+    if (!parsedAny) {
+        csvBest.quality = 1.0
+        jsonBest.quality = 1.0
+        if (hasAcceptHeader) {
+            attributes.put(AcceptInvalidAttribute, true)
+        }
+    } else {
+        attributes.put(AcceptInvalidAttribute, false)
+    }
+
+    return csvBest.quality > 0.0 && csvBest.quality > jsonBest.quality
 }
 
 private fun String?.toBooleanStrictOrNull(): Boolean? =

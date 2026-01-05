@@ -26,6 +26,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.ktor.client.HttpClient
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -43,6 +44,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.mockk.mockk
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -237,80 +239,360 @@ class GuestListRoutesTest :
                     userId
                 }
 
-            "import dry run returns json report" {
-                val clubId = createClub("Nebula")
-                val eventId = createEvent(clubId, "Launch")
-                val ownerId = createDomainUser("owner1")
+            data class ImportSetup(
+                val listId: Long,
+                val telegramId: Long,
+            )
+
+            suspend fun prepareActiveListWithManager(
+                clubName: String,
+                eventTitle: String,
+                ownerUsername: String,
+                telegramId: Long,
+                capacity: Int = 25,
+                listTitle: String = eventTitle,
+            ): ImportSetup {
+                val clubId = createClub(clubName)
+                val eventId = createEvent(clubId, eventTitle)
+                val ownerId = createDomainUser(ownerUsername)
                 val list =
                     repository.createList(
                         clubId = clubId,
                         eventId = eventId,
                         ownerType = GuestListOwnerType.MANAGER,
                         ownerUserId = ownerId,
-                        title = "VIP",
-                        capacity = 50,
+                        title = listTitle,
+                        capacity = capacity,
                         arrivalWindowStart = null,
                         arrivalWindowEnd = null,
                         status = GuestListStatus.ACTIVE,
                     )
-                registerRbacUser(telegramId = 100L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                registerRbacUser(telegramId = telegramId, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
+                return ImportSetup(list.id, telegramId)
+            }
+
+            suspend fun assertJsonImport(
+                response: HttpResponse,
+                expectedAccepted: Int,
+            ): JsonObject {
+                response.status shouldBe HttpStatusCode.OK
+                val contentType =
+                    response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
+                contentType shouldBe ContentType.Application.Json
+                val jsonBody = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+                jsonBody["accepted"]!!.jsonPrimitive.int shouldBe expectedAccepted
+                return jsonBody
+            }
+
+            suspend fun assertCsvImport(
+                response: HttpResponse,
+                expectedDataLine: String = "1,0",
+            ) {
+                response.status shouldBe HttpStatusCode.OK
+                val contentType =
+                    response.headers[HttpHeaders.ContentType]?.let { header -> ContentType.parse(header).withoutParameters() }
+                contentType shouldBe ContentType.Text.CSV
+                val lines = response.bodyAsText().trimEnd().lines()
+                lines shouldHaveSize 2
+                lines.first().removePrefix("\uFEFF") shouldBe "accepted_count,rejected_count"
+                lines[1] shouldBe expectedDataLine
+            }
+
+            "import dry run returns json report" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Nebula",
+                        eventTitle = "Launch",
+                        ownerUsername = "owner1",
+                        telegramId = 100L,
+                        capacity = 50,
+                        listTitle = "VIP",
+                    )
 
                 testApplication {
                     applicationDev { testModule() }
-                    val authedClient = authenticatedClient(telegramId = 100L)
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
                     val response =
-                        authedClient.post("/api/guest-lists/${list.id}/import?dry_run=true") {
+                        authedClient.post("/api/guest-lists/${setup.listId}/import?dry_run=true") {
                             contentType(ContentType.Text.CSV)
                             setBody("name,phone,guests_count,notes\nAlice,+123456789,2,VIP\n")
                         }
-                    // Диагностика
-                    println(
-                        "DBG guestlists dry-run: status=${response.status} " +
-                            "body=${response.bodyAsText()}",
-                    )
-                    response.status shouldBe HttpStatusCode.OK
-                    val jsonBody = Json.parseToJsonElement(response.bodyAsText()).jsonObject
-                    jsonBody["accepted"]!!.jsonPrimitive.int shouldBe 1
+                    val jsonBody = assertJsonImport(response, expectedAccepted = 1)
                     jsonBody["rejected"]!!.jsonArray.size shouldBe 0
-                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 0
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 0
                 }
             }
 
             "commit import persists and returns csv" {
-                val clubId = createClub("Orion")
-                val eventId = createEvent(clubId, "Opening")
-                val ownerId = createDomainUser("owner2")
-                val list =
-                    repository.createList(
-                        clubId = clubId,
-                        eventId = eventId,
-                        ownerType = GuestListOwnerType.MANAGER,
-                        ownerUserId = ownerId,
-                        title = "Friends",
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Orion",
+                        eventTitle = "Opening",
+                        ownerUsername = "owner2",
+                        telegramId = 200L,
                         capacity = 30,
-                        arrivalWindowStart = null,
-                        arrivalWindowEnd = null,
-                        status = GuestListStatus.ACTIVE,
+                        listTitle = "Friends",
                     )
-                registerRbacUser(telegramId = 200L, roles = setOf(Role.MANAGER), clubs = setOf(clubId))
 
                 testApplication {
                     applicationDev { testModule() }
-                    val authedClient = authenticatedClient(telegramId = 200L)
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
                     val response =
-                        authedClient.post("/api/guest-lists/${list.id}/import") {
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
                             header(HttpHeaders.Accept, ContentType.Text.CSV.toString())
                             contentType(ContentType.Text.CSV)
                             setBody("name,phone,guests_count,notes\nBob,+123456700,3,\n")
                         }
-                    // Диагностика
-                    println(
-                        "DBG guestlists: status=${response.status} " +
-                            "body=${response.bodyAsText()}",
+                    assertCsvImport(response)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Accept text/csv;q=0 НЕ включает CSV" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Andromeda",
+                        eventTitle = "Preview",
+                        ownerUsername = "owner3",
+                        telegramId = 210L,
+                        capacity = 15,
                     )
-                    response.status shouldBe HttpStatusCode.OK
-                    response.headers[HttpHeaders.ContentType]!!.startsWith("text/csv") shouldBe true
-                    repository.listEntries(list.id, page = 0, size = 10) shouldHaveSize 1
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "text/csv;q=0, application/json;q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nCharlie,+123450000,1,\n")
+                        }
+
+                    assertJsonImport(response, expectedAccepted = 1)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Accept text/csv с параметрами включает CSV" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Lyra",
+                        eventTitle = "Evening",
+                        ownerUsername = "owner4",
+                        telegramId = 220L,
+                        capacity = 25,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "text/csv; charset=utf-8; q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nDiana,+123450001,2,VIP\n")
+                        }
+
+                    assertCsvImport(response)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Wildcard with lower csv quality falls back to json" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Deneb",
+                        eventTitle = "WildcardLow",
+                        ownerUsername = "owner8",
+                        telegramId = 245L,
+                        capacity = 20,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "*/*;q=1, text/csv;q=0.1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nHank,+123450005,1,\n")
+                        }
+
+                    assertJsonImport(response, expectedAccepted = 1)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Type wildcard preferred over lower csv quality" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Rigel",
+                        eventTitle = "TypeWildcard",
+                        ownerUsername = "owner9",
+                        telegramId = 250L,
+                        capacity = 20,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "application/*;q=1, text/csv;q=0.5")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nIvy,+123450006,1,\n")
+                        }
+
+                    assertJsonImport(response, expectedAccepted = 1)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Wildcard allows csv when json forbidden" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Spica",
+                        eventTitle = "WildcardCsv",
+                        ownerUsername = "owner10",
+                        telegramId = 255L,
+                        capacity = 20,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "application/json;q=0, */*;q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nJules,+123450007,1,\n")
+                        }
+
+                    assertCsvImport(response)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "JSON preferred when csv has lower q" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Altair",
+                        eventTitle = "Preference",
+                        ownerUsername = "owner6",
+                        telegramId = 235L,
+                        capacity = 25,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "text/csv;q=0.1, application/json;q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nFinn,+123450003,1,\n")
+                        }
+
+                    assertJsonImport(response, expectedAccepted = 1)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "CSV preferred when quality above json" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Vega",
+                        eventTitle = "PreferenceCsv",
+                        ownerUsername = "owner7",
+                        telegramId = 240L,
+                        capacity = 25,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "application/json;q=0.1, text/csv;q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nGina,+123450004,1,\n")
+                        }
+
+                    assertCsvImport(response)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Invalid Accept header falls back to default (JSON)" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Draco",
+                        eventTitle = "InvalidAccept",
+                        ownerUsername = "owner11",
+                        telegramId = 260L,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "not-a-media-type")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nKira,+123450008,1,\n")
+                        }
+
+                    assertJsonImport(response, expectedAccepted = 1)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "Tie CSV and JSON defaults to JSON" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Lacerta",
+                        eventTitle = "TiePreference",
+                        ownerUsername = "owner12",
+                        telegramId = 265L,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import") {
+                            header(HttpHeaders.Accept, "text/csv, application/json")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nLena,+123450009,1,\n")
+                        }
+
+                    assertJsonImport(response, expectedAccepted = 1)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
+                }
+            }
+
+            "format=csv overrides q=0 Accept" {
+                val setup =
+                    prepareActiveListWithManager(
+                        clubName = "Cassiopeia",
+                        eventTitle = "Priority",
+                        ownerUsername = "owner5",
+                        telegramId = 230L,
+                        capacity = 25,
+                    )
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = setup.telegramId)
+                    val response =
+                        authedClient.post("/api/guest-lists/${setup.listId}/import?format=csv") {
+                            header(HttpHeaders.Accept, "text/csv;q=0, application/json;q=1")
+                            contentType(ContentType.Text.CSV)
+                            setBody("name,phone,guests_count,notes\nEli,+123450002,1,\n")
+                        }
+
+                    assertCsvImport(response)
+                    repository.listEntries(setup.listId, page = 0, size = 10) shouldHaveSize 1
                 }
             }
 
@@ -409,11 +691,6 @@ class GuestListRoutesTest :
                     applicationDev { testModule() }
                     val authedClient = authenticatedClient(telegramId = 400L)
                     val response = authedClient.get("/api/guest-lists")
-                    // Диагностика
-                    println(
-                        "DBG guestlists promoter: status=${response.status} " +
-                            "body=${response.bodyAsText()}",
-                    )
                     response.status shouldBe HttpStatusCode.OK
                     val items = Json.parseToJsonElement(response.bodyAsText()).jsonObject["items"]!!.jsonArray
                     items.shouldHaveSize(1)
@@ -444,11 +721,6 @@ class GuestListRoutesTest :
                     applicationDev { testModule() }
                     val authedClient = authenticatedClient(telegramId = 500L)
                     val response = authedClient.get("/api/guest-lists/export")
-                    // Диагностика
-                    println(
-                        "DBG guestlists export: status=${response.status} " +
-                            "body=${response.bodyAsText()}",
-                    )
                     response.status shouldBe HttpStatusCode.OK
                     response.headers[HttpHeaders.ContentType]!!.startsWith("text/csv") shouldBe true
                     response.bodyAsText().contains("Guest One") shouldBe true
