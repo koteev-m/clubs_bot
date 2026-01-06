@@ -572,6 +572,8 @@ class CheckinDbRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    data class InvitationUse(val invitationId: Long, val usedAt: Instant)
+
     suspend fun insert(checkin: NewCheckin): CheckinRecord {
         val createdAt = now()
         return withTxRetry {
@@ -589,6 +591,61 @@ class CheckinDbRepository(
                         it[occurredAt] = checkin.occurredAt.toOffsetDateTime()
                         it[CheckinsTable.createdAt] = createdAt
                     } get CheckinsTable.id
+
+                CheckinRecord(
+                    id = id,
+                    clubId = checkin.clubId,
+                    eventId = checkin.eventId,
+                    subjectType = checkin.subjectType,
+                    subjectId = checkin.subjectId,
+                    checkedBy = checkin.checkedBy,
+                    method = checkin.method,
+                    resultStatus = checkin.resultStatus,
+                    denyReason = checkin.denyReason,
+                    occurredAt = checkin.occurredAt,
+                    createdAt = createdAt.toInstantUtc(),
+                )
+            }
+        }
+    }
+
+    suspend fun insertWithEntryUpdate(
+        checkin: NewCheckin,
+        entryId: Long,
+        entryStatus: GuestListEntryStatus,
+        invitationUse: InvitationUse?,
+    ): CheckinRecord {
+        val createdAt = now()
+        return withTxRetry {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val id =
+                    CheckinsTable.insert {
+                        it[clubId] = checkin.clubId
+                        it[eventId] = checkin.eventId
+                        it[subjectType] = checkin.subjectType.name
+                        it[CheckinsTable.subjectId] = checkin.subjectId
+                        it[checkedBy] = checkin.checkedBy
+                        it[method] = checkin.method.name
+                        it[resultStatus] = checkin.resultStatus.name
+                        it[denyReason] = checkin.denyReason
+                        it[occurredAt] = checkin.occurredAt.toOffsetDateTime()
+                        it[CheckinsTable.createdAt] = createdAt
+                    } get CheckinsTable.id
+
+                GuestListEntriesTable.update({ GuestListEntriesTable.id eq entryId }) {
+                    it[GuestListEntriesTable.status] = entryStatus.name
+                    it[updatedAt] = now()
+                }
+
+                if (invitationUse != null) {
+                    InvitationsTable.update({
+                        (InvitationsTable.id eq invitationUse.invitationId) and
+                            InvitationsTable.usedAt.isNull() and
+                            InvitationsTable.revokedAt.isNull()
+                    }) {
+                        it[InvitationsTable.usedAt] = invitationUse.usedAt.toOffsetDateTime()
+                    }
+                }
 
                 CheckinRecord(
                     id = id,
