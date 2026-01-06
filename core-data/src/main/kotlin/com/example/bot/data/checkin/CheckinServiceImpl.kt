@@ -1,5 +1,6 @@
 package com.example.bot.data.checkin
 
+import com.example.bot.booking.a3.QrBookingCodec
 import com.example.bot.checkin.CheckinConfig
 import com.example.bot.checkin.CheckinInvalidReason
 import com.example.bot.checkin.CheckinResult
@@ -14,6 +15,8 @@ import com.example.bot.club.GuestListEntryStatus
 import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceError
 import com.example.bot.club.InvitationServiceResult
+import com.example.bot.data.booking.BookingStatus
+import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.club.CheckinDbRepository
 import com.example.bot.data.club.CheckinDbRepository.InvitationUse
 import com.example.bot.data.club.GuestListDbRepository
@@ -21,18 +24,23 @@ import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
-import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
+import org.slf4j.LoggerFactory
 
 class CheckinServiceImpl(
     private val checkinRepo: CheckinDbRepository,
     private val invitationService: InvitationService,
     private val guestListRepo: GuestListDbRepository,
     private val guestListEntryRepo: GuestListEntryDbRepository,
+    private val bookingRepo: BookingRepository,
     private val checkinConfig: CheckinConfig = CheckinConfig.fromEnv(),
+    private val bookingQrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: "" },
+    private val oldBookingQrSecretProvider: () -> String? = { System.getenv("QR_OLD_SECRET") },
+    private val bookingQrTtl: Duration = Duration.ofHours(12),
     private val clock: Clock = Clock.systemUTC(),
 ) : CheckinService {
     private val logger = LoggerFactory.getLogger(CheckinServiceImpl::class.java)
@@ -45,8 +53,16 @@ class CheckinServiceImpl(
             return CheckinServiceResult.Success(CheckinResult.Forbidden)
         }
 
-        val rawToken = parseInvitationToken(payload.trim())
-            ?: return CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.UNKNOWN_FORMAT))
+        val trimmed = payload.trim()
+        val rawToken = parseInvitationToken(trimmed)
+        if (rawToken == null) {
+            val bookingDecoded = parseBookingToken(trimmed)
+                ?: return CheckinServiceResult.Success(
+                    CheckinResult.Invalid(CheckinInvalidReason.UNKNOWN_FORMAT),
+                )
+
+            return handleBookingScan(bookingDecoded, actor)
+        }
 
         val resolved = invitationService.resolveInvitation(rawToken)
         if (resolved is InvitationServiceResult.Failure) {
@@ -128,10 +144,19 @@ class CheckinServiceImpl(
             return CheckinServiceResult.Success(CheckinResult.Forbidden)
         }
 
-        if (subjectType != CheckinSubjectType.GUEST_LIST_ENTRY) {
-            return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
+        return when (subjectType) {
+            CheckinSubjectType.GUEST_LIST_ENTRY ->
+                manualGuestListCheckin(subjectId, status, denyReason, actor)
+            CheckinSubjectType.BOOKING -> manualBookingCheckin(subjectId, status, denyReason, actor)
         }
+    }
 
+    private suspend fun manualGuestListCheckin(
+        subjectId: String,
+        status: CheckinResultStatus,
+        denyReason: String?,
+        actor: AuthContext,
+    ): CheckinServiceResult<CheckinResult> {
         val entryId = subjectId.toLongOrNull()
             ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
         val canonicalSubjectId = entryId.toString()
@@ -184,6 +209,53 @@ class CheckinServiceImpl(
         }
     }
 
+    private suspend fun manualBookingCheckin(
+        subjectId: String,
+        status: CheckinResultStatus,
+        denyReason: String?,
+        actor: AuthContext,
+    ): CheckinServiceResult<CheckinResult> {
+        val canonicalSubjectId = subjectId.toLongOrNull()?.toString() ?: subjectId
+        val bookingUuid = resolveBookingUuid(canonicalSubjectId)
+            ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
+        val booking = bookingRepo.findById(bookingUuid)
+            ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_SUBJECT_NOT_FOUND)
+
+        val existing = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonicalSubjectId)
+        if (existing != null) {
+            return CheckinServiceResult.Success(existing.toAlreadyUsed())
+        }
+
+        if (status == CheckinResultStatus.DENIED && denyReason.isNullOrBlank()) {
+            return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_DENY_REASON_REQUIRED)
+        }
+
+        val occurredAt = clock.instant().truncatedTo(ChronoUnit.SECONDS)
+
+        return try {
+            insertBookingCheckin(
+                bookingId = bookingUuid,
+                booking = booking,
+                subjectId = canonicalSubjectId,
+                actor = actor,
+                method = CheckinMethod.NAME,
+                status = status,
+                denyReason = denyReason,
+                occurredAt = occurredAt,
+            )
+        } catch (ex: Exception) {
+            if (ex.isUniqueViolation()) {
+                val duplicate =
+                    checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonicalSubjectId)
+                if (duplicate != null) {
+                    return CheckinServiceResult.Success(duplicate.toAlreadyUsed())
+                }
+            }
+            logger.warn("checkin.manual failed", ex)
+            CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
+        }
+    }
+
     private fun hasEntryManagerRole(actor: AuthContext): Boolean {
         val allowed =
             setOf(
@@ -197,11 +269,119 @@ class CheckinServiceImpl(
         return actor.roles.any { it in allowed }
     }
 
+    private fun parseBookingToken(payload: String): QrBookingCodec.Decoded? {
+        val now = clock.instant()
+        val primarySecret = bookingQrSecretProvider().takeIf { it.isNotBlank() }
+        val decodedPrimary =
+            primarySecret?.let { secret ->
+                runCatching { QrBookingCodec.verify(payload, now, bookingQrTtl, secret) }.getOrNull()
+            }
+        if (decodedPrimary != null) return decodedPrimary
+
+        val oldSecret = oldBookingQrSecretProvider()?.takeIf { it.isNotBlank() }
+        return oldSecret?.let { secret ->
+            runCatching { QrBookingCodec.verify(payload, now, bookingQrTtl, secret) }.getOrNull()
+        }
+    }
+
+    private suspend fun handleBookingScan(
+        decoded: QrBookingCodec.Decoded,
+        actor: AuthContext,
+    ): CheckinServiceResult<CheckinResult> {
+        val bookingUuid = decoded.bookingId.toBookingUuid()
+            ?: return CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.BOOKING_INVALID))
+        val booking = bookingRepo.findById(bookingUuid)
+            ?: return CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.BOOKING_INVALID))
+
+        val subjectId = decoded.bookingId.toString()
+        val existingCheckin = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
+        if (existingCheckin != null) {
+            return CheckinServiceResult.Success(existingCheckin.toAlreadyUsed())
+        }
+
+        val occurredAt = clock.instant().truncatedTo(ChronoUnit.SECONDS)
+        val resultStatus = calculateResultStatus(booking.arrivalBy, occurredAt)
+
+        return try {
+            insertBookingCheckin(
+                bookingId = bookingUuid,
+                booking = booking,
+                subjectId = subjectId,
+                actor = actor,
+                method = CheckinMethod.QR,
+                status = resultStatus,
+                denyReason = null,
+                occurredAt = occurredAt,
+            )
+        } catch (ex: Exception) {
+            if (ex.isUniqueViolation()) {
+                val existing = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
+                if (existing != null) {
+                    return CheckinServiceResult.Success(existing.toAlreadyUsed())
+                }
+            }
+            logger.warn("checkin.scan failed", ex)
+            CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
+        }
+    }
+
     private fun parseInvitationToken(payload: String): String? =
         when {
             payload.startsWith("inv:") && payload.length > 4 -> payload.removePrefix("inv:")
             payload.startsWith("inv_") && payload.length > 4 -> payload.removePrefix("inv_")
             else -> null
+        }
+
+    private fun resolveBookingUuid(subjectId: String): UUID? =
+        subjectId.toLongOrNull()?.toBookingUuid()
+            ?: runCatching { UUID.fromString(subjectId) }.getOrNull()
+
+    private fun Long.toBookingUuid(): UUID? = runCatching { UUID(0L, this) }.getOrNull()
+
+    private suspend fun insertBookingCheckin(
+        bookingId: UUID,
+        booking: com.example.bot.data.booking.core.BookingRecord,
+        subjectId: String,
+        actor: AuthContext,
+        method: CheckinMethod,
+        status: CheckinResultStatus,
+        denyReason: String?,
+        occurredAt: Instant,
+    ): CheckinServiceResult<CheckinResult> {
+        val record =
+            checkinRepo.insertWithBookingUpdate(
+                checkin =
+                    com.example.bot.data.club.NewCheckin(
+                        clubId = booking.clubId,
+                        eventId = booking.eventId,
+                        subjectType = CheckinSubjectType.BOOKING,
+                        subjectId = subjectId,
+                        checkedBy = actor.userId,
+                        method = method,
+                        resultStatus = status,
+                        denyReason = denyReason,
+                        occurredAt = occurredAt,
+                    ),
+                bookingId = bookingId,
+                bookingStatus = status.toBookingStatus(),
+            )
+
+        return CheckinServiceResult.Success(
+            CheckinResult.Success(
+                subjectType = record.subjectType,
+                subjectId = record.subjectId,
+                resultStatus = record.resultStatus,
+                displayName = null,
+                occurredAt = record.occurredAt,
+                checkedBy = record.checkedBy,
+            ),
+        )
+    }
+
+    private fun CheckinResultStatus.toBookingStatus(): BookingStatus =
+        when (this) {
+            CheckinResultStatus.ARRIVED, CheckinResultStatus.LATE -> BookingStatus.SEATED
+            CheckinResultStatus.DENIED -> BookingStatus.NO_SHOW
         }
 
     private fun calculateResultStatus(arrivalWindowEnd: Instant?, now: Instant): CheckinResultStatus {

@@ -52,6 +52,7 @@ data class BookingRecord(
     val slotStart: Instant,
     val slotEnd: Instant,
     val status: BookingStatus,
+    val arrivalBy: Instant?,
     val qrSecret: String,
     val idempotencyKey: String,
     val createdAt: Instant,

@@ -368,6 +368,7 @@ class BookingRepository(
             slotStart = this[BookingsTable.slotStart].toInstant(),
             slotEnd = this[BookingsTable.slotEnd].toInstant(),
             status = BookingStatus.valueOf(this[BookingsTable.status]),
+            arrivalBy = this[BookingsTable.arrivalBy]?.toInstant(),
             qrSecret = this[BookingsTable.qrSecret],
             idempotencyKey = this[BookingsTable.idempotencyKey],
             createdAt = this[BookingsTable.createdAt].toInstant(),

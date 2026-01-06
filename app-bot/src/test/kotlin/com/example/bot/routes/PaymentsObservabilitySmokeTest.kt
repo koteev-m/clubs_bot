@@ -281,6 +281,7 @@ private class TestPaymentsBookingRepository : PaymentsBookingRepository {
             slotStart = Instant.EPOCH,
             slotEnd = Instant.EPOCH,
             status = status,
+            arrivalBy = null,
             qrSecret = "qr",
             idempotencyKey = "seed",
             createdAt = Instant.EPOCH,
