@@ -132,14 +132,16 @@ class CheckinServiceImpl(
             return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
         }
 
-        val entryId = subjectId.toLongOrNull() ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
+        val entryId = subjectId.toLongOrNull()
+            ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
         val canonicalSubjectId = entryId.toString()
         val entry = guestListEntryRepo.findById(entryId)
             ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_SUBJECT_NOT_FOUND)
         val guestList = guestListRepo.findById(entry.guestListId)
             ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_SUBJECT_NOT_FOUND)
 
-        val existing = checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, canonicalSubjectId)
+        val existing =
+            checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, canonicalSubjectId)
         if (existing != null) {
             return CheckinServiceResult.Success(existing.toAlreadyUsed())
         }
@@ -171,7 +173,8 @@ class CheckinServiceImpl(
             )
         } catch (ex: Exception) {
             if (ex.isUniqueViolation()) {
-                val duplicate = checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, canonicalSubjectId)
+                val duplicate =
+                    checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, canonicalSubjectId)
                 if (duplicate != null) {
                     return CheckinServiceResult.Success(duplicate.toAlreadyUsed())
                 }

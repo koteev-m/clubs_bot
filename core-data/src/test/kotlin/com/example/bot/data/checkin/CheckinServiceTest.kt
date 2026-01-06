@@ -206,6 +206,50 @@ class CheckinServiceTest {
     }
 
     @Test
+    fun `manual checkin inserts canonical subject id`() = runBlocking {
+        val entry = entryRecord(id = 1, guestListId = 2)
+        val guestList = guestListRecord(id = entry.guestListId)
+        val checkin = checkinRecord(subjectId = "1")
+
+        coEvery { guestListEntryRepo.findById(entry.id) } returns entry
+        coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, "1") } returns null
+        coEvery {
+            checkinRepo.insertWithEntryUpdate(
+                checkin = any(),
+                entryId = entry.id,
+                entryStatus = GuestListEntryStatus.ARRIVED,
+                invitationUse = null,
+            )
+        } returns checkin
+
+        val result =
+            service.manualCheckin(
+                subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
+                subjectId = "01",
+                status = CheckinResultStatus.ARRIVED,
+                denyReason = null,
+                actor = actor,
+            )
+
+        check(result is CheckinServiceResult.Success)
+        val payload = result.value
+
+        assertTrue(payload is CheckinResult.Success)
+
+        coVerify(exactly = 1) {
+            checkinRepo.insertWithEntryUpdate(
+                checkin = match { it.subjectId == "1" },
+                entryId = entry.id,
+                entryStatus = GuestListEntryStatus.ARRIVED,
+                invitationUse = null,
+            )
+        }
+        coVerify(exactly = 1) { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, "1") }
+        confirmVerified(checkinRepo)
+    }
+
+    @Test
     fun `forbidden when actor lacks role`() = runBlocking {
         val noRoleActor = actor.copy(roles = emptySet())
 
