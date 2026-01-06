@@ -1,6 +1,7 @@
 package com.example.bot.data.checkin
 
 import com.example.bot.booking.a3.QrBookingCodec
+import com.example.bot.checkin.BookingQrConfig
 import com.example.bot.checkin.CheckinConfig
 import com.example.bot.checkin.CheckinInvalidReason
 import com.example.bot.checkin.CheckinResult
@@ -38,12 +39,11 @@ class CheckinServiceImpl(
     private val guestListEntryRepo: GuestListEntryDbRepository,
     private val bookingRepo: BookingRepository,
     private val checkinConfig: CheckinConfig = CheckinConfig.fromEnv(),
-    private val bookingQrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: "" },
-    private val oldBookingQrSecretProvider: () -> String? = { System.getenv("QR_OLD_SECRET") },
-    private val bookingQrTtl: Duration = Duration.ofHours(12),
+    private val bookingQrConfig: BookingQrConfig = BookingQrConfig.fromEnv(),
     private val clock: Clock = Clock.systemUTC(),
 ) : CheckinService {
     private val logger = LoggerFactory.getLogger(CheckinServiceImpl::class.java)
+    private val allowedBookingStatusTransitions = setOf(BookingStatus.BOOKED)
 
     override suspend fun scanQr(
         payload: String,
@@ -215,13 +215,12 @@ class CheckinServiceImpl(
         denyReason: String?,
         actor: AuthContext,
     ): CheckinServiceResult<CheckinResult> {
-        val canonicalSubjectId = subjectId.toLongOrNull()?.toString() ?: subjectId
-        val bookingUuid = resolveBookingUuid(canonicalSubjectId)
+        val canonical = canonicalizeBookingSubject(subjectId)
             ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
-        val booking = bookingRepo.findById(bookingUuid)
+        val booking = bookingRepo.findById(canonical.bookingId)
             ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_SUBJECT_NOT_FOUND)
 
-        val existing = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonicalSubjectId)
+        val existing = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonical.subjectId)
         if (existing != null) {
             return CheckinServiceResult.Success(existing.toAlreadyUsed())
         }
@@ -234,9 +233,9 @@ class CheckinServiceImpl(
 
         return try {
             insertBookingCheckin(
-                bookingId = bookingUuid,
+                bookingId = canonical.bookingId,
                 booking = booking,
-                subjectId = canonicalSubjectId,
+                subjectId = canonical.subjectId,
                 actor = actor,
                 method = CheckinMethod.NAME,
                 status = status,
@@ -246,7 +245,7 @@ class CheckinServiceImpl(
         } catch (ex: Exception) {
             if (ex.isUniqueViolation()) {
                 val duplicate =
-                    checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonicalSubjectId)
+                    checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonical.subjectId)
                 if (duplicate != null) {
                     return CheckinServiceResult.Success(duplicate.toAlreadyUsed())
                 }
@@ -271,16 +270,17 @@ class CheckinServiceImpl(
 
     private fun parseBookingToken(payload: String): QrBookingCodec.Decoded? {
         val now = clock.instant()
-        val primarySecret = bookingQrSecretProvider().takeIf { it.isNotBlank() }
+        val ttl = bookingQrConfig.ttl
+        val primarySecret = bookingQrConfig.secret.takeIf { it.isNotBlank() }
         val decodedPrimary =
             primarySecret?.let { secret ->
-                runCatching { QrBookingCodec.verify(payload, now, bookingQrTtl, secret) }.getOrNull()
+                runCatching { QrBookingCodec.verify(payload, now, ttl, secret) }.getOrNull()
             }
         if (decodedPrimary != null) return decodedPrimary
 
-        val oldSecret = oldBookingQrSecretProvider()?.takeIf { it.isNotBlank() }
+        val oldSecret = bookingQrConfig.oldSecret?.takeIf { it.isNotBlank() }
         return oldSecret?.let { secret ->
-            runCatching { QrBookingCodec.verify(payload, now, bookingQrTtl, secret) }.getOrNull()
+            runCatching { QrBookingCodec.verify(payload, now, ttl, secret) }.getOrNull()
         }
     }
 
@@ -288,13 +288,12 @@ class CheckinServiceImpl(
         decoded: QrBookingCodec.Decoded,
         actor: AuthContext,
     ): CheckinServiceResult<CheckinResult> {
-        val bookingUuid = decoded.bookingId.toBookingUuid()
+        val canonical = canonicalizeBookingSubject(decoded.bookingId.toString())
             ?: return CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.BOOKING_INVALID))
-        val booking = bookingRepo.findById(bookingUuid)
+        val booking = bookingRepo.findById(canonical.bookingId)
             ?: return CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.BOOKING_INVALID))
 
-        val subjectId = decoded.bookingId.toString()
-        val existingCheckin = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
+        val existingCheckin = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonical.subjectId)
         if (existingCheckin != null) {
             return CheckinServiceResult.Success(existingCheckin.toAlreadyUsed())
         }
@@ -304,9 +303,9 @@ class CheckinServiceImpl(
 
         return try {
             insertBookingCheckin(
-                bookingId = bookingUuid,
+                bookingId = canonical.bookingId,
                 booking = booking,
-                subjectId = subjectId,
+                subjectId = canonical.subjectId,
                 actor = actor,
                 method = CheckinMethod.QR,
                 status = resultStatus,
@@ -315,7 +314,7 @@ class CheckinServiceImpl(
             )
         } catch (ex: Exception) {
             if (ex.isUniqueViolation()) {
-                val existing = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
+                val existing = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, canonical.subjectId)
                 if (existing != null) {
                     return CheckinServiceResult.Success(existing.toAlreadyUsed())
                 }
@@ -331,12 +330,6 @@ class CheckinServiceImpl(
             payload.startsWith("inv_") && payload.length > 4 -> payload.removePrefix("inv_")
             else -> null
         }
-
-    private fun resolveBookingUuid(subjectId: String): UUID? =
-        subjectId.toLongOrNull()?.toBookingUuid()
-            ?: runCatching { UUID.fromString(subjectId) }.getOrNull()
-
-    private fun Long.toBookingUuid(): UUID? = runCatching { UUID(0L, this) }.getOrNull()
 
     private suspend fun insertBookingCheckin(
         bookingId: UUID,
@@ -364,6 +357,7 @@ class CheckinServiceImpl(
                     ),
                 bookingId = bookingId,
                 bookingStatus = status.toBookingStatus(),
+                allowedFromStatuses = allowedBookingStatusTransitions,
             )
 
         return CheckinServiceResult.Success(

@@ -1,6 +1,7 @@
 package com.example.bot.data.checkin
 
 import com.example.bot.booking.a3.QrBookingCodec
+import com.example.bot.checkin.BookingQrConfig
 import com.example.bot.checkin.CheckinConfig
 import com.example.bot.checkin.CheckinResult
 import com.example.bot.checkin.CheckinServiceError
@@ -46,6 +47,7 @@ class CheckinServiceTest {
     private val guestListEntryRepo: GuestListEntryDbRepository = mockk()
     private val bookingRepo: BookingRepository = mockk()
     private val bookingSecret = "booking-secret"
+    private val bookingQrConfig = BookingQrConfig(secret = bookingSecret, oldSecret = null, ttl = Duration.ofHours(12))
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2024-07-01T18:00:00Z"), ZoneOffset.UTC)
     private val service =
         CheckinServiceImpl(
@@ -55,10 +57,8 @@ class CheckinServiceTest {
             guestListEntryRepo,
             bookingRepo,
             CheckinConfig(lateGraceMinutes = 0),
-            bookingQrSecretProvider = { bookingSecret },
-            oldBookingQrSecretProvider = { null },
-            bookingQrTtl = Duration.ofHours(12),
-            fixedClock,
+            bookingQrConfig = bookingQrConfig,
+            clock = fixedClock,
         )
 
     private val actor = AuthContext(userId = 10, telegramUserId = 11, roles = setOf(Role.ENTRY_MANAGER))
@@ -330,6 +330,28 @@ class CheckinServiceTest {
     }
 
     @Test
+    fun `manual booking canonicalizes uuid subject`() = runBlocking {
+        val bookingId = UUID(0L, 53L)
+        val booking = bookingRecord(id = bookingId)
+        val existing = checkinRecord(subjectId = "53", subjectType = CheckinSubjectType.BOOKING)
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "53") } returns existing
+
+        val result =
+            service.manualCheckin(
+                subjectType = CheckinSubjectType.BOOKING,
+                subjectId = "00000000-0000-0000-0000-000000000035",
+                status = CheckinResultStatus.ARRIVED,
+                denyReason = null,
+                actor = actor,
+            )
+
+        check(result is CheckinServiceResult.Success)
+        assertTrue(result.value is CheckinResult.AlreadyUsed)
+    }
+
+    @Test
     fun `booking scan returns already used on duplicate`() = runBlocking {
         val bookingId = UUID(0L, 52L)
         val booking = bookingRecord(id = bookingId)
@@ -361,7 +383,7 @@ class CheckinServiceTest {
 
         coEvery { bookingRepo.findById(bookingId) } returns booking
         coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "53") } returns null
-        coEvery { checkinRepo.insertWithBookingUpdate(any(), bookingId, BookingStatus.SEATED) } returns checkin
+        coEvery { checkinRepo.insertWithBookingUpdate(any(), bookingId, BookingStatus.SEATED, any()) } returns checkin
 
         val result = service.scanQr(qr, actor)
 
@@ -371,7 +393,37 @@ class CheckinServiceTest {
         val success = payload as CheckinResult.Success
         assertEquals(CheckinResultStatus.ARRIVED, success.resultStatus)
 
-        coVerify(exactly = 1) { checkinRepo.insertWithBookingUpdate(any(), bookingId, BookingStatus.SEATED) }
+        coVerify(exactly = 1) { checkinRepo.insertWithBookingUpdate(any(), bookingId, BookingStatus.SEATED, any()) }
+    }
+
+    fun `booking status is not updated from cancelled`() = runBlocking {
+        val bookingId = UUID(0L, 60L)
+        val booking = bookingRecord(id = bookingId, status = BookingStatus.CANCELLED)
+        val checkin =
+            checkinRecord(
+                subjectId = "60",
+                subjectType = CheckinSubjectType.BOOKING,
+                method = CheckinMethod.QR,
+                occurredAt = fixedClock.instant(),
+            )
+        var allowedFrom: Set<BookingStatus>? = null
+        var appliedStatus: BookingStatus? = null
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "60") } returns null
+        coEvery { checkinRepo.insertWithBookingUpdate(any(), bookingId, any(), any()) } answers {
+            appliedStatus = arg(2)
+            allowedFrom = arg(3)
+            checkin
+        }
+
+        val qr = QrBookingCodec.encode(60, booking.eventId, fixedClock.instant(), bookingSecret)
+        val result = service.scanQr(qr, actor)
+
+        check(result is CheckinServiceResult.Success)
+        assertTrue(result.value is CheckinResult.Success)
+        assertEquals(BookingStatus.SEATED, appliedStatus)
+        assertEquals(setOf(BookingStatus.BOOKED), allowedFrom)
     }
 
     private fun invitationCard(
@@ -417,6 +469,7 @@ class CheckinServiceTest {
 
     private fun bookingRecord(
         id: UUID,
+        status: BookingStatus = BookingStatus.BOOKED,
         arrivalBy: Instant? = fixedClock.instant().plusSeconds(300),
     ): BookingRecord =
         BookingRecord(
@@ -430,7 +483,7 @@ class CheckinServiceTest {
             totalRate = java.math.BigDecimal.TEN,
             slotStart = fixedClock.instant(),
             slotEnd = fixedClock.instant().plusSeconds(3600),
-            status = BookingStatus.BOOKED,
+            status = status,
             arrivalBy = arrivalBy,
             qrSecret = "qr",
             idempotencyKey = "idem",

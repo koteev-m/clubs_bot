@@ -17,6 +17,7 @@ import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.andWhere
@@ -670,6 +671,7 @@ class CheckinDbRepository(
         checkin: NewCheckin,
         bookingId: java.util.UUID,
         bookingStatus: BookingStatus,
+        allowedFromStatuses: Set<BookingStatus> = setOf(BookingStatus.BOOKED),
     ): CheckinRecord {
         val createdAt = now()
         return withTxRetry {
@@ -688,9 +690,14 @@ class CheckinDbRepository(
                         it[CheckinsTable.createdAt] = createdAt
                     } get CheckinsTable.id
 
-                BookingsTable.update({ BookingsTable.id eq bookingId }) { statement ->
-                    statement[status] = bookingStatus.name
-                    statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
+                if (allowedFromStatuses.isNotEmpty()) {
+                    val allowedNames = allowedFromStatuses.map { it.name }
+                    BookingsTable.update({
+                        (BookingsTable.id eq bookingId) and (BookingsTable.status inList allowedNames)
+                    }) { statement ->
+                        statement[status] = bookingStatus.name
+                        statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
+                    }
                 }
 
                 CheckinRecord(
