@@ -174,6 +174,38 @@ class CheckinServiceTest {
     }
 
     @Test
+    fun `manual checkin uses canonical subject id for duplicate`() = runBlocking {
+        val entry = entryRecord(id = 1, guestListId = 2)
+        val guestList = guestListRecord(id = entry.guestListId)
+        val existing = checkinRecord(subjectId = "1")
+
+        coEvery { guestListEntryRepo.findById(entry.id) } returns entry
+        coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, "1") } returns existing
+
+        val result =
+            service.manualCheckin(
+                subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
+                subjectId = "01",
+                status = CheckinResultStatus.ARRIVED,
+                denyReason = null,
+                actor = actor,
+            )
+
+        check(result is CheckinServiceResult.Success)
+        val payload = result.value
+
+        assertTrue(payload is CheckinResult.AlreadyUsed)
+        val alreadyUsed = payload as CheckinResult.AlreadyUsed
+        assertEquals(existing.subjectId, alreadyUsed.subjectId)
+
+        coVerify(exactly = 1) { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, "1") }
+        coVerify(exactly = 0) { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, "01") }
+        coVerify(exactly = 0) { checkinRepo.insertWithEntryUpdate(any(), any(), any(), any()) }
+        confirmVerified(checkinRepo)
+    }
+
+    @Test
     fun `forbidden when actor lacks role`() = runBlocking {
         val noRoleActor = actor.copy(roles = emptySet())
 
