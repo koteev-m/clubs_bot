@@ -1,5 +1,6 @@
 package com.example.bot.data.checkin
 
+import com.example.bot.booking.a3.QrBookingCodec
 import com.example.bot.checkin.CheckinConfig
 import com.example.bot.checkin.CheckinResult
 import com.example.bot.checkin.CheckinServiceError
@@ -13,6 +14,9 @@ import com.example.bot.club.GuestListStatus
 import com.example.bot.club.InvitationCard
 import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceResult
+import com.example.bot.data.booking.BookingStatus
+import com.example.bot.data.booking.core.BookingRecord
+import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.club.CheckinDbRepository
 import com.example.bot.data.club.CheckinRecord
 import com.example.bot.data.club.GuestListDbRepository
@@ -29,15 +33,19 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 
 class CheckinServiceTest {
     private val checkinRepo: CheckinDbRepository = mockk()
     private val invitationService: InvitationService = mockk()
     private val guestListRepo: GuestListDbRepository = mockk()
     private val guestListEntryRepo: GuestListEntryDbRepository = mockk()
+    private val bookingRepo: BookingRepository = mockk()
+    private val bookingSecret = "booking-secret"
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2024-07-01T18:00:00Z"), ZoneOffset.UTC)
     private val service =
         CheckinServiceImpl(
@@ -45,7 +53,11 @@ class CheckinServiceTest {
             invitationService,
             guestListRepo,
             guestListEntryRepo,
+            bookingRepo,
             CheckinConfig(lateGraceMinutes = 0),
+            bookingQrSecretProvider = { bookingSecret },
+            oldBookingQrSecretProvider = { null },
+            bookingQrTtl = Duration.ofHours(12),
             fixedClock,
         )
 
@@ -270,6 +282,98 @@ class CheckinServiceTest {
         assertTrue(manualPayload is CheckinResult.Forbidden)
     }
 
+    @Test
+    fun `manual booking denied without reason fails`() = runBlocking {
+        val bookingId = UUID(0L, 50L)
+        val booking = bookingRecord(id = bookingId)
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "50") } returns null
+
+        val result =
+            service.manualCheckin(
+                subjectType = CheckinSubjectType.BOOKING,
+                subjectId = "50",
+                status = CheckinResultStatus.DENIED,
+                denyReason = null,
+                actor = actor,
+            )
+
+        assertTrue(result is CheckinServiceResult.Failure)
+        assertEquals(CheckinServiceError.CHECKIN_DENY_REASON_REQUIRED, (result as CheckinServiceResult.Failure).error)
+    }
+
+    @Test
+    fun `manual booking respects canonical subject and uniqueness`() = runBlocking {
+        val bookingId = UUID(0L, 51L)
+        val booking = bookingRecord(id = bookingId)
+        val existing = checkinRecord(subjectId = "51", subjectType = CheckinSubjectType.BOOKING)
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "51") } returns existing
+
+        val result =
+            service.manualCheckin(
+                subjectType = CheckinSubjectType.BOOKING,
+                subjectId = "051",
+                status = CheckinResultStatus.ARRIVED,
+                denyReason = null,
+                actor = actor,
+            )
+
+        check(result is CheckinServiceResult.Success)
+        val payload = (result as CheckinServiceResult.Success).value
+        assertTrue(payload is CheckinResult.AlreadyUsed)
+
+        coVerify(exactly = 1) { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "51") }
+        confirmVerified(checkinRepo)
+    }
+
+    @Test
+    fun `booking scan returns already used on duplicate`() = runBlocking {
+        val bookingId = UUID(0L, 52L)
+        val booking = bookingRecord(id = bookingId)
+        val qr = QrBookingCodec.encode(52, booking.eventId, fixedClock.instant(), bookingSecret)
+        val existing = checkinRecord(subjectId = "52", subjectType = CheckinSubjectType.BOOKING)
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "52") } returns existing
+
+        val result = service.scanQr(qr, actor)
+
+        check(result is CheckinServiceResult.Success)
+        val payload = result.value
+        assertTrue(payload is CheckinResult.AlreadyUsed)
+    }
+
+    @Test
+    fun `booking scan creates checkin and updates status`() = runBlocking {
+        val bookingId = UUID(0L, 53L)
+        val booking = bookingRecord(id = bookingId, arrivalBy = fixedClock.instant().plusSeconds(120))
+        val qr = QrBookingCodec.encode(53, booking.eventId, fixedClock.instant(), bookingSecret)
+        val checkin =
+            checkinRecord(
+                subjectId = "53",
+                subjectType = CheckinSubjectType.BOOKING,
+                method = CheckinMethod.QR,
+                occurredAt = fixedClock.instant(),
+            )
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "53") } returns null
+        coEvery { checkinRepo.insertWithBookingUpdate(any(), bookingId, BookingStatus.SEATED) } returns checkin
+
+        val result = service.scanQr(qr, actor)
+
+        check(result is CheckinServiceResult.Success)
+        val payload = result.value
+        assertTrue(payload is CheckinResult.Success)
+        val success = payload as CheckinResult.Success
+        assertEquals(CheckinResultStatus.ARRIVED, success.resultStatus)
+
+        coVerify(exactly = 1) { checkinRepo.insertWithBookingUpdate(any(), bookingId, BookingStatus.SEATED) }
+    }
+
     private fun invitationCard(
         entryId: Long,
         arrivalWindowEnd: Instant? = null,
@@ -292,6 +396,7 @@ class CheckinServiceTest {
 
     private fun checkinRecord(
         subjectId: String,
+        subjectType: CheckinSubjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
         method: CheckinMethod = CheckinMethod.NAME,
         occurredAt: Instant = fixedClock.instant(),
         resultStatus: CheckinResultStatus = CheckinResultStatus.ARRIVED,
@@ -300,7 +405,7 @@ class CheckinServiceTest {
             id = 1,
             clubId = 3,
             eventId = 4,
-            subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
+            subjectType = subjectType,
             subjectId = subjectId,
             checkedBy = actor.userId,
             method = method,
@@ -308,6 +413,29 @@ class CheckinServiceTest {
             denyReason = null,
             occurredAt = occurredAt,
             createdAt = occurredAt,
+        )
+
+    private fun bookingRecord(
+        id: UUID,
+        arrivalBy: Instant? = fixedClock.instant().plusSeconds(300),
+    ): BookingRecord =
+        BookingRecord(
+            id = id,
+            clubId = 3,
+            tableId = 2,
+            tableNumber = 1,
+            eventId = 4,
+            guests = 2,
+            minRate = java.math.BigDecimal.TEN,
+            totalRate = java.math.BigDecimal.TEN,
+            slotStart = fixedClock.instant(),
+            slotEnd = fixedClock.instant().plusSeconds(3600),
+            status = BookingStatus.BOOKED,
+            arrivalBy = arrivalBy,
+            qrSecret = "qr",
+            idempotencyKey = "idem",
+            createdAt = fixedClock.instant(),
+            updatedAt = fixedClock.instant(),
         )
 
     private fun entryRecord(

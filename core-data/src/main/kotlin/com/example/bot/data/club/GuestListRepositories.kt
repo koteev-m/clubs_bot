@@ -7,6 +7,8 @@ import com.example.bot.club.GuestListEntryStatus
 import com.example.bot.club.GuestListOwnerType
 import com.example.bot.club.GuestListStatus
 import com.example.bot.club.InvitationChannel
+import com.example.bot.data.booking.BookingStatus
+import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.db.withTxRetry
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
@@ -645,6 +647,50 @@ class CheckinDbRepository(
                     }) {
                         it[InvitationsTable.usedAt] = invitationUse.usedAt.toOffsetDateTime()
                     }
+                }
+
+                CheckinRecord(
+                    id = id,
+                    clubId = checkin.clubId,
+                    eventId = checkin.eventId,
+                    subjectType = checkin.subjectType,
+                    subjectId = checkin.subjectId,
+                    checkedBy = checkin.checkedBy,
+                    method = checkin.method,
+                    resultStatus = checkin.resultStatus,
+                    denyReason = checkin.denyReason,
+                    occurredAt = checkin.occurredAt,
+                    createdAt = createdAt.toInstantUtc(),
+                )
+            }
+        }
+    }
+
+    suspend fun insertWithBookingUpdate(
+        checkin: NewCheckin,
+        bookingId: java.util.UUID,
+        bookingStatus: BookingStatus,
+    ): CheckinRecord {
+        val createdAt = now()
+        return withTxRetry {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val id =
+                    CheckinsTable.insert {
+                        it[clubId] = checkin.clubId
+                        it[eventId] = checkin.eventId
+                        it[subjectType] = checkin.subjectType.name
+                        it[CheckinsTable.subjectId] = checkin.subjectId
+                        it[checkedBy] = checkin.checkedBy
+                        it[method] = checkin.method.name
+                        it[resultStatus] = checkin.resultStatus.name
+                        it[denyReason] = checkin.denyReason
+                        it[occurredAt] = checkin.occurredAt.toOffsetDateTime()
+                        it[CheckinsTable.createdAt] = createdAt
+                    } get CheckinsTable.id
+
+                BookingsTable.update({ BookingsTable.id eq bookingId }) { statement ->
+                    statement[status] = bookingStatus.name
+                    statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
                 }
 
                 CheckinRecord(

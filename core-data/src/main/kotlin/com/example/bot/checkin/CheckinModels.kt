@@ -30,7 +30,14 @@ data class CheckinConfig(
     }
 }
 
-enum class CheckinInvalidReason { UNKNOWN_FORMAT, TOKEN_INVALID, TOKEN_REVOKED, TOKEN_EXPIRED, TOKEN_USED }
+enum class CheckinInvalidReason {
+    UNKNOWN_FORMAT,
+    TOKEN_INVALID,
+    TOKEN_REVOKED,
+    TOKEN_EXPIRED,
+    TOKEN_USED,
+    BOOKING_INVALID,
+}
 
 sealed interface CheckinResult {
     data class Success(

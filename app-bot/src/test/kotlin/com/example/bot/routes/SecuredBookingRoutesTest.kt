@@ -151,6 +151,7 @@ private fun bookingRecord(
         slotStart = Instant.parse("2025-04-01T10:00:00Z"),
         slotEnd = Instant.parse("2025-04-01T12:00:00Z"),
         status = status,
+        arrivalBy = null,
         qrSecret = "qr",
         idempotencyKey = "idem",
         createdAt = Instant.parse("2025-03-01T10:00:00Z"),
