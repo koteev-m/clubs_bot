@@ -90,6 +90,47 @@ class CheckinServiceTest {
     }
 
     @Test
+    fun `scan invitation marks late when arrival window ended`() = runBlocking {
+        val card = invitationCard(entryId = 7, arrivalWindowEnd = fixedClock.instant().minusSeconds(60))
+        val checkin =
+            checkinRecord(
+                subjectId = card.entryId.toString(),
+                occurredAt = fixedClock.instant(),
+                resultStatus = CheckinResultStatus.LATE,
+            )
+
+        coEvery { invitationService.resolveInvitation("token") } returns InvitationServiceResult.Success(card)
+        coEvery {
+            checkinRepo.insertWithEntryUpdate(
+                checkin = any(),
+                entryId = card.entryId,
+                entryStatus = GuestListEntryStatus.LATE,
+                invitationUse = any(),
+            )
+        } returns checkin
+        coEvery { checkinRepo.findBySubject(any(), any()) } returns null
+
+        val result = service.scanQr("inv:token", actor)
+
+        check(result is CheckinServiceResult.Success)
+        val payload = (result as CheckinServiceResult.Success).value
+        assertTrue(payload is CheckinResult.Success)
+        val success = payload as CheckinResult.Success
+        assertEquals(CheckinResultStatus.LATE, success.resultStatus)
+
+        coVerify(exactly = 1) {
+            checkinRepo.insertWithEntryUpdate(
+                checkin = any(),
+                entryId = card.entryId,
+                entryStatus = GuestListEntryStatus.LATE,
+                invitationUse = any(),
+            )
+        }
+        coVerify(exactly = 1) { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, card.entryId.toString()) }
+        confirmVerified(checkinRepo)
+    }
+
+    @Test
     fun `repeat scan returns already used`() = runBlocking {
         val existing = checkinRecord(subjectId = "15", method = CheckinMethod.QR)
 
@@ -177,6 +218,7 @@ class CheckinServiceTest {
         subjectId: String,
         method: CheckinMethod = CheckinMethod.NAME,
         occurredAt: Instant = fixedClock.instant(),
+        resultStatus: CheckinResultStatus = CheckinResultStatus.ARRIVED,
     ): CheckinRecord =
         CheckinRecord(
             id = 1,
@@ -186,7 +228,7 @@ class CheckinServiceTest {
             subjectId = subjectId,
             checkedBy = actor.userId,
             method = method,
-            resultStatus = CheckinResultStatus.ARRIVED,
+            resultStatus = resultStatus,
             denyReason = null,
             occurredAt = occurredAt,
             createdAt = occurredAt,

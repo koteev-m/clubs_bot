@@ -19,7 +19,6 @@ import com.example.bot.data.club.CheckinDbRepository.InvitationUse
 import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.db.isUniqueViolation
-import com.example.bot.data.db.withTxRetry
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
 import org.slf4j.LoggerFactory
@@ -98,7 +97,12 @@ class CheckinServiceImpl(
                     ),
                 entryId = card.entryId,
                 entryStatus = resultStatus.toEntryStatus(),
-                invitationUse = card.usedAt?.let { null } ?: InvitationUse(card.invitationId, occurredAt),
+                invitationUse =
+                    if (card.usedAt != null) {
+                        null
+                    } else {
+                        InvitationUse(card.invitationId, occurredAt)
+                    },
                 displayName = card.displayName,
             )
         } catch (ex: Exception) {
@@ -217,14 +221,12 @@ class CheckinServiceImpl(
         displayName: String?,
     ): CheckinServiceResult<CheckinResult> {
         val record =
-            withTxRetry {
-                checkinRepo.insertWithEntryUpdate(
-                    checkin = checkin,
-                    entryId = entryId,
-                    entryStatus = entryStatus,
-                    invitationUse = invitationUse,
-                )
-            }
+            checkinRepo.insertWithEntryUpdate(
+                checkin = checkin,
+                entryId = entryId,
+                entryStatus = entryStatus,
+                invitationUse = invitationUse,
+            )
 
         return CheckinServiceResult.Success(
             CheckinResult.Success(
