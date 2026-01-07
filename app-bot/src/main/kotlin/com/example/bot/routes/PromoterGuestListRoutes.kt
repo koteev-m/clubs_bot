@@ -1,8 +1,10 @@
 package com.example.bot.routes
 
+import com.example.bot.club.GuestList
 import com.example.bot.club.GuestListEntryInfo
 import com.example.bot.club.GuestListInfo
 import com.example.bot.club.GuestListOwnerType
+import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListService
 import com.example.bot.club.GuestListServiceError
 import com.example.bot.club.GuestListServiceResult
@@ -17,6 +19,7 @@ import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
+import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpStatusCode
@@ -129,19 +132,15 @@ private enum class InvitationChannelDto {
 }
 
 fun Application.promoterGuestListRoutes(
+    guestListRepository: GuestListRepository,
     guestListService: GuestListService,
     guestListEntryRepository: GuestListEntryDbRepository,
     invitationService: InvitationService,
     clock: Clock = Clock.systemUTC(),
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
-    enableMiniAppAuth: Boolean = true,
 ) {
     routing {
         route("/api/promoter") {
-            if (enableMiniAppAuth) {
-                withMiniAppAuth { botTokenProvider() }
-            }
-
             authorize(
                 Role.PROMOTER,
                 Role.MANAGER,
@@ -150,6 +149,8 @@ fun Application.promoterGuestListRoutes(
                 Role.GLOBAL_ADMIN,
                 Role.OWNER,
             ) {
+                withMiniAppAuth { botTokenProvider() }
+
                 post("/guest-lists") {
                     val payload = runCatching { call.receive<CreateGuestListRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
@@ -214,6 +215,14 @@ fun Application.promoterGuestListRoutes(
                     val payload = runCatching { call.receive<BulkEntriesRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
+                    val list =
+                        guestListRepository.getList(listId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
+                    val context = call.rbacContext()
+                    if (!canAccessList(context, list)) {
+                        return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                    }
+
                     when (val result = guestListService.addEntriesBulk(listId, payload.rawText)) {
                         is GuestListServiceResult.Failure -> {
                             val (status, code) = result.error.toHttpError()
@@ -239,6 +248,14 @@ fun Application.promoterGuestListRoutes(
 
                     val payload = runCatching { call.receive<AddEntryRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+
+                    val list =
+                        guestListRepository.getList(listId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
+                    val context = call.rbacContext()
+                    if (!canAccessList(context, list)) {
+                        return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                    }
 
                     val added = guestListService.addEntrySingle(listId, payload.displayName)
                     when (added) {
@@ -273,6 +290,14 @@ fun Application.promoterGuestListRoutes(
                     val entryId = call.parameters["entryId"]?.toLongOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
+                    val list =
+                        guestListRepository.getList(listId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
+                    val context = call.rbacContext()
+                    if (!canAccessList(context, list)) {
+                        return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                    }
+
                     val entry =
                         guestListEntryRepository.findById(entryId)
                             ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
@@ -284,7 +309,6 @@ fun Application.promoterGuestListRoutes(
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                     val channel = payload.channel.toDomain()
-                    val context = call.rbacContext()
                     when (
                         val result = invitationService.createInvitation(
                             entryId = entryId,
@@ -304,6 +328,25 @@ fun Application.promoterGuestListRoutes(
             }
         }
     }
+}
+
+private val GLOBAL_ROLES: Set<Role> =
+    setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+
+private fun canAccessList(
+    context: RbacContext,
+    list: GuestList,
+): Boolean {
+    val isGlobal = context.roles.any { it in GLOBAL_ROLES }
+    val isClubScoped =
+        (Role.CLUB_ADMIN in context.roles || Role.MANAGER in context.roles) &&
+            (list.clubId in context.clubIds)
+    val isPromoterOwnList =
+        (Role.PROMOTER in context.roles) &&
+            list.ownerType == GuestListOwnerType.PROMOTER &&
+            list.ownerUserId == context.user.id
+
+    return isGlobal || isClubScoped || isPromoterOwnList
 }
 
 private fun parseInstant(value: String?): Instant? = value?.let { runCatching { Instant.parse(it) }.getOrNull() }

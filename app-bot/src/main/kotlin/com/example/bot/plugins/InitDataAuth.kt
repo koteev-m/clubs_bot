@@ -47,6 +47,7 @@ internal class MiniAppAuthAbort : RuntimeException() {
 
 private class MiniAppAuthConfig {
     lateinit var botTokenProvider: () -> String
+    // Если true — отсутствие initData не считается ошибкой (например, на публичных маршрутах).
     var allowMissingInitData: Boolean = false
 }
 
@@ -55,6 +56,7 @@ private val MiniAppAuth =
         val tokenProvider = pluginConfig.botTokenProvider
 
         onCall { call ->
+            // includeBody управляет тем, можно ли пытаться доставать initData из JSON/form body.
             val initData = extractInitData(call, includeBody = !pluginConfig.allowMissingInitData)
             if (initData.isNullOrBlank()) {
                 if (pluginConfig.allowMissingInitData) {
