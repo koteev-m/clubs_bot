@@ -212,10 +212,10 @@ fun Application.promoterGuestListRoutes(
                     val listId = call.parameters["id"]?.toLongOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
+                    call.requireAccessibleGuestList(guestListRepository, listId) ?: return@post
+
                     val payload = runCatching { call.receive<BulkEntriesRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-
-                    call.requireAccessibleGuestList(guestListRepository, listId) ?: return@post
 
                     when (val result = guestListService.addEntriesBulk(listId, payload.rawText)) {
                         is GuestListServiceResult.Failure -> {
@@ -240,10 +240,10 @@ fun Application.promoterGuestListRoutes(
                     val listId = call.parameters["id"]?.toLongOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
+                    call.requireAccessibleGuestList(guestListRepository, listId) ?: return@post
+
                     val payload = runCatching { call.receive<AddEntryRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-
-                    call.requireAccessibleGuestList(guestListRepository, listId) ?: return@post
 
                     val added = guestListService.addEntrySingle(listId, payload.displayName)
                     when (added) {
