@@ -17,6 +17,12 @@ data class BookingQrConfig(
         ),
     ),
 ) {
+    init {
+        if (secret.isBlank() && (oldSecret == null || oldSecret.isBlank())) {
+            log.warn("QR secrets are missing or empty: {} and {} are not set", ENV_QR_SECRET, ENV_QR_OLD_SECRET)
+        }
+    }
+
     companion object {
         const val ENV_QR_SECRET: String = "QR_SECRET"
         const val ENV_QR_OLD_SECRET: String = "QR_OLD_SECRET"

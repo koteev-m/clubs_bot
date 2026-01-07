@@ -396,7 +396,8 @@ class CheckinServiceTest {
         coVerify(exactly = 1) { checkinRepo.insertWithBookingUpdate(any(), bookingId, BookingStatus.SEATED, any()) }
     }
 
-    fun `booking status is not updated from cancelled`() = runBlocking {
+    @Test
+    fun `booking update only allows transition from booked`() = runBlocking {
         val bookingId = UUID(0L, 60L)
         val booking = bookingRecord(id = bookingId, status = BookingStatus.CANCELLED)
         val checkin =

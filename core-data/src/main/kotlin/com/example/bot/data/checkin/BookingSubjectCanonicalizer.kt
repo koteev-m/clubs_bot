@@ -2,12 +2,12 @@ package com.example.bot.data.checkin
 
 import java.util.UUID
 
-data class CanonicalBookingSubject(
+internal data class CanonicalBookingSubject(
     val bookingId: UUID,
     val subjectId: String,
 )
 
-fun canonicalizeBookingSubject(input: String): CanonicalBookingSubject? {
+internal fun canonicalizeBookingSubject(input: String): CanonicalBookingSubject? {
     val trimmed = input.trim()
     if (trimmed.isEmpty()) return null
 
