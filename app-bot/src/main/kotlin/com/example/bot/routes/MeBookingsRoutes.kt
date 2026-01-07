@@ -11,6 +11,7 @@ import com.example.bot.clubs.EventsRepository
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.matchesEtag
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -51,7 +52,7 @@ fun Application.meBookingsRoutes(
     eventsRepository: EventsRepository,
     clubsRepository: ClubsRepository,
     meterRegistry: MeterRegistry? = null,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
     qrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: "" },
 ) {
     val logger = LoggerFactory.getLogger("MeBookingsRoutes")

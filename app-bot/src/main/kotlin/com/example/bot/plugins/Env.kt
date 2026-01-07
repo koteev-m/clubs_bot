@@ -24,6 +24,20 @@ fun Application.envString(
     return envValue ?: configValue ?: default
 }
 
+fun Application.miniAppBotToken(): String? {
+    val primary = envString("BOT_TOKEN") ?: System.getProperty("BOT_TOKEN")
+    if (!primary.isNullOrBlank()) {
+        return primary
+    }
+    return envString("TELEGRAM_BOT_TOKEN") ?: System.getProperty("TELEGRAM_BOT_TOKEN")
+}
+
+fun Application.miniAppBotTokenRequired(): String =
+    miniAppBotToken() ?: error("BOT_TOKEN or TELEGRAM_BOT_TOKEN is missing")
+
+fun Application.miniAppBotTokenProvider(default: String = ""): () -> String =
+    { miniAppBotToken() ?: default }
+
 private fun String.toBooleanStrictOrNull(): Boolean? =
     when (lowercase()) {
         "true" -> true

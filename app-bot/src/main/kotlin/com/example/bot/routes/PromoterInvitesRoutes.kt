@@ -2,6 +2,7 @@ package com.example.bot.routes
 
 import com.example.bot.http.ErrorCodes
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promoter.invites.PromoterInviteQrCodec
 import com.example.bot.promoter.invites.PromoterInviteService
@@ -58,7 +59,7 @@ private data class InvitesResponse(val invites: List<PromoterInviteView>)
 fun Application.promoterInvitesRoutes(
     promoterInviteService: PromoterInviteService,
     meterRegistry: MeterRegistry? = null,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
     qrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: "" },
     clock: Clock = Clock.systemUTC(),
 ) {

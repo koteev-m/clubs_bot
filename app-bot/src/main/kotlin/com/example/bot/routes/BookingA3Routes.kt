@@ -12,6 +12,7 @@ import com.example.bot.http.ErrorCodes
 import com.example.bot.logging.MdcContext
 import com.example.bot.logging.spanSuspended
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.ratelimit.RateLimitSnapshot
 import com.example.bot.ratelimit.TokenBucket
@@ -65,7 +66,7 @@ private data class ConfirmPayload(val bookingId: Long)
 fun Application.bookingA3Routes(
     bookingState: BookingState,
     meterRegistry: MeterRegistry? = null,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     val logger = LoggerFactory.getLogger("BookingA3Routes")
     val rateLimiter = RouteRateLimiter()

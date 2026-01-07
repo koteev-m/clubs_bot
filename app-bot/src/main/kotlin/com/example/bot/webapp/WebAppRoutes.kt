@@ -2,7 +2,7 @@ package com.example.bot.webapp
 
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.TelegramMiniUser
-import com.example.bot.plugins.envString
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -53,9 +53,9 @@ fun Application.webAppRoutes() {
 
         staticResources("/app", "webapp/app")
 
-        val botTokenProvider = { envString("BOT_TOKEN") ?: "" }
+        val botTokenProvider = miniAppBotTokenProvider()
         route("/miniapp") {
-            withMiniAppAuth(botTokenProvider)
+            withMiniAppAuth(botTokenProvider = botTokenProvider)
             get("/me") {
                 val user = call.attributes[MiniAppUserKey]
                 call.respond(HttpStatusCode.OK, MiniAppMeResponse(ok = true, user = user))

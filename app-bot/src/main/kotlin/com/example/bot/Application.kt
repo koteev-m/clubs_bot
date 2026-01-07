@@ -6,6 +6,7 @@ import com.example.bot.club.InvitationService
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.club.GuestListCsvParser
+import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
 import com.example.bot.metrics.UiCheckinMetrics
@@ -144,6 +145,7 @@ fun Application.module() {
     // 6) Инжект сервисов
     val guestListRepository by inject<GuestListRepository>()
     val guestListService by inject<GuestListService>()
+    val guestListEntryRepository by inject<GuestListEntryDbRepository>()
     val guestListCsvParser by inject<GuestListCsvParser>()
     val bookingService by inject<BookingService>()
     val bookingState by inject<com.example.bot.booking.a3.BookingState>()
@@ -202,6 +204,7 @@ fun Application.module() {
     promoterInvitesRoutes(promoterInviteService = promoterInviteService, meterRegistry = registry)
     promoterGuestListRoutes(
         guestListService = guestListService,
+        guestListEntryRepository = guestListEntryRepository,
         invitationService = invitationService,
         clock = appClock,
     )

@@ -7,6 +7,7 @@ import com.example.bot.clubs.EventsRepository
 import com.example.bot.http.etagFor
 import com.example.bot.http.matchesEtag
 import com.example.bot.metrics.RouteCacheMetrics
+import com.example.bot.plugins.miniAppBotTokenRequired
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -85,9 +86,7 @@ fun Application.clubsRoutes(
 
     routing {
         route("/api") {
-            withMiniAppAuth {
-                System.getenv("TELEGRAM_BOT_TOKEN")!!
-            }
+            withMiniAppAuth { miniAppBotTokenRequired() }
 
             get("/clubs") {
                 val params = call.request.queryParameters

@@ -2,6 +2,7 @@ package com.example.bot.routes
 
 import com.example.bot.booking.BookingService
 import com.example.bot.data.security.Role
+import com.example.bot.plugins.miniAppBotTokenRequired
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
@@ -20,7 +21,7 @@ import io.ktor.server.routing.routing
  */
 fun Application.securedRoutes(
     bookingService: BookingService,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN")!! },
+    botTokenProvider: () -> String = { miniAppBotTokenRequired() },
 ) {
     routing {
         // Админская зона

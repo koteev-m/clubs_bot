@@ -1,6 +1,7 @@
 package com.example.bot.routes
 
 import com.example.bot.music.MusicService
+import com.example.bot.plugins.miniAppBotTokenRequired
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -19,9 +20,7 @@ fun Application.musicRoutes(service: MusicService) {
 
     routing {
         route("/api/music") {
-            withMiniAppAuth {
-                System.getenv("TELEGRAM_BOT_TOKEN")!!
-            }
+            withMiniAppAuth { miniAppBotTokenRequired() }
 
             get("/items") {
                 val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]

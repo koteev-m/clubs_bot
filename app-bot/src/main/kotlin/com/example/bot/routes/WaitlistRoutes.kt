@@ -5,6 +5,7 @@ import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.security.Role
 import com.example.bot.metrics.UiWaitlistMetrics
 import com.example.bot.notifications.NotificationService
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
@@ -48,7 +49,7 @@ fun Application.waitlistRoutes(
     repository: WaitlistRepository,
     notificationService: NotificationService,
     clock: Clock = Clock.systemUTC(),
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
         route("/api/clubs/{clubId}/waitlist") {

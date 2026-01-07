@@ -8,6 +8,7 @@ import com.example.bot.host.ShiftChecklistService
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import io.ktor.http.HttpHeaders
@@ -39,7 +40,7 @@ fun Application.hostChecklistRoutes(
     checklistService: ShiftChecklistService,
     eventsRepository: EventsRepository,
     clock: Clock = Clock.systemUTC(),
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
         route("/api/host/checklist") {

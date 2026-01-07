@@ -3,6 +3,7 @@ package com.example.bot.routes
 import com.example.bot.booking.BookingCmdResult
 import com.example.bot.booking.BookingService
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.miniAppBotTokenRequired
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -20,7 +21,7 @@ private data class FinalizePayload(val bookingId: String)
 
 fun Application.bookingFinalizeRoutes(
     bookingService: BookingService,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: error("TELEGRAM_BOT_TOKEN missing") },
+    botTokenProvider: () -> String = { miniAppBotTokenRequired() },
 ) {
     routing {
         route("/api/clubs/{clubId}/bookings") {
