@@ -24,13 +24,10 @@ import com.example.bot.plugins.installMiniAppAuthStatusPage
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
-import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
-import io.ktor.client.request.header
-import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -92,9 +89,7 @@ class PromoterGuestListRoutesTest {
             val initData = createInitData(userId = 100)
             val response =
                 client.post("/api/promoter/guest-lists") {
-                    parameter("initData", initData)
-                    header("X-Telegram-Init-Data", initData)
-                    header("X-Telegram-InitData", initData)
+                    withInitData(initData)
                     contentType(ContentType.Application.Json)
                     setBody(
                         """
@@ -166,9 +161,7 @@ class PromoterGuestListRoutesTest {
             val initData = createInitData(userId = 100)
             val response =
                 client.post("/api/promoter/guest-lists/$listId/entries") {
-                    parameter("initData", initData)
-                    header("X-Telegram-Init-Data", initData)
-                    header("X-Telegram-InitData", initData)
+                    withInitData(initData)
                     contentType(ContentType.Application.Json)
                     setBody("""{"displayName":"Guest"}""")
                 }
@@ -257,7 +250,6 @@ class PromoterGuestListRoutesTest {
             val initData = createInitData(userId = 100)
             val response =
                 client.post("/api/invitations/respond") {
-                    parameter("initData", initData)
                     withInitData(initData)
                     contentType(ContentType.Application.Json)
                     setBody("""{"token":"token","response":"CONFIRM"}""")
@@ -319,9 +311,7 @@ class PromoterGuestListRoutesTest {
             val initData = createInitData(userId = 100)
             val response =
                 client.post("/api/promoter/guest-lists/12/entries/50/invitation") {
-                    parameter("initData", initData)
-                    header("X-Telegram-Init-Data", initData)
-                    header("X-Telegram-InitData", initData)
+                    withInitData(initData)
                     contentType(ContentType.Application.Json)
                     setBody("""{"channel":"TELEGRAM"}""")
                 }
@@ -345,17 +335,8 @@ private fun Application.installRbac(roles: Set<Role>) {
                 val principal = call.attributes[MiniAppUserKey]
                 TelegramPrincipal(principal.id, principal.username)
             } else {
-                val initData =
-                    call.request.header("X-Telegram-InitData")
-                        ?: call.request.header("X-Telegram-Init-Data")
-                        ?: call.request.queryParameters["initData"]
-                val initUser = initData?.let { InitDataValidator.validate(it, TEST_BOT_TOKEN) }
-                if (initUser != null) {
-                    TelegramPrincipal(initUser.id, initUser.username)
-                } else {
-                    call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { id ->
-                        TelegramPrincipal(id, call.request.header("X-Telegram-Username"))
-                    }
+                call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { id ->
+                    TelegramPrincipal(id, call.request.header("X-Telegram-Username"))
                 }
             }
         }
