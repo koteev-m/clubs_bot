@@ -20,7 +20,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
-class CheckinDbRepositoryIT : PostgresClubIntegrationTest() {
+class CheckinDbRepositoryTest : PostgresClubIntegrationTest() {
     private val clock = Clock.fixed(Instant.parse("2025-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val checkinRepo by lazy { CheckinDbRepository(database, clock) }
 
@@ -42,6 +42,7 @@ class CheckinDbRepositoryIT : PostgresClubIntegrationTest() {
                 minDeposit = BigDecimal("100.00"),
             )
             val bookingId = UUID(0L, 60L)
+            val subjectId = bookingId.leastSignificantBits.toString()
             val slotStart = Instant.parse("2025-01-02T20:00:00Z")
             val slotEnd = Instant.parse("2025-01-03T02:00:00Z")
             val timestamp = OffsetDateTime.ofInstant(Instant.now(clock), ZoneOffset.UTC)
@@ -76,7 +77,7 @@ class CheckinDbRepositoryIT : PostgresClubIntegrationTest() {
                     clubId = clubId,
                     eventId = eventId,
                     subjectType = CheckinSubjectType.BOOKING,
-                    subjectId = "60",
+                    subjectId = subjectId,
                     checkedBy = null,
                     method = CheckinMethod.QR,
                     resultStatus = CheckinResultStatus.ARRIVED,
@@ -92,9 +93,10 @@ class CheckinDbRepositoryIT : PostgresClubIntegrationTest() {
                     allowedFromStatuses = setOf(BookingStatus.BOOKED),
                 )
 
-            val stored = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, bookingId.toString())
+            val stored = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
             assertNotNull(stored)
             assertEquals(inserted.id, stored?.id)
+            assertEquals(subjectId, stored?.subjectId)
 
             val bookingStatus =
                 transaction(database) {
@@ -124,6 +126,7 @@ class CheckinDbRepositoryIT : PostgresClubIntegrationTest() {
                 minDeposit = BigDecimal("100.00"),
             )
             val bookingId = UUID(0L, 61L)
+            val subjectId = bookingId.leastSignificantBits.toString()
             val slotStart = Instant.parse("2025-01-02T20:00:00Z")
             val slotEnd = Instant.parse("2025-01-03T02:00:00Z")
             val timestamp = OffsetDateTime.ofInstant(Instant.now(clock), ZoneOffset.UTC)
@@ -158,7 +161,7 @@ class CheckinDbRepositoryIT : PostgresClubIntegrationTest() {
                     clubId = clubId,
                     eventId = eventId,
                     subjectType = CheckinSubjectType.BOOKING,
-                    subjectId = "61",
+                    subjectId = subjectId,
                     checkedBy = null,
                     method = CheckinMethod.QR,
                     resultStatus = CheckinResultStatus.ARRIVED,
@@ -174,9 +177,10 @@ class CheckinDbRepositoryIT : PostgresClubIntegrationTest() {
                     allowedFromStatuses = setOf(BookingStatus.BOOKED),
                 )
 
-            val stored = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, bookingId.toString())
+            val stored = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
             assertNotNull(stored)
             assertEquals(inserted.id, stored?.id)
+            assertEquals(subjectId, stored?.subjectId)
 
             val bookingStatus =
                 transaction(database) {
