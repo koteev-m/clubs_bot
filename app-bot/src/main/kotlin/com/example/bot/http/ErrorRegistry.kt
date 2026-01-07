@@ -18,7 +18,7 @@ data class ErrorCodesPayload(
 )
 
 object ErrorRegistry {
-    const val version: Int = 3
+    const val version: Int = 4
     val etag: String = "\"error-codes-v$version\""
     const val cacheControl: String = "public, max-age=300, stale-while-revalidate=30, stale-if-error=86400"
 
@@ -40,6 +40,10 @@ object ErrorRegistry {
         ErrorCodeInfo(ErrorCodes.empty_qr, HttpStatusCode.BadRequest.value),
         ErrorCodeInfo(ErrorCodes.invalid_or_expired_qr, HttpStatusCode.BadRequest.value),
         ErrorCodeInfo(ErrorCodes.invalid_club_id, HttpStatusCode.BadRequest.value),
+        ErrorCodeInfo(ErrorCodes.checkin_invalid_payload, HttpStatusCode.BadRequest.value),
+        ErrorCodeInfo(ErrorCodes.checkin_deny_reason_required, HttpStatusCode.BadRequest.value),
+        ErrorCodeInfo(ErrorCodes.checkin_subject_not_found, HttpStatusCode.NotFound.value),
+        ErrorCodeInfo(ErrorCodes.checkin_forbidden, HttpStatusCode.Forbidden.value),
         ErrorCodeInfo(ErrorCodes.entry_list_mismatch, HttpStatusCode.BadRequest.value),
         ErrorCodeInfo(ErrorCodes.list_not_found, HttpStatusCode.NotFound.value),
         ErrorCodeInfo(ErrorCodes.entry_not_found, HttpStatusCode.NotFound.value),

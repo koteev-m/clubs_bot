@@ -162,8 +162,17 @@ class HostEntranceService(
 
     private fun List<GuestListEntry>.toGuestListMetrics(): ChannelMetrics {
         val expected = filter { it.status != GuestListEntryStatus.EXPIRED }.sumOf { it.guestsCount }
-        val arrived = filter { it.status == GuestListEntryStatus.CHECKED_IN }.sumOf { it.guestsCount }
-        val noShow = filter { it.status == GuestListEntryStatus.NO_SHOW }.sumOf { it.guestsCount }
+        val arrivedStatuses = setOf(
+            GuestListEntryStatus.ARRIVED,
+            GuestListEntryStatus.LATE,
+            GuestListEntryStatus.CHECKED_IN,
+        )
+        val noShowStatuses = setOf(
+            GuestListEntryStatus.NO_SHOW,
+            GuestListEntryStatus.DENIED,
+        )
+        val arrived = filter { it.status in arrivedStatuses }.sumOf { it.guestsCount }
+        val noShow = filter { it.status in noShowStatuses }.sumOf { it.guestsCount }
         return ChannelMetrics(expected = expected, arrived = arrived, noShow = noShow)
     }
 

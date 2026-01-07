@@ -1,6 +1,7 @@
 package com.example.bot
 
 import com.example.bot.booking.BookingService
+import com.example.bot.checkin.CheckinService
 import com.example.bot.club.GuestListService
 import com.example.bot.club.InvitationService
 import com.example.bot.club.GuestListRepository
@@ -49,6 +50,7 @@ import com.example.bot.routes.guestListInviteRoutes
 import com.example.bot.routes.guestListRoutes
 import com.example.bot.routes.hostEntranceRoutes
 import com.example.bot.routes.hostChecklistRoutes
+import com.example.bot.routes.hostCheckinRoutes
 import com.example.bot.routes.adminTablesRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
@@ -86,8 +88,8 @@ import java.lang.reflect.Modifier
 import java.net.JarURLConnection
 import java.net.URL
 import java.util.jar.JarFile
-import com.example.bot.host.ShiftChecklistService
 import java.time.Clock
+import com.example.bot.host.ShiftChecklistService
 
 @Suppress("unused")
 fun Application.module() {
@@ -164,6 +166,7 @@ fun Application.module() {
     val promoterQuotaService by inject<PromoterQuotaService>()
     val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
+    val checkinService by inject<CheckinService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
     val hostEntranceService =
@@ -243,6 +246,7 @@ fun Application.module() {
         eventsRepository = eventsRepository,
         clock = appClock,
     )
+    hostCheckinRoutes(checkinService = checkinService)
 
     // 9) Прочее
     routing {
