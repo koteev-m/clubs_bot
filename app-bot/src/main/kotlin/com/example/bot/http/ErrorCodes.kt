@@ -34,6 +34,11 @@ object ErrorCodes {
     const val invitation_already_used: String = "invitation_already_used"
     const val invitation_forbidden: String = "invitation_forbidden"
 
+    const val checkin_forbidden: String = "checkin_forbidden"
+    const val checkin_invalid_payload: String = "checkin_invalid_payload"
+    const val checkin_subject_not_found: String = "checkin_subject_not_found"
+    const val checkin_deny_reason_required: String = "checkin_deny_reason_required"
+
     // Booking (A3)
     const val table_not_available: String = "table_not_available"
     const val validation_error: String = "validation_error"
