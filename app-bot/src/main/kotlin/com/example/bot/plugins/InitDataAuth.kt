@@ -165,8 +165,9 @@ private suspend fun extractInitDataFromBodyOrNull(
     maxInitDataBodyBytes: Long,
 ): String? {
     return try {
-        val contentLength = call.request.header(HttpHeaders.ContentLength)?.toLongOrNull()
-        if (contentLength != null && contentLength > maxInitDataBodyBytes) {
+        val contentLengthHeader = call.request.header(HttpHeaders.ContentLength) ?: return null
+        val contentLength = contentLengthHeader.toLongOrNull() ?: return null
+        if (contentLength > maxInitDataBodyBytes) {
             return null
         }
         when {

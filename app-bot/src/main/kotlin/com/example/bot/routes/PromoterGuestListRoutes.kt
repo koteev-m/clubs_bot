@@ -142,7 +142,7 @@ fun Application.promoterGuestListRoutes(
 ) {
     routing {
         route("/api/promoter") {
-            withMiniAppAuth { botTokenProvider() }
+            withMiniAppAuth(allowInitDataFromBody = false) { botTokenProvider() }
             authorize(
                 Role.PROMOTER,
                 Role.MANAGER,
