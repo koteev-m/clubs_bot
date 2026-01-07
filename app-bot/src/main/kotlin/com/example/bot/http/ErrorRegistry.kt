@@ -18,7 +18,7 @@ data class ErrorCodesPayload(
 )
 
 object ErrorRegistry {
-    const val version: Int = 2
+    const val version: Int = 3
     val etag: String = "\"error-codes-v$version\""
     const val cacheControl: String = "public, max-age=300, stale-while-revalidate=30, stale-if-error=86400"
 
@@ -61,7 +61,22 @@ object ErrorRegistry {
         ErrorCodeInfo(ErrorCodes.promoter_quota_exhausted, HttpStatusCode.Conflict.value),
     ).sortedBy { it.code }
 
-    val codes: List<ErrorCodeInfo> = common + checkin + booking
+    val guestLists: List<ErrorCodeInfo> = listOf(
+        ErrorCodeInfo(ErrorCodes.guest_list_not_found, HttpStatusCode.NotFound.value),
+        ErrorCodeInfo(ErrorCodes.guest_list_not_active, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.guest_list_limit_exceeded, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.bulk_parse_too_large, HttpStatusCode.PayloadTooLarge.value),
+    ).sortedBy { it.code }
+
+    val invitations: List<ErrorCodeInfo> = listOf(
+        ErrorCodeInfo(ErrorCodes.invitation_invalid, HttpStatusCode.BadRequest.value),
+        ErrorCodeInfo(ErrorCodes.invitation_revoked, HttpStatusCode.Gone.value),
+        ErrorCodeInfo(ErrorCodes.invitation_expired, HttpStatusCode.Gone.value),
+        ErrorCodeInfo(ErrorCodes.invitation_already_used, HttpStatusCode.Conflict.value),
+        ErrorCodeInfo(ErrorCodes.invitation_forbidden, HttpStatusCode.Forbidden.value),
+    ).sortedBy { it.code }
+
+    val codes: List<ErrorCodeInfo> = common + checkin + booking + guestLists + invitations
 
     init {
         val duplicateCodes = codes

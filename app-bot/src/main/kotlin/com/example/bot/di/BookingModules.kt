@@ -2,14 +2,21 @@ package com.example.bot.di
 
 import com.example.bot.booking.BookingService
 import com.example.bot.club.GuestListRepository
+import com.example.bot.club.GuestListService
+import com.example.bot.club.InvitationService
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.booking.core.AuditLogRepository
 import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.booking.core.OutboxRepository
 import com.example.bot.data.booking.core.PaymentsBookingRepository
+import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListCsvParser
+import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListRepositoryImpl
+import com.example.bot.data.club.GuestListServiceImpl
+import com.example.bot.data.club.InvitationDbRepository
+import com.example.bot.data.club.InvitationServiceImpl
 import com.example.bot.data.club.WaitlistRepositoryImpl
 import com.example.bot.data.notifications.NotificationsOutboxRepository
 import com.example.bot.data.promo.BookingTemplateRepositoryImpl
@@ -62,6 +69,11 @@ val bookingModule =
 
         single<GuestListRepository> { GuestListRepositoryImpl(get()) }
         single<WaitlistRepository> { WaitlistRepositoryImpl(get()) }
+        single { GuestListDbRepository(get()) }
+        single { GuestListEntryDbRepository(get()) }
+        single { InvitationDbRepository(get()) }
+        single<GuestListService> { GuestListServiceImpl(get(), get()) }
+        single<InvitationService> { InvitationServiceImpl(get(), get(), get()) }
 
         single<PromoLinkRepository> { PromoLinkRepositoryImpl(get()) }
         single<PromoAttributionRepository> { PromoAttributionRepositoryImpl(get()) }

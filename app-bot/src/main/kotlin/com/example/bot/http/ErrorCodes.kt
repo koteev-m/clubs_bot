@@ -23,6 +23,17 @@ object ErrorCodes {
     const val outside_arrival_window: String = "outside_arrival_window"
     const val unable_to_mark: String = "unable_to_mark"
 
+    const val guest_list_not_found: String = "guest_list_not_found"
+    const val guest_list_not_active: String = "guest_list_not_active"
+    const val guest_list_limit_exceeded: String = "guest_list_limit_exceeded"
+    const val bulk_parse_too_large: String = "bulk_parse_too_large"
+
+    const val invitation_invalid: String = "invitation_invalid"
+    const val invitation_revoked: String = "invitation_revoked"
+    const val invitation_expired: String = "invitation_expired"
+    const val invitation_already_used: String = "invitation_already_used"
+    const val invitation_forbidden: String = "invitation_forbidden"
+
     // Booking (A3)
     const val table_not_available: String = "table_not_available"
     const val validation_error: String = "validation_error"

@@ -1,6 +1,8 @@
 package com.example.bot
 
 import com.example.bot.booking.BookingService
+import com.example.bot.club.GuestListService
+import com.example.bot.club.InvitationService
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.club.GuestListCsvParser
@@ -54,11 +56,13 @@ import com.example.bot.routes.musicLikesRoutes
 import com.example.bot.routes.ownerHealthRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.promoterInvitesRoutes
+import com.example.bot.routes.promoterGuestListRoutes
 import com.example.bot.routes.promoterQuotasAdminRoutes
 import com.example.bot.routes.promoterRatingRoutes
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.trackOfNightRoutes
 import com.example.bot.routes.waitlistRoutes
+import com.example.bot.routes.invitationRoutes
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -139,6 +143,7 @@ fun Application.module() {
 
     // 6) Инжект сервисов
     val guestListRepository by inject<GuestListRepository>()
+    val guestListService by inject<GuestListService>()
     val guestListCsvParser by inject<GuestListCsvParser>()
     val bookingService by inject<BookingService>()
     val bookingState by inject<com.example.bot.booking.a3.BookingState>()
@@ -155,6 +160,7 @@ fun Application.module() {
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
+    val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
@@ -194,6 +200,11 @@ fun Application.module() {
         rotationConfig = rotationConfig,
     )
     promoterInvitesRoutes(promoterInviteService = promoterInviteService, meterRegistry = registry)
+    promoterGuestListRoutes(
+        guestListService = guestListService,
+        invitationService = invitationService,
+        clock = appClock,
+    )
     promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
     adminTablesRoutes(adminTablesRepository = adminTablesRepository)
@@ -216,6 +227,7 @@ fun Application.module() {
         clock = appClock,
     )
     guestListInviteRoutes(repository = guestListRepository)
+    invitationRoutes(invitationService = invitationService)
     waitlistRoutes(
         repository = waitlistRepository,
         notificationService = notificationService,
