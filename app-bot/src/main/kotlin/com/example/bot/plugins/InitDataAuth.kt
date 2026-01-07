@@ -3,6 +3,7 @@ package com.example.bot.plugins
 import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.auth.TelegramUser
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -49,6 +50,10 @@ private class MiniAppAuthConfig {
     lateinit var botTokenProvider: () -> String
     // Если true — отсутствие initData не считается ошибкой (например, на публичных маршрутах).
     var allowMissingInitData: Boolean = false
+    // Если true — можно пытаться извлекать initData из JSON/form body.
+    var allowInitDataFromBody: Boolean = true
+    // Максимальный размер body для чтения initData (Content-Length).
+    var maxInitDataBodyBytes: Long = 8_192
 }
 
 private val MiniAppAuth =
@@ -56,8 +61,12 @@ private val MiniAppAuth =
         val tokenProvider = pluginConfig.botTokenProvider
 
         onCall { call ->
-            // includeBody управляет тем, можно ли пытаться доставать initData из JSON/form body.
-            val initData = extractInitData(call, includeBody = !pluginConfig.allowMissingInitData)
+            val initData =
+                extractInitData(
+                    call,
+                    allowInitDataFromBody = pluginConfig.allowInitDataFromBody,
+                    maxInitDataBodyBytes = pluginConfig.maxInitDataBodyBytes,
+                )
             if (initData.isNullOrBlank()) {
                 if (pluginConfig.allowMissingInitData) {
                     return@onCall
@@ -92,6 +101,8 @@ private val MiniAppAuthRouteMarker = AttributeKey<Boolean>("miniapp.auth.install
 
 fun Route.withMiniAppAuth(
     allowMissingInitData: Boolean = false,
+    allowInitDataFromBody: Boolean = true,
+    maxInitDataBodyBytes: Long = 8_192,
     botTokenProvider: () -> String,
 ) {
     if (attributes.contains(MiniAppAuthRouteMarker)) return
@@ -99,6 +110,8 @@ fun Route.withMiniAppAuth(
         install(MiniAppAuth) {
             this.botTokenProvider = botTokenProvider
             this.allowMissingInitData = allowMissingInitData
+            this.allowInitDataFromBody = allowInitDataFromBody
+            this.maxInitDataBodyBytes = maxInitDataBodyBytes
         }
     } catch (_: DuplicatePluginException) {
         // уже установлен выше
@@ -126,7 +139,11 @@ private fun TelegramUser.toMiniUser(): TelegramMiniUser = TelegramMiniUser(id = 
 
 // -------- helpers --------
 
-private suspend fun extractInitData(call: ApplicationCall, includeBody: Boolean): String? {
+private suspend fun extractInitData(
+    call: ApplicationCall,
+    allowInitDataFromBody: Boolean,
+    maxInitDataBodyBytes: Long,
+): String? {
     val q = call.request.queryParameters["initData"]?.takeIf { it.isNotBlank() }
     val h =
         call.request.header("X-Telegram-InitData")?.takeIf { it.isNotBlank() }
@@ -134,8 +151,8 @@ private suspend fun extractInitData(call: ApplicationCall, includeBody: Boolean)
 
     if (!q.isNullOrBlank()) return q
     if (!h.isNullOrBlank()) return h
-    if (!includeBody) return null
-    return extractInitDataFromBodyOrNull(call)
+    if (!allowInitDataFromBody) return null
+    return extractInitDataFromBodyOrNull(call, maxInitDataBodyBytes)
 }
 
 private suspend fun ApplicationCall.respondUnauthorized(reason: String) {
@@ -143,8 +160,15 @@ private suspend fun ApplicationCall.respondUnauthorized(reason: String) {
     respond(HttpStatusCode.Unauthorized, mapOf("error" to reason))
 }
 
-private suspend fun extractInitDataFromBodyOrNull(call: ApplicationCall): String? =
-    try {
+private suspend fun extractInitDataFromBodyOrNull(
+    call: ApplicationCall,
+    maxInitDataBodyBytes: Long,
+): String? {
+    return try {
+        val contentLength = call.request.header(HttpHeaders.ContentLength)?.toLongOrNull()
+        if (contentLength != null && contentLength > maxInitDataBodyBytes) {
+            return null
+        }
         when {
             call.request.contentType().match(ContentType.Application.FormUrlEncoded) ->
                 call.receiveParameters()["initData"]
@@ -159,5 +183,6 @@ private suspend fun extractInitDataFromBodyOrNull(call: ApplicationCall): String
     } catch (_: Throwable) {
         null
     }
+}
 
 private val INIT_DATA_REGEX = "\"initData\"\\s*:\\s*\"([^\"]+)\"".toRegex()
