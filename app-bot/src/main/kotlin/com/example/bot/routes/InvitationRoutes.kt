@@ -77,6 +77,7 @@ fun Application.invitationRoutes(
                 withMiniAppAuth(
                     botTokenProvider = botTokenProvider,
                     allowMissingInitData = true,
+                    allowInitDataFromBody = false,
                 )
 
                 post {
