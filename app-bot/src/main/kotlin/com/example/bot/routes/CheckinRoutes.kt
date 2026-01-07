@@ -15,6 +15,7 @@ import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
+import com.example.bot.plugins.miniAppBotTokenRequired
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.http.respondError
 import com.example.bot.metrics.QrRotationConfig
@@ -63,7 +64,7 @@ private data class PromoterInviteScanResponse(
 fun Application.checkinRoutes(
     repository: GuestListRepository,
     promoterInviteService: PromoterInviteService? = null,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: error("TELEGRAM_BOT_TOKEN missing") },
+    botTokenProvider: () -> String = { miniAppBotTokenRequired() },
     qrSecretProvider: () -> String = { System.getenv("QR_SECRET") ?: error("QR_SECRET missing") },
     rotationConfig: QrRotationConfig = QrRotationConfig.fromEnv(),
     oldQrSecretProvider: () -> String? = { rotationConfig.oldSecret },

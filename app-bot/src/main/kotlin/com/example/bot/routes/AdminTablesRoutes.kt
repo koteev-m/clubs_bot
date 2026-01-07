@@ -10,6 +10,7 @@ import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.ArrivalWindow
 import com.example.bot.layout.parseArrivalWindowOrNull
 import com.example.bot.layout.toRangeString
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -73,7 +74,7 @@ private data class AdminTableResponse(
 
 fun Application.adminTablesRoutes(
     adminTablesRepository: AdminTablesRepository,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     val logger = LoggerFactory.getLogger("AdminTablesRoutes")
 

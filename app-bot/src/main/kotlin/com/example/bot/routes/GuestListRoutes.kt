@@ -10,6 +10,7 @@ import com.example.bot.club.RejectedRow
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.security.Role
 import com.example.bot.metrics.UiCheckinMetrics
+import com.example.bot.plugins.miniAppBotTokenRequired
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
@@ -45,7 +46,7 @@ import kotlin.io.use
 fun Application.guestListRoutes(
     repository: GuestListRepository,
     parser: GuestListCsvParser,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN")!! },
+    botTokenProvider: () -> String = { miniAppBotTokenRequired() },
 ) {
     routing {
         // Плагин ставим ТОЛЬКО на ветку /api/guest-lists, чтобы /health, /ready и пр. остались публичными

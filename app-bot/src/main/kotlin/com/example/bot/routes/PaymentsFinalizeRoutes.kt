@@ -64,7 +64,7 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
         route("/api/clubs/{clubId}/bookings") {
             // Плагин ставим на дочерний узел /finalize, чтобы не конфликтовать с другими модулями
             route("/finalize") {
-                withMiniAppAuth(miniAppBotTokenProvider)
+                withMiniAppAuth(botTokenProvider = miniAppBotTokenProvider)
 
                 post {
                     val callId = call.callId ?: "unknown"

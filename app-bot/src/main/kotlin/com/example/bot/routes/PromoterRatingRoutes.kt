@@ -4,6 +4,7 @@ import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promoter.rating.PromoterPeriod
 import com.example.bot.promoter.rating.PromoterRatingPage
@@ -61,7 +62,7 @@ private data class PromoterRatingPageView(
 
 fun Application.promoterRatingRoutes(
     promoterRatingService: PromoterRatingService,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
         route("/api/promoter") {

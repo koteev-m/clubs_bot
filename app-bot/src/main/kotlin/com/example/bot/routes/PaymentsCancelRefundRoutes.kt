@@ -128,7 +128,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
 
     if (cancelEnabled) {
         route("/{bookingId}/cancel") {
-            withMiniAppAuth(miniAppBotTokenProvider)
+            withMiniAppAuth(botTokenProvider = miniAppBotTokenProvider)
 
             post {
                 val callId = call.callId ?: "unknown"
@@ -280,7 +280,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
 
     if (refundEnabled) {
         route("/{bookingId}/refund") {
-            withMiniAppAuth(miniAppBotTokenProvider)
+            withMiniAppAuth(botTokenProvider = miniAppBotTokenProvider)
 
             post {
                 val callId = call.callId ?: "unknown"

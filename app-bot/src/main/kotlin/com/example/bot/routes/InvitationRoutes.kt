@@ -7,11 +7,12 @@ import com.example.bot.club.InvitationServiceResult
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
-import io.ktor.server.request.header
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.post
@@ -55,6 +56,7 @@ private enum class InvitationResponseDto {
 
 fun Application.invitationRoutes(
     invitationService: InvitationService,
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
         route("/api/invitations") {
@@ -71,20 +73,27 @@ fun Application.invitationRoutes(
                 }
             }
 
-            post("/respond") {
-                val payload = runCatching { call.receive<RespondInvitationRequest>() }.getOrNull()
-                    ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+            route("/respond") {
+                withMiniAppAuth(
+                    botTokenProvider = botTokenProvider,
+                    allowMissingInitData = true,
+                )
 
-                val telegramUserId = call.telegramUserIdOrNull()
-                    ?: return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.invitation_forbidden)
+                post {
+                    val payload = runCatching { call.receive<RespondInvitationRequest>() }.getOrNull()
+                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
-                val response = payload.response.toDomain()
-                when (val result = invitationService.respondToInvitation(payload.token, telegramUserId, response)) {
-                    is InvitationServiceResult.Failure -> {
-                        val (status, code) = result.error.toHttpError()
-                        call.respondError(status, code)
+                    val telegramUserId = call.telegramUserIdOrNull()
+                        ?: return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.invitation_forbidden)
+
+                    val response = payload.response.toDomain()
+                    when (val result = invitationService.respondToInvitation(payload.token, telegramUserId, response)) {
+                        is InvitationServiceResult.Failure -> {
+                            val (status, code) = result.error.toHttpError()
+                            call.respondError(status, code)
+                        }
+                        is InvitationServiceResult.Success -> call.respond(result.value.toDto())
                     }
-                    is InvitationServiceResult.Success -> call.respond(result.value.toDto())
                 }
             }
         }
@@ -101,7 +110,7 @@ private fun ApplicationCall.telegramUserIdOrNull(): Long? {
     if (attributes.contains(MiniAppUserKey)) {
         return attributes[MiniAppUserKey].id
     }
-    return request.header("X-Telegram-Id")?.toLongOrNull()
+    return null
 }
 
 private fun InvitationCard.toDto(): InvitationCardDto =

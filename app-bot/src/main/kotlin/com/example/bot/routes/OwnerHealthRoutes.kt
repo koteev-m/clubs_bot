@@ -12,6 +12,7 @@ import com.example.bot.owner.OwnerHealthRequest
 import com.example.bot.owner.OwnerHealthService
 import com.example.bot.owner.OwnerHealthWatermarks
 import com.example.bot.owner.ownerHealthEtagSeed
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -36,7 +37,7 @@ fun Application.ownerHealthRoutes(
     service: OwnerHealthService,
     layoutRepository: LayoutRepository,
     clock: Clock = Clock.systemUTC(),
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
         route("/api/owner") {

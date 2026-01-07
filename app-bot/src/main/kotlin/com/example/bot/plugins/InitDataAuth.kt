@@ -47,6 +47,7 @@ internal class MiniAppAuthAbort : RuntimeException() {
 
 private class MiniAppAuthConfig {
     lateinit var botTokenProvider: () -> String
+    var allowMissingInitData: Boolean = false
 }
 
 private val MiniAppAuth =
@@ -54,8 +55,11 @@ private val MiniAppAuth =
         val tokenProvider = pluginConfig.botTokenProvider
 
         onCall { call ->
-            val initData = extractInitData(call)
+            val initData = extractInitData(call, includeBody = !pluginConfig.allowMissingInitData)
             if (initData.isNullOrBlank()) {
+                if (pluginConfig.allowMissingInitData) {
+                    return@onCall
+                }
                 call.respondUnauthorized("initData missing")
                 throw MiniAppAuthAbort()
             }
@@ -84,10 +88,16 @@ private val MiniAppAuth =
 
 private val MiniAppAuthRouteMarker = AttributeKey<Boolean>("miniapp.auth.installed.route")
 
-fun Route.withMiniAppAuth(botTokenProvider: () -> String) {
+fun Route.withMiniAppAuth(
+    allowMissingInitData: Boolean = false,
+    botTokenProvider: () -> String,
+) {
     if (attributes.contains(MiniAppAuthRouteMarker)) return
     try {
-        install(MiniAppAuth) { this.botTokenProvider = botTokenProvider }
+        install(MiniAppAuth) {
+            this.botTokenProvider = botTokenProvider
+            this.allowMissingInitData = allowMissingInitData
+        }
     } catch (_: DuplicatePluginException) {
         // уже установлен выше
     }
@@ -114,7 +124,7 @@ private fun TelegramUser.toMiniUser(): TelegramMiniUser = TelegramMiniUser(id = 
 
 // -------- helpers --------
 
-private suspend fun extractInitData(call: ApplicationCall): String? {
+private suspend fun extractInitData(call: ApplicationCall, includeBody: Boolean): String? {
     val q = call.request.queryParameters["initData"]?.takeIf { it.isNotBlank() }
     val h =
         call.request.header("X-Telegram-InitData")?.takeIf { it.isNotBlank() }
@@ -122,6 +132,7 @@ private suspend fun extractInitData(call: ApplicationCall): String? {
 
     if (!q.isNullOrBlank()) return q
     if (!h.isNullOrBlank()) return h
+    if (!includeBody) return null
     return extractInitDataFromBodyOrNull(call)
 }
 

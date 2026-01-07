@@ -9,6 +9,8 @@ import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceError
 import com.example.bot.club.InvitationServiceResult
 import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.data.club.GuestListEntryDbRepository
+import com.example.bot.data.club.GuestListEntryRecord
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
@@ -19,7 +21,11 @@ import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
+import com.example.bot.testing.createInitData
+import com.example.bot.testing.withInitData
+import com.example.bot.webapp.TEST_BOT_TOKEN
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -32,6 +38,7 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.header
 import io.ktor.server.testing.testApplication
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.time.Instant
@@ -40,18 +47,19 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Before
-import org.junit.Test
+import kotlinx.serialization.json.long
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 
 class PromoterGuestListRoutesTest {
-    @Before
+    @BeforeEach
     fun setUp() {
         overrideMiniAppValidatorForTesting { _, _ -> TelegramMiniUser(id = 100) }
     }
 
-    @After
+    @AfterEach
     fun tearDown() {
         resetMiniAppValidator()
     }
@@ -59,6 +67,7 @@ class PromoterGuestListRoutesTest {
     @Test
     fun `promoter guest lists require promoter role`() = runBlockingUnit {
         val guestListService = mockk<GuestListService>(relaxed = true)
+        val guestListEntryRepository = mockk<GuestListEntryDbRepository>(relaxed = true)
         val invitationService = mockk<InvitationService>(relaxed = true)
 
         testApplication {
@@ -67,14 +76,16 @@ class PromoterGuestListRoutesTest {
                 installRbac(roles = emptySet())
                 promoterGuestListRoutes(
                     guestListService = guestListService,
+                    guestListEntryRepository = guestListEntryRepository,
                     invitationService = invitationService,
-                    botTokenProvider = { "test" },
+                    botTokenProvider = { TEST_BOT_TOKEN },
+                    enableMiniAppAuth = false,
                 )
             }
 
             val response =
                 client.post("/api/promoter/guest-lists") {
-                    header("X-Telegram-Init-Data", "init")
+                    header("X-Telegram-Id", "100")
                     contentType(ContentType.Application.Json)
                     setBody(
                         """
@@ -129,12 +140,124 @@ class PromoterGuestListRoutesTest {
             assertEquals("Guest", payload["displayName"]!!.jsonPrimitive.content)
         }
     }
+
+    @Test
+    fun `respond invitation without miniapp auth is forbidden`() = runBlockingUnit {
+        val service = mockk<InvitationService>(relaxed = true)
+
+        testApplication {
+            application {
+                install(ContentNegotiation) { json() }
+                invitationRoutes(invitationService = service, botTokenProvider = { "test" })
+            }
+
+            val response =
+                client.post("/api/invitations/respond") {
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"token":"token","response":"CONFIRM"}""")
+                }
+
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            val payload = response.bodyAsJson()
+            assertEquals("invitation_forbidden", payload["code"]!!.jsonPrimitive.content)
+            coVerify(exactly = 0) { service.respondToInvitation(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `respond invitation uses miniapp auth`() = runBlockingUnit {
+        val service = mockk<InvitationService>()
+        val card =
+            InvitationCard(
+                invitationId = 12,
+                entryId = 3,
+                guestListId = 2,
+                clubId = 1,
+                clubName = null,
+                eventId = 4,
+                arrivalWindowStart = Instant.parse("2024-06-01T12:00:00Z"),
+                arrivalWindowEnd = Instant.parse("2024-06-01T14:00:00Z"),
+                displayName = "Guest",
+                entryStatus = com.example.bot.club.GuestListEntryStatus.INVITED,
+                expiresAt = Instant.parse("2024-06-02T12:00:00Z"),
+                revokedAt = null,
+                usedAt = null,
+            )
+        coEvery { service.respondToInvitation("token", 100, InvitationResponse.CONFIRM) } returns
+            InvitationServiceResult.Success(card)
+
+        testApplication {
+            application {
+                install(ContentNegotiation) { json() }
+                invitationRoutes(invitationService = service, botTokenProvider = { TEST_BOT_TOKEN })
+            }
+
+            val initData = createInitData(userId = 100)
+            val response =
+                client.post("/api/invitations/respond") {
+                    parameter("initData", initData)
+                    withInitData(initData)
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"token":"token","response":"CONFIRM"}""")
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            val payload = response.bodyAsJson()
+            assertEquals(12L, payload["invitationId"]!!.jsonPrimitive.long)
+            coVerify(exactly = 1) { service.respondToInvitation("token", 100, InvitationResponse.CONFIRM) }
+        }
+    }
+
+    @Test
+    fun `promoter invitation rejects entry list mismatch`() = runBlockingUnit {
+        val guestListService = mockk<GuestListService>(relaxed = true)
+        val guestListEntryRepository = mockk<GuestListEntryDbRepository>()
+        val invitationService = mockk<InvitationService>(relaxed = true)
+
+        coEvery { guestListEntryRepository.findById(50) } returns
+            GuestListEntryRecord(
+                id = 50,
+                guestListId = 999,
+                displayName = "Guest",
+                fullName = "Guest",
+                telegramUserId = null,
+                status = com.example.bot.club.GuestListEntryStatus.ADDED,
+                createdAt = Instant.parse("2024-06-01T12:00:00Z"),
+                updatedAt = Instant.parse("2024-06-01T12:00:00Z"),
+            )
+
+        testApplication {
+            application {
+                install(ContentNegotiation) { json() }
+                installRbac(roles = setOf(Role.PROMOTER))
+                promoterGuestListRoutes(
+                    guestListService = guestListService,
+                    guestListEntryRepository = guestListEntryRepository,
+                    invitationService = invitationService,
+                    botTokenProvider = { TEST_BOT_TOKEN },
+                    enableMiniAppAuth = false,
+                )
+            }
+
+            val response =
+                client.post("/api/promoter/guest-lists/12/entries/50/invitation") {
+                    header("X-Telegram-Id", "100")
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"channel":"TELEGRAM"}""")
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            val payload = response.bodyAsJson()
+            assertEquals("entry_list_mismatch", payload["code"]!!.jsonPrimitive.content)
+            coVerify(exactly = 0) { invitationService.createInvitation(any(), any(), any()) }
+        }
+    }
 }
 
 private fun Application.installRbac(roles: Set<Role>) {
     install(RbacPlugin) {
-        userRepository = StubUserRepository()
-        userRoleRepository = StubUserRoleRepository(roles)
+        userRepository = PromoterStubUserRepository()
+        userRoleRepository = PromoterStubUserRoleRepository(roles)
         auditLogRepository = relaxedAuditRepository()
         principalExtractor = { call ->
             if (call.attributes.contains(MiniAppUserKey)) {
@@ -149,11 +272,11 @@ private fun Application.installRbac(roles: Set<Role>) {
     }
 }
 
-private class StubUserRepository : UserRepository {
+private class PromoterStubUserRepository : UserRepository {
     override suspend fun getByTelegramId(id: Long): User? = User(id = 1, telegramId = id, username = "tester")
 }
 
-private class StubUserRoleRepository(
+private class PromoterStubUserRoleRepository(
     private val roles: Set<Role>,
 ) : UserRoleRepository {
     override suspend fun listRoles(userId: Long): Set<Role> = roles

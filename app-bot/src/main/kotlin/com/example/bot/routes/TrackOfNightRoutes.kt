@@ -4,6 +4,7 @@ import com.example.bot.data.security.Role
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.TrackOfNightRepository
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -25,7 +26,7 @@ fun Application.trackOfNightRoutes(
     trackOfNightRepository: TrackOfNightRepository,
     playlistsRepository: MusicPlaylistRepository,
     clock: Clock = Clock.systemUTC(),
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     val logger = LoggerFactory.getLogger("MusicTrackOfNightRoutes")
 

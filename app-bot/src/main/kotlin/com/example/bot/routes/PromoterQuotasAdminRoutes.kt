@@ -3,6 +3,7 @@ package com.example.bot.routes
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promoter.quotas.PromoterQuota
 import com.example.bot.promoter.quotas.PromoterQuotaService
@@ -54,7 +55,7 @@ private data class PromoterQuotaResponse(val quota: PromoterQuotaView)
 
 fun Application.promoterQuotasAdminRoutes(
     promoterQuotaService: PromoterQuotaService,
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
     clock: Clock = Clock.systemUTC(),
 ) {
     val logger = LoggerFactory.getLogger("PromoterQuotasAdminRoutes")

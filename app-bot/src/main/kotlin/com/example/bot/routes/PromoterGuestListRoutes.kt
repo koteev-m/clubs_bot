@@ -11,9 +11,11 @@ import com.example.bot.club.InvitationChannel
 import com.example.bot.club.InvitationCreateResult
 import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceResult
+import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -128,13 +130,17 @@ private enum class InvitationChannelDto {
 
 fun Application.promoterGuestListRoutes(
     guestListService: GuestListService,
+    guestListEntryRepository: GuestListEntryDbRepository,
     invitationService: InvitationService,
     clock: Clock = Clock.systemUTC(),
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
+    enableMiniAppAuth: Boolean = true,
 ) {
     routing {
         route("/api/promoter") {
-            withMiniAppAuth { botTokenProvider() }
+            if (enableMiniAppAuth) {
+                withMiniAppAuth { botTokenProvider() }
+            }
 
             authorize(
                 Role.PROMOTER,
@@ -261,10 +267,18 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 post("/guest-lists/{id}/entries/{entryId}/invitation") {
-                    call.parameters["id"]?.toLongOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val listId =
+                        call.parameters["id"]?.toLongOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     val entryId = call.parameters["entryId"]?.toLongOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+
+                    val entry =
+                        guestListEntryRepository.findById(entryId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
+                    if (entry.guestListId != listId) {
+                        return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.entry_list_mismatch)
+                    }
 
                     val payload = runCatching { call.receive<CreateInvitationRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)

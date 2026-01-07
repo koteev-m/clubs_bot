@@ -10,6 +10,7 @@ import com.example.bot.layout.TableStatus
 import com.example.bot.layout.Zone
 import com.example.bot.layout.toRangeString
 import com.example.bot.metrics.RouteCacheMetrics
+import com.example.bot.plugins.miniAppBotTokenRequired
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -96,7 +97,7 @@ fun Application.layoutRoutes(layoutRepository: LayoutRepository) {
 
     routing {
         route("/api") {
-            withMiniAppAuth { System.getenv("TELEGRAM_BOT_TOKEN")!! }
+            withMiniAppAuth { miniAppBotTokenRequired() }
 
             route("/clubs/{id}/layout") {
                 get { call.handleLayout(layoutRepository, logger, respondBody = true) }

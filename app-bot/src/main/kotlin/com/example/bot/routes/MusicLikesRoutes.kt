@@ -7,6 +7,7 @@ import com.example.bot.http.matchesEtag
 import com.example.bot.music.Mixtape
 import com.example.bot.music.MixtapeService
 import com.example.bot.music.MusicLikesRepository
+import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -52,7 +53,7 @@ fun Application.musicLikesRoutes(
     likesRepository: MusicLikesRepository,
     mixtapeService: MixtapeService,
     clock: Clock = Clock.systemUTC(),
-    botTokenProvider: () -> String = { System.getenv("TELEGRAM_BOT_TOKEN") ?: "" },
+    botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     val logger = LoggerFactory.getLogger("MusicLikesRoutes")
 
