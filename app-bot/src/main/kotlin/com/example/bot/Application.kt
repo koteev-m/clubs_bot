@@ -203,6 +203,7 @@ fun Application.module() {
     )
     promoterInvitesRoutes(promoterInviteService = promoterInviteService, meterRegistry = registry)
     promoterGuestListRoutes(
+        guestListRepository = guestListRepository,
         guestListService = guestListService,
         guestListEntryRepository = guestListEntryRepository,
         invitationService = invitationService,

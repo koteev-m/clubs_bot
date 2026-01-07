@@ -1,6 +1,8 @@
 package com.example.bot.routes
 
 import com.example.bot.club.GuestListOwnerType
+import com.example.bot.club.GuestList
+import com.example.bot.club.GuestListStatus
 import com.example.bot.club.GuestListService
 import com.example.bot.club.InvitationCard
 import com.example.bot.club.InvitationChannel
@@ -8,6 +10,7 @@ import com.example.bot.club.InvitationResponse
 import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceError
 import com.example.bot.club.InvitationServiceResult
+import com.example.bot.club.GuestListRepository
 import com.example.bot.data.booking.core.AuditLogRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListEntryRecord
@@ -17,9 +20,11 @@ import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.TelegramMiniUser
+import com.example.bot.plugins.installMiniAppAuthStatusPage
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
+import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
@@ -66,6 +71,7 @@ class PromoterGuestListRoutesTest {
 
     @Test
     fun `promoter guest lists require promoter role`() = runBlockingUnit {
+        val guestListRepository = mockk<GuestListRepository>(relaxed = true)
         val guestListService = mockk<GuestListService>(relaxed = true)
         val guestListEntryRepository = mockk<GuestListEntryDbRepository>(relaxed = true)
         val invitationService = mockk<InvitationService>(relaxed = true)
@@ -75,17 +81,20 @@ class PromoterGuestListRoutesTest {
                 install(ContentNegotiation) { json() }
                 installRbac(roles = emptySet())
                 promoterGuestListRoutes(
+                    guestListRepository = guestListRepository,
                     guestListService = guestListService,
                     guestListEntryRepository = guestListEntryRepository,
                     invitationService = invitationService,
                     botTokenProvider = { TEST_BOT_TOKEN },
-                    enableMiniAppAuth = false,
                 )
             }
 
+            val initData = createInitData(userId = 100)
             val response =
                 client.post("/api/promoter/guest-lists") {
-                    header("X-Telegram-Id", "100")
+                    parameter("initData", initData)
+                    header("X-Telegram-Init-Data", initData)
+                    header("X-Telegram-InitData", initData)
                     contentType(ContentType.Application.Json)
                     setBody(
                         """
@@ -115,6 +124,59 @@ class PromoterGuestListRoutesTest {
                     title = any(),
                 )
             }
+        }
+    }
+
+    @Test
+    fun `promoter cannot add entry to чужой list`() = runBlockingUnit {
+        val guestListRepository = mockk<GuestListRepository>()
+        val guestListService = mockk<GuestListService>(relaxed = true)
+        val guestListEntryRepository = mockk<GuestListEntryDbRepository>(relaxed = true)
+        val invitationService = mockk<InvitationService>(relaxed = true)
+        val listId = 42L
+
+        coEvery { guestListRepository.getList(listId) } returns
+            GuestList(
+                id = listId,
+                clubId = 7,
+                eventId = 9,
+                ownerType = GuestListOwnerType.PROMOTER,
+                ownerUserId = 999,
+                title = " чужой ",
+                capacity = 10,
+                arrivalWindowStart = null,
+                arrivalWindowEnd = null,
+                status = GuestListStatus.ACTIVE,
+                createdAt = Instant.parse("2024-06-01T12:00:00Z"),
+            )
+
+        testApplication {
+            application {
+                install(ContentNegotiation) { json() }
+                installRbac(roles = setOf(Role.PROMOTER))
+                promoterGuestListRoutes(
+                    guestListRepository = guestListRepository,
+                    guestListService = guestListService,
+                    guestListEntryRepository = guestListEntryRepository,
+                    invitationService = invitationService,
+                    botTokenProvider = { TEST_BOT_TOKEN },
+                )
+            }
+
+            val initData = createInitData(userId = 100)
+            val response =
+                client.post("/api/promoter/guest-lists/$listId/entries") {
+                    parameter("initData", initData)
+                    header("X-Telegram-Init-Data", initData)
+                    header("X-Telegram-InitData", initData)
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"displayName":"Guest"}""")
+                }
+
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            val payload = response.bodyAsJson()
+            assertEquals("forbidden", payload["code"]!!.jsonPrimitive.content)
+            coVerify(exactly = 0) { guestListService.addEntrySingle(any(), any()) }
         }
     }
 
@@ -210,10 +272,25 @@ class PromoterGuestListRoutesTest {
 
     @Test
     fun `promoter invitation rejects entry list mismatch`() = runBlockingUnit {
+        val guestListRepository = mockk<GuestListRepository>()
         val guestListService = mockk<GuestListService>(relaxed = true)
         val guestListEntryRepository = mockk<GuestListEntryDbRepository>()
         val invitationService = mockk<InvitationService>(relaxed = true)
 
+        coEvery { guestListRepository.getList(12) } returns
+            GuestList(
+                id = 12,
+                clubId = 1,
+                eventId = 2,
+                ownerType = GuestListOwnerType.PROMOTER,
+                ownerUserId = 1,
+                title = "VIP",
+                capacity = 10,
+                arrivalWindowStart = null,
+                arrivalWindowEnd = null,
+                status = GuestListStatus.ACTIVE,
+                createdAt = Instant.parse("2024-06-01T12:00:00Z"),
+            )
         coEvery { guestListEntryRepository.findById(50) } returns
             GuestListEntryRecord(
                 id = 50,
@@ -231,17 +308,20 @@ class PromoterGuestListRoutesTest {
                 install(ContentNegotiation) { json() }
                 installRbac(roles = setOf(Role.PROMOTER))
                 promoterGuestListRoutes(
+                    guestListRepository = guestListRepository,
                     guestListService = guestListService,
                     guestListEntryRepository = guestListEntryRepository,
                     invitationService = invitationService,
                     botTokenProvider = { TEST_BOT_TOKEN },
-                    enableMiniAppAuth = false,
                 )
             }
 
+            val initData = createInitData(userId = 100)
             val response =
                 client.post("/api/promoter/guest-lists/12/entries/50/invitation") {
-                    header("X-Telegram-Id", "100")
+                    parameter("initData", initData)
+                    header("X-Telegram-Init-Data", initData)
+                    header("X-Telegram-InitData", initData)
                     contentType(ContentType.Application.Json)
                     setBody("""{"channel":"TELEGRAM"}""")
                 }
@@ -255,6 +335,7 @@ class PromoterGuestListRoutesTest {
 }
 
 private fun Application.installRbac(roles: Set<Role>) {
+    installMiniAppAuthStatusPage()
     install(RbacPlugin) {
         userRepository = PromoterStubUserRepository()
         userRoleRepository = PromoterStubUserRoleRepository(roles)
@@ -264,8 +345,17 @@ private fun Application.installRbac(roles: Set<Role>) {
                 val principal = call.attributes[MiniAppUserKey]
                 TelegramPrincipal(principal.id, principal.username)
             } else {
-                call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { id ->
-                    TelegramPrincipal(id, call.request.header("X-Telegram-Username"))
+                val initData =
+                    call.request.header("X-Telegram-InitData")
+                        ?: call.request.header("X-Telegram-Init-Data")
+                        ?: call.request.queryParameters["initData"]
+                val initUser = initData?.let { InitDataValidator.validate(it, TEST_BOT_TOKEN) }
+                if (initUser != null) {
+                    TelegramPrincipal(initUser.id, initUser.username)
+                } else {
+                    call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { id ->
+                        TelegramPrincipal(id, call.request.header("X-Telegram-Username"))
+                    }
                 }
             }
         }
