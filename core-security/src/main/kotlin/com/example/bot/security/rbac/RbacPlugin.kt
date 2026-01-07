@@ -92,7 +92,7 @@ private val AuthorizeRoutePlugin =
         onCall { call ->
             val required = pluginConfig.requiredRoles
             val access = call.attributes[accessLogStateKey]
-            val resolution = call.attributes[rbacResolutionKey]
+            val resolution = resolveForRoute(call, state)
             when (resolution) {
                 is RbacResolution.Failure -> {
                     state.handleFailure(call, access, resolution)
@@ -120,7 +120,7 @@ private val ClubScopeRoutePlugin =
         onCall { call ->
             val access = call.attributes[accessLogStateKey]
             access.scopeRequired = true
-            val resolution = call.attributes[rbacResolutionKey]
+            val resolution = resolveForRoute(call, state)
             val context =
                 when (resolution) {
                     is RbacResolution.Failure -> {
@@ -191,6 +191,28 @@ private fun installDoubleReceiveIfNeeded(application: Application) {
             application.install(DoubleReceive)
         }
     }
+}
+
+private suspend fun resolveForRoute(
+    call: ApplicationCall,
+    state: RbacState,
+): RbacResolution {
+    val existing = call.attributes.getOrNull(rbacResolutionKey)
+    val resolved =
+        when (existing) {
+            null -> state.resolve(call)
+            is RbacResolution.Failure ->
+                if (existing.reason == FailureReason.MissingPrincipal) {
+                    state.resolve(call)
+                } else {
+                    existing
+                }
+            is RbacResolution.Success -> existing
+        }
+    if (resolved !== existing) {
+        call.attributes.put(rbacResolutionKey, resolved)
+    }
+    return resolved
 }
 
 /** DSL entry point for enforcing role based access. */

@@ -24,6 +24,7 @@ import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -141,6 +142,7 @@ fun Application.promoterGuestListRoutes(
 ) {
     routing {
         route("/api/promoter") {
+            withMiniAppAuth { botTokenProvider() }
             authorize(
                 Role.PROMOTER,
                 Role.MANAGER,
@@ -149,8 +151,6 @@ fun Application.promoterGuestListRoutes(
                 Role.GLOBAL_ADMIN,
                 Role.OWNER,
             ) {
-                withMiniAppAuth { botTokenProvider() }
-
                 post("/guest-lists") {
                     val payload = runCatching { call.receive<CreateGuestListRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
@@ -215,13 +215,7 @@ fun Application.promoterGuestListRoutes(
                     val payload = runCatching { call.receive<BulkEntriesRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
-                    val list =
-                        guestListRepository.getList(listId)
-                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
-                    val context = call.rbacContext()
-                    if (!canAccessList(context, list)) {
-                        return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
-                    }
+                    val list = loadAccessibleList(call, guestListRepository, listId) ?: return@post
 
                     when (val result = guestListService.addEntriesBulk(listId, payload.rawText)) {
                         is GuestListServiceResult.Failure -> {
@@ -249,13 +243,7 @@ fun Application.promoterGuestListRoutes(
                     val payload = runCatching { call.receive<AddEntryRequest>() }.getOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
-                    val list =
-                        guestListRepository.getList(listId)
-                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
-                    val context = call.rbacContext()
-                    if (!canAccessList(context, list)) {
-                        return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
-                    }
+                    val list = loadAccessibleList(call, guestListRepository, listId) ?: return@post
 
                     val added = guestListService.addEntrySingle(listId, payload.displayName)
                     when (added) {
@@ -290,13 +278,8 @@ fun Application.promoterGuestListRoutes(
                     val entryId = call.parameters["entryId"]?.toLongOrNull()
                         ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
-                    val list =
-                        guestListRepository.getList(listId)
-                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
+                    val list = loadAccessibleList(call, guestListRepository, listId) ?: return@post
                     val context = call.rbacContext()
-                    if (!canAccessList(context, list)) {
-                        return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
-                    }
 
                     val entry =
                         guestListEntryRepository.findById(entryId)
@@ -332,6 +315,25 @@ fun Application.promoterGuestListRoutes(
 
 private val GLOBAL_ROLES: Set<Role> =
     setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+
+private suspend fun loadAccessibleList(
+    call: ApplicationCall,
+    guestListRepository: GuestListRepository,
+    listId: Long,
+): GuestList? {
+    val list =
+        guestListRepository.getList(listId)
+            ?: run {
+                call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
+                return null
+            }
+    val context = call.rbacContext()
+    if (!canAccessList(context, list)) {
+        call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+        return null
+    }
+    return list
+}
 
 private fun canAccessList(
     context: RbacContext,
