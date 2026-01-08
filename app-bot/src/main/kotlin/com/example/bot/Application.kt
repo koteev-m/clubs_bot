@@ -34,6 +34,7 @@ import com.example.bot.plugins.installWebAppCspFromEnv
 import com.example.bot.plugins.installWebAppEtagForFingerprints
 import com.example.bot.plugins.installWebAppImmutableCacheFromEnv
 import com.example.bot.plugins.installWebUi
+import com.example.bot.plugins.appConfig
 import com.example.bot.routes.checkinRoutes
 import com.example.bot.routes.clubsRoutes
 import com.example.bot.booking.a3.Booking
@@ -66,6 +67,9 @@ import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.trackOfNightRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.invitationRoutes
+import com.example.bot.routes.telegramWebhookRoutes
+import com.example.bot.telegram.InvitationTelegramHandler
+import com.example.bot.telegram.TelegramClient
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -89,6 +93,7 @@ import java.net.JarURLConnection
 import java.net.URL
 import java.util.jar.JarFile
 import java.time.Clock
+import java.time.ZoneId
 import com.example.bot.host.ShiftChecklistService
 
 @Suppress("unused")
@@ -188,6 +193,16 @@ fun Application.module() {
     UiCheckinMetrics.bind(registry, rotationConfig)
     UiWaitlistMetrics.bind(registry)
 
+    val config = appConfig
+    val telegramClient = TelegramClient(config.bot.token, config.localApi.baseUrl.takeIf { config.localApi.enabled })
+    val invitationTelegramHandler =
+        InvitationTelegramHandler(
+            send = telegramClient::send,
+            invitationService = invitationService,
+            meterRegistry = registry,
+            zoneId = ZoneId.systemDefault(),
+        )
+
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
     errorCodesRoutes()
     pingRoute()
@@ -235,6 +250,10 @@ fun Application.module() {
     )
     guestListInviteRoutes(repository = guestListRepository)
     invitationRoutes(invitationService = invitationService)
+    telegramWebhookRoutes(
+        expectedSecret = config.webhook.secretToken,
+        onUpdate = { update -> invitationTelegramHandler.handle(update) },
+    )
     waitlistRoutes(
         repository = waitlistRepository,
         notificationService = notificationService,
