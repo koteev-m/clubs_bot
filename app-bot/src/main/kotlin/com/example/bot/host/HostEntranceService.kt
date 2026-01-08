@@ -34,6 +34,17 @@ class HostEntranceService(
     private val eventsRepository: EventsRepository,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    private val arrivedStatuses = setOf(
+        GuestListEntryStatus.ARRIVED,
+        GuestListEntryStatus.LATE,
+        GuestListEntryStatus.CHECKED_IN,
+    )
+    private val noShowStatuses = setOf(
+        GuestListEntryStatus.NO_SHOW,
+        // DENIED считаем no-show: отказ на входе равнозначен неявке в метриках.
+        GuestListEntryStatus.DENIED,
+    )
+
     @Suppress("LongMethod")
     suspend fun buildEntranceSnapshot(clubId: Long, eventId: Long): HostEntranceResponse? {
         val event = eventsRepository.findById(clubId, eventId) ?: return null
@@ -162,15 +173,6 @@ class HostEntranceService(
 
     private fun List<GuestListEntry>.toGuestListMetrics(): ChannelMetrics {
         val expected = filter { it.status != GuestListEntryStatus.EXPIRED }.sumOf { it.guestsCount }
-        val arrivedStatuses = setOf(
-            GuestListEntryStatus.ARRIVED,
-            GuestListEntryStatus.LATE,
-            GuestListEntryStatus.CHECKED_IN,
-        )
-        val noShowStatuses = setOf(
-            GuestListEntryStatus.NO_SHOW,
-            GuestListEntryStatus.DENIED,
-        )
         val arrived = filter { it.status in arrivedStatuses }.sumOf { it.guestsCount }
         val noShow = filter { it.status in noShowStatuses }.sumOf { it.guestsCount }
         return ChannelMetrics(expected = expected, arrived = arrived, noShow = noShow)

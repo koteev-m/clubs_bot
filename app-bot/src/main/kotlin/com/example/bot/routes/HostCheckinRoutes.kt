@@ -9,18 +9,23 @@ import com.example.bot.club.CheckinSubjectType
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
+import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
+import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
+import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
+import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
+import io.ktor.server.plugins.requestsize.RequestSizeLimit
+import io.ktor.server.plugins.requestsize.maxRequestSize
 import io.ktor.server.request.contentType
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -29,9 +34,8 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
+import java.util.Locale
 
-private const val VARY_HEADER = "X-Telegram-Init-Data"
-private const val NO_STORE = "no-store"
 private val logger = LoggerFactory.getLogger("HostCheckinRoutes")
 
 @Serializable
@@ -83,9 +87,14 @@ fun Application.hostCheckinRoutes(
     routing {
         route("/api/host/checkin") {
             intercept(ApplicationCallPipeline.Setup) {
-                call.applyNoStoreHeaders()
+                call.ensureMiniAppNoStoreHeaders()
             }
-            withMiniAppAuth { botTokenProvider() }
+            val maxBytes: Long = (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
+                ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
+            install(RequestSizeLimit) {
+                maxRequestSize = maxBytes
+            }
+            withMiniAppAuth(allowInitDataFromBody = false) { botTokenProvider() }
 
             authorize(Role.ENTRY_MANAGER, Role.CLUB_ADMIN, Role.OWNER, Role.GLOBAL_ADMIN) {
                 post("/scan") {
@@ -207,30 +216,19 @@ private fun com.example.bot.checkin.ExistingCheckin.toResponse(): ExistingChecki
 
 private fun parseSubjectType(value: String?): CheckinSubjectType? =
     value?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
-        runCatching { CheckinSubjectType.valueOf(raw) }.getOrNull()
+        runCatching { CheckinSubjectType.valueOf(raw.uppercase(Locale.ROOT)) }.getOrNull()
     }
 
 private fun parseResultStatus(value: String?): CheckinResultStatus? =
     value?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
-        runCatching { CheckinResultStatus.valueOf(raw) }.getOrNull()
+        runCatching { CheckinResultStatus.valueOf(raw.uppercase(Locale.ROOT)) }.getOrNull()
     }
 
-private suspend inline fun <reified T> ApplicationCall.receiveOrNull(): T? =
+private suspend inline fun <reified T : Any> ApplicationCall.receiveOrNull(): T? =
     runCatching { receive<T>() }.getOrNull()
 
 private suspend fun ApplicationCall.respondCheckinError(status: HttpStatusCode, code: String) {
-    applyNoStoreHeaders()
     respondError(status, code)
-}
-
-private fun ApplicationCall.applyNoStoreHeaders() {
-    val headers = response.headers
-    if (headers[HttpHeaders.CacheControl] == null) {
-        headers.append(HttpHeaders.CacheControl, NO_STORE)
-    }
-    if (headers[HttpHeaders.Vary] == null) {
-        headers.append(HttpHeaders.Vary, VARY_HEADER)
-    }
 }
 
 private fun ApplicationCall.toAuthContext(): AuthContext {

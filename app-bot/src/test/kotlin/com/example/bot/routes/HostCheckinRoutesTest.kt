@@ -2,6 +2,7 @@ package com.example.bot.routes
 
 import com.example.bot.checkin.CheckinResult
 import com.example.bot.checkin.CheckinService
+import com.example.bot.checkin.CheckinServiceError
 import com.example.bot.checkin.CheckinServiceResult
 import com.example.bot.club.CheckinResultStatus
 import com.example.bot.club.CheckinSubjectType
@@ -15,7 +16,8 @@ import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
-import io.ktor.client.request.header
+import com.example.bot.testing.createInitData
+import com.example.bot.testing.withInitData
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -33,23 +35,24 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Before
-import org.junit.Test
 import io.mockk.coEvery
 import io.mockk.mockk
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 
 class HostCheckinRoutesTest {
     private val telegramId = 42L
+    private val initData = createInitData(userId = telegramId)
 
-    @Before
+    @BeforeEach
     fun setUp() {
         System.setProperty("TELEGRAM_BOT_TOKEN", "test")
         overrideMiniAppValidatorForTesting { _, _ -> TelegramMiniUser(id = telegramId) }
     }
 
-    @After
+    @AfterEach
     fun tearDown() {
         resetMiniAppValidator()
     }
@@ -58,7 +61,7 @@ class HostCheckinRoutesTest {
     fun `rbac forbids non entry roles`() = withHostApp(roles = setOf(Role.PROMOTER)) {
         val response =
             client.post("/api/host/checkin/scan") {
-                header("X-Telegram-Init-Data", "init")
+                withInitData(initData)
                 contentType(ContentType.Application.Json)
                 setBody("""{"payload":"token"}""")
             }
@@ -83,7 +86,7 @@ class HostCheckinRoutesTest {
 
         val response =
             client.post("/api/host/checkin/scan") {
-                header("X-Telegram-Init-Data", "init")
+                withInitData(initData)
                 contentType(ContentType.Application.Json)
                 setBody("""{"payload":"token"}""")
             }
@@ -97,6 +100,31 @@ class HostCheckinRoutesTest {
         assertEquals("Alice", body["displayName"]!!.jsonPrimitive.content)
         assertEquals(99L, body["checkedBy"]!!.jsonPrimitive.long)
         assertEquals(occurredAt.toString(), body["occurredAt"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `manual denied without reason returns error`() = withHostApp() { service ->
+        coEvery { service.manualCheckin(any(), any(), any(), any(), any()) } returns
+            CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_DENY_REASON_REQUIRED)
+
+        val response =
+            client.post("/api/host/checkin/manual") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """
+                    {
+                      "subjectType": "guest_list_entry",
+                      "subjectId": "123",
+                      "status": "denied",
+                      "denyReason": ""
+                    }
+                    """.trimIndent()
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.checkin_deny_reason_required, response.errorCode())
     }
 
     private fun withHostApp(
