@@ -83,16 +83,15 @@ private data class ExistingCheckinResponse(
 fun Application.hostCheckinRoutes(
     checkinService: CheckinService,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
+    maxBodyBytes: Long = readCheckinMaxBodyBytesFromEnvOrDefault(),
 ) {
     routing {
         route("/api/host/checkin") {
             intercept(ApplicationCallPipeline.Setup) {
                 call.ensureMiniAppNoStoreHeaders()
             }
-            val maxBytes: Long = (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
-                ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
             install(RequestSizeLimit) {
-                maxRequestSize = maxBytes
+                maxRequestSize = maxBodyBytes
             }
             withMiniAppAuth(allowInitDataFromBody = false) { botTokenProvider() }
 
@@ -239,3 +238,7 @@ private fun ApplicationCall.toAuthContext(): AuthContext {
         roles = context.roles,
     )
 }
+
+private fun readCheckinMaxBodyBytesFromEnvOrDefault(envProvider: (String) -> String? = System::getenv): Long =
+    (envProvider("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
+        ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES

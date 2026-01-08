@@ -1,9 +1,12 @@
 package com.example.bot.routes
 
 import com.example.bot.checkin.CheckinResult
+import com.example.bot.checkin.CheckinInvalidReason
 import com.example.bot.checkin.CheckinService
 import com.example.bot.checkin.CheckinServiceError
 import com.example.bot.checkin.CheckinServiceResult
+import com.example.bot.checkin.ExistingCheckin
+import com.example.bot.club.CheckinMethod
 import com.example.bot.club.CheckinResultStatus
 import com.example.bot.club.CheckinSubjectType
 import com.example.bot.data.security.Role
@@ -13,6 +16,7 @@ import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.MINI_APP_VARY_HEADER
 import com.example.bot.http.NO_STORE_CACHE_CONTROL
+import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.installMiniAppAuthStatusPage
@@ -153,7 +157,86 @@ class HostCheckinRoutesTest {
         assertEquals(99L, body["checkedBy"]!!.jsonPrimitive.long)
         assertEquals(occurredAt.toString(), body["occurredAt"]!!.jsonPrimitive.content)
         assertMiniAppNoStoreHeaders(response)
-        coVerify(exactly = 1) { service.scanQr("token", any()) }
+        coVerify(exactly = 1) {
+            service.scanQr(
+                "token",
+                match {
+                    it.telegramUserId == 42L &&
+                        it.userId == 1L &&
+                        it.roles.contains(Role.ENTRY_MANAGER)
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `scan returns already used payload`() = withHostApp() { service ->
+        val occurredAt = Instant.parse("2024-06-10T10:15:30Z")
+        val result =
+            CheckinResult.AlreadyUsed(
+                subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
+                subjectId = "123",
+                existingCheckin =
+                    ExistingCheckin(
+                        occurredAt = occurredAt,
+                        checkedBy = 77L,
+                        resultStatus = CheckinResultStatus.ARRIVED,
+                        method = CheckinMethod.QR,
+                    ),
+            )
+        coEvery { service.scanQr(any(), any()) } returns CheckinServiceResult.Success(result)
+
+        val response =
+            client.post("/api/host/checkin/scan") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"payload":"token"}""")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = response.bodyAsJson()
+        assertEquals("ALREADY_USED", body["type"]!!.jsonPrimitive.content)
+        assertEquals("GUEST_LIST_ENTRY", body["subjectType"]!!.jsonPrimitive.content)
+        assertEquals("123", body["subjectId"]!!.jsonPrimitive.content)
+        val existing = body["existingCheckin"]!!.jsonObject
+        assertEquals(occurredAt.toString(), existing["occurredAt"]!!.jsonPrimitive.content)
+        assertEquals("ARRIVED", existing["resultStatus"]!!.jsonPrimitive.content)
+        assertEquals("QR", existing["method"]!!.jsonPrimitive.content)
+        assertMiniAppNoStoreHeaders(response)
+    }
+
+    @Test
+    fun `scan returns invalid payload`() = withHostApp() { service ->
+        coEvery { service.scanQr(any(), any()) } returns
+            CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.TOKEN_EXPIRED))
+
+        val response =
+            client.post("/api/host/checkin/scan") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"payload":"token"}""")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = response.bodyAsJson()
+        assertEquals("INVALID", body["type"]!!.jsonPrimitive.content)
+        assertEquals("TOKEN_EXPIRED", body["reason"]!!.jsonPrimitive.content)
+        assertMiniAppNoStoreHeaders(response)
+    }
+
+    @Test
+    fun `scan rejects oversized payload`() = withHostApp(maxBodyBytes = 32L) { service ->
+        val payload = "x".repeat(64)
+        val response =
+            client.post("/api/host/checkin/scan") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"payload":"$payload"}""")
+            }
+
+        assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
+        assertMiniAppNoStoreHeaders(response)
+        assertServiceNotCalledScan(service)
     }
 
     @Test
@@ -252,6 +335,7 @@ class HostCheckinRoutesTest {
 
     private fun withHostApp(
         roles: Set<Role> = setOf(Role.ENTRY_MANAGER),
+        maxBodyBytes: Long = DEFAULT_CHECKIN_MAX_BYTES,
         block: suspend ApplicationTestBuilder.(CheckinService) -> Unit,
     ) {
         testApplication {
@@ -273,7 +357,11 @@ class HostCheckinRoutesTest {
                     }
                 }
 
-                hostCheckinRoutes(checkinService = checkinService, botTokenProvider = { "test" })
+                hostCheckinRoutes(
+                    checkinService = checkinService,
+                    botTokenProvider = { "test" },
+                    maxBodyBytes = maxBodyBytes,
+                )
             }
             block(this, checkinService)
         }
