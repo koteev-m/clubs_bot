@@ -14,6 +14,20 @@ class InvitationTelegramHandlerTest {
     }
 
     @Test
+    fun `parses start token without trailing payload`() {
+        val token = InvitationTelegramHandler.parseStartToken("/start inv_AbCdEf extra")
+
+        assertEquals("AbCdEf", token)
+    }
+
+    @Test
+    fun `parses start token with bot name`() {
+        val token = InvitationTelegramHandler.parseStartToken("/start@MyBot inv_AbCdEf")
+
+        assertEquals("AbCdEf", token)
+    }
+
+    @Test
     fun `ignores unrelated start payloads`() {
         assertNull(InvitationTelegramHandler.parseStartToken("/start promo_123"))
         assertNull(InvitationTelegramHandler.parseStartToken("/start"))

@@ -10,6 +10,7 @@ import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.request.AnswerCallbackQuery
+import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.EditMessageText
 import com.pengrad.telegrambot.request.SendMessage
 import com.pengrad.telegrambot.response.BaseResponse
@@ -23,7 +24,7 @@ private const val CALLBACK_DECLINE_PREFIX = "inv_decline:"
 private const val CALLBACK_MAX_BYTES = 64
 
 class InvitationTelegramHandler(
-    private val send: suspend (Any) -> BaseResponse,
+    private val send: suspend (BaseRequest<*, *>) -> BaseResponse,
     private val invitationService: InvitationService,
     private val meterRegistry: MeterRegistry,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
@@ -64,8 +65,17 @@ class InvitationTelegramHandler(
 
     private suspend fun handleCallback(update: Update) {
         val callbackQuery = update.callbackQuery() ?: return
-        val data = callbackQuery.data() ?: return
-        val callback = parseCallbackData(data) ?: return
+        val data = callbackQuery.data()
+        val callback = data?.let { parseCallbackData(it) }
+        if (callback == null) {
+            editStaleCallbackMessage(callbackQuery.message())
+            send(
+                AnswerCallbackQuery(callbackQuery.id())
+                    .text("Кнопка устарела")
+                    .showAlert(false),
+            )
+            return
+        }
         val telegramUserId = callbackQuery.from()?.id() ?: return
 
         when (val result = invitationService.respondToInvitation(callback.token, telegramUserId, callback.response)) {
@@ -96,6 +106,17 @@ class InvitationTelegramHandler(
         text: String,
     ) {
         if (message == null) return
+        val chatId = message.chat().id()
+        val messageId = message.messageId()
+        val request =
+            EditMessageText(chatId, messageId, text)
+                .replyMarkup(InlineKeyboardMarkup())
+        send(request)
+    }
+
+    private suspend fun editStaleCallbackMessage(message: Message?) {
+        if (message == null) return
+        val text = message.text() ?: return
         val chatId = message.chat().id()
         val messageId = message.messageId()
         val request =
@@ -156,8 +177,8 @@ class InvitationTelegramHandler(
         fun parseStartToken(text: String): String? {
             val trimmed = text.trim()
             if (!trimmed.startsWith("/start")) return null
-            val parts = trimmed.split(" ", limit = 2)
-            val startParam = parts.getOrNull(1)?.trim() ?: return null
+            val parts = trimmed.split(Regex("\\s+"), limit = 3)
+            val startParam = parts.getOrNull(1) ?: return null
             if (!startParam.startsWith(START_PREFIX)) return null
             val token = startParam.removePrefix(START_PREFIX)
             return token.takeIf { it.isNotBlank() }
