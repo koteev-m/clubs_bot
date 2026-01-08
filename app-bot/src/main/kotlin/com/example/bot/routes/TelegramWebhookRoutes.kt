@@ -1,6 +1,5 @@
 package com.example.bot.routes
 
-import com.pengrad.telegrambot.TelegramBot
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.utility.BotUtils
 import io.ktor.http.HttpStatusCode
@@ -15,9 +14,8 @@ import org.slf4j.LoggerFactory
 private const val SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
 fun Application.telegramWebhookRoutes(
-    bot: TelegramBot,
     expectedSecret: String?,
-    onUpdate: (Update) -> Unit,
+    onUpdate: suspend (Update) -> Unit,
 ) {
     val logger = LoggerFactory.getLogger("TelegramWebhookRoutes")
 
@@ -40,8 +38,11 @@ fun Application.telegramWebhookRoutes(
                 return@post
             }
 
-            runCatching { onUpdate(update) }
-                .onFailure { t -> logger.warn("webhook: handler failed: {}", t.toString()) }
+            try {
+                onUpdate(update)
+            } catch (t: Throwable) {
+                logger.warn("webhook: handler failed: {}", t.toString())
+            }
 
             call.respond(HttpStatusCode.OK, "OK")
         }
