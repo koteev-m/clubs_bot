@@ -11,7 +11,9 @@ import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.http.ErrorCodes
+import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.TelegramMiniUser
+import com.example.bot.plugins.installMiniAppAuthStatusPage
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
@@ -48,7 +50,6 @@ class HostCheckinRoutesTest {
 
     @BeforeEach
     fun setUp() {
-        System.setProperty("TELEGRAM_BOT_TOKEN", "test")
         overrideMiniAppValidatorForTesting { _, _ -> TelegramMiniUser(id = telegramId) }
     }
 
@@ -68,6 +69,28 @@ class HostCheckinRoutesTest {
 
         assertEquals(HttpStatusCode.Forbidden, response.status)
         assertEquals(ErrorCodes.forbidden, response.errorCode())
+    }
+
+    @Test
+    fun `missing initData returns unauthorized`() = withHostApp {
+        val response =
+            client.post("/api/host/checkin/scan") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"payload":"token"}""")
+            }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun `initData in body is ignored`() = withHostApp {
+        val response =
+            client.post("/api/host/checkin/scan") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"initData":"body-token","payload":"token"}""")
+            }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
     }
 
     @Test
@@ -135,11 +158,19 @@ class HostCheckinRoutesTest {
             val checkinService = mockk<CheckinService>(relaxed = true)
             application {
                 install(ContentNegotiation) { json() }
+                installMiniAppAuthStatusPage()
                 install(RbacPlugin) {
                     userRepository = StubUserRepository()
                     userRoleRepository = StubUserRoleRepository(roles)
                     auditLogRepository = relaxedAuditRepository()
-                    principalExtractor = { TelegramPrincipal(telegramId, "tester") }
+                    principalExtractor = { call ->
+                        if (call.attributes.contains(MiniAppUserKey)) {
+                            val principal = call.attributes[MiniAppUserKey]
+                            TelegramPrincipal(principal.id, principal.username)
+                        } else {
+                            null
+                        }
+                    }
                 }
 
                 hostCheckinRoutes(checkinService = checkinService, botTokenProvider = { "test" })

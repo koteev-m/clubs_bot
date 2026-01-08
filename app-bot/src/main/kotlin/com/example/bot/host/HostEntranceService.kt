@@ -18,8 +18,9 @@ import kotlinx.serialization.Serializable
  * Builds a read-only entrance snapshot for a specific (club, event) pair.
  *
  * Metrics semantics:
- * - Guest list: expectedGuests sums guestsCount for entries not EXPIRED; arrivedGuests sums CHECKED_IN; noShowGuests sums
- *   NO_SHOW; notArrivedGuests is max(expected - arrived - noShow, 0).
+ * - Guest list: expectedGuests sums guestsCount for entries not EXPIRED; arrivedGuests sums ARRIVED, LATE, CHECKED_IN;
+ *   noShowGuests sums NO_SHOW and DENIED (DENIED считаем no-show в метриках); notArrivedGuests is max(expected - arrived
+ *   - noShow, 0).
  * - Bookings: expectedGuests sums guestCount for non-CANCELED bookings; arrivedGuests and noShowGuests are intentionally 0
  *   until booking check-in semantics are wired; notArrivedGuests equals expectedGuests.
  * - Counts are summed across channels without deduplication between them.
