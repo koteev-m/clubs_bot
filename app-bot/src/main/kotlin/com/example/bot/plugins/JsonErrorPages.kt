@@ -30,7 +30,7 @@ fun Application.installJsonErrorPages() {
 
         exception<MiniAppAuthAbort> { _, _ -> }
 
-        exception<RequestTooLargeException> { call, cause ->
+        exception<RequestTooLargeException> { call, _ ->
             if (!call.request.path().startsWith("/api/")) {
                 call.respond(HttpStatusCode.PayloadTooLarge)
                 return@exception
@@ -40,6 +40,7 @@ fun Application.installJsonErrorPages() {
 
         status(HttpStatusCode.Unauthorized) { call, _ ->
             if (call.attributes.contains(MiniAppAuthErrorHandledKey)) return@status
+            if (!call.request.path().startsWith("/api/")) return@status
             if (call.attributes.contains(ApiErrorHandledKey)) return@status
             val wwwAuthenticate = call.response.headers[HttpHeaders.WWWAuthenticate]
             if (wwwAuthenticate != null) {
@@ -49,6 +50,7 @@ fun Application.installJsonErrorPages() {
         }
 
         status(HttpStatusCode.TooManyRequests) { call, _ ->
+            if (!call.request.path().startsWith("/api/")) return@status
             if (call.attributes.contains(ApiErrorHandledKey)) return@status
             val retryAfter = call.response.headers[HttpHeaders.RetryAfter]
             if (retryAfter != null) {
