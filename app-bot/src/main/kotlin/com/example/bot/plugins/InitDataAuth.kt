@@ -161,7 +161,14 @@ private suspend fun extractInitData(
 private suspend fun ApplicationCall.respondUnauthorized(reason: String) {
     logger.info("Mini App request unauthorized: {}", reason)
     attributes.put(MiniAppAuthErrorHandledKey, true)
-    respond(HttpStatusCode.Unauthorized, mapOf("error" to reason, "code" to ErrorCodes.unauthorized))
+    respond(
+        HttpStatusCode.Unauthorized,
+        mapOf(
+            "error" to reason,
+            "message" to reason,
+            "code" to ErrorCodes.unauthorized,
+        ),
+    )
 }
 
 private suspend fun extractInitDataFromBodyOrNull(

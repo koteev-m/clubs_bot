@@ -143,6 +143,37 @@ class JsonErrorFormatTest {
     }
 
     @Test
+    fun `domain payload too large is not overwritten`() = testApplication {
+        application {
+            val app = this
+            app.install(ServerContentNegotiation) { json() }
+            app.configureLoggingAndRequestId()
+            app.installJsonErrorPages()
+            routing {
+                route("/api") {
+                    get("/domain-413") {
+                        call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.bulk_parse_too_large)
+                    }
+                }
+            }
+        }
+
+        val response = client.config {
+            install(ContentNegotiation) { json() }
+        }.get("/api/domain-413") {
+            headers { append("X-Request-Id", "rid-413-domain") }
+        }
+
+        assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
+        val contentType = response.headers[HttpHeaders.ContentType]
+        assertTrue(contentType?.startsWith(ContentType.Application.Json.toString()) == true)
+        val error = Json.decodeFromString<ApiError>(response.bodyAsText())
+        assertEquals("bulk_parse_too_large", error.code)
+        assertEquals(HttpStatusCode.PayloadTooLarge.value, error.status)
+        assertEquals("rid-413-domain", error.requestId)
+    }
+
+    @Test
     fun `unauthorized returns JSON`() = testApplication {
         application {
             val app = this

@@ -4,7 +4,10 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.callid.callId
 import io.ktor.server.response.respond
+import io.ktor.util.AttributeKey
 import kotlinx.serialization.Serializable
+
+val ApiErrorHandledKey: AttributeKey<Boolean> = AttributeKey("api.error.handled")
 
 @Serializable
 data class ApiError(
@@ -28,5 +31,6 @@ suspend fun ApplicationCall.respondError(
         status = status.value,
         details = details,
     )
+    attributes.put(ApiErrorHandledKey, true)
     respond(status, body)
 }
