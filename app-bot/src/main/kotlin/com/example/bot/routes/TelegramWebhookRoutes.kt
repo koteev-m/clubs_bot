@@ -41,7 +41,7 @@ fun Application.telegramWebhookRoutes(
             try {
                 onUpdate(update)
             } catch (t: Throwable) {
-                logger.warn("webhook: handler failed: {}", t::class.simpleName)
+                logger.warn("webhook: handler failed: {}", t.javaClass.simpleName)
             }
 
             call.respond(HttpStatusCode.OK, "OK")
