@@ -239,6 +239,32 @@ class JsonErrorFormatTest {
     }
 
     @Test
+    fun `unauthorized on non api is not converted to JSON`() = testApplication {
+        application {
+            val app = this
+            app.install(ServerContentNegotiation) { json() }
+            app.configureLoggingAndRequestId()
+            app.installJsonErrorPages()
+            routing {
+                post("/secure-non-api") {
+                    call.respond(HttpStatusCode.Unauthorized)
+                }
+            }
+        }
+
+        val response = client.config {
+            install(ContentNegotiation) { json() }
+        }.post("/secure-non-api") {
+            headers { append("X-Request-Id", "rid-401-non-api") }
+            setBody("{}")
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        val contentType = response.headers[HttpHeaders.ContentType]
+        assertTrue(contentType?.startsWith(ContentType.Application.Json.toString()) != true)
+    }
+
+    @Test
     fun `too many requests returns JSON with retry after`() = testApplication {
         application {
             val app = this
@@ -270,6 +296,32 @@ class JsonErrorFormatTest {
         assertEquals("rate_limited", error.code)
         assertEquals(HttpStatusCode.TooManyRequests.value, error.status)
         assertEquals("rid-429-0001", error.requestId)
+    }
+
+    @Test
+    fun `too many requests on non api is not converted to JSON`() = testApplication {
+        application {
+            val app = this
+            app.install(ServerContentNegotiation) { json() }
+            app.configureLoggingAndRequestId()
+            app.installJsonErrorPages()
+            routing {
+                post("/rate-non-api") {
+                    call.respond(HttpStatusCode.TooManyRequests)
+                }
+            }
+        }
+
+        val response = client.config {
+            install(ContentNegotiation) { json() }
+        }.post("/rate-non-api") {
+            headers { append("X-Request-Id", "rid-429-non-api") }
+            setBody("{}")
+        }
+
+        assertEquals(HttpStatusCode.TooManyRequests, response.status)
+        val contentType = response.headers[HttpHeaders.ContentType]
+        assertTrue(contentType?.startsWith(ContentType.Application.Json.toString()) != true)
     }
 
     @Test
