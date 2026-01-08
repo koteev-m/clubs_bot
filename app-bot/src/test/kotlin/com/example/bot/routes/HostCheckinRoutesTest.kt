@@ -11,6 +11,8 @@ import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.http.ErrorCodes
+import com.example.bot.http.MINI_APP_VARY_HEADER
+import com.example.bot.http.NO_STORE_CACHE_CONTROL
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.installMiniAppAuthStatusPage
@@ -82,11 +84,8 @@ class HostCheckinRoutesTest {
                 setBody("""{"payload":"token"}""")
             }
 
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-        assertEquals("initData missing", response.errorCode())
-        assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
-        assertTrue(response.headers[HttpHeaders.Vary]?.isNotBlank() == true)
-        coVerify(exactly = 0) { service.scanQr(any(), any()) }
+        assertMiniAppUnauthorized(response, expectedError = "initData missing")
+        assertServiceNotCalledScan(service)
     }
 
     @Test
@@ -97,11 +96,28 @@ class HostCheckinRoutesTest {
                 setBody("""{"initData":"body-token","payload":"token"}""")
             }
 
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-        assertEquals("initData missing", response.errorCode())
-        assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
-        assertTrue(response.headers[HttpHeaders.Vary]?.isNotBlank() == true)
-        coVerify(exactly = 0) { service.scanQr(any(), any()) }
+        assertMiniAppUnauthorized(response, expectedError = "initData missing")
+        assertServiceNotCalledScan(service)
+    }
+
+    @Test
+    fun `manual without initData returns unauthorized`() = withHostApp { service ->
+        val response =
+            client.post("/api/host/checkin/manual") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """
+                    {
+                      "subjectType": "guest_list_entry",
+                      "subjectId": "123",
+                      "status": "approved"
+                    }
+                    """.trimIndent()
+                )
+            }
+
+        assertMiniAppUnauthorized(response, expectedError = "initData missing")
+        assertServiceNotCalledManual(service)
     }
 
     @Test
@@ -215,6 +231,24 @@ class HostCheckinRoutesTest {
             ?.groupValues
             ?.getOrNull(1)
         return parsed ?: extracted ?: raw
+    }
+
+    private suspend fun assertMiniAppUnauthorized(
+        response: io.ktor.client.statement.HttpResponse,
+        expectedError: String,
+    ) {
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertEquals(expectedError, response.errorCode())
+        assertTrue(response.headers[HttpHeaders.CacheControl]?.contains(NO_STORE_CACHE_CONTROL) == true)
+        assertTrue(response.headers[HttpHeaders.Vary]?.contains(MINI_APP_VARY_HEADER) == true)
+    }
+
+    private fun assertServiceNotCalledScan(service: CheckinService) {
+        coVerify(exactly = 0) { service.scanQr(any(), any()) }
+    }
+
+    private fun assertServiceNotCalledManual(service: CheckinService) {
+        coVerify(exactly = 0) { service.manualCheckin(any(), any(), any(), any(), any()) }
     }
 
     private fun JsonObject.errorCodeOrNull(): String? =
