@@ -153,6 +153,7 @@ class HostCheckinRoutesTest {
         assertEquals(99L, body["checkedBy"]!!.jsonPrimitive.long)
         assertEquals(occurredAt.toString(), body["occurredAt"]!!.jsonPrimitive.content)
         assertMiniAppNoStoreHeaders(response)
+        coVerify(exactly = 1) { service.scanQr("token", any()) }
     }
 
     @Test
@@ -168,6 +169,59 @@ class HostCheckinRoutesTest {
         assertEquals(ErrorCodes.unsupported_media_type, response.errorCode())
         assertMiniAppNoStoreHeaders(response)
         assertServiceNotCalledScan(service)
+    }
+
+    @Test
+    fun `manual with wrong content type returns unsupported_media_type`() = withHostApp() { service ->
+        val response =
+            client.post("/api/host/checkin/manual") {
+                withInitData(initData)
+                contentType(ContentType.Text.Plain)
+                setBody("payload")
+            }
+
+        assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+        assertEquals(ErrorCodes.unsupported_media_type, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
+        assertServiceNotCalledManual(service)
+    }
+
+    @Test
+    fun `scan with blank payload returns checkin_invalid_payload`() = withHostApp() { service ->
+        val response =
+            client.post("/api/host/checkin/scan") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"payload":"   "}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.checkin_invalid_payload, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
+        assertServiceNotCalledScan(service)
+    }
+
+    @Test
+    fun `manual with invalid enum values returns checkin_invalid_payload`() = withHostApp() { service ->
+        val response =
+            client.post("/api/host/checkin/manual") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """
+                    {
+                      "subjectType": "bad_type",
+                      "subjectId": "123",
+                      "status": "bad_status"
+                    }
+                    """.trimIndent()
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.checkin_invalid_payload, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
+        assertServiceNotCalledManual(service)
     }
 
     @Test
