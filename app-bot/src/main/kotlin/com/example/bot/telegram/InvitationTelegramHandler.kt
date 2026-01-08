@@ -25,6 +25,16 @@ private const val CALLBACK_CONFIRM_PREFIX = "inv_confirm:"
 private const val CALLBACK_DECLINE_PREFIX = "inv_decline:"
 private const val CALLBACK_MAX_BYTES = 64
 
+private suspend inline fun bestEffort(block: suspend () -> Unit) {
+    try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        // ignore (best-effort)
+    }
+}
+
 class InvitationTelegramHandler(
     private val send: suspend (BaseRequest<*, *>) -> BaseResponse,
     private val invitationService: InvitationService,
@@ -75,13 +85,7 @@ class InvitationTelegramHandler(
                     .text("Кнопка устарела")
                     .showAlert(false),
             )
-            try {
-                clearInlineKeyboard(callbackQuery.message())
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Throwable) {
-                // ignore (best-effort)
-            }
+            bestEffort { clearInlineKeyboard(callbackQuery.message()) }
             return
         }
         val telegramUserId = callbackQuery.from()?.id() ?: return
@@ -94,13 +98,7 @@ class InvitationTelegramHandler(
                 }
                 val cardText = buildCardText(result.value)
                 send(AnswerCallbackQuery(callbackQuery.id()).text("Готово"))
-                try {
-                    editCallbackMessage(callbackQuery.message(), cardText)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Throwable) {
-                    // ignore (best-effort)
-                }
+                bestEffort { editCallbackMessage(callbackQuery.message(), cardText) }
             }
 
             is InvitationServiceResult.Failure -> {
@@ -110,13 +108,7 @@ class InvitationTelegramHandler(
                         .text(errorText)
                         .showAlert(true),
                 )
-                try {
-                    editCallbackMessage(callbackQuery.message(), errorText)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Throwable) {
-                    // ignore (best-effort)
-                }
+                bestEffort { editCallbackMessage(callbackQuery.message(), errorText) }
             }
         }
     }
