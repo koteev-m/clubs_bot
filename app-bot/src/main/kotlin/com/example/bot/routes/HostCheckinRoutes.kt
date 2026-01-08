@@ -239,6 +239,6 @@ private fun ApplicationCall.toAuthContext(): AuthContext {
     )
 }
 
-private fun readCheckinMaxBodyBytesFromEnvOrDefault(envProvider: (String) -> String? = System::getenv): Long =
-    (envProvider("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
+private fun readCheckinMaxBodyBytesFromEnvOrDefault(): Long =
+    (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
         ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
