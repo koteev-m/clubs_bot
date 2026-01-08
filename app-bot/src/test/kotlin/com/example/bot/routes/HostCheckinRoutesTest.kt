@@ -64,7 +64,7 @@ class HostCheckinRoutesTest {
     }
 
     @Test
-    fun `rbac forbids non entry roles`() = withHostApp(roles = setOf(Role.PROMOTER)) {
+    fun `rbac forbids non entry roles`() = withHostApp(roles = setOf(Role.PROMOTER)) { service ->
         val response =
             client.post("/api/host/checkin/scan") {
                 withInitData(initData)
@@ -75,6 +75,7 @@ class HostCheckinRoutesTest {
         assertEquals(HttpStatusCode.Forbidden, response.status)
         assertEquals(ErrorCodes.forbidden, response.errorCode())
         assertMiniAppNoStoreHeaders(response)
+        assertServiceNotCalledScan(service)
     }
 
     @Test
@@ -155,6 +156,21 @@ class HostCheckinRoutesTest {
     }
 
     @Test
+    fun `scan with wrong content type returns unsupported_media_type`() = withHostApp() { service ->
+        val response =
+            client.post("/api/host/checkin/scan") {
+                withInitData(initData)
+                contentType(ContentType.Text.Plain)
+                setBody("payload")
+            }
+
+        assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+        assertEquals(ErrorCodes.unsupported_media_type, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
+        assertServiceNotCalledScan(service)
+    }
+
+    @Test
     fun `manual denied without reason returns error`() = withHostApp() { service ->
         coEvery { service.manualCheckin(any(), any(), any(), any(), any()) } returns
             CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_DENY_REASON_REQUIRED)
@@ -177,6 +193,7 @@ class HostCheckinRoutesTest {
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertEquals(ErrorCodes.checkin_deny_reason_required, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
     }
 
     private fun withHostApp(
