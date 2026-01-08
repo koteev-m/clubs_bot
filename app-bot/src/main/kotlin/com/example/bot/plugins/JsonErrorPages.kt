@@ -11,6 +11,7 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.requestsize.RequestTooLargeException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
+import io.ktor.server.response.respond
 import org.slf4j.LoggerFactory
 
 fun Application.installJsonErrorPages() {
@@ -30,12 +31,16 @@ fun Application.installJsonErrorPages() {
         exception<MiniAppAuthAbort> { _, _ -> }
 
         exception<RequestTooLargeException> { call, cause ->
-            if (!call.request.path().startsWith("/api/")) throw cause
+            if (!call.request.path().startsWith("/api/")) {
+                call.respond(HttpStatusCode.PayloadTooLarge)
+                return@exception
+            }
             call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
         }
 
         status(HttpStatusCode.Unauthorized) { call, _ ->
             if (call.attributes.contains(MiniAppAuthErrorHandledKey)) return@status
+            if (call.attributes.contains(ApiErrorHandledKey)) return@status
             val wwwAuthenticate = call.response.headers[HttpHeaders.WWWAuthenticate]
             if (wwwAuthenticate != null) {
                 call.response.headers.append(HttpHeaders.WWWAuthenticate, wwwAuthenticate, false)
@@ -44,6 +49,7 @@ fun Application.installJsonErrorPages() {
         }
 
         status(HttpStatusCode.TooManyRequests) { call, _ ->
+            if (call.attributes.contains(ApiErrorHandledKey)) return@status
             val retryAfter = call.response.headers[HttpHeaders.RetryAfter]
             if (retryAfter != null) {
                 call.response.headers.append(HttpHeaders.RetryAfter, retryAfter, false)
@@ -59,11 +65,13 @@ fun Application.installJsonErrorPages() {
 
         status(HttpStatusCode.UnsupportedMediaType) { call, _ ->
             if (!call.request.path().startsWith("/api/")) return@status
+            if (call.attributes.contains(ApiErrorHandledKey)) return@status
             call.respondError(HttpStatusCode.UnsupportedMediaType, ErrorCodes.unsupported_media_type)
         }
 
         status(HttpStatusCode.NotFound) { call, _ ->
             if (!call.request.path().startsWith("/api/")) return@status
+            if (call.attributes.contains(ApiErrorHandledKey)) return@status
             call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
         }
 

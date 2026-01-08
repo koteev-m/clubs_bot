@@ -304,6 +304,37 @@ class JsonErrorFormatTest {
     }
 
     @Test
+    fun `domain forbidden is not overwritten`() = testApplication {
+        application {
+            val app = this
+            app.install(ServerContentNegotiation) { json() }
+            app.configureLoggingAndRequestId()
+            app.installJsonErrorPages()
+            routing {
+                route("/api") {
+                    get("/domain-403") {
+                        call.respondError(HttpStatusCode.Forbidden, ErrorCodes.checkin_forbidden)
+                    }
+                }
+            }
+        }
+
+        val response = client.config {
+            install(ContentNegotiation) { json() }
+        }.get("/api/domain-403") {
+            headers { append("X-Request-Id", "rid-403-domain") }
+        }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        val contentType = response.headers[HttpHeaders.ContentType]
+        assertTrue(contentType?.startsWith(ContentType.Application.Json.toString()) == true)
+        val error = Json.decodeFromString<ApiError>(response.bodyAsText())
+        assertEquals("checkin_forbidden", error.code)
+        assertEquals(HttpStatusCode.Forbidden.value, error.status)
+        assertEquals("rid-403-domain", error.requestId)
+    }
+
+    @Test
     fun `unsupported media type returns JSON on api`() = testApplication {
         application {
             val app = this
@@ -333,6 +364,37 @@ class JsonErrorFormatTest {
         assertEquals("unsupported_media_type", error.code)
         assertEquals(HttpStatusCode.UnsupportedMediaType.value, error.status)
         assertEquals("rid-415-0001", error.requestId)
+    }
+
+    @Test
+    fun `domain not found is not overwritten`() = testApplication {
+        application {
+            val app = this
+            app.install(ServerContentNegotiation) { json() }
+            app.configureLoggingAndRequestId()
+            app.installJsonErrorPages()
+            routing {
+                route("/api") {
+                    get("/domain-404") {
+                        call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
+                    }
+                }
+            }
+        }
+
+        val response = client.config {
+            install(ContentNegotiation) { json() }
+        }.get("/api/domain-404") {
+            headers { append("X-Request-Id", "rid-404-domain") }
+        }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        val contentType = response.headers[HttpHeaders.ContentType]
+        assertTrue(contentType?.startsWith(ContentType.Application.Json.toString()) == true)
+        val error = Json.decodeFromString<ApiError>(response.bodyAsText())
+        assertEquals("entry_not_found", error.code)
+        assertEquals(HttpStatusCode.NotFound.value, error.status)
+        assertEquals("rid-404-domain", error.requestId)
     }
 
     @Test
