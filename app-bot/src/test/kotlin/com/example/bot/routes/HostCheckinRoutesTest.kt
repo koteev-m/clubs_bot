@@ -19,7 +19,7 @@ import com.example.bot.http.NO_STORE_CACHE_CONTROL
 import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.TelegramMiniUser
-import com.example.bot.plugins.installMiniAppAuthStatusPage
+import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
@@ -239,8 +239,33 @@ class HostCheckinRoutesTest {
             }
 
         assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
+        assertEquals(ErrorCodes.payload_too_large, response.errorCode())
         assertMiniAppNoStoreHeaders(response)
         assertServiceNotCalledScan(service)
+    }
+
+    @Test
+    fun `manual rejects oversized payload`() = withHostApp(maxBodyBytes = 32L) { service ->
+        val payload = "x".repeat(64)
+        val response =
+            client.post("/api/host/checkin/manual") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """
+                    {
+                      "subjectType": "guest_list_entry",
+                      "subjectId": "$payload",
+                      "status": "approved"
+                    }
+                    """.trimIndent()
+                )
+            }
+
+        assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
+        assertEquals(ErrorCodes.payload_too_large, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
+        assertServiceNotCalledManual(service)
     }
 
     @Test
@@ -346,7 +371,7 @@ class HostCheckinRoutesTest {
             val checkinService = mockk<CheckinService>(relaxed = true)
             application {
                 install(ContentNegotiation) { json() }
-                installMiniAppAuthStatusPage()
+                installJsonErrorPages()
                 install(RbacPlugin) {
                     userRepository = StubUserRepository(userId)
                     userRoleRepository = StubUserRoleRepository(roles)
@@ -398,12 +423,23 @@ class HostCheckinRoutesTest {
         return parsed ?: extracted ?: raw
     }
 
+    private suspend fun io.ktor.client.statement.HttpResponse.errorMessage(): String? {
+        val raw = bodyAsText()
+        val parsed = runCatching { Json.parseToJsonElement(raw).jsonObject.errorMessageOrNull() }.getOrNull()
+        val extracted = Regex("\\\"error\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"")
+            .find(raw)
+            ?.groupValues
+            ?.getOrNull(1)
+        return parsed ?: extracted
+    }
+
     private suspend fun assertMiniAppUnauthorized(
         response: io.ktor.client.statement.HttpResponse,
         expectedError: String,
     ) {
         assertEquals(HttpStatusCode.Unauthorized, response.status)
-        assertEquals(expectedError, response.errorCode())
+        assertEquals(ErrorCodes.unauthorized, response.errorCode())
+        assertEquals(expectedError, response.errorMessage())
         assertMiniAppNoStoreHeaders(response)
     }
 
@@ -424,4 +460,7 @@ class HostCheckinRoutesTest {
         this["code"]?.jsonPrimitive?.content
             ?: this["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content
             ?: this["error"]?.jsonPrimitive?.content
+
+    private fun JsonObject.errorMessageOrNull(): String? =
+        this["error"]?.jsonPrimitive?.content
 }
