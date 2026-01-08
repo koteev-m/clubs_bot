@@ -74,6 +74,7 @@ class HostCheckinRoutesTest {
 
         assertEquals(HttpStatusCode.Forbidden, response.status)
         assertEquals(ErrorCodes.forbidden, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
     }
 
     @Test
@@ -150,6 +151,7 @@ class HostCheckinRoutesTest {
         assertEquals("Alice", body["displayName"]!!.jsonPrimitive.content)
         assertEquals(99L, body["checkedBy"]!!.jsonPrimitive.long)
         assertEquals(occurredAt.toString(), body["occurredAt"]!!.jsonPrimitive.content)
+        assertMiniAppNoStoreHeaders(response)
     }
 
     @Test
@@ -239,8 +241,12 @@ class HostCheckinRoutesTest {
     ) {
         assertEquals(HttpStatusCode.Unauthorized, response.status)
         assertEquals(expectedError, response.errorCode())
-        assertTrue(response.headers[HttpHeaders.CacheControl]?.contains(NO_STORE_CACHE_CONTROL) == true)
-        assertTrue(response.headers[HttpHeaders.Vary]?.contains(MINI_APP_VARY_HEADER) == true)
+        assertMiniAppNoStoreHeaders(response)
+    }
+
+    private fun assertMiniAppNoStoreHeaders(response: io.ktor.client.statement.HttpResponse) {
+        assertTrue(response.headers[HttpHeaders.CacheControl]?.contains(NO_STORE_CACHE_CONTROL, ignoreCase = true) == true)
+        assertTrue(response.headers[HttpHeaders.Vary]?.contains(MINI_APP_VARY_HEADER, ignoreCase = true) == true)
     }
 
     private fun assertServiceNotCalledScan(service: CheckinService) {
