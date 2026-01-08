@@ -10,6 +10,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import org.slf4j.LoggerFactory
+import kotlin.coroutines.cancellation.CancellationException
 
 private const val SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
@@ -41,6 +42,7 @@ fun Application.telegramWebhookRoutes(
             try {
                 onUpdate(update)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 logger.warn("webhook: handler failed: {}", t.javaClass.simpleName)
             }
 

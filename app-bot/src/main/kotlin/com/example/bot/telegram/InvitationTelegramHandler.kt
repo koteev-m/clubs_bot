@@ -18,6 +18,7 @@ import com.pengrad.telegrambot.response.BaseResponse
 import io.micrometer.core.instrument.MeterRegistry
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.coroutines.cancellation.CancellationException
 
 private const val START_PREFIX = "inv_"
 private const val CALLBACK_CONFIRM_PREFIX = "inv_confirm:"
@@ -74,7 +75,13 @@ class InvitationTelegramHandler(
                     .text("Кнопка устарела")
                     .showAlert(false),
             )
-            runCatching { clearInlineKeyboard(callbackQuery.message()) }
+            try {
+                clearInlineKeyboard(callbackQuery.message())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // ignore (best-effort)
+            }
             return
         }
         val telegramUserId = callbackQuery.from()?.id() ?: return
@@ -87,7 +94,13 @@ class InvitationTelegramHandler(
                 }
                 val cardText = buildCardText(result.value)
                 send(AnswerCallbackQuery(callbackQuery.id()).text("Готово"))
-                runCatching { editCallbackMessage(callbackQuery.message(), cardText) }
+                try {
+                    editCallbackMessage(callbackQuery.message(), cardText)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    // ignore (best-effort)
+                }
             }
 
             is InvitationServiceResult.Failure -> {
@@ -97,7 +110,13 @@ class InvitationTelegramHandler(
                         .text(errorText)
                         .showAlert(true),
                 )
-                runCatching { editCallbackMessage(callbackQuery.message(), errorText) }
+                try {
+                    editCallbackMessage(callbackQuery.message(), errorText)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    // ignore (best-effort)
+                }
             }
         }
     }
