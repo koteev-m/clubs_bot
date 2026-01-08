@@ -24,6 +24,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
@@ -38,9 +39,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -72,7 +75,7 @@ class HostCheckinRoutesTest {
     }
 
     @Test
-    fun `missing initData returns unauthorized`() = withHostApp {
+    fun `missing initData returns unauthorized`() = withHostApp { service ->
         val response =
             client.post("/api/host/checkin/scan") {
                 contentType(ContentType.Application.Json)
@@ -80,10 +83,14 @@ class HostCheckinRoutesTest {
             }
 
         assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertEquals("initData missing", response.errorCode())
+        assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+        assertTrue(response.headers[HttpHeaders.Vary]?.isNotBlank() == true)
+        coVerify(exactly = 0) { service.scanQr(any(), any()) }
     }
 
     @Test
-    fun `initData in body is ignored`() = withHostApp {
+    fun `initData in body is ignored`() = withHostApp { service ->
         val response =
             client.post("/api/host/checkin/scan") {
                 contentType(ContentType.Application.Json)
@@ -91,6 +98,10 @@ class HostCheckinRoutesTest {
             }
 
         assertEquals(HttpStatusCode.Unauthorized, response.status)
+        assertEquals("initData missing", response.errorCode())
+        assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+        assertTrue(response.headers[HttpHeaders.Vary]?.isNotBlank() == true)
+        coVerify(exactly = 0) { service.scanQr(any(), any()) }
     }
 
     @Test
