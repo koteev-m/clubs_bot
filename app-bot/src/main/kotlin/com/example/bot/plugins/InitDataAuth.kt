@@ -1,5 +1,6 @@
 package com.example.bot.plugins
 
+import com.example.bot.http.ErrorCodes
 import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.auth.TelegramUser
 import io.ktor.http.ContentType
@@ -24,6 +25,8 @@ import org.slf4j.LoggerFactory
 import java.io.Serial
 
 val MiniAppUserKey: AttributeKey<TelegramMiniUser> = AttributeKey("miniapp.user")
+internal val MiniAppAuthErrorHandledKey: AttributeKey<Boolean> =
+    AttributeKey("miniapp.auth.error.handled")
 
 @Serializable
 data class TelegramMiniUser(
@@ -157,7 +160,8 @@ private suspend fun extractInitData(
 
 private suspend fun ApplicationCall.respondUnauthorized(reason: String) {
     logger.info("Mini App request unauthorized: {}", reason)
-    respond(HttpStatusCode.Unauthorized, mapOf("error" to reason))
+    attributes.put(MiniAppAuthErrorHandledKey, true)
+    respond(HttpStatusCode.Unauthorized, mapOf("error" to reason, "code" to ErrorCodes.unauthorized))
 }
 
 private suspend fun extractInitDataFromBodyOrNull(

@@ -15,11 +15,18 @@ fun Application.installJsonErrorPages() {
     val logger = LoggerFactory.getLogger("JsonErrorPages")
 
     install(StatusPages) {
+        status(HttpStatusCode.PayloadTooLarge) { call, _ ->
+            call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
+        }
+
+        exception<MiniAppAuthAbort> { _, _ -> }
+
         exception<RequestTooLargeException> { call, _ ->
             call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
         }
 
         status(HttpStatusCode.Unauthorized) { call, _ ->
+            if (call.attributes.contains(MiniAppAuthErrorHandledKey)) return@status
             val wwwAuthenticate = call.response.headers[HttpHeaders.WWWAuthenticate]
             if (wwwAuthenticate != null) {
                 call.response.headers.append(HttpHeaders.WWWAuthenticate, wwwAuthenticate, false)
