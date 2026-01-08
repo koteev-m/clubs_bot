@@ -1,7 +1,9 @@
 package com.example.bot.plugins
 
+import com.example.bot.http.ApiErrorHandledKey
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -16,12 +18,19 @@ fun Application.installJsonErrorPages() {
 
     install(StatusPages) {
         status(HttpStatusCode.PayloadTooLarge) { call, _ ->
+            if (!call.request.path().startsWith("/api/")) return@status
+            if (call.attributes.contains(ApiErrorHandledKey)) return@status
+            val contentType = call.response.headers[HttpHeaders.ContentType]
+            if (contentType?.startsWith(ContentType.Application.Json.toString()) == true) {
+                return@status
+            }
             call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
         }
 
         exception<MiniAppAuthAbort> { _, _ -> }
 
-        exception<RequestTooLargeException> { call, _ ->
+        exception<RequestTooLargeException> { call, cause ->
+            if (!call.request.path().startsWith("/api/")) throw cause
             call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
         }
 
