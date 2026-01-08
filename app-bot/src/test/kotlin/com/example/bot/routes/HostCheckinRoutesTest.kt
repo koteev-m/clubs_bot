@@ -229,6 +229,24 @@ class HostCheckinRoutesTest {
     }
 
     @Test
+    fun `scan forbidden returns domain error`() = withHostApp() { service ->
+        coEvery { service.scanQr(any(), any()) } returns
+            CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_FORBIDDEN)
+
+        val response =
+            client.post("/api/host/checkin/scan") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"payload":"token"}""")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        assertEquals(ErrorCodes.checkin_forbidden, response.errorCode())
+        assertMiniAppNoStoreHeaders(response)
+        coVerify(exactly = 1) { service.scanQr("token", any()) }
+    }
+
+    @Test
     fun `scan rejects oversized payload`() = withHostApp(maxBodyBytes = 32L) { service ->
         val payload = "x".repeat(64)
         val response =

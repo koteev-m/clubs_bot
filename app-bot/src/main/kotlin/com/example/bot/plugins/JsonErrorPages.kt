@@ -53,6 +53,7 @@ fun Application.installJsonErrorPages() {
 
         status(HttpStatusCode.Forbidden) { call, _ ->
             if (!call.request.path().startsWith("/api/")) return@status
+            if (call.attributes.contains(ApiErrorHandledKey)) return@status
             call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
         }
 
