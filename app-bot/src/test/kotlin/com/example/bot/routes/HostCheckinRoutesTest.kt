@@ -55,6 +55,7 @@ import org.junit.jupiter.api.Test
 
 class HostCheckinRoutesTest {
     private val telegramId = 42L
+    private val userId = 1L
     private val initData = createInitData(userId = telegramId)
 
     @BeforeEach
@@ -161,8 +162,8 @@ class HostCheckinRoutesTest {
             service.scanQr(
                 "token",
                 match {
-                    it.telegramUserId == 42L &&
-                        it.userId == 1L &&
+                    it.telegramUserId == telegramId &&
+                        it.userId == userId &&
                         it.roles.contains(Role.ENTRY_MANAGER)
                 },
             )
@@ -200,9 +201,11 @@ class HostCheckinRoutesTest {
         assertEquals("123", body["subjectId"]!!.jsonPrimitive.content)
         val existing = body["existingCheckin"]!!.jsonObject
         assertEquals(occurredAt.toString(), existing["occurredAt"]!!.jsonPrimitive.content)
+        assertEquals(77L, existing["checkedBy"]!!.jsonPrimitive.long)
         assertEquals("ARRIVED", existing["resultStatus"]!!.jsonPrimitive.content)
         assertEquals("QR", existing["method"]!!.jsonPrimitive.content)
         assertMiniAppNoStoreHeaders(response)
+        coVerify(exactly = 1) { service.scanQr("token", any()) }
     }
 
     @Test
@@ -222,6 +225,7 @@ class HostCheckinRoutesTest {
         assertEquals("INVALID", body["type"]!!.jsonPrimitive.content)
         assertEquals("TOKEN_EXPIRED", body["reason"]!!.jsonPrimitive.content)
         assertMiniAppNoStoreHeaders(response)
+        coVerify(exactly = 1) { service.scanQr("token", any()) }
     }
 
     @Test
@@ -344,7 +348,7 @@ class HostCheckinRoutesTest {
                 install(ContentNegotiation) { json() }
                 installMiniAppAuthStatusPage()
                 install(RbacPlugin) {
-                    userRepository = StubUserRepository()
+                    userRepository = StubUserRepository(userId)
                     userRoleRepository = StubUserRoleRepository(roles)
                     auditLogRepository = relaxedAuditRepository()
                     principalExtractor = { call ->
@@ -367,8 +371,8 @@ class HostCheckinRoutesTest {
         }
     }
 
-    private class StubUserRepository : UserRepository {
-        override suspend fun getByTelegramId(id: Long): User? = User(id = 1, telegramId = id, username = "tester")
+    private class StubUserRepository(private val userId: Long) : UserRepository {
+        override suspend fun getByTelegramId(id: Long): User? = User(id = userId, telegramId = id, username = "tester")
     }
 
     private class StubUserRoleRepository(private val roles: Set<Role>) : UserRoleRepository {
