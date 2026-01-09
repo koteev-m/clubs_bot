@@ -20,7 +20,7 @@ object TicketsTable : Table("tickets") {
 
 object TicketMessagesTable : Table("ticket_messages") {
     val id = long("id").autoIncrement()
-    val ticketId = long("ticket_id")
+    val ticketId = long("ticket_id").references(TicketsTable.id)
     val senderType = text("sender_type")
     val text = text("text")
     val attachments = text("attachments").nullable()
