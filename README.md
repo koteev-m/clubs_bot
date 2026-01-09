@@ -165,9 +165,10 @@ POST /api/host/checkin/scan
     `BookingStatus` (`hold|booked|canceled`), waitlist — из `WaitlistStatus` (`waiting|called|expired|cancelled|...`).
     `expected.guestList[*].hasQr` сейчас всегда `false` до явной привязки QR к гостевой записи.
   - `status` — агрегаты по каналам: expectedGuests, arrivedGuests, notArrivedGuests, noShowGuests. Guest list expected — все
-    не-EXPIRED записи; arrived — CHECKED_IN; noShow — NO_SHOW; notArrived = max(expected - arrived - noShow, 0). Bookings
-    expected — все НЕ-CANCELED; arrived/noShow = 0 (пока без чек-ина по booking), notArrived = expected. `counts` — сумма
-    expected/arrived/noShow по каналам без дедупликации между ними.
+    не-EXPIRED записи; arrived — суммы статусов ARRIVED, LATE, CHECKED_IN; noShow — суммы статусов NO_SHOW и DENIED;
+    notArrived = max(expected - arrived - noShow, 0). Bookings expected — все НЕ-CANCELED; arrived/noShow = 0 (пока без
+    чек-ина по booking), notArrived = expected. `counts` — сумма expected/arrived/noShow по каналам без дедупликации между
+    ними.
   - `waitlist` — активные записи очереди ожидания (`id`, `clubId`, `eventId`, `userId`, `partySize`, `status`,
     `createdAt`, `calledAt`, `expiresAt`) и `activeCount` (size списка).
 
