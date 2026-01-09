@@ -481,6 +481,36 @@ class InvitationServiceTest {
     }
 
     @Test
+    fun `respond decline keeps existing telegram user id`() = runBlocking {
+        val entry = entryRecord(status = GuestListEntryStatus.INVITED, telegramUserId = 555)
+        val guestList = guestListRecord()
+        val invitation = invitationRecord(entryId = entry.id, expiresAt = fixedClock.instant().plusSeconds(3600))
+        val tokenHash = "decline".sha256Hex()
+
+        coEvery { invitationRepo.findByTokenHash(tokenHash) } returns invitation
+        coEvery { entryRepo.findById(entry.id) } returns entry
+        coEvery { guestListRepo.findById(guestList.id) } returns guestList
+        coEvery { entryRepo.updateStatus(entry.id, GuestListEntryStatus.DECLINED) } returns true
+
+        val service = InvitationServiceImpl(
+            invitationRepo,
+            guestListRepo,
+            entryRepo,
+            guestListConfig,
+            invitationConfig,
+            fixedClock,
+            FixedSecureRandom(ByteArray(32)),
+        )
+
+        val result = service.respondToInvitation("decline", telegramUserId = 9999, response = InvitationResponse.DECLINE)
+
+        check(result is InvitationServiceResult.Success)
+        assertEquals(GuestListEntryStatus.DECLINED, result.value.entryStatus)
+        coVerify(exactly = 0) { entryRepo.setTelegramUserIdIfNull(any(), any()) }
+        coVerify(exactly = 1) { entryRepo.updateStatus(entry.id, GuestListEntryStatus.DECLINED) }
+    }
+
+    @Test
     fun `respond decline does not override terminal status`() = runBlocking {
         val entry = entryRecord(status = GuestListEntryStatus.CHECKED_IN, telegramUserId = 55)
         val guestList = guestListRecord()

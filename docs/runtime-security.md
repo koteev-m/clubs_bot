@@ -67,6 +67,13 @@ spec:
 
 Корневая ФС контейнера монтируется read-only, запись возможна только в `emptyDir` для `/tmp` и `/var/cache/app`. Capabilities целиком сброшены, повышение привилегий запрещено, процесс запускается под UID/GID `10001`; `runAsUser: 10001` зеркалирует настройки образа и закрепляет инвариант non-root на уровне кластера.
 
+# Инварианты безопасности (P0.1)
+
+- Raw токены приглашений/QR не логируются и не сохраняются; в БД хранится только `token_hash`.
+- QR/subject одноразовые: повторный scan возвращает AlreadyUsed, используется unique/idempotency на уровне БД.
+- Self-checkin запрещён и/или ограничен role gating: доступ к host check-in только для ENTRY_MANAGER+.
+- Для чувствительных Mini App/host endpoints всегда `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data`.
+
 # Привязка к HEALTHCHECK / livenessProbe
 
 В Dockerfile уже настроен `HEALTHCHECK` на HTTP `GET /health` (порт `8080`). В Kubernetes можно использовать тот же endpoint в `livenessProbe`/`readinessProbe`, чтобы повторять текущую схему проверки без изменений бизнес-логики.
