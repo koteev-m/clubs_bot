@@ -1,0 +1,26 @@
+CREATE TABLE tickets (
+    id BIGSERIAL PRIMARY KEY,
+    club_id BIGINT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    booking_id UUID NULL REFERENCES bookings(id) ON DELETE SET NULL,
+    list_entry_id BIGINT NULL REFERENCES guest_list_entries(id) ON DELETE SET NULL,
+    topic TEXT NOT NULL CHECK (topic IN ('address','dresscode','booking','invite','lost_found','complaint','other')),
+    status TEXT NOT NULL CHECK (status IN ('opened','in_progress','answered','closed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_agent_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+    resolution_rating SMALLINT NULL
+);
+
+CREATE TABLE ticket_messages (
+    id BIGSERIAL PRIMARY KEY,
+    ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    sender_type TEXT NOT NULL CHECK (sender_type IN ('guest','agent','system')),
+    text TEXT NOT NULL,
+    attachments TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_tickets_user_updated_at ON tickets(user_id, updated_at DESC);
+CREATE INDEX idx_tickets_club_status_updated_at ON tickets(club_id, status, updated_at DESC);
+CREATE INDEX idx_ticket_messages_ticket_id_id ON ticket_messages(ticket_id, id ASC);
