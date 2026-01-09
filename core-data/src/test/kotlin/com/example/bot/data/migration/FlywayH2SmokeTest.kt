@@ -2,6 +2,7 @@ package com.example.bot.data.migration
 
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.time.OffsetDateTime
 
 class FlywayH2SmokeTest {
@@ -28,6 +29,33 @@ class FlywayH2SmokeTest {
             assertCheckinsConstraintEnforced(connection)
             assertGuestListStatusConstraintH2(connection)
             assertGuestListStatuses(connection, baseTime)
+        }
+    }
+
+    @Test
+    fun `h2 migrations create support tables`() {
+        val jdbcUrl =
+            "jdbc:h2:mem:flyway-h2-support;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
+        migrateAndTrack(jdbcUrl, "sa", "", "org.h2.Driver", "h2", resourcesToClose)
+
+        withConnection(resourcesToClose) { connection ->
+            assertTableExists(connection, "tickets")
+            assertTableExists(connection, "ticket_messages")
+        }
+    }
+
+    private fun assertTableExists(connection: Connection, tableName: String) {
+        connection.prepareStatement(
+            """
+            SELECT 1
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE lower(TABLE_NAME) = ?
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, tableName.lowercase())
+            statement.executeQuery().use { resultSet ->
+                check(resultSet.next()) { "Expected table $tableName to exist" }
+            }
         }
     }
 }
