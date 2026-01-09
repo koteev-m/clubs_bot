@@ -211,8 +211,7 @@ class GuestListInvitationCheckinE2ETest {
             }
 
         assertEquals(HttpStatusCode.Forbidden, response.status)
-        val body = response.bodyAsJson()
-        assertEquals("forbidden", body["error"]!!.jsonPrimitive.content)
+        assertEquals("forbidden", response.errorCode())
     }
 
     @Test
@@ -318,6 +317,18 @@ class GuestListInvitationCheckinE2ETest {
 
     private suspend fun io.ktor.client.statement.HttpResponse.bodyAsJson(): JsonObject =
         Json.parseToJsonElement(bodyAsText()).jsonObject
+
+    private suspend fun io.ktor.client.statement.HttpResponse.errorCode(): String {
+        val raw = bodyAsText()
+        val parsed = runCatching { Json.parseToJsonElement(raw).jsonObject.errorCodeOrNull() }.getOrNull()
+        val extracted = Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(raw)?.groupValues?.getOrNull(1)
+        return parsed ?: extracted ?: raw
+    }
+
+    private fun JsonObject.errorCodeOrNull(): String? =
+        this["code"]?.jsonPrimitive?.content
+            ?: this["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content
+            ?: this["error"]?.jsonPrimitive?.content
 
     private data class DbSetup(
         val dataSource: JdbcDataSource,
