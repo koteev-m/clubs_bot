@@ -49,6 +49,27 @@ class GuestListServiceTest {
     }
 
     @Test
+    fun `bulk add rejects oversized payload before parsing`() = runBlocking {
+        val list = listRecord(capacity = 10)
+        coEvery { guestListRepo.findById(list.id) } returns list
+
+        val tinyConfig = GuestListConfig(bulkMaxChars = 5, noShowGraceMinutes = 30)
+        val service = GuestListServiceImpl(guestListRepo, entryRepo, tinyConfig, fixedClock, GuestListBulkParser())
+
+        val result = service.addEntriesBulk(list.id, rawText = "abcdef")
+
+        when (result) {
+            is GuestListServiceResult.Failure ->
+                assertEquals(GuestListServiceError.BulkParseTooLarge, result.error)
+            is GuestListServiceResult.Success -> fail("Expected bulk parse size failure but got success")
+        }
+        coVerify(exactly = 1) { guestListRepo.findById(list.id) }
+        coVerify(exactly = 0) { entryRepo.listByGuestList(any()) }
+        coVerify(exactly = 0) { entryRepo.insertMany(any(), any()) }
+        confirmVerified(entryRepo)
+    }
+
+    @Test
     fun `stats include arrivals and no shows after grace`() = runBlocking {
         val arrivalEnd = Instant.parse("2024-06-01T21:00:00Z")
         val list = listRecord(capacity = 10, arrivalWindowEnd = arrivalEnd)

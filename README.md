@@ -112,6 +112,46 @@ Rate limits are enforced per user and route (e.g., 5 holds / 10s). Every respons
 `X-RateLimit-Remaining`; a throttled response adds `Retry-After` with seconds to wait. These headers are returned even for early
 validation errors so clients can surface them consistently.
 
+### Guest lists / Invitations / Check-ins (P0.1)
+
+Ключевые endpoints:
+- `POST /api/promoter/guest-lists` — создать гостевой список (promoter/admin flow).
+- `POST /api/promoter/guest-lists/{id}/entries/bulk` — массовое добавление гостей из текста.
+- `POST /api/promoter/guest-lists/{id}/entries/{entryId}/invitation` — создать приглашение для записи (возвращает token).
+- `POST /api/invitations/resolve` — получить карточку приглашения по token.
+- `POST /api/invitations/respond` — подтвердить/отклонить приглашение (Mini App контекст).
+- `POST /api/host/checkin/scan` — скан приглашения на входе (ENTRY_MANAGER+).
+
+Примеры (placeholders):
+```json
+POST /api/promoter/guest-lists
+{
+  "clubId": 1,
+  "eventId": 10,
+  "arrivalWindowStart": "2025-01-01T19:00:00Z",
+  "arrivalWindowEnd": "2025-01-02T03:00:00Z",
+  "limit": 50,
+  "name": "VIP"
+}
+
+POST /api/promoter/guest-lists/{id}/entries/bulk
+{ "rawText": "Иван Иванов / Пётр Петров\nСаша" }
+
+POST /api/promoter/guest-lists/{id}/entries/{entryId}/invitation
+{ "channel": "TELEGRAM" }
+
+POST /api/invitations/respond
+{ "token": "<token>", "response": "CONFIRM" }
+
+POST /api/host/checkin/scan
+{ "payload": "inv:<token>" }
+```
+
+Инварианты:
+- `token` возвращается только один раз при создании; в хранилище сохраняется только `token_hash`.
+- Telegram deep link: `/start inv_<token>`.
+- Кнопки confirm/decline меняют статус записи (CONFIRMED/DECLINED).
+
 ### Host entrance aggregate (C1)
 
 - `GET /api/host/entrance?clubId=&eventId=` — агрегат «Вход сегодня» для ролей ENTRY_MANAGER+. Возвращает ожидаемых гостей по
