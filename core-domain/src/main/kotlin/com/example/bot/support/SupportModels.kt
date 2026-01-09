@@ -3,7 +3,7 @@ package com.example.bot.support
 import java.time.Instant
 import java.util.UUID
 
-enum class TicketTopic(val value: String) {
+enum class TicketTopic(val wire: String) {
     ADDRESS("address"),
     DRESSCODE("dresscode"),
     BOOKING("booking"),
@@ -12,24 +12,30 @@ enum class TicketTopic(val value: String) {
     COMPLAINT("complaint"),
     OTHER("other");
 
-    override fun toString(): String = value
+    companion object {
+        fun fromWire(value: String): TicketTopic? = entries.firstOrNull { it.wire == value }
+    }
 }
 
-enum class TicketStatus(val value: String) {
+enum class TicketStatus(val wire: String) {
     OPENED("opened"),
     IN_PROGRESS("in_progress"),
     ANSWERED("answered"),
     CLOSED("closed");
 
-    override fun toString(): String = value
+    companion object {
+        fun fromWire(value: String): TicketStatus? = entries.firstOrNull { it.wire == value }
+    }
 }
 
-enum class TicketSenderType(val value: String) {
+enum class TicketSenderType(val wire: String) {
     GUEST("guest"),
     AGENT("agent"),
     SYSTEM("system");
 
-    override fun toString(): String = value
+    companion object {
+        fun fromWire(value: String): TicketSenderType? = entries.firstOrNull { it.wire == value }
+    }
 }
 
 data class Ticket(
@@ -55,16 +61,24 @@ data class TicketMessage(
     val createdAt: Instant,
 )
 
+data class TicketWithMessage(
+    val ticket: Ticket,
+    val initialMessage: TicketMessage,
+)
+
+data class SupportReplyResult(
+    val ticket: Ticket,
+    val replyMessage: TicketMessage,
+)
+
 data class TicketSummary(
     val id: Long,
     val clubId: Long,
-    val userId: Long,
-    val bookingId: UUID?,
-    val listEntryId: Long?,
     val topic: TicketTopic,
     val status: TicketStatus,
     val updatedAt: Instant,
-    val lastMessageAt: Instant?,
+    val lastMessagePreview: String?,
+    val lastSenderType: TicketSenderType?,
 )
 
 sealed interface SupportServiceError {
@@ -88,31 +102,51 @@ interface SupportService {
         bookingId: UUID?,
         listEntryId: Long?,
         topic: TicketTopic,
-        messageText: String,
+        text: String,
         attachments: String?,
-    ): SupportServiceResult<Ticket>
+    ): SupportServiceResult<TicketWithMessage>
 
-    suspend fun addMessage(
+    suspend fun listMyTickets(
+        userId: Long,
+    ): List<TicketSummary>
+
+    suspend fun addGuestMessage(
         ticketId: Long,
-        senderId: Long,
-        senderType: TicketSenderType,
+        userId: Long,
         text: String,
         attachments: String?,
     ): SupportServiceResult<TicketMessage>
 
-    suspend fun getTicket(
+    suspend fun listTicketsForClub(
+        clubId: Long,
+        status: TicketStatus?,
+    ): List<TicketSummary>
+
+    suspend fun assign(
         ticketId: Long,
-        requesterId: Long,
+        agentUserId: Long,
     ): SupportServiceResult<Ticket>
 
-    suspend fun listTickets(
-        clubId: Long,
-        requesterId: Long,
-    ): SupportServiceResult<List<TicketSummary>>
+    suspend fun setStatus(
+        ticketId: Long,
+        agentUserId: Long,
+        status: TicketStatus,
+    ): SupportServiceResult<Ticket>
 
-    suspend fun rateTicket(
+    suspend fun reply(
+        ticketId: Long,
+        agentUserId: Long,
+        text: String,
+        attachments: String?,
+    ): SupportServiceResult<SupportReplyResult>
+
+    suspend fun setResolutionRating(
         ticketId: Long,
         userId: Long,
         rating: Int,
     ): SupportServiceResult<Ticket>
+
+    suspend fun getTicket(
+        ticketId: Long,
+    ): Ticket?
 }
