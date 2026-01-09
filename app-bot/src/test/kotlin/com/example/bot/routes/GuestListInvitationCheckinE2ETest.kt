@@ -33,6 +33,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -325,10 +326,16 @@ class GuestListInvitationCheckinE2ETest {
         return parsed ?: extracted ?: raw
     }
 
-    private fun JsonObject.errorCodeOrNull(): String? =
-        this["code"]?.jsonPrimitive?.content
-            ?: this["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content
-            ?: this["error"]?.jsonPrimitive?.content
+    private fun JsonObject.errorCodeOrNull(): String? {
+        val code = this["code"] as? JsonPrimitive
+        if (code != null) {
+            return code.content
+        }
+        val error = this["error"]
+        val nestedCode = ((error as? JsonObject)?.get("code") as? JsonPrimitive)?.content
+        val legacyCode = (error as? JsonPrimitive)?.content
+        return nestedCode ?: legacyCode
+    }
 
     private data class DbSetup(
         val dataSource: JdbcDataSource,
