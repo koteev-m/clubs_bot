@@ -45,15 +45,26 @@ class SupportServiceImpl(
         text: String,
         attachments: String?,
     ): SupportServiceResult<TicketMessage> {
-        val ticket = repository.findTicket(ticketId) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        if (ticket.userId != userId) {
-            return SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
+        return when (
+            val result =
+                repository.addGuestMessage(
+                    ticketId = ticketId,
+                    userId = userId,
+                    text = text,
+                    attachments = attachments,
+                )
+        ) {
+            is AddGuestMessageResult.Success -> SupportServiceResult.Success(result.message)
+            is AddGuestMessageResult.Failure ->
+                when (result.reason) {
+                    AddGuestMessageFailure.NotFound ->
+                        SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
+                    AddGuestMessageFailure.Forbidden ->
+                        SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
+                    AddGuestMessageFailure.Closed ->
+                        SupportServiceResult.Failure(SupportServiceError.TicketClosed)
+                }
         }
-        if (ticket.status == TicketStatus.CLOSED) {
-            return SupportServiceResult.Failure(SupportServiceError.TicketClosed)
-        }
-        val message = repository.addGuestMessage(ticketId = ticketId, text = text, attachments = attachments)
-        return SupportServiceResult.Success(message)
     }
 
     override suspend fun listTicketsForClub(
@@ -66,8 +77,8 @@ class SupportServiceImpl(
         ticketId: Long,
         agentUserId: Long,
     ): SupportServiceResult<Ticket> {
-        val ticket = repository.findTicket(ticketId) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        val updated = repository.assign(ticketId = ticket.id, agentUserId = agentUserId)
+        val updated = repository.assign(ticketId = ticketId, agentUserId = agentUserId)
+            ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
         return SupportServiceResult.Success(updated)
     }
 
@@ -76,8 +87,13 @@ class SupportServiceImpl(
         agentUserId: Long,
         status: TicketStatus,
     ): SupportServiceResult<Ticket> {
-        val ticket = repository.findTicket(ticketId) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        val updated = repository.setStatus(ticketId = ticket.id, agentUserId = agentUserId, status = status)
+        val updated =
+            repository.setStatus(
+                ticketId = ticketId,
+                agentUserId = agentUserId,
+                status = status,
+            )
+            ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
         return SupportServiceResult.Success(updated)
     }
 
@@ -87,14 +103,13 @@ class SupportServiceImpl(
         text: String,
         attachments: String?,
     ): SupportServiceResult<SupportReplyResult> {
-        val ticket = repository.findTicket(ticketId) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
         val result =
             repository.reply(
-                ticketId = ticket.id,
+                ticketId = ticketId,
                 agentUserId = agentUserId,
                 text = text,
                 attachments = attachments,
-            )
+            ) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
         return SupportServiceResult.Success(result)
     }
 
@@ -106,19 +121,27 @@ class SupportServiceImpl(
         if (rating != 1 && rating != -1) {
             return SupportServiceResult.Failure(SupportServiceError.RatingNotAllowed)
         }
-        val ticket = repository.findTicket(ticketId) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        if (ticket.userId != userId) {
-            return SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
+        return when (
+            val result =
+                repository.setResolutionRating(
+                    ticketId = ticketId,
+                    userId = userId,
+                    rating = rating,
+                )
+        ) {
+            is SetResolutionRatingResult.Success -> SupportServiceResult.Success(result.ticket)
+            is SetResolutionRatingResult.Failure ->
+                when (result.reason) {
+                    SetResolutionRatingFailure.NotFound ->
+                        SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
+                    SetResolutionRatingFailure.Forbidden ->
+                        SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
+                    SetResolutionRatingFailure.NotAllowed ->
+                        SupportServiceResult.Failure(SupportServiceError.RatingNotAllowed)
+                    SetResolutionRatingFailure.AlreadySet ->
+                        SupportServiceResult.Failure(SupportServiceError.RatingAlreadySet)
+                }
         }
-        if (ticket.status != TicketStatus.ANSWERED && ticket.status != TicketStatus.CLOSED) {
-            return SupportServiceResult.Failure(SupportServiceError.RatingNotAllowed)
-        }
-        val updated = repository.setResolutionRating(ticketId = ticketId, rating = rating)
-        if (!updated) {
-            return SupportServiceResult.Failure(SupportServiceError.RatingAlreadySet)
-        }
-        val refreshed = repository.findTicket(ticketId) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        return SupportServiceResult.Success(refreshed)
     }
 
     override suspend fun getTicket(ticketId: Long): Ticket? =
