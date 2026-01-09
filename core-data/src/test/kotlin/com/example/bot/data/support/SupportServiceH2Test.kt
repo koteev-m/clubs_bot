@@ -86,14 +86,20 @@ class SupportServiceH2Test {
                     attachments = null,
                 ) as SupportServiceResult.Success
 
-            service.addGuestMessage(
-                ticketId = created.value.ticket.id,
-                userId = userId,
-                text = "Adding more context",
-                attachments = null,
-            )
+            val guestMessage =
+                service.addGuestMessage(
+                    ticketId = created.value.ticket.id,
+                    userId = userId,
+                    text = "Adding more context",
+                    attachments = null,
+                )
+            assertTrue(guestMessage is SupportServiceResult.Success)
 
-            service.assign(ticketId = created.value.ticket.id, agentUserId = agentId)
+            val assigned = service.assign(ticketId = created.value.ticket.id, agentUserId = agentId)
+            assertTrue(assigned is SupportServiceResult.Success)
+            val assignedTicket = (assigned as SupportServiceResult.Success).value
+            assertEquals(TicketStatus.IN_PROGRESS, assignedTicket.status)
+            assertEquals(agentId, assignedTicket.lastAgentId)
             service.reply(
                 ticketId = created.value.ticket.id,
                 agentUserId = agentId,
@@ -107,6 +113,44 @@ class SupportServiceH2Test {
             assertTrue(summary.lastMessagePreview?.contains("resolved") == true)
             assertEquals(TicketSenderType.AGENT, summary.lastSenderType)
             assertEquals(TicketStatus.ANSWERED, summary.status)
+        }
+
+    @Test
+    fun `guest message reopens answered ticket`() =
+        runBlocking {
+            val userId = insertUser(username = "guest", displayName = "Guest")
+            val agentId = insertUser(username = "agent", displayName = "Agent")
+            val clubId = insertClub(name = "Aurora")
+
+            val created =
+                service.createTicket(
+                    clubId = clubId,
+                    userId = userId,
+                    bookingId = null,
+                    listEntryId = null,
+                    topic = TicketTopic.OTHER,
+                    text = "Need help",
+                    attachments = null,
+                ) as SupportServiceResult.Success
+
+            service.reply(
+                ticketId = created.value.ticket.id,
+                agentUserId = agentId,
+                text = "Resolved",
+                attachments = null,
+            )
+
+            val message =
+                service.addGuestMessage(
+                    ticketId = created.value.ticket.id,
+                    userId = userId,
+                    text = "It came back",
+                    attachments = null,
+                )
+            assertTrue(message is SupportServiceResult.Success)
+
+            val ticket = service.getTicket(created.value.ticket.id)
+            assertEquals(TicketStatus.OPENED, ticket?.status)
         }
 
     @Test
@@ -139,6 +183,36 @@ class SupportServiceH2Test {
 
             assertTrue(result is SupportServiceResult.Failure)
             assertEquals(SupportServiceError.TicketClosed, (result as SupportServiceResult.Failure).error)
+        }
+
+    @Test
+    fun `rating not allowed for open or in progress tickets`() =
+        runBlocking {
+            val userId = insertUser(username = "guest", displayName = "Guest")
+            val agentId = insertUser(username = "agent", displayName = "Agent")
+            val clubId = insertClub(name = "Aurora")
+
+            val created =
+                service.createTicket(
+                    clubId = clubId,
+                    userId = userId,
+                    bookingId = null,
+                    listEntryId = null,
+                    topic = TicketTopic.OTHER,
+                    text = "Need help",
+                    attachments = null,
+                ) as SupportServiceResult.Success
+
+            val openedRating = service.setResolutionRating(created.value.ticket.id, userId, 1)
+            assertTrue(openedRating is SupportServiceResult.Failure)
+            assertEquals(SupportServiceError.RatingNotAllowed, (openedRating as SupportServiceResult.Failure).error)
+
+            val assigned = service.assign(ticketId = created.value.ticket.id, agentUserId = agentId)
+            assertTrue(assigned is SupportServiceResult.Success)
+
+            val inProgressRating = service.setResolutionRating(created.value.ticket.id, userId, 1)
+            assertTrue(inProgressRating is SupportServiceResult.Failure)
+            assertEquals(SupportServiceError.RatingNotAllowed, (inProgressRating as SupportServiceResult.Failure).error)
         }
 
     @Test

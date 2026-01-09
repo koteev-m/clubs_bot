@@ -12,9 +12,12 @@ import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.max
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -127,21 +130,44 @@ class SupportRepository(
 
     suspend fun addGuestMessage(
         ticketId: Long,
+        userId: Long,
         text: String,
         attachments: String?,
-    ): TicketMessage =
+    ): AddGuestMessageResult =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             val now = clock.instant().atOffset(ZoneOffset.UTC)
-            val ticketRow =
-                TicketsTable
-                    .selectAll()
-                    .where { TicketsTable.id eq ticketId }
-                    .single()
-            val currentStatus = toStatus(ticketRow)
-            val nextStatus = if (currentStatus == TicketStatus.ANSWERED) TicketStatus.OPENED else currentStatus
-            TicketsTable.update({ TicketsTable.id eq ticketId }) {
-                it[TicketsTable.updatedAt] = now
-                it[TicketsTable.status] = nextStatus.wire
+            val answeredUpdated =
+                TicketsTable.update({
+                    (TicketsTable.id eq ticketId) and
+                        (TicketsTable.userId eq userId) and
+                        (TicketsTable.status eq TicketStatus.ANSWERED.wire)
+                }) {
+                    it[TicketsTable.status] = TicketStatus.OPENED.wire
+                    it[TicketsTable.updatedAt] = now
+                }
+            val updatedAtOnly =
+                TicketsTable.update({
+                    (TicketsTable.id eq ticketId) and
+                        (TicketsTable.userId eq userId) and
+                        (TicketsTable.status neq TicketStatus.CLOSED.wire) and
+                        (TicketsTable.status neq TicketStatus.ANSWERED.wire)
+                }) {
+                    it[TicketsTable.updatedAt] = now
+                }
+            if (answeredUpdated + updatedAtOnly == 0) {
+                val ticketRow =
+                    TicketsTable
+                        .selectAll()
+                        .where { TicketsTable.id eq ticketId }
+                        .singleOrNull()
+                        ?: return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.NotFound)
+                if (ticketRow[TicketsTable.userId] != userId) {
+                    return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.Forbidden)
+                }
+                if (toStatus(ticketRow) == TicketStatus.CLOSED) {
+                    return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.Closed)
+                }
+                return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.Closed)
             }
             val messageId =
                 TicketMessagesTable.insert {
@@ -151,51 +177,61 @@ class SupportRepository(
                     it[TicketMessagesTable.attachments] = attachments
                     it[TicketMessagesTable.createdAt] = now
                 }[TicketMessagesTable.id]
-            TicketMessage(
-                id = messageId,
-                ticketId = ticketId,
-                senderType = TicketSenderType.GUEST,
-                text = text,
-                attachments = attachments,
-                createdAt = now.toInstant(),
+            AddGuestMessageResult.Success(
+                TicketMessage(
+                    id = messageId,
+                    ticketId = ticketId,
+                    senderType = TicketSenderType.GUEST,
+                    text = text,
+                    attachments = attachments,
+                    createdAt = now.toInstant(),
+                ),
             )
         }
 
     suspend fun assign(
         ticketId: Long,
         agentUserId: Long,
-    ): Ticket =
+    ): Ticket? =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             val now = clock.instant().atOffset(ZoneOffset.UTC)
-            TicketsTable.update({ TicketsTable.id eq ticketId }) {
-                it[TicketsTable.status] = TicketStatus.IN_PROGRESS.wire
-                it[TicketsTable.lastAgentId] = agentUserId
-                it[TicketsTable.updatedAt] = now
+            val updated =
+                TicketsTable.update({ TicketsTable.id eq ticketId }) {
+                    it[TicketsTable.status] = TicketStatus.IN_PROGRESS.wire
+                    it[TicketsTable.lastAgentId] = agentUserId
+                    it[TicketsTable.updatedAt] = now
+                }
+            if (updated == 0) {
+                return@newSuspendedTransaction null
             }
             TicketsTable
                 .selectAll()
                 .where { TicketsTable.id eq ticketId }
                 .map { toTicket(it) }
-                .single()
+                .singleOrNull()
         }
 
     suspend fun setStatus(
         ticketId: Long,
         agentUserId: Long,
         status: TicketStatus,
-    ): Ticket =
+    ): Ticket? =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             val now = clock.instant().atOffset(ZoneOffset.UTC)
-            TicketsTable.update({ TicketsTable.id eq ticketId }) {
-                it[TicketsTable.status] = status.wire
-                it[TicketsTable.lastAgentId] = agentUserId
-                it[TicketsTable.updatedAt] = now
+            val updated =
+                TicketsTable.update({ TicketsTable.id eq ticketId }) {
+                    it[TicketsTable.status] = status.wire
+                    it[TicketsTable.lastAgentId] = agentUserId
+                    it[TicketsTable.updatedAt] = now
+                }
+            if (updated == 0) {
+                return@newSuspendedTransaction null
             }
             TicketsTable
                 .selectAll()
                 .where { TicketsTable.id eq ticketId }
                 .map { toTicket(it) }
-                .single()
+                .singleOrNull()
         }
 
     suspend fun reply(
@@ -203,8 +239,14 @@ class SupportRepository(
         agentUserId: Long,
         text: String,
         attachments: String?,
-    ): SupportReplyResult =
+    ): SupportReplyResult? =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            val ticketRow =
+                TicketsTable
+                    .selectAll()
+                    .where { TicketsTable.id eq ticketId }
+                    .singleOrNull()
+                    ?: return@newSuspendedTransaction null
             val now = clock.instant().atOffset(ZoneOffset.UTC)
             val messageId =
                 TicketMessagesTable.insert {
@@ -219,12 +261,11 @@ class SupportRepository(
                 it[TicketsTable.lastAgentId] = agentUserId
                 it[TicketsTable.updatedAt] = now
             }
-            val ticket =
-                TicketsTable
-                    .selectAll()
-                    .where { TicketsTable.id eq ticketId }
-                    .map { toTicket(it) }
-                    .single()
+            val ticket = toTicket(ticketRow).copy(
+                status = TicketStatus.ANSWERED,
+                updatedAt = now.toInstant(),
+                lastAgentId = agentUserId,
+            )
             val replyMessage =
                 TicketMessage(
                     id = messageId,
@@ -239,18 +280,55 @@ class SupportRepository(
 
     suspend fun setResolutionRating(
         ticketId: Long,
+        userId: Long,
         rating: Int,
-    ): Boolean =
+    ): SetResolutionRatingResult =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             val now = clock.instant().atOffset(ZoneOffset.UTC)
             val updated =
                 TicketsTable.update({
-                    (TicketsTable.id eq ticketId) and TicketsTable.resolutionRating.isNull()
+                    (TicketsTable.id eq ticketId) and
+                        (TicketsTable.userId eq userId) and
+                        TicketsTable.resolutionRating.isNull() and
+                        (
+                            TicketsTable.status inList
+                                listOf(TicketStatus.ANSWERED.wire, TicketStatus.CLOSED.wire)
+                        )
                 }) {
                     it[TicketsTable.resolutionRating] = rating.toShort()
                     it[TicketsTable.updatedAt] = now
                 }
-            updated > 0
+            if (updated > 0) {
+                val ticket =
+                    TicketsTable
+                        .selectAll()
+                        .where { TicketsTable.id eq ticketId }
+                        .map { toTicket(it) }
+                        .singleOrNull()
+                        ?: return@newSuspendedTransaction SetResolutionRatingResult.Failure(
+                            SetResolutionRatingFailure.NotFound,
+                        )
+                return@newSuspendedTransaction SetResolutionRatingResult.Success(ticket)
+            }
+            val ticketRow =
+                TicketsTable
+                    .selectAll()
+                    .where { TicketsTable.id eq ticketId }
+                    .singleOrNull()
+                    ?: return@newSuspendedTransaction SetResolutionRatingResult.Failure(
+                        SetResolutionRatingFailure.NotFound,
+                    )
+            if (ticketRow[TicketsTable.userId] != userId) {
+                return@newSuspendedTransaction SetResolutionRatingResult.Failure(SetResolutionRatingFailure.Forbidden)
+            }
+            if (ticketRow[TicketsTable.resolutionRating] != null) {
+                return@newSuspendedTransaction SetResolutionRatingResult.Failure(SetResolutionRatingFailure.AlreadySet)
+            }
+            val status = toStatus(ticketRow)
+            if (status != TicketStatus.ANSWERED && status != TicketStatus.CLOSED) {
+                return@newSuspendedTransaction SetResolutionRatingResult.Failure(SetResolutionRatingFailure.NotAllowed)
+            }
+            SetResolutionRatingResult.Failure(SetResolutionRatingFailure.AlreadySet)
         }
 
     private fun buildSummaries(ticketRows: List<ResultRow>): List<TicketSummary> {
@@ -275,24 +353,31 @@ class SupportRepository(
     }
 
     private fun loadLastMessages(ticketIds: List<Long>): Map<Long, LastMessage> {
+        if (ticketIds.isEmpty()) {
+            return emptyMap()
+        }
+        val maxMessageId = TicketMessagesTable.id.max()
+        val latestIds =
+            TicketMessagesTable
+                .slice(maxMessageId)
+                .select { TicketMessagesTable.ticketId inList ticketIds }
+                .groupBy(TicketMessagesTable.ticketId)
+                .mapNotNull { it[maxMessageId] }
+        if (latestIds.isEmpty()) {
+            return emptyMap()
+        }
         val messages =
             TicketMessagesTable
                 .selectAll()
-                .where { TicketMessagesTable.ticketId inList ticketIds }
-                .orderBy(
-                    TicketMessagesTable.createdAt to SortOrder.DESC,
-                    TicketMessagesTable.id to SortOrder.DESC,
-                )
+                .where { TicketMessagesTable.id inList latestIds }
         val result = LinkedHashMap<Long, LastMessage>()
         for (row in messages) {
             val ticketId = row[TicketMessagesTable.ticketId]
-            if (!result.containsKey(ticketId)) {
-                result[ticketId] =
-                    LastMessage(
-                        text = row[TicketMessagesTable.text],
-                        senderType = toSender(row),
-                    )
-            }
+            result[ticketId] =
+                LastMessage(
+                    text = row[TicketMessagesTable.text],
+                    senderType = toSender(row),
+                )
         }
         return result
     }
@@ -331,4 +416,29 @@ class SupportRepository(
         val text: String,
         val senderType: TicketSenderType,
     )
+}
+
+sealed class AddGuestMessageResult {
+    data class Success(val message: TicketMessage) : AddGuestMessageResult()
+
+    data class Failure(val reason: AddGuestMessageFailure) : AddGuestMessageResult()
+}
+
+enum class AddGuestMessageFailure {
+    NotFound,
+    Forbidden,
+    Closed,
+}
+
+sealed class SetResolutionRatingResult {
+    data class Success(val ticket: Ticket) : SetResolutionRatingResult()
+
+    data class Failure(val reason: SetResolutionRatingFailure) : SetResolutionRatingResult()
+}
+
+enum class SetResolutionRatingFailure {
+    NotFound,
+    Forbidden,
+    NotAllowed,
+    AlreadySet,
 }
