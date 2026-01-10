@@ -193,7 +193,7 @@ private suspend fun ApplicationCall.userIdOrNull(userRepository: UserRepository)
     val telegramUserId = attributes[MiniAppUserKey].id
     val user = userRepository.getByTelegramId(telegramUserId)
     if (user == null) {
-        logger.warn("support.ticket.forbidden")
+        logger.warn("support.ticket.forbidden user_not_found")
     }
     return user?.id
 }
