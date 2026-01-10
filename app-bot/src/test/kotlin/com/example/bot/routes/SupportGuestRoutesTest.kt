@@ -139,6 +139,23 @@ class SupportGuestRoutesTest {
     }
 
     @Test
+    fun `add message to missing ticket returns 404 and no-store headers`() = withSupportApp { context ->
+        val telegramId = 313L
+        insertUser(context.database, telegramId, "guest")
+
+        val response =
+            client.post("/api/support/tickets/999999/messages") {
+                withInitData(createInitData(userId = telegramId))
+                contentType(ContentType.Application.Json)
+                setBody("""{"text":"Ping"}""")
+            }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("support_ticket_not_found", response.errorCode())
+    }
+
+    @Test
     fun `other user cannot add message`() = withSupportApp { context ->
         val ownerTelegramId = 404L
         val intruderTelegramId = 405L
@@ -207,6 +224,29 @@ class SupportGuestRoutesTest {
         assertEquals(HttpStatusCode.Conflict, response.status)
         response.assertNoStoreHeaders()
         assertEquals("support_ticket_closed", response.errorCode())
+    }
+
+    @Test
+    fun `create ticket without user returns 403 and no-store headers`() = withSupportApp { context ->
+        val telegramId = 605L
+        val clubId = insertClub(context.database, "Test Club")
+
+        val response =
+            client.post("/api/support/tickets") {
+                withInitData(createInitData(userId = telegramId))
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "clubId":$clubId,
+                    "topic":"booking",
+                    "text":"Need help"
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("forbidden", response.errorCode())
     }
 
     @Test
