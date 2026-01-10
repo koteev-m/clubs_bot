@@ -413,6 +413,81 @@ class SupportGuestRoutesTest {
     }
 
     @Test
+    fun `create ticket missing fields return 400`() = withSupportApp { context ->
+        val telegramId = 910L
+        insertUser(context.database, telegramId, "guest")
+        val clubId = insertClub(context.database, "Test Club")
+
+        val requests =
+            listOf(
+                """{"topic":"booking","text":"Need help"}""",
+                """{"clubId":$clubId,"text":"Need help"}""",
+                """{"clubId":$clubId,"topic":"booking"}""",
+            )
+
+        requests.forEach { body ->
+            val response =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(body)
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("validation_error", response.errorCode())
+        }
+    }
+
+    @Test
+    fun `add message missing text returns 400`() = withSupportApp { context ->
+        val telegramId = 911L
+        insertUser(context.database, telegramId, "guest")
+        val clubId = insertClub(context.database, "Test Club")
+
+        val create =
+            client.post("/api/support/tickets") {
+                withInitData(createInitData(userId = telegramId))
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "clubId":$clubId,
+                    "topic":"other",
+                    "text":"Initial"
+                }""",
+                )
+            }
+        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
+
+        val response =
+            client.post("/api/support/tickets/$ticketId/messages") {
+                withInitData(createInitData(userId = telegramId))
+                contentType(ContentType.Application.Json)
+                setBody("""{"attachments":"[]"}""")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("validation_error", response.errorCode())
+    }
+
+    @Test
+    fun `list my tickets returns empty array for new user`() = withSupportApp { context ->
+        val telegramId = 912L
+        insertUser(context.database, telegramId, "guest")
+
+        val response =
+            client.get("/api/support/tickets/my") {
+                withInitData(createInitData(userId = telegramId))
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        response.assertNoStoreHeaders()
+        val items = json.parseToJsonElement(response.bodyAsText()).jsonArray
+        assertEquals(0, items.size)
+    }
+
+    @Test
     fun `missing init data returns 401 and no-store headers`() = withSupportApp { context ->
         val telegramId = 1001L
         insertUser(context.database, telegramId, "guest")
