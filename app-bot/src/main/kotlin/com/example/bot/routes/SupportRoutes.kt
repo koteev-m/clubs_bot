@@ -1,16 +1,21 @@
 package com.example.bot.routes
 
 import com.example.bot.data.security.UserRepository
+import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
+import com.example.bot.security.rbac.authorize
+import com.example.bot.security.rbac.rbacContext
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
+import com.example.bot.support.Ticket
 import com.example.bot.support.TicketMessage
+import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
 import io.ktor.http.HttpStatusCode
@@ -20,6 +25,7 @@ import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
@@ -64,12 +70,36 @@ private data class AddMessageRequest(
 )
 
 @Serializable
+private data class UpdateStatusRequest(
+    val status: String? = null,
+)
+
+@Serializable
+private data class ReplyRequest(
+    val text: String? = null,
+    val attachments: String? = null,
+)
+
+@Serializable
 private data class MessageResponse(
     val messageId: Long,
     val ticketId: Long,
     val senderType: String,
     val createdAt: String,
 )
+
+@Serializable
+private data class SupportReplyResponse(
+    val ticketId: Long,
+    val clubId: Long,
+    val ownerUserId: Long,
+    val replyMessageId: Long,
+    val replyCreatedAt: String,
+    val ticketStatus: String,
+)
+
+private val supportAdminRoles = setOf(Role.CLUB_ADMIN, Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+private val supportGlobalRoles = setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
 
 fun Application.supportRoutes(
     supportService: SupportService,
@@ -185,6 +215,166 @@ fun Application.supportRoutes(
                     }
                 }
             }
+
+            route("/tickets") {
+                requireSupportUser(userRepository)
+                authorize {
+                    get {
+                        val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
+                        if (clubId == null || clubId <= 0) {
+                            logger.warn("support.ticket.list validation_error club_id={}", call.request.queryParameters["clubId"])
+                            return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+
+                        val statusRaw = call.request.queryParameters["status"]
+                        val status = statusRaw?.let { TicketStatus.fromWire(it) }
+                        if (statusRaw != null && status == null) {
+                            logger.warn("support.ticket.list validation_error status={}", statusRaw)
+                            return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+
+                        if (!call.hasSupportAdminRole()) {
+                            return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+                        }
+                        if (!call.isSupportClubAllowed(clubId)) {
+                            return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+                        }
+
+                        val tickets = supportService.listTicketsForClub(clubId, status)
+                        call.respond(HttpStatusCode.OK, tickets.map { it.toResponse() })
+                    }
+                }
+            }
+
+            route("/tickets/{id}") {
+                requireSupportUser(userRepository)
+                authorize {
+                    post("/assign") {
+                        val ticketId = call.parameters["id"]?.toLongOrNull()
+                        if (ticketId == null || ticketId <= 0) {
+                            logger.warn("support.ticket.assign validation_error ticket_id={}", call.parameters["id"])
+                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+
+                        val ticket = supportService.getTicket(ticketId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
+                        if (!call.hasSupportAdminRole() || !call.isSupportClubAllowed(ticket.clubId)) {
+                            return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+                        }
+
+                        when (val result = supportService.assign(ticketId = ticketId, agentUserId = call.rbacContext().user.id)) {
+                            is SupportServiceResult.Success -> {
+                                logger.info("support.ticket.assign ticket_id={} club_id={}", ticketId, ticket.clubId)
+                                call.respond(HttpStatusCode.OK, result.value.toResponse())
+                            }
+                            is SupportServiceResult.Failure -> {
+                                val (status, code) = mapSupportAdminError(result.error)
+                                call.respondError(status, code)
+                            }
+                        }
+                    }
+
+                    post("/status") {
+                        val ticketId = call.parameters["id"]?.toLongOrNull()
+                        if (ticketId == null || ticketId <= 0) {
+                            logger.warn("support.ticket.status validation_error ticket_id={}", call.parameters["id"])
+                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+
+                        val ticket = supportService.getTicket(ticketId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
+                        if (!call.hasSupportAdminRole() || !call.isSupportClubAllowed(ticket.clubId)) {
+                            return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+                        }
+
+                        val request =
+                            runCatching { call.receive<UpdateStatusRequest>() }.getOrElse {
+                                logger.warn("support.ticket.status invalid_json ticket_id={}", ticketId)
+                                return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                            }
+
+                        val status = request.status?.let { TicketStatus.fromWire(it) }
+                        if (status == null) {
+                            logger.warn("support.ticket.status validation_error ticket_id={}", ticketId)
+                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+
+                        when (
+                            val result =
+                                supportService.setStatus(
+                                    ticketId = ticketId,
+                                    agentUserId = call.rbacContext().user.id,
+                                    status = status,
+                                )
+                        ) {
+                            is SupportServiceResult.Success -> {
+                                logger.info("support.ticket.status ticket_id={} club_id={}", ticketId, ticket.clubId)
+                                call.respond(HttpStatusCode.OK, result.value.toResponse())
+                            }
+                            is SupportServiceResult.Failure -> {
+                                val (statusCode, code) = mapSupportAdminError(result.error)
+                                call.respondError(statusCode, code)
+                            }
+                        }
+                    }
+
+                    post("/reply") {
+                        val ticketId = call.parameters["id"]?.toLongOrNull()
+                        if (ticketId == null || ticketId <= 0) {
+                            logger.warn("support.ticket.reply validation_error ticket_id={}", call.parameters["id"])
+                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+
+                        val ticket = supportService.getTicket(ticketId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
+                        if (!call.hasSupportAdminRole() || !call.isSupportClubAllowed(ticket.clubId)) {
+                            return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+                        }
+
+                        val request =
+                            runCatching { call.receive<ReplyRequest>() }.getOrElse {
+                                logger.warn("support.ticket.reply invalid_json ticket_id={}", ticketId)
+                                return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                            }
+
+                        val text = normalizeText(request.text)
+                        if (text == null) {
+                            logger.warn("support.ticket.reply validation_error ticket_id={}", ticketId)
+                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+
+                        when (
+                            val result =
+                                supportService.reply(
+                                    ticketId = ticketId,
+                                    agentUserId = call.rbacContext().user.id,
+                                    text = text,
+                                    attachments = request.attachments,
+                                )
+                        ) {
+                            is SupportServiceResult.Success -> {
+                                val reply = result.value
+                                logger.info("support.ticket.reply ticket_id={} club_id={}", ticketId, reply.ticket.clubId)
+                                call.respond(
+                                    HttpStatusCode.OK,
+                                    SupportReplyResponse(
+                                        ticketId = reply.ticket.id,
+                                        clubId = reply.ticket.clubId,
+                                        ownerUserId = reply.ticket.userId,
+                                        replyMessageId = reply.replyMessage.id,
+                                        replyCreatedAt = reply.replyMessage.createdAt.toString(),
+                                        ticketStatus = reply.ticket.status.wire,
+                                    ),
+                                )
+                            }
+                            is SupportServiceResult.Failure -> {
+                                val (statusCode, code) = mapSupportAdminError(result.error)
+                                call.respondError(statusCode, code)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -217,6 +407,15 @@ private fun TicketSummary.toResponse(): TicketSummaryResponse =
         lastSenderType = lastSenderType?.wire,
     )
 
+private fun Ticket.toResponse(): TicketResponse =
+    TicketResponse(
+        id = id,
+        clubId = clubId,
+        topic = topic.wire,
+        status = status.wire,
+        updatedAt = updatedAt.toString(),
+    )
+
 private fun TicketMessage.toResponse(): MessageResponse =
     MessageResponse(
         messageId = id,
@@ -224,6 +423,13 @@ private fun TicketMessage.toResponse(): MessageResponse =
         senderType = senderType.wire,
         createdAt = createdAt.toString(),
     )
+
+private fun mapSupportAdminError(error: SupportServiceError): Pair<HttpStatusCode, String> =
+    when (error) {
+        SupportServiceError.TicketNotFound -> HttpStatusCode.NotFound to ErrorCodes.support_ticket_not_found
+        SupportServiceError.TicketForbidden -> HttpStatusCode.Forbidden to ErrorCodes.support_ticket_forbidden
+        else -> HttpStatusCode.InternalServerError to ErrorCodes.internal_error
+    }
 
 private fun mapSupportError(error: SupportServiceError): Pair<HttpStatusCode, String> =
     when (error) {
@@ -233,3 +439,24 @@ private fun mapSupportError(error: SupportServiceError): Pair<HttpStatusCode, St
         SupportServiceError.RatingNotAllowed -> HttpStatusCode.Conflict to ErrorCodes.invalid_state
         SupportServiceError.RatingAlreadySet -> HttpStatusCode.Conflict to ErrorCodes.invalid_state
     }
+
+private fun Route.requireSupportUser(userRepository: UserRepository) {
+    intercept(ApplicationCallPipeline.Plugins) {
+        val userId = call.userIdOrNull(userRepository)
+        if (userId == null) {
+            call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+            finish()
+        }
+    }
+}
+
+private fun ApplicationCall.hasSupportAdminRole(): Boolean {
+    val context = rbacContext()
+    return context.roles.any { it in supportAdminRoles }
+}
+
+private fun ApplicationCall.isSupportClubAllowed(clubId: Long): Boolean {
+    val context = rbacContext()
+    val elevated = context.roles.any { it in supportGlobalRoles }
+    return elevated || clubId in context.clubIds
+}
