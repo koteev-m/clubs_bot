@@ -34,6 +34,10 @@ object ErrorCodes {
     const val invitation_already_used: String = "invitation_already_used"
     const val invitation_forbidden: String = "invitation_forbidden"
 
+    const val support_ticket_not_found: String = "support_ticket_not_found"
+    const val support_ticket_forbidden: String = "support_ticket_forbidden"
+    const val support_ticket_closed: String = "support_ticket_closed"
+
     const val checkin_forbidden: String = "checkin_forbidden"
     const val checkin_invalid_payload: String = "checkin_invalid_payload"
     const val checkin_subject_not_found: String = "checkin_subject_not_found"
