@@ -348,6 +348,74 @@ class SupportGuestRoutesTest {
         assertEquals("unauthorized", response.errorCode())
     }
 
+    @Test
+    fun `list my tickets without init data returns 401 and no-store headers`() = withSupportApp {
+        val response = client.get("/api/support/tickets/my")
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("unauthorized", response.errorCode())
+    }
+
+    @Test
+    fun `add message without init data returns 401 and no-store headers`() = withSupportApp {
+        val response =
+            client.post("/api/support/tickets/1/messages") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"text":"Ping"}""")
+            }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("unauthorized", response.errorCode())
+    }
+
+    @Test
+    fun `add message invalid ticket id returns 400 and no-store headers`() = withSupportApp { context ->
+        val telegramId = 1101L
+        insertUser(context.database, telegramId, "guest")
+
+        val invalidIds = listOf("abc", "0")
+        invalidIds.forEach { ticketId ->
+            val response =
+                client.post("/api/support/tickets/$ticketId/messages") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Ping"}""")
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("validation_error", response.errorCode())
+        }
+    }
+
+    @Test
+    fun `create ticket invalid club id returns 400 and no-store headers`() = withSupportApp { context ->
+        val telegramId = 1201L
+        insertUser(context.database, telegramId, "guest")
+
+        val invalidClubIds = listOf(0, -1)
+        invalidClubIds.forEach { clubId ->
+            val response =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
+                        "clubId":$clubId,
+                        "topic":"booking",
+                        "text":"Need help"
+                    }""",
+                    )
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("validation_error", response.errorCode())
+        }
+    }
+
     private data class DbSetup(
         val dataSource: JdbcDataSource,
         val database: Database,
