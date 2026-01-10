@@ -113,7 +113,7 @@ fun Application.supportRoutes(
                 ) {
                     is SupportServiceResult.Success -> {
                         val ticket = result.value.ticket
-                        logger.info("support.ticket.create id={} user_id={} club_id={}", ticket.id, userId, clubId)
+                        logger.info("support.ticket.create id={} club_id={}", ticket.id, clubId)
                         call.respond(
                             HttpStatusCode.Created,
                             TicketResponse(
@@ -127,7 +127,7 @@ fun Application.supportRoutes(
                     }
 
                     is SupportServiceResult.Failure -> {
-                        logger.warn("support.ticket.create internal_error user_id={} club_id={}", userId, clubId)
+                        logger.warn("support.ticket.create internal_error club_id={}", clubId)
                         call.respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
                     }
                 }
@@ -193,7 +193,7 @@ private suspend fun ApplicationCall.userIdOrNull(userRepository: UserRepository)
     val telegramUserId = attributes[MiniAppUserKey].id
     val user = userRepository.getByTelegramId(telegramUserId)
     if (user == null) {
-        logger.warn("support.ticket.forbidden telegram_user_id={}", telegramUserId)
+        logger.warn("support.ticket.forbidden")
     }
     return user?.id
 }
@@ -230,5 +230,6 @@ private fun mapSupportError(error: SupportServiceError): Pair<HttpStatusCode, St
         SupportServiceError.TicketNotFound -> HttpStatusCode.NotFound to ErrorCodes.support_ticket_not_found
         SupportServiceError.TicketForbidden -> HttpStatusCode.Forbidden to ErrorCodes.support_ticket_forbidden
         SupportServiceError.TicketClosed -> HttpStatusCode.Conflict to ErrorCodes.support_ticket_closed
-        else -> HttpStatusCode.InternalServerError to ErrorCodes.internal_error
+        SupportServiceError.RatingNotAllowed -> HttpStatusCode.Conflict to ErrorCodes.invalid_state
+        SupportServiceError.RatingAlreadySet -> HttpStatusCode.Conflict to ErrorCodes.invalid_state
     }
