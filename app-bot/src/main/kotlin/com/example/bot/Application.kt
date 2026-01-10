@@ -8,6 +8,7 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListEntryDbRepository
+import com.example.bot.data.security.UserRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
 import com.example.bot.metrics.UiCheckinMetrics
@@ -45,6 +46,7 @@ import com.example.bot.notifications.NotificationService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
+import com.example.bot.support.SupportService
 import com.example.bot.routes.bookingA3Routes
 import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
@@ -58,6 +60,7 @@ import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.musicLikesRoutes
 import com.example.bot.routes.ownerHealthRoutes
+import com.example.bot.routes.supportRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.promoterInvitesRoutes
 import com.example.bot.routes.promoterGuestListRoutes
@@ -172,6 +175,8 @@ fun Application.module() {
     val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
     val checkinService by inject<CheckinService>()
+    val userRepository by inject<UserRepository>()
+    val supportService by inject<SupportService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
     val hostEntranceService =
@@ -250,6 +255,7 @@ fun Application.module() {
     )
     guestListInviteRoutes(repository = guestListRepository)
     invitationRoutes(invitationService = invitationService)
+    supportRoutes(supportService = supportService, userRepository = userRepository)
     telegramWebhookRoutes(
         expectedSecret = config.webhook.secretToken,
         onUpdate = { update -> invitationTelegramHandler.handle(update) },
