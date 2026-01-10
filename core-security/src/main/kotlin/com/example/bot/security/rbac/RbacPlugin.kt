@@ -84,6 +84,7 @@ private val doubleReceiveLock = Any()
 
 private class AuthorizeRouteConfig {
     var requiredRoles: Set<Role> = emptySet()
+    var forbiddenHandler: (suspend (ApplicationCall) -> Unit)? = null
 }
 
 private val AuthorizeRoutePlugin =
@@ -91,6 +92,7 @@ private val AuthorizeRoutePlugin =
         val state = application.attributes[rbacStateKey]
         onCall { call ->
             val required = pluginConfig.requiredRoles
+            val forbiddenHandler = pluginConfig.forbiddenHandler
             val access = call.attributes[accessLogStateKey]
             val resolution = resolveForRoute(call, state)
             when (resolution) {
@@ -100,7 +102,11 @@ private val AuthorizeRoutePlugin =
                 }
                 is RbacResolution.Success -> {
                     if (required.isNotEmpty() && resolution.roles.intersect(required).isEmpty()) {
-                        state.handleForbidden(call, access, resolution, "missing_role", null)
+                        if (forbiddenHandler == null) {
+                            state.handleForbidden(call, access, resolution, "missing_role", null)
+                        } else {
+                            state.handleForbidden(call, access, resolution, "missing_role", null, forbiddenHandler)
+                        }
                         return@onCall
                     } else {
                         access.roleCheckPassed = true
@@ -218,10 +224,14 @@ private suspend fun resolveForRoute(
 /** DSL entry point for enforcing role based access. */
 fun Route.authorize(
     vararg roles: Role,
+    forbiddenHandler: (suspend (ApplicationCall) -> Unit)? = null,
     block: Route.() -> Unit,
 ) {
     val authorizedRoute = createChild(PluginRouteSelector("authorize"))
-    authorizedRoute.install(AuthorizeRoutePlugin) { requiredRoles = roles.toSet() }
+    authorizedRoute.install(AuthorizeRoutePlugin) {
+        requiredRoles = roles.toSet()
+        this.forbiddenHandler = forbiddenHandler
+    }
     authorizedRoute.block()
 }
 
@@ -323,11 +333,20 @@ internal data class RbacState(
         reason: String,
         clubId: Long?,
     ) {
-        if (!access.logged) {
-            logDecision(call, context, "access_denied", reason, clubId)
-            access.logged = true
-        }
+        logForbidden(call, access, context, reason, clubId)
         call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
+    }
+
+    suspend fun handleForbidden(
+        call: ApplicationCall,
+        access: AccessLogState,
+        context: RbacResolution.Success,
+        reason: String,
+        clubId: Long?,
+        handler: suspend (ApplicationCall) -> Unit,
+    ) {
+        logForbidden(call, access, context, reason, clubId)
+        handler(call)
     }
 
     suspend fun logFinalDecision(
@@ -370,6 +389,19 @@ internal data class RbacState(
                 ip = ip,
                 meta = meta,
             )
+        }
+    }
+
+    private suspend fun logForbidden(
+        call: ApplicationCall,
+        access: AccessLogState,
+        context: RbacResolution.Success,
+        reason: String,
+        clubId: Long?,
+    ) {
+        if (!access.logged) {
+            logDecision(call, context, "access_denied", reason, clubId)
+            access.logged = true
         }
     }
 }

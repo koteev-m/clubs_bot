@@ -27,6 +27,7 @@ import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
+import io.ktor.server.routing.intercept
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -99,7 +100,6 @@ private data class SupportReplyResponse(
 )
 
 private val supportAdminRoles = setOf(Role.CLUB_ADMIN, Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
-private val supportGlobalRoles = setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
 
 fun Application.supportRoutes(
     supportService: SupportService,
@@ -218,7 +218,15 @@ fun Application.supportRoutes(
 
             route("/tickets") {
                 requireSupportUser(userRepository)
-                authorize {
+                authorize(
+                    Role.CLUB_ADMIN,
+                    Role.OWNER,
+                    Role.GLOBAL_ADMIN,
+                    Role.HEAD_MANAGER,
+                    forbiddenHandler = { call ->
+                        call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+                    },
+                ) {
                     get {
                         val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
                         if (clubId == null || clubId <= 0) {
@@ -233,10 +241,7 @@ fun Application.supportRoutes(
                             return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                         }
 
-                        if (!call.hasSupportAdminRole()) {
-                            return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
-                        }
-                        if (!call.isSupportClubAllowed(clubId)) {
+                        if (!call.hasSupportClubAccess(clubId)) {
                             return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
                         }
 
@@ -248,7 +253,15 @@ fun Application.supportRoutes(
 
             route("/tickets/{id}") {
                 requireSupportUser(userRepository)
-                authorize {
+                authorize(
+                    Role.CLUB_ADMIN,
+                    Role.OWNER,
+                    Role.GLOBAL_ADMIN,
+                    Role.HEAD_MANAGER,
+                    forbiddenHandler = { call ->
+                        call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+                    },
+                ) {
                     post("/assign") {
                         val ticketId = call.parameters["id"]?.toLongOrNull()
                         if (ticketId == null || ticketId <= 0) {
@@ -258,7 +271,7 @@ fun Application.supportRoutes(
 
                         val ticket = supportService.getTicket(ticketId)
                             ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
-                        if (!call.hasSupportAdminRole() || !call.isSupportClubAllowed(ticket.clubId)) {
+                        if (!call.hasSupportClubAccess(ticket.clubId)) {
                             return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
                         }
 
@@ -283,7 +296,7 @@ fun Application.supportRoutes(
 
                         val ticket = supportService.getTicket(ticketId)
                             ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
-                        if (!call.hasSupportAdminRole() || !call.isSupportClubAllowed(ticket.clubId)) {
+                        if (!call.hasSupportClubAccess(ticket.clubId)) {
                             return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
                         }
 
@@ -327,7 +340,7 @@ fun Application.supportRoutes(
 
                         val ticket = supportService.getTicket(ticketId)
                             ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
-                        if (!call.hasSupportAdminRole() || !call.isSupportClubAllowed(ticket.clubId)) {
+                        if (!call.hasSupportClubAccess(ticket.clubId)) {
                             return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
                         }
 
@@ -450,13 +463,8 @@ private fun Route.requireSupportUser(userRepository: UserRepository) {
     }
 }
 
-private fun ApplicationCall.hasSupportAdminRole(): Boolean {
+private fun ApplicationCall.hasSupportClubAccess(clubId: Long): Boolean {
     val context = rbacContext()
-    return context.roles.any { it in supportAdminRoles }
-}
-
-private fun ApplicationCall.isSupportClubAllowed(clubId: Long): Boolean {
-    val context = rbacContext()
-    val elevated = context.roles.any { it in supportGlobalRoles }
-    return elevated || clubId in context.clubIds
+    val isGlobal = context.roles.any { it in supportAdminRoles && it != Role.CLUB_ADMIN }
+    return isGlobal || clubId in context.clubIds
 }

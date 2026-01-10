@@ -1,9 +1,9 @@
 package com.example.bot.routes
 
-import com.example.bot.data.booking.core.AuditLogRepository
-import com.example.bot.data.security.ExposedUserRepository
-import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.data.security.Role
+import com.example.bot.data.security.User
+import com.example.bot.data.security.UserRepository
+import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.data.support.SupportRepository
 import com.example.bot.data.support.SupportServiceImpl
 import com.example.bot.plugins.MiniAppUserKey
@@ -47,6 +47,7 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import io.mockk.mockk
 
 class SupportAdminRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -54,11 +55,11 @@ class SupportAdminRoutesTest {
     @Test
     fun `admin list tickets ok`() = withSupportAdminApp { context ->
         val adminTelegramId = 201L
-        val adminUserId = insertUser(context.database, adminTelegramId, "admin")
+        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
         val clubId = insertClub(context.database, "Admin Club")
-        insertUserRole(context.database, adminUserId, Role.CLUB_ADMIN, scopeType = "CLUB", scopeClubId = clubId)
+        context.userRoleRepository.setRoles(adminUserId, setOf(Role.CLUB_ADMIN), clubIds = setOf(clubId))
 
-        val ownerUserId = insertUser(context.database, 202L, "guest")
+        val ownerUserId = insertUser(context.database, context.userRepository, 202L, "guest")
         val ticketId = createTicket(context, clubId, ownerUserId)
 
         val response =
@@ -75,7 +76,7 @@ class SupportAdminRoutesTest {
     @Test
     fun `guest without role cannot list tickets`() = withSupportAdminApp { context ->
         val telegramId = 301L
-        insertUser(context.database, telegramId, "guest")
+        insertUser(context.database, context.userRepository, telegramId, "guest")
         val clubId = insertClub(context.database, "Guest Club")
 
         val response =
@@ -91,11 +92,11 @@ class SupportAdminRoutesTest {
     @Test
     fun `assign status and reply ok for admin`() = withSupportAdminApp { context ->
         val adminTelegramId = 401L
-        val adminUserId = insertUser(context.database, adminTelegramId, "admin")
+        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
         val clubId = insertClub(context.database, "Support Club")
-        insertUserRole(context.database, adminUserId, Role.OWNER, scopeType = "CLUB", scopeClubId = clubId)
+        context.userRoleRepository.setRoles(adminUserId, setOf(Role.OWNER), clubIds = emptySet())
 
-        val ownerUserId = insertUser(context.database, 402L, "guest")
+        val ownerUserId = insertUser(context.database, context.userRepository, 402L, "guest")
         val ticketId = createTicket(context, clubId, ownerUserId)
 
         val assignResponse =
@@ -142,11 +143,11 @@ class SupportAdminRoutesTest {
     @Test
     fun `admin without club access cannot manage tickets`() = withSupportAdminApp { context ->
         val adminTelegramId = 501L
-        val adminUserId = insertUser(context.database, adminTelegramId, "admin")
+        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
         val clubId = insertClub(context.database, "Scoped Club")
-        insertUserRole(context.database, adminUserId, Role.CLUB_ADMIN, scopeType = "GLOBAL", scopeClubId = null)
+        context.userRoleRepository.setRoles(adminUserId, setOf(Role.CLUB_ADMIN), clubIds = emptySet())
 
-        val ownerUserId = insertUser(context.database, 502L, "guest")
+        val ownerUserId = insertUser(context.database, context.userRepository, 502L, "guest")
         val ticketId = createTicket(context, clubId, ownerUserId)
 
         val listResponse =
@@ -193,9 +194,9 @@ class SupportAdminRoutesTest {
     @Test
     fun `invalid status filter returns 400`() = withSupportAdminApp { context ->
         val adminTelegramId = 601L
-        val adminUserId = insertUser(context.database, adminTelegramId, "admin")
+        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
         val clubId = insertClub(context.database, "Filter Club")
-        insertUserRole(context.database, adminUserId, Role.OWNER, scopeType = "CLUB", scopeClubId = clubId)
+        context.userRoleRepository.setRoles(adminUserId, setOf(Role.OWNER), clubIds = emptySet())
 
         val response =
             client.get("/api/support/tickets?clubId=$clubId&status=bad") {
@@ -215,6 +216,8 @@ class SupportAdminRoutesTest {
     private data class TestContext(
         val database: Database,
         val supportService: SupportService,
+        val userRepository: TestUserRepository,
+        val userRoleRepository: TestUserRoleRepository,
     )
 
     private fun withSupportAdminApp(block: suspend ApplicationTestBuilder.(TestContext) -> Unit) =
@@ -222,15 +225,14 @@ class SupportAdminRoutesTest {
             val setup = prepareDatabase()
             val supportRepository = SupportRepository(setup.database)
             val supportService = SupportServiceImpl(supportRepository)
-            val userRepository = ExposedUserRepository(setup.database)
-            val userRoleRepository = ExposedUserRoleRepository(setup.database)
-            val auditLogRepository = AuditLogRepository(setup.database)
+            val userRepository = TestUserRepository()
+            val userRoleRepository = TestUserRoleRepository()
             application {
                 install(ContentNegotiation) { json() }
                 install(RbacPlugin) {
                     this.userRepository = userRepository
                     this.userRoleRepository = userRoleRepository
-                    this.auditLogRepository = auditLogRepository
+                    this.auditLogRepository = mockk(relaxed = true)
                     principalExtractor = { call ->
                         if (call.attributes.contains(MiniAppUserKey)) {
                             val principal = call.attributes[MiniAppUserKey]
@@ -246,7 +248,7 @@ class SupportAdminRoutesTest {
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
-            block(TestContext(setup.database, supportService))
+            block(TestContext(setup.database, supportService, userRepository, userRoleRepository))
         }
 
     private fun prepareDatabase(): DbSetup {
@@ -288,10 +290,12 @@ class SupportAdminRoutesTest {
 
     private fun insertUser(
         database: Database,
+        userRepository: TestUserRepository,
         telegramUserId: Long,
         username: String,
-    ): Long =
-        transaction(database) {
+    ): Long {
+        val id =
+            transaction(database) {
             UsersTable
                 .insert {
                     it[UsersTable.telegramUserId] = telegramUserId
@@ -300,7 +304,10 @@ class SupportAdminRoutesTest {
                     it[UsersTable.phoneE164] = null
                 }.resultedValues!!
                 .single()[UsersTable.id]
-        }
+            }
+        userRepository.register(id, telegramUserId, username)
+        return id
+    }
 
     private fun insertClub(
         database: Database,
@@ -320,23 +327,6 @@ class SupportAdminRoutesTest {
                 .single()[ClubsTable.id]
         }
 
-    private fun insertUserRole(
-        database: Database,
-        userId: Long,
-        role: Role,
-        scopeType: String,
-        scopeClubId: Long?,
-    ) {
-        transaction(database) {
-            UserRolesTable.insert {
-                it[UserRolesTable.userId] = userId
-                it[UserRolesTable.roleCode] = role.name
-                it[UserRolesTable.scopeType] = scopeType
-                it[UserRolesTable.scopeClubId] = scopeClubId
-            }
-        }
-    }
-
     private object UsersTable : Table("users") {
         val id = long("id").autoIncrement()
         val telegramUserId = long("telegram_user_id")
@@ -355,15 +345,6 @@ class SupportAdminRoutesTest {
         val bookingsTopicId = integer("bookings_topic_id").nullable()
         val checkinTopicId = integer("checkin_topic_id").nullable()
         val qaTopicId = integer("qa_topic_id").nullable()
-        override val primaryKey = PrimaryKey(id)
-    }
-
-    private object UserRolesTable : Table("user_roles") {
-        val id = long("id").autoIncrement()
-        val userId = long("user_id")
-        val roleCode = text("role_code")
-        val scopeType = text("scope_type")
-        val scopeClubId = long("scope_club_id").nullable()
         override val primaryKey = PrimaryKey(id)
     }
 
@@ -388,5 +369,37 @@ class SupportAdminRoutesTest {
     private fun HttpResponse.assertNoStoreHeaders() {
         assertEquals("no-store", headers[HttpHeaders.CacheControl])
         assertEquals("X-Telegram-Init-Data", headers[HttpHeaders.Vary])
+    }
+
+    private class TestUserRepository : UserRepository {
+        private val usersByTelegramId = mutableMapOf<Long, User>()
+
+        fun register(
+            id: Long,
+            telegramUserId: Long,
+            username: String,
+        ) {
+            usersByTelegramId[telegramUserId] = User(id = id, telegramId = telegramUserId, username = username)
+        }
+
+        override suspend fun getByTelegramId(id: Long): User? = usersByTelegramId[id]
+    }
+
+    private class TestUserRoleRepository : UserRoleRepository {
+        private val rolesByUser = mutableMapOf<Long, Set<Role>>()
+        private val clubsByUser = mutableMapOf<Long, Set<Long>>()
+
+        fun setRoles(
+            userId: Long,
+            roles: Set<Role>,
+            clubIds: Set<Long>,
+        ) {
+            rolesByUser[userId] = roles
+            clubsByUser[userId] = clubIds
+        }
+
+        override suspend fun listRoles(userId: Long): Set<Role> = rolesByUser[userId].orEmpty()
+
+        override suspend fun listClubIdsFor(userId: Long): Set<Long> = clubsByUser[userId].orEmpty()
     }
 }
