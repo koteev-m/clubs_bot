@@ -105,6 +105,20 @@ class SupportGuestRoutesTest {
     }
 
     @Test
+    fun `list my tickets without user returns 403 and no-store headers`() = withSupportApp {
+        val telegramId = 212L
+
+        val response =
+            client.get("/api/support/tickets/my") {
+                withInitData(createInitData(userId = telegramId))
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("forbidden", response.errorCode())
+    }
+
+    @Test
     fun `add message returns 200 and no-store headers`() = withSupportApp { context ->
         val telegramId = 303L
         insertUser(context.database, telegramId, "guest")
@@ -136,6 +150,39 @@ class SupportGuestRoutesTest {
         val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
         assertEquals(ticketId, payload["ticketId"]!!.jsonPrimitive.long)
         assertEquals("guest", payload["senderType"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `add message without user returns 403 and no-store headers`() = withSupportApp { context ->
+        val ownerTelegramId = 323L
+        val requesterTelegramId = 324L
+        insertUser(context.database, ownerTelegramId, "owner")
+        val clubId = insertClub(context.database, "Test Club")
+
+        val create =
+            client.post("/api/support/tickets") {
+                withInitData(createInitData(userId = ownerTelegramId))
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "clubId":$clubId,
+                    "topic":"other",
+                    "text":"Initial"
+                }""",
+                )
+            }
+        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
+
+        val response =
+            client.post("/api/support/tickets/$ticketId/messages") {
+                withInitData(createInitData(userId = requesterTelegramId))
+                contentType(ContentType.Application.Json)
+                setBody("""{"text":"Ping"}""")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("forbidden", response.errorCode())
     }
 
     @Test
