@@ -785,6 +785,24 @@ private class GLUserRepositoryStub(
                     )
                 }
         }
+
+    override suspend fun getById(id: Long): User? =
+        transaction(db) {
+            GLDomainUsersTable
+                .selectAll()
+                .where { GLDomainUsersTable.id eq id }
+                .limit(1)
+                .firstOrNull()
+                ?.let { row ->
+                    val telegramId = row[GLDomainUsersTable.telegramUserId] ?: return@let null
+                    val username = row[GLDomainUsersTable.username]
+                    User(
+                        id = id,
+                        telegramId = telegramId,
+                        username = username,
+                    )
+                }
+        }
 }
 
 private class GLUserRoleRepositoryStub(

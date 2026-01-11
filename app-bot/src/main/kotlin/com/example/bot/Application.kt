@@ -72,7 +72,9 @@ import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.invitationRoutes
 import com.example.bot.routes.telegramWebhookRoutes
 import com.example.bot.telegram.InvitationTelegramHandler
+import com.example.bot.telegram.SupportTelegramHandler
 import com.example.bot.telegram.TelegramClient
+import com.example.bot.telegram.TelegramCallbackRouter
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -207,6 +209,17 @@ fun Application.module() {
             meterRegistry = registry,
             zoneId = ZoneId.systemDefault(),
         )
+    val supportTelegramHandler =
+        SupportTelegramHandler(
+            send = telegramClient::send,
+            supportService = supportService,
+            userRepository = userRepository,
+        )
+    val telegramCallbackRouter =
+        TelegramCallbackRouter(
+            supportHandler = supportTelegramHandler::handle,
+            invitationHandler = invitationTelegramHandler::handle,
+        )
 
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
     errorCodesRoutes()
@@ -255,10 +268,14 @@ fun Application.module() {
     )
     guestListInviteRoutes(repository = guestListRepository)
     invitationRoutes(invitationService = invitationService)
-    supportRoutes(supportService = supportService, userRepository = userRepository)
+    supportRoutes(
+        supportService = supportService,
+        userRepository = userRepository,
+        telegramClient = telegramClient,
+    )
     telegramWebhookRoutes(
         expectedSecret = config.webhook.secretToken,
-        onUpdate = { update -> invitationTelegramHandler.handle(update) },
+        onUpdate = { update -> telegramCallbackRouter.route(update) },
     )
     waitlistRoutes(
         repository = waitlistRepository,

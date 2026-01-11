@@ -315,6 +315,9 @@ private class DummyGuestListRepository : GuestListRepository {
 private class DummyUserRepository : UserRepository {
     override suspend fun getByTelegramId(id: Long): User? =
         if (id == TELEGRAM_USER_ID) User(id = INTERNAL_USER_ID, telegramId = TELEGRAM_USER_ID, username = null) else null
+
+    override suspend fun getById(id: Long): User? =
+        if (id == INTERNAL_USER_ID) User(id = INTERNAL_USER_ID, telegramId = TELEGRAM_USER_ID, username = null) else null
 }
 
 private class DummyUserRoleRepository : UserRoleRepository {

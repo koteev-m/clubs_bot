@@ -474,6 +474,8 @@ private class EMUserRepository : UserRepository {
         )
 
     override suspend fun getByTelegramId(id: Long): User? = if (id == EM_TELEGRAM_USER_ID) user else null
+
+    override suspend fun getById(id: Long): User? = if (id == EM_INTERNAL_USER_ID) user else null
 }
 
 private class EMUserRoleRepository(

@@ -21,8 +21,6 @@ import java.time.format.DateTimeFormatter
 import kotlin.coroutines.cancellation.CancellationException
 
 private const val START_PREFIX = "inv_"
-private const val CALLBACK_CONFIRM_PREFIX = "inv_confirm:"
-private const val CALLBACK_DECLINE_PREFIX = "inv_decline:"
 private const val CALLBACK_MAX_BYTES = 64
 
 private suspend inline fun bestEffort(block: suspend () -> Unit) {
@@ -185,6 +183,9 @@ class InvitationTelegramHandler(
     )
 
     companion object {
+        const val CALLBACK_CONFIRM_PREFIX = "inv_confirm:"
+        const val CALLBACK_DECLINE_PREFIX = "inv_decline:"
+
         fun parseStartToken(text: String): String? {
             val trimmed = text.trim()
             if (!trimmed.startsWith("/start")) return null

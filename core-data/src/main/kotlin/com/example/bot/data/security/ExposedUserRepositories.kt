@@ -43,6 +43,16 @@ class ExposedUserRepository(
                 .firstOrNull()
                 ?.toUser()
         }
+
+    override suspend fun getById(id: Long): User? =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            UsersTable
+                .selectAll()
+                .where { UsersTable.id eq id }
+                .limit(1)
+                .firstOrNull()
+                ?.toUser()
+        }
 }
 
 /**

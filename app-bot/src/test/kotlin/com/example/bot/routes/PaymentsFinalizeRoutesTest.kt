@@ -202,6 +202,8 @@ class PaymentsFinalizeRoutesTest : StringSpec() {
                     userRepository =
                         object : UserRepository {
                             override suspend fun getByTelegramId(id: Long): User? = null
+
+                            override suspend fun getById(id: Long): User? = null
                         },
                     userRoleRepository =
                         object : UserRoleRepository {

@@ -69,6 +69,8 @@ class SmokeRoutesTest {
                     userRepository =
                         object : UserRepository {
                             override suspend fun getByTelegramId(id: Long) = null
+
+                            override suspend fun getById(id: Long) = null
                         }
                     userRoleRepository =
                         object : UserRoleRepository {

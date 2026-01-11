@@ -211,6 +211,9 @@ class TracingSmokeTest :
                                 object : UserRepository {
                                     override suspend fun getByTelegramId(id: Long): User =
                                         User(id = id, telegramId = id, username = "tester")
+
+                                    override suspend fun getById(id: Long): User =
+                                        User(id = id, telegramId = id, username = "tester")
                                 }
                             userRoleRepository =
                                 object : UserRoleRepository {
