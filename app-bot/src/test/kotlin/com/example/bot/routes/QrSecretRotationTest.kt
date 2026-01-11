@@ -305,6 +305,8 @@ private class RotationUserRepository : UserRepository {
         )
 
     override suspend fun getByTelegramId(id: Long): User? = if (id == ROTATION_TELEGRAM_USER_ID) user else null
+
+    override suspend fun getById(id: Long): User? = if (id == ROTATION_INTERNAL_USER_ID) user else null
 }
 
 private class RotationUserRoleRepository : UserRoleRepository {

@@ -381,6 +381,8 @@ private fun Application.installTestKoin(
 
 private class StubUserRepository : UserRepository {
     override suspend fun getByTelegramId(id: Long): User? = User(id = 1, telegramId = id, username = "tester")
+
+    override suspend fun getById(id: Long): User? = User(id = id, telegramId = id, username = "tester")
 }
 
 private class StubUserRoleRepository(

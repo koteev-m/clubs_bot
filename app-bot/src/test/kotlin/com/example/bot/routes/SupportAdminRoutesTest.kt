@@ -13,6 +13,7 @@ import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.TicketTopic
+import com.example.bot.telegram.TelegramClient
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
@@ -30,6 +31,8 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.coEvery
+import io.mockk.mockk
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -294,6 +297,8 @@ class SupportAdminRoutesTest {
             val supportService = SupportServiceImpl(supportRepository)
             val userRepository = TestUserRepository()
             val userRoleRepository = TestUserRoleRepository()
+            val telegramClient = mockk<TelegramClient>(relaxed = true)
+            coEvery { telegramClient.send(any()) } returns mockk(relaxed = true)
             application {
                 install(ContentNegotiation) { json() }
                 install(RbacPlugin) {
@@ -312,6 +317,7 @@ class SupportAdminRoutesTest {
                 supportRoutes(
                     supportService = supportService,
                     userRepository = userRepository,
+                    telegramClient = telegramClient,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
@@ -440,16 +446,21 @@ class SupportAdminRoutesTest {
 
     private class TestUserRepository : UserRepository {
         private val usersByTelegramId = mutableMapOf<Long, User>()
+        private val usersById = mutableMapOf<Long, User>()
 
         fun register(
             id: Long,
             telegramUserId: Long,
             username: String,
         ) {
-            usersByTelegramId[telegramUserId] = User(id = id, telegramId = telegramUserId, username = username)
+            val user = User(id = id, telegramId = telegramUserId, username = username)
+            usersByTelegramId[telegramUserId] = user
+            usersById[id] = user
         }
 
         override suspend fun getByTelegramId(id: Long): User? = usersByTelegramId[id]
+
+        override suspend fun getById(id: Long): User? = usersById[id]
     }
 
     private class TestUserRoleRepository : UserRoleRepository {

@@ -11,6 +11,7 @@ import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.support.SupportService
 import com.example.bot.support.TicketStatus
+import com.example.bot.telegram.TelegramClient
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
@@ -28,6 +29,8 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.coEvery
+import io.mockk.mockk
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -601,6 +604,8 @@ class SupportGuestRoutesTest {
             val supportService = SupportServiceImpl(supportRepository)
             val userRepository = ExposedUserRepository(setup.database)
             val userRoleRepository = StubUserRoleRepository()
+            val telegramClient = mockk<TelegramClient>(relaxed = true)
+            coEvery { telegramClient.send(any()) } returns mockk(relaxed = true)
             application {
                 install(ContentNegotiation) { json() }
                 install(RbacPlugin) {
@@ -619,6 +624,7 @@ class SupportGuestRoutesTest {
                 supportRoutes(
                     supportService = supportService,
                     userRepository = userRepository,
+                    telegramClient = telegramClient,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }

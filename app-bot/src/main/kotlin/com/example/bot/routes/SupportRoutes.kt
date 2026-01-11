@@ -18,6 +18,10 @@ import com.example.bot.support.TicketMessage
 import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
+import com.example.bot.telegram.TelegramClient
+import com.pengrad.telegrambot.model.request.InlineKeyboardButton
+import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
+import com.pengrad.telegrambot.request.SendMessage
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -31,10 +35,15 @@ import io.ktor.server.routing.intercept
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
+import kotlin.coroutines.cancellation.CancellationException
 
 private val logger = LoggerFactory.getLogger("SupportRoutes")
+private const val SUPPORT_RATE_PREFIX = "support_rate:"
+private const val CALLBACK_MAX_BYTES = 64
 
 @Serializable
 private data class CreateTicketRequest(
@@ -105,6 +114,7 @@ private val supportAdminRoles = supportGlobalRoles + Role.CLUB_ADMIN
 fun Application.supportRoutes(
     supportService: SupportService,
     userRepository: UserRepository,
+    telegramClient: TelegramClient,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
@@ -352,6 +362,14 @@ fun Application.supportRoutes(
                                         ticketStatus = reply.ticket.status.wire,
                                     ),
                                 )
+                                call.application.launch(MDCContext()) {
+                                    sendSupportReplyNotification(
+                                        telegramClient = telegramClient,
+                                        userRepository = userRepository,
+                                        ticket = reply.ticket,
+                                        replyText = text,
+                                    )
+                                }
                             }
                             is SupportServiceResult.Failure -> {
                                 val (statusCode, code) = mapSupportAdminError(result.error)
@@ -420,6 +438,55 @@ private fun TicketMessage.toResponse(): MessageResponse =
         senderType = senderType.wire,
         createdAt = createdAt.toString(),
     )
+
+private suspend fun sendSupportReplyNotification(
+    telegramClient: TelegramClient,
+    userRepository: UserRepository,
+    ticket: Ticket,
+    replyText: String,
+) {
+    val user = userRepository.getById(ticket.userId) ?: return
+    val telegramUserId = user.telegramId
+    val message = buildSupportReplyMessage(ticket.clubId, replyText)
+    val keyboard = buildSupportRatingKeyboard(ticket.id)
+    val request = SendMessage(telegramUserId, message)
+    if (keyboard != null) {
+        request.replyMarkup(keyboard)
+    }
+    try {
+        telegramClient.send(request)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        logger.warn("support.ticket.reply.notify_failed ticket_id={} club_id={}", ticket.id, ticket.clubId)
+    }
+}
+
+private fun buildSupportReplyMessage(
+    clubId: Long,
+    replyText: String,
+): String =
+    buildString {
+        appendLine("Ответ от клуба #$clubId")
+        appendLine()
+        append(replyText)
+    }
+
+private fun buildSupportRatingKeyboard(ticketId: Long): InlineKeyboardMarkup? {
+    val up = "$SUPPORT_RATE_PREFIX$ticketId:up"
+    val down = "$SUPPORT_RATE_PREFIX$ticketId:down"
+    if (!fitsCallbackData(up) || !fitsCallbackData(down)) {
+        return null
+    }
+    return InlineKeyboardMarkup(
+        arrayOf(
+            InlineKeyboardButton("👍").callbackData(up),
+            InlineKeyboardButton("👎").callbackData(down),
+        ),
+    )
+}
+
+private fun fitsCallbackData(data: String): Boolean = data.toByteArray(Charsets.UTF_8).size < CALLBACK_MAX_BYTES
 
 private fun mapSupportAdminError(error: SupportServiceError): Pair<HttpStatusCode, String> =
     when (error) {

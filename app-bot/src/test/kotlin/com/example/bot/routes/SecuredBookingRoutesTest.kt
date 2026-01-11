@@ -180,6 +180,23 @@ private class BookingUserRepositoryStub(
                     )
                 }
         }
+
+    override suspend fun getById(id: Long): User? =
+        transaction(db) {
+            BookingUsersTable
+                .selectAll()
+                .where { BookingUsersTable.id eq id }
+                .limit(1)
+                .firstOrNull()
+                ?.let { row ->
+                    val telegramId = row[BookingUsersTable.telegramUserId] ?: return@let null
+                    User(
+                        id = id,
+                        telegramId = telegramId,
+                        username = row[BookingUsersTable.username],
+                    )
+                }
+        }
 }
 
 private class BookingUserRoleRepositoryStub(

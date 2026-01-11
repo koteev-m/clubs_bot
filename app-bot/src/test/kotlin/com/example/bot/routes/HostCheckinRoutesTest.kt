@@ -416,6 +416,8 @@ class HostCheckinRoutesTest {
 
     private class StubUserRepository(private val userId: Long) : UserRepository {
         override suspend fun getByTelegramId(id: Long): User? = User(id = userId, telegramId = id, username = "tester")
+
+        override suspend fun getById(id: Long): User? = User(id = userId, telegramId = id, username = "tester")
     }
 
     private class StubUserRoleRepository(private val roles: Set<Role>) : UserRoleRepository {

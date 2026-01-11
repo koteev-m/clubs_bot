@@ -103,6 +103,8 @@ private class StaticUserRepository(
     private val users: Map<Long, User>,
 ) : UserRepository {
     override suspend fun getByTelegramId(id: Long): User? = users[id]
+
+    override suspend fun getById(id: Long): User? = users[id]
 }
 
 private class StaticUserRoleRepository(
