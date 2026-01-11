@@ -1,8 +1,13 @@
 package com.example.bot.routes
 
 import com.example.bot.data.security.ExposedUserRepository
+import com.example.bot.data.security.Role
+import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.data.support.SupportRepository
 import com.example.bot.data.support.SupportServiceImpl
+import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.security.auth.TelegramPrincipal
+import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.support.SupportService
 import com.example.bot.support.TicketStatus
 import com.example.bot.testing.createInitData
@@ -37,6 +42,7 @@ import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.Test
+import io.mockk.mockk
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -594,8 +600,22 @@ class SupportGuestRoutesTest {
             val supportRepository = SupportRepository(setup.database)
             val supportService = SupportServiceImpl(supportRepository)
             val userRepository = ExposedUserRepository(setup.database)
+            val userRoleRepository = StubUserRoleRepository()
             application {
                 install(ContentNegotiation) { json() }
+                install(RbacPlugin) {
+                    this.userRepository = userRepository
+                    this.userRoleRepository = userRoleRepository
+                    this.auditLogRepository = mockk(relaxed = true)
+                    principalExtractor = { call ->
+                        if (call.attributes.contains(MiniAppUserKey)) {
+                            val principal = call.attributes[MiniAppUserKey]
+                            TelegramPrincipal(principal.id, principal.username)
+                        } else {
+                            null
+                        }
+                    }
+                }
                 supportRoutes(
                     supportService = supportService,
                     userRepository = userRepository,
@@ -699,5 +719,11 @@ class SupportGuestRoutesTest {
     private fun HttpResponse.assertNoStoreHeaders() {
         assertEquals("no-store", headers[HttpHeaders.CacheControl])
         assertEquals("X-Telegram-Init-Data", headers[HttpHeaders.Vary])
+    }
+
+    private class StubUserRoleRepository : UserRoleRepository {
+        override suspend fun listRoles(userId: Long): Set<Role> = emptySet()
+
+        override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
     }
 }
