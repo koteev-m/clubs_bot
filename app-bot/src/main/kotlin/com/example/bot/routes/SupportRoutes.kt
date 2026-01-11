@@ -248,11 +248,7 @@ fun Application.supportRoutes(
                 requireSupportUser(userRepository)
                 supportAdminAuthorize {
                     post("/assign") {
-                        val ticketId = call.parameters["id"]?.toLongOrNull()
-                        if (ticketId == null || ticketId <= 0) {
-                            logger.warn("support.ticket.assign validation_error ticket_id={}", call.parameters["id"])
-                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
-                        }
+                        val ticketId = call.parseTicketIdOrRespond("assign") ?: return@post
 
                         val ticket = supportService.getTicket(ticketId)
                             ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
@@ -273,11 +269,7 @@ fun Application.supportRoutes(
                     }
 
                     post("/status") {
-                        val ticketId = call.parameters["id"]?.toLongOrNull()
-                        if (ticketId == null || ticketId <= 0) {
-                            logger.warn("support.ticket.status validation_error ticket_id={}", call.parameters["id"])
-                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
-                        }
+                        val ticketId = call.parseTicketIdOrRespond("status") ?: return@post
 
                         val ticket = supportService.getTicket(ticketId)
                             ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
@@ -317,11 +309,7 @@ fun Application.supportRoutes(
                     }
 
                     post("/reply") {
-                        val ticketId = call.parameters["id"]?.toLongOrNull()
-                        if (ticketId == null || ticketId <= 0) {
-                            logger.warn("support.ticket.reply validation_error ticket_id={}", call.parameters["id"])
-                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
-                        }
+                        val ticketId = call.parseTicketIdOrRespond("reply") ?: return@post
 
                         val ticket = supportService.getTicket(ticketId)
                             ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
@@ -384,6 +372,17 @@ private suspend fun ApplicationCall.userIdOrNull(userRepository: UserRepository)
         logger.warn("support.ticket.forbidden user_not_found")
     }
     return user?.id
+}
+
+private suspend fun ApplicationCall.parseTicketIdOrRespond(action: String): Long? {
+    val rawTicketId = parameters["id"]
+    val ticketId = rawTicketId?.toLongOrNull()
+    if (ticketId == null || ticketId <= 0) {
+        logger.warn("support.ticket.{} validation_error ticket_id={}", action, rawTicketId)
+        respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+        return null
+    }
+    return ticketId
 }
 
 private fun normalizeText(text: String?): String? {

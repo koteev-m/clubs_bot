@@ -141,6 +141,59 @@ class SupportAdminRoutesTest {
     }
 
     @Test
+    fun `admin status invalid json returns 400 and no-store headers`() = withSupportAdminApp { context ->
+        val adminTelegramId = 451L
+        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
+        val clubId = insertClub(context.database, "Invalid Json Club")
+        context.userRoleRepository.setRoles(adminUserId, setOf(Role.OWNER), clubIds = emptySet())
+
+        val ownerUserId = insertUser(context.database, context.userRepository, 452L, "guest")
+        val ticketId = createTicket(context, clubId, ownerUserId)
+
+        val response =
+            client.post("/api/support/tickets/$ticketId/status") {
+                withInitData(createInitData(userId = adminTelegramId))
+                contentType(ContentType.Application.Json)
+                setBody("{")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("invalid_json", response.errorCode())
+    }
+
+    @Test
+    fun `admin endpoints without init data return 401 and no-store headers`() = withSupportAdminApp {
+        val listResponse = client.get("/api/support/tickets?clubId=1")
+        assertEquals(HttpStatusCode.Unauthorized, listResponse.status)
+        listResponse.assertNoStoreHeaders()
+        assertEquals("unauthorized", listResponse.errorCode())
+
+        val assignResponse = client.post("/api/support/tickets/1/assign")
+        assertEquals(HttpStatusCode.Unauthorized, assignResponse.status)
+        assignResponse.assertNoStoreHeaders()
+        assertEquals("unauthorized", assignResponse.errorCode())
+
+        val statusResponse =
+            client.post("/api/support/tickets/1/status") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"status":"answered"}""")
+            }
+        assertEquals(HttpStatusCode.Unauthorized, statusResponse.status)
+        statusResponse.assertNoStoreHeaders()
+        assertEquals("unauthorized", statusResponse.errorCode())
+
+        val replyResponse =
+            client.post("/api/support/tickets/1/reply") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"text":"Reply"}""")
+            }
+        assertEquals(HttpStatusCode.Unauthorized, replyResponse.status)
+        replyResponse.assertNoStoreHeaders()
+        assertEquals("unauthorized", replyResponse.errorCode())
+    }
+
+    @Test
     fun `admin without club access cannot manage tickets`() = withSupportAdminApp { context ->
         val adminTelegramId = 501L
         val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
