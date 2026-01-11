@@ -4,6 +4,7 @@ import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
+import com.example.bot.data.booking.core.AuditLogRepository
 import com.example.bot.data.support.SupportRepository
 import com.example.bot.data.support.SupportServiceImpl
 import com.example.bot.plugins.MiniAppUserKey
@@ -47,7 +48,6 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import io.mockk.mockk
 
 class SupportAdminRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -208,6 +208,20 @@ class SupportAdminRoutesTest {
         assertEquals("validation_error", response.errorCode())
     }
 
+    @Test
+    fun `admin without internal user returns forbidden for support tickets`() = withSupportAdminApp { context ->
+        val clubId = insertClub(context.database, "Missing User Club")
+
+        val response =
+            client.get("/api/support/tickets?clubId=$clubId") {
+                withInitData(createInitData(userId = 700L))
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        response.assertNoStoreHeaders()
+        assertEquals("forbidden", response.errorCode())
+    }
+
     private data class DbSetup(
         val dataSource: JdbcDataSource,
         val database: Database,
@@ -232,7 +246,7 @@ class SupportAdminRoutesTest {
                 install(RbacPlugin) {
                     this.userRepository = userRepository
                     this.userRoleRepository = userRoleRepository
-                    this.auditLogRepository = mockk(relaxed = true)
+                    this.auditLogRepository = AuditLogRepository(setup.database)
                     principalExtractor = { call ->
                         if (call.attributes.contains(MiniAppUserKey)) {
                             val principal = call.attributes[MiniAppUserKey]

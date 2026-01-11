@@ -99,7 +99,8 @@ private data class SupportReplyResponse(
     val ticketStatus: String,
 )
 
-private val supportAdminRoles = setOf(Role.CLUB_ADMIN, Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+private val supportGlobalRoles = setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+private val supportAdminRoles = supportGlobalRoles + Role.CLUB_ADMIN
 
 fun Application.supportRoutes(
     supportService: SupportService,
@@ -218,15 +219,7 @@ fun Application.supportRoutes(
 
             route("/tickets") {
                 requireSupportUser(userRepository)
-                authorize(
-                    Role.CLUB_ADMIN,
-                    Role.OWNER,
-                    Role.GLOBAL_ADMIN,
-                    Role.HEAD_MANAGER,
-                    forbiddenHandler = { call ->
-                        call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
-                    },
-                ) {
+                supportAdminAuthorize {
                     get {
                         val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
                         if (clubId == null || clubId <= 0) {
@@ -253,15 +246,7 @@ fun Application.supportRoutes(
 
             route("/tickets/{id}") {
                 requireSupportUser(userRepository)
-                authorize(
-                    Role.CLUB_ADMIN,
-                    Role.OWNER,
-                    Role.GLOBAL_ADMIN,
-                    Role.HEAD_MANAGER,
-                    forbiddenHandler = { call ->
-                        call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
-                    },
-                ) {
+                supportAdminAuthorize {
                     post("/assign") {
                         val ticketId = call.parameters["id"]?.toLongOrNull()
                         if (ticketId == null || ticketId <= 0) {
@@ -465,6 +450,16 @@ private fun Route.requireSupportUser(userRepository: UserRepository) {
 
 private fun ApplicationCall.hasSupportClubAccess(clubId: Long): Boolean {
     val context = rbacContext()
-    val isGlobal = context.roles.any { it in supportAdminRoles && it != Role.CLUB_ADMIN }
+    val isGlobal = context.roles.any { it in supportGlobalRoles }
     return isGlobal || clubId in context.clubIds
+}
+
+private fun Route.supportAdminAuthorize(block: Route.() -> Unit) {
+    authorize(
+        *supportAdminRoles.toTypedArray(),
+        forbiddenHandler = { call ->
+            call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden)
+        },
+        block = block,
+    )
 }
