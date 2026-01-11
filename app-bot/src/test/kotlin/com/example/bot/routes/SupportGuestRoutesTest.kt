@@ -1,5 +1,6 @@
 package com.example.bot.routes
 
+import com.example.bot.data.booking.core.AuditLogRepository
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRoleRepository
@@ -42,7 +43,6 @@ import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.Test
-import io.mockk.mockk
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -606,7 +606,7 @@ class SupportGuestRoutesTest {
                 install(RbacPlugin) {
                     this.userRepository = userRepository
                     this.userRoleRepository = userRoleRepository
-                    this.auditLogRepository = mockk(relaxed = true)
+                    this.auditLogRepository = AuditLogRepository(setup.database)
                     principalExtractor = { call ->
                         if (call.attributes.contains(MiniAppUserKey)) {
                             val principal = call.attributes[MiniAppUserKey]
