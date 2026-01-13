@@ -272,6 +272,12 @@ fun Application.module() {
         supportService = supportService,
         userRepository = userRepository,
         sendTelegram = telegramClient::send,
+        clubNameProvider = { clubId ->
+            clubsRepository
+                .list(null, null, null, null, 0, 50)
+                .firstOrNull { it.id == clubId }
+                ?.name
+        },
     )
     telegramWebhookRoutes(
         expectedSecret = config.webhook.secretToken,
