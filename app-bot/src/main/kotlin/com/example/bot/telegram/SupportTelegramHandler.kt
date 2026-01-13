@@ -19,6 +19,12 @@ class SupportTelegramHandler(
     private val supportService: SupportService,
     private val userRepository: UserRepository,
 ) {
+    private data class Outcome(
+        val text: String,
+        val resultTag: String,
+        val ticketIdForLog: String,
+    )
+
     private val logger = LoggerFactory.getLogger("SupportTelegramHandler")
 
     suspend fun handle(update: Update) {
@@ -28,26 +34,28 @@ class SupportTelegramHandler(
 
         val callbackId = callbackQuery.id()
         val message = callbackQuery.message()
+        val from = callbackQuery.from()
+        val telegramUserId = from?.id()
         val parsed = SupportCallbacks.parseRate(data)
-        val (text, resultTag, ticketIdForLog) =
+        val outcome =
             try {
                 when {
-                    parsed == null -> Triple(ERROR_TEXT, "invalid", "unknown")
-                    callbackQuery.from()?.id() == null -> Triple(ERROR_TEXT, "error", parsed.ticketId.toString())
+                    parsed == null -> Outcome(ERROR_TEXT, "invalid", "unknown")
+                    telegramUserId == null ->
+                        Outcome(ERROR_TEXT, "error", parsed.ticketId.toString())
                     else -> {
-                        val telegramUserId = callbackQuery.from().id()
                         val user = userRepository.getByTelegramId(telegramUserId)
                         if (user == null) {
-                            Triple(FORBIDDEN_TEXT, "forbidden", parsed.ticketId.toString())
+                            Outcome(FORBIDDEN_TEXT, "forbidden", parsed.ticketId.toString())
                         } else {
                             when (val rateResult = supportService.setResolutionRating(parsed.ticketId, user.id, parsed.rating)) {
                                 is SupportServiceResult.Success ->
-                                    Triple(SUCCESS_TEXT, "success", parsed.ticketId.toString())
+                                    Outcome(SUCCESS_TEXT, "success", parsed.ticketId.toString())
                                 is SupportServiceResult.Failure ->
                                     when (rateResult.error) {
                                         SupportServiceError.RatingAlreadySet ->
-                                            Triple(ALREADY_SET_TEXT, "already_set", parsed.ticketId.toString())
-                                        else -> Triple(ERROR_TEXT, "error", parsed.ticketId.toString())
+                                            Outcome(ALREADY_SET_TEXT, "already_set", parsed.ticketId.toString())
+                                        else -> Outcome(ERROR_TEXT, "error", parsed.ticketId.toString())
                                     }
                             }
                         }
@@ -56,11 +64,11 @@ class SupportTelegramHandler(
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Throwable) {
-                Triple(ERROR_TEXT, "error", "unknown")
+                Outcome(ERROR_TEXT, "error", parsed?.ticketId?.toString() ?: "unknown")
             }
-        answer(callbackId, text)
+        answer(callbackId, outcome.text)
         clearInlineKeyboard(message)
-        logger.info("support.rating ticket_id={} result={}", ticketIdForLog, resultTag)
+        logger.info("support.rating ticket_id={} result={}", outcome.ticketIdForLog, outcome.resultTag)
     }
 
     private suspend fun answer(
