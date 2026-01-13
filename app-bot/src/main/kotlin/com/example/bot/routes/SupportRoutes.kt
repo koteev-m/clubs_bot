@@ -114,6 +114,7 @@ fun Application.supportRoutes(
     supportService: SupportService,
     userRepository: UserRepository,
     sendTelegram: suspend (BaseRequest<*, *>) -> BaseResponse,
+    clubNameProvider: suspend (clubId: Long) -> String? = { null },
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
@@ -367,6 +368,7 @@ fun Application.supportRoutes(
                                         userRepository = userRepository,
                                         ticket = reply.ticket,
                                         replyText = text,
+                                        clubNameProvider = clubNameProvider,
                                     )
                                 }
                             }
@@ -443,11 +445,20 @@ private suspend fun sendSupportReplyNotification(
     userRepository: UserRepository,
     ticket: Ticket,
     replyText: String,
+    clubNameProvider: suspend (clubId: Long) -> String? = { null },
 ) {
     try {
         val user = userRepository.getById(ticket.userId) ?: return
         val telegramUserId = user.telegramId
-        val message = buildSupportReplyMessage(ticket.clubId, replyText)
+        val clubName =
+            try {
+                clubNameProvider(ticket.clubId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                null
+            }
+        val message = buildSupportReplyMessage(clubName, replyText)
         val keyboard = buildSupportRatingKeyboard(ticket.id)
         val request = SendMessage(telegramUserId, message)
         if (keyboard != null) {
@@ -467,11 +478,16 @@ private suspend fun sendSupportReplyNotification(
 }
 
 private fun buildSupportReplyMessage(
-    clubId: Long,
+    clubName: String?,
     replyText: String,
 ): String =
     buildString {
-        appendLine("Ответ от клуба #$clubId")
+        val safeName = clubName?.trim()?.takeIf { it.isNotBlank() }
+        if (safeName != null) {
+            appendLine("Ответ от клуба «$safeName»")
+        } else {
+            appendLine("Ответ от клуба")
+        }
         appendLine()
         append(replyText)
     }
