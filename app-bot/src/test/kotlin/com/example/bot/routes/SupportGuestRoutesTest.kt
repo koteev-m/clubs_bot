@@ -16,6 +16,7 @@ import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.response.BaseResponse
+import io.mockk.mockk
 import io.ktor.client.request.post
 import io.ktor.client.request.get
 import io.ktor.client.request.setBody
@@ -736,7 +737,7 @@ class SupportGuestRoutesTest {
 
         suspend fun send(request: BaseRequest<*, *>): BaseResponse {
             requests += request
-            return BaseResponse()
+            return mockk()
         }
     }
 }

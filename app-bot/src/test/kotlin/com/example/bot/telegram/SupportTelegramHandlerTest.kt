@@ -13,9 +13,12 @@ import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
 import com.example.bot.support.TicketWithMessage
 import com.pengrad.telegrambot.model.CallbackQuery
+import com.pengrad.telegrambot.model.Chat
+import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
+import com.pengrad.telegrambot.request.EditMessageReplyMarkup
 import com.pengrad.telegrambot.response.BaseResponse
 import io.mockk.every
 import io.mockk.mockk
@@ -24,6 +27,7 @@ import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SupportTelegramHandlerTest {
@@ -75,6 +79,69 @@ class SupportTelegramHandlerTest {
         assertEquals(2, answers.size)
         assertEquals("Спасибо! Оценка сохранена.", answers[0].parameters["text"])
         assertEquals("Оценка уже сохранена.", answers[1].parameters["text"])
+    }
+
+    @Test
+    fun `ack first then clears inline keyboard`() = runBlocking {
+        val sender = RecordingTelegramSender()
+        val supportService = RatingSupportService()
+        val userRepository =
+            object : UserRepository {
+                override suspend fun getByTelegramId(id: Long): User? =
+                    if (id == 101L) User(id = 55L, telegramId = 101L, username = "guest") else null
+
+                override suspend fun getById(id: Long): User? =
+                    if (id == 55L) User(id = 55L, telegramId = 101L, username = "guest") else null
+            }
+        val message = mockk<Message>()
+        val chat = mockk<Chat>()
+        every { message.chat() } returns chat
+        every { chat.id() } returns 42L
+        every { message.messageId() } returns 7
+        val handler =
+            SupportTelegramHandler(
+                send = sender::send,
+                supportService = supportService,
+                userRepository = userRepository,
+            )
+        val update = mockCallbackUpdate("support_rate:10:up", message)
+
+        handler.handle(update)
+
+        assertEquals(2, sender.requests.size)
+        assertTrue(sender.requests[0] is AnswerCallbackQuery)
+        assertTrue(sender.requests[1] is EditMessageReplyMarkup)
+    }
+
+    @Test
+    fun `best effort failures do not throw and only attempt one ack`() = runBlocking {
+        val sender = FailingTelegramSender()
+        val supportService = RatingSupportService()
+        val userRepository =
+            object : UserRepository {
+                override suspend fun getByTelegramId(id: Long): User? =
+                    if (id == 101L) User(id = 55L, telegramId = 101L, username = "guest") else null
+
+                override suspend fun getById(id: Long): User? =
+                    if (id == 55L) User(id = 55L, telegramId = 101L, username = "guest") else null
+            }
+        val message = mockk<Message>()
+        val chat = mockk<Chat>()
+        every { message.chat() } returns chat
+        every { chat.id() } returns 42L
+        every { message.messageId() } returns 7
+        val handler =
+            SupportTelegramHandler(
+                send = sender::send,
+                supportService = supportService,
+                userRepository = userRepository,
+            )
+        val update = mockCallbackUpdate("support_rate:10:up", message)
+
+        handler.handle(update)
+
+        val answers = sender.requests.filterIsInstance<AnswerCallbackQuery>()
+        assertEquals(1, answers.size)
     }
 }
 
@@ -149,7 +216,16 @@ private class RecordingTelegramSender {
 
     suspend fun send(request: BaseRequest<*, *>): BaseResponse {
         requests += request
-        return BaseResponse()
+        return mockk()
+    }
+}
+
+private class FailingTelegramSender {
+    val requests = mutableListOf<BaseRequest<*, *>>()
+
+    suspend fun send(request: BaseRequest<*, *>): BaseResponse {
+        requests += request
+        throw RuntimeException("send failed")
     }
 }
 
@@ -232,7 +308,10 @@ private fun sampleTicket(
         resolutionRating = null,
     )
 
-private fun mockCallbackUpdate(data: String): Update {
+private fun mockCallbackUpdate(
+    data: String,
+    message: Message? = null,
+): Update {
     val update = mockk<Update>()
     val callbackQuery = mockk<CallbackQuery>()
     val from = mockk<com.pengrad.telegrambot.model.User>()
@@ -240,7 +319,7 @@ private fun mockCallbackUpdate(data: String): Update {
     every { callbackQuery.data() } returns data
     every { callbackQuery.id() } returns "callback-id"
     every { callbackQuery.from() } returns from
-    every { callbackQuery.message() } returns null
+    every { callbackQuery.message() } returns message
     every { from.id() } returns 101L
     return update
 }
