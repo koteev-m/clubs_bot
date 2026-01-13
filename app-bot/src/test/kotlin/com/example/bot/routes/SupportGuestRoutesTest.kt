@@ -11,10 +11,11 @@ import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.support.SupportService
 import com.example.bot.support.TicketStatus
-import com.example.bot.telegram.TelegramClient
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
+import com.pengrad.telegrambot.request.BaseRequest
+import com.pengrad.telegrambot.response.BaseResponse
 import io.ktor.client.request.post
 import io.ktor.client.request.get
 import io.ktor.client.request.setBody
@@ -29,8 +30,6 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
-import io.mockk.coEvery
-import io.mockk.mockk
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -604,8 +603,7 @@ class SupportGuestRoutesTest {
             val supportService = SupportServiceImpl(supportRepository)
             val userRepository = ExposedUserRepository(setup.database)
             val userRoleRepository = StubUserRoleRepository()
-            val telegramClient = mockk<TelegramClient>(relaxed = true)
-            coEvery { telegramClient.send(any()) } returns mockk(relaxed = true)
+            val telegramSender = RecordingTelegramSender()
             application {
                 install(ContentNegotiation) { json() }
                 install(RbacPlugin) {
@@ -624,7 +622,7 @@ class SupportGuestRoutesTest {
                 supportRoutes(
                     supportService = supportService,
                     userRepository = userRepository,
-                    telegramClient = telegramClient,
+                    sendTelegram = telegramSender::send,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
@@ -731,5 +729,14 @@ class SupportGuestRoutesTest {
         override suspend fun listRoles(userId: Long): Set<Role> = emptySet()
 
         override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
+    }
+
+    private class RecordingTelegramSender {
+        val requests = mutableListOf<BaseRequest<*, *>>()
+
+        suspend fun send(request: BaseRequest<*, *>): BaseResponse {
+            requests += request
+            return BaseResponse()
+        }
     }
 }
