@@ -142,6 +142,7 @@ class SupportTelegramHandlerTest {
 
         val answers = sender.requests.filterIsInstance<AnswerCallbackQuery>()
         assertEquals(1, answers.size)
+        assertTrue(sender.requests.any { it is EditMessageReplyMarkup })
     }
 }
 
