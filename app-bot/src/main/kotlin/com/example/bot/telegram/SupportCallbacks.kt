@@ -15,7 +15,7 @@ object SupportCallbacks {
     fun buildRate(ticketId: Long, up: Boolean): String =
         "$RATE_PREFIX$ticketId:${if (up) RATE_UP else RATE_DOWN}"
 
-    fun fits(data: String): Boolean = data.toByteArray(Charsets.UTF_8).size < MAX_BYTES
+    fun fits(data: String): Boolean = data.toByteArray(Charsets.UTF_8).size <= MAX_BYTES
 
     fun isRateCallback(data: String): Boolean = data.startsWith(RATE_PREFIX)
 
