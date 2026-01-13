@@ -47,6 +47,7 @@ import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
 import com.example.bot.support.SupportService
+import com.example.bot.support.sanitizeClubName
 import com.example.bot.routes.bookingA3Routes
 import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
@@ -275,10 +276,10 @@ fun Application.module() {
         supportService = supportService,
         userRepository = userRepository,
         sendTelegram = telegramClient::send,
-        clubNameProvider = { clubId ->
-            clubNameCache[clubId]?.let { return@supportRoutes it }
+        clubNameProvider = clubNameProvider@{ clubId ->
+            clubNameCache[clubId]?.let { return@clubNameProvider it }
             try {
-                val clubName = clubsRepository.getById(clubId)?.name?.trim()?.takeIf { it.isNotBlank() }
+                val clubName = sanitizeClubName(clubsRepository.getById(clubId)?.name)
                 if (clubName != null) {
                     if (clubNameCache.size > 1000) {
                         clubNameCache.clear()

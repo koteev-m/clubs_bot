@@ -1,4 +1,4 @@
-package com.example.bot.routes
+package com.example.bot.support
 
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue

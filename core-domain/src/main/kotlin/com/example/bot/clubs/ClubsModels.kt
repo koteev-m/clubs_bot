@@ -59,7 +59,9 @@ class InMemoryClubsRepository(
     private val clubs: List<Club>,
     private val updatedAt: Instant? = null,
 ) : ClubsRepository {
-    override suspend fun getById(id: Long): Club? = clubs.firstOrNull { it.id == id }
+    private val byId = clubs.associateBy { it.id }
+
+    override suspend fun getById(id: Long): Club? = byId[id]
 
     override suspend fun list(
         city: String?,
