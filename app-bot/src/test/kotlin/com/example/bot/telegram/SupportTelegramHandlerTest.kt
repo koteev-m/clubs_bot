@@ -26,11 +26,27 @@ import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SupportTelegramHandlerTest {
+    @Test
+    fun `supports callback fits byte boundary`() {
+        assertTrue(SupportCallbacks.fits("a".repeat(64)))
+        assertFalse(SupportCallbacks.fits("a".repeat(65)))
+    }
+
+    @Test
+    fun `supports callback fits multibyte boundary`() {
+        val sixtyFourBytes = "€".repeat(21) + "a"
+        val sixtyFiveBytes = "€".repeat(21) + "aa"
+
+        assertTrue(SupportCallbacks.fits(sixtyFourBytes))
+        assertFalse(SupportCallbacks.fits(sixtyFiveBytes))
+    }
+
     @Test
     fun `parses support rating callback`() {
         val up = SupportCallbacks.parseRate("support_rate:42:up")
