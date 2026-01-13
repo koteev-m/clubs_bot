@@ -28,50 +28,39 @@ class SupportTelegramHandler(
 
         val callbackId = callbackQuery.id()
         val message = callbackQuery.message()
-        var ackAttempted = false
-        var logResult: String? = null
         val parsed = SupportCallbacks.parseRate(data)
-        try {
-            val (text, result) =
+        val (text, resultTag, ticketIdForLog) =
+            try {
                 when {
-                    parsed == null -> INVALID_TEXT to "invalid"
-                    callbackQuery.from()?.id() == null -> ERROR_TEXT to "error"
+                    parsed == null -> Triple(ERROR_TEXT, "invalid", "unknown")
+                    callbackQuery.from()?.id() == null -> Triple(ERROR_TEXT, "error", parsed.ticketId.toString())
                     else -> {
                         val telegramUserId = callbackQuery.from().id()
                         val user = userRepository.getByTelegramId(telegramUserId)
                         if (user == null) {
-                            FORBIDDEN_TEXT to "forbidden"
+                            Triple(FORBIDDEN_TEXT, "forbidden", parsed.ticketId.toString())
                         } else {
                             when (val rateResult = supportService.setResolutionRating(parsed.ticketId, user.id, parsed.rating)) {
-                                is SupportServiceResult.Success -> SUCCESS_TEXT to "success"
+                                is SupportServiceResult.Success ->
+                                    Triple(SUCCESS_TEXT, "success", parsed.ticketId.toString())
                                 is SupportServiceResult.Failure ->
                                     when (rateResult.error) {
-                                        SupportServiceError.RatingAlreadySet -> ALREADY_SET_TEXT to "already_set"
-                                        else -> ERROR_TEXT to "error"
+                                        SupportServiceError.RatingAlreadySet ->
+                                            Triple(ALREADY_SET_TEXT, "already_set", parsed.ticketId.toString())
+                                        else -> Triple(ERROR_TEXT, "error", parsed.ticketId.toString())
                                     }
                             }
                         }
                     }
                 }
-            ackAttempted = true
-            answer(callbackId, text)
-            logResult = result
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Throwable) {
-            if (!ackAttempted) {
-                ackAttempted = true
-                answer(callbackId, ERROR_TEXT)
-                logResult = "error"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                Triple(ERROR_TEXT, "error", "unknown")
             }
-        } finally {
-            if (ackAttempted) {
-                clearInlineKeyboard(message)
-            }
-            if (logResult != null) {
-                logger.info("support.rating ticket_id={} result={}", parsed?.ticketId, logResult)
-            }
-        }
+        answer(callbackId, text)
+        clearInlineKeyboard(message)
+        logger.info("support.rating ticket_id={} result={}", ticketIdForLog, resultTag)
     }
 
     private suspend fun answer(
@@ -105,6 +94,5 @@ class SupportTelegramHandler(
         private const val ALREADY_SET_TEXT = "Оценка уже сохранена."
         private const val ERROR_TEXT = "Не удалось сохранить оценку."
         private const val FORBIDDEN_TEXT = "Доступ запрещён"
-        private const val INVALID_TEXT = "Не удалось сохранить оценку."
     }
 }
