@@ -96,10 +96,12 @@ import java.io.File
 import java.lang.reflect.Modifier
 import java.net.JarURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
 import java.time.Clock
 import java.time.ZoneId
 import com.example.bot.host.ShiftChecklistService
+import kotlin.coroutines.cancellation.CancellationException
 
 @Suppress("unused")
 fun Application.module() {
@@ -268,15 +270,27 @@ fun Application.module() {
     )
     guestListInviteRoutes(repository = guestListRepository)
     invitationRoutes(invitationService = invitationService)
+    val clubNameCache = ConcurrentHashMap<Long, String>()
     supportRoutes(
         supportService = supportService,
         userRepository = userRepository,
         sendTelegram = telegramClient::send,
         clubNameProvider = { clubId ->
-            clubsRepository
-                .list(null, null, null, null, 0, 50)
-                .firstOrNull { it.id == clubId }
-                ?.name
+            clubNameCache[clubId]?.let { return@supportRoutes it }
+            try {
+                val clubName = clubsRepository.getById(clubId)?.name?.trim()?.takeIf { it.isNotBlank() }
+                if (clubName != null) {
+                    if (clubNameCache.size > 1000) {
+                        clubNameCache.clear()
+                    }
+                    clubNameCache[clubId] = clubName
+                }
+                clubName
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
         },
     )
     telegramWebhookRoutes(

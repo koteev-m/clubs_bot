@@ -21,6 +21,8 @@ data class Event(
 )
 
 interface ClubsRepository {
+    suspend fun getById(id: Long): Club?
+
     suspend fun list(
         city: String?,
         query: String?,
@@ -57,6 +59,8 @@ class InMemoryClubsRepository(
     private val clubs: List<Club>,
     private val updatedAt: Instant? = null,
 ) : ClubsRepository {
+    override suspend fun getById(id: Long): Club? = clubs.firstOrNull { it.id == id }
+
     override suspend fun list(
         city: String?,
         query: String?,
