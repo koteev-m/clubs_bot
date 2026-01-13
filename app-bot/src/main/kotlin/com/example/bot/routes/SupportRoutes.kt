@@ -18,6 +18,7 @@ import com.example.bot.support.TicketMessage
 import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
+import com.example.bot.support.buildSupportReplyMessage
 import com.example.bot.telegram.SupportCallbacks
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
@@ -476,28 +477,6 @@ private suspend fun sendSupportReplyNotification(
         )
     }
 }
-
-internal fun sanitizeClubName(raw: String?): String? =
-    raw
-        ?.trim()
-        ?.replace(Regex("\\s+"), " ")
-        ?.take(80)
-        ?.takeIf { it.isNotBlank() }
-
-internal fun buildSupportReplyMessage(
-    clubName: String?,
-    replyText: String,
-): String =
-    buildString {
-        val safeName = sanitizeClubName(clubName)
-        if (safeName != null) {
-            appendLine("Ответ от клуба «$safeName»")
-        } else {
-            appendLine("Ответ от клуба")
-        }
-        appendLine()
-        append(replyText)
-    }
 
 private fun buildSupportRatingKeyboard(ticketId: Long): InlineKeyboardMarkup? {
     val up = SupportCallbacks.buildRate(ticketId, up = true)
