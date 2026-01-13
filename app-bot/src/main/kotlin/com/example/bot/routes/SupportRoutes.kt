@@ -18,10 +18,12 @@ import com.example.bot.support.TicketMessage
 import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
-import com.example.bot.telegram.TelegramClient
+import com.example.bot.telegram.SupportCallbacks
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
+import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.SendMessage
+import com.pengrad.telegrambot.response.BaseResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -42,9 +44,6 @@ import org.slf4j.LoggerFactory
 import kotlin.coroutines.cancellation.CancellationException
 
 private val logger = LoggerFactory.getLogger("SupportRoutes")
-private const val SUPPORT_RATE_PREFIX = "support_rate:"
-private const val CALLBACK_MAX_BYTES = 64
-
 @Serializable
 private data class CreateTicketRequest(
     val clubId: Long? = null,
@@ -114,7 +113,7 @@ private val supportAdminRoles = supportGlobalRoles + Role.CLUB_ADMIN
 fun Application.supportRoutes(
     supportService: SupportService,
     userRepository: UserRepository,
-    telegramClient: TelegramClient,
+    sendTelegram: suspend (BaseRequest<*, *>) -> BaseResponse,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
@@ -364,7 +363,7 @@ fun Application.supportRoutes(
                                 )
                                 call.application.launch(MDCContext()) {
                                     sendSupportReplyNotification(
-                                        telegramClient = telegramClient,
+                                        sendTelegram = sendTelegram,
                                         userRepository = userRepository,
                                         ticket = reply.ticket,
                                         replyText = text,
@@ -440,25 +439,30 @@ private fun TicketMessage.toResponse(): MessageResponse =
     )
 
 private suspend fun sendSupportReplyNotification(
-    telegramClient: TelegramClient,
+    sendTelegram: suspend (BaseRequest<*, *>) -> BaseResponse,
     userRepository: UserRepository,
     ticket: Ticket,
     replyText: String,
 ) {
-    val user = userRepository.getById(ticket.userId) ?: return
-    val telegramUserId = user.telegramId
-    val message = buildSupportReplyMessage(ticket.clubId, replyText)
-    val keyboard = buildSupportRatingKeyboard(ticket.id)
-    val request = SendMessage(telegramUserId, message)
-    if (keyboard != null) {
-        request.replyMarkup(keyboard)
-    }
     try {
-        telegramClient.send(request)
+        val user = userRepository.getById(ticket.userId) ?: return
+        val telegramUserId = user.telegramId
+        val message = buildSupportReplyMessage(ticket.clubId, replyText)
+        val keyboard = buildSupportRatingKeyboard(ticket.id)
+        val request = SendMessage(telegramUserId, message)
+        if (keyboard != null) {
+            request.replyMarkup(keyboard)
+        }
+        sendTelegram(request)
     } catch (e: CancellationException) {
         throw e
-    } catch (_: Throwable) {
-        logger.warn("support.ticket.reply.notify_failed ticket_id={} club_id={}", ticket.id, ticket.clubId)
+    } catch (e: Throwable) {
+        logger.warn(
+            "support.ticket.reply.notify_failed ticket_id={} club_id={} error={}",
+            ticket.id,
+            ticket.clubId,
+            e::class.java.simpleName,
+        )
     }
 }
 
@@ -473,9 +477,9 @@ private fun buildSupportReplyMessage(
     }
 
 private fun buildSupportRatingKeyboard(ticketId: Long): InlineKeyboardMarkup? {
-    val up = "$SUPPORT_RATE_PREFIX$ticketId:up"
-    val down = "$SUPPORT_RATE_PREFIX$ticketId:down"
-    if (!fitsCallbackData(up) || !fitsCallbackData(down)) {
+    val up = SupportCallbacks.buildRate(ticketId, up = true)
+    val down = SupportCallbacks.buildRate(ticketId, up = false)
+    if (!SupportCallbacks.fits(up) || !SupportCallbacks.fits(down)) {
         return null
     }
     return InlineKeyboardMarkup(
@@ -485,8 +489,6 @@ private fun buildSupportRatingKeyboard(ticketId: Long): InlineKeyboardMarkup? {
         ),
     )
 }
-
-private fun fitsCallbackData(data: String): Boolean = data.toByteArray(Charsets.UTF_8).size < CALLBACK_MAX_BYTES
 
 private fun mapSupportAdminError(error: SupportServiceError): Pair<HttpStatusCode, String> =
     when (error) {

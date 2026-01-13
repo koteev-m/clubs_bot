@@ -29,8 +29,8 @@ import org.junit.jupiter.api.Test
 class SupportTelegramHandlerTest {
     @Test
     fun `parses support rating callback`() {
-        val up = SupportTelegramHandler.parseCallbackData("support_rate:42:up")
-        val down = SupportTelegramHandler.parseCallbackData("support_rate:7:down")
+        val up = SupportCallbacks.parseRate("support_rate:42:up")
+        val down = SupportCallbacks.parseRate("support_rate:7:down")
 
         assertEquals(42L, up?.ticketId)
         assertEquals(1, up?.rating)
@@ -40,12 +40,12 @@ class SupportTelegramHandlerTest {
 
     @Test
     fun `rejects invalid support rating callback`() {
-        assertNull(SupportTelegramHandler.parseCallbackData("inv_confirm:123"))
-        assertNull(SupportTelegramHandler.parseCallbackData("support_rate:"))
-        assertNull(SupportTelegramHandler.parseCallbackData("support_rate:abc:up"))
-        assertNull(SupportTelegramHandler.parseCallbackData("support_rate:0:up"))
-        assertNull(SupportTelegramHandler.parseCallbackData("support_rate:1:sideways"))
-        assertNull(SupportTelegramHandler.parseCallbackData("support_rate:1:up:extra"))
+        assertNull(SupportCallbacks.parseRate("inv_confirm:123"))
+        assertNull(SupportCallbacks.parseRate("support_rate:"))
+        assertNull(SupportCallbacks.parseRate("support_rate:abc:up"))
+        assertNull(SupportCallbacks.parseRate("support_rate:0:up"))
+        assertNull(SupportCallbacks.parseRate("support_rate:1:sideways"))
+        assertNull(SupportCallbacks.parseRate("support_rate:1:up:extra"))
     }
 
     @Test
@@ -149,7 +149,7 @@ private class RecordingTelegramSender {
 
     suspend fun send(request: BaseRequest<*, *>): BaseResponse {
         requests += request
-        return mockk(relaxed = true)
+        return BaseResponse()
     }
 }
 

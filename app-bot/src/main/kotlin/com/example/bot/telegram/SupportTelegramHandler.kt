@@ -24,42 +24,52 @@ class SupportTelegramHandler(
     suspend fun handle(update: Update) {
         val callbackQuery = update.callbackQuery() ?: return
         val data = callbackQuery.data() ?: return
-        if (!data.startsWith(CALLBACK_PREFIX)) return
+        if (!SupportCallbacks.isRateCallback(data)) return
 
-        val parsed = parseCallbackData(data)
-        if (parsed == null) {
-            answer(callbackQuery.id(), ERROR_TEXT)
-            bestEffort { clearInlineKeyboard(callbackQuery.message()) }
-            return
-        }
-        val telegramUserId = callbackQuery.from()?.id() ?: return
-        val user = userRepository.getByTelegramId(telegramUserId)
-        if (user == null) {
-            answer(callbackQuery.id(), FORBIDDEN_TEXT)
-            return
-        }
-
+        val callbackId = callbackQuery.id()
+        val message = callbackQuery.message()
         var answered = false
+        var logResult: String? = null
+        val parsed = SupportCallbacks.parseRate(data)
         try {
-            val result = supportService.setResolutionRating(parsed.ticketId, user.id, parsed.rating)
-            val (text, logResult) =
-                when (result) {
-                    is SupportServiceResult.Success -> SUCCESS_TEXT to "success"
-                    is SupportServiceResult.Failure ->
-                        when (result.error) {
-                            SupportServiceError.RatingAlreadySet -> ALREADY_SET_TEXT to "already_set"
-                            else -> ERROR_TEXT to "error"
+            val (text, result) =
+                when {
+                    parsed == null -> INVALID_TEXT to "invalid"
+                    callbackQuery.from()?.id() == null -> ERROR_TEXT to "error"
+                    else -> {
+                        val telegramUserId = callbackQuery.from().id()
+                        val user = userRepository.getByTelegramId(telegramUserId)
+                        if (user == null) {
+                            FORBIDDEN_TEXT to "forbidden"
+                        } else {
+                            when (val rateResult = supportService.setResolutionRating(parsed.ticketId, user.id, parsed.rating)) {
+                                is SupportServiceResult.Success -> SUCCESS_TEXT to "success"
+                                is SupportServiceResult.Failure ->
+                                    when (rateResult.error) {
+                                        SupportServiceError.RatingAlreadySet -> ALREADY_SET_TEXT to "already_set"
+                                        else -> ERROR_TEXT to "error"
+                                    }
+                            }
                         }
+                    }
                 }
-            answer(callbackQuery.id(), text)
             answered = true
-            logger.info("support.rating ticket_id={} result={}", parsed.ticketId, logResult)
-            bestEffort { clearInlineKeyboard(callbackQuery.message()) }
+            answer(callbackId, text)
+            logResult = result
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
             if (!answered) {
-                answer(callbackQuery.id(), ERROR_TEXT)
+                answered = true
+                answer(callbackId, ERROR_TEXT)
+                logResult = "error"
+            }
+        } finally {
+            if (answered) {
+                bestEffort { clearInlineKeyboard(message) }
+            }
+            if (logResult != null) {
+                logger.info("support.rating ticket_id={} result={}", parsed?.ticketId, logResult)
             }
         }
     }
@@ -88,30 +98,11 @@ class SupportTelegramHandler(
         }
     }
 
-    data class ParsedCallback(
-        val ticketId: Long,
-        val rating: Int,
-    )
-
     companion object {
-        const val CALLBACK_PREFIX = "support_rate:"
         private const val SUCCESS_TEXT = "Спасибо! Оценка сохранена."
         private const val ALREADY_SET_TEXT = "Оценка уже сохранена."
         private const val ERROR_TEXT = "Не удалось сохранить оценку."
         private const val FORBIDDEN_TEXT = "Доступ запрещён"
-
-        fun parseCallbackData(data: String): ParsedCallback? {
-            if (!data.startsWith(CALLBACK_PREFIX)) return null
-            val parts = data.removePrefix(CALLBACK_PREFIX).split(":", limit = 3)
-            if (parts.size != 2) return null
-            val ticketId = parts[0].toLongOrNull()?.takeIf { it > 0 } ?: return null
-            val rating =
-                when (parts[1]) {
-                    "up" -> 1
-                    "down" -> -1
-                    else -> return null
-                }
-            return ParsedCallback(ticketId = ticketId, rating = rating)
-        }
+        private const val INVALID_TEXT = "Не удалось сохранить оценку."
     }
 }

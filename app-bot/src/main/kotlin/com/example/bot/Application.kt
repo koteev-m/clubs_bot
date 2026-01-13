@@ -271,7 +271,7 @@ fun Application.module() {
     supportRoutes(
         supportService = supportService,
         userRepository = userRepository,
-        telegramClient = telegramClient,
+        sendTelegram = telegramClient::send,
     )
     telegramWebhookRoutes(
         expectedSecret = config.webhook.secretToken,
