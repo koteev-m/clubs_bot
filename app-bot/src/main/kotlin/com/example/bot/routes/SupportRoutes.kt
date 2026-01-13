@@ -477,12 +477,19 @@ private suspend fun sendSupportReplyNotification(
     }
 }
 
-private fun buildSupportReplyMessage(
+internal fun sanitizeClubName(raw: String?): String? =
+    raw
+        ?.trim()
+        ?.replace(Regex("\\s+"), " ")
+        ?.take(80)
+        ?.takeIf { it.isNotBlank() }
+
+internal fun buildSupportReplyMessage(
     clubName: String?,
     replyText: String,
 ): String =
     buildString {
-        val safeName = clubName?.trim()?.takeIf { it.isNotBlank() }
+        val safeName = sanitizeClubName(clubName)
         if (safeName != null) {
             appendLine("Ответ от клуба «$safeName»")
         } else {
