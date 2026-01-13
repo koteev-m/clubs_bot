@@ -4,6 +4,7 @@ import HallMap from './HallMap';
 import { useGuestStore } from '../state/guest.store';
 import ToastHost from '../../../widgets/ToastHost';
 import BookingFlow from '../components/BookingFlow';
+import SupportSection from '../components/SupportSection';
 
 /** Main screen for Guest mode. */
 export default function GuestHome() {
@@ -15,6 +16,7 @@ export default function GuestHome() {
       <NightPicker />
       {selectedClub && selectedNight && <HallMap />}
       {selectedTable && <BookingFlow />}
+      <SupportSection />
       <ToastHost />
     </div>
   );
