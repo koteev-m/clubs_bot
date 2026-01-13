@@ -3,6 +3,10 @@ package com.example.bot.support
 internal const val MAX_CLUB_NAME_LEN = 80
 private val WS_REGEX = Regex("\\s+")
 
+/**
+ * Санитизация имени клуба для уведомлений поддержки:
+ * trim, схлопывание пробелов и ограничение длины.
+ */
 internal fun sanitizeClubName(raw: String?): String? =
     raw
         ?.trim()
