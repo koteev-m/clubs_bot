@@ -28,7 +28,7 @@ class SupportTelegramHandler(
 
         val callbackId = callbackQuery.id()
         val message = callbackQuery.message()
-        var answered = false
+        var ackAttempted = false
         var logResult: String? = null
         val parsed = SupportCallbacks.parseRate(data)
         try {
@@ -53,20 +53,20 @@ class SupportTelegramHandler(
                         }
                     }
                 }
-            answered = true
+            ackAttempted = true
             answer(callbackId, text)
             logResult = result
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) {
-            if (!answered) {
-                answered = true
+            if (!ackAttempted) {
+                ackAttempted = true
                 answer(callbackId, ERROR_TEXT)
                 logResult = "error"
             }
         } finally {
-            if (answered) {
-                bestEffort { clearInlineKeyboard(message) }
+            if (ackAttempted) {
+                clearInlineKeyboard(message)
             }
             if (logResult != null) {
                 logger.info("support.rating ticket_id={} result={}", parsed?.ticketId, logResult)
@@ -78,17 +78,19 @@ class SupportTelegramHandler(
         callbackId: String,
         text: String,
     ) {
-        send(AnswerCallbackQuery(callbackId).text(text))
+        bestEffortSend { send(AnswerCallbackQuery(callbackId).text(text)) }
     }
 
     private suspend fun clearInlineKeyboard(message: Message?) {
         if (message == null) return
         val chatId = message.chat().id()
         val messageId = message.messageId()
-        send(EditMessageReplyMarkup(chatId, messageId).replyMarkup(InlineKeyboardMarkup()))
+        bestEffortSend {
+            send(EditMessageReplyMarkup(chatId, messageId).replyMarkup(InlineKeyboardMarkup()))
+        }
     }
 
-    private suspend inline fun bestEffort(block: suspend () -> Unit) {
+    private suspend inline fun bestEffortSend(block: suspend () -> Unit) {
         try {
             block()
         } catch (e: CancellationException) {

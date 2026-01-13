@@ -10,7 +10,7 @@ class TelegramCallbackRouter(
         val callbackData = update.callbackQuery()?.data()
         when {
             callbackData == null -> invitationHandler(update)
-            callbackData.startsWith(SupportCallbacks.RATE_PREFIX) -> supportHandler(update)
+            SupportCallbacks.isRateCallback(callbackData) -> supportHandler(update)
             callbackData.startsWith(InvitationTelegramHandler.CALLBACK_CONFIRM_PREFIX) ||
                 callbackData.startsWith(InvitationTelegramHandler.CALLBACK_DECLINE_PREFIX) ->
                 invitationHandler(update)
