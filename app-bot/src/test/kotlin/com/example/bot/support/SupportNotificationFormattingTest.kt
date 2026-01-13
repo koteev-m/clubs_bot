@@ -1,5 +1,6 @@
 package com.example.bot.support
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -25,5 +26,18 @@ class SupportNotificationFormattingTest {
             assertFalse(message.contains("#"))
             assertFalse(message.contains("null"))
         }
+    }
+
+    @Test
+    fun `support reply message truncates long club name`() {
+        val longName = "Клуб".repeat(200)
+
+        val sanitized = sanitizeClubName(longName)
+        assertEquals(MAX_CLUB_NAME_LEN, sanitized?.length)
+
+        val message = buildSupportReplyMessage(longName, "Спасибо")
+        assertTrue(message.startsWith("Ответ от клуба «$sanitized»"))
+        assertFalse(message.contains("#"))
+        assertFalse(message.contains("null"))
     }
 }
