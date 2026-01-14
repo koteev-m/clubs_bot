@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { http } from '../../../shared/api/http';
 import { getApiErrorInfo, isRequestCanceled } from '../../../shared/api/error';
 import { useGuestStore } from '../state/guest.store';
@@ -32,11 +32,20 @@ type Step = 'table' | 'guests' | 'rules' | 'confirm';
 
 function createIdempotency(key: string) {
   return {
-    next: () => {
+    next: (fingerprint: string) => {
       const existing = sessionStorage.getItem(key);
-      if (existing) return existing;
+      if (existing) {
+        try {
+          const parsed = JSON.parse(existing) as { key?: string; fingerprint?: string };
+          if (parsed?.key && parsed.fingerprint === fingerprint) {
+            return parsed.key;
+          }
+        } catch {
+          // ignore and regenerate
+        }
+      }
       const fresh = crypto.randomUUID();
-      sessionStorage.setItem(key, fresh);
+      sessionStorage.setItem(key, JSON.stringify({ key: fresh, fingerprint }));
       return fresh;
     },
     clear: () => sessionStorage.removeItem(key),
@@ -93,6 +102,7 @@ export default function BookingFlow() {
       setHold(null);
       setStep('table');
       setAgreeRules(false);
+      holdKey.clear();
       confirmKey.clear();
       plusOneKey.clear();
     },
@@ -117,28 +127,27 @@ export default function BookingFlow() {
     return () => window.clearInterval(id);
   }, [latePlusOneDeadline]);
 
-  const cancelPendingAndInvalidate = (resetLoading = false) => {
-    controller.current?.abort();
-    requestIdRef.current += 1;
-    if (resetLoading) {
-      setLoading(false);
-    }
-  };
+  const cancelPendingAndInvalidate = useCallback(
+    (resetLoading = false) => {
+      controller.current?.abort();
+      requestIdRef.current += 1;
+      if (resetLoading) {
+        setLoading(false);
+      }
+    },
+    [setLoading],
+  );
 
   useEffect(() => {
     cancelPendingAndInvalidate(true);
-  }, [selectedClub, selectedNight, selectedEventId, selectedTable]);
+  }, [cancelPendingAndInvalidate, selectedClub, selectedNight, selectedEventId, selectedTable]);
 
   useEffect(() => {
     return () => {
       cancelPendingAndInvalidate();
       controller.current = null;
     };
-  }, []);
-
-  useEffect(() => {
-    holdKey.clear();
-  }, [selectedTable, selectedEventId, guests, holdKey]);
+  }, [cancelPendingAndInvalidate]);
 
   useEffect(() => {
     setStep(selectedTable ? 'guests' : 'table');
@@ -149,6 +158,22 @@ export default function BookingFlow() {
     confirmKey.clear();
     plusOneKey.clear();
   }, [confirmKey, plusOneKey, selectedTable]);
+
+  const holdFingerprint = useMemo(
+    () =>
+      JSON.stringify({
+        selectedClub,
+        selectedTable,
+        selectedEventId,
+        guests,
+      }),
+    [guests, selectedClub, selectedEventId, selectedTable],
+  );
+
+  const confirmFingerprint = useMemo(() => {
+    if (!hold) return '';
+    return JSON.stringify({ selectedClub, bookingId: hold.booking.id });
+  }, [hold, selectedClub]);
 
   if (!selectedClub || !selectedNight || !selectedTable) return null;
 
@@ -167,7 +192,7 @@ export default function BookingFlow() {
     setLoading(true);
     setError(null);
     setLastAction(() => performHold);
-    const key = holdKey.next();
+    const key = holdKey.next(holdFingerprint);
     controller.current = new AbortController();
     try {
       const payload: BookingPayload = {
@@ -180,7 +205,6 @@ export default function BookingFlow() {
         signal: controller.current.signal,
       });
       if (requestId !== requestIdRef.current) return;
-      holdKey.clear();
       confirmKey.clear();
       plusOneKey.clear();
       setHold(res.data);
@@ -210,7 +234,7 @@ export default function BookingFlow() {
     setLoading(true);
     setError(null);
     setLastAction(() => performConfirm);
-    const key = confirmKey.next();
+    const key = confirmKey.next(confirmFingerprint);
     controller.current = new AbortController();
     try {
       const res = await http.post<HoldResponse>(`/api/clubs/${selectedClub}/bookings/confirm`, { bookingId: hold.booking.id }, {
@@ -245,7 +269,7 @@ export default function BookingFlow() {
     setLoading(true);
     setError(null);
     setLastAction(() => performPlusOne);
-    const key = plusOneKey.next();
+    const key = plusOneKey.next(confirmFingerprint);
     controller.current = new AbortController();
     try {
       const res = await http.post<HoldResponse>(`/api/bookings/${hold.booking.id}/plus-one`, undefined, {
