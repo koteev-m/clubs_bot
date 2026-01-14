@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 interface ApiErrorResponse {
   error?: {
     code?: string;
@@ -5,8 +7,8 @@ interface ApiErrorResponse {
 }
 
 function getApiErrorResponse(error: unknown): { data?: ApiErrorResponse } | undefined {
-  if (!error || typeof error !== 'object' || !('response' in error)) return undefined;
-  return (error as { response?: { data?: ApiErrorResponse } }).response;
+  if (!axios.isAxiosError<ApiErrorResponse>(error)) return undefined;
+  return error.response;
 }
 
 export function getApiErrorCode(error: unknown): string | undefined {

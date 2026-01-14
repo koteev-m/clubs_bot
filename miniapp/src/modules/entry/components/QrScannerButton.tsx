@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef } from 'react';
 import { useTelegram } from '../../../app/providers/TelegramProvider';
 import { useEntryStore } from '../state/entry.store';
 import { http } from '../../../shared/api/http';
@@ -8,6 +9,24 @@ export default function QrScannerButton() {
   const webApp = useTelegram();
   const { setResult } = useEntryStore();
   const { addToast } = useUiStore();
+  const listenersRef = useRef<{
+    qrTextReceived?: ({ data }: { data: string }) => void;
+    scanQrPopupClosed?: () => void;
+  } | null>(null);
+
+  const cleanupListeners = useCallback(() => {
+    const listeners = listenersRef.current;
+    if (!listeners) return;
+    if (listeners.qrTextReceived) {
+      webApp.offEvent('qrTextReceived', listeners.qrTextReceived);
+    }
+    if (listeners.scanQrPopupClosed) {
+      webApp.offEvent('scanQrPopupClosed', listeners.scanQrPopupClosed);
+    }
+    listenersRef.current = null;
+  }, [webApp]);
+
+  useEffect(() => () => cleanupListeners(), [cleanupListeners]);
 
   function handleScan(text: string) {
     http
@@ -24,6 +43,7 @@ export default function QrScannerButton() {
   }
 
   function openScanner() {
+    cleanupListeners();
     const handleQrText = ({ data }: { data: string }) => {
       handleScan(data);
       cleanupListeners();
@@ -31,9 +51,9 @@ export default function QrScannerButton() {
     const handleClosed = () => {
       cleanupListeners();
     };
-    const cleanupListeners = () => {
-      webApp.offEvent('qrTextReceived', handleQrText);
-      webApp.offEvent('scanQrPopupClosed', handleClosed);
+    listenersRef.current = {
+      qrTextReceived: handleQrText,
+      scanQrPopupClosed: handleClosed,
     };
     webApp.onEvent('qrTextReceived', handleQrText);
     webApp.onEvent('scanQrPopupClosed', handleClosed);
