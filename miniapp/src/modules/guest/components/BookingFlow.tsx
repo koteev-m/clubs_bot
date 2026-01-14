@@ -30,7 +30,7 @@ interface HoldResponse {
 
 type Step = 'table' | 'guests' | 'rules' | 'confirm';
 
-function useIdempotency(key: string) {
+function createIdempotency(key: string) {
   return {
     next: () => {
       const existing = sessionStorage.getItem(key);
@@ -74,9 +74,9 @@ export default function BookingFlow() {
   const [lastAction, setLastAction] = useState<(() => Promise<void>) | null>(null);
   const controller = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
-  const holdKey = useIdempotency('booking-hold-key');
-  const confirmKey = useIdempotency('booking-confirm-key');
-  const plusOneKey = useIdempotency('booking-plus1-key');
+  const holdKey = useMemo(() => createIdempotency('booking-hold-key'), []);
+  const confirmKey = useMemo(() => createIdempotency('booking-confirm-key'), []);
+  const plusOneKey = useMemo(() => createIdempotency('booking-plus1-key'), []);
 
   const latePlusOneDeadline = useMemo(() => hold?.latePlusOneAllowedUntil ?? hold?.booking.latePlusOneAllowedUntil, [hold]);
   const [deadlineText, setDeadlineText] = useState('');
@@ -93,6 +93,8 @@ export default function BookingFlow() {
       setHold(null);
       setStep('table');
       setAgreeRules(false);
+      confirmKey.clear();
+      plusOneKey.clear();
     },
     setError: (msg) => setError(msg),
     clearAction: () => setLastAction(null),
@@ -115,19 +117,40 @@ export default function BookingFlow() {
     return () => window.clearInterval(id);
   }, [latePlusOneDeadline]);
 
+  const cancelPendingAndInvalidate = (resetLoading = false) => {
+    controller.current?.abort();
+    requestIdRef.current += 1;
+    if (resetLoading) {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    cancelPendingAndInvalidate(true);
+  }, [selectedClub, selectedNight, selectedEventId, selectedTable]);
+
+  useEffect(() => {
+    return () => {
+      cancelPendingAndInvalidate();
+      controller.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    holdKey.clear();
+  }, [selectedTable, selectedEventId, guests, holdKey]);
+
   useEffect(() => {
     setStep(selectedTable ? 'guests' : 'table');
     setHold(null);
     setAgreeRules(false);
     setError(null);
     setLastAction(null);
-  }, [selectedTable]);
+    confirmKey.clear();
+    plusOneKey.clear();
+  }, [confirmKey, plusOneKey, selectedTable]);
 
   if (!selectedClub || !selectedNight || !selectedTable) return null;
-
-  const cancelPending = () => {
-    controller.current?.abort();
-  };
 
   const performHold = async () => {
     if (!name.trim() || guests < 1 || !agreeRules) {
@@ -139,8 +162,8 @@ export default function BookingFlow() {
       return;
     }
     const eventId = selectedEventId;
-    cancelPending();
-    const requestId = (requestIdRef.current += 1);
+    cancelPendingAndInvalidate();
+    const requestId = requestIdRef.current;
     setLoading(true);
     setError(null);
     setLastAction(() => performHold);
@@ -158,6 +181,8 @@ export default function BookingFlow() {
       });
       if (requestId !== requestIdRef.current) return;
       holdKey.clear();
+      confirmKey.clear();
+      plusOneKey.clear();
       setHold(res.data);
       setStep('confirm');
       setLastAction(null);
@@ -180,8 +205,8 @@ export default function BookingFlow() {
 
   const performConfirm = async () => {
     if (!hold) return;
-    cancelPending();
-    const requestId = (requestIdRef.current += 1);
+    cancelPendingAndInvalidate();
+    const requestId = requestIdRef.current;
     setLoading(true);
     setError(null);
     setLastAction(() => performConfirm);
@@ -215,8 +240,8 @@ export default function BookingFlow() {
 
   const performPlusOne = async () => {
     if (!hold) return;
-    cancelPending();
-    const requestId = (requestIdRef.current += 1);
+    cancelPendingAndInvalidate();
+    const requestId = requestIdRef.current;
     setLoading(true);
     setError(null);
     setLastAction(() => performPlusOne);
