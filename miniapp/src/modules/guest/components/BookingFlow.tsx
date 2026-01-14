@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { http } from '../../../shared/api/http';
-import { getApiErrorInfo } from '../../../shared/api/error';
+import { getApiErrorInfo, isRequestCanceled } from '../../../shared/api/error';
 import { useGuestStore } from '../state/guest.store';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -73,6 +73,7 @@ export default function BookingFlow() {
   const [error, setError] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<(() => Promise<void>) | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
   const holdKey = useIdempotency('booking-hold-key');
   const confirmKey = useIdempotency('booking-confirm-key');
   const plusOneKey = useIdempotency('booking-plus1-key');
@@ -139,6 +140,7 @@ export default function BookingFlow() {
     }
     const eventId = selectedEventId;
     cancelPending();
+    const requestId = (requestIdRef.current += 1);
     setLoading(true);
     setError(null);
     setLastAction(() => performHold);
@@ -154,11 +156,14 @@ export default function BookingFlow() {
         headers: { 'Idempotency-Key': key },
         signal: controller.current.signal,
       });
+      if (requestId !== requestIdRef.current) return;
       holdKey.clear();
       setHold(res.data);
       setStep('confirm');
       setLastAction(null);
     } catch (error) {
+      if (isRequestCanceled(error)) return;
+      if (requestId !== requestIdRef.current) return;
       const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
@@ -167,13 +172,16 @@ export default function BookingFlow() {
         handleServerError(code);
       }
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   const performConfirm = async () => {
     if (!hold) return;
     cancelPending();
+    const requestId = (requestIdRef.current += 1);
     setLoading(true);
     setError(null);
     setLastAction(() => performConfirm);
@@ -184,10 +192,13 @@ export default function BookingFlow() {
         headers: { 'Idempotency-Key': key },
         signal: controller.current.signal,
       });
+      if (requestId !== requestIdRef.current) return;
       confirmKey.clear();
       setHold(res.data);
       setLastAction(null);
     } catch (error) {
+      if (isRequestCanceled(error)) return;
+      if (requestId !== requestIdRef.current) return;
       const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
@@ -196,13 +207,16 @@ export default function BookingFlow() {
         handleServerError(code);
       }
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   const performPlusOne = async () => {
     if (!hold) return;
     cancelPending();
+    const requestId = (requestIdRef.current += 1);
     setLoading(true);
     setError(null);
     setLastAction(() => performPlusOne);
@@ -213,10 +227,13 @@ export default function BookingFlow() {
         headers: { 'Idempotency-Key': key },
         signal: controller.current.signal,
       });
+      if (requestId !== requestIdRef.current) return;
       plusOneKey.clear();
       setHold(res.data);
       setLastAction(null);
     } catch (error) {
+      if (isRequestCanceled(error)) return;
+      if (requestId !== requestIdRef.current) return;
       const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
@@ -225,7 +242,9 @@ export default function BookingFlow() {
         handleServerError(code);
       }
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
