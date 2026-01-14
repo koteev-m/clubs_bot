@@ -23,6 +23,14 @@ export const ticketStatusLabels: Record<TicketStatus, string> = {
   closed: 'Закрыто',
 };
 
+export interface SupportTicketResponse {
+  id: number;
+  clubId: number;
+  topic: TicketTopic;
+  status: TicketStatus;
+  updatedAt: string;
+}
+
 export interface SupportTicketSummary {
   id: number;
   clubId: number;
@@ -30,6 +38,7 @@ export interface SupportTicketSummary {
   status: TicketStatus;
   updatedAt: string;
   lastMessagePreview?: string | null;
+  lastSenderType?: string | null;
 }
 
 export interface CreateSupportTicketParams {
@@ -39,7 +48,7 @@ export interface CreateSupportTicketParams {
 }
 
 export function createSupportTicket(params: CreateSupportTicketParams) {
-  return http.post('/api/support/tickets', params);
+  return http.post<SupportTicketResponse>('/api/support/tickets', params);
 }
 
 export function getMySupportTickets() {
