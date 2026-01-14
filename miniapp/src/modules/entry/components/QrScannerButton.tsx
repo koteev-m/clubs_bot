@@ -29,7 +29,7 @@ export default function QrScannerButton() {
       webApp.offEvent('qrTextReceived', listener as any);
     };
     webApp.onEvent('qrTextReceived', listener as any);
-    webApp.showScanQrPopup();
+    webApp.showScanQrPopup({});
   }
 
   return (
