@@ -10,9 +10,9 @@ test.beforeEach(async ({ page }) => {
 test('request flows', async ({ page }) => {
   await page.goto('/?mode=guest');
   await page.evaluate(() => {
-    // @ts-ignore
+    // @ts-expect-error API stubbed in test
     window.Telegram.WebApp.requestWriteAccess();
-    // @ts-ignore
+    // @ts-expect-error API stubbed in test
     window.Telegram.WebApp.requestContact();
   });
 });

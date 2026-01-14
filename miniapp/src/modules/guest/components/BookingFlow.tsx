@@ -27,6 +27,12 @@ interface HoldResponse {
   latePlusOneAllowedUntil?: string | null;
 }
 
+interface ApiErrorResponse {
+  error?: {
+    code?: string;
+  };
+}
+
 type Step = 'table' | 'guests' | 'rules' | 'confirm';
 
 function useIdempotency(key: string) {
@@ -50,6 +56,20 @@ function formatInterval(range?: string[]): string {
   } catch (e) {
     return '';
   }
+}
+
+function getErrorInfo(error: unknown): { code: string; hasResponse: boolean } {
+  if (!error || typeof error !== 'object') {
+    return { code: 'error', hasResponse: false };
+  }
+  if (!('response' in error)) {
+    return { code: 'error', hasResponse: false };
+  }
+  const response = (error as { response?: { data?: ApiErrorResponse } }).response;
+  return {
+    code: response?.data?.error?.code ?? 'error',
+    hasResponse: Boolean(response),
+  };
 }
 
 export default function BookingFlow() {
@@ -157,9 +177,9 @@ export default function BookingFlow() {
       setHold(res.data);
       setStep('confirm');
       setLastAction(null);
-    } catch (e: any) {
-      const code = e?.response?.data?.error?.code ?? 'error';
-      if (!e?.response) {
+    } catch (error) {
+      const { code, hasResponse } = getErrorInfo(error);
+      if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
         setLastAction(() => performHold);
       } else {
@@ -186,9 +206,9 @@ export default function BookingFlow() {
       confirmKey.clear();
       setHold(res.data);
       setLastAction(null);
-    } catch (e: any) {
-      const code = e?.response?.data?.error?.code ?? 'error';
-      if (!e?.response) {
+    } catch (error) {
+      const { code, hasResponse } = getErrorInfo(error);
+      if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
         setLastAction(() => performConfirm);
       } else {
@@ -215,9 +235,9 @@ export default function BookingFlow() {
       plusOneKey.clear();
       setHold(res.data);
       setLastAction(null);
-    } catch (e: any) {
-      const code = e?.response?.data?.error?.code ?? 'error';
-      if (!e?.response) {
+    } catch (error) {
+      const { code, hasResponse } = getErrorInfo(error);
+      if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
         setLastAction(() => performPlusOne);
       } else {

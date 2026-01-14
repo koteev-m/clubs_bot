@@ -32,6 +32,7 @@ module.exports = {
   overrides: [
     {
       files: [
+        ".eslintrc.cjs",
         "vite.config.*",
         "vitest.config.*",
         "playwright.config.*",
