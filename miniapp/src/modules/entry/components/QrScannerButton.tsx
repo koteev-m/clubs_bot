@@ -24,11 +24,19 @@ export default function QrScannerButton() {
   }
 
   function openScanner() {
-    const listener = ({ data }: { data: string }) => {
+    const handleQrText = ({ data }: { data: string }) => {
       handleScan(data);
-      webApp.offEvent('qrTextReceived', listener);
+      cleanupListeners();
     };
-    webApp.onEvent('qrTextReceived', listener);
+    const handleClosed = () => {
+      cleanupListeners();
+    };
+    const cleanupListeners = () => {
+      webApp.offEvent('qrTextReceived', handleQrText);
+      webApp.offEvent('scanQrPopupClosed', handleClosed);
+    };
+    webApp.onEvent('qrTextReceived', handleQrText);
+    webApp.onEvent('scanQrPopupClosed', handleClosed);
     webApp.showScanQrPopup({});
   }
 

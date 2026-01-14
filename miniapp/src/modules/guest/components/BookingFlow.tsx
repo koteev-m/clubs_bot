@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { http } from '../../../shared/api/http';
+import { getApiErrorInfo } from '../../../shared/api/error';
 import { useGuestStore } from '../state/guest.store';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -27,12 +28,6 @@ interface HoldResponse {
   latePlusOneAllowedUntil?: string | null;
 }
 
-interface ApiErrorResponse {
-  error?: {
-    code?: string;
-  };
-}
-
 type Step = 'table' | 'guests' | 'rules' | 'confirm';
 
 function useIdempotency(key: string) {
@@ -53,23 +48,9 @@ function formatInterval(range?: string[]): string {
   const [from, to] = range;
   try {
     return `${format(new Date(from), 'HH:mm', { locale: ru })} – ${format(new Date(to), 'HH:mm', { locale: ru })}`;
-  } catch (e) {
+  } catch {
     return '';
   }
-}
-
-function getErrorInfo(error: unknown): { code: string; hasResponse: boolean } {
-  if (!error || typeof error !== 'object') {
-    return { code: 'error', hasResponse: false };
-  }
-  if (!('response' in error)) {
-    return { code: 'error', hasResponse: false };
-  }
-  const response = (error as { response?: { data?: ApiErrorResponse } }).response;
-  return {
-    code: response?.data?.error?.code ?? 'error',
-    hasResponse: Boolean(response),
-  };
 }
 
 export default function BookingFlow() {
@@ -178,7 +159,7 @@ export default function BookingFlow() {
       setStep('confirm');
       setLastAction(null);
     } catch (error) {
-      const { code, hasResponse } = getErrorInfo(error);
+      const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
         setLastAction(() => performHold);
@@ -207,7 +188,7 @@ export default function BookingFlow() {
       setHold(res.data);
       setLastAction(null);
     } catch (error) {
-      const { code, hasResponse } = getErrorInfo(error);
+      const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
         setLastAction(() => performConfirm);
@@ -236,7 +217,7 @@ export default function BookingFlow() {
       setHold(res.data);
       setLastAction(null);
     } catch (error) {
-      const { code, hasResponse } = getErrorInfo(error);
+      const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
         setLastAction(() => performPlusOne);

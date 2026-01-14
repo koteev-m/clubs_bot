@@ -1,7 +1,7 @@
 export function tgInitData() {
   try {
     return (window?.Telegram?.WebApp?.initData) || "";
-  } catch (e) {
+  } catch {
     return "";
   }
 }
