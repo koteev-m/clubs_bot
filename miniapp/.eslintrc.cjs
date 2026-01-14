@@ -3,7 +3,6 @@ module.exports = {
   env: {
     browser: true,
     es2021: true,
-    node: true,
   },
   ignorePatterns: ["dist/", "node_modules/"],
   parser: "@typescript-eslint/parser",
@@ -30,4 +29,29 @@ module.exports = {
       version: "detect",
     },
   },
+  overrides: [
+    {
+      files: [
+        "vite.config.*",
+        "vitest.config.*",
+        "playwright.config.*",
+        "tailwind.config.*",
+        "postcss.config.*",
+      ],
+      env: {
+        node: true,
+      },
+    },
+    {
+      files: ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
+      globals: {
+        describe: "readonly",
+        it: "readonly",
+        expect: "readonly",
+        vi: "readonly",
+        beforeEach: "readonly",
+        afterEach: "readonly",
+      },
+    },
+  ],
 };
