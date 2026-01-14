@@ -33,6 +33,11 @@ function resolveTopicLabel(topic: TicketTopic): string {
   return ticketTopicLabels[topic] ?? topic;
 }
 
+function resolveTicketTimestamp(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 /** Guest support section with create form and own tickets list. */
 export default function SupportSection() {
   const { selectedClub } = useGuestStore();
@@ -47,10 +52,13 @@ export default function SupportSection() {
   const isClubSelected = Boolean(selectedClub);
   const isValid = trimmedText.length > 0 && trimmedText.length <= MAX_TEXT_LENGTH;
   const isFormDisabled = !isClubSelected || isSubmitting;
-  const sortedTickets = useMemo(
-    () => [...tickets].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [tickets],
-  );
+  const sortedTickets = useMemo(() => {
+    return [...tickets].sort((a, b) => {
+      const bUpdatedAt = resolveTicketTimestamp(b.updatedAt);
+      const aUpdatedAt = resolveTicketTimestamp(a.updatedAt);
+      return bUpdatedAt - aUpdatedAt;
+    });
+  }, [tickets]);
 
   const loadTickets = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     setIsLoadingTickets(true);
