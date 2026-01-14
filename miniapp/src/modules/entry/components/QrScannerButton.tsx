@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { useTelegram } from '../../../app/providers/TelegramProvider';
 import { useEntryStore } from '../state/entry.store';
 import { checkinQr } from '../api/entry.api';
@@ -17,6 +18,7 @@ export default function QrScannerButton() {
     scanQrPopupClosed?: () => void;
   } | null>(null);
   const inFlightRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const cleanupListeners = useCallback(() => {
     const listeners = listenersRef.current;
@@ -30,24 +32,47 @@ export default function QrScannerButton() {
     listenersRef.current = null;
   }, [webApp]);
 
-  useEffect(() => () => cleanupListeners(), [cleanupListeners]);
+  const abortInFlight = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
+  useEffect(
+    () => () => {
+      const wasOpen = isScannerOpenRef.current;
+      isScannerOpenRef.current = false;
+      scanSessionRef.current += 1;
+      inFlightRef.current = false;
+      abortInFlight();
+      cleanupListeners();
+      if (wasOpen) {
+        webApp.closeScanQrPopup();
+      }
+    },
+    [abortInFlight, cleanupListeners, webApp],
+  );
 
   const handleScan = useCallback(
     async (text: string, sessionId: number) => {
       if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
       if (inFlightRef.current) return;
       inFlightRef.current = true;
+      abortInFlight();
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
-        await checkinQr(text);
+        await checkinQr(text, controller.signal);
         if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
         setResult('ARRIVED');
         addToast('ARRIVED');
         isScannerOpenRef.current = false;
         scanSessionRef.current += 1;
+        abortRef.current = null;
         webApp.closeScanQrPopup();
         cleanupListeners();
       } catch (error) {
         if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
+        if (axios.isAxiosError(error) && error.code === 'ERR_CANCELED') return;
         const { code, hasResponse } = getApiErrorInfo(error);
         if (!hasResponse) {
           addToast('Не удалось проверить QR (проблема с сетью). Сканируйте ещё раз.');
@@ -64,16 +89,20 @@ export default function QrScannerButton() {
         }
         addToast('Ошибка проверки QR');
       } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
         if (sessionId === scanSessionRef.current && isScannerOpenRef.current) {
           inFlightRef.current = false;
         }
       }
     },
-    [addToast, cleanupListeners, setResult, webApp],
+    [abortInFlight, addToast, cleanupListeners, setResult, webApp],
   );
 
   function openScanner() {
     cleanupListeners();
+    abortInFlight();
     scanSessionRef.current += 1;
     const sessionId = scanSessionRef.current;
     isScannerOpenRef.current = true;
@@ -86,6 +115,7 @@ export default function QrScannerButton() {
       isScannerOpenRef.current = false;
       scanSessionRef.current += 1;
       inFlightRef.current = false;
+      abortInFlight();
       cleanupListeners();
     };
     listenersRef.current = {

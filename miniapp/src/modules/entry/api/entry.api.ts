@@ -1,8 +1,8 @@
 import { http } from '../../../shared/api/http';
 
 /** Check-in guest via QR code. */
-export function checkinQr(code: string) {
-  return http.post('/api/checkin/qr', { code });
+export function checkinQr(code: string, signal?: AbortSignal) {
+  return http.post('/api/checkin/qr', { code }, { signal });
 }
 
 /** Manual check-in search. */
