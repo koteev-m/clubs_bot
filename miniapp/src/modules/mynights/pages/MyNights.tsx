@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { downloadBookingIcs, fetchBookingQr, fetchMyBookings, MyBookingDto } from '../api/mynights.api';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -19,6 +19,12 @@ function Countdown({ arriveBy, now }: CountdownProps) {
   return <span className="text-sm text-gray-500">До прибытия: {minutes}м {seconds}с</span>;
 }
 
+function getErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('response' in error)) return undefined;
+  const response = (error as { response?: { data?: { error?: { code?: string } } } }).response;
+  return response?.data?.error?.code;
+}
+
 export default function MyNights() {
   const [status, setStatus] = useState<'upcoming' | 'past'>('upcoming');
   const [bookings, setBookings] = useState<MyBookingDto[]>([]);
@@ -32,30 +38,30 @@ export default function MyNights() {
     return () => window.clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [status]);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const res = await fetchMyBookings(status);
       setBookings(res.data.bookings);
-    } catch (e: any) {
-      const code = e?.response?.data?.error?.code;
+    } catch (error) {
+      const code = getErrorCode(error);
       setError(code === 'validation_error' ? 'Неверный фильтр статуса' : 'Не удалось загрузить бронирования');
     } finally {
       setLoading(false);
     }
-  };
+  }, [status]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const openQr = async (bookingId: number) => {
     try {
       const res = await fetchBookingQr(bookingId);
       setQrPayloads((prev) => ({ ...prev, [bookingId]: res.data.qrPayload }));
-    } catch (e: any) {
-      const code = e?.response?.data?.error?.code;
+    } catch (error) {
+      const code = getErrorCode(error);
       setError(code === 'forbidden' ? 'Бронь недоступна' : 'Не удалось получить QR');
     }
   };
@@ -70,8 +76,8 @@ export default function MyNights() {
       a.download = `booking-${bookingId}.ics`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      const code = e?.response?.data?.error?.code;
+    } catch (error) {
+      const code = getErrorCode(error);
       setError(code === 'forbidden' ? 'Бронь недоступна' : 'Не удалось выгрузить календарь');
     }
   };

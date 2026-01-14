@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { listItems } from '../api/music.api';
-import { MusicList } from '../components/MusicList';
+import { MusicList, type MusicItemProps } from '../components/MusicList';
 
 /** Page displaying music items. */
 export const MusicPage: React.FC = () => {
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<MusicItemProps[]>([]);
 
   useEffect(() => {
     listItems({ limit: 10 }).then(setItems);
@@ -19,4 +19,3 @@ export const MusicPage: React.FC = () => {
 };
 
 export default MusicPage;
-

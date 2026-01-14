@@ -24,11 +24,11 @@ export default function QrScannerButton() {
   }
 
   function openScanner() {
-    const listener = (data: string) => {
+    const listener = ({ data }: { data: string }) => {
       handleScan(data);
-      webApp.offEvent('qrTextReceived', listener as any);
+      webApp.offEvent('qrTextReceived', listener);
     };
-    webApp.onEvent('qrTextReceived', listener as any);
+    webApp.onEvent('qrTextReceived', listener);
     webApp.showScanQrPopup({});
   }
 
