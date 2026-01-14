@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react';
-import axios from 'axios';
 import { useTelegram } from '../../../app/providers/TelegramProvider';
 import { useEntryStore } from '../state/entry.store';
 import { checkinQr } from '../api/entry.api';
 import { useUiStore } from '../../../shared/store/ui';
-import { getApiErrorInfo } from '../../../shared/api/error';
+import { getApiErrorInfo, isRequestCanceled } from '../../../shared/api/error';
 
 /** Button triggering Telegram QR scanner. */
 export default function QrScannerButton() {
@@ -72,7 +71,7 @@ export default function QrScannerButton() {
         cleanupListeners();
       } catch (error) {
         if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
-        if (axios.isAxiosError(error) && error.code === 'ERR_CANCELED') return;
+        if (isRequestCanceled(error)) return;
         const { code, hasResponse } = getApiErrorInfo(error);
         if (!hasResponse) {
           addToast('Не удалось проверить QR (проблема с сетью). Сканируйте ещё раз.');

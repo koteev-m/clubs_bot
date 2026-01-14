@@ -23,3 +23,8 @@ export function getApiErrorInfo(error: unknown): { code: string; hasResponse: bo
     hasResponse: Boolean(response),
   };
 }
+
+export function isRequestCanceled(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return false;
+  return error.code === 'ERR_CANCELED' || error.name === 'CanceledError';
+}
