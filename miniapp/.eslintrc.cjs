@@ -39,6 +39,7 @@ module.exports = {
         "postcss.config.*",
       ],
       env: {
+        browser: false,
         node: true,
       },
     },
