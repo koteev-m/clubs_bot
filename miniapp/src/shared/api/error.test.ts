@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getApiErrorCode, getApiErrorInfo } from './error';
+import { getApiErrorCode, getApiErrorInfo, isRequestCanceled } from './error';
 
 describe('api error helpers', () => {
   it('returns undefined code and no response for non-axios error', () => {
@@ -23,5 +23,18 @@ describe('api error helpers', () => {
 
     expect(getApiErrorCode(error)).toBe('invalid_qr');
     expect(getApiErrorInfo(error)).toEqual({ code: 'invalid_qr', hasResponse: true });
+  });
+
+  it('detects canceled axios requests', () => {
+    const error = {
+      isAxiosError: true,
+      code: 'ERR_CANCELED',
+    };
+
+    expect(isRequestCanceled(error)).toBe(true);
+  });
+
+  it('does not treat regular errors as canceled', () => {
+    expect(isRequestCanceled(new Error('Boom'))).toBe(false);
   });
 });
