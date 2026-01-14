@@ -10,6 +10,8 @@ export default function QrScannerButton() {
   const webApp = useTelegram();
   const { setResult } = useEntryStore();
   const { addToast } = useUiStore();
+  const scanSessionRef = useRef(0);
+  const isScannerOpenRef = useRef(false);
   const listenersRef = useRef<{
     qrTextReceived?: ({ data }: { data: string }) => void;
     scanQrPopupClosed?: () => void;
@@ -31,16 +33,21 @@ export default function QrScannerButton() {
   useEffect(() => () => cleanupListeners(), [cleanupListeners]);
 
   const handleScan = useCallback(
-    async (text: string) => {
+    async (text: string, sessionId: number) => {
+      if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
       if (inFlightRef.current) return;
       inFlightRef.current = true;
       try {
         await checkinQr(text);
+        if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
         setResult('ARRIVED');
         addToast('ARRIVED');
+        isScannerOpenRef.current = false;
+        scanSessionRef.current += 1;
         webApp.closeScanQrPopup();
         cleanupListeners();
       } catch (error) {
+        if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
         const { code, hasResponse } = getApiErrorInfo(error);
         if (!hasResponse) {
           addToast('Не удалось проверить QR (проблема с сетью). Сканируйте ещё раз.');
@@ -57,7 +64,9 @@ export default function QrScannerButton() {
         }
         addToast('Ошибка проверки QR');
       } finally {
-        inFlightRef.current = false;
+        if (sessionId === scanSessionRef.current && isScannerOpenRef.current) {
+          inFlightRef.current = false;
+        }
       }
     },
     [addToast, cleanupListeners, setResult, webApp],
@@ -65,10 +74,17 @@ export default function QrScannerButton() {
 
   function openScanner() {
     cleanupListeners();
+    scanSessionRef.current += 1;
+    const sessionId = scanSessionRef.current;
+    isScannerOpenRef.current = true;
+    inFlightRef.current = false;
     const handleQrText = ({ data }: { data: string }) => {
-      handleScan(data);
+      void handleScan(data, sessionId);
     };
     const handleClosed = () => {
+      if (sessionId !== scanSessionRef.current) return;
+      isScannerOpenRef.current = false;
+      scanSessionRef.current += 1;
       inFlightRef.current = false;
       cleanupListeners();
     };
@@ -82,7 +98,7 @@ export default function QrScannerButton() {
   }
 
   return (
-    <button onClick={openScanner} className="p-2 border">
+    <button type="button" onClick={openScanner} className="p-2 border">
       Сканировать QR
     </button>
   );
