@@ -44,15 +44,23 @@ export default function SupportSection() {
   const [isLoadingTickets, setIsLoadingTickets] = useState(false);
 
   const trimmedText = useMemo(() => text.trim(), [text]);
+  const isClubSelected = Boolean(selectedClub);
   const isValid = trimmedText.length > 0 && trimmedText.length <= MAX_TEXT_LENGTH;
+  const isFormDisabled = !isClubSelected || isSubmitting;
+  const sortedTickets = useMemo(
+    () => [...tickets].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [tickets],
+  );
 
-  const loadTickets = useCallback(async () => {
+  const loadTickets = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     setIsLoadingTickets(true);
     try {
       const res = await getMySupportTickets();
       setTickets(res.data);
     } catch {
-      addToast('Не удалось загрузить обращения');
+      if (!silent) {
+        addToast('Не удалось загрузить обращения');
+      }
     } finally {
       setIsLoadingTickets(false);
     }
@@ -65,7 +73,6 @@ export default function SupportSection() {
   const handleSubmit = async () => {
     if (isSubmitting) return;
     if (!selectedClub) {
-      addToast('Не удалось определить клуб');
       return;
     }
     if (!isValid) {
@@ -76,7 +83,7 @@ export default function SupportSection() {
     try {
       await createSupportTicket({ clubId: selectedClub, topic, text: trimmedText });
       setText('');
-      await loadTickets();
+      await loadTickets({ silent: true });
       addToast('Обращение отправлено');
     } catch {
       addToast('Не удалось отправить обращение');
@@ -93,6 +100,7 @@ export default function SupportSection() {
         <select
           className="w-full rounded border p-2"
           value={topic}
+          disabled={isFormDisabled}
           onChange={(event) => setTopic(event.target.value as TicketTopic)}
         >
           {ticketTopics.map((value) => (
@@ -109,17 +117,21 @@ export default function SupportSection() {
           rows={4}
           maxLength={MAX_TEXT_LENGTH}
           value={text}
+          disabled={isFormDisabled}
           onChange={(event) => setText(event.target.value)}
         />
       </label>
+      {!isClubSelected ? (
+        <div className="text-xs text-amber-600">Выберите клуб, чтобы отправить обращение</div>
+      ) : null}
       <div className="flex items-center justify-between text-xs text-gray-500">
-        <span>{trimmedText.length}/{MAX_TEXT_LENGTH}</span>
+        <span>{text.length}/{MAX_TEXT_LENGTH}</span>
       </div>
       <button
         type="button"
         className="w-full rounded border p-2 disabled:opacity-50"
         onClick={handleSubmit}
-        disabled={!isValid || isSubmitting}
+        disabled={!isValid || isFormDisabled}
       >
         {isSubmitting ? 'Отправка...' : 'Отправить'}
       </button>
@@ -130,7 +142,7 @@ export default function SupportSection() {
         <div className="text-sm text-gray-500">Пока нет обращений</div>
       ) : (
         <div className="space-y-3">
-          {tickets.map((ticket) => (
+          {sortedTickets.map((ticket) => (
             <div key={ticket.id} className="rounded border p-3 text-sm">
               <div className="font-medium">{resolveTopicLabel(ticket.topic)}</div>
               <div className="text-gray-600">Статус: {resolveStatusLabel(ticket.status)}</div>
