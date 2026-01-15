@@ -85,6 +85,7 @@ export default function BookingFlow() {
   const hasHold = Boolean(hold);
   const controller = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
+  const holdNightRef = useRef<string | null>(null);
   const holdKey = useMemo(() => createIdempotency('booking-hold-key'), []);
   const confirmKey = useMemo(() => createIdempotency('booking-confirm-key'), []);
   const plusOneKey = useMemo(() => createIdempotency('booking-plus1-key'), []);
@@ -152,7 +153,8 @@ export default function BookingFlow() {
       String(selectedClub) !== String(hold.booking.clubId) ||
       String(selectedTable) !== String(hold.booking.tableId) ||
       String(selectedEventId) !== String(hold.booking.eventId);
-    if (!mismatchedContext) return;
+    const mismatchedNight = holdNightRef.current !== null && holdNightRef.current !== selectedNight;
+    if (!mismatchedContext && !mismatchedNight) return;
     cancelPendingAndInvalidate(true);
     setHold(null);
     setAgreeRules(false);
@@ -170,8 +172,15 @@ export default function BookingFlow() {
     plusOneKey,
     selectedClub,
     selectedEventId,
+    selectedNight,
     selectedTable,
   ]);
+
+  useEffect(() => {
+    if (!hold) {
+      holdNightRef.current = null;
+    }
+  }, [hold]);
 
   useEffect(() => {
     return () => {
@@ -241,6 +250,7 @@ export default function BookingFlow() {
       if (requestId !== requestIdRef.current) return;
       confirmKey.clear();
       plusOneKey.clear();
+      holdNightRef.current = selectedNight;
       setHold(res.data);
       setStep('confirm');
       setLastAction(null);
