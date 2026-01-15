@@ -29,6 +29,7 @@ interface HoldResponse {
 }
 
 type Step = 'table' | 'guests' | 'rules' | 'confirm';
+type LastAction = 'hold' | 'confirm' | 'plusOne' | null;
 
 function createIdempotency(key: string) {
   return {
@@ -80,7 +81,7 @@ export default function BookingFlow() {
   const [hold, setHold] = useState<HoldResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastAction, setLastAction] = useState<(() => Promise<void>) | null>(null);
+  const [lastAction, setLastAction] = useState<LastAction>(null);
   const controller = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const holdKey = useMemo(() => createIdempotency('booking-hold-key'), []);
@@ -166,8 +167,9 @@ export default function BookingFlow() {
         selectedTable,
         selectedEventId,
         guests,
+        selectedNight,
       }),
-    [guests, selectedClub, selectedEventId, selectedTable],
+    [guests, selectedClub, selectedEventId, selectedNight, selectedTable],
   );
 
   const confirmFingerprint = useMemo(() => {
@@ -191,7 +193,7 @@ export default function BookingFlow() {
     const requestId = requestIdRef.current;
     setLoading(true);
     setError(null);
-    setLastAction(() => performHold);
+    setLastAction('hold');
     const key = holdKey.next(holdFingerprint);
     controller.current = new AbortController();
     try {
@@ -216,7 +218,7 @@ export default function BookingFlow() {
       const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
-        setLastAction(() => performHold);
+        setLastAction('hold');
       } else {
         handleServerError(code);
       }
@@ -233,7 +235,7 @@ export default function BookingFlow() {
     const requestId = requestIdRef.current;
     setLoading(true);
     setError(null);
-    setLastAction(() => performConfirm);
+    setLastAction('confirm');
     const key = confirmKey.next(confirmFingerprint);
     controller.current = new AbortController();
     try {
@@ -251,7 +253,7 @@ export default function BookingFlow() {
       const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
-        setLastAction(() => performConfirm);
+        setLastAction('confirm');
       } else {
         handleServerError(code);
       }
@@ -268,7 +270,7 @@ export default function BookingFlow() {
     const requestId = requestIdRef.current;
     setLoading(true);
     setError(null);
-    setLastAction(() => performPlusOne);
+    setLastAction('plusOne');
     const key = plusOneKey.next(confirmFingerprint);
     controller.current = new AbortController();
     try {
@@ -286,7 +288,7 @@ export default function BookingFlow() {
       const { code, hasResponse } = getApiErrorInfo(error);
       if (!hasResponse) {
         setError('Проблема с сетью. Повторите попытку');
-        setLastAction(() => performPlusOne);
+        setLastAction('plusOne');
       } else {
         handleServerError(code);
       }
@@ -387,7 +389,17 @@ export default function BookingFlow() {
             <button
               className="px-2 py-1 bg-red-100 text-red-700 rounded"
               disabled={loading}
-              onClick={() => lastAction()}
+              onClick={() => {
+                if (lastAction === 'hold') {
+                  void performHold();
+                }
+                if (lastAction === 'confirm') {
+                  void performConfirm();
+                }
+                if (lastAction === 'plusOne') {
+                  void performPlusOne();
+                }
+              }}
             >
               Повторить
             </button>
