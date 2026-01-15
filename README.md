@@ -179,6 +179,10 @@ Admin API (roles: OWNER, GLOBAL_ADMIN, HEAD_MANAGER, CLUB_ADMIN):
 
 - `POST /api/support/tickets/{id}/assign` — назначить агента.
 
+  Request:
+  ```json
+  {}
+  ```
   Response:
   ```json
   { "id": 101, "clubId": 1, "topic": "booking", "status": "in_progress", "updatedAt": "2025-01-01T12:10:00Z" }
