@@ -82,6 +82,7 @@ export default function BookingFlow() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<LastAction>(null);
+  const hasHold = Boolean(hold);
   const controller = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const holdKey = useMemo(() => createIdempotency('booking-hold-key'), []);
@@ -184,10 +185,12 @@ export default function BookingFlow() {
   const performHold = async () => {
     if (!name.trim() || guests < 1 || !agreeRules) {
       setError('Заполните данные гостей и подтвердите правила');
+      setLastAction(null);
       return;
     }
     if (!selectedEventId) {
       setError('Выберите событие');
+      setLastAction(null);
       return;
     }
     const eventId = selectedEventId;
@@ -302,6 +305,7 @@ export default function BookingFlow() {
   };
 
   const retryLastAction = () => {
+    if (loading) return;
     switch (lastAction) {
       case 'hold':
         void performHold();
@@ -317,6 +321,18 @@ export default function BookingFlow() {
     }
   };
 
+  const editBooking = () => {
+    cancelPendingAndInvalidate(true);
+    setHold(null);
+    setAgreeRules(false);
+    setError(null);
+    setLastAction(null);
+    holdKey.clear();
+    confirmKey.clear();
+    plusOneKey.clear();
+    setStep('guests');
+  };
+
   return (
     <div className="space-y-4 border rounded-lg p-4">
       <h3 className="text-lg font-semibold">Бронирование</h3>
@@ -330,6 +346,7 @@ export default function BookingFlow() {
           onChange={(e) => setName(e.target.value)}
           className="border rounded px-2 py-1 w-full"
           placeholder="Имя гостя"
+          disabled={loading || hasHold}
         />
         <label className="block text-sm">Количество гостей</label>
         <input
@@ -343,10 +360,11 @@ export default function BookingFlow() {
             setGuests(capped);
           }}
           className="border rounded px-2 py-1 w-full"
+          disabled={loading || hasHold}
         />
         <button
           className="bg-blue-600 text-white px-3 py-2 rounded"
-          disabled={loading}
+          disabled={loading || hasHold}
           type="button"
           onClick={() => setStep('rules')}
         >
@@ -354,7 +372,7 @@ export default function BookingFlow() {
         </button>
       </div>
 
-      {step !== 'table' && (
+      {step !== 'table' && !hasHold && (
         <>
           <StepPill step="Правила" active={step === 'rules'} />
           <label className="inline-flex items-center space-x-2 text-sm">
@@ -404,6 +422,11 @@ export default function BookingFlow() {
               </button>
             )}
             {atCapacity && <span className="text-sm text-gray-600">Достигнута вместимость стола</span>}
+          </div>
+          <div>
+            <button className="bg-gray-200 text-gray-900 px-3 py-2 rounded" disabled={loading} type="button" onClick={editBooking}>
+              Изменить данные
+            </button>
           </div>
         </div>
       )}
