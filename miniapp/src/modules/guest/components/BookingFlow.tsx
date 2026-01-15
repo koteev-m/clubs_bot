@@ -173,7 +173,12 @@ export default function BookingFlow() {
       String(selectedEventId) !== String(hold.booking.eventId);
     const mismatchedNight = holdNightRef.current !== null && holdNightRef.current !== selectedNight;
     if (!mismatchedContext && !mismatchedNight) return;
-    addToast('Параметры бронирования изменились — бронь сброшена. Создайте заново.');
+    const isBooked = hold.booking.status === 'BOOKED';
+    addToast(
+      isBooked
+        ? 'Параметры бронирования изменились — откроем форму для нового бронирования. Подтверждённая бронь сохранена.'
+        : 'Параметры бронирования изменились — черновик бронирования сброшен. Создайте заново.',
+    );
     resetHoldState(selectedTable ? 'guests' : 'table');
   }, [
     addToast,
