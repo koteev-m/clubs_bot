@@ -141,6 +141,8 @@ export default function BookingFlow() {
 
   useEffect(() => {
     cancelPendingAndInvalidate(true);
+    setError(null);
+    setLastAction(null);
   }, [cancelPendingAndInvalidate, selectedClub, selectedNight, selectedEventId, selectedTable]);
 
   useEffect(() => {
@@ -299,6 +301,22 @@ export default function BookingFlow() {
     }
   };
 
+  const retryLastAction = () => {
+    switch (lastAction) {
+      case 'hold':
+        void performHold();
+        return;
+      case 'confirm':
+        void performConfirm();
+        return;
+      case 'plusOne':
+        void performPlusOne();
+        return;
+      default:
+        return;
+    }
+  };
+
   return (
     <div className="space-y-4 border rounded-lg p-4">
       <h3 className="text-lg font-semibold">Бронирование</h3>
@@ -329,6 +347,7 @@ export default function BookingFlow() {
         <button
           className="bg-blue-600 text-white px-3 py-2 rounded"
           disabled={loading}
+          type="button"
           onClick={() => setStep('rules')}
         >
           Далее
@@ -346,6 +365,7 @@ export default function BookingFlow() {
             <button
               className="bg-green-600 text-white px-3 py-2 rounded"
               disabled={loading}
+              type="button"
               onClick={performHold}
             >
               Забронировать
@@ -365,6 +385,7 @@ export default function BookingFlow() {
             <button
               className="bg-purple-600 text-white px-3 py-2 rounded"
               disabled={loading || hold.booking.status === 'BOOKED'}
+              type="button"
               onClick={performConfirm}
             >
               Подтвердить
@@ -373,7 +394,12 @@ export default function BookingFlow() {
               latePlusOneDeadline &&
               hold.booking.status === 'BOOKED' &&
               !atCapacity && (
-              <button className="bg-amber-500 text-white px-3 py-2 rounded" disabled={loading} onClick={performPlusOne}>
+              <button
+                className="bg-amber-500 text-white px-3 py-2 rounded"
+                disabled={loading}
+                type="button"
+                onClick={performPlusOne}
+              >
                 Добавить +1
               </button>
             )}
@@ -389,17 +415,8 @@ export default function BookingFlow() {
             <button
               className="px-2 py-1 bg-red-100 text-red-700 rounded"
               disabled={loading}
-              onClick={() => {
-                if (lastAction === 'hold') {
-                  void performHold();
-                }
-                if (lastAction === 'confirm') {
-                  void performConfirm();
-                }
-                if (lastAction === 'plusOne') {
-                  void performPlusOne();
-                }
-              }}
+              type="button"
+              onClick={retryLastAction}
             >
               Повторить
             </button>
