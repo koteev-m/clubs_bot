@@ -112,6 +112,111 @@ Rate limits are enforced per user and route (e.g., 5 holds / 10s). Every respons
 `X-RateLimit-Remaining`; a throttled response adds `Retry-After` with seconds to wait. These headers are returned even for early
 validation errors so clients can surface them consistently.
 
+### Support (P0.2)
+
+Все endpoints поддержки работают в Mini App контексте, требуют авторизацию и отвечают с `Cache-Control: no-store`,
+`Vary: X-Telegram-Init-Data`.
+
+Guest API:
+
+- `POST /api/support/tickets` — создать тикет.
+
+  Request:
+  ```json
+  { "clubId": 1, "topic": "booking", "text": "Не пришёл депозит", "attachments": null }
+  ```
+  Response:
+  ```json
+  { "id": 101, "clubId": 1, "topic": "booking", "status": "opened", "updatedAt": "2025-01-01T12:00:00Z" }
+  ```
+
+- `GET /api/support/tickets/my` — список тикетов пользователя.
+
+  Response:
+  ```json
+  [
+    {
+      "id": 101,
+      "clubId": 1,
+      "topic": "booking",
+      "status": "opened",
+      "updatedAt": "2025-01-01T12:00:00Z",
+      "lastMessagePreview": "Не пришёл депозит",
+      "lastSenderType": "guest"
+    }
+  ]
+  ```
+
+- `POST /api/support/tickets/{id}/messages` — добавить сообщение в тикет.
+
+  Request:
+  ```json
+  { "text": "Есть номер брони", "attachments": null }
+  ```
+  Response:
+  ```json
+  { "messageId": 501, "ticketId": 101, "senderType": "guest", "createdAt": "2025-01-01T12:05:00Z" }
+  ```
+
+Admin API (roles: OWNER, GLOBAL_ADMIN, HEAD_MANAGER, CLUB_ADMIN):
+
+- `GET /api/support/tickets?clubId=&status=` — список тикетов клуба, `status` опционален (`opened|in_progress|answered|closed`).
+
+  Response:
+  ```json
+  [
+    {
+      "id": 101,
+      "clubId": 1,
+      "topic": "booking",
+      "status": "opened",
+      "updatedAt": "2025-01-01T12:00:00Z",
+      "lastMessagePreview": "Не пришёл депозит",
+      "lastSenderType": "guest"
+    }
+  ]
+  ```
+
+- `POST /api/support/tickets/{id}/assign` — назначить агента.
+
+  Response:
+  ```json
+  { "id": 101, "clubId": 1, "topic": "booking", "status": "in_progress", "updatedAt": "2025-01-01T12:10:00Z" }
+  ```
+
+- `POST /api/support/tickets/{id}/status` — изменить статус.
+
+  Request:
+  ```json
+  { "status": "closed" }
+  ```
+  Response:
+  ```json
+  { "id": 101, "clubId": 1, "topic": "booking", "status": "closed", "updatedAt": "2025-01-01T12:20:00Z" }
+  ```
+
+- `POST /api/support/tickets/{id}/reply` — ответить гостю.
+
+  Request:
+  ```json
+  { "text": "Депозит найден, спасибо!", "attachments": null }
+  ```
+  Response:
+  ```json
+  {
+    "ticketId": 101,
+    "clubId": 1,
+    "ownerUserId": 9001,
+    "replyMessageId": 502,
+    "replyCreatedAt": "2025-01-01T12:30:00Z",
+    "ticketStatus": "answered"
+  }
+  ```
+
+Дополнительно:
+- Ответ клуба гостю приходит в Telegram (уведомление «Ответ от клуба …») вместе с клавиатурой рейтинга.
+- Рейтинг ответа сохраняется один раз и не перезаписывается при повторном нажатии (повторный клик не меняет значение).
+
 ### Guest lists / Invitations / Check-ins (P0.1)
 
 Ключевые endpoints:

@@ -74,6 +74,15 @@ spec:
 - Self-checkin запрещён и/или ограничен role gating: доступ к host check-in только для ENTRY_MANAGER+.
 - Для чувствительных Mini App/host endpoints всегда `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data`.
 
+# Инварианты безопасности (P0.2) — Support
+
+- Текст тикета, вложения и Telegram `callback_data` не логируются; в логах допускаются только безопасные идентификаторы
+  (`ticket_id`, `club_id`, `user_id`) и коды ошибок.
+- RBAC для admin endpoints поддержки: `OWNER`, `GLOBAL_ADMIN`, `HEAD_MANAGER`, `CLUB_ADMIN` (последний — только в пределах
+  `clubIds` из RBAC-контекста; глобальные роли имеют доступ к любым клубам).
+- Рейтинг ответа сохраняется один раз; повторные попытки не меняют значение (immutable once set).
+- `callback_data` ограничен 64 байтами в UTF-8; проверка `fits()` допускает длину ровно 64 байта.
+
 # Привязка к HEALTHCHECK / livenessProbe
 
 В Dockerfile уже настроен `HEALTHCHECK` на HTTP `GET /health` (порт `8080`). В Kubernetes можно использовать тот же endpoint в `livenessProbe`/`readinessProbe`, чтобы повторять текущую схему проверки без изменений бизнес-логики.
