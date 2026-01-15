@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { http } from '../../../shared/api/http';
 import { getApiErrorInfo, isRequestCanceled } from '../../../shared/api/error';
+import { useUiStore } from '../../../shared/store/ui';
 import { useGuestStore } from '../state/guest.store';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -75,6 +76,7 @@ export default function BookingFlow() {
     setTable,
     setNight,
   } = useGuestStore();
+  const { addToast } = useUiStore();
   const [step, setStep] = useState<Step>('table');
   const [name, setName] = useState('');
   const [agreeRules, setAgreeRules] = useState(false);
@@ -141,6 +143,22 @@ export default function BookingFlow() {
     [setLoading],
   );
 
+  const resetHoldState = useCallback(
+    (nextStep: Step) => {
+      cancelPendingAndInvalidate(true);
+      holdNightRef.current = null;
+      setHold(null);
+      setAgreeRules(false);
+      setError(null);
+      setLastAction(null);
+      holdKey.clear();
+      confirmKey.clear();
+      plusOneKey.clear();
+      setStep(nextStep);
+    },
+    [cancelPendingAndInvalidate, confirmKey, holdKey, plusOneKey],
+  );
+
   useEffect(() => {
     cancelPendingAndInvalidate(true);
     setError(null);
@@ -155,21 +173,12 @@ export default function BookingFlow() {
       String(selectedEventId) !== String(hold.booking.eventId);
     const mismatchedNight = holdNightRef.current !== null && holdNightRef.current !== selectedNight;
     if (!mismatchedContext && !mismatchedNight) return;
-    cancelPendingAndInvalidate(true);
-    setHold(null);
-    setAgreeRules(false);
-    setError(null);
-    setLastAction(null);
-    holdKey.clear();
-    confirmKey.clear();
-    plusOneKey.clear();
-    setStep(selectedTable ? 'guests' : 'table');
+    addToast('Параметры бронирования изменились — бронь сброшена. Создайте заново.');
+    resetHoldState(selectedTable ? 'guests' : 'table');
   }, [
-    cancelPendingAndInvalidate,
-    confirmKey,
+    addToast,
     hold,
-    holdKey,
-    plusOneKey,
+    resetHoldState,
     selectedClub,
     selectedEventId,
     selectedNight,
@@ -362,15 +371,7 @@ export default function BookingFlow() {
   };
 
   const editBooking = () => {
-    cancelPendingAndInvalidate(true);
-    setHold(null);
-    setAgreeRules(false);
-    setError(null);
-    setLastAction(null);
-    holdKey.clear();
-    confirmKey.clear();
-    plusOneKey.clear();
-    setStep('guests');
+    resetHoldState('guests');
   };
 
   return (
