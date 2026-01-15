@@ -147,6 +147,33 @@ export default function BookingFlow() {
   }, [cancelPendingAndInvalidate, selectedClub, selectedNight, selectedEventId, selectedTable]);
 
   useEffect(() => {
+    if (!hold) return;
+    const mismatchedContext =
+      String(selectedClub) !== String(hold.booking.clubId) ||
+      String(selectedTable) !== String(hold.booking.tableId) ||
+      String(selectedEventId) !== String(hold.booking.eventId);
+    if (!mismatchedContext) return;
+    cancelPendingAndInvalidate(true);
+    setHold(null);
+    setAgreeRules(false);
+    setError(null);
+    setLastAction(null);
+    holdKey.clear();
+    confirmKey.clear();
+    plusOneKey.clear();
+    setStep(selectedTable ? 'guests' : 'table');
+  }, [
+    cancelPendingAndInvalidate,
+    confirmKey,
+    hold,
+    holdKey,
+    plusOneKey,
+    selectedClub,
+    selectedEventId,
+    selectedTable,
+  ]);
+
+  useEffect(() => {
     return () => {
       cancelPendingAndInvalidate();
       controller.current = null;
@@ -250,6 +277,9 @@ export default function BookingFlow() {
       });
       if (requestId !== requestIdRef.current) return;
       confirmKey.clear();
+      if (res.data.booking.status === 'BOOKED') {
+        holdKey.clear();
+      }
       setHold(res.data);
       setLastAction(null);
     } catch (error) {
@@ -423,11 +453,13 @@ export default function BookingFlow() {
             )}
             {atCapacity && <span className="text-sm text-gray-600">Достигнута вместимость стола</span>}
           </div>
-          <div>
-            <button className="bg-gray-200 text-gray-900 px-3 py-2 rounded" disabled={loading} type="button" onClick={editBooking}>
-              Изменить данные
-            </button>
-          </div>
+          {hold.booking.status !== 'BOOKED' && (
+            <div>
+              <button className="bg-gray-200 text-gray-900 px-3 py-2 rounded" disabled={loading} type="button" onClick={editBooking}>
+                Изменить данные
+              </button>
+            </div>
+          )}
         </div>
       )}
 
