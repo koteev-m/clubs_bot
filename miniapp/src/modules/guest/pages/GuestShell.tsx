@@ -43,14 +43,16 @@ const syncUrlTab = (tab: GuestTab) => {
 };
 
 export default function GuestShell() {
-  const [activeTab, setActiveTab] = useState<GuestTab>(() => {
-    const initial = readTabFromUrl();
+  const [activeTab, setActiveTab] = useState<GuestTab>(() => readTabFromUrl());
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('tab') !== initial) {
-      syncUrlTab(initial);
+    const rawTab = params.get('tab');
+    const normalizedTab = readTabFromUrl();
+    if (rawTab !== normalizedTab) {
+      syncUrlTab(normalizedTab);
     }
-    return initial;
-  });
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -85,16 +87,24 @@ export default function GuestShell() {
   }, [activeTab]);
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
+    <div
+      className="min-h-screen bg-gray-50"
+      style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
+    >
       {content}
       <ToastHost />
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white">
+      <nav
+        className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        aria-label="Guest navigation"
+      >
         <div className="flex">
           {tabs.map((tab) => {
             const isActive = tab.key === activeTab;
             return (
               <button
                 key={tab.key}
+                type="button"
                 className={`flex-1 px-2 py-3 text-xs font-medium ${
                   isActive ? 'text-blue-600' : 'text-gray-500'
                 }`}
