@@ -2,7 +2,6 @@ import ClubPicker from '../../common/components/ClubPicker';
 import NightPicker from '../../common/components/NightPicker';
 import HallMap from './HallMap';
 import { useGuestStore } from '../state/guest.store';
-import ToastHost from '../../../widgets/ToastHost';
 import BookingFlow from '../components/BookingFlow';
 import SupportSection from '../components/SupportSection';
 
@@ -17,7 +16,6 @@ export default function GuestHome() {
       {selectedClub && selectedNight && <HallMap />}
       {selectedTable && <BookingFlow />}
       <SupportSection />
-      <ToastHost />
     </div>
   );
 }

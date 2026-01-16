@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { downloadBookingIcs, fetchBookingQr, fetchMyBookings, MyBookingDto } from '../api/mynights.api';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import ToastHost from '../../../widgets/ToastHost';
 import { getApiErrorCode } from '../../../shared/api/error';
 
 interface CountdownProps {
@@ -135,7 +134,6 @@ export default function MyNights() {
       {loading && <div>Загрузка...</div>}
       {!loading && bookings.length === 0 && <div className="text-sm text-gray-500">Бронирования не найдены</div>}
       <div className="space-y-3">{bookings.map(renderBooking)}</div>
-      <ToastHost />
     </div>
   );
 }
