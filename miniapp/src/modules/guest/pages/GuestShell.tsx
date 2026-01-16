@@ -48,7 +48,7 @@ export default function GuestShell() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rawTab = params.get('tab');
-    const normalizedTab = readTabFromUrl();
+    const normalizedTab = resolveTab(rawTab);
     if (rawTab !== normalizedTab) {
       syncUrlTab(normalizedTab);
     }
@@ -88,14 +88,16 @@ export default function GuestShell() {
 
   return (
     <div
-      className="min-h-screen bg-gray-50"
-      style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
+      className="min-h-screen bg-gray-50 pb-20"
+      style={{
+        paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))',
+      }}
     >
       {content}
       <ToastHost />
       <nav
         className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         aria-label="Guest navigation"
       >
         <div className="flex">
