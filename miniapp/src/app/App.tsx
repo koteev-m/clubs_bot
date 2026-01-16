@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import GuestHome from '../modules/guest/pages/GuestHome';
+import GuestShell from '../modules/guest/pages/GuestShell';
 import EntryConsole from '../modules/entry/pages/EntryConsole';
 import { useInitData } from '../modules/auth/hooks/useInitData';
 import MyNights from '../modules/mynights/pages/MyNights';
@@ -28,5 +28,5 @@ export default function App() {
   if (mode === 'my-nights') {
     return <MyNights />;
   }
-  return <GuestHome />;
+  return <GuestShell />;
 }
