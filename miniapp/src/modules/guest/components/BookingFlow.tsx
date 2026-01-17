@@ -29,7 +29,7 @@ interface HoldResponse {
   latePlusOneAllowedUntil?: string | null;
 }
 
-type Step = 'table' | 'guests' | 'rules' | 'confirm';
+type Step = 'guests' | 'rules' | 'confirm';
 type LastAction = 'hold' | 'confirm' | 'plusOne' | null;
 
 function createIdempotency(key: string) {
@@ -77,7 +77,7 @@ export default function BookingFlow() {
     setNight,
   } = useGuestStore();
   const { addToast } = useUiStore();
-  const [step, setStep] = useState<Step>('table');
+  const [step, setStep] = useState<Step>('guests');
   const [name, setName] = useState('');
   const [agreeRules, setAgreeRules] = useState(false);
   const [hold, setHold] = useState<HoldResponse | null>(null);
@@ -105,7 +105,7 @@ export default function BookingFlow() {
     setNight,
     resetFlow: () => {
       setHold(null);
-      setStep('table');
+      setStep('guests');
       setAgreeRules(false);
       holdKey.clear();
       confirmKey.clear();
@@ -179,7 +179,7 @@ export default function BookingFlow() {
         ? 'Параметры бронирования изменились — откроем форму для нового бронирования. Подтверждённая бронь сохранена.'
         : 'Параметры бронирования изменились — черновик бронирования сброшен. Создайте заново.',
     );
-    resetHoldState(selectedTable ? 'guests' : 'table');
+    resetHoldState('guests');
   }, [
     addToast,
     hold,
@@ -204,7 +204,7 @@ export default function BookingFlow() {
   }, [cancelPendingAndInvalidate]);
 
   useEffect(() => {
-    setStep(selectedTable ? 'guests' : 'table');
+    setStep('guests');
     setHold(null);
     setAgreeRules(false);
     setError(null);
@@ -231,6 +231,11 @@ export default function BookingFlow() {
   }, [hold, selectedClub]);
 
   if (!selectedClub || !selectedNight || !selectedTable) return null;
+
+  const changeTable = () => {
+    resetHoldState('guests');
+    setTable(undefined);
+  };
 
   const performHold = async () => {
     if (!name.trim() || guests < 1 || !agreeRules) {
@@ -382,8 +387,17 @@ export default function BookingFlow() {
   return (
     <div className="space-y-4 border rounded-lg p-4">
       <h3 className="text-lg font-semibold">Бронирование</h3>
-      <StepPill step="Выбор стола" active={step === 'table'} />
-      <div className="text-sm text-gray-700">Стол #{selectedTable} · Ночь {selectedNight}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-700">
+        <div>Стол #{selectedTable} · Ночь {selectedNight}</div>
+        <button
+          className="rounded border px-3 py-1 text-xs text-gray-700"
+          type="button"
+          disabled={loading}
+          onClick={changeTable}
+        >
+          Изменить стол
+        </button>
+      </div>
       <StepPill step="Данные гостей" active={step === 'guests'} />
       <div className="space-y-2">
         <label className="block text-sm">Имя</label>
@@ -418,7 +432,7 @@ export default function BookingFlow() {
         </button>
       </div>
 
-      {step !== 'table' && !hasHold && (
+      {step === 'rules' && !hasHold && (
         <>
           <StepPill step="Правила" active={step === 'rules'} />
           <label className="inline-flex items-center space-x-2 text-sm">
@@ -433,6 +447,14 @@ export default function BookingFlow() {
               onClick={performHold}
             >
               Забронировать
+            </button>
+            <button
+              className="bg-gray-200 text-gray-900 px-3 py-2 rounded"
+              disabled={loading}
+              type="button"
+              onClick={() => setStep('guests')}
+            >
+              Назад
             </button>
           </div>
         </>

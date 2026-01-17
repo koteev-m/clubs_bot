@@ -10,6 +10,7 @@ export default function NightPicker() {
 
   useEffect(() => {
     if (!selectedClub) return;
+    setNights([]);
     http.get<NightDto[]>(`/api/clubs/${selectedClub}/nights?limit=8`).then((r) => setNights(r.data));
   }, [selectedClub]);
 
