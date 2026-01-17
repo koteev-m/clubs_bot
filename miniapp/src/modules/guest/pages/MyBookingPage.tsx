@@ -89,7 +89,6 @@ export default function MyBookingPage() {
       const res = await fetchMyBookings('upcoming', { signal: controllerRef.current.signal });
       if (requestId !== requestIdRef.current) return;
       setBooking(selectActiveBooking(res.data.bookings));
-      setQrPayload('');
     } catch (error) {
       if (isRequestCanceled(error)) return;
       if (requestId !== requestIdRef.current) return;
@@ -236,19 +235,6 @@ export default function MyBookingPage() {
     window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
-  if (!loading && !booking) {
-    return (
-      <div className="p-4">
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-600 space-y-3">
-          <div>Активной брони нет.</div>
-          <button className="rounded bg-blue-600 px-3 py-2 text-sm text-white" type="button" onClick={goToBooking}>
-            Перейти к бронированию
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -257,10 +243,31 @@ export default function MyBookingPage() {
           Обновить
         </button>
       </div>
-      {error && <div className="text-sm text-red-600">{error}</div>}
       {loading && <div className="text-sm text-gray-500">Загрузка...</div>}
+      {!loading && !booking && error && (
+        <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm text-red-700 space-y-3">
+          <div>{error}</div>
+          <button
+            className="rounded bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-60"
+            type="button"
+            onClick={() => void loadBooking()}
+            disabled={busy}
+          >
+            Повторить
+          </button>
+        </div>
+      )}
+      {!loading && !booking && !error && (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-600 space-y-3">
+          <div>Активной брони нет.</div>
+          <button className="rounded bg-blue-600 px-3 py-2 text-sm text-white" type="button" onClick={goToBooking}>
+            Перейти к бронированию
+          </button>
+        </div>
+      )}
       {booking && (
         <div className="rounded-lg border bg-white p-4 space-y-3">
+          {error && <div className="text-sm text-red-600">{error}</div>}
           <div className="flex items-center justify-between">
             <div>
               <div className="font-semibold">Клуб #{booking.booking.clubId}</div>
