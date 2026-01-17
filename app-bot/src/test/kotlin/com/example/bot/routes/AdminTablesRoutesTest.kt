@@ -11,6 +11,7 @@ import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.ArrivalWindow
 import com.example.bot.layout.ClubLayout
 import com.example.bot.layout.LayoutAssets
+import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.InMemoryLayoutRepository
 import com.example.bot.layout.Table
@@ -57,6 +58,10 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class AdminTablesRoutesTest {
+    private val emptyAssets =
+        object : LayoutAssetsRepository {
+            override suspend fun loadGeometry(clubId: Long, fingerprint: String): String? = null
+        }
     private val json = Json { ignoreUnknownKeys = true }
     private val telegramId = 123L
     private val clock: Clock = Clock.fixed(Instant.parse("2024-06-01T10:00:00Z"), ZoneOffset.UTC)
@@ -577,7 +582,7 @@ class AdminTablesRoutesTest {
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
                 adminTablesRoutes(repo, botTokenProvider = { "test" })
-                layoutRoutes(repo)
+                layoutRoutes(repo, emptyAssets)
             }
 
             block(this, repo, repo)
@@ -612,7 +617,7 @@ class AdminTablesRoutesTest {
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
                 adminTablesRoutes(repo, botTokenProvider = { "test" })
-                layoutRoutes(repo)
+                layoutRoutes(repo, emptyAssets)
             }
 
             block(this, repo)

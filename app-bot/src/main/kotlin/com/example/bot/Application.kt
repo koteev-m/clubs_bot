@@ -8,9 +8,11 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListEntryDbRepository
+import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.security.UserRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
+import com.example.bot.coredata.CoreDataSeed
 import com.example.bot.metrics.UiCheckinMetrics
 import com.example.bot.metrics.UiWaitlistMetrics
 import com.example.bot.music.MusicLikesRepository
@@ -19,6 +21,7 @@ import com.example.bot.music.MusicService
 import com.example.bot.music.MixtapeService
 import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.layout.AdminTablesRepository
+import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.configureLoggingAndRequestId
@@ -80,6 +83,7 @@ import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
+import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
@@ -103,6 +107,7 @@ import java.time.Clock
 import java.time.ZoneId
 import com.example.bot.host.ShiftChecklistService
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.runBlocking
 
 @Suppress("unused")
 fun Application.module() {
@@ -150,6 +155,14 @@ fun Application.module() {
     }
     environment.log.info("Koin: loaded ${koinModules.size} module(s)")
 
+    val coreDataSeeder by inject<CoreDataSeeder>()
+    val coreDataSeed by inject<CoreDataSeed>()
+    environment.monitor.subscribe(ApplicationStarted) {
+        runBlocking {
+            coreDataSeeder.seedIfEmpty(coreDataSeed)
+        }
+    }
+
     if (isDev) {
         installDiagTime()
     }
@@ -167,6 +180,7 @@ fun Application.module() {
     val clubsRepository by inject<ClubsRepository>()
     val eventsRepository by inject<EventsRepository>()
     val layoutRepository by inject<LayoutRepository>()
+    val layoutAssetsRepository by inject<LayoutAssetsRepository>()
     val adminTablesRepository by inject<AdminTablesRepository>()
     val musicService by inject<MusicService>()
     val musicLikesRepository by inject<MusicLikesRepository>()
@@ -252,7 +266,7 @@ fun Application.module() {
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
     adminTablesRoutes(adminTablesRepository = adminTablesRepository)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
-    layoutRoutes(layoutRepository = layoutRepository)
+    layoutRoutes(layoutRepository = layoutRepository, layoutAssetsRepository = layoutAssetsRepository)
     ownerHealthRoutes(
         service = ownerHealthService,
         layoutRepository = layoutRepository,

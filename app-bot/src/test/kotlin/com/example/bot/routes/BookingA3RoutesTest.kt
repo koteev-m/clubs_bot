@@ -12,6 +12,7 @@ import com.example.bot.clubs.Event
 import com.example.bot.clubs.EventsRepository
 import com.example.bot.clubs.InMemoryEventsRepository
 import com.example.bot.layout.BookingAwareLayoutRepository
+import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.InMemoryLayoutRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
@@ -57,6 +58,11 @@ import java.time.Instant
 import java.time.ZoneId
 
 class BookingA3RoutesTest {
+    private val emptyAssets =
+        object : LayoutAssetsRepository {
+            override suspend fun loadGeometry(clubId: Long, fingerprint: String): String? = null
+        }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val states = mutableListOf<BookingState>()
 
@@ -222,7 +228,7 @@ class BookingA3RoutesTest {
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
-                layoutRoutes(fixture.layoutRepository)
+                layoutRoutes(fixture.layoutRepository, emptyAssets)
                 bookingA3Routes(fixture.state, botTokenProvider = { "token" })
             }
 
@@ -317,7 +323,7 @@ class BookingA3RoutesTest {
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
-                layoutRoutes(fixture.layoutRepository)
+                layoutRoutes(fixture.layoutRepository, emptyAssets)
                 bookingA3Routes(fixture.state, botTokenProvider = { "token" })
             }
 

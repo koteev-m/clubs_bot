@@ -1,6 +1,7 @@
 package com.example.bot.routes
 
 import com.example.bot.layout.InMemoryLayoutRepository
+import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
@@ -38,10 +39,15 @@ class LayoutRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
     private val clock: Clock = Clock.fixed(Instant.parse("2024-06-01T12:00:00Z"), ZoneOffset.UTC)
 
+    private val emptyAssets =
+        object : LayoutAssetsRepository {
+            override suspend fun loadGeometry(clubId: Long, fingerprint: String): String? = null
+        }
+
     private fun Application.installLayoutRoutes(repo: LayoutRepository) {
         install(ContentNegotiation) { json() }
         install(AutoHeadResponse)
-        layoutRoutes(repo)
+        layoutRoutes(repo, emptyAssets)
     }
 
     private fun repository(
