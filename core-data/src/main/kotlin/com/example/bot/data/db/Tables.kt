@@ -2,12 +2,21 @@ package com.example.bot.data.db
 
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
+import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
 
 object Clubs : IntIdTable("clubs") {
     val name = varchar("name", 255)
     val description = text("description").nullable()
     val adminChatId = long("admin_chat_id").nullable()
     val timezone = varchar("timezone", 64).default("Europe/Moscow")
+    val city = varchar("city", 128).default("Unknown")
+    val genres = text("genres").default("[]")
+    val tags = text("tags").default("[]")
+    val logoUrl = text("logo_url").nullable()
+    val isActive = bool("is_active").default(true)
+    val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
+    val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestamp())
 
     val generalTopicId = integer("general_topic_id").nullable()
     val bookingsTopicId = integer("bookings_topic_id").nullable()

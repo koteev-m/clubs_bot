@@ -4,6 +4,7 @@ import com.example.bot.http.etagFor
 import com.example.bot.http.matchesEtag
 import com.example.bot.layout.ClubLayout
 import com.example.bot.layout.LayoutAssets
+import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
@@ -92,7 +93,7 @@ private enum class TableStatusDto {
     BOOKED,
 }
 
-fun Application.layoutRoutes(layoutRepository: LayoutRepository) {
+fun Application.layoutRoutes(layoutRepository: LayoutRepository, layoutAssetsRepository: LayoutAssetsRepository) {
     val logger = LoggerFactory.getLogger("LayoutRoutes")
 
     routing {
@@ -105,7 +106,7 @@ fun Application.layoutRoutes(layoutRepository: LayoutRepository) {
             }
         }
 
-        layoutAssetsRoutes(logger)
+        layoutAssetsRoutes(logger, layoutAssetsRepository)
     }
 }
 
@@ -225,7 +226,7 @@ private suspend fun ApplicationCall.respondLayoutNotModified(etag: String) {
 
 private fun resourcePath(clubId: String, fingerprint: String): String = "layouts/$clubId/$fingerprint.json"
 
-private fun Route.layoutAssetsRoutes(logger: Logger) {
+private fun Route.layoutAssetsRoutes(logger: Logger, layoutAssetsRepository: LayoutAssetsRepository) {
     get("/assets/layouts/{clubId}/{fingerprint}.json") {
         val clubId = call.parameters["clubId"]?.takeIf { CLUB_ID_RE.matches(it) }
         val fingerprint = call.parameters["fingerprint"]?.takeIf { FP_RE.matches(it) }
@@ -235,14 +236,26 @@ private fun Route.layoutAssetsRoutes(logger: Logger) {
             return@get
         }
 
-        val assetResourcePath = resourcePath(clubId, fingerprint)
-        val resource =
-            Thread.currentThread().contextClassLoader
-                .getResourceAsStream(assetResourcePath)
-        if (resource == null) {
+        val clubIdLong = clubId.toLongOrNull()
+        if (clubIdLong == null) {
             call.respond(HttpStatusCode.NotFound)
             return@get
         }
+
+        val assetResourcePath = resourcePath(clubId, fingerprint)
+        val geometryJson =
+            withContext(Dispatchers.IO + MDCContext()) {
+                layoutAssetsRepository.loadGeometry(clubIdLong, fingerprint)
+            }
+        val bytes =
+            geometryJson?.toByteArray(Charsets.UTF_8)
+                ?: Thread.currentThread().contextClassLoader
+                    .getResourceAsStream(assetResourcePath)
+                    ?.use { it.readBytes() }
+                ?: run {
+                    call.respond(HttpStatusCode.NotFound)
+                    return@get
+                }
 
         val etag = fingerprint
         val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
@@ -252,7 +265,6 @@ private fun Route.layoutAssetsRoutes(logger: Logger) {
             return@get
         }
 
-        val bytes = resource.use { it.readBytes() }
         call.respondLayoutAsset(etag, bytes)
     }
 }
