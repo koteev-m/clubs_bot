@@ -37,6 +37,15 @@ export default function MyNights() {
     return () => window.clearInterval(id);
   }, []);
 
+  const handleStatusChange = (nextStatus: 'upcoming' | 'past') => {
+    if (nextStatus === status) return;
+    setBookings([]);
+    setError('');
+    setQrPayloads({});
+    setQrVisible({});
+    setStatus(nextStatus);
+  };
+
   useEffect(() => {
     return () => {
       isMounted.current = false;
@@ -175,14 +184,14 @@ export default function MyNights() {
         <button
           className={`px-3 py-2 rounded ${status === 'upcoming' ? 'bg-blue-600 text-white' : 'bg-white border'}`}
           type="button"
-          onClick={() => setStatus('upcoming')}
+          onClick={() => handleStatusChange('upcoming')}
         >
           Предстоящие
         </button>
         <button
           className={`px-3 py-2 rounded ${status === 'past' ? 'bg-blue-600 text-white' : 'bg-white border'}`}
           type="button"
-          onClick={() => setStatus('past')}
+          onClick={() => handleStatusChange('past')}
         >
           Прошедшие
         </button>
@@ -197,7 +206,9 @@ export default function MyNights() {
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
       {loading && <div>Загрузка...</div>}
-      {!loading && bookings.length === 0 && <div className="text-sm text-gray-500">Бронирования не найдены</div>}
+      {!loading && !error && bookings.length === 0 && (
+        <div className="text-sm text-gray-500">Бронирования не найдены</div>
+      )}
       <div className="space-y-3">{bookings.map(renderBooking)}</div>
     </div>
   );
