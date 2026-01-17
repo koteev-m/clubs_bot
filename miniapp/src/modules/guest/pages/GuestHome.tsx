@@ -49,7 +49,8 @@ export default function GuestHome() {
 
       <section className="space-y-2">
         <div className="text-base font-semibold">Шаг 4. Оформление брони</div>
-        {hasTable ? <BookingFlow /> : <div className="text-sm text-gray-500">Выберите стол, чтобы продолжить.</div>}
+        {hasTable ? null : <div className="text-sm text-gray-500">Выберите стол, чтобы продолжить.</div>}
+        {hasClub && hasNight ? <BookingFlow /> : null}
       </section>
 
       <SupportSection />
