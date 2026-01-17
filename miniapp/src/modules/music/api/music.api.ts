@@ -3,10 +3,10 @@ import { http } from '../../../shared/api/http';
 export interface MusicItemDto {
   id: number;
   title: string;
-  artist: string;
-  durationSec: number;
+  artist?: string | null;
+  durationSec?: number | null;
   coverUrl?: string | null;
-  isTrackOfNight: boolean;
+  isTrackOfNight?: boolean;
 }
 
 /** Lists music items. */

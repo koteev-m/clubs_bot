@@ -20,9 +20,9 @@ export const MusicPage: React.FC = () => {
           data.map((item) => ({
             id: item.id,
             title: item.title,
-            artist: item.artist,
+            artist: item.artist ?? undefined,
             coverUrl: item.coverUrl ?? undefined,
-            isTrackOfNight: item.isTrackOfNight,
+            isTrackOfNight: item.isTrackOfNight ?? false,
           })),
         );
       })
