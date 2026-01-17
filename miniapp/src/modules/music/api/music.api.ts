@@ -1,12 +1,21 @@
 import { http } from '../../../shared/api/http';
 
+export interface MusicItemDto {
+  id: number;
+  title: string;
+  artist: string;
+  durationSec: number;
+  coverUrl?: string | null;
+  isTrackOfNight: boolean;
+}
+
 /** Lists music items. */
-export async function listItems(params: { clubId?: number; limit?: number; offset?: number }) {
+export async function listItems(params: { clubId?: number; limit?: number; offset?: number }): Promise<MusicItemDto[]> {
   const query = new URLSearchParams();
   if (params.clubId) query.append('clubId', String(params.clubId));
   if (params.limit) query.append('limit', String(params.limit));
   if (params.offset) query.append('offset', String(params.offset));
-  const res = await http.get(`/api/music/items?${query.toString()}`);
+  const res = await http.get<MusicItemDto[]>(`/api/music/items?${query.toString()}`);
   return res.data;
 }
 
@@ -25,4 +34,3 @@ export async function getPlaylist(id: number) {
   const res = await http.get(`/api/music/playlists/${id}`);
   return res.data;
 }
-

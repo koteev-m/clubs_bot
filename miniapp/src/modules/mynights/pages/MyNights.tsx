@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { downloadBookingIcs, fetchBookingQr, fetchMyBookings, MyBookingDto } from '../api/mynights.api';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { getApiErrorCode } from '../../../shared/api/error';
+import { getApiErrorInfo, isRequestCanceled } from '../../../shared/api/error';
 
 interface CountdownProps {
   arriveBy: string;
@@ -26,36 +26,64 @@ export default function MyNights() {
   const [error, setError] = useState('');
   const [qrPayloads, setQrPayloads] = useState<Record<number, string>>({});
   const [now, setNow] = useState(Date.now());
+  const isMounted = useRef(true);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetchMyBookings(status);
-      setBookings(res.data.bookings);
-    } catch (error) {
-      const code = getApiErrorCode(error);
-      setError(code === 'validation_error' ? 'Неверный фильтр статуса' : 'Не удалось загрузить бронирования');
-    } finally {
-      setLoading(false);
-    }
-  }, [status]);
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await fetchMyBookings(status, { signal });
+        if (!isMounted.current) return;
+        setBookings(res.data.bookings);
+      } catch (error) {
+        if (isRequestCanceled(error)) return;
+        const { code, hasResponse } = getApiErrorInfo(error);
+        if (!isMounted.current) return;
+        if (!hasResponse) {
+          setError('Не удалось связаться с сервером');
+          return;
+        }
+        setError(code === 'validation_error' ? 'Неверный фильтр статуса' : 'Не удалось загрузить бронирования');
+      } finally {
+        if (isMounted.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [status],
+  );
 
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   const openQr = async (bookingId: number) => {
     try {
       const res = await fetchBookingQr(bookingId);
+      if (!isMounted.current) return;
       setQrPayloads((prev) => ({ ...prev, [bookingId]: res.data.qrPayload }));
     } catch (error) {
-      const code = getApiErrorCode(error);
+      if (isRequestCanceled(error)) return;
+      const { code, hasResponse } = getApiErrorInfo(error);
+      if (!isMounted.current) return;
+      if (!hasResponse) {
+        setError('Не удалось связаться с сервером');
+        return;
+      }
       setError(code === 'forbidden' ? 'Бронь недоступна' : 'Не удалось получить QR');
     }
   };
@@ -71,7 +99,13 @@ export default function MyNights() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      const code = getApiErrorCode(error);
+      if (isRequestCanceled(error)) return;
+      const { code, hasResponse } = getApiErrorInfo(error);
+      if (!isMounted.current) return;
+      if (!hasResponse) {
+        setError('Не удалось связаться с сервером');
+        return;
+      }
       setError(code === 'forbidden' ? 'Бронь недоступна' : 'Не удалось выгрузить календарь');
     }
   };
@@ -93,12 +127,14 @@ export default function MyNights() {
         <div className="flex gap-2">
           <button
             className="px-3 py-2 text-sm rounded bg-blue-600 text-white"
+            type="button"
             onClick={() => void openQr(item.booking.id)}
           >
             Показать QR
           </button>
           <button
             className="px-3 py-2 text-sm rounded bg-gray-200"
+            type="button"
             onClick={() => void saveIcs(item.booking.id)}
           >
             Добавить в календарь
@@ -116,17 +152,19 @@ export default function MyNights() {
       <div className="flex gap-2">
         <button
           className={`px-3 py-2 rounded ${status === 'upcoming' ? 'bg-blue-600 text-white' : 'bg-white border'}`}
+          type="button"
           onClick={() => setStatus('upcoming')}
         >
           Предстоящие
         </button>
         <button
           className={`px-3 py-2 rounded ${status === 'past' ? 'bg-blue-600 text-white' : 'bg-white border'}`}
+          type="button"
           onClick={() => setStatus('past')}
         >
           Прошедшие
         </button>
-        <button className="ml-auto text-sm underline" onClick={() => void load()}>
+        <button className="ml-auto text-sm underline" type="button" onClick={() => void load()}>
           Обновить
         </button>
       </div>
