@@ -28,8 +28,7 @@ export default function NightPicker() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
+    const requestId = ++requestIdRef.current;
 
     setNights([]);
     setLoading(true);
@@ -37,9 +36,13 @@ export default function NightPicker() {
 
     http
       .get<NightDto[]>(`/api/clubs/${selectedClub}/nights?limit=8`, { signal: controller.signal })
-      .then((r) => setNights(r.data))
+      .then((r) => {
+        if (requestIdRef.current !== requestId) return;
+        setNights(r.data);
+      })
       .catch((error) => {
         if (isRequestCanceled(error)) return;
+        if (requestIdRef.current !== requestId) return;
         setError('Не удалось загрузить ночи');
         addToast('Не удалось загрузить ночи');
       })
@@ -51,6 +54,9 @@ export default function NightPicker() {
 
     return () => {
       controller.abort();
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     };
   }, [addToast, selectedClub]);
 
