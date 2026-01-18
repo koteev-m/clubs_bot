@@ -37,6 +37,8 @@ class CoreDataSeeder(
             var seededHalls = false
             var seededHallTables = false
 
+            acquireSeedLockIfPostgres()
+
             val shouldSeedClubs = Clubs.selectAll().limit(1).firstOrNull() == null
             val shouldSeedEvents = EventsTable.selectAll().limit(1).firstOrNull() == null
             val shouldSeedHalls = HallsTable.selectAll().limit(1).firstOrNull() == null
@@ -200,6 +202,14 @@ class CoreDataSeeder(
         val connection = TransactionManager.current().connection.connection as java.sql.Connection
         val productName = connection.metaData.databaseProductName
         return productName.contains("PostgreSQL", ignoreCase = true)
+    }
+
+    private fun acquireSeedLockIfPostgres() {
+        if (!isPostgres()) return
+        TransactionManager.current().exec(
+            "SELECT pg_advisory_xact_lock(hashtext('coredata'), hashtext('seed'))",
+        )
+        logger.debug("coredata.seed.lock_acquired engine=postgres")
     }
 
     private fun validateSeed(seed: CoreDataSeed) {
