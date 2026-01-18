@@ -4,12 +4,18 @@ import com.example.bot.admin.AdminHall
 import com.example.bot.admin.AdminHallCreate
 import com.example.bot.admin.AdminHallUpdate
 import com.example.bot.admin.AdminHallsRepository
+import com.example.bot.admin.InvalidHallGeometryException
 import com.example.bot.data.db.withRetriedTx
+import com.example.bot.data.layout.HallZonesTable
 import com.example.bot.data.layout.HallsTable
 import com.example.bot.data.layout.LayoutDbRepository
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Op
 import org.jetbrains.exposed.sql.ResultRow
@@ -21,11 +27,14 @@ import org.jetbrains.exposed.sql.lowerCase
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.insertAndGetId
+import org.jetbrains.exposed.sql.insert
 
 class AdminHallsDbRepository(
     private val database: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) : AdminHallsRepository {
+    private val json = Json { ignoreUnknownKeys = true }
+
     override suspend fun listForClub(clubId: Long): List<AdminHall> =
         withRetriedTx(name = "admin.halls.list", readOnly = true, database = database) {
             HallsTable
@@ -57,6 +66,7 @@ class AdminHallsDbRepository(
     override suspend fun create(clubId: Long, request: AdminHallCreate): AdminHall =
         withRetriedTx(name = "admin.halls.create", database = database) {
             val now = clock.instant().toOffsetDateTime()
+            val zones = parseZones(request.geometryJson)
             if (request.isActive) {
                 HallsTable.update({ HallsTable.clubId eq clubId }) {
                     it[isActive] = false
@@ -75,6 +85,17 @@ class AdminHallsDbRepository(
                     it[createdAt] = now
                     it[updatedAt] = now
                 }
+            zones.forEachIndexed { index, zone ->
+                HallZonesTable.insert {
+                    it[hallId] = newId.value
+                    it[zoneId] = zone.id
+                    it[name] = zone.name
+                    it[tags] = "[]"
+                    it[sortOrder] = index + 1
+                    it[createdAt] = now
+                    it[updatedAt] = now
+                }
+            }
             HallsTable
                 .selectAll()
                 .where { HallsTable.id eq newId.value }
@@ -93,12 +114,16 @@ class AdminHallsDbRepository(
             val now = clock.instant().toOffsetDateTime()
             val newGeometryJson = request.geometryJson
             val newFingerprint = newGeometryJson?.let { LayoutDbRepository.fingerprintFor(it) }
+            val zones = newGeometryJson?.let { parseZones(it) }
             HallsTable.update({ HallsTable.id eq id }) {
                 request.name?.let { value -> it[name] = value }
                 newGeometryJson?.let { value -> it[geometryJson] = value }
                 newFingerprint?.let { value -> it[geometryFingerprint] = value }
                 it[layoutRevision] = existing[HallsTable.layoutRevision] + 1
                 it[updatedAt] = now
+            }
+            if (zones != null) {
+                upsertZones(id, zones, now)
             }
             existing.toAdminHall().copy(
                 name = request.name ?: existing[HallsTable.name],
@@ -190,6 +215,54 @@ class AdminHallsDbRepository(
             createdAt = this[HallsTable.createdAt].toInstant(),
             updatedAt = this[HallsTable.updatedAt].toInstant(),
         )
+
+    private fun parseZones(geometryJson: String): List<HallZoneSpec> {
+        val root = runCatching { json.parseToJsonElement(geometryJson) }.getOrNull()
+        val rootObject = root as? JsonObject ?: throw InvalidHallGeometryException()
+        val zones = rootObject["zones"] as? JsonArray ?: throw InvalidHallGeometryException()
+        if (zones.isEmpty()) throw InvalidHallGeometryException()
+        return zones.map { element ->
+            val zoneObject = element as? JsonObject ?: throw InvalidHallGeometryException()
+            val id = zoneObject.zoneField("id")
+            val name = zoneObject.zoneField("name")
+            HallZoneSpec(id = id, name = name)
+        }
+    }
+
+    private fun JsonObject.zoneField(field: String): String {
+        val primitive = this[field] as? JsonPrimitive ?: throw InvalidHallGeometryException()
+        if (!primitive.isString) throw InvalidHallGeometryException()
+        val raw = primitive.content.trim()
+        if (raw.isBlank()) throw InvalidHallGeometryException()
+        return raw
+    }
+
+    private fun upsertZones(hallId: Long, zones: List<HallZoneSpec>, now: OffsetDateTime) {
+        zones.forEachIndexed { index, zone ->
+            val updated =
+                HallZonesTable.update({ (HallZonesTable.hallId eq hallId) and (HallZonesTable.zoneId eq zone.id) }) {
+                    it[name] = zone.name
+                    it[sortOrder] = index + 1
+                    it[updatedAt] = now
+                }
+            if (updated == 0) {
+                HallZonesTable.insert {
+                    it[HallZonesTable.hallId] = hallId
+                    it[HallZonesTable.zoneId] = zone.id
+                    it[name] = zone.name
+                    it[tags] = "[]"
+                    it[sortOrder] = index + 1
+                    it[createdAt] = now
+                    it[updatedAt] = now
+                }
+            }
+        }
+    }
+
+    private data class HallZoneSpec(
+        val id: String,
+        val name: String,
+    )
 }
 
 private fun java.time.Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

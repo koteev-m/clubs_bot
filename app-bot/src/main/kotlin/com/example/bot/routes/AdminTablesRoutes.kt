@@ -8,6 +8,7 @@ import com.example.bot.layout.AdminTableCreate
 import com.example.bot.layout.AdminTableUpdate
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.ArrivalWindow
+import com.example.bot.layout.TableNumberConflictException
 import com.example.bot.layout.parseArrivalWindowOrNull
 import com.example.bot.layout.toRangeString
 import com.example.bot.plugins.miniAppBotTokenProvider
@@ -167,21 +168,25 @@ fun Application.adminTablesRoutes(
                         }
 
                         val created =
-                            adminTablesRepository.createForHall(
-                                AdminTableCreate(
-                                    clubId = hall.clubId,
-                                    label = payload.label.trim(),
-                                    minDeposit = payload.minDeposit ?: 0,
-                                    capacity = payload.capacity,
-                                    zone = zone,
-                                    arrivalWindow = arrivalWindow,
-                                    mysteryEligible = payload.mysteryEligible,
-                                    tableNumber = payload.tableNumber,
-                                    x = payload.x,
-                                    y = payload.y,
-                                    hallId = hallId,
-                                ),
-                            )
+                            try {
+                                adminTablesRepository.createForHall(
+                                    AdminTableCreate(
+                                        clubId = hall.clubId,
+                                        label = payload.label.trim(),
+                                        minDeposit = payload.minDeposit ?: 0,
+                                        capacity = payload.capacity,
+                                        zone = zone,
+                                        arrivalWindow = arrivalWindow,
+                                        mysteryEligible = payload.mysteryEligible,
+                                        tableNumber = payload.tableNumber,
+                                        x = payload.x,
+                                        y = payload.y,
+                                        hallId = hallId,
+                                    ),
+                                )
+                            } catch (_: TableNumberConflictException) {
+                                return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.table_number_conflict)
+                            }
                         logger.info("admin.halls.tables.create hall_id={} table_id={} by={}", hallId, created.id, call.rbacContext().user.id)
                         call.respond(HttpStatusCode.Created, created.toResponse(hall.clubId, hallId, zones))
                     }
@@ -234,22 +239,26 @@ fun Application.adminTablesRoutes(
                         }
 
                         val updated =
-                            adminTablesRepository.updateForHall(
-                                AdminTableUpdate(
-                                    id = tableId,
-                                    clubId = hall.clubId,
-                                    label = payload.label?.trim(),
-                                    minDeposit = payload.minDeposit,
-                                    capacity = payload.capacity,
-                                    zone = zone,
-                                    arrivalWindow = arrivalWindow,
-                                    mysteryEligible = payload.mysteryEligible,
-                                    tableNumber = payload.tableNumber,
-                                    x = payload.x,
-                                    y = payload.y,
-                                    hallId = hallId,
-                                ),
-                            )
+                            try {
+                                adminTablesRepository.updateForHall(
+                                    AdminTableUpdate(
+                                        id = tableId,
+                                        clubId = hall.clubId,
+                                        label = payload.label?.trim(),
+                                        minDeposit = payload.minDeposit,
+                                        capacity = payload.capacity,
+                                        zone = zone,
+                                        arrivalWindow = arrivalWindow,
+                                        mysteryEligible = payload.mysteryEligible,
+                                        tableNumber = payload.tableNumber,
+                                        x = payload.x,
+                                        y = payload.y,
+                                        hallId = hallId,
+                                    ),
+                                )
+                            } catch (_: TableNumberConflictException) {
+                                return@patch call.respondError(HttpStatusCode.Conflict, ErrorCodes.table_number_conflict)
+                            }
                                 ?: return@patch call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
 
                         logger.info("admin.halls.tables.update hall_id={} table_id={} by={}", hallId, updated.id, call.rbacContext().user.id)
@@ -292,8 +301,8 @@ fun Application.adminTablesRoutes(
                             return@get
                         }
 
-                        val zones = adminTablesRepository.listZonesForClub(clubId)
-                        val tables = adminTablesRepository.listForClub(clubId)
+                        val zones = adminTablesRepository.listZonesForHall(activeHall.id)
+                        val tables = adminTablesRepository.listForHall(activeHall.id)
                         val sorted = tables.sortedWith(compareBy<com.example.bot.layout.Table> { it.zoneId }.thenBy { it.id })
                         val offset = page * size
                         val pageItems = if (offset >= sorted.size) emptyList() else sorted.drop(offset).take(size)
@@ -313,8 +322,8 @@ fun Application.adminTablesRoutes(
 
                         val activeHall = adminHallsRepository.findActiveForClub(clubId)
                             ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                        val zones = adminTablesRepository.listZonesForClub(clubId)
-                        val table = adminTablesRepository.findById(clubId, id)
+                        val zones = adminTablesRepository.listZonesForHall(activeHall.id)
+                        val table = adminTablesRepository.findByIdForHall(activeHall.id, id)
                             ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
 
                         call.respond(HttpStatusCode.OK, table.toResponse(clubId, activeHall.id, zones))
@@ -326,6 +335,9 @@ fun Application.adminTablesRoutes(
                             return@post call.respondForbidden()
                         }
 
+                        val activeHall = adminHallsRepository.findActiveForClub(clubId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+
                         val payload = runCatching { call.receive<AdminTableCreateRequest>() }.getOrNull()
                             ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
@@ -335,7 +347,7 @@ fun Application.adminTablesRoutes(
                         payload.validateCoords(validationErrors)
                         val (payloadErrors, arrivalWindow) = payload.validate(zone)
                         validationErrors.putAll(payloadErrors)
-                        val zones = adminTablesRepository.listZonesForClub(clubId)
+                        val zones = adminTablesRepository.listZonesForHall(activeHall.id)
                         if (
                             zone != null &&
                                 "zone" !in validationErrors &&
@@ -347,28 +359,30 @@ fun Application.adminTablesRoutes(
                             return@post call.respondValidationErrors(validationErrors)
                         }
 
-                        val activeHall = adminHallsRepository.findActiveForClub(clubId)
-                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         if (payload.tableNumber != null && adminTablesRepository.isTableNumberTaken(activeHall.id, payload.tableNumber)) {
                             return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.table_number_conflict)
                         }
 
                         val created =
-                            adminTablesRepository.create(
-                                AdminTableCreate(
-                                    clubId = clubId,
-                                    label = payload.label.trim(),
-                                    minDeposit = payload.minDeposit ?: 0,
-                                    capacity = payload.capacity,
-                                    zone = zone,
-                                    arrivalWindow = arrivalWindow,
-                                    mysteryEligible = payload.mysteryEligible,
-                                    tableNumber = payload.tableNumber,
-                                    x = payload.x,
-                                    y = payload.y,
-                                    hallId = activeHall.id,
-                                ),
-                            )
+                            try {
+                                adminTablesRepository.createForHall(
+                                    AdminTableCreate(
+                                        clubId = clubId,
+                                        label = payload.label.trim(),
+                                        minDeposit = payload.minDeposit ?: 0,
+                                        capacity = payload.capacity,
+                                        zone = zone,
+                                        arrivalWindow = arrivalWindow,
+                                        mysteryEligible = payload.mysteryEligible,
+                                        tableNumber = payload.tableNumber,
+                                        x = payload.x,
+                                        y = payload.y,
+                                        hallId = activeHall.id,
+                                    ),
+                                )
+                            } catch (_: TableNumberConflictException) {
+                                return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.table_number_conflict)
+                            }
                         logger.info("admin.tables.create club_id={} table_id={} by={}", clubId, created.id, call.rbacContext().user.id)
                         call.respond(HttpStatusCode.Created, created.toResponse(clubId, activeHall.id, zones))
                     }
@@ -379,6 +393,9 @@ fun Application.adminTablesRoutes(
                             return@put call.respondForbidden()
                         }
 
+                        val activeHall = adminHallsRepository.findActiveForClub(clubId)
+                            ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+
                         val payload = runCatching { call.receive<AdminTableUpdateRequest>() }.getOrNull()
                             ?: return@put call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
@@ -388,7 +405,7 @@ fun Application.adminTablesRoutes(
                         payload.validateCoords(validationErrors)
                         val (payloadErrors, arrivalWindow) = payload.validate(zone)
                         validationErrors.putAll(payloadErrors)
-                        val zones = adminTablesRepository.listZonesForClub(clubId)
+                        val zones = adminTablesRepository.listZonesForHall(activeHall.id)
                         if (
                             zone != null &&
                                 "zone" !in validationErrors &&
@@ -400,29 +417,31 @@ fun Application.adminTablesRoutes(
                             return@put call.respondValidationErrors(validationErrors)
                         }
 
-                        val activeHall = adminHallsRepository.findActiveForClub(clubId)
-                            ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         if (payload.tableNumber != null && adminTablesRepository.isTableNumberTaken(activeHall.id, payload.tableNumber, payload.id)) {
                             return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.table_number_conflict)
                         }
 
                         val updated =
-                            adminTablesRepository.update(
-                                AdminTableUpdate(
-                                    id = payload.id,
-                                    clubId = clubId,
-                                    label = payload.label?.trim(),
-                                    minDeposit = payload.minDeposit,
-                                    capacity = payload.capacity,
-                                    zone = zone,
-                                    arrivalWindow = arrivalWindow,
-                                    mysteryEligible = payload.mysteryEligible,
-                                    tableNumber = payload.tableNumber,
-                                    x = payload.x,
-                                    y = payload.y,
-                                    hallId = activeHall.id,
-                                ),
-                            )
+                            try {
+                                adminTablesRepository.updateForHall(
+                                    AdminTableUpdate(
+                                        id = payload.id,
+                                        clubId = clubId,
+                                        label = payload.label?.trim(),
+                                        minDeposit = payload.minDeposit,
+                                        capacity = payload.capacity,
+                                        zone = zone,
+                                        arrivalWindow = arrivalWindow,
+                                        mysteryEligible = payload.mysteryEligible,
+                                        tableNumber = payload.tableNumber,
+                                        x = payload.x,
+                                        y = payload.y,
+                                        hallId = activeHall.id,
+                                    ),
+                                )
+                            } catch (_: TableNumberConflictException) {
+                                return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.table_number_conflict)
+                            }
                                 ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         logger.info("admin.tables.update club_id={} table_id={} by={}", clubId, updated.id, call.rbacContext().user.id)
                         call.respond(HttpStatusCode.OK, updated.toResponse(clubId, activeHall.id, zones))
@@ -439,7 +458,10 @@ fun Application.adminTablesRoutes(
                             return@delete call.respondValidationErrors(mapOf("id" to "must_be_positive"))
                         }
 
-                        val deleted = adminTablesRepository.delete(clubId, id)
+                        val activeHall = adminHallsRepository.findActiveForClub(clubId)
+                            ?: return@delete call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+
+                        val deleted = adminTablesRepository.deleteForHall(activeHall.id, id)
                         if (!deleted) {
                             return@delete call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         }
