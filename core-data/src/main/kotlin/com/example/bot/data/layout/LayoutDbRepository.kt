@@ -23,9 +23,11 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.Op
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.selectAll
@@ -78,109 +80,104 @@ class LayoutDbRepository(
     override suspend fun listForClub(clubId: Long): List<Table> =
         withRetriedTx(name = "layout.listForClub", readOnly = true, database = database) {
             val hall = loadActiveHall(clubId) ?: return@withRetriedTx emptyList()
-            HallTablesTable
-                .selectAll()
-                .where { (HallTablesTable.hallId eq hall.id) and (HallTablesTable.isActive eq true) }
-                .orderBy(HallTablesTable.id, SortOrder.ASC)
-                .map { it.toTable() }
+            listTablesForHall(hall.id)
         }
 
     override suspend fun listZonesForClub(clubId: Long): List<Zone> =
         withRetriedTx(name = "layout.listZones", readOnly = true, database = database) {
             val hall = loadActiveHall(clubId) ?: return@withRetriedTx emptyList()
-            HallZonesTable
-                .selectAll()
-                .where { HallZonesTable.hallId eq hall.id }
-                .orderBy(HallZonesTable.sortOrder, SortOrder.ASC)
-                .map { it.toZone() }
+            listZonesForHall(hall.id)
         }
 
     override suspend fun findById(clubId: Long, id: Long): Table? =
         withRetriedTx(name = "layout.findById", readOnly = true, database = database) {
             val hall = loadActiveHall(clubId) ?: return@withRetriedTx null
-            HallTablesTable
-                .selectAll()
-                .where { (HallTablesTable.hallId eq hall.id) and (HallTablesTable.id eq id) }
-                .firstOrNull()
-                ?.toTable()
+            loadTableById(hall.id, id)
         }
 
     override suspend fun create(request: AdminTableCreate): Table =
         withRetriedTx(name = "layout.create", database = database) {
             val hall = requireActiveHall(request.clubId)
-            val now = clock.instant()
-            val nowOffset = now.toOffsetDateTime()
-            val nextNumber =
-                HallTablesTable
-                    .selectAll()
-                    .where { HallTablesTable.hallId eq hall.id }
-                    .maxOfOrNull { it[HallTablesTable.tableNumber] }
-                    ?.plus(1) ?: 1L
-            val newId =
-                HallTablesTable.insertAndGetId {
-                it[hallId] = hall.id
-                it[tableNumber] = nextNumber.toInt()
-                it[label] = request.label
-                it[capacity] = request.capacity
-                it[minimumTier] = "standard"
-                it[minDeposit] = request.minDeposit
-                it[zoneId] = request.zone ?: defaultZoneId(hall.id)
-                it[zone] = request.zone
-                it[arrivalWindow] = request.arrivalWindow?.toRangeString()
-                it[mysteryEligible] = request.mysteryEligible
-                it[x] = 0.5
-                it[y] = 0.5
-                it[isActive] = true
-                it[createdAt] = nowOffset
-                it[updatedAt] = nowOffset
-            }
-            bumpHallRevision(hall.id, nowOffset)
-            loadTableById(hall.id, newId.value) ?: error("Failed to create table")
+            createTableForHall(hall.id, request)
         }
 
     override suspend fun update(request: AdminTableUpdate): Table? =
         withRetriedTx(name = "layout.update", database = database) {
             val hall = requireActiveHall(request.clubId)
-            val existing = loadTableById(hall.id, request.id) ?: return@withRetriedTx null
-            val now = clock.instant()
-            val nowOffset = now.toOffsetDateTime()
-            HallTablesTable.update({ (HallTablesTable.hallId eq hall.id) and (HallTablesTable.id eq request.id) }) {
-                request.label?.let { value -> it[label] = value }
-                request.capacity?.let { value -> it[capacity] = value }
-                request.minDeposit?.let { value -> it[minDeposit] = value }
-                request.zone?.let { value ->
-                    it[zoneId] = value
-                    it[zone] = value
-                }
-                it[arrivalWindow] = request.arrivalWindow?.toRangeString() ?: existing.arrivalWindow?.toRangeString()
-                request.mysteryEligible?.let { value -> it[mysteryEligible] = value }
-                it[updatedAt] = nowOffset
-            }
-            bumpHallRevision(hall.id, nowOffset)
-            loadTableById(hall.id, request.id)
+            updateTableForHall(hall.id, request)
         }
 
     override suspend fun delete(clubId: Long, id: Long): Boolean =
         withRetriedTx(name = "layout.delete", database = database) {
             val hall = requireActiveHall(clubId)
-            val nowOffset = clock.instant().toOffsetDateTime()
-            val updated =
-                HallTablesTable.update({ (HallTablesTable.hallId eq hall.id) and (HallTablesTable.id eq id) }) {
-                    it[isActive] = false
-                    it[updatedAt] = nowOffset
-                }
-            if (updated > 0) {
-                bumpHallRevision(hall.id, nowOffset)
-                true
-            } else {
-                false
-            }
+            deleteTableForHall(hall.id, id)
         }
 
     override suspend fun lastUpdatedAt(clubId: Long): Instant? =
         withRetriedTx(name = "layout.adminLastUpdated", readOnly = true, database = database) {
             val hall = loadActiveHall(clubId) ?: return@withRetriedTx null
             bumpInstantWithRevision(hall.updatedAt, hall.layoutRevision)
+        }
+
+    override suspend fun listForHall(hallId: Long): List<Table> =
+        withRetriedTx(name = "layout.listForHall", readOnly = true, database = database) {
+            listTablesForHall(hallId)
+        }
+
+    override suspend fun listZonesForHall(hallId: Long): List<Zone> =
+        withRetriedTx(name = "layout.listZonesForHall", readOnly = true, database = database) {
+            HallZonesTable
+                .selectAll()
+                .where { HallZonesTable.hallId eq hallId }
+                .orderBy(HallZonesTable.sortOrder, SortOrder.ASC)
+                .map { it.toZone() }
+        }
+
+    override suspend fun findByIdForHall(hallId: Long, id: Long): Table? =
+        withRetriedTx(name = "layout.findByIdForHall", readOnly = true, database = database) {
+            loadTableById(hallId, id)
+        }
+
+    override suspend fun createForHall(request: AdminTableCreate): Table =
+        withRetriedTx(name = "layout.createForHall", database = database) {
+            val hallId = request.hallId ?: error("Hall id is required for createForHall")
+            createTableForHall(hallId, request)
+        }
+
+    override suspend fun updateForHall(request: AdminTableUpdate): Table? =
+        withRetriedTx(name = "layout.updateForHall", database = database) {
+            val hallId = request.hallId ?: error("Hall id is required for updateForHall")
+            updateTableForHall(hallId, request)
+        }
+
+    override suspend fun deleteForHall(hallId: Long, id: Long): Boolean =
+        withRetriedTx(name = "layout.deleteForHall", database = database) {
+            deleteTableForHall(hallId, id)
+        }
+
+    override suspend fun lastUpdatedAtForHall(hallId: Long): Instant? =
+        withRetriedTx(name = "layout.adminLastUpdatedForHall", readOnly = true, database = database) {
+            HallsTable
+                .selectAll()
+                .where { HallsTable.id eq hallId }
+                .firstOrNull()
+                ?.let { row ->
+                    bumpInstantWithRevision(row[HallsTable.updatedAt].toInstant(), row[HallsTable.layoutRevision])
+                }
+        }
+
+    override suspend fun isTableNumberTaken(hallId: Long, tableNumber: Int, excludeTableId: Long?): Boolean =
+        withRetriedTx(name = "layout.tableNumberTaken", readOnly = true, database = database) {
+            HallTablesTable
+                .selectAll()
+                .where {
+                    (HallTablesTable.hallId eq hallId) and
+                        (HallTablesTable.tableNumber eq tableNumber) and
+                        (HallTablesTable.isActive eq true) and
+                        (excludeTableId?.let { HallTablesTable.id neq it } ?: Op.TRUE)
+                }
+                .limit(1)
+                .any()
         }
 
     override suspend fun loadGeometry(clubId: Long, fingerprint: String): String? =
@@ -218,6 +215,84 @@ class LayoutDbRepository(
             .where { (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq id) }
             .firstOrNull()
             ?.toTable()
+    }
+
+    private fun listTablesForHall(hallId: Long): List<Table> {
+        return HallTablesTable
+            .selectAll()
+            .where { (HallTablesTable.hallId eq hallId) and (HallTablesTable.isActive eq true) }
+            .orderBy(HallTablesTable.id, SortOrder.ASC)
+            .map { it.toTable() }
+    }
+
+    private fun createTableForHall(hallId: Long, request: AdminTableCreate): Table {
+        val now = clock.instant()
+        val nowOffset = now.toOffsetDateTime()
+        val nextNumber =
+            request.tableNumber?.toLong()
+                ?: HallTablesTable
+                    .selectAll()
+                    .where { HallTablesTable.hallId eq hallId }
+                    .maxOfOrNull { it[HallTablesTable.tableNumber] }
+                    ?.plus(1) ?: 1L
+        val newId =
+            HallTablesTable.insertAndGetId {
+                it[HallTablesTable.hallId] = hallId
+                it[tableNumber] = nextNumber.toInt()
+                it[label] = request.label
+                it[capacity] = request.capacity
+                it[minimumTier] = "standard"
+                it[minDeposit] = request.minDeposit
+                it[zoneId] = request.zone ?: defaultZoneId(hallId)
+                it[zone] = request.zone
+                it[arrivalWindow] = request.arrivalWindow?.toRangeString()
+                it[mysteryEligible] = request.mysteryEligible
+                it[x] = request.x ?: 0.5
+                it[y] = request.y ?: 0.5
+                it[isActive] = true
+                it[createdAt] = nowOffset
+                it[updatedAt] = nowOffset
+            }
+        bumpHallRevision(hallId, nowOffset)
+        return loadTableById(hallId, newId.value) ?: error("Failed to create table")
+    }
+
+    private fun updateTableForHall(hallId: Long, request: AdminTableUpdate): Table? {
+        val existing = loadTableById(hallId, request.id) ?: return null
+        val now = clock.instant()
+        val nowOffset = now.toOffsetDateTime()
+        HallTablesTable.update({ (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq request.id) }) {
+            request.label?.let { value -> it[label] = value }
+            request.capacity?.let { value -> it[capacity] = value }
+            request.minDeposit?.let { value -> it[minDeposit] = value }
+            request.zone?.let { value ->
+                it[zoneId] = value
+                it[zone] = value
+            }
+            request.tableNumber?.let { value -> it[tableNumber] = value }
+            request.x?.let { value -> it[x] = value }
+            request.y?.let { value -> it[y] = value }
+            it[arrivalWindow] = request.arrivalWindow?.toRangeString() ?: existing.arrivalWindow?.toRangeString()
+            request.mysteryEligible?.let { value -> it[mysteryEligible] = value }
+            it[updatedAt] = nowOffset
+        }
+        bumpHallRevision(hallId, nowOffset)
+        return loadTableById(hallId, request.id)
+    }
+
+    private fun deleteTableForHall(hallId: Long, id: Long): Boolean {
+        val nowOffset = clock.instant().toOffsetDateTime()
+        val updated =
+            HallTablesTable.update({ (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq id) }) {
+                it[isActive] = false
+                it[updatedAt] = nowOffset
+            }
+        return if (updated > 0) {
+            bumpHallRevision(hallId, nowOffset)
+            true
+        } else {
+            false
+        }
     }
 
     private fun defaultZoneId(hallId: Long): String {
@@ -269,6 +344,9 @@ class LayoutDbRepository(
             zone = this[HallTablesTable.zone],
             arrivalWindow = this[HallTablesTable.arrivalWindow]?.let(::parseArrivalWindowOrNull),
             mysteryEligible = this[HallTablesTable.mysteryEligible],
+            tableNumber = this[HallTablesTable.tableNumber],
+            x = this[HallTablesTable.x],
+            y = this[HallTablesTable.y],
         )
 
     private fun decodeTags(raw: String): List<String> {

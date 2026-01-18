@@ -54,4 +54,12 @@ object ErrorCodes {
     const val plus_one_already_used: String = "plus_one_already_used"
     const val capacity_exceeded: String = "capacity_exceeded"
     const val promoter_quota_exhausted: String = "promoter_quota_exhausted"
+
+    const val club_not_found: String = "club_not_found"
+    const val hall_not_found: String = "hall_not_found"
+    const val table_not_found: String = "table_not_found"
+    const val hall_name_conflict: String = "hall_name_conflict"
+    const val table_number_conflict: String = "table_number_conflict"
+    const val invalid_table_coords: String = "invalid_table_coords"
+    const val invalid_capacity: String = "invalid_capacity"
 }

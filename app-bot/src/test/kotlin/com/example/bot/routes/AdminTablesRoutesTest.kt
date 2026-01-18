@@ -5,6 +5,10 @@ import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.http.ErrorCodes
+import com.example.bot.admin.AdminHall
+import com.example.bot.admin.AdminHallCreate
+import com.example.bot.admin.AdminHallUpdate
+import com.example.bot.admin.AdminHallsRepository
 import com.example.bot.layout.AdminTableCreate
 import com.example.bot.layout.AdminTableUpdate
 import com.example.bot.layout.AdminTablesRepository
@@ -572,6 +576,7 @@ class AdminTablesRoutesTest {
         block: suspend ApplicationTestBuilder.(FakeTablesRepository, LayoutRepository) -> Unit,
     ) {
         val repo = FakeTablesRepository(clock)
+        val hallsRepository = FakeHallsRepository(clock)
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
@@ -581,7 +586,7 @@ class AdminTablesRoutesTest {
                     auditLogRepository = io.mockk.mockk(relaxed = true)
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
-                adminTablesRoutes(repo, botTokenProvider = { "test" })
+                adminTablesRoutes(repo, hallsRepository, botTokenProvider = { "test" })
                 layoutRoutes(repo, emptyAssets)
             }
 
@@ -607,6 +612,7 @@ class AdminTablesRoutesTest {
                     ),
                 clock = clock,
             )
+        val hallsRepository = FakeHallsRepository(clock)
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
@@ -616,7 +622,7 @@ class AdminTablesRoutesTest {
                     auditLogRepository = io.mockk.mockk(relaxed = true)
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
-                adminTablesRoutes(repo, botTokenProvider = { "test" })
+                adminTablesRoutes(repo, hallsRepository, botTokenProvider = { "test" })
                 layoutRoutes(repo, emptyAssets)
             }
 
@@ -675,10 +681,12 @@ class AdminTablesRoutesTest {
             tablesByClub[clubId]?.firstOrNull { it.id == id }
 
         override suspend fun create(request: AdminTableCreate): Table {
-            val list = tablesByClub.getOrPut(request.clubId) { mutableListOf() }
-            zonesByClub.putIfAbsent(request.clubId, listOf(Zone(id = "main", name = "Main", tags = emptyList(), order = 1)))
+            val clubId = request.clubId
+            val list = tablesByClub.getOrPut(clubId) { mutableListOf() }
+            zonesByClub.putIfAbsent(clubId, listOf(Zone(id = "main", name = "Main", tags = emptyList(), order = 1)))
             val nextId = (list.maxOfOrNull { it.id } ?: 0L) + 1
-            val defaultZoneId = request.zone ?: zonesByClub[request.clubId]?.firstOrNull()?.id ?: "main"
+            val nextNumber = request.tableNumber ?: ((list.maxOfOrNull { it.tableNumber } ?: 0) + 1)
+            val defaultZoneId = request.zone ?: zonesByClub[clubId]?.firstOrNull()?.id ?: "main"
             val table =
                 Table(
                     id = nextId,
@@ -691,6 +699,9 @@ class AdminTablesRoutesTest {
                     zone = request.zone ?: defaultZoneId,
                     arrivalWindow = request.arrivalWindow,
                     mysteryEligible = request.mysteryEligible,
+                    tableNumber = nextNumber,
+                    x = request.x ?: 0.5,
+                    y = request.y ?: 0.5,
                 )
             list += table
             touch()
@@ -698,7 +709,8 @@ class AdminTablesRoutesTest {
         }
 
         override suspend fun update(request: AdminTableUpdate): Table? {
-            val list = tablesByClub[request.clubId] ?: return null
+            val clubId = request.clubId
+            val list = tablesByClub[clubId] ?: return null
             val existing = list.firstOrNull { it.id == request.id } ?: return null
             val updated =
                 existing.copy(
@@ -709,6 +721,9 @@ class AdminTablesRoutesTest {
                     zoneId = request.zone ?: existing.zoneId,
                     arrivalWindow = request.arrivalWindow ?: existing.arrivalWindow,
                     mysteryEligible = request.mysteryEligible ?: existing.mysteryEligible,
+                    tableNumber = request.tableNumber ?: existing.tableNumber,
+                    x = request.x ?: existing.x,
+                    y = request.y ?: existing.y,
                 )
             list.replaceAll { if (it.id == request.id) updated else it }
             touch()
@@ -743,5 +758,97 @@ class AdminTablesRoutesTest {
             touchCounter += 1
             updatedAt = clock.instant().plusMillis(touchCounter)
         }
+
+        override suspend fun listForHall(hallId: Long): List<Table> = listForClub(hallId)
+
+        override suspend fun listZonesForHall(hallId: Long): List<Zone> = listZonesForClub(hallId)
+
+        override suspend fun findByIdForHall(hallId: Long, id: Long): Table? = findById(hallId, id)
+
+        override suspend fun createForHall(request: AdminTableCreate): Table = create(request)
+
+        override suspend fun updateForHall(request: AdminTableUpdate): Table? = update(request)
+
+        override suspend fun deleteForHall(hallId: Long, id: Long): Boolean = delete(hallId, id)
+
+        override suspend fun lastUpdatedAtForHall(hallId: Long): Instant? = updatedAt
+
+        override suspend fun isTableNumberTaken(hallId: Long, tableNumber: Int, excludeTableId: Long?): Boolean {
+            val tables = listForHall(hallId)
+            return tables.any { it.tableNumber == tableNumber && (excludeTableId == null || it.id != excludeTableId) }
+        }
+    }
+
+    private class FakeHallsRepository(private val clock: Clock) : AdminHallsRepository {
+        private val halls: MutableList<AdminHall> =
+            mutableListOf(
+                AdminHall(
+                    id = 1,
+                    clubId = 1,
+                    name = "Main",
+                    isActive = true,
+                    layoutRevision = 1,
+                    geometryFingerprint = "fp",
+                    createdAt = clock.instant(),
+                    updatedAt = clock.instant(),
+                ),
+            )
+
+        override suspend fun listForClub(clubId: Long): List<AdminHall> = halls.filter { it.clubId == clubId }
+
+        override suspend fun getById(id: Long): AdminHall? = halls.firstOrNull { it.id == id }
+
+        override suspend fun findActiveForClub(clubId: Long): AdminHall? =
+            halls.firstOrNull { it.clubId == clubId && it.isActive }
+                ?: create(clubId, AdminHallCreate(name = "Auto $clubId", geometryJson = "{}", isActive = true))
+
+        override suspend fun create(clubId: Long, request: AdminHallCreate): AdminHall {
+            val nextId = (halls.maxOfOrNull { it.id } ?: 0L) + 1
+            val hall =
+                AdminHall(
+                    id = nextId,
+                    clubId = clubId,
+                    name = request.name,
+                    isActive = request.isActive,
+                    layoutRevision = 1,
+                    geometryFingerprint = "fp-$nextId",
+                    createdAt = clock.instant(),
+                    updatedAt = clock.instant(),
+                )
+            halls += hall
+            return hall
+        }
+
+        override suspend fun update(id: Long, request: AdminHallUpdate): AdminHall? {
+            val existing = halls.firstOrNull { it.id == id } ?: return null
+            val updated =
+                existing.copy(
+                    name = request.name ?: existing.name,
+                    layoutRevision = existing.layoutRevision + 1,
+                    updatedAt = clock.instant(),
+                )
+            halls.replaceAll { if (it.id == id) updated else it }
+            return updated
+        }
+
+        override suspend fun delete(id: Long): Boolean {
+            val existing = halls.firstOrNull { it.id == id } ?: return false
+            halls.replaceAll { if (it.id == id) it.copy(isActive = false, layoutRevision = it.layoutRevision + 1) else it }
+            if (existing.isActive) {
+                halls.firstOrNull { it.id != id }?.let { other ->
+                    halls.replaceAll { if (it.id == other.id) it.copy(isActive = true) else it }
+                }
+            }
+            return true
+        }
+
+        override suspend fun makeActive(id: Long): AdminHall? {
+            val existing = halls.firstOrNull { it.id == id } ?: return null
+            halls.replaceAll { it.copy(isActive = it.id == id, layoutRevision = if (it.id == id) it.layoutRevision + 1 else it.layoutRevision) }
+            return existing.copy(isActive = true, layoutRevision = existing.layoutRevision + 1)
+        }
+
+        override suspend fun isHallNameTaken(clubId: Long, name: String, excludeHallId: Long?): Boolean =
+            halls.any { it.clubId == clubId && it.name.equals(name, ignoreCase = true) && it.id != excludeHallId }
     }
 }

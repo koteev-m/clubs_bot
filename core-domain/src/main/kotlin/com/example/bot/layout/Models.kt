@@ -28,6 +28,9 @@ data class Table(
     val zone: String? = null,
     val arrivalWindow: ArrivalWindow? = null,
     val mysteryEligible: Boolean = false,
+    val tableNumber: Int = 0,
+    val x: Double = 0.5,
+    val y: Double = 0.5,
 )
 
 data class ClubLayout(

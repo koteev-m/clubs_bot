@@ -6,6 +6,8 @@ import com.example.bot.club.GuestListService
 import com.example.bot.club.InvitationService
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.WaitlistRepository
+import com.example.bot.admin.AdminClubsRepository
+import com.example.bot.admin.AdminHallsRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
@@ -58,6 +60,8 @@ import com.example.bot.routes.guestListRoutes
 import com.example.bot.routes.hostEntranceRoutes
 import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.hostCheckinRoutes
+import com.example.bot.routes.adminClubsRoutes
+import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminTablesRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
@@ -179,6 +183,8 @@ fun Application.module() {
     val layoutRepository by inject<LayoutRepository>()
     val layoutAssetsRepository by inject<LayoutAssetsRepository>()
     val adminTablesRepository by inject<AdminTablesRepository>()
+    val adminClubsRepository by inject<AdminClubsRepository>()
+    val adminHallsRepository by inject<AdminHallsRepository>()
     val musicService by inject<MusicService>()
     val musicLikesRepository by inject<MusicLikesRepository>()
     val mixtapeService by inject<MixtapeService>()
@@ -261,7 +267,9 @@ fun Application.module() {
     )
     promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
-    adminTablesRoutes(adminTablesRepository = adminTablesRepository)
+    adminClubsRoutes(adminClubsRepository = adminClubsRepository)
+    adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
+    adminTablesRoutes(adminTablesRepository = adminTablesRepository, adminHallsRepository = adminHallsRepository)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository, layoutAssetsRepository = layoutAssetsRepository)
     ownerHealthRoutes(

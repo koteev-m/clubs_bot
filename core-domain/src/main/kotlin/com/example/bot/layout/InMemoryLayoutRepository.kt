@@ -52,8 +52,10 @@ class InMemoryLayoutRepository(
         layoutsByClub[clubId]?.tables?.firstOrNull { it.id == id }
 
     override suspend fun create(request: AdminTableCreate): Table {
-        val seed = layoutsByClub[request.clubId] ?: LayoutSeed(request.clubId, emptyList(), emptyList(), DEFAULT_GEOMETRY_JSON)
+        val clubId = request.hallId ?: request.clubId
+        val seed = layoutsByClub[clubId] ?: LayoutSeed(clubId, emptyList(), emptyList(), DEFAULT_GEOMETRY_JSON)
         val nextId = (seed.tables.maxOfOrNull { it.id } ?: 0L) + 1
+        val nextNumber = request.tableNumber ?: ((seed.tables.maxOfOrNull { it.tableNumber } ?: 0) + 1)
         val defaultZoneId = request.zone ?: (seed.zones.firstOrNull()?.id ?: "main")
         val newTable =
             Table(
@@ -67,15 +69,19 @@ class InMemoryLayoutRepository(
                 zone = request.zone ?: defaultZoneId,
                 arrivalWindow = request.arrivalWindow,
                 mysteryEligible = request.mysteryEligible,
+                tableNumber = nextNumber,
+                x = request.x ?: 0.5,
+                y = request.y ?: 0.5,
             )
         val updatedSeed = seed.copy(tables = seed.tables + newTable)
-        layoutsByClub[request.clubId] = updatedSeed
+        layoutsByClub[clubId] = updatedSeed
         touch()
         return newTable
     }
 
     override suspend fun update(request: AdminTableUpdate): Table? {
-        val seed = layoutsByClub[request.clubId] ?: return null
+        val clubId = request.hallId ?: request.clubId
+        val seed = layoutsByClub[clubId] ?: return null
         val existing = seed.tables.firstOrNull { it.id == request.id } ?: return null
         val updated =
             existing.copy(
@@ -86,9 +92,12 @@ class InMemoryLayoutRepository(
                 zoneId = request.zone ?: existing.zoneId,
                 arrivalWindow = request.arrivalWindow ?: existing.arrivalWindow,
                 mysteryEligible = request.mysteryEligible ?: existing.mysteryEligible,
+                tableNumber = request.tableNumber ?: existing.tableNumber,
+                x = request.x ?: existing.x,
+                y = request.y ?: existing.y,
             )
         val updatedSeed = seed.copy(tables = seed.tables.map { if (it.id == existing.id) updated else it })
-        layoutsByClub[request.clubId] = updatedSeed
+        layoutsByClub[clubId] = updatedSeed
         touch()
         return updated
     }
@@ -104,6 +113,25 @@ class InMemoryLayoutRepository(
     }
 
     override suspend fun lastUpdatedAt(clubId: Long): Instant? = updatedAt
+
+    override suspend fun listForHall(hallId: Long): List<Table> = listForClub(hallId)
+
+    override suspend fun listZonesForHall(hallId: Long): List<Zone> = listZonesForClub(hallId)
+
+    override suspend fun findByIdForHall(hallId: Long, id: Long): Table? = findById(hallId, id)
+
+    override suspend fun createForHall(request: AdminTableCreate): Table = create(request)
+
+    override suspend fun updateForHall(request: AdminTableUpdate): Table? = update(request)
+
+    override suspend fun deleteForHall(hallId: Long, id: Long): Boolean = delete(hallId, id)
+
+    override suspend fun lastUpdatedAtForHall(hallId: Long): Instant? = lastUpdatedAt(hallId)
+
+    override suspend fun isTableNumberTaken(hallId: Long, tableNumber: Int, excludeTableId: Long?): Boolean {
+        val tables = listForHall(hallId)
+        return tables.any { it.tableNumber == tableNumber && (excludeTableId == null || it.id != excludeTableId) }
+    }
 
     private fun touch() {
         updatedAt = clock.instant()

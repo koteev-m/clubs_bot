@@ -1,7 +1,9 @@
 package com.example.bot.di
 
+import com.example.bot.admin.AdminClubsRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
+import com.example.bot.data.admin.AdminClubsDbRepository
 import com.example.bot.data.clubs.ClubsDbRepository
 import com.example.bot.data.clubs.EventsDbRepository
 import org.koin.dsl.module
@@ -13,5 +15,8 @@ val clubsModule =
         }
         single<EventsRepository> {
             EventsDbRepository(get())
+        }
+        single<AdminClubsRepository> {
+            AdminClubsDbRepository(get())
         }
     }
