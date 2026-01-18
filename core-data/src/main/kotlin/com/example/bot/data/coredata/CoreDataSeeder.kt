@@ -31,13 +31,27 @@ class CoreDataSeeder(
     private val json = Json { encodeDefaults = true }
 
     suspend fun seedIfEmpty(seed: CoreDataSeed) {
-        validateSeed(seed)
         withRetriedTx(name = "coredata.seed", database = database) {
             var seededClubs = false
             var seededEvents = false
             var seededHalls = false
             var seededHallTables = false
-            if (Clubs.selectAll().limit(1).firstOrNull() == null) {
+
+            val shouldSeedClubs = Clubs.selectAll().limit(1).firstOrNull() == null
+            val shouldSeedEvents = EventsTable.selectAll().limit(1).firstOrNull() == null
+            val shouldSeedHalls = HallsTable.selectAll().limit(1).firstOrNull() == null
+
+            if (!shouldSeedClubs && !shouldSeedEvents && !shouldSeedHalls) {
+                logger.info("coredata.seed.skipped reason=\"db_not_empty\"")
+                logger.info(
+                    "coredata.seed.result seededClubs=false seededEvents=false seededHalls=false sequencesSynced=false",
+                )
+                return@withRetriedTx
+            }
+
+            validateSeed(seed)
+
+            if (shouldSeedClubs) {
                 val now = clock.instant().toOffsetDateTime()
                 seed.clubs.forEach { club ->
                     Clubs.insert {
@@ -59,7 +73,7 @@ class CoreDataSeeder(
                 seededClubs = true
             }
 
-            if (EventsTable.selectAll().limit(1).firstOrNull() == null) {
+            if (shouldSeedEvents) {
                 seed.events.forEach { event ->
                     EventsTable.insert {
                         it[id] = event.id
@@ -75,7 +89,7 @@ class CoreDataSeeder(
                 seededEvents = true
             }
 
-            if (HallsTable.selectAll().limit(1).firstOrNull() == null) {
+            if (shouldSeedHalls) {
                 val now = clock.instant().toOffsetDateTime()
                 seed.halls.forEach { hall ->
                     val fingerprint = LayoutDbRepository.fingerprintFor(hall.geometryJson)
@@ -129,11 +143,18 @@ class CoreDataSeeder(
                 seededHallTables = true
             }
 
-            syncSequencesIfNeeded(
+            val sequencesSynced = syncSequencesIfNeeded(
                 seededClubs = seededClubs,
                 seededEvents = seededEvents,
                 seededHalls = seededHalls,
                 seededHallTables = seededHallTables,
+            )
+            logger.info(
+                "coredata.seed.result seededClubs={} seededEvents={} seededHalls={} sequencesSynced={}",
+                seededClubs,
+                seededEvents,
+                seededHalls,
+                sequencesSynced,
             )
         }
     }
@@ -143,8 +164,9 @@ class CoreDataSeeder(
         seededEvents: Boolean,
         seededHalls: Boolean,
         seededHallTables: Boolean,
-    ) {
-        if (!isPostgres()) return
+    ): Boolean {
+        val hasSeededData = seededClubs || seededEvents || seededHalls || seededHallTables
+        if (!hasSeededData || !isPostgres()) return false
         if (seededClubs) {
             syncIdentitySequence("clubs")
         }
@@ -157,6 +179,7 @@ class CoreDataSeeder(
         if (seededHallTables) {
             syncIdentitySequence("hall_tables")
         }
+        return true
     }
 
     private fun syncIdentitySequence(tableName: String, idColumn: String = "id") {
@@ -173,7 +196,11 @@ class CoreDataSeeder(
         )
     }
 
-    private fun isPostgres(): Boolean = database.url?.startsWith("jdbc:postgresql", ignoreCase = true) == true
+    private fun isPostgres(): Boolean {
+        val connection = TransactionManager.current().connection.connection as java.sql.Connection
+        val productName = connection.metaData.databaseProductName
+        return productName.contains("PostgreSQL", ignoreCase = true)
+    }
 
     private fun validateSeed(seed: CoreDataSeed) {
         seed.halls.forEach { hall ->
