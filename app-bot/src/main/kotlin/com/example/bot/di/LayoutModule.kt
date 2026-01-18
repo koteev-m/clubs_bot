@@ -1,6 +1,8 @@
 package com.example.bot.di
 
+import com.example.bot.admin.AdminHallsRepository
 import com.example.bot.booking.a3.BookingState
+import com.example.bot.data.admin.AdminHallsDbRepository
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.data.layout.LayoutDbRepository
 import com.example.bot.layout.BookingAwareLayoutRepository
@@ -23,6 +25,7 @@ val layoutModule =
         single<LayoutAssetsRepository> { get<LayoutRepository>(named("baseLayout")) as LayoutAssetsRepository }
 
         single<AdminTablesRepository> { get<LayoutRepository>(named("baseLayout")) as AdminTablesRepository }
+        single<AdminHallsRepository> { AdminHallsDbRepository(get()) }
 
         single {
             val holdTtl = envDuration("BOOKING_HOLD_TTL", Duration.ofMinutes(10))

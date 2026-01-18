@@ -10,6 +10,10 @@ data class AdminTableCreate(
     val zone: String?,
     val arrivalWindow: ArrivalWindow?,
     val mysteryEligible: Boolean,
+    val tableNumber: Int? = null,
+    val x: Double? = null,
+    val y: Double? = null,
+    val hallId: Long? = null,
 )
 
 data class AdminTableUpdate(
@@ -21,6 +25,10 @@ data class AdminTableUpdate(
     val zone: String?,
     val arrivalWindow: ArrivalWindow?,
     val mysteryEligible: Boolean?,
+    val tableNumber: Int? = null,
+    val x: Double? = null,
+    val y: Double? = null,
+    val hallId: Long? = null,
 )
 
 interface AdminTablesRepository {
@@ -41,4 +49,20 @@ interface AdminTablesRepository {
      * Should advance whenever tables are created or updated so layout caches can react to changes.
      */
     suspend fun lastUpdatedAt(clubId: Long): Instant?
+
+    suspend fun listForHall(hallId: Long): List<Table>
+
+    suspend fun listZonesForHall(hallId: Long): List<Zone>
+
+    suspend fun findByIdForHall(hallId: Long, id: Long): Table?
+
+    suspend fun createForHall(request: AdminTableCreate): Table
+
+    suspend fun updateForHall(request: AdminTableUpdate): Table?
+
+    suspend fun deleteForHall(hallId: Long, id: Long): Boolean
+
+    suspend fun lastUpdatedAtForHall(hallId: Long): Instant?
+
+    suspend fun isTableNumberTaken(hallId: Long, tableNumber: Int, excludeTableId: Long? = null): Boolean
 }
