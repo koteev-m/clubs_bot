@@ -20,6 +20,7 @@ import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.slf4j.LoggerFactory
 
 class CoreDataSeeder(
@@ -30,7 +31,12 @@ class CoreDataSeeder(
     private val json = Json { encodeDefaults = true }
 
     suspend fun seedIfEmpty(seed: CoreDataSeed) {
+        validateSeed(seed)
         withRetriedTx(name = "coredata.seed", database = database) {
+            var seededClubs = false
+            var seededEvents = false
+            var seededHalls = false
+            var seededHallTables = false
             if (Clubs.selectAll().limit(1).firstOrNull() == null) {
                 val now = clock.instant().toOffsetDateTime()
                 seed.clubs.forEach { club ->
@@ -50,6 +56,7 @@ class CoreDataSeeder(
                     }
                 }
                 logger.info("coredata.seeded_clubs count={}", seed.clubs.size)
+                seededClubs = true
             }
 
             if (EventsTable.selectAll().limit(1).firstOrNull() == null) {
@@ -65,6 +72,7 @@ class CoreDataSeeder(
                     }
                 }
                 logger.info("coredata.seeded_events count={}", seed.events.size)
+                seededEvents = true
             }
 
             if (HallsTable.selectAll().limit(1).firstOrNull() == null) {
@@ -117,6 +125,64 @@ class CoreDataSeeder(
                     }
                 }
                 logger.info("coredata.seeded_halls count={}", seed.halls.size)
+                seededHalls = true
+                seededHallTables = true
+            }
+
+            syncSequencesIfNeeded(
+                seededClubs = seededClubs,
+                seededEvents = seededEvents,
+                seededHalls = seededHalls,
+                seededHallTables = seededHallTables,
+            )
+        }
+    }
+
+    private fun syncSequencesIfNeeded(
+        seededClubs: Boolean,
+        seededEvents: Boolean,
+        seededHalls: Boolean,
+        seededHallTables: Boolean,
+    ) {
+        if (!isPostgres()) return
+        if (seededClubs) {
+            syncIdentitySequence("clubs")
+        }
+        if (seededEvents) {
+            syncIdentitySequence("events")
+        }
+        if (seededHalls) {
+            syncIdentitySequence("halls")
+        }
+        if (seededHallTables) {
+            syncIdentitySequence("hall_tables")
+        }
+    }
+
+    private fun syncIdentitySequence(tableName: String, idColumn: String = "id") {
+        TransactionManager.current().exec(
+            """
+            SELECT setval(seq, max_id)
+            FROM (
+                SELECT
+                    pg_get_serial_sequence('$tableName', '$idColumn') AS seq,
+                    COALESCE((SELECT MAX($idColumn) FROM $tableName), 0) AS max_id
+            ) AS seq_meta
+            WHERE seq IS NOT NULL
+            """.trimIndent(),
+        )
+    }
+
+    private fun isPostgres(): Boolean = database.url?.startsWith("jdbc:postgresql", ignoreCase = true) == true
+
+    private fun validateSeed(seed: CoreDataSeed) {
+        seed.halls.forEach { hall ->
+            hall.tables.forEach { table ->
+                val ref = "clubId=${hall.clubId} hallId=${hall.id} tableId=${table.id}"
+                require(table.x in 0.0..1.0) { "coredata.seed invalid x for $ref: ${table.x}" }
+                require(table.y in 0.0..1.0) { "coredata.seed invalid y for $ref: ${table.y}" }
+                require(table.capacity > 0) { "coredata.seed invalid capacity for $ref: ${table.capacity}" }
+                require(table.minDeposit >= 0) { "coredata.seed invalid minDeposit for $ref: ${table.minDeposit}" }
             }
         }
     }
