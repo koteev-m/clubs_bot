@@ -83,7 +83,6 @@ import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
-import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
@@ -157,10 +156,8 @@ fun Application.module() {
 
     val coreDataSeeder by inject<CoreDataSeeder>()
     val coreDataSeed by inject<CoreDataSeed>()
-    environment.monitor.subscribe(ApplicationStarted) {
-        runBlocking {
-            coreDataSeeder.seedIfEmpty(coreDataSeed)
-        }
+    runBlocking {
+        coreDataSeeder.seedIfEmpty(coreDataSeed)
     }
 
     if (isDev) {

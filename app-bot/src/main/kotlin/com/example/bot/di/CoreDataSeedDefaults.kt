@@ -63,8 +63,8 @@ fun defaultCoreDataSeed(): CoreDataSeed {
                 zone = "vip",
                 arrivalWindow = null,
                 mysteryEligible = false,
-                x = 1.0,
-                y = 1.0,
+                x = 0.095, // normalized [0..1] of layout width
+                y = 0.133, // normalized [0..1] of layout height
             ),
             HallTableSeed(
                 id = 2,
@@ -77,8 +77,8 @@ fun defaultCoreDataSeed(): CoreDataSeed {
                 zone = "vip",
                 arrivalWindow = null,
                 mysteryEligible = false,
-                x = 3.0,
-                y = 1.0,
+                x = 0.286,
+                y = 0.133,
             ),
             HallTableSeed(
                 id = 3,
@@ -91,8 +91,8 @@ fun defaultCoreDataSeed(): CoreDataSeed {
                 zone = "dancefloor",
                 arrivalWindow = null,
                 mysteryEligible = false,
-                x = 6.0,
-                y = 1.0,
+                x = 0.571,
+                y = 0.133,
             ),
             HallTableSeed(
                 id = 4,
@@ -105,8 +105,8 @@ fun defaultCoreDataSeed(): CoreDataSeed {
                 zone = "dancefloor",
                 arrivalWindow = null,
                 mysteryEligible = false,
-                x = 8.0,
-                y = 2.5,
+                x = 0.762,
+                y = 0.333,
             ),
             HallTableSeed(
                 id = 5,
@@ -119,8 +119,8 @@ fun defaultCoreDataSeed(): CoreDataSeed {
                 zone = "dancefloor",
                 arrivalWindow = null,
                 mysteryEligible = false,
-                x = 10.5,
-                y = 4.5,
+                x = 1.0,
+                y = 0.6,
             ),
             HallTableSeed(
                 id = 6,
@@ -133,8 +133,8 @@ fun defaultCoreDataSeed(): CoreDataSeed {
                 zone = "balcony",
                 arrivalWindow = ArrivalWindow(LocalTime.of(22, 0), LocalTime.of(23, 0)),
                 mysteryEligible = false,
-                x = 1.0,
-                y = 6.0,
+                x = 0.095,
+                y = 0.8,
             ),
             HallTableSeed(
                 id = 7,
@@ -147,8 +147,8 @@ fun defaultCoreDataSeed(): CoreDataSeed {
                 zone = "balcony",
                 arrivalWindow = null,
                 mysteryEligible = false,
-                x = 3.0,
-                y = 7.5,
+                x = 0.286,
+                y = 1.0,
             ),
         )
 
