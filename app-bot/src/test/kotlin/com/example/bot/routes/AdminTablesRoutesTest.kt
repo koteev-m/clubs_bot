@@ -800,10 +800,14 @@ class AdminTablesRoutesTest {
 
         override suspend fun findActiveForClub(clubId: Long): AdminHall? =
             halls.firstOrNull { it.clubId == clubId && it.isActive }
-                ?: create(clubId, AdminHallCreate(name = "Auto $clubId", geometryJson = "{}", isActive = true))
+                ?: createHall(clubId, AdminHallCreate(name = "Auto $clubId", geometryJson = "{}", isActive = true), clubId)
 
         override suspend fun create(clubId: Long, request: AdminHallCreate): AdminHall {
-            val nextId = (halls.maxOfOrNull { it.id } ?: 0L) + 1
+            return createHall(clubId, request, null)
+        }
+
+        private fun createHall(clubId: Long, request: AdminHallCreate, idOverride: Long?): AdminHall {
+            val nextId = idOverride ?: (halls.maxOfOrNull { it.id } ?: 0L) + 1
             val hall =
                 AdminHall(
                     id = nextId,

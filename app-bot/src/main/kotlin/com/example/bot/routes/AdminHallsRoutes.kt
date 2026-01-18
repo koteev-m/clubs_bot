@@ -5,6 +5,7 @@ import com.example.bot.admin.AdminHallCreate
 import com.example.bot.admin.AdminHallUpdate
 import com.example.bot.admin.AdminHallsRepository
 import com.example.bot.admin.AdminClubsRepository
+import com.example.bot.admin.InvalidHallGeometryException
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
@@ -118,14 +119,22 @@ fun Application.adminHallsRoutes(
                         val hasActive = adminHallsRepository.findActiveForClub(clubId) != null
                         val shouldBeActive = payload.isActive || !hasActive
                         val created =
-                            adminHallsRepository.create(
-                                clubId,
-                                AdminHallCreate(
-                                    name = trimmedName,
-                                    geometryJson = payload.geometryJson,
-                                    isActive = shouldBeActive,
-                                ),
-                            )
+                            try {
+                                adminHallsRepository.create(
+                                    clubId,
+                                    AdminHallCreate(
+                                        name = trimmedName,
+                                        geometryJson = payload.geometryJson,
+                                        isActive = shouldBeActive,
+                                    ),
+                                )
+                            } catch (_: InvalidHallGeometryException) {
+                                return@post call.respondError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.validation_error,
+                                    details = mapOf("geometryJson" to "invalid_zones"),
+                                )
+                            }
                         logger.info("admin.halls.create club_id={} hall_id={} by={}", clubId, created.id, call.rbacContext().user.id)
                         call.respond(HttpStatusCode.Created, created.toResponse())
                     }
@@ -160,13 +169,21 @@ fun Application.adminHallsRoutes(
                         }
 
                         val updated =
-                            adminHallsRepository.update(
-                                hallId,
-                                AdminHallUpdate(
-                                    name = trimmedName,
-                                    geometryJson = payload.geometryJson,
-                                ),
-                            )
+                            try {
+                                adminHallsRepository.update(
+                                    hallId,
+                                    AdminHallUpdate(
+                                        name = trimmedName,
+                                        geometryJson = payload.geometryJson,
+                                    ),
+                                )
+                            } catch (_: InvalidHallGeometryException) {
+                                return@patch call.respondError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.validation_error,
+                                    details = mapOf("geometryJson" to "invalid_zones"),
+                                )
+                            }
                                 ?: return@patch call.respondError(HttpStatusCode.NotFound, ErrorCodes.hall_not_found)
 
                         logger.info("admin.halls.update club_id={} hall_id={} by={}", hall.clubId, hallId, call.rbacContext().user.id)

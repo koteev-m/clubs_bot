@@ -1,6 +1,7 @@
 package com.example.bot.data.layout
 
 import com.example.bot.data.db.withRetriedTx
+import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.layout.AdminTableCreate
 import com.example.bot.layout.AdminTableUpdate
 import com.example.bot.layout.AdminTablesRepository
@@ -10,6 +11,7 @@ import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
+import com.example.bot.layout.TableNumberConflictException
 import com.example.bot.layout.Zone
 import com.example.bot.layout.parseArrivalWindowOrNull
 import com.example.bot.layout.toRangeString
@@ -28,6 +30,7 @@ import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.selectAll
@@ -236,22 +239,29 @@ class LayoutDbRepository(
                     .maxOfOrNull { it[HallTablesTable.tableNumber] }
                     ?.plus(1) ?: 1L
         val newId =
-            HallTablesTable.insertAndGetId {
-                it[HallTablesTable.hallId] = hallId
-                it[tableNumber] = nextNumber.toInt()
-                it[label] = request.label
-                it[capacity] = request.capacity
-                it[minimumTier] = "standard"
-                it[minDeposit] = request.minDeposit
-                it[zoneId] = request.zone ?: defaultZoneId(hallId)
-                it[zone] = request.zone
-                it[arrivalWindow] = request.arrivalWindow?.toRangeString()
-                it[mysteryEligible] = request.mysteryEligible
-                it[x] = request.x ?: 0.5
-                it[y] = request.y ?: 0.5
-                it[isActive] = true
-                it[createdAt] = nowOffset
-                it[updatedAt] = nowOffset
+            try {
+                HallTablesTable.insertAndGetId {
+                    it[HallTablesTable.hallId] = hallId
+                    it[tableNumber] = nextNumber.toInt()
+                    it[label] = request.label
+                    it[capacity] = request.capacity
+                    it[minimumTier] = "standard"
+                    it[minDeposit] = request.minDeposit
+                    it[zoneId] = request.zone ?: defaultZoneId(hallId)
+                    it[zone] = request.zone
+                    it[arrivalWindow] = request.arrivalWindow?.toRangeString()
+                    it[mysteryEligible] = request.mysteryEligible
+                    it[x] = request.x ?: 0.5
+                    it[y] = request.y ?: 0.5
+                    it[isActive] = true
+                    it[createdAt] = nowOffset
+                    it[updatedAt] = nowOffset
+                }
+            } catch (error: Throwable) {
+                if (error.isUniqueViolation()) {
+                    throw TableNumberConflictException()
+                }
+                throw error
             }
         bumpHallRevision(hallId, nowOffset)
         return loadTableById(hallId, newId.value) ?: error("Failed to create table")
@@ -261,20 +271,27 @@ class LayoutDbRepository(
         val existing = loadTableById(hallId, request.id) ?: return null
         val now = clock.instant()
         val nowOffset = now.toOffsetDateTime()
-        HallTablesTable.update({ (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq request.id) }) {
-            request.label?.let { value -> it[label] = value }
-            request.capacity?.let { value -> it[capacity] = value }
-            request.minDeposit?.let { value -> it[minDeposit] = value }
-            request.zone?.let { value ->
-                it[zoneId] = value
-                it[zone] = value
+        try {
+            HallTablesTable.update({ (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq request.id) }) {
+                request.label?.let { value -> it[label] = value }
+                request.capacity?.let { value -> it[capacity] = value }
+                request.minDeposit?.let { value -> it[minDeposit] = value }
+                request.zone?.let { value ->
+                    it[zoneId] = value
+                    it[zone] = value
+                }
+                request.tableNumber?.let { value -> it[tableNumber] = value }
+                request.x?.let { value -> it[x] = value }
+                request.y?.let { value -> it[y] = value }
+                it[arrivalWindow] = request.arrivalWindow?.toRangeString() ?: existing.arrivalWindow?.toRangeString()
+                request.mysteryEligible?.let { value -> it[mysteryEligible] = value }
+                it[updatedAt] = nowOffset
             }
-            request.tableNumber?.let { value -> it[tableNumber] = value }
-            request.x?.let { value -> it[x] = value }
-            request.y?.let { value -> it[y] = value }
-            it[arrivalWindow] = request.arrivalWindow?.toRangeString() ?: existing.arrivalWindow?.toRangeString()
-            request.mysteryEligible?.let { value -> it[mysteryEligible] = value }
-            it[updatedAt] = nowOffset
+        } catch (error: Throwable) {
+            if (error.isUniqueViolation()) {
+                throw TableNumberConflictException()
+            }
+            throw error
         }
         bumpHallRevision(hallId, nowOffset)
         return loadTableById(hallId, request.id)
@@ -306,17 +323,9 @@ class LayoutDbRepository(
     }
 
     private fun bumpHallRevision(hallId: Long, now: OffsetDateTime) {
-        val currentRevision =
-            HallsTable
-                .selectAll()
-                .where { HallsTable.id eq hallId }
-                .limit(1)
-                .firstOrNull()
-                ?.get(HallsTable.layoutRevision)
-                ?: return
         val updated =
             HallsTable.update({ HallsTable.id eq hallId }) {
-                it[layoutRevision] = currentRevision + 1
+                it[layoutRevision] = HallsTable.layoutRevision + 1
                 it[updatedAt] = now
             }
         if (updated == 0) {
