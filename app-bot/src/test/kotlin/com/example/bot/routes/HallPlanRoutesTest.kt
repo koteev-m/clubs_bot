@@ -9,6 +9,7 @@ import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.http.ErrorCodes
 import com.example.bot.layout.ClubLayout
 import com.example.bot.layout.HallPlan
+import com.example.bot.layout.HallPlanMeta
 import com.example.bot.layout.HallPlansRepository
 import com.example.bot.layout.LayoutAssets
 import com.example.bot.layout.LayoutAssetsRepository
@@ -150,12 +151,14 @@ class HallPlanRoutesTest {
         assertEquals(bytes.toList(), response.bodyAsBytes().toList())
         assertTrue(!etag.isNullOrBlank())
 
+        plansRepo.getPlanForClubCalls = 0
         val cached =
             client.get("/api/clubs/1/halls/1/plan") {
                 header("X-Telegram-Init-Data", "init")
                 header(HttpHeaders.IfNoneMatch, etag!!)
             }
         assertEquals(HttpStatusCode.NotModified, cached.status)
+        assertEquals(0, plansRepo.getPlanForClubCalls)
 
         val afterLayout = client.get("/api/clubs/1/layout") { header("X-Telegram-Init-Data", "init") }
         val afterEtag = afterLayout.headers[HttpHeaders.ETag]
@@ -186,7 +189,7 @@ class HallPlanRoutesTest {
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
                 adminHallPlanRoutes(hallsRepo, plansRepo, botTokenProvider = { "test" })
-                hallPlanRoutes(hallsRepo, plansRepo)
+                hallPlanRoutes(plansRepo)
                 layoutRoutes(layoutRepo, assetsRepo)
             }
 
@@ -304,6 +307,7 @@ class HallPlanRoutesTest {
         private val clock: Clock,
     ) : HallPlansRepository {
         private val plans = mutableMapOf<Long, HallPlan>()
+        var getPlanForClubCalls: Int = 0
 
         override suspend fun upsertPlan(
             hallId: Long,
@@ -330,9 +334,23 @@ class HallPlanRoutesTest {
         }
 
         override suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan? {
+            getPlanForClubCalls += 1
             val hall = hallsRepository.getById(hallId) ?: return null
             if (hall.clubId != clubId) return null
             return plans[hallId]
+        }
+
+        override suspend fun getPlanMetaForClub(clubId: Long, hallId: Long): HallPlanMeta? {
+            val hall = hallsRepository.getById(hallId) ?: return null
+            if (hall.clubId != clubId) return null
+            val plan = plans[hallId] ?: return null
+            return HallPlanMeta(
+                hallId = hallId,
+                contentType = plan.contentType,
+                sha256 = plan.sha256,
+                sizeBytes = plan.sizeBytes,
+                updatedAt = plan.updatedAt,
+            )
         }
     }
 }

@@ -6,7 +6,6 @@ import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.matchesEtag
 import com.example.bot.http.respondError
-import com.example.bot.layout.HallPlan
 import com.example.bot.layout.HallPlansRepository
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.miniAppBotTokenRequired
@@ -124,7 +123,6 @@ fun Application.adminHallPlanRoutes(
 }
 
 fun Application.hallPlanRoutes(
-    adminHallsRepository: AdminHallsRepository,
     hallPlansRepository: HallPlansRepository,
 ) {
     val logger = LoggerFactory.getLogger("HallPlanRoutes")
@@ -134,14 +132,13 @@ fun Application.hallPlanRoutes(
             withMiniAppAuth { miniAppBotTokenRequired() }
 
             route("/clubs/{clubId}/halls/{hallId}/plan") {
-                get { call.handleHallPlanGet(adminHallsRepository, hallPlansRepository, logger) }
+                get { call.handleHallPlanGet(hallPlansRepository, logger) }
             }
         }
     }
 }
 
 private suspend fun ApplicationCall.handleHallPlanGet(
-    adminHallsRepository: AdminHallsRepository,
     hallPlansRepository: HallPlansRepository,
     logger: org.slf4j.Logger,
 ) {
@@ -151,24 +148,26 @@ private suspend fun ApplicationCall.handleHallPlanGet(
         return respondPlanError(HttpStatusCode.NotFound, ErrorCodes.not_found)
     }
 
-    val hall = adminHallsRepository.getById(hallId)
-    if (hall == null || hall.clubId != clubId) {
-        return respondPlanError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+    val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
+    if (ifNoneMatch != null) {
+        val meta =
+            hallPlansRepository.getPlanMetaForClub(clubId, hallId)
+                ?: return respondPlanError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+        val etag = planEtag(meta.sha256)
+        if (matchesEtag(ifNoneMatch, etag)) {
+            logger.debug("hall_plan.not_modified clubId={} hallId={} etag={}", clubId, hallId, etag)
+            response.headers.append(HttpHeaders.ETag, etag, safeOnly = false)
+            response.headers.append(HttpHeaders.CacheControl, PLAN_CACHE_CONTROL)
+            respond(HttpStatusCode.NotModified)
+            return
+        }
     }
 
     val plan =
         hallPlansRepository.getPlanForClub(clubId, hallId)
             ?: return respondPlanError(HttpStatusCode.NotFound, ErrorCodes.not_found)
 
-    val etag = planEtag(plan)
-    val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
-    if (matchesEtag(ifNoneMatch, etag)) {
-        logger.debug("hall_plan.not_modified clubId={} hallId={} etag={}", clubId, hallId, etag)
-        response.headers.append(HttpHeaders.ETag, etag, safeOnly = false)
-        response.headers.append(HttpHeaders.CacheControl, PLAN_CACHE_CONTROL)
-        respond(HttpStatusCode.NotModified)
-        return
-    }
+    val etag = planEtag(plan.sha256)
 
     logger.debug("hall_plan.ok clubId={} hallId={} etag={}", clubId, hallId, etag)
     response.headers.append(HttpHeaders.ETag, etag, safeOnly = false)
@@ -260,7 +259,7 @@ private suspend fun readLimited(channelProvider: () -> ByteReadChannel, maxBytes
     return bytes
 }
 
-private fun planEtag(plan: HallPlan): String = "\"plan-sha256-${plan.sha256}\""
+private fun planEtag(sha256: String): String = "\"plan-sha256-$sha256\""
 
 private fun sha256Hex(bytes: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(bytes)

@@ -12,6 +12,14 @@ data class HallPlan(
     val updatedAt: Instant,
 )
 
+data class HallPlanMeta(
+    val hallId: Long,
+    val contentType: String,
+    val sha256: String,
+    val sizeBytes: Long,
+    val updatedAt: Instant,
+)
+
 interface HallPlansRepository {
     suspend fun upsertPlan(
         hallId: Long,
@@ -22,4 +30,6 @@ interface HallPlansRepository {
     ): HallPlan
 
     suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan?
+
+    suspend fun getPlanMetaForClub(clubId: Long, hallId: Long): HallPlanMeta?
 }

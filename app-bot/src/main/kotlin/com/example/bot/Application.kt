@@ -277,7 +277,7 @@ fun Application.module() {
     adminTablesRoutes(adminTablesRepository = adminTablesRepository, adminHallsRepository = adminHallsRepository)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository, layoutAssetsRepository = layoutAssetsRepository)
-    hallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)
+    hallPlanRoutes(hallPlansRepository = hallPlansRepository)
     ownerHealthRoutes(
         service = ownerHealthService,
         layoutRepository = layoutRepository,
