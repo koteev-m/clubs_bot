@@ -31,7 +31,7 @@ const removeAdminMode = () => {
 };
 
 export default function AdminShell() {
-  const { addToast } = useUiStore();
+  const addToast = useUiStore((state) => state.addToast);
   const [clubId, setClubId] = useState<number | null>(() => parseClubId());
   const [forbidden, setForbidden] = useState(false);
   const [toastShown, setToastShown] = useState(false);

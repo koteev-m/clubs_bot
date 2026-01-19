@@ -14,6 +14,10 @@ import {
 } from '../../api/admin.api';
 import { useUiStore } from '../../../../shared/store/ui';
 
+vi.mock('../../../../widgets/ToastHost', () => ({
+  default: () => null,
+}));
+
 vi.mock('../../api/admin.api', async () => {
   const actual = await vi.importActual<typeof import('../../api/admin.api')>('../../api/admin.api');
   return {
@@ -56,7 +60,7 @@ describe('admin screens', () => {
     render(<AdminShell />);
 
     expect(await screen.findByText('Нет доступа к админ-панели')).toBeTruthy();
-    expect(screen.getByText('Недостаточно прав')).toBeTruthy();
+    expect(useUiStore.getState().toasts).toContain('Недостаточно прав');
     expect(screen.queryByText(/"code"/i)).toBeNull();
   });
 

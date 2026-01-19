@@ -27,7 +27,7 @@ const emptyForm = {
 };
 
 export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHallsScreenProps) {
-  const { addToast } = useUiStore();
+  const addToast = useUiStore((state) => state.addToast);
   const [halls, setHalls] = useState<AdminHall[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -38,8 +38,16 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
   const [editingHallId, setEditingHallId] = useState<number | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const requestIdRef = useRef(0);
+  const mountedRef = useRef(false);
 
   const reload = useCallback(() => setRefreshIndex((value) => value + 1), []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -93,6 +101,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
           payload.geometryJson = form.geometryJson;
         }
         await updateHall(editingHallId, payload);
+        if (!mountedRef.current) return;
         addToast('Зал обновлен');
       } else {
         await createHall(clubId, {
@@ -100,8 +109,10 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
           geometryJson: form.geometryJson,
           isActive: form.isActive,
         });
+        if (!mountedRef.current) return;
         addToast('Зал создан');
       }
+      if (!mountedRef.current) return;
       handleReset();
       reload();
     } catch (error) {
@@ -113,12 +124,16 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
       }
       const validation = mapValidationErrors(normalized);
       if (validation) {
+        if (!mountedRef.current) return;
         setFieldErrors(validation);
       } else {
+        if (!mountedRef.current) return;
         addToast(mapAdminErrorMessage(normalized));
       }
     } finally {
-      setBusy(false);
+      if (mountedRef.current) {
+        setBusy(false);
+      }
     }
   }, [addToast, busy, clubId, editingHallId, form, formMode, handleReset, onForbidden, reload]);
 
@@ -130,6 +145,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
       setBusy(true);
       try {
         await deleteHall(hallId);
+        if (!mountedRef.current) return;
         addToast('Зал удален');
         reload();
       } catch (error) {
@@ -139,9 +155,12 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
           onForbidden();
           return;
         }
+        if (!mountedRef.current) return;
         addToast(mapAdminErrorMessage(normalized));
       } finally {
-        setBusy(false);
+        if (mountedRef.current) {
+          setBusy(false);
+        }
       }
     },
     [addToast, busy, onForbidden, reload],
@@ -153,6 +172,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
       setBusy(true);
       try {
         await makeHallActive(hallId);
+        if (!mountedRef.current) return;
         addToast('Зал активирован');
         reload();
       } catch (error) {
@@ -162,9 +182,12 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
           onForbidden();
           return;
         }
+        if (!mountedRef.current) return;
         addToast(mapAdminErrorMessage(normalized));
       } finally {
-        setBusy(false);
+        if (mountedRef.current) {
+          setBusy(false);
+        }
       }
     },
     [addToast, busy, onForbidden, reload],
