@@ -274,17 +274,46 @@ export const fetchHallPlanBlob = async (
   signal?: AbortSignal,
 ): Promise<{ status: 200 | 304 | 404; blob?: Blob; etag?: string | null }> => {
   try {
-    const response = await http.get(`/api/clubs/${clubId}/halls/${hallId}/plan`, {
-      responseType: 'blob',
+    const response = await http.get<ArrayBuffer>(`/api/clubs/${clubId}/halls/${hallId}/plan`, {
+      responseType: 'arraybuffer',
       signal,
       headers: etag ? { 'If-None-Match': etag } : undefined,
-      validateStatus: (status) => status === 200 || status === 304 || status === 404,
+      validateStatus: () => true,
     });
-    return {
-      status: response.status as 200 | 304 | 404,
-      blob: response.status === 200 ? (response.data as Blob) : undefined,
-      etag: response.headers['etag'] ?? null,
-    };
+    if (response.status === 200) {
+      const contentType =
+        typeof response.headers['content-type'] === 'string'
+          ? response.headers['content-type']
+          : 'application/octet-stream';
+      const blob = new Blob([response.data], { type: contentType || 'application/octet-stream' });
+      return {
+        status: 200,
+        blob,
+        etag: response.headers['etag'] ?? null,
+      };
+    }
+    if (response.status === 304 || response.status === 404) {
+      return {
+        status: response.status,
+        etag: response.headers['etag'] ?? null,
+      };
+    }
+    const contentType = typeof response.headers['content-type'] === 'string' ? response.headers['content-type'] : '';
+    let message = 'Ошибка запроса';
+    let code: string | undefined;
+    let details: Record<string, string> | undefined;
+    if (contentType.includes('application/json')) {
+      try {
+        const decoded = new TextDecoder('utf-8').decode(new Uint8Array(response.data));
+        const payload = JSON.parse(decoded) as ApiErrorPayload;
+        message = payload.message ?? message;
+        code = payload.code;
+        details = payload.details ?? undefined;
+      } catch {
+        // ignore parsing errors
+      }
+    }
+    throw new AdminApiError(message, { status: response.status, code, details });
   } catch (error) {
     throw normalizeAdminError(error);
   }

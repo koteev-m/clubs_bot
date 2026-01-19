@@ -219,6 +219,63 @@ describe('hall editor interactions', () => {
     });
   });
 
+  it('creates second table after clearing selection', async () => {
+    setupPlanMocks();
+    vi.mocked(listHallTables).mockResolvedValue([]);
+    vi.mocked(createHallTable)
+      .mockResolvedValueOnce({
+        id: 1,
+        hallId: 10,
+        clubId: 2,
+        label: 'Table 1',
+        minDeposit: 0,
+        capacity: 2,
+        zone: null,
+        zoneName: null,
+        arrivalWindow: null,
+        mysteryEligible: false,
+        tableNumber: 1,
+        x: 0.5,
+        y: 0.5,
+      })
+      .mockResolvedValueOnce({
+        id: 2,
+        hallId: 10,
+        clubId: 2,
+        label: 'Table 2',
+        minDeposit: 0,
+        capacity: 2,
+        zone: null,
+        zoneName: null,
+        arrivalWindow: null,
+        mysteryEligible: false,
+        tableNumber: 2,
+        x: 0.6,
+        y: 0.6,
+      });
+
+    render(<HallEditorScreen clubId={2} hallId={10} onBack={vi.fn()} />);
+
+    const stage = await screen.findByTestId('hall-plan-stage');
+    const image = await screen.findByTestId('hall-plan-image');
+    mockStageRect(stage);
+    fireEvent.load(image);
+
+    fireEvent.click(stage, { clientX: 100, clientY: 50 });
+
+    await waitFor(() => {
+      expect(createHallTable).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Снять выделение' }));
+
+    fireEvent.click(stage, { clientX: 120, clientY: 60 });
+
+    await waitFor(() => {
+      expect(createHallTable).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('disables interactions in preview mode', async () => {
     setupPlanMocks();
     setupTablesMock();

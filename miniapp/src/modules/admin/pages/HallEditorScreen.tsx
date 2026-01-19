@@ -59,11 +59,11 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
 
   useEffect(
     () => () => {
-      if (planUrl) {
-        URL.revokeObjectURL(planUrl);
+      if (planUrlRef.current) {
+        URL.revokeObjectURL(planUrlRef.current);
       }
     },
-    [planUrl],
+    [],
   );
 
   useEffect(() => {
@@ -261,6 +261,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
     async (tableId: number, coords: { x: number; y: number }) => {
       if (busy || previewMode) return;
       setBusy(true);
+      setTables((prev) => prev.map((table) => (table.id === tableId ? { ...table, ...coords } : table)));
       try {
         const updated = await updateHallTable(hallId, tableId, { x: coords.x, y: coords.y });
         if (!mountedRef.current) return;
@@ -278,6 +279,11 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
     },
     [addToast, busy, hallId, previewMode, reload],
   );
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedTableId(null);
+    setFieldErrors({});
+  }, []);
 
   const handleSaveMetadata = useCallback(async () => {
     if (!selectedTable || busy || previewMode) return;
@@ -394,7 +400,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
               planUrl={planUrl}
               tables={tables}
               selectedTableId={selectedTableId}
-              readOnly={previewMode}
+              readOnly={isReadOnly}
               onSelectTable={(tableId) => setSelectedTableId(tableId)}
               onCreateTable={handleCreateTable}
               onMoveTable={handleMoveTable}
@@ -453,7 +459,19 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
           </div>
         )}
         <div className="mt-6 space-y-3">
-          <p className="text-sm font-medium text-gray-800">Выбранный стол</p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-800">Выбранный стол</p>
+            {selectedTable && (
+              <button
+                type="button"
+                className="text-xs text-blue-600"
+                onClick={handleClearSelection}
+                disabled={busy}
+              >
+                Снять выделение
+              </button>
+            )}
+          </div>
           {!selectedTable && <p className="text-sm text-gray-500">Выберите стол на плане.</p>}
           {selectedTable && (
             <div className="space-y-3">
