@@ -15,7 +15,6 @@ import { mapAdminErrorMessage, mapValidationErrors, FieldErrors } from '../utils
 type ClubHallsScreenProps = {
   clubId: number;
   onBack: () => void;
-  onForbidden: () => void;
 };
 
 type FormMode = 'create' | 'edit';
@@ -26,7 +25,7 @@ const emptyForm = {
   isActive: false,
 };
 
-export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHallsScreenProps) {
+export default function ClubHallsScreen({ clubId, onBack }: ClubHallsScreenProps) {
   const addToast = useUiStore((state) => state.addToast);
   const [halls, setHalls] = useState<AdminHall[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -64,7 +63,8 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
         if (requestId !== requestIdRef.current) return;
         if (isAbortError(error)) return;
         if (error.status === 403) {
-          onForbidden();
+          addToast(mapAdminErrorMessage(error));
+          onBack();
           return;
         }
         const message = mapAdminErrorMessage(error);
@@ -73,7 +73,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
         addToast(message);
       });
     return () => controller.abort();
-  }, [addToast, clubId, onForbidden, refreshIndex]);
+  }, [addToast, clubId, onBack, refreshIndex]);
 
   const handleEdit = useCallback((hall: AdminHall) => {
     setFormMode('edit');
@@ -119,7 +119,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
       const normalized = error as AdminApiError;
       if (isAbortError(normalized)) return;
       if (normalized.status === 403) {
-        onForbidden();
+        addToast(mapAdminErrorMessage(normalized));
         return;
       }
       const validation = mapValidationErrors(normalized);
@@ -135,7 +135,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
         setBusy(false);
       }
     }
-  }, [addToast, busy, clubId, editingHallId, form, formMode, handleReset, onForbidden, reload]);
+  }, [addToast, busy, clubId, editingHallId, form, formMode, handleReset, reload]);
 
   const handleDelete = useCallback(
     async (hallId: number) => {
@@ -152,7 +152,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
         const normalized = error as AdminApiError;
         if (isAbortError(normalized)) return;
         if (normalized.status === 403) {
-          onForbidden();
+          addToast(mapAdminErrorMessage(normalized));
           return;
         }
         if (!mountedRef.current) return;
@@ -163,7 +163,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
         }
       }
     },
-    [addToast, busy, onForbidden, reload],
+    [addToast, busy, reload],
   );
 
   const handleMakeActive = useCallback(
@@ -179,7 +179,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
         const normalized = error as AdminApiError;
         if (isAbortError(normalized)) return;
         if (normalized.status === 403) {
-          onForbidden();
+          addToast(mapAdminErrorMessage(normalized));
           return;
         }
         if (!mountedRef.current) return;
@@ -190,7 +190,7 @@ export default function ClubHallsScreen({ clubId, onBack, onForbidden }: ClubHal
         }
       }
     },
-    [addToast, busy, onForbidden, reload],
+    [addToast, busy, reload],
   );
 
   const formTitle = useMemo(() => (formMode === 'edit' ? 'Редактировать зал' : 'Создать зал'), [formMode]);

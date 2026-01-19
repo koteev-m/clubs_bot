@@ -139,6 +139,24 @@ describe('admin screens', () => {
     });
   });
 
+  it('shows toast on create club forbidden without switching to global forbidden', async () => {
+    vi.mocked(listClubs).mockResolvedValueOnce([]);
+    vi.mocked(createClub).mockRejectedValue(new AdminApiError('Forbidden', { status: 403, code: 'forbidden' }));
+    const onForbidden = vi.fn();
+
+    render(<ClubsScreen onSelectClub={vi.fn()} onForbidden={onForbidden} />);
+
+    fireEvent.change(await screen.findByLabelText('Название'), { target: { value: 'Club' } });
+    fireEvent.change(screen.getByLabelText('Город'), { target: { value: 'City' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+
+    await waitFor(() => {
+      expect(useUiStore.getState().toasts).toContain('Недостаточно прав');
+    });
+    expect(onForbidden).not.toHaveBeenCalled();
+    expect(screen.queryByText('Нет доступа к админ-панели')).toBeNull();
+  });
+
   it('makes hall active and updates UI', async () => {
     const inactiveHall: AdminHall = {
       id: 10,
@@ -154,7 +172,7 @@ describe('admin screens', () => {
     vi.mocked(listHalls).mockResolvedValueOnce([inactiveHall]).mockResolvedValueOnce([activeHall]);
     vi.mocked(makeHallActive).mockResolvedValue(activeHall);
 
-    render(<ClubHallsScreen clubId={7} onBack={vi.fn()} onForbidden={vi.fn()} />);
+    render(<ClubHallsScreen clubId={7} onBack={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Сделать активным' }));
 
@@ -162,5 +180,18 @@ describe('admin screens', () => {
       expect(useUiStore.getState().toasts).toContain('Зал активирован');
     });
     expect(await screen.findByText('Активный')).toBeTruthy();
+  });
+
+  it('navigates back on list halls forbidden without switching to global forbidden', async () => {
+    vi.mocked(listHalls).mockRejectedValue(new AdminApiError('Forbidden', { status: 403, code: 'forbidden' }));
+    const onBack = vi.fn();
+
+    render(<ClubHallsScreen clubId={3} onBack={onBack} />);
+
+    await waitFor(() => {
+      expect(useUiStore.getState().toasts).toContain('Недостаточно прав');
+    });
+    expect(onBack).toHaveBeenCalled();
+    expect(screen.queryByText('Нет доступа к админ-панели')).toBeNull();
   });
 });

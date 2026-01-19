@@ -69,7 +69,7 @@ export default function AdminShell() {
       return <AdminForbidden onExit={removeAdminMode} />;
     }
     if (clubId) {
-      return <ClubHallsScreen clubId={clubId} onBack={handleBackToClubs} onForbidden={handleForbidden} />;
+      return <ClubHallsScreen clubId={clubId} onBack={handleBackToClubs} />;
     }
     return <ClubsScreen onSelectClub={handleSelectClub} onForbidden={handleForbidden} />;
   }, [clubId, forbidden, handleBackToClubs, handleForbidden, handleSelectClub]);

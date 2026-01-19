@@ -113,7 +113,7 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
       const normalized = error as AdminApiError;
       if (isAbortError(normalized)) return;
       if (normalized.status === 403) {
-        onForbidden();
+        addToast(mapAdminErrorMessage(normalized));
         return;
       }
       const validation = mapValidationErrors(normalized);
@@ -129,7 +129,7 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
         setBusy(false);
       }
     }
-  }, [addToast, busy, editingClubId, form, formMode, handleReset, onForbidden, reload]);
+  }, [addToast, busy, editingClubId, form, formMode, handleReset, reload]);
 
   const handleDelete = useCallback(
     async (clubId: number) => {
@@ -146,7 +146,7 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
         const normalized = error as AdminApiError;
         if (isAbortError(normalized)) return;
         if (normalized.status === 403) {
-          onForbidden();
+          addToast(mapAdminErrorMessage(normalized));
           return;
         }
         if (!mountedRef.current) return;
@@ -157,7 +157,7 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
         }
       }
     },
-    [addToast, busy, onForbidden, reload],
+    [addToast, busy, reload],
   );
 
   const formTitle = useMemo(() => (formMode === 'edit' ? 'Редактировать клуб' : 'Создать клуб'), [formMode]);
