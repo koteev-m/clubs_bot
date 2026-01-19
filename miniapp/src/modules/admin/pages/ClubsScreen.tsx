@@ -25,7 +25,7 @@ const emptyForm = {
 };
 
 export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenProps) {
-  const { addToast } = useUiStore();
+  const addToast = useUiStore((state) => state.addToast);
   const [clubs, setClubs] = useState<AdminClub[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -36,8 +36,16 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
   const [editingClubId, setEditingClubId] = useState<number | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const requestIdRef = useRef(0);
+  const mountedRef = useRef(false);
 
   const reload = useCallback(() => setRefreshIndex((value) => value + 1), []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -91,11 +99,14 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
           city: form.city,
           isActive: form.isActive,
         });
+        if (!mountedRef.current) return;
         addToast('Клуб обновлен');
       } else {
         await createClub({ name: form.name, city: form.city, isActive: form.isActive });
+        if (!mountedRef.current) return;
         addToast('Клуб создан');
       }
+      if (!mountedRef.current) return;
       handleReset();
       reload();
     } catch (error) {
@@ -107,12 +118,16 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
       }
       const validation = mapValidationErrors(normalized);
       if (validation) {
+        if (!mountedRef.current) return;
         setFieldErrors(validation);
       } else {
+        if (!mountedRef.current) return;
         addToast(mapAdminErrorMessage(normalized));
       }
     } finally {
-      setBusy(false);
+      if (mountedRef.current) {
+        setBusy(false);
+      }
     }
   }, [addToast, busy, editingClubId, form, formMode, handleReset, onForbidden, reload]);
 
@@ -124,6 +139,7 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
       setBusy(true);
       try {
         await deleteClub(clubId);
+        if (!mountedRef.current) return;
         addToast('Клуб удален');
         reload();
       } catch (error) {
@@ -133,9 +149,12 @@ export default function ClubsScreen({ onSelectClub, onForbidden }: ClubsScreenPr
           onForbidden();
           return;
         }
+        if (!mountedRef.current) return;
         addToast(mapAdminErrorMessage(normalized));
       } finally {
-        setBusy(false);
+        if (mountedRef.current) {
+          setBusy(false);
+        }
       }
     },
     [addToast, busy, onForbidden, reload],
