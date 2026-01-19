@@ -67,6 +67,16 @@ export default function ClubHallsScreen({ clubId, onBack }: ClubHallsScreenProps
           onBack();
           return;
         }
+        if (error.status === 404 && error.code === 'club_not_found') {
+          addToast(mapAdminErrorMessage(error));
+          onBack();
+          return;
+        }
+        if (error.status === 400 && error.code === 'validation_error') {
+          addToast(mapAdminErrorMessage(error));
+          onBack();
+          return;
+        }
         const message = mapAdminErrorMessage(error);
         setErrorMessage(message);
         setStatus('error');
