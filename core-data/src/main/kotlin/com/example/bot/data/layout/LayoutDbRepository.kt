@@ -36,7 +36,6 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertAndGetId
-import org.jetbrains.exposed.sql.innerJoin
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
@@ -215,14 +214,28 @@ class LayoutDbRepository(
                     it[HallPlansTable.updatedAt] = nowOffset
                 }
             if (updated == 0) {
-                HallPlansTable.insert {
-                    it[HallPlansTable.hallId] = hallId
-                    it[HallPlansTable.bytes] = bytes
-                    it[HallPlansTable.contentType] = contentType
-                    it[HallPlansTable.sha256] = sha256
-                    it[HallPlansTable.sizeBytes] = sizeBytes
-                    it[HallPlansTable.createdAt] = nowOffset
-                    it[HallPlansTable.updatedAt] = nowOffset
+                try {
+                    HallPlansTable.insert {
+                        it[HallPlansTable.hallId] = hallId
+                        it[HallPlansTable.bytes] = bytes
+                        it[HallPlansTable.contentType] = contentType
+                        it[HallPlansTable.sha256] = sha256
+                        it[HallPlansTable.sizeBytes] = sizeBytes
+                        it[HallPlansTable.createdAt] = nowOffset
+                        it[HallPlansTable.updatedAt] = nowOffset
+                    }
+                } catch (error: Throwable) {
+                    if (error.isUniqueViolation()) {
+                        HallPlansTable.update({ HallPlansTable.hallId eq hallId }) {
+                            it[HallPlansTable.bytes] = bytes
+                            it[HallPlansTable.contentType] = contentType
+                            it[HallPlansTable.sha256] = sha256
+                            it[HallPlansTable.sizeBytes] = sizeBytes
+                            it[HallPlansTable.updatedAt] = nowOffset
+                        }
+                    } else {
+                        throw error
+                    }
                 }
             }
             HallsTable.update({ HallsTable.id eq hallId }) {
@@ -238,9 +251,18 @@ class LayoutDbRepository(
 
     override suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan? =
         withRetriedTx(name = "layout.plan.get", readOnly = true, database = database) {
-            (HallPlansTable innerJoin HallsTable)
+            val hallExists =
+                HallsTable
+                    .selectAll()
+                    .where { (HallsTable.id eq hallId) and (HallsTable.clubId eq clubId) }
+                    .limit(1)
+                    .any()
+            if (!hallExists) {
+                return@withRetriedTx null
+            }
+            HallPlansTable
                 .selectAll()
-                .where { (HallPlansTable.hallId eq hallId) and (HallsTable.clubId eq clubId) }
+                .where { HallPlansTable.hallId eq hallId }
                 .firstOrNull()
                 ?.toHallPlan()
         }
@@ -339,35 +361,36 @@ class LayoutDbRepository(
         val existing = loadTableById(hallId, request.id) ?: return null
         val now = clock.instant()
         val nowOffset = now.toOffsetDateTime()
-        try {
-            val updated =
+        val updated =
+            try {
                 HallTablesTable.update({
                     (HallTablesTable.hallId eq hallId) and
                         (HallTablesTable.id eq request.id) and
                         (HallTablesTable.isActive eq true)
                 }) {
-                request.label?.let { value -> it[label] = value }
-                request.capacity?.let { value -> it[capacity] = value }
-                request.minDeposit?.let { value -> it[minDeposit] = value }
-                request.zone?.let { value ->
-                    it[zoneId] = value
-                    it[zone] = value
+                    request.label?.let { value -> it[label] = value }
+                    request.capacity?.let { value -> it[capacity] = value }
+                    request.minDeposit?.let { value -> it[minDeposit] = value }
+                    request.zone?.let { value ->
+                        it[zoneId] = value
+                        it[zone] = value
+                    }
+                    request.tableNumber?.let { value -> it[tableNumber] = value }
+                    request.x?.let { value -> it[x] = value }
+                    request.y?.let { value -> it[y] = value }
+                    it[arrivalWindow] =
+                        request.arrivalWindow?.toRangeString() ?: existing.arrivalWindow?.toRangeString()
+                    request.mysteryEligible?.let { value -> it[mysteryEligible] = value }
+                    it[updatedAt] = nowOffset
                 }
-                request.tableNumber?.let { value -> it[tableNumber] = value }
-                request.x?.let { value -> it[x] = value }
-                request.y?.let { value -> it[y] = value }
-                it[arrivalWindow] = request.arrivalWindow?.toRangeString() ?: existing.arrivalWindow?.toRangeString()
-                request.mysteryEligible?.let { value -> it[mysteryEligible] = value }
-                it[updatedAt] = nowOffset
+            } catch (error: Throwable) {
+                if (error.isUniqueViolation()) {
+                    throw TableNumberConflictException()
+                }
+                throw error
             }
-            if (updated == 0) {
-                return null
-            }
-        } catch (error: Throwable) {
-            if (error.isUniqueViolation()) {
-                throw TableNumberConflictException()
-            }
-            throw error
+        if (updated == 0) {
+            return null
         }
         bumpHallRevision(hallId, nowOffset)
         return loadTableById(hallId, request.id)
