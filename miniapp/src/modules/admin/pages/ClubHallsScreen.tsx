@@ -15,6 +15,7 @@ import { mapAdminErrorMessage, mapValidationErrors, FieldErrors } from '../utils
 type ClubHallsScreenProps = {
   clubId: number;
   onBack: () => void;
+  onOpenEditor: (hallId: number) => void;
 };
 
 type FormMode = 'create' | 'edit';
@@ -25,7 +26,7 @@ const emptyForm = {
   isActive: false,
 };
 
-export default function ClubHallsScreen({ clubId, onBack }: ClubHallsScreenProps) {
+export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHallsScreenProps) {
   const addToast = useUiStore((state) => state.addToast);
   const [halls, setHalls] = useState<AdminHall[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -331,6 +332,14 @@ export default function ClubHallsScreen({ clubId, onBack }: ClubHallsScreenProps
                     disabled={busy}
                   >
                     Редактировать
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-blue-200 px-3 py-1 text-xs text-blue-600"
+                    onClick={() => onOpenEditor(hall.id)}
+                    disabled={busy}
+                  >
+                    Редактор
                   </button>
                   <button
                     type="button"
