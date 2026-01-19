@@ -9,6 +9,8 @@ import com.example.bot.layout.ClubLayout
 import com.example.bot.layout.LayoutAssets
 import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
+import com.example.bot.layout.HallPlan
+import com.example.bot.layout.HallPlansRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
 import com.example.bot.layout.TableNumberConflictException
@@ -32,7 +34,9 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertAndGetId
+import org.jetbrains.exposed.sql.innerJoin
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
@@ -40,7 +44,7 @@ import org.slf4j.LoggerFactory
 class LayoutDbRepository(
     private val database: Database,
     private val clock: Clock = Clock.systemUTC(),
-) : LayoutRepository, AdminTablesRepository, LayoutAssetsRepository {
+) : LayoutRepository, AdminTablesRepository, LayoutAssetsRepository, HallPlansRepository {
     private val logger = LoggerFactory.getLogger(LayoutDbRepository::class.java)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -192,6 +196,55 @@ class LayoutDbRepository(
                 ?.get(HallsTable.geometryJson)
         }
 
+    override suspend fun upsertPlan(
+        hallId: Long,
+        contentType: String,
+        bytes: ByteArray,
+        sha256: String,
+        sizeBytes: Long,
+    ): HallPlan =
+        withRetriedTx(name = "layout.plan.upsert", database = database) {
+            val now = clock.instant()
+            val nowOffset = now.toOffsetDateTime()
+            val updated =
+                HallPlansTable.update({ HallPlansTable.hallId eq hallId }) {
+                    it[HallPlansTable.bytes] = bytes
+                    it[HallPlansTable.contentType] = contentType
+                    it[HallPlansTable.sha256] = sha256
+                    it[HallPlansTable.sizeBytes] = sizeBytes
+                    it[HallPlansTable.updatedAt] = nowOffset
+                }
+            if (updated == 0) {
+                HallPlansTable.insert {
+                    it[HallPlansTable.hallId] = hallId
+                    it[HallPlansTable.bytes] = bytes
+                    it[HallPlansTable.contentType] = contentType
+                    it[HallPlansTable.sha256] = sha256
+                    it[HallPlansTable.sizeBytes] = sizeBytes
+                    it[HallPlansTable.createdAt] = nowOffset
+                    it[HallPlansTable.updatedAt] = nowOffset
+                }
+            }
+            HallsTable.update({ HallsTable.id eq hallId }) {
+                it[layoutRevision] = HallsTable.layoutRevision + 1
+                it[updatedAt] = nowOffset
+            }
+            HallPlansTable
+                .selectAll()
+                .where { HallPlansTable.hallId eq hallId }
+                .first()
+                .toHallPlan()
+        }
+
+    override suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan? =
+        withRetriedTx(name = "layout.plan.get", readOnly = true, database = database) {
+            (HallPlansTable innerJoin HallsTable)
+                .selectAll()
+                .where { (HallPlansTable.hallId eq hallId) and (HallsTable.clubId eq clubId) }
+                .firstOrNull()
+                ?.toHallPlan()
+        }
+
     private fun loadActiveHall(clubId: Long): HallRow? {
         return HallsTable
             .selectAll()
@@ -207,6 +260,17 @@ class LayoutDbRepository(
             )
         }
     }
+
+    private fun ResultRow.toHallPlan(): HallPlan =
+        HallPlan(
+            hallId = this[HallPlansTable.hallId],
+            bytes = this[HallPlansTable.bytes],
+            contentType = this[HallPlansTable.contentType],
+            sha256 = this[HallPlansTable.sha256],
+            sizeBytes = this[HallPlansTable.sizeBytes],
+            createdAt = this[HallPlansTable.createdAt].toInstant(),
+            updatedAt = this[HallPlansTable.updatedAt].toInstant(),
+        )
 
     private fun requireActiveHall(clubId: Long): HallRow {
         return loadActiveHall(clubId) ?: error("No active hall for club $clubId")

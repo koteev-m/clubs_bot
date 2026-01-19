@@ -1,6 +1,7 @@
 package com.example.bot.data.layout
 
 import org.jetbrains.exposed.dao.id.LongIdTable
+import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
 
@@ -41,4 +42,15 @@ object HallTablesTable : LongIdTable("hall_tables") {
     val isActive = bool("is_active").default(true)
     val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
     val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestamp())
+}
+
+object HallPlansTable : Table("hall_plans") {
+    val hallId = long("hall_id")
+    val bytes = binary("bytes")
+    val contentType = text("content_type")
+    val sha256 = text("sha256")
+    val sizeBytes = long("size_bytes")
+    val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
+    val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestamp())
+    override val primaryKey = PrimaryKey(hallId)
 }
