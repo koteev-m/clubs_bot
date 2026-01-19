@@ -208,4 +208,22 @@ describe('admin screens', () => {
     });
     expect(onBack).toHaveBeenCalled();
   });
+
+  it('navigates back on validation error when listing halls', async () => {
+    vi.mocked(listHalls).mockRejectedValue(
+      new AdminApiError('Bad Request', {
+        status: 400,
+        code: 'validation_error',
+        details: { clubId: 'must_be_positive' },
+      }),
+    );
+    const onBack = vi.fn();
+
+    render(<ClubHallsScreen clubId={-1} onBack={onBack} />);
+
+    await waitFor(() => {
+      expect(useUiStore.getState().toasts).toContain('Некорректный идентификатор');
+    });
+    expect(onBack).toHaveBeenCalled();
+  });
 });
