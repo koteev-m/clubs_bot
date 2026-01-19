@@ -172,7 +172,7 @@ describe('admin screens', () => {
     vi.mocked(listHalls).mockResolvedValueOnce([inactiveHall]).mockResolvedValueOnce([activeHall]);
     vi.mocked(makeHallActive).mockResolvedValue(activeHall);
 
-    render(<ClubHallsScreen clubId={7} onBack={vi.fn()} />);
+    render(<ClubHallsScreen clubId={7} onBack={vi.fn()} onOpenEditor={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Сделать активным' }));
 
@@ -186,7 +186,7 @@ describe('admin screens', () => {
     vi.mocked(listHalls).mockRejectedValue(new AdminApiError('Forbidden', { status: 403, code: 'forbidden' }));
     const onBack = vi.fn();
 
-    render(<ClubHallsScreen clubId={3} onBack={onBack} />);
+    render(<ClubHallsScreen clubId={3} onBack={onBack} onOpenEditor={vi.fn()} />);
 
     await waitFor(() => {
       expect(useUiStore.getState().toasts).toContain('Недостаточно прав');
@@ -201,7 +201,7 @@ describe('admin screens', () => {
     );
     const onBack = vi.fn();
 
-    render(<ClubHallsScreen clubId={404} onBack={onBack} />);
+    render(<ClubHallsScreen clubId={404} onBack={onBack} onOpenEditor={vi.fn()} />);
 
     await waitFor(() => {
       expect(useUiStore.getState().toasts).toContain('Клуб не найден');
@@ -219,7 +219,7 @@ describe('admin screens', () => {
     );
     const onBack = vi.fn();
 
-    render(<ClubHallsScreen clubId={-1} onBack={onBack} />);
+    render(<ClubHallsScreen clubId={-1} onBack={onBack} onOpenEditor={vi.fn()} />);
 
     await waitFor(() => {
       expect(useUiStore.getState().toasts).toContain('Некорректный идентификатор');

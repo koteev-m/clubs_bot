@@ -21,6 +21,22 @@ export type AdminHall = {
   updatedAt: string;
 };
 
+export type AdminTable = {
+  id: number;
+  hallId: number;
+  clubId: number;
+  label: string;
+  minDeposit: number;
+  capacity: number;
+  zone?: string | null;
+  zoneName?: string | null;
+  arrivalWindow?: string | null;
+  mysteryEligible: boolean;
+  tableNumber: number;
+  x: number;
+  y: number;
+};
+
 type ApiErrorPayload = {
   code: string;
   message?: string | null;
@@ -172,6 +188,103 @@ export const makeHallActive = async (hallId: number, signal?: AbortSignal): Prom
   try {
     const response = await http.post<AdminHall>(`/api/admin/halls/${hallId}/make-active`, {}, { signal });
     return response.data;
+  } catch (error) {
+    throw normalizeAdminError(error);
+  }
+};
+
+export const listHallTables = async (hallId: number, signal?: AbortSignal): Promise<AdminTable[]> => {
+  try {
+    const response = await http.get<AdminTable[]>(`/api/admin/halls/${hallId}/tables`, { signal });
+    return response.data;
+  } catch (error) {
+    throw normalizeAdminError(error);
+  }
+};
+
+export const createHallTable = async (
+  hallId: number,
+  payload: {
+    label: string;
+    minDeposit?: number;
+    capacity: number;
+    zone?: string | null;
+    arrivalWindow?: string | null;
+    mysteryEligible?: boolean;
+    tableNumber?: number;
+    x?: number;
+    y?: number;
+  },
+  signal?: AbortSignal,
+): Promise<AdminTable> => {
+  try {
+    const response = await http.post<AdminTable>(`/api/admin/halls/${hallId}/tables`, payload, { signal });
+    return response.data;
+  } catch (error) {
+    throw normalizeAdminError(error);
+  }
+};
+
+export const updateHallTable = async (
+  hallId: number,
+  tableId: number,
+  payload: {
+    label?: string;
+    minDeposit?: number;
+    capacity?: number;
+    zone?: string | null;
+    arrivalWindow?: string | null;
+    mysteryEligible?: boolean;
+    tableNumber?: number;
+    x?: number;
+    y?: number;
+  },
+  signal?: AbortSignal,
+): Promise<AdminTable> => {
+  try {
+    const response = await http.patch<AdminTable>(`/api/admin/halls/${hallId}/tables/${tableId}`, payload, { signal });
+    return response.data;
+  } catch (error) {
+    throw normalizeAdminError(error);
+  }
+};
+
+export const deleteHallTable = async (hallId: number, tableId: number, signal?: AbortSignal): Promise<void> => {
+  try {
+    await http.delete(`/api/admin/halls/${hallId}/tables/${tableId}`, { signal });
+  } catch (error) {
+    throw normalizeAdminError(error);
+  }
+};
+
+export const uploadHallPlan = async (hallId: number, file: File, signal?: AbortSignal): Promise<void> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    await http.put(`/api/admin/halls/${hallId}/plan`, formData, { signal });
+  } catch (error) {
+    throw normalizeAdminError(error);
+  }
+};
+
+export const fetchHallPlanBlob = async (
+  clubId: number,
+  hallId: number,
+  etag?: string | null,
+  signal?: AbortSignal,
+): Promise<{ status: 200 | 304 | 404; blob?: Blob; etag?: string | null }> => {
+  try {
+    const response = await http.get(`/api/clubs/${clubId}/halls/${hallId}/plan`, {
+      responseType: 'blob',
+      signal,
+      headers: etag ? { 'If-None-Match': etag } : undefined,
+      validateStatus: (status) => status === 200 || status === 304 || status === 404,
+    });
+    return {
+      status: response.status as 200 | 304 | 404,
+      blob: response.status === 200 ? (response.data as Blob) : undefined,
+      etag: response.headers['etag'] ?? null,
+    };
   } catch (error) {
     throw normalizeAdminError(error);
   }

@@ -4,6 +4,7 @@ import { useUiStore } from '../../../shared/store/ui';
 import AdminForbidden from './AdminForbidden';
 import ClubsScreen from './ClubsScreen';
 import ClubHallsScreen from './ClubHallsScreen';
+import HallEditorScreen from './HallEditorScreen';
 
 const parseClubId = () => {
   const params = new URLSearchParams(window.location.search);
@@ -13,12 +14,25 @@ const parseClubId = () => {
   return id;
 };
 
-const setClubIdInUrl = (clubId: number | null) => {
+const parseHallId = () => {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get('hallId');
+  const id = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return id;
+};
+
+const setAdminParamsInUrl = (clubId: number | null, hallId: number | null) => {
   const url = new URL(window.location.href);
   if (clubId) {
     url.searchParams.set('clubId', String(clubId));
   } else {
     url.searchParams.delete('clubId');
+  }
+  if (hallId && clubId) {
+    url.searchParams.set('hallId', String(hallId));
+  } else {
+    url.searchParams.delete('hallId');
   }
   window.history.pushState({}, '', url);
 };
@@ -33,28 +47,47 @@ const removeAdminMode = () => {
 export default function AdminShell() {
   const addToast = useUiStore((state) => state.addToast);
   const [clubId, setClubId] = useState<number | null>(() => parseClubId());
+  const [hallId, setHallId] = useState<number | null>(() => (parseClubId() ? parseHallId() : null));
   const [forbidden, setForbidden] = useState(false);
   const [toastShown, setToastShown] = useState(false);
 
   useEffect(() => {
     const handlePopState = () => {
-      setClubId(parseClubId());
+      const nextClubId = parseClubId();
+      setClubId(nextClubId);
+      setHallId(nextClubId ? parseHallId() : null);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const handleSelectClub = useCallback((id: number) => {
-    setClubIdInUrl(id);
+    setAdminParamsInUrl(id, null);
     setClubId(id);
+    setHallId(null);
     window.scrollTo(0, 0);
   }, []);
 
   const handleBackToClubs = useCallback(() => {
-    setClubIdInUrl(null);
+    setAdminParamsInUrl(null, null);
     setClubId(null);
+    setHallId(null);
     window.scrollTo(0, 0);
   }, []);
+
+  const handleOpenHallEditor = useCallback((id: number) => {
+    if (!clubId) return;
+    setAdminParamsInUrl(clubId, id);
+    setHallId(id);
+    window.scrollTo(0, 0);
+  }, [clubId]);
+
+  const handleBackToHalls = useCallback(() => {
+    if (!clubId) return;
+    setAdminParamsInUrl(clubId, null);
+    setHallId(null);
+    window.scrollTo(0, 0);
+  }, [clubId]);
 
   const handleForbidden = useCallback(() => {
     setForbidden(true);
@@ -68,11 +101,14 @@ export default function AdminShell() {
     if (forbidden) {
       return <AdminForbidden onExit={removeAdminMode} />;
     }
+    if (clubId && hallId) {
+      return <HallEditorScreen clubId={clubId} hallId={hallId} onBack={handleBackToHalls} />;
+    }
     if (clubId) {
-      return <ClubHallsScreen clubId={clubId} onBack={handleBackToClubs} />;
+      return <ClubHallsScreen clubId={clubId} onBack={handleBackToClubs} onOpenEditor={handleOpenHallEditor} />;
     }
     return <ClubsScreen onSelectClub={handleSelectClub} onForbidden={handleForbidden} />;
-  }, [clubId, forbidden, handleBackToClubs, handleForbidden, handleSelectClub]);
+  }, [clubId, forbidden, hallId, handleBackToClubs, handleBackToHalls, handleForbidden, handleOpenHallEditor, handleSelectClub]);
 
   return (
     <div
