@@ -194,4 +194,18 @@ describe('admin screens', () => {
     expect(onBack).toHaveBeenCalled();
     expect(screen.queryByText('Нет доступа к админ-панели')).toBeNull();
   });
+
+  it('navigates back on club not found when listing halls', async () => {
+    vi.mocked(listHalls).mockRejectedValue(
+      new AdminApiError('Not Found', { status: 404, code: 'club_not_found' }),
+    );
+    const onBack = vi.fn();
+
+    render(<ClubHallsScreen clubId={404} onBack={onBack} />);
+
+    await waitFor(() => {
+      expect(useUiStore.getState().toasts).toContain('Клуб не найден');
+    });
+    expect(onBack).toHaveBeenCalled();
+  });
 });
