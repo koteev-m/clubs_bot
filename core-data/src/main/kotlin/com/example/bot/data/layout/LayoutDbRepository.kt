@@ -10,6 +10,7 @@ import com.example.bot.layout.LayoutAssets
 import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.HallPlan
+import com.example.bot.layout.HallPlanMeta
 import com.example.bot.layout.HallPlansRepository
 import com.example.bot.layout.Table
 import com.example.bot.layout.TableStatus
@@ -37,6 +38,7 @@ import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
 
@@ -267,6 +269,30 @@ class LayoutDbRepository(
                 ?.toHallPlan()
         }
 
+    override suspend fun getPlanMetaForClub(clubId: Long, hallId: Long): HallPlanMeta? =
+        withRetriedTx(name = "layout.plan.meta.get", readOnly = true, database = database) {
+            val hallExists =
+                HallsTable
+                    .selectAll()
+                    .where { (HallsTable.id eq hallId) and (HallsTable.clubId eq clubId) }
+                    .limit(1)
+                    .any()
+            if (!hallExists) {
+                return@withRetriedTx null
+            }
+            HallPlansTable
+                .slice(
+                    HallPlansTable.hallId,
+                    HallPlansTable.contentType,
+                    HallPlansTable.sha256,
+                    HallPlansTable.sizeBytes,
+                    HallPlansTable.updatedAt,
+                )
+                .select { HallPlansTable.hallId eq hallId }
+                .firstOrNull()
+                ?.toHallPlanMeta()
+        }
+
     private fun loadActiveHall(clubId: Long): HallRow? {
         return HallsTable
             .selectAll()
@@ -291,6 +317,15 @@ class LayoutDbRepository(
             sha256 = this[HallPlansTable.sha256],
             sizeBytes = this[HallPlansTable.sizeBytes],
             createdAt = this[HallPlansTable.createdAt].toInstant(),
+            updatedAt = this[HallPlansTable.updatedAt].toInstant(),
+        )
+
+    private fun ResultRow.toHallPlanMeta(): HallPlanMeta =
+        HallPlanMeta(
+            hallId = this[HallPlansTable.hallId],
+            contentType = this[HallPlansTable.contentType],
+            sha256 = this[HallPlansTable.sha256],
+            sizeBytes = this[HallPlansTable.sizeBytes],
             updatedAt = this[HallPlansTable.updatedAt].toInstant(),
         )
 
