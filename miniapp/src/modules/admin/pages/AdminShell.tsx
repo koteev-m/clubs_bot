@@ -41,6 +41,7 @@ const removeAdminMode = () => {
   const url = new URL(window.location.href);
   url.searchParams.delete('mode');
   url.searchParams.delete('clubId');
+  url.searchParams.delete('hallId');
   window.location.assign(url.toString());
 };
 

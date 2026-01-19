@@ -93,6 +93,14 @@ export default function HallPlanStage({
     [onSelectTable, readOnly],
   );
 
+  const resetDragging = useCallback((tableId: number) => {
+    if (!dragOriginRef.current || dragOriginRef.current.tableId !== tableId) return;
+    dragOriginRef.current = null;
+    dragPositionRef.current = null;
+    setDragging(null);
+    draggingMovedRef.current = false;
+  }, []);
+
   const handlePointerMove = useCallback(
     (event: PointerEvent<HTMLButtonElement>, table: AdminTable) => {
       if (readOnly) return;
@@ -132,6 +140,16 @@ export default function HallPlanStage({
       onMoveTable(table.id, { x: position.x, y: position.y });
     },
     [onMoveTable, readOnly],
+  );
+
+  const handlePointerCancel = useCallback(
+    (event: PointerEvent<HTMLButtonElement>, table: AdminTable) => {
+      if (typeof event.currentTarget.releasePointerCapture === 'function') {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      resetDragging(table.id);
+    },
+    [resetDragging],
   );
 
   const positions = useMemo(() => {
@@ -185,6 +203,7 @@ export default function HallPlanStage({
             onPointerDown={(event) => handlePointerDown(event, table)}
             onPointerMove={(event) => handlePointerMove(event, table)}
             onPointerUp={(event) => handlePointerUp(event, table)}
+            onPointerCancel={(event) => handlePointerCancel(event, table)}
             onClick={(event) => event.stopPropagation()}
           >
             {table.tableNumber}
