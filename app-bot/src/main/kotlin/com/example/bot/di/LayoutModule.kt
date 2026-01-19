@@ -6,6 +6,7 @@ import com.example.bot.data.admin.AdminHallsDbRepository
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.data.layout.LayoutDbRepository
 import com.example.bot.layout.BookingAwareLayoutRepository
+import com.example.bot.layout.HallPlansRepository
 import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.promoter.quotas.PromoterQuotaService
@@ -25,6 +26,7 @@ val layoutModule =
         single<LayoutAssetsRepository> { get<LayoutRepository>(named("baseLayout")) as LayoutAssetsRepository }
 
         single<AdminTablesRepository> { get<LayoutRepository>(named("baseLayout")) as AdminTablesRepository }
+        single<HallPlansRepository> { get<LayoutRepository>(named("baseLayout")) as HallPlansRepository }
         single<AdminHallsRepository> { AdminHallsDbRepository(get()) }
 
         single {

@@ -23,6 +23,7 @@ import com.example.bot.music.MusicService
 import com.example.bot.music.MixtapeService
 import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.layout.AdminTablesRepository
+import com.example.bot.layout.HallPlansRepository
 import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
 import com.example.bot.plugins.ActorMdcPlugin
@@ -62,7 +63,9 @@ import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.hostCheckinRoutes
 import com.example.bot.routes.adminClubsRoutes
 import com.example.bot.routes.adminHallsRoutes
+import com.example.bot.routes.adminHallPlanRoutes
 import com.example.bot.routes.adminTablesRoutes
+import com.example.bot.routes.hallPlanRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.musicRoutes
@@ -185,6 +188,7 @@ fun Application.module() {
     val adminTablesRepository by inject<AdminTablesRepository>()
     val adminClubsRepository by inject<AdminClubsRepository>()
     val adminHallsRepository by inject<AdminHallsRepository>()
+    val hallPlansRepository by inject<HallPlansRepository>()
     val musicService by inject<MusicService>()
     val musicLikesRepository by inject<MusicLikesRepository>()
     val mixtapeService by inject<MixtapeService>()
@@ -269,9 +273,11 @@ fun Application.module() {
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
     adminClubsRoutes(adminClubsRepository = adminClubsRepository)
     adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
+    adminHallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)
     adminTablesRoutes(adminTablesRepository = adminTablesRepository, adminHallsRepository = adminHallsRepository)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository, layoutAssetsRepository = layoutAssetsRepository)
+    hallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)
     ownerHealthRoutes(
         service = ownerHealthService,
         layoutRepository = layoutRepository,
