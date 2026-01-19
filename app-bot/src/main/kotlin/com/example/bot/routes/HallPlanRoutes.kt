@@ -149,7 +149,7 @@ private suspend fun ApplicationCall.handleHallPlanGet(
     }
 
     val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
-    if (ifNoneMatch != null) {
+    if (!ifNoneMatch.isNullOrBlank()) {
         val meta =
             hallPlansRepository.getPlanMetaForClub(clubId, hallId)
                 ?: return respondPlanError(HttpStatusCode.NotFound, ErrorCodes.not_found)

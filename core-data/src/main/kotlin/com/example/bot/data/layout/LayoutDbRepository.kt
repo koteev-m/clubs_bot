@@ -253,13 +253,7 @@ class LayoutDbRepository(
 
     override suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan? =
         withRetriedTx(name = "layout.plan.get", readOnly = true, database = database) {
-            val hallExists =
-                HallsTable
-                    .selectAll()
-                    .where { (HallsTable.id eq hallId) and (HallsTable.clubId eq clubId) }
-                    .limit(1)
-                    .any()
-            if (!hallExists) {
+            if (!hallBelongsToClub(hallId, clubId)) {
                 return@withRetriedTx null
             }
             HallPlansTable
@@ -271,13 +265,7 @@ class LayoutDbRepository(
 
     override suspend fun getPlanMetaForClub(clubId: Long, hallId: Long): HallPlanMeta? =
         withRetriedTx(name = "layout.plan.meta.get", readOnly = true, database = database) {
-            val hallExists =
-                HallsTable
-                    .selectAll()
-                    .where { (HallsTable.id eq hallId) and (HallsTable.clubId eq clubId) }
-                    .limit(1)
-                    .any()
-            if (!hallExists) {
+            if (!hallBelongsToClub(hallId, clubId)) {
                 return@withRetriedTx null
             }
             HallPlansTable
@@ -292,6 +280,14 @@ class LayoutDbRepository(
                 .firstOrNull()
                 ?.toHallPlanMeta()
         }
+
+    private fun hallBelongsToClub(hallId: Long, clubId: Long): Boolean {
+        return HallsTable
+            .slice(HallsTable.id)
+            .select { (HallsTable.id eq hallId) and (HallsTable.clubId eq clubId) }
+            .limit(1)
+            .any()
+    }
 
     private fun loadActiveHall(clubId: Long): HallRow? {
         return HallsTable
