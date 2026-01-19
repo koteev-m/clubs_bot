@@ -21,14 +21,18 @@ fun etagFor(updatedAt: Instant?, count: Int, seed: String): String {
  */
 fun matchesEtag(ifNoneMatch: String?, etag: String): Boolean {
     if (ifNoneMatch.isNullOrBlank()) return false
+    val normalizedEtag = normalizeEtag(etag)
 
     return ifNoneMatch
         .split(',')
         .map { it.trim() }
         .any { candidate ->
             if (candidate == "*") return true
-            val weakStripped = candidate.removePrefix("W/").removePrefix("w/").trim()
-            val unquoted = weakStripped.trim('"')
-            unquoted == etag
+            normalizeEtag(candidate) == normalizedEtag
         }
+}
+
+private fun normalizeEtag(value: String): String {
+    val weakStripped = value.removePrefix("W/").removePrefix("w/").trim()
+    return weakStripped.trim('"')
 }

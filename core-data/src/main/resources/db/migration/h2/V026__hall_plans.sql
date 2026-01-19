@@ -1,6 +1,6 @@
 CREATE TABLE hall_plans (
     hall_id BIGINT PRIMARY KEY REFERENCES halls(id) ON DELETE CASCADE,
-    bytes BLOB NOT NULL,
+    bytes BYTEA NOT NULL,
     content_type TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     size_bytes BIGINT NOT NULL,
