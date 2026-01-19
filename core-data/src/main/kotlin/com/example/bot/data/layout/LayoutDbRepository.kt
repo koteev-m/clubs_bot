@@ -215,7 +215,11 @@ class LayoutDbRepository(
     private fun loadTableById(hallId: Long, id: Long): Table? {
         return HallTablesTable
             .selectAll()
-            .where { (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq id) }
+            .where {
+                (HallTablesTable.hallId eq hallId) and
+                    (HallTablesTable.id eq id) and
+                    (HallTablesTable.isActive eq true)
+            }
             .firstOrNull()
             ?.toTable()
     }
@@ -272,7 +276,12 @@ class LayoutDbRepository(
         val now = clock.instant()
         val nowOffset = now.toOffsetDateTime()
         try {
-            HallTablesTable.update({ (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq request.id) }) {
+            val updated =
+                HallTablesTable.update({
+                    (HallTablesTable.hallId eq hallId) and
+                        (HallTablesTable.id eq request.id) and
+                        (HallTablesTable.isActive eq true)
+                }) {
                 request.label?.let { value -> it[label] = value }
                 request.capacity?.let { value -> it[capacity] = value }
                 request.minDeposit?.let { value -> it[minDeposit] = value }
@@ -287,6 +296,9 @@ class LayoutDbRepository(
                 request.mysteryEligible?.let { value -> it[mysteryEligible] = value }
                 it[updatedAt] = nowOffset
             }
+            if (updated == 0) {
+                return null
+            }
         } catch (error: Throwable) {
             if (error.isUniqueViolation()) {
                 throw TableNumberConflictException()
@@ -300,7 +312,11 @@ class LayoutDbRepository(
     private fun deleteTableForHall(hallId: Long, id: Long): Boolean {
         val nowOffset = clock.instant().toOffsetDateTime()
         val updated =
-            HallTablesTable.update({ (HallTablesTable.hallId eq hallId) and (HallTablesTable.id eq id) }) {
+            HallTablesTable.update({
+                (HallTablesTable.hallId eq hallId) and
+                    (HallTablesTable.id eq id) and
+                    (HallTablesTable.isActive eq true)
+            }) {
                 it[isActive] = false
                 it[updatedAt] = nowOffset
             }

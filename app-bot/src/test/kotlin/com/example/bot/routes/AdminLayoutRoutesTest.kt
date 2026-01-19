@@ -8,6 +8,7 @@ import com.example.bot.admin.AdminHall
 import com.example.bot.admin.AdminHallCreate
 import com.example.bot.admin.AdminHallUpdate
 import com.example.bot.admin.AdminHallsRepository
+import com.example.bot.admin.InvalidHallGeometryException
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
@@ -41,6 +42,9 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -149,6 +153,26 @@ class AdminLayoutRoutesTest {
         assertNotEquals(initialEtag, afterEtag)
         assertEquals(1, json.parseToJsonElement(after.bodyAsText()).jsonObject["tables"]!!.jsonArray.size)
         assertTrue(layoutRepo.lastUpdatedAt(1, null) != null)
+    }
+
+    @Test
+    fun `create hall rejects duplicate zone ids`() = withApp(roles = setOf(Role.GLOBAL_ADMIN)) { _, _, _ ->
+        val response =
+            client.post("/api/admin/clubs/1/halls") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "name":"Duplicate zones",
+                    "geometryJson":"{\"zones\":[{\"id\":\"vip\",\"name\":\"VIP\"},{\"id\":\"vip\",\"name\":\"VIP 2\"}]}",
+                    "isActive":true
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.validation_error, response.bodyAsText().jsonError("code"))
+        assertEquals("invalid_zones", response.bodyAsText().jsonError("geometryJson"))
     }
 
     private fun withApp(
@@ -263,6 +287,7 @@ class AdminLayoutRoutesTest {
     }
 
     private class InMemoryAdminHallsRepository(private val clock: Clock) : AdminHallsRepository {
+        private val json = Json { ignoreUnknownKeys = true }
         private val halls: MutableList<AdminHall> =
             mutableListOf(
                 AdminHall(1, 1, "Main", true, 1, "fp-1", clock.instant(), clock.instant()),
@@ -277,6 +302,7 @@ class AdminLayoutRoutesTest {
         override suspend fun findActiveForClub(clubId: Long): AdminHall? = halls.firstOrNull { it.clubId == clubId && it.isActive }
 
         override suspend fun create(clubId: Long, request: AdminHallCreate): AdminHall {
+            validateGeometry(request.geometryJson)
             val nextId = (halls.maxOfOrNull { it.id } ?: 0L) + 1
             val hall =
                 AdminHall(
@@ -295,6 +321,7 @@ class AdminLayoutRoutesTest {
 
         override suspend fun update(id: Long, request: AdminHallUpdate): AdminHall? {
             val existing = halls.firstOrNull { it.id == id } ?: return null
+            request.geometryJson?.let { validateGeometry(it) }
             val updated =
                 existing.copy(
                     name = request.name ?: existing.name,
@@ -330,5 +357,41 @@ class AdminLayoutRoutesTest {
 
         override suspend fun isHallNameTaken(clubId: Long, name: String, excludeHallId: Long?): Boolean =
             halls.any { it.clubId == clubId && it.name.equals(name, ignoreCase = true) && it.id != excludeHallId }
+
+        private fun validateGeometry(geometryJson: String) {
+            val root = runCatching { json.parseToJsonElement(geometryJson) }.getOrNull()
+                ?: throw InvalidHallGeometryException()
+            val rootObject = root as? JsonObject ?: throw InvalidHallGeometryException()
+            val zones = rootObject["zones"] as? JsonArray ?: throw InvalidHallGeometryException()
+            if (zones.isEmpty()) throw InvalidHallGeometryException()
+            val ids =
+                zones.map { element ->
+                    val zoneObject = element as? JsonObject ?: throw InvalidHallGeometryException()
+                    val id = zoneObject.zoneField("id")
+                    zoneObject.zoneField("name")
+                    id
+                }
+            if (ids.distinct().size != ids.size) throw InvalidHallGeometryException()
+        }
+
+        private fun JsonObject.zoneField(field: String): String {
+            val primitive = this[field] as? JsonPrimitive ?: throw InvalidHallGeometryException()
+            if (!primitive.isString) throw InvalidHallGeometryException()
+            val raw = primitive.content.trim()
+            if (raw.isBlank()) throw InvalidHallGeometryException()
+            return raw
+        }
     }
+
+    private fun String.jsonError(field: String): String? =
+        runCatching {
+            val node = json.parseToJsonElement(this).jsonObject
+            val details = node["details"]?.jsonObject
+            if (field == "code") {
+                node["code"]?.jsonPrimitive?.content
+            } else {
+                details?.get(field)?.jsonPrimitive?.content
+            }
+        }
+            .getOrNull()
 }

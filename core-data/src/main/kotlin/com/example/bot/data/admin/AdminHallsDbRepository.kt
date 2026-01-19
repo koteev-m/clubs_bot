@@ -221,12 +221,17 @@ class AdminHallsDbRepository(
         val rootObject = root as? JsonObject ?: throw InvalidHallGeometryException()
         val zones = rootObject["zones"] as? JsonArray ?: throw InvalidHallGeometryException()
         if (zones.isEmpty()) throw InvalidHallGeometryException()
-        return zones.map { element ->
-            val zoneObject = element as? JsonObject ?: throw InvalidHallGeometryException()
-            val id = zoneObject.zoneField("id")
-            val name = zoneObject.zoneField("name")
-            HallZoneSpec(id = id, name = name)
+        val parsed =
+            zones.map { element ->
+                val zoneObject = element as? JsonObject ?: throw InvalidHallGeometryException()
+                val id = zoneObject.zoneField("id")
+                val name = zoneObject.zoneField("name")
+                HallZoneSpec(id = id, name = name)
+            }
+        if (parsed.map { it.id }.distinct().size != parsed.size) {
+            throw InvalidHallGeometryException()
         }
+        return parsed
     }
 
     private fun JsonObject.zoneField(field: String): String {
