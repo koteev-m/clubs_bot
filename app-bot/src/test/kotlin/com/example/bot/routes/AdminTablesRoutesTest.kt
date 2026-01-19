@@ -30,6 +30,7 @@ import com.example.bot.security.rbac.RbacPlugin
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
@@ -199,6 +200,38 @@ class AdminTablesRoutesTest {
         assertEquals(HttpStatusCode.NoContent, response.status)
         response.assertNoStoreHeaders()
         assertTrue(repo.listForClub(1).isEmpty())
+    }
+
+    @Test
+    fun `patch returns not found for deleted hall table`() = withApp() { _, _ ->
+        val create =
+            client.post("/api/admin/halls/1/tables") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "label":"To delete",
+                    "capacity":4
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.Created, create.status)
+        val createdPayload = json.parseToJsonElement(create.bodyAsText()).jsonObject
+        val tableId = createdPayload["id"]!!.jsonPrimitive.long
+
+        val deleted = client.delete("/api/admin/halls/1/tables/$tableId") { header("X-Telegram-Init-Data", "init") }
+        assertEquals(HttpStatusCode.NoContent, deleted.status)
+
+        val patch =
+            client.patch("/api/admin/halls/1/tables/$tableId") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody("""{"label":"Updated"}""")
+            }
+
+        assertEquals(HttpStatusCode.NotFound, patch.status)
+        assertEquals(ErrorCodes.table_not_found, patch.errorCode())
     }
 
     @Test
