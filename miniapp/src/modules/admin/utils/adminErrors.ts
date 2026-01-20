@@ -4,6 +4,7 @@ export type FieldErrors = Record<string, string>;
 
 const errorMessages: Record<string, string> = {
   forbidden: 'Недостаточно прав',
+  not_found: 'Данные не найдены',
   club_not_found: 'Клуб не найден',
   hall_not_found: 'Зал не найден',
   table_not_found: 'Стол не найден',
@@ -13,6 +14,8 @@ const errorMessages: Record<string, string> = {
   validation_error: 'Проверьте заполнение формы',
   invalid_table_coords: 'Некорректные координаты стола',
   invalid_capacity: 'Некорректная вместимость',
+  unsupported_media_type: 'Неподдерживаемый формат файла',
+  payload_too_large: 'Слишком большой файл',
   request_timeout: 'Превышено время ожидания',
   internal_error: 'Ошибка сервера',
 };
