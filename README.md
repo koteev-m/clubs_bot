@@ -120,6 +120,68 @@ curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
   "$BASE_URL/api/admin/halls/10/tables"
 ```
 
+## Promoter (miniapp mode=promoter)
+
+### Как открыть кабинет промоутера
+
+- Откройте Mini App с параметром `?mode=promoter` (например: `https://miniapp.example/?mode=promoter`).
+- Навигация в URL: `tab`, опционально `clubId`, `guestListId`, `eventId`.
+
+### Auth
+
+- Авторизация в promoter API — через miniapp initData (Telegram WebApp).
+- Все `/api/promoter/*` отвечают `Cache-Control: no-store` + `Vary: X-Telegram-Init-Data`.
+
+### Endpoint list
+
+**Me / stats**
+
+- `GET /api/promoter/me`
+- `GET /api/promoter/me/stats`
+
+**Clubs / events**
+
+- `GET /api/promoter/clubs`
+- `GET /api/promoter/club-events?clubId=&date=`
+- `GET /api/promoter/clubs/{clubId}/halls`
+- `GET /api/promoter/halls/{hallId}/tables`
+
+**Guest lists**
+
+- `GET /api/promoter/guest-lists?from=&to=&clubId=`
+- `POST /api/promoter/guest-lists`
+- `GET /api/promoter/guest-lists/{id}`
+- `POST /api/promoter/guest-lists/{id}/entries`
+- `POST /api/promoter/guest-lists/{id}/entries/bulk`
+- `GET /api/promoter/guest-lists/{id}/invitations`
+- `POST /api/promoter/guest-lists/{id}/entries/{entryId}/invitation`
+
+**Tables booking**
+
+- `POST /api/promoter/bookings/assign`
+
+### Примеры curl
+
+```bash
+BASE_URL="https://api.example"
+INIT_DATA="query_id=AA...&user=...&hash=..."
+```
+
+```bash
+curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/promoter/guest-lists?clubId=1&from=2024-06-01&to=2024-06-30"
+
+curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/promoter/guest-lists" \
+  -H "Content-Type: application/json" \
+  -d '{"clubId":1,"eventId":10,"arrivalWindowStart":"2024-06-01T18:00:00Z","arrivalWindowEnd":"2024-06-01T20:00:00Z","limit":25}'
+
+curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/promoter/guest-lists/10/entries/bulk" \
+  -H "Content-Type: application/json" \
+  -d '{"rawText":"Anna\nBob\nChris"}'
+```
+
 Create/update/delete club:
 
 ```bash

@@ -2,11 +2,17 @@ package com.example.bot.routes
 
 import com.example.bot.clubs.Event
 import com.example.bot.clubs.InMemoryEventsRepository
+import com.example.bot.clubs.ClubsRepository
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.club.GuestListEntriesTable
+import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.security.Role
 import com.example.bot.host.BookingProvider
 import com.example.bot.host.HostEntranceService
+import com.example.bot.admin.AdminHallsRepository
+import com.example.bot.layout.AdminTablesRepository
+import com.example.bot.booking.a3.BookingState
+import com.example.bot.promoter.PromoterBookingAssignments
 import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.plugins.configureSecurity
 import com.example.bot.testing.createInitData
@@ -28,6 +34,7 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.mockk
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
@@ -295,6 +302,13 @@ class GuestListInvitationCheckinE2ETest {
             guestListService = get(),
             guestListEntryRepository = get(),
             invitationService = get(),
+            guestListDbRepository = mockk<GuestListDbRepository>(relaxed = true),
+            clubsRepository = mockk<ClubsRepository>(relaxed = true),
+            eventsRepository = eventsRepository,
+            adminHallsRepository = mockk<AdminHallsRepository>(relaxed = true),
+            adminTablesRepository = mockk<AdminTablesRepository>(relaxed = true),
+            bookingState = mockk<BookingState>(relaxed = true),
+            promoterAssignments = PromoterBookingAssignments(),
             botTokenProvider = { com.example.bot.webapp.TEST_BOT_TOKEN },
         )
         invitationRoutes(

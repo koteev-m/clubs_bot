@@ -210,6 +210,31 @@ class GuestListDbRepository(
             }
         }
 
+    suspend fun listByClub(
+        clubId: Long,
+        eventId: Long? = null,
+        status: GuestListStatus? = null,
+    ): List<GuestListRecord> =
+        withTxRetry {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val query =
+                    GuestListsTable
+                        .selectAll()
+                        .where { GuestListsTable.clubId eq clubId }
+
+                if (eventId != null) {
+                    query.andWhere { GuestListsTable.eventId eq eventId }
+                }
+                if (status != null) {
+                    query.andWhere { GuestListsTable.status eq status.name }
+                }
+
+                query
+                    .orderBy(GuestListsTable.createdAt to SortOrder.DESC)
+                    .map { it.toGuestListRecord() }
+            }
+        }
+
     suspend fun updateStatus(
         id: Long,
         status: GuestListStatus,
