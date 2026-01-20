@@ -124,8 +124,8 @@ export default function HallPlanStage({
       if (typeof event.currentTarget.releasePointerCapture === 'function') {
         try {
           event.currentTarget.releasePointerCapture(event.pointerId);
-        } catch (error) {
-          console.warn('Failed to release pointer capture for table marker.', error);
+        } catch {
+          // Игнорируем, если захват уже был освобождён браузером.
         }
       }
       const origin = dragOriginRef.current;
@@ -151,8 +151,8 @@ export default function HallPlanStage({
       if (typeof event.currentTarget.releasePointerCapture === 'function') {
         try {
           event.currentTarget.releasePointerCapture(event.pointerId);
-        } catch (error) {
-          console.warn('Failed to release pointer capture for table marker.', error);
+        } catch {
+          // Игнорируем, если захват уже был освобождён браузером.
         }
       }
       resetDragging(table.id);
@@ -207,7 +207,7 @@ export default function HallPlanStage({
               top: position.top - markerSize / 2,
               width: markerSize,
               height: markerSize,
-              touchAction: 'none',
+              touchAction: readOnly ? 'auto' : 'none',
             }}
             onPointerDown={(event) => handlePointerDown(event, table)}
             onPointerMove={(event) => handlePointerMove(event, table)}
