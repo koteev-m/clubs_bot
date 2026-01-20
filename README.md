@@ -96,6 +96,10 @@ and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) a
 
 Все admin endpoints отвечают с `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data`.
 
+`GET /api/clubs/{clubId}/halls/{hallId}/plan` не относится к `/api/admin` и возвращает
+`Cache-Control: private, max-age=3600, must-revalidate` + `ETag` (sha256); ответ `304`
+отдаёт те же cache headers.
+
 ### Примеры curl
 
 ```bash
