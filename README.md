@@ -81,12 +81,18 @@ and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) a
 - `PUT /api/admin/halls/{hallId}/plan` — multipart upload, поле `file` (PNG/JPEG, до 5MB).
 - `GET /api/clubs/{clubId}/halls/{hallId}/plan` — получить план (ETag + Cache-Control; 200/304/404).
 
-**Tables**
+**Hall tables (layout markers)**
 
 - `GET /api/admin/halls/{hallId}/tables`
 - `POST /api/admin/halls/{hallId}/tables`
 - `PATCH /api/admin/halls/{hallId}/tables/{tableId}`
 - `DELETE /api/admin/halls/{hallId}/tables/{tableId}`
+
+Координаты столов в Hall Editor:
+- `x`, `y` ∈ [0..1]
+- `(0,0)` — верхний‑левый угол изображения плана
+- `(1,1)` — нижний‑правый
+- если координаты передаются — нужны обе (`x` и `y`)
 
 Все admin endpoints отвечают с `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data`.
 
@@ -173,7 +179,7 @@ Create/update/delete table:
 ```bash
 curl -sS -X POST -H "Content-Type: application/json" \
   -H "X-Telegram-InitData: $INIT_DATA" \
-  -d '{"label":"T1","capacity":4,"zone":"vip","x":100.5,"y":240.0}' \
+  -d '{"label":"T1","capacity":4,"zone":"vip","x":0.35,"y":0.62}' \
   "$BASE_URL/api/admin/halls/10/tables"
 
 curl -sS -X PATCH -H "Content-Type: application/json" \
@@ -183,6 +189,25 @@ curl -sS -X PATCH -H "Content-Type: application/json" \
 
 curl -sS -X DELETE -H "X-Telegram-InitData: $INIT_DATA" \
   "$BASE_URL/api/admin/halls/10/tables/55"
+```
+
+Move table (update only coordinates):
+
+```bash
+curl -sS -X PATCH -H "Content-Type: application/json" \
+  -H "X-Telegram-InitData: $INIT_DATA" \
+  -d '{"x":0.5,"y":0.25}' \
+  "$BASE_URL/api/admin/halls/10/tables/55"
+```
+
+Table number conflict (same `tableNumber` in hall):
+
+```json
+{
+  "code": "table_number_conflict",
+  "requestId": "req-123",
+  "status": 409
+}
 ```
 
 ### Ошибки

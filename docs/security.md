@@ -45,6 +45,7 @@ rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' 
 - Допустимые content‑type: `image/png`, `image/jpeg`.
 - Максимальный размер: 5MB (server‑side guard).
 - Контент файла не логируется и не отражается в ошибках.
+- Проверки на клиенте — не безопасность; обязательны server‑side guards.
 
 ## 4) Cache headers
 
