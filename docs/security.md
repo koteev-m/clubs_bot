@@ -32,12 +32,13 @@
 Перед релизом прогнать:
 
 ```bash
-rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "logger\.(debug|info|warn|error)\(" app-bot core-data
+rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "logger\.(debug|info|warn|error)\(" app-bot core-*
 rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "console\.(log|warn|error)\(" miniapp/src
-rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "(base64|Base64|multipart|FormData|PartData|toByteArray\(|ByteArray|bytes=|geometryJson|initData|Authorization)" app-bot core-data miniapp/src
+rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "(base64|Base64|multipart|FormData|PartData|toByteArray\(|ByteArray|bytes=|geometryJson|initData|Authorization)" app-bot core-* miniapp/src
 ```
 
-Результат аудита P0.4: чувствительные payload‑данные в логах не обнаружены. Логи ограничены id/size/sha256 и техническими метками.
+Результат аудита P0.4: проверены `app-bot`, `core-*`, `miniapp/src` (без `node_modules`, `dist`, `build`), чувствительные
+payload‑данные в логах не обнаружены. Логи ограничены id/size/sha256 и техническими метками.
 
 ## 3) Upload constraints
 
