@@ -34,7 +34,7 @@
 ```bash
 rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "logger\.(debug|info|warn|error)\(" app-bot core-*
 rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "console\.(log|warn|error)\(" miniapp/src
-rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "(base64|Base64|multipart|FormData|PartData|toByteArray\(|ByteArray|bytes=|geometryJson|initData|Authorization)" app-bot core-* miniapp/src
+rg -n -i --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "(base64|multipart|formdata|partdata|tobytearray\(|bytearray|bytes=|geometryjson|initdata|x-telegram-init-data|authorization)" app-bot core-* miniapp/src
 ```
 
 Результат аудита P0.4: проверены `app-bot`, `core-*`, `miniapp/src` (без `node_modules`, `dist`, `build`), чувствительные
