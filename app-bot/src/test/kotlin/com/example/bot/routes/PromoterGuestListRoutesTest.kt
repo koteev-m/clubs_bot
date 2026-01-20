@@ -12,6 +12,7 @@ import com.example.bot.club.InvitationServiceError
 import com.example.bot.club.InvitationServiceResult
 import com.example.bot.club.GuestListRepository
 import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListEntryRecord
 import com.example.bot.data.security.Role
@@ -23,11 +24,17 @@ import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.installMiniAppAuthStatusPage
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
+import com.example.bot.promoter.PromoterBookingAssignments
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
+import com.example.bot.admin.AdminHallsRepository
+import com.example.bot.clubs.ClubsRepository
+import com.example.bot.clubs.EventsRepository
+import com.example.bot.layout.AdminTablesRepository
+import com.example.bot.booking.a3.BookingState
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -72,6 +79,13 @@ class PromoterGuestListRoutesTest {
         val guestListService = mockk<GuestListService>(relaxed = true)
         val guestListEntryRepository = mockk<GuestListEntryDbRepository>(relaxed = true)
         val invitationService = mockk<InvitationService>(relaxed = true)
+        val guestListDbRepository = mockk<GuestListDbRepository>(relaxed = true)
+        val clubsRepository = mockk<ClubsRepository>(relaxed = true)
+        val eventsRepository = mockk<EventsRepository>(relaxed = true)
+        val adminHallsRepository = mockk<AdminHallsRepository>(relaxed = true)
+        val adminTablesRepository = mockk<AdminTablesRepository>(relaxed = true)
+        val bookingState = mockk<BookingState>(relaxed = true)
+        val promoterAssignments = PromoterBookingAssignments()
 
         testApplication {
             application {
@@ -82,6 +96,13 @@ class PromoterGuestListRoutesTest {
                     guestListService = guestListService,
                     guestListEntryRepository = guestListEntryRepository,
                     invitationService = invitationService,
+                    guestListDbRepository = guestListDbRepository,
+                    clubsRepository = clubsRepository,
+                    eventsRepository = eventsRepository,
+                    adminHallsRepository = adminHallsRepository,
+                    adminTablesRepository = adminTablesRepository,
+                    bookingState = bookingState,
+                    promoterAssignments = promoterAssignments,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
@@ -128,6 +149,20 @@ class PromoterGuestListRoutesTest {
         val guestListService = mockk<GuestListService>(relaxed = true)
         val guestListEntryRepository = mockk<GuestListEntryDbRepository>(relaxed = true)
         val invitationService = mockk<InvitationService>(relaxed = true)
+        val guestListDbRepository = mockk<GuestListDbRepository>(relaxed = true)
+        val clubsRepository = mockk<ClubsRepository>(relaxed = true)
+        val eventsRepository = mockk<EventsRepository>(relaxed = true)
+        val adminHallsRepository = mockk<AdminHallsRepository>(relaxed = true)
+        val adminTablesRepository = mockk<AdminTablesRepository>(relaxed = true)
+        val bookingState = mockk<BookingState>(relaxed = true)
+        val promoterAssignments = PromoterBookingAssignments()
+        val guestListDbRepository = mockk<GuestListDbRepository>(relaxed = true)
+        val clubsRepository = mockk<ClubsRepository>(relaxed = true)
+        val eventsRepository = mockk<EventsRepository>(relaxed = true)
+        val adminHallsRepository = mockk<AdminHallsRepository>(relaxed = true)
+        val adminTablesRepository = mockk<AdminTablesRepository>(relaxed = true)
+        val bookingState = mockk<BookingState>(relaxed = true)
+        val promoterAssignments = PromoterBookingAssignments()
         val listId = 42L
 
         coEvery { guestListRepository.getList(listId) } returns
@@ -154,6 +189,13 @@ class PromoterGuestListRoutesTest {
                     guestListService = guestListService,
                     guestListEntryRepository = guestListEntryRepository,
                     invitationService = invitationService,
+                    guestListDbRepository = guestListDbRepository,
+                    clubsRepository = clubsRepository,
+                    eventsRepository = eventsRepository,
+                    adminHallsRepository = adminHallsRepository,
+                    adminTablesRepository = adminTablesRepository,
+                    bookingState = bookingState,
+                    promoterAssignments = promoterAssignments,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
@@ -304,6 +346,13 @@ class PromoterGuestListRoutesTest {
                     guestListService = guestListService,
                     guestListEntryRepository = guestListEntryRepository,
                     invitationService = invitationService,
+                    guestListDbRepository = guestListDbRepository,
+                    clubsRepository = clubsRepository,
+                    eventsRepository = eventsRepository,
+                    adminHallsRepository = adminHallsRepository,
+                    adminTablesRepository = adminTablesRepository,
+                    bookingState = bookingState,
+                    promoterAssignments = promoterAssignments,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }

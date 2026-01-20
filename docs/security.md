@@ -5,11 +5,14 @@
 ## 1) RBAC
 
 - Все `/api/admin/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.
+- Все `/api/promoter/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.
 - Доступные роли: `OWNER`, `GLOBAL_ADMIN`, `CLUB_ADMIN`.
+- Promoter доступен для `PROMOTER` (опционально также `OWNER`/`GLOBAL_ADMIN`/`HEAD_MANAGER`).
 - Инварианты:
   - Создание клубов (`POST /api/admin/clubs`) доступно только `OWNER`/`GLOBAL_ADMIN`.
   - `CLUB_ADMIN` ограничен только клубами из RBAC-контекста — `isAdminClubAllowed(clubId)`.
   - Любые действия по залам/столам проверяют принадлежность клуба перед изменением.
+  - Promoter ограничен своими guest lists (owner/promoter) и/или `clubIds` из RBAC.
 
 ## 2) No‑leak logs
 
@@ -19,6 +22,8 @@
 - multipart payload и file contents
 - geometryJson / контент плана зала
 - initData / bot tokens / auth headers
+- bulk текст гостевых списков
+- ссылки/QR с токенами приглашений
 
 Разрешено логировать:
 

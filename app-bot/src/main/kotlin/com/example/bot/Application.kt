@@ -9,6 +9,7 @@ import com.example.bot.club.WaitlistRepository
 import com.example.bot.admin.AdminClubsRepository
 import com.example.bot.admin.AdminHallsRepository
 import com.example.bot.data.club.GuestListCsvParser
+import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.security.UserRepository
@@ -52,6 +53,7 @@ import com.example.bot.notifications.NotificationService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
+import com.example.bot.promoter.PromoterBookingAssignments
 import com.example.bot.support.SupportService
 import com.example.bot.support.sanitizeClubName
 import com.example.bot.routes.bookingA3Routes
@@ -178,6 +180,7 @@ fun Application.module() {
     val guestListRepository by inject<GuestListRepository>()
     val guestListService by inject<GuestListService>()
     val guestListEntryRepository by inject<GuestListEntryDbRepository>()
+    val guestListDbRepository by inject<GuestListDbRepository>()
     val guestListCsvParser by inject<GuestListCsvParser>()
     val bookingService by inject<BookingService>()
     val bookingState by inject<com.example.bot.booking.a3.BookingState>()
@@ -198,6 +201,7 @@ fun Application.module() {
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
+    val promoterAssignments by inject<PromoterBookingAssignments>()
     val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
     val checkinService by inject<CheckinService>()
@@ -268,6 +272,13 @@ fun Application.module() {
         guestListEntryRepository = guestListEntryRepository,
         invitationService = invitationService,
         clock = appClock,
+        guestListDbRepository = guestListDbRepository,
+        clubsRepository = clubsRepository,
+        eventsRepository = eventsRepository,
+        adminHallsRepository = adminHallsRepository,
+        adminTablesRepository = adminTablesRepository,
+        bookingState = bookingState,
+        promoterAssignments = promoterAssignments,
     )
     promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
