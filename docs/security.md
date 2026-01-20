@@ -1,0 +1,61 @@
+# Security invariants (P0.4)
+
+Документ фиксирует инварианты безопасности для admin miniapp и связанных API. Текст ориентирован на прод‑релиз P0.4.
+
+## 1) RBAC
+
+- Все `/api/admin/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.
+- Доступные роли: `OWNER`, `GLOBAL_ADMIN`, `CLUB_ADMIN`.
+- Инварианты:
+  - Создание клубов (`POST /api/admin/clubs`) доступно только `OWNER`/`GLOBAL_ADMIN`.
+  - `CLUB_ADMIN` ограничен только клубами из RBAC-контекста — `isAdminClubAllowed(clubId)`.
+  - Любые действия по залам/столам проверяют принадлежность клуба перед изменением.
+
+## 2) No‑leak logs
+
+Запрещено логировать (включая warn/error/debug):
+
+- bytes / `ByteArray` / base64
+- multipart payload и file contents
+- geometryJson / контент плана зала
+- initData / bot tokens / auth headers
+
+Разрешено логировать:
+
+- идентификаторы (clubId/hallId/tableId)
+- counts, sizeBytes
+- sha256 (или префикс), contentType
+- requestId
+
+### Audit (grep‑чеклист)
+
+Перед релизом прогнать:
+
+```bash
+rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "logger\.(debug|info|warn|error)\(" app-bot core-data
+rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "console\.(log|warn|error)\(" miniapp/src
+rg -n --hidden --glob '!.git' --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!**/build/**' "(base64|Base64|multipart|FormData|PartData|toByteArray\(|ByteArray|bytes=|geometryJson|initData|Authorization)" app-bot core-data miniapp/src
+```
+
+Результат аудита P0.4: чувствительные payload‑данные в логах не обнаружены. Логи ограничены id/size/sha256 и техническими метками.
+
+## 3) Upload constraints
+
+- Загрузка плана зала: `PUT /api/admin/halls/{hallId}/plan`.
+- Допустимые content‑type: `image/png`, `image/jpeg`.
+- Максимальный размер: 5MB (server‑side guard).
+- Контент файла не логируется и не отражается в ошибках.
+
+## 4) Cache headers
+
+- Все admin endpoints обязаны возвращать `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data`.
+- `GET /api/clubs/{clubId}/halls/{hallId}/plan`:
+  - `ETag` основан на sha256 контента.
+  - `Cache-Control: private, max-age=3600, must-revalidate`.
+  - `304 Not Modified` возвращает те же cache headers.
+
+## 5) Error handling
+
+- Ошибки возвращаются в формате `{ code, message, requestId, status, details }`.
+- Поля `message` и `details` не должны содержать чувствительные данные.
+- `requestId` используется для корреляции и трассировки проблем.

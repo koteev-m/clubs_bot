@@ -43,6 +43,179 @@ SHA-256 base64url hash of the geometry JSON. These immutable assets return `Cach
 immutable`, `ETag: {fingerprint}` and intentionally omit `Vary` to stay CDN-friendly; new geometry produces a new fingerprint
 and URL. Asset paths are validated (numeric `clubId`, base64url `fingerprint`) and invalid inputs respond with 404.
 
+## Admin (miniapp mode=admin)
+
+### Как открыть админку
+
+- Откройте Mini App с параметром `?mode=admin` (например: `https://miniapp.example/?mode=admin`).
+- Для прямой навигации можно добавить `clubId` и `hallId`: `?mode=admin&clubId=1&hallId=2`.
+- Доступ: роли OWNER, GLOBAL_ADMIN, CLUB_ADMIN. Для CLUB_ADMIN доступ ограничен только `clubIds` из RBAC (см.
+  `isAdminClubAllowed`).
+
+### Auth
+
+- Авторизация в admin API — через miniapp initData (Telegram WebApp).
+- Сервер проверяет initData с BOT_TOKEN/TELEGRAM_BOT_TOKEN (см. `miniAppBotTokenProvider`).
+- Источник initData: query параметр `initData` **или** заголовок `X-Telegram-InitData`/`X-Telegram-Init-Data`
+  (fallback — JSON/form body, если Content-Length ≤ 8192).
+
+### Endpoint list
+
+**Clubs**
+
+- `GET /api/admin/clubs` — список клубов (OWNER/GLOBAL_ADMIN/CLUB_ADMIN, фильтрация по RBAC).
+- `POST /api/admin/clubs` — создать клуб (только OWNER/GLOBAL_ADMIN).
+- `PATCH /api/admin/clubs/{clubId}` — обновить клуб (OWNER/GLOBAL_ADMIN/CLUB_ADMIN, только разрешённые клубы).
+- `DELETE /api/admin/clubs/{clubId}` — удалить клуб (OWNER/GLOBAL_ADMIN/CLUB_ADMIN, только разрешённые клубы).
+
+**Halls**
+
+- `GET /api/admin/clubs/{clubId}/halls` — список залов.
+- `POST /api/admin/clubs/{clubId}/halls` — создать зал.
+- `PATCH /api/admin/halls/{hallId}` — обновить зал.
+- `DELETE /api/admin/halls/{hallId}` — удалить зал.
+- `POST /api/admin/halls/{hallId}/make-active` — сделать зал активным.
+
+**Hall plan**
+
+- `PUT /api/admin/halls/{hallId}/plan` — multipart upload, поле `file` (PNG/JPEG, до 5MB).
+- `GET /api/clubs/{clubId}/halls/{hallId}/plan` — получить план (ETag + Cache-Control; 200/304/404).
+
+**Tables**
+
+- `GET /api/admin/halls/{hallId}/tables`
+- `POST /api/admin/halls/{hallId}/tables`
+- `PATCH /api/admin/halls/{hallId}/tables/{tableId}`
+- `DELETE /api/admin/halls/{hallId}/tables/{tableId}`
+
+Все admin endpoints отвечают с `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data`.
+
+### Примеры curl
+
+```bash
+BASE_URL="https://api.example"
+INIT_DATA="query_id=AA...&user=...&hash=..."
+```
+
+List clubs/halls/tables:
+
+```bash
+curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/admin/clubs"
+
+curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/admin/clubs/1/halls"
+
+curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/admin/halls/10/tables"
+```
+
+Create/update/delete club:
+
+```bash
+curl -sS -X POST -H "Content-Type: application/json" \
+  -H "X-Telegram-InitData: $INIT_DATA" \
+  -d '{"name":"Club One","city":"Berlin","isActive":true}' \
+  "$BASE_URL/api/admin/clubs"
+
+curl -sS -X PATCH -H "Content-Type: application/json" \
+  -H "X-Telegram-InitData: $INIT_DATA" \
+  -d '{"name":"Club One Reloaded"}' \
+  "$BASE_URL/api/admin/clubs/1"
+
+curl -sS -X DELETE -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/admin/clubs/1"
+```
+
+Create/update/delete hall + make-active:
+
+```bash
+curl -sS -X POST -H "Content-Type: application/json" \
+  -H "X-Telegram-InitData: $INIT_DATA" \
+  -d '{"name":"Main Hall","geometryJson":"{\"zones\":[]}","isActive":true}' \
+  "$BASE_URL/api/admin/clubs/1/halls"
+
+curl -sS -X PATCH -H "Content-Type: application/json" \
+  -H "X-Telegram-InitData: $INIT_DATA" \
+  -d '{"name":"Main Hall 2"}' \
+  "$BASE_URL/api/admin/halls/10"
+
+curl -sS -X POST -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/admin/halls/10/make-active"
+
+curl -sS -X DELETE -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/admin/halls/10"
+```
+
+Upload plan:
+
+```bash
+curl -sS -X PUT -H "X-Telegram-InitData: $INIT_DATA" \
+  -F "file=@plan.png" \
+  "$BASE_URL/api/admin/halls/10/plan"
+```
+
+Fetch plan (200 + ETag, затем 304):
+
+```bash
+curl -sS -D - -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/clubs/1/halls/10/plan"
+
+curl -sS -D - -H "X-Telegram-InitData: $INIT_DATA" \
+  -H 'If-None-Match: "plan-sha256-<etag>"' \
+  "$BASE_URL/api/clubs/1/halls/10/plan"
+```
+
+Пустой `If-None-Match` игнорируется, сервер отвечает `200`.
+
+Create/update/delete table:
+
+```bash
+curl -sS -X POST -H "Content-Type: application/json" \
+  -H "X-Telegram-InitData: $INIT_DATA" \
+  -d '{"label":"T1","capacity":4,"zone":"vip","x":100.5,"y":240.0}' \
+  "$BASE_URL/api/admin/halls/10/tables"
+
+curl -sS -X PATCH -H "Content-Type: application/json" \
+  -H "X-Telegram-InitData: $INIT_DATA" \
+  -d '{"capacity":6,"tableNumber":12}' \
+  "$BASE_URL/api/admin/halls/10/tables/55"
+
+curl -sS -X DELETE -H "X-Telegram-InitData: $INIT_DATA" \
+  "$BASE_URL/api/admin/halls/10/tables/55"
+```
+
+### Ошибки
+
+Формат ответа ошибки (см. `respondError`):
+
+```json
+{
+  "code": "validation_error",
+  "message": "optional",
+  "requestId": "req-123",
+  "status": 400,
+  "details": {
+    "name": "length_1_255"
+  }
+}
+```
+
+Пример ошибки валидации полей:
+
+```json
+{
+  "code": "validation_error",
+  "message": null,
+  "requestId": "req-123",
+  "status": 400,
+  "details": {
+    "hallId": "must_be_positive",
+    "geometryJson": "invalid_zones"
+  }
+}
+```
+
 ### Admin tables (E1)
 
 - `GET /api/admin/tables?clubId=&page=&size=` — список правил столов для клуба.
