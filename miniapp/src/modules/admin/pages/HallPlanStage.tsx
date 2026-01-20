@@ -122,7 +122,11 @@ export default function HallPlanStage({
       if (readOnly) return;
       if (!dragOriginRef.current || dragOriginRef.current.tableId !== table.id) return;
       if (typeof event.currentTarget.releasePointerCapture === 'function') {
-        event.currentTarget.releasePointerCapture(event.pointerId);
+        try {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        } catch (error) {
+          console.warn('Failed to release pointer capture for table marker.', error);
+        }
       }
       const origin = dragOriginRef.current;
       const position = dragPositionRef.current;
@@ -145,7 +149,11 @@ export default function HallPlanStage({
   const handlePointerCancel = useCallback(
     (event: PointerEvent<HTMLButtonElement>, table: AdminTable) => {
       if (typeof event.currentTarget.releasePointerCapture === 'function') {
-        event.currentTarget.releasePointerCapture(event.pointerId);
+        try {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        } catch (error) {
+          console.warn('Failed to release pointer capture for table marker.', error);
+        }
       }
       resetDragging(table.id);
     },
@@ -193,12 +201,13 @@ export default function HallPlanStage({
               isSelected
                 ? 'border-blue-500 bg-blue-600 text-white'
                 : 'border-white bg-white text-gray-700'
-            } ${readOnly ? 'cursor-default' : 'cursor-grab'}`}
+            } ${readOnly ? 'cursor-default' : 'cursor-grab'} select-none`}
             style={{
               left: position.left - markerSize / 2,
               top: position.top - markerSize / 2,
               width: markerSize,
               height: markerSize,
+              touchAction: 'none',
             }}
             onPointerDown={(event) => handlePointerDown(event, table)}
             onPointerMove={(event) => handlePointerMove(event, table)}
