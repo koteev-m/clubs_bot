@@ -85,7 +85,11 @@ export default function HallPlanStage({
       onSelectTable(table.id);
       if (readOnly) return;
       if (typeof event.currentTarget.setPointerCapture === 'function') {
-        event.currentTarget.setPointerCapture(event.pointerId);
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // Игнорируем возможные исключения WebView.
+        }
       }
       draggingMovedRef.current = false;
       dragOriginRef.current = { tableId: table.id, x: table.x, y: table.y };
