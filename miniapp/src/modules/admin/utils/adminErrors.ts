@@ -4,6 +4,7 @@ export type FieldErrors = Record<string, string>;
 
 const errorMessages: Record<string, string> = {
   forbidden: 'Недостаточно прав',
+  unauthorized: 'Не удалось авторизоваться, откройте Mini App заново',
   not_found: 'Данные не найдены',
   club_not_found: 'Клуб не найден',
   hall_not_found: 'Зал не найден',
@@ -16,6 +17,7 @@ const errorMessages: Record<string, string> = {
   invalid_capacity: 'Некорректная вместимость',
   unsupported_media_type: 'Неподдерживаемый формат файла',
   payload_too_large: 'Слишком большой файл',
+  rate_limited: 'Слишком много запросов, попробуйте позже',
   request_timeout: 'Превышено время ожидания',
   internal_error: 'Ошибка сервера',
 };

@@ -182,4 +182,35 @@ class ErrorCodesRouteTest {
         val contentType = response.headers[HttpHeaders.ContentType] ?: error("Missing Content-Type header")
         assertEquals(jsonContentType, contentType)
     }
+
+    @Test
+    fun `errors registry includes p0_4 codes`() = testApplication {
+        application {
+            install(ServerContentNegotiation) { json() }
+            configureLoggingAndRequestId()
+            errorCodesRoutes()
+        }
+
+        val response = client.config {
+            install(ContentNegotiation) { json() }
+        }.get("/api/.well-known/errors")
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(ErrorRegistry.etag, response.headers[HttpHeaders.ETag])
+
+        val payload = response.body<ErrorCodesPayload>()
+        val codeValues = payload.codes.map { it.code }.toSet()
+        val expectedCodes = setOf(
+            ErrorCodes.payload_too_large,
+            ErrorCodes.unsupported_media_type,
+            ErrorCodes.table_not_found,
+            ErrorCodes.table_number_conflict,
+            ErrorCodes.invalid_table_coords,
+            ErrorCodes.invalid_capacity,
+        )
+
+        expectedCodes.forEach { code ->
+            assertTrue(code in codeValues, "Missing expected code $code")
+        }
+    }
 }
