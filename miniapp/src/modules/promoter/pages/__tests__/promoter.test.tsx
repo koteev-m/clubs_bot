@@ -6,6 +6,7 @@ import TablesScreen from '../TablesScreen';
 import {
   addGuestListEntriesBulk,
   assignBooking,
+  createGuestList,
   getGuestListDetails,
   listClubEvents,
   listClubHalls,
@@ -32,6 +33,7 @@ vi.mock('../../api/promoter.api', async () => {
     listGuestLists: vi.fn(),
     listClubEvents: vi.fn(),
     addGuestListEntriesBulk: vi.fn(),
+    createGuestList: vi.fn(),
     listInvitations: vi.fn(),
     listClubHalls: vi.fn(),
     listHallTables: vi.fn(),
@@ -95,6 +97,59 @@ describe('promoter screens', () => {
       expect(addGuestListEntriesBulk).toHaveBeenCalled();
     });
     expect(vi.mocked(addGuestListEntriesBulk).mock.calls[0][1]).toBe('Alice\nBob');
+  });
+
+  it('arrival window crossing midnight shifts end date', async () => {
+    vi.mocked(listPromoterClubs).mockResolvedValue([{ id: 1, name: 'Club', city: 'City' }]);
+    vi.mocked(listGuestLists).mockResolvedValue([]);
+    vi.mocked(listClubEvents).mockResolvedValue([
+      { id: 9, clubId: 1, startUtc: '2024-06-01T20:00:00Z', endUtc: '2024-06-01T23:00:00Z', title: 'Event', isSpecial: false },
+    ]);
+    vi.mocked(createGuestList).mockResolvedValue({
+      guestList: {
+        id: 10,
+        clubId: 1,
+        eventId: 9,
+        ownerType: 'PROMOTER',
+        ownerUserId: 1,
+        name: 'List',
+        limit: 20,
+        status: 'ACTIVE',
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+      },
+      stats: { added: 0, invited: 0, confirmed: 0, declined: 0, arrived: 0, noShow: 0 },
+    });
+
+    render(
+      <GuestListsScreen
+        clubId={1}
+        guestListId={null}
+        onSelectClub={vi.fn()}
+        onSelectGuestList={vi.fn()}
+        onForbidden={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(await screen.findByLabelText('Дата'), { target: { value: '2024-06-01' } });
+    fireEvent.change(screen.getByLabelText('Окно прибытия (HH:mm-HH:mm)'), { target: { value: '23:00-01:00' } });
+
+    await waitFor(() => {
+      expect(listClubEvents).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+
+    await waitFor(() => {
+      expect(createGuestList).toHaveBeenCalled();
+    });
+
+    expect(vi.mocked(createGuestList).mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        arrivalWindowStart: '2024-06-01T23:00:00.000Z',
+        arrivalWindowEnd: '2024-06-02T01:00:00.000Z',
+      }),
+    );
   });
 
   it('copy link shows toast', async () => {

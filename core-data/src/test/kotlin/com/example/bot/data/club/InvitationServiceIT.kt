@@ -38,7 +38,7 @@ class InvitationServiceIT : PostgresClubIntegrationTest() {
     }
 
     @Test
-    fun `createInvitation stores only token hash`() = runBlocking {
+    fun `createInvitation stores token and hash`() = runBlocking {
         val clubId = insertClub(name = "Aurora")
         val eventId =
             insertEvent(
@@ -95,7 +95,9 @@ class InvitationServiceIT : PostgresClubIntegrationTest() {
                     .where { InvitationsTable.guestListEntryId eq entry.id }
                     .single()
             }
+        val storedToken = stored[InvitationsTable.token]
         val storedHash = stored[InvitationsTable.tokenHash]
+        assertEquals(expectedToken, storedToken)
         assertEquals(expectedToken.sha256Hex(), storedHash)
         assertNotEquals(expectedToken, storedHash)
         assertTrue(storedHash.matches(Regex("^[0-9a-f]{64}$")))

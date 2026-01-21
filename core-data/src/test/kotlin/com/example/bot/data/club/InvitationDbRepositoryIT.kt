@@ -84,6 +84,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val expiredInvite =
                 invitationRepo.create(
                     entry.id,
+                    token = "token-expired",
                     tokenHash = sha256Hex("token-expired"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = fixedInstant.minusSeconds(60),
@@ -92,6 +93,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val usedInvite =
                 invitationRepo.create(
                     entry.id,
+                    token = "token-used",
                     tokenHash = sha256Hex("token-used"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = futureExpiry,
@@ -103,6 +105,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val revokedInvite =
                 invitationRepo.create(
                     entry.id,
+                    token = "token-revoked",
                     tokenHash = sha256Hex("token-revoked"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = futureExpiry,
@@ -113,6 +116,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val inv1 =
                 invitationRepo.create(
                     entry.id,
+                    token = "token-old",
                     tokenHash = sha256Hex("token-old"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = futureExpiry,
@@ -121,6 +125,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val inv2 =
                 invitationRepo.create(
                     entry.id,
+                    token = "token-keep",
                     tokenHash = sha256Hex("token-keep"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = futureExpiry,
@@ -129,6 +134,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val inv3 =
                 invitationRepo.create(
                     entry.id,
+                    token = "token-new",
                     tokenHash = sha256Hex("token-new"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = futureExpiry,
@@ -137,6 +143,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val otherEntryInvite =
                 invitationRepo.create(
                     anotherEntry.id,
+                    token = "token-other-entry",
                     tokenHash = sha256Hex("token-other-entry"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = futureExpiry,
@@ -146,6 +153,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
             val created =
                 invitationRepo.createAndRevokeOtherActiveByEntryId(
                     entry.id,
+                    token = "token-created",
                     tokenHash = sha256Hex("token-created"),
                     channel = InvitationChannel.TELEGRAM,
                     expiresAt = futureExpiry,
@@ -212,6 +220,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
         val invite =
             invitationRepo.create(
                 entry.id,
+                token = "token",
                 tokenHash = sha256Hex("token"),
                 channel = InvitationChannel.TELEGRAM,
                 expiresAt = fixedInstant.plusSeconds(1200),
@@ -258,6 +267,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
         val invite =
             invitationRepo.create(
                 entry.id,
+                token = "token",
                 tokenHash = sha256Hex("token"),
                 channel = InvitationChannel.TELEGRAM,
                 expiresAt = fixedInstant.plusSeconds(1200),
@@ -304,6 +314,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
         val invite =
             invitationRepo.create(
                 entry.id,
+                token = "token",
                 tokenHash = sha256Hex("token"),
                 channel = InvitationChannel.TELEGRAM,
                 expiresAt = fixedInstant.plusSeconds(1200),

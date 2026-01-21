@@ -30,7 +30,7 @@ import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.plugins.DataSourceHolder
-import com.example.bot.promoter.PromoterBookingAssignments
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.promo.BookingTemplateRepository
 import com.example.bot.promo.BookingTemplateService
 import com.example.bot.promo.InMemoryPromoAttributionStore
@@ -80,7 +80,7 @@ val bookingModule =
         single<GuestListService> { GuestListServiceImpl(get(), get()) }
         single<InvitationService> { InvitationServiceImpl(get(), get(), get()) }
         single<CheckinService> { CheckinServiceImpl(get(), get(), get(), get(), get()) }
-        single { PromoterBookingAssignments() }
+        single { PromoterBookingAssignmentsRepository(get()) }
 
         single<PromoLinkRepository> { PromoLinkRepositoryImpl(get()) }
         single<PromoAttributionRepository> { PromoAttributionRepositoryImpl(get()) }

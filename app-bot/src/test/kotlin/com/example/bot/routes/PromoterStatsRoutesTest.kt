@@ -21,7 +21,7 @@ import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.installMiniAppAuthStatusPage
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
-import com.example.bot.promoter.PromoterBookingAssignments
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.createInitData
@@ -75,7 +75,7 @@ class PromoterStatsRoutesTest {
         val adminHallsRepository = mockk<AdminHallsRepository>(relaxed = true)
         val adminTablesRepository = mockk<AdminTablesRepository>(relaxed = true)
         val bookingState = mockk<BookingState>(relaxed = true)
-        val promoterAssignments = PromoterBookingAssignments()
+        val promoterAssignments = mockk<PromoterBookingAssignmentsRepository>(relaxed = true)
 
         testApplication {
             application {
@@ -119,7 +119,7 @@ class PromoterStatsRoutesTest {
         val adminHallsRepository = mockk<AdminHallsRepository>(relaxed = true)
         val adminTablesRepository = mockk<AdminTablesRepository>(relaxed = true)
         val bookingState = mockk<BookingState>(relaxed = true)
-        val promoterAssignments = PromoterBookingAssignments()
+        val promoterAssignments = mockk<PromoterBookingAssignmentsRepository>(relaxed = true)
 
         val list =
             GuestListRecord(
@@ -167,7 +167,7 @@ class PromoterStatsRoutesTest {
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
-                installRbac(roles = setOf(Role.PROMOTER))
+                installRbac(roles = setOf(Role.PROMOTER), clubIds = setOf(2))
                 promoterGuestListRoutes(
                     guestListRepository = guestListRepository,
                     guestListService = guestListService,
@@ -198,11 +198,14 @@ class PromoterStatsRoutesTest {
     }
 }
 
-private fun Application.installRbac(roles: Set<Role>) {
+private fun Application.installRbac(
+    roles: Set<Role>,
+    clubIds: Set<Long> = emptySet(),
+) {
     installMiniAppAuthStatusPage()
     install(RbacPlugin) {
-        userRepository = PromoterStubUserRepository()
-        userRoleRepository = PromoterStubUserRoleRepository(roles)
+        userRepository = PromoterStatsStubUserRepository()
+        userRoleRepository = PromoterStatsStubUserRoleRepository(roles, clubIds)
         auditLogRepository = relaxedAuditRepository()
         principalExtractor = { call ->
             if (call.attributes.contains(MiniAppUserKey)) {
@@ -217,18 +220,19 @@ private fun Application.installRbac(roles: Set<Role>) {
     }
 }
 
-private class PromoterStubUserRepository : UserRepository {
+private class PromoterStatsStubUserRepository : UserRepository {
     override suspend fun getByTelegramId(id: Long): User? = User(id = 1, telegramId = id, username = "tester")
 
     override suspend fun getById(id: Long): User? = User(id = id, telegramId = id, username = "tester")
 }
 
-private class PromoterStubUserRoleRepository(
+private class PromoterStatsStubUserRoleRepository(
     private val roles: Set<Role>,
+    private val clubIds: Set<Long>,
 ) : UserRoleRepository {
     override suspend fun listRoles(userId: Long): Set<Role> = roles
 
-    override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
+    override suspend fun listClubIdsFor(userId: Long): Set<Long> = clubIds
 }
 
 private fun relaxedAuditRepository(): AuditLogRepository = mockk(relaxed = true)

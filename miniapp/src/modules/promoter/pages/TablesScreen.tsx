@@ -35,6 +35,22 @@ const parseOptionalId = (value: string) => {
   return id;
 };
 
+const mapPromoterTableToAdmin = (table: PromoterTable): AdminTable => ({
+  id: table.id,
+  hallId: table.hallId,
+  clubId: table.clubId,
+  label: table.label,
+  minDeposit: table.minDeposit,
+  capacity: table.capacity,
+  zone: table.zone ?? null,
+  zoneName: table.zoneName ?? null,
+  arrivalWindow: table.arrivalWindow ?? null,
+  mysteryEligible: table.mysteryEligible,
+  tableNumber: table.tableNumber,
+  x: table.x,
+  y: table.y,
+});
+
 export default function TablesScreen({
   clubId,
   eventId,
@@ -197,7 +213,7 @@ export default function TablesScreen({
     [clubId, selectedHallId, tables],
   );
 
-  const stageTables = useMemo(() => activeTables as AdminTable[], [activeTables]);
+  const stageTables = useMemo(() => activeTables.map(mapPromoterTableToAdmin), [activeTables]);
 
   const handleAssign = useCallback(async () => {
     if (!selectedEntryId || !selectedTableId || !selectedHallId || !eventId) {

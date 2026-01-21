@@ -22,7 +22,7 @@ import com.example.bot.clubs.Club
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.Event
 import com.example.bot.clubs.EventsRepository
-import com.example.bot.data.booking.a3.hashRequestCanonical
+import com.example.bot.booking.a3.hashRequestCanonical
 import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListEntryRecord
@@ -35,7 +35,7 @@ import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.toRangeString
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
-import com.example.bot.promoter.PromoterBookingAssignments
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -270,7 +270,7 @@ fun Application.promoterGuestListRoutes(
     adminHallsRepository: AdminHallsRepository,
     adminTablesRepository: AdminTablesRepository,
     bookingState: BookingState,
-    promoterAssignments: PromoterBookingAssignments,
+    promoterAssignments: PromoterBookingAssignmentsRepository,
     clock: Clock = Clock.systemUTC(),
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
@@ -280,9 +280,7 @@ fun Application.promoterGuestListRoutes(
             withMiniAppAuth(allowInitDataFromBody = false) { botTokenProvider() }
             authorize(
                 Role.PROMOTER,
-                Role.MANAGER,
                 Role.CLUB_ADMIN,
-                Role.HEAD_MANAGER,
                 Role.GLOBAL_ADMIN,
                 Role.OWNER,
             ) {
@@ -363,7 +361,13 @@ fun Application.promoterGuestListRoutes(
                     val lists =
                         when {
                             Role.PROMOTER in context.roles ->
-                                guestListDbRepository.listByPromoter(context.user.id, clubId = clubId)
+                                if (context.clubIds.isEmpty()) {
+                                    emptyList()
+                                } else {
+                                    guestListDbRepository
+                                        .listByPromoter(context.user.id, clubId = clubId)
+                                        .filter { it.clubId in context.clubIds }
+                                }
                             clubId != null ->
                                 guestListDbRepository.listByClub(clubId)
                             else -> emptyList()
@@ -450,9 +454,13 @@ fun Application.promoterGuestListRoutes(
                     }
                     val table = adminTablesRepository.findByIdForHall(payload.hallId, payload.tableId)
                         ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
-                    val existingBooking = promoterAssignments.findBookingForEntry(entry.id)
+                    val existingBooking = promoterAssignments.findBookingIdForEntry(entry.id)
                     if (existingBooking != null) {
-                        return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                        return@post call.respondError(
+                            HttpStatusCode.Conflict,
+                            ErrorCodes.invalid_state,
+                            message = "Этому гостю уже назначен стол",
+                        )
                     }
                     val idem = "promoter-assign:${entry.id}:${payload.tableId}"
                     val holdHash = hashRequestCanonical(mapOf("tableId" to payload.tableId, "eventId" to payload.eventId, "guests" to 1))
@@ -490,9 +498,13 @@ fun Application.promoterGuestListRoutes(
                                     return@post call.respondError(status, code)
                                 }
                                 is ConfirmResult.Success -> {
-                                    val recorded = promoterAssignments.assignEntry(entry.id, confirm.booking.id)
+                                    val recorded = promoterAssignments.assignIfAbsent(entry.id, confirm.booking.id)
                                     if (!recorded) {
-                                        return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                                        return@post call.respondError(
+                                            HttpStatusCode.Conflict,
+                                            ErrorCodes.invalid_state,
+                                            message = "Этому гостю уже назначен стол",
+                                        )
                                     }
                                     call.respond(
                                         PromoterBookingAssignResponse(
@@ -510,8 +522,10 @@ fun Application.promoterGuestListRoutes(
                 get("/me/stats") {
                     val context = call.rbacContext()
                     val lists =
-                        if (Role.PROMOTER in context.roles) {
-                            guestListDbRepository.listByPromoter(context.user.id)
+                        if (Role.PROMOTER in context.roles && context.clubIds.isNotEmpty()) {
+                            guestListDbRepository
+                                .listByPromoter(context.user.id)
+                                .filter { it.clubId in context.clubIds }
                         } else if (context.roles.any { it in GLOBAL_ROLES }) {
                             val clubIds =
                                 if (context.clubIds.isNotEmpty()) {
@@ -722,7 +736,7 @@ fun Application.promoterGuestListRoutes(
 }
 
 private val GLOBAL_ROLES: Set<Role> =
-    setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+    setOf(Role.OWNER, Role.GLOBAL_ADMIN)
 
 private suspend fun ApplicationCall.requireAccessibleGuestList(
     repo: GuestListRepository,
@@ -747,10 +761,9 @@ private fun canAccessList(
     list: GuestList,
 ): Boolean {
     val isGlobal = context.roles.any { it in GLOBAL_ROLES }
-    val clubScopeOk = context.clubIds.isEmpty() || list.clubId in context.clubIds
+    val clubScopeOk = list.clubId in context.clubIds
     val isClubScoped =
-        (Role.CLUB_ADMIN in context.roles || Role.MANAGER in context.roles) &&
-            clubScopeOk
+        (Role.CLUB_ADMIN in context.roles) && clubScopeOk
     val isPromoterOwnList =
         (Role.PROMOTER in context.roles) &&
             list.ownerType == GuestListOwnerType.PROMOTER &&
@@ -952,7 +965,6 @@ private fun List<GuestListRecord>.filterByDateRange(
 
 private fun RbacContext.canAccessClub(clubId: Long): Boolean {
     if (roles.any { it in GLOBAL_ROLES }) return true
-    if (clubIds.isEmpty()) return true
     return clubId in clubIds
 }
 

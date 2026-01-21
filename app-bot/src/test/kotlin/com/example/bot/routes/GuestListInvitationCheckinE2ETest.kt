@@ -12,7 +12,7 @@ import com.example.bot.host.HostEntranceService
 import com.example.bot.admin.AdminHallsRepository
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.booking.a3.BookingState
-import com.example.bot.promoter.PromoterBookingAssignments
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.plugins.configureSecurity
 import com.example.bot.testing.createInitData
@@ -92,8 +92,8 @@ class GuestListInvitationCheckinE2ETest {
             )
         promoterUserId = insertUser(telegramUserId = promoterTelegramId, username = "promoter", displayName = "Promoter")
         entryManagerUserId = insertUser(telegramUserId = entryManagerTelegramId, username = "entry", displayName = "Entry")
-        insertUserRole(promoterUserId, Role.PROMOTER, scopeType = "GLOBAL", scopeClubId = null)
-        insertUserRole(entryManagerUserId, Role.ENTRY_MANAGER, scopeType = "GLOBAL", scopeClubId = null)
+        insertUserRole(promoterUserId, Role.PROMOTER, scopeType = "CLUB", scopeClubId = clubId)
+        insertUserRole(entryManagerUserId, Role.ENTRY_MANAGER, scopeType = "CLUB", scopeClubId = clubId)
 
         event =
             Event(
@@ -308,7 +308,7 @@ class GuestListInvitationCheckinE2ETest {
             adminHallsRepository = mockk<AdminHallsRepository>(relaxed = true),
             adminTablesRepository = mockk<AdminTablesRepository>(relaxed = true),
             bookingState = mockk<BookingState>(relaxed = true),
-            promoterAssignments = PromoterBookingAssignments(),
+            promoterAssignments = mockk<PromoterBookingAssignmentsRepository>(relaxed = true),
             botTokenProvider = { com.example.bot.webapp.TEST_BOT_TOKEN },
         )
         invitationRoutes(
