@@ -18,6 +18,7 @@ import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.fail
 import java.security.MessageDigest
@@ -29,12 +30,17 @@ import java.time.ZoneOffset
 import java.util.Base64
 
 class InvitationServiceTest {
-    private val invitationRepo: InvitationDbRepository = mockk()
+    private val invitationRepo: InvitationDbRepository = mockk(relaxed = true)
     private val guestListRepo: GuestListDbRepository = mockk()
     private val entryRepo: GuestListEntryDbRepository = mockk()
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2024-07-01T18:00:00Z"), ZoneOffset.UTC)
     private val guestListConfig = GuestListConfig(bulkMaxChars = 20_000, noShowGraceMinutes = 30)
     private val invitationConfig = InvitationConfig(ttlHours = 72, botUsername = "clubbot")
+
+    @BeforeEach
+    fun stubDefaults() {
+        coEvery { invitationRepo.findActiveByEntryId(any(), any(), any()) } returns null
+    }
 
     @Test
     fun `createInvitation generates token and hashes`() = runBlocking {
@@ -43,12 +49,14 @@ class InvitationServiceTest {
         val tokenBytes = ByteArray(32) { it.toByte() }
         val expectedToken = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)
         val tokenHashSlot: CapturingSlot<String> = slot()
+        val tokenSlot: CapturingSlot<String> = slot()
 
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
         coEvery {
             invitationRepo.createAndRevokeOtherActiveByEntryId(
                 entry.id,
+                capture(tokenSlot),
                 capture(tokenHashSlot),
                 InvitationChannel.TELEGRAM,
                 any(),
@@ -56,7 +64,7 @@ class InvitationServiceTest {
                 now = fixedClock.instant(),
             )
         } answers {
-            val expires = arg<Instant>(3)
+            val expires = arg<Instant>(4)
             invitationRecord(
                 id = 10,
                 entryId = entry.id,
@@ -88,6 +96,7 @@ class InvitationServiceTest {
                 assertEquals("inv:${expectedToken}", payload.qrPayload)
                 assertEquals(fixedClock.instant().plus(Duration.ofHours(invitationConfig.ttlHours.toLong())), payload.expiresAt)
                 val expectedHash = expectedToken.sha256Hex()
+                assertEquals(expectedToken, tokenSlot.captured)
                 assertEquals(expectedHash, tokenHashSlot.captured)
                 assertEquals(64, tokenHashSlot.captured.length)
                 assertTrue(tokenHashSlot.captured.matches(Regex("^[0-9a-f]{64}$")))
@@ -99,6 +108,60 @@ class InvitationServiceTest {
     }
 
     @Test
+    fun `createInvitation reuses active invitation`() = runBlocking {
+        val entry = entryRecord(status = GuestListEntryStatus.ADDED)
+        val guestList = guestListRecord(arrivalWindowEnd = null)
+        val existing =
+            invitationRecord(
+                id = 20,
+                entryId = entry.id,
+                token = "persisted-token",
+                channel = InvitationChannel.EXTERNAL,
+                expiresAt = fixedClock.instant().plus(Duration.ofHours(2)),
+            )
+
+        coEvery { entryRepo.findById(entry.id) } returns entry
+        coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
+        coEvery {
+            invitationRepo.findActiveByEntryId(
+                entryId = entry.id,
+                channel = InvitationChannel.EXTERNAL,
+                now = fixedClock.instant(),
+            )
+        } returns existing
+
+        val service =
+            InvitationServiceImpl(
+                invitationRepo,
+                guestListRepo,
+                entryRepo,
+                guestListConfig,
+                invitationConfig,
+                fixedClock,
+                FixedSecureRandom(ByteArray(32)),
+            )
+
+        val result = service.createInvitation(entry.id, InvitationChannel.EXTERNAL, createdBy = 42)
+
+        check(result is InvitationServiceResult.Success)
+        assertEquals("persisted-token", result.value.token)
+        assertEquals("inv:persisted-token", result.value.qrPayload)
+        assertEquals("https://t.me/clubbot?start=inv_persisted-token", result.value.deepLinkUrl)
+        assertEquals(existing.expiresAt, result.value.expiresAt)
+        coVerify(exactly = 0) {
+            invitationRepo.createAndRevokeOtherActiveByEntryId(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        }
+    }
+
+    @Test
     fun `createInvitation keeps confirmed status`() = runBlocking {
         val entry = entryRecord(status = GuestListEntryStatus.CONFIRMED)
         val guestList = guestListRecord(arrivalWindowEnd = fixedClock.instant())
@@ -106,6 +169,7 @@ class InvitationServiceTest {
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
         coEvery {
             invitationRepo.createAndRevokeOtherActiveByEntryId(
+                any(),
                 any(),
                 any(),
                 any(),
@@ -152,6 +216,7 @@ class InvitationServiceTest {
                 any(),
                 any(),
                 any(),
+                any(),
                 now = fixedClock.instant(),
             )
         } returns invitationRecord(id = 12, entryId = entry.id, expiresAt = fixedClock.instant().plusSeconds(7200))
@@ -172,6 +237,7 @@ class InvitationServiceTest {
             invitationRepo.createAndRevokeOtherActiveByEntryId(
                 entry.id,
                 any(),
+                any(),
                 InvitationChannel.TELEGRAM,
                 any(),
                 any(),
@@ -189,6 +255,7 @@ class InvitationServiceTest {
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
         coEvery {
             invitationRepo.createAndRevokeOtherActiveByEntryId(
+                any(),
                 any(),
                 any(),
                 any(),
@@ -217,8 +284,16 @@ class InvitationServiceTest {
         coVerify(exactly = 1) { entryRepo.findById(entry.id) }
         coVerify(exactly = 1) { guestListRepo.findById(entry.guestListId) }
         coVerify(exactly = 1) {
+            invitationRepo.findActiveByEntryId(
+                entryId = entry.id,
+                channel = InvitationChannel.TELEGRAM,
+                now = fixedClock.instant(),
+            )
+        }
+        coVerify(exactly = 1) {
             invitationRepo.createAndRevokeOtherActiveByEntryId(
                 entry.id,
+                any(),
                 any(),
                 InvitationChannel.TELEGRAM,
                 any(),
@@ -237,12 +312,14 @@ class InvitationServiceTest {
         val tokenBytes = ByteArray(32) { it.toByte() }
         val expectedToken = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes)
         val tokenHashSlot: CapturingSlot<String> = slot()
+        val tokenSlot: CapturingSlot<String> = slot()
 
         coEvery { entryRepo.findById(entry.id) } returns entry
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
         coEvery {
             invitationRepo.createAndRevokeOtherActiveByEntryId(
                 entry.id,
+                capture(tokenSlot),
                 capture(tokenHashSlot),
                 InvitationChannel.TELEGRAM,
                 any(),
@@ -250,7 +327,7 @@ class InvitationServiceTest {
                 now = fixedClock.instant(),
             )
         } answers {
-            val expires = arg<Instant>(3)
+            val expires = arg<Instant>(4)
             invitationRecord(
                 id = 12,
                 entryId = entry.id,
@@ -277,6 +354,7 @@ class InvitationServiceTest {
             is InvitationServiceResult.Success -> {
                 val payload = result.value
                 assertEquals("https://t.me/clubbot?start=inv_${expectedToken}", payload.deepLinkUrl)
+                assertEquals(expectedToken, tokenSlot.captured)
             }
             is InvitationServiceResult.Failure -> fail("expected success, got ${result.error}")
         }
@@ -303,7 +381,7 @@ class InvitationServiceTest {
         val result = service.createInvitation(entry.id, InvitationChannel.TELEGRAM, createdBy = 1)
 
         assertTrue(result is InvitationServiceResult.Failure && result.error == InvitationServiceError.GUEST_LIST_NOT_ACTIVE)
-        coVerify(exactly = 0) { invitationRepo.createAndRevokeOtherActiveByEntryId(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { invitationRepo.createAndRevokeOtherActiveByEntryId(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -328,7 +406,7 @@ class InvitationServiceTest {
         val result = service.createInvitation(entry.id, InvitationChannel.TELEGRAM, createdBy = 1)
 
         assertTrue(result is InvitationServiceResult.Failure && result.error == InvitationServiceError.GUEST_LIST_NOT_ACTIVE)
-        coVerify(exactly = 0) { invitationRepo.createAndRevokeOtherActiveByEntryId(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { invitationRepo.createAndRevokeOtherActiveByEntryId(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -542,6 +620,8 @@ class InvitationServiceTest {
     private fun invitationRecord(
         id: Long = 1,
         entryId: Long = 10,
+        token: String? = "token",
+        channel: InvitationChannel = InvitationChannel.TELEGRAM,
         expiresAt: Instant = fixedClock.instant(),
         revokedAt: Instant? = null,
         usedAt: Instant? = null,
@@ -550,8 +630,9 @@ class InvitationServiceTest {
         InvitationRecord(
             id = id,
             guestListEntryId = entryId,
+            token = token,
             tokenHash = "hash",
-            channel = InvitationChannel.TELEGRAM,
+            channel = channel,
             expiresAt = expiresAt,
             revokedAt = revokedAt,
             usedAt = usedAt,

@@ -34,9 +34,13 @@ const formatWindowToIso = (date: string, window: string) => {
   if (parts.length !== 2) return null;
   const [start, end] = parts;
   if (!start || !end) return null;
-  const startIso = new Date(`${date}T${start}:00Z`).toISOString();
-  const endIso = new Date(`${date}T${end}:00Z`).toISOString();
-  return { startIso, endIso };
+  const startDate = new Date(`${date}T${start}:00Z`);
+  const endDate = new Date(`${date}T${end}:00Z`);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  if (endDate <= startDate) {
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+  }
+  return { startIso: startDate.toISOString(), endIso: endDate.toISOString() };
 };
 
 const parseOptionalId = (value: string) => {

@@ -61,12 +61,26 @@ class InvitationServiceImpl(
             if (!expiresAt.isAfter(now)) {
                 return@withRetriedTx InvitationServiceResult.Failure(InvitationServiceError.GUEST_LIST_NOT_ACTIVE)
             }
+            val activeInvitation = invitationRepo.findActiveByEntryId(entryId, channel, now)
+            if (activeInvitation?.token != null) {
+                val token = activeInvitation.token
+                val deepLink = buildDeepLink(token)
+                return@withRetriedTx InvitationServiceResult.Success(
+                    InvitationCreateResult(
+                        token = token,
+                        deepLinkUrl = deepLink,
+                        qrPayload = "inv:$token",
+                        expiresAt = activeInvitation.expiresAt,
+                    ),
+                )
+            }
             val token = generateToken()
             val tokenHash = token.sha256Hex()
 
             val invitation =
                 invitationRepo.createAndRevokeOtherActiveByEntryId(
                     entryId,
+                    token,
                     tokenHash,
                     channel,
                     expiresAt,

@@ -53,7 +53,7 @@ import com.example.bot.notifications.NotificationService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
-import com.example.bot.promoter.PromoterBookingAssignments
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.support.SupportService
 import com.example.bot.support.sanitizeClubName
 import com.example.bot.routes.bookingA3Routes
@@ -201,7 +201,7 @@ fun Application.module() {
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
-    val promoterAssignments by inject<PromoterBookingAssignments>()
+    val promoterAssignments by inject<PromoterBookingAssignmentsRepository>()
     val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
     val checkinService by inject<CheckinService>()

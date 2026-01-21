@@ -44,6 +44,7 @@ object GuestListEntriesTable : Table("guest_list_entries") {
 object InvitationsTable : Table("invitations") {
     val id = long("id").autoIncrement()
     val guestListEntryId = long("guest_list_entry_id")
+    val token = text("token").nullable()
     val tokenHash = text("token_hash")
     val channel = text("channel")
     val expiresAt = timestampWithTimeZone("expires_at")

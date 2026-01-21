@@ -65,6 +65,7 @@ data class GuestListEntryRecord(
 data class InvitationRecord(
     val id: Long,
     val guestListEntryId: Long,
+    val token: String?,
     val tokenHash: String,
     val channel: InvitationChannel,
     val expiresAt: Instant,
@@ -431,6 +432,7 @@ class InvitationDbRepository(
      */
     suspend fun createAndRevokeOtherActiveByEntryId(
         entryId: Long,
+        token: String,
         tokenHash: String,
         channel: InvitationChannel,
         expiresAt: Instant,
@@ -462,6 +464,7 @@ class InvitationDbRepository(
                 val newInvitationId =
                     InvitationsTable.insert {
                         it[guestListEntryId] = entryId
+                        it[InvitationsTable.token] = token
                         it[InvitationsTable.tokenHash] = tokenHash
                         it[InvitationsTable.channel] = channel.name
                         it[InvitationsTable.expiresAt] = expiresAtOffset
@@ -484,6 +487,7 @@ class InvitationDbRepository(
                 InvitationRecord(
                     id = newInvitationId,
                     guestListEntryId = entryId,
+                    token = token,
                     tokenHash = tokenHash,
                     channel = channel,
                     expiresAt = expiresAt,
@@ -501,6 +505,7 @@ class InvitationDbRepository(
      */
     internal suspend fun create(
         entryId: Long,
+        token: String,
         tokenHash: String,
         channel: InvitationChannel,
         expiresAt: Instant,
@@ -512,6 +517,7 @@ class InvitationDbRepository(
                 val id =
                     InvitationsTable.insert {
                         it[guestListEntryId] = entryId
+                        it[InvitationsTable.token] = token
                         it[InvitationsTable.tokenHash] = tokenHash
                         it[InvitationsTable.channel] = channel.name
                         it[InvitationsTable.expiresAt] = expiresAt.toOffsetDateTime()
@@ -524,6 +530,7 @@ class InvitationDbRepository(
                 InvitationRecord(
                     id = id,
                     guestListEntryId = entryId,
+                    token = token,
                     tokenHash = tokenHash,
                     channel = channel,
                     expiresAt = expiresAt,
@@ -542,6 +549,30 @@ class InvitationDbRepository(
                 InvitationsTable
                     .selectAll()
                     .where { InvitationsTable.tokenHash eq tokenHash }
+                    .limit(1)
+                    .firstOrNull()
+                    ?.toInvitationRecord()
+            }
+        }
+
+    suspend fun findActiveByEntryId(
+        entryId: Long,
+        channel: InvitationChannel,
+        now: Instant,
+    ): InvitationRecord? =
+        withTxRetry {
+            val nowOffset = now.toOffsetDateTime()
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                InvitationsTable
+                    .selectAll()
+                    .where {
+                        (InvitationsTable.guestListEntryId eq entryId) and
+                            (InvitationsTable.channel eq channel.name) and
+                            InvitationsTable.revokedAt.isNull() and
+                            InvitationsTable.usedAt.isNull() and
+                            (InvitationsTable.expiresAt greater nowOffset)
+                    }
+                    .orderBy(InvitationsTable.createdAt to SortOrder.DESC)
                     .limit(1)
                     .firstOrNull()
                     ?.toInvitationRecord()
@@ -820,6 +851,7 @@ private fun ResultRow.toInvitationRecord(): InvitationRecord =
     InvitationRecord(
         id = this[InvitationsTable.id],
         guestListEntryId = this[InvitationsTable.guestListEntryId],
+        token = this[InvitationsTable.token],
         tokenHash = this[InvitationsTable.tokenHash],
         channel = InvitationChannel.valueOf(this[InvitationsTable.channel]),
         expiresAt = this[InvitationsTable.expiresAt].toInstantUtc(),

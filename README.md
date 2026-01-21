@@ -155,6 +155,7 @@ curl -sS -H "X-Telegram-InitData: $INIT_DATA" \
 - `POST /api/promoter/guest-lists/{id}/entries/bulk`
 - `GET /api/promoter/guest-lists/{id}/invitations`
 - `POST /api/promoter/guest-lists/{id}/entries/{entryId}/invitation`
+- Окно прибытия может пересекать полночь: если `arrivalWindowEnd` раньше/равно `arrivalWindowStart`, конец окна будет в следующий день.
 
 **Tables booking**
 

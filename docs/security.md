@@ -7,12 +7,17 @@
 - Все `/api/admin/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.
 - Все `/api/promoter/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.
 - Доступные роли: `OWNER`, `GLOBAL_ADMIN`, `CLUB_ADMIN`.
-- Promoter доступен для `PROMOTER` (опционально также `OWNER`/`GLOBAL_ADMIN`/`HEAD_MANAGER`).
+- Promoter доступен для `PROMOTER` (опционально также `OWNER`/`GLOBAL_ADMIN`/`CLUB_ADMIN`).
 - Инварианты:
   - Создание клубов (`POST /api/admin/clubs`) доступно только `OWNER`/`GLOBAL_ADMIN`.
   - `CLUB_ADMIN` ограничен только клубами из RBAC-контекста — `isAdminClubAllowed(clubId)`.
   - Любые действия по залам/столам проверяют принадлежность клуба перед изменением.
-  - Promoter ограничен своими guest lists (owner/promoter) и/или `clubIds` из RBAC.
+  - Promoter ограничен своими guest lists (owner/promoter) и `clubIds` из RBAC.
+  - Для не‑глобальных ролей пустой `clubIds` означает отсутствие доступа к клубам (deny‑by‑default).
+
+## 1.1) Promoter bookings
+
+- Привязка guest list entry ↔ booking хранится персистентно в БД (не в памяти).
 
 ## 2) No‑leak logs
 
