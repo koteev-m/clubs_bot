@@ -27,6 +27,7 @@ import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.installMiniAppAuthStatusPage
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
+import com.example.bot.data.promoter.AcquireLockResult
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
@@ -467,8 +468,9 @@ class PromoterGuestListRoutesTest {
         coEvery { guestListRepository.getList(entry.guestListId) } returns list
         coEvery { adminHallsRepository.getById(hall.id) } returns hall
         coEvery { adminTablesRepository.findByIdForHall(hall.id, table.id) } returns table
-        coEvery { promoterAssignments.findBookingIdForEntry(entry.id) } returnsMany listOf(null, bookingConfirmed.id)
-        coEvery { promoterAssignments.assignIfAbsent(entry.id, bookingConfirmed.id) } returns true
+        coEvery { promoterAssignments.acquireLock(entry.id) } returnsMany
+            listOf(AcquireLockResult.Acquired, AcquireLockResult.AlreadyAssigned(bookingConfirmed.id))
+        coEvery { promoterAssignments.finalizeAssignment(entry.id, bookingConfirmed.id) } returns true
         coEvery {
             bookingState.hold(
                 userId = 1,
@@ -550,7 +552,122 @@ class PromoterGuestListRoutesTest {
             assertEquals(HttpStatusCode.Conflict, secondResponse.status)
             coVerify(exactly = 1) { bookingState.hold(any(), any(), any(), any(), any(), any(), any(), any()) }
             coVerify(exactly = 1) { bookingState.confirm(any(), any(), any(), any(), any()) }
-            coVerify(exactly = 1) { promoterAssignments.assignIfAbsent(entry.id, bookingConfirmed.id) }
+            coVerify(exactly = 1) { promoterAssignments.finalizeAssignment(entry.id, bookingConfirmed.id) }
+        }
+    }
+
+    @Test
+    fun `promoter booking assignment returns conflict when lock in progress`() = runBlockingUnit {
+        val guestListRepository = mockk<GuestListRepository>()
+        val guestListService = mockk<GuestListService>(relaxed = true)
+        val guestListEntryRepository = mockk<GuestListEntryDbRepository>()
+        val invitationService = mockk<InvitationService>(relaxed = true)
+        val guestListDbRepository = mockk<GuestListDbRepository>(relaxed = true)
+        val clubsRepository = mockk<ClubsRepository>(relaxed = true)
+        val eventsRepository = mockk<EventsRepository>(relaxed = true)
+        val adminHallsRepository = mockk<AdminHallsRepository>()
+        val adminTablesRepository = mockk<AdminTablesRepository>()
+        val bookingState = mockk<BookingState>(relaxed = true)
+        val promoterAssignments = mockk<PromoterBookingAssignmentsRepository>()
+
+        val list =
+            GuestList(
+                id = 12,
+                clubId = 1,
+                eventId = 10,
+                ownerType = GuestListOwnerType.PROMOTER,
+                ownerUserId = 1,
+                title = "VIP",
+                capacity = 10,
+                arrivalWindowStart = null,
+                arrivalWindowEnd = null,
+                status = GuestListStatus.ACTIVE,
+                createdAt = Instant.parse("2024-06-01T12:00:00Z"),
+            )
+        val entry =
+            GuestListEntryRecord(
+                id = 50,
+                guestListId = list.id,
+                displayName = "Guest",
+                fullName = "Guest",
+                telegramUserId = null,
+                status = com.example.bot.club.GuestListEntryStatus.ADDED,
+                createdAt = Instant.parse("2024-06-01T12:00:00Z"),
+                updatedAt = Instant.parse("2024-06-01T12:00:00Z"),
+            )
+        val hall =
+            AdminHall(
+                id = 7,
+                clubId = 1,
+                name = "Main",
+                isActive = true,
+                layoutRevision = 1,
+                geometryFingerprint = "hash",
+                createdAt = Instant.parse("2024-06-01T12:00:00Z"),
+                updatedAt = Instant.parse("2024-06-01T12:00:00Z"),
+            )
+        val table =
+            com.example.bot.layout.Table(
+                id = 99,
+                zoneId = "A",
+                label = "A1",
+                capacity = 2,
+                minimumTier = "standard",
+                status = com.example.bot.layout.TableStatus.FREE,
+                minDeposit = 0,
+                zone = "A",
+                arrivalWindow = null,
+                mysteryEligible = false,
+                tableNumber = 1,
+                x = 0.1,
+                y = 0.2,
+            )
+
+        coEvery { guestListEntryRepository.findById(entry.id) } returns entry
+        coEvery { guestListRepository.getList(entry.guestListId) } returns list
+        coEvery { adminHallsRepository.getById(hall.id) } returns hall
+        coEvery { adminTablesRepository.findByIdForHall(hall.id, table.id) } returns table
+        coEvery { promoterAssignments.acquireLock(entry.id) } returns AcquireLockResult.InProgress
+
+        testApplication {
+            application {
+                install(ContentNegotiation) { json() }
+                installRbac(roles = setOf(Role.PROMOTER), clubIds = setOf(1))
+                promoterGuestListRoutes(
+                    guestListRepository = guestListRepository,
+                    guestListService = guestListService,
+                    guestListEntryRepository = guestListEntryRepository,
+                    invitationService = invitationService,
+                    guestListDbRepository = guestListDbRepository,
+                    clubsRepository = clubsRepository,
+                    eventsRepository = eventsRepository,
+                    adminHallsRepository = adminHallsRepository,
+                    adminTablesRepository = adminTablesRepository,
+                    bookingState = bookingState,
+                    promoterAssignments = promoterAssignments,
+                    botTokenProvider = { TEST_BOT_TOKEN },
+                )
+            }
+
+            val initData = createInitData(userId = 100)
+            val response =
+                client.post("/api/promoter/bookings/assign") {
+                    withInitData(initData)
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """
+                        {
+                          "guestListEntryId": 50,
+                          "hallId": 7,
+                          "tableId": 99,
+                          "eventId": 10
+                        }
+                        """.trimIndent(),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.Conflict, response.status)
+            coVerify(exactly = 0) { bookingState.hold(any(), any(), any(), any(), any(), any(), any(), any()) }
         }
     }
 
