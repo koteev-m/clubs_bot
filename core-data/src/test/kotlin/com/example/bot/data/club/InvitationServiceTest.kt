@@ -39,7 +39,7 @@ class InvitationServiceTest {
 
     @BeforeEach
     fun stubDefaults() {
-        coEvery { invitationRepo.findActiveByEntryId(any(), any(), any()) } returns null
+        coEvery { invitationRepo.findActiveByEntryId(any(), any()) } returns null
     }
 
     @Test
@@ -125,7 +125,6 @@ class InvitationServiceTest {
         coEvery {
             invitationRepo.findActiveByEntryId(
                 entryId = entry.id,
-                channel = InvitationChannel.EXTERNAL,
                 now = fixedClock.instant(),
             )
         } returns existing
@@ -141,7 +140,7 @@ class InvitationServiceTest {
                 FixedSecureRandom(ByteArray(32)),
             )
 
-        val result = service.createInvitation(entry.id, InvitationChannel.EXTERNAL, createdBy = 42)
+        val result = service.createInvitation(entry.id, InvitationChannel.TELEGRAM, createdBy = 42)
 
         check(result is InvitationServiceResult.Success)
         assertEquals("persisted-token", result.value.token)
@@ -284,11 +283,7 @@ class InvitationServiceTest {
         coVerify(exactly = 1) { entryRepo.findById(entry.id) }
         coVerify(exactly = 1) { guestListRepo.findById(entry.guestListId) }
         coVerify(exactly = 1) {
-            invitationRepo.findActiveByEntryId(
-                entryId = entry.id,
-                channel = InvitationChannel.TELEGRAM,
-                now = fixedClock.instant(),
-            )
+            invitationRepo.findActiveByEntryId(entryId = entry.id, now = fixedClock.instant())
         }
         coVerify(exactly = 1) {
             invitationRepo.createAndRevokeOtherActiveByEntryId(

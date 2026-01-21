@@ -462,7 +462,7 @@ fun Application.promoterGuestListRoutes(
                             message = "Этому гостю уже назначен стол",
                         )
                     }
-                    val idem = "promoter-assign:${entry.id}:${payload.tableId}"
+                    val idem = "promoter-assign:${entry.id}"
                     val holdHash = hashRequestCanonical(mapOf("tableId" to payload.tableId, "eventId" to payload.eventId, "guests" to 1))
                     when (
                         val hold =

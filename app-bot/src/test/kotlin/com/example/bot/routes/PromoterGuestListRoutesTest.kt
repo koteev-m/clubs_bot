@@ -57,9 +57,11 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.header
 import io.ktor.server.testing.testApplication
+import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -387,6 +389,7 @@ class PromoterGuestListRoutesTest {
         val adminTablesRepository = mockk<AdminTablesRepository>()
         val bookingState = mockk<BookingState>()
         val promoterAssignments = mockk<PromoterBookingAssignmentsRepository>()
+        val idempotencyKeySlot: CapturingSlot<String> = slot()
 
         val list =
             GuestList(
@@ -473,7 +476,7 @@ class PromoterGuestListRoutesTest {
                 tableId = table.id,
                 eventId = list.eventId,
                 guestCount = 1,
-                idempotencyKey = any(),
+                idempotencyKey = capture(idempotencyKeySlot),
                 requestHash = any(),
                 promoterId = 1,
             )
@@ -526,6 +529,7 @@ class PromoterGuestListRoutesTest {
                 }
 
             assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals("promoter-assign:50", idempotencyKeySlot.captured)
 
             val secondResponse =
                 client.post("/api/promoter/bookings/assign") {

@@ -61,7 +61,7 @@ class InvitationServiceImpl(
             if (!expiresAt.isAfter(now)) {
                 return@withRetriedTx InvitationServiceResult.Failure(InvitationServiceError.GUEST_LIST_NOT_ACTIVE)
             }
-            val activeInvitation = invitationRepo.findActiveByEntryId(entryId, channel, now)
+            val activeInvitation = invitationRepo.findActiveByEntryId(entryId, now)
             if (activeInvitation?.token != null) {
                 val token = activeInvitation.token
                 val deepLink = buildDeepLink(token)
