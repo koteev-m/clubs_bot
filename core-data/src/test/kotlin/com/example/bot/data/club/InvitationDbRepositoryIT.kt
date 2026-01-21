@@ -163,21 +163,28 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
 
             val invitations = loadInvitations(entry.id)
             assertEquals(fixedInstant, invitations.getValue(inv1.id).revokedAt)
+            assertNull(invitations.getValue(inv1.id).token)
             assertEquals(fixedInstant, invitations.getValue(inv2.id).revokedAt)
+            assertNull(invitations.getValue(inv2.id).token)
             assertEquals(fixedInstant, invitations.getValue(inv3.id).revokedAt)
+            assertNull(invitations.getValue(inv3.id).token)
             assertNull(invitations.getValue(created.id).revokedAt)
             assertNull(invitations.getValue(created.id).usedAt)
             assertEquals(futureExpiry, invitations.getValue(created.id).expiresAt)
             assertNull(invitations.getValue(expiredInvite.id).revokedAt)
             assertNull(invitations.getValue(expiredInvite.id).usedAt)
+            assertEquals("token-expired", invitations.getValue(expiredInvite.id).token)
             assertEquals(alreadyRevokedAt, invitations.getValue(revokedInvite.id).revokedAt)
             assertNull(invitations.getValue(revokedInvite.id).usedAt)
+            assertNull(invitations.getValue(revokedInvite.id).token)
             assertEquals(fixedInstant.minusSeconds(30), invitations.getValue(usedInvite.id).usedAt)
             assertNull(invitations.getValue(usedInvite.id).revokedAt)
+            assertNull(invitations.getValue(usedInvite.id).token)
 
             val otherEntryInvitations = loadInvitations(anotherEntry.id)
             assertNull(otherEntryInvitations.getValue(otherEntryInvite.id).revokedAt)
             assertNull(otherEntryInvitations.getValue(otherEntryInvite.id).usedAt)
+            assertEquals("token-other-entry", otherEntryInvitations.getValue(otherEntryInvite.id).token)
 
             val entryAfter = guestListEntryRepo.findById(entry.id)
             val anotherEntryAfter = guestListEntryRepo.findById(anotherEntry.id)
@@ -236,6 +243,7 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
         val invitations = loadInvitations(entry.id)
         assertEquals(fixedInstant, invitations.getValue(invite.id).revokedAt)
         assertNull(invitations.getValue(invite.id).usedAt)
+        assertNull(invitations.getValue(invite.id).token)
     }
 
     @Test
@@ -352,8 +360,9 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
                     val revokedAt = result[InvitationsTable.revokedAt]?.toInstant()
                     val usedAt = result[InvitationsTable.usedAt]?.toInstant()
                     val expiresAt = result[InvitationsTable.expiresAt].toInstant()
+                    val token = result[InvitationsTable.token]
 
-                    id to InvitationState(revokedAt = revokedAt, usedAt = usedAt, expiresAt = expiresAt)
+                    id to InvitationState(revokedAt = revokedAt, usedAt = usedAt, expiresAt = expiresAt, token = token)
                 }
         }
 
@@ -361,5 +370,6 @@ class InvitationDbRepositoryIT : PostgresClubIntegrationTest() {
         val revokedAt: Instant?,
         val usedAt: Instant?,
         val expiresAt: Instant,
+        val token: String?,
     )
 }

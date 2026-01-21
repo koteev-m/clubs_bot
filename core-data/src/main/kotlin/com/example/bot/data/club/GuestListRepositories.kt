@@ -482,6 +482,7 @@ class InvitationDbRepository(
                         (InvitationsTable.id neq newInvitationId)
                 }) {
                     it[InvitationsTable.revokedAt] = nowOffset
+                    it[InvitationsTable.token] = null
                 }
 
                 InvitationRecord(
@@ -557,7 +558,6 @@ class InvitationDbRepository(
 
     suspend fun findActiveByEntryId(
         entryId: Long,
-        channel: InvitationChannel,
         now: Instant,
     ): InvitationRecord? =
         withTxRetry {
@@ -567,7 +567,6 @@ class InvitationDbRepository(
                     .selectAll()
                     .where {
                         (InvitationsTable.guestListEntryId eq entryId) and
-                            (InvitationsTable.channel eq channel.name) and
                             InvitationsTable.revokedAt.isNull() and
                             InvitationsTable.usedAt.isNull() and
                             (InvitationsTable.expiresAt greater nowOffset)
@@ -591,6 +590,7 @@ class InvitationDbRepository(
                         InvitationsTable.revokedAt.isNull()
                 }) {
                     it[InvitationsTable.usedAt] = usedAt.toOffsetDateTime()
+                    it[InvitationsTable.token] = null
                 } > 0
             }
         }
@@ -607,6 +607,7 @@ class InvitationDbRepository(
                         InvitationsTable.usedAt.isNull()
                 }) {
                     it[InvitationsTable.revokedAt] = revokedAt.toOffsetDateTime()
+                    it[InvitationsTable.token] = null
                 } > 0
             }
         }
@@ -703,6 +704,7 @@ class CheckinDbRepository(
                             InvitationsTable.revokedAt.isNull()
                     }) {
                         it[InvitationsTable.usedAt] = invitationUse.usedAt.toOffsetDateTime()
+                        it[InvitationsTable.token] = null
                     }
                 }
 
