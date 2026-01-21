@@ -35,6 +35,7 @@ import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.toRangeString
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
+import com.example.bot.data.promoter.AcquireLockResult
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
@@ -454,13 +455,22 @@ fun Application.promoterGuestListRoutes(
                     }
                     val table = adminTablesRepository.findByIdForHall(payload.hallId, payload.tableId)
                         ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
-                    val existingBooking = promoterAssignments.findBookingIdForEntry(entry.id)
-                    if (existingBooking != null) {
-                        return@post call.respondError(
-                            HttpStatusCode.Conflict,
-                            ErrorCodes.invalid_state,
-                            message = "Этому гостю уже назначен стол",
-                        )
+                    when (val lockResult = promoterAssignments.acquireLock(entry.id)) {
+                        is AcquireLockResult.AlreadyAssigned -> {
+                            return@post call.respondError(
+                                HttpStatusCode.Conflict,
+                                ErrorCodes.invalid_state,
+                                message = "Этому гостю уже назначен стол",
+                            )
+                        }
+                        AcquireLockResult.InProgress -> {
+                            return@post call.respondError(
+                                HttpStatusCode.Conflict,
+                                ErrorCodes.invalid_state,
+                                message = "Назначение стола уже выполняется, попробуйте позже",
+                            )
+                        }
+                        AcquireLockResult.Acquired -> Unit
                     }
                     val idem = "promoter-assign:${entry.id}"
                     val holdHash = hashRequestCanonical(mapOf("tableId" to payload.tableId, "eventId" to payload.eventId, "guests" to 1))
@@ -478,6 +488,7 @@ fun Application.promoterGuestListRoutes(
                             )
                     ) {
                         is HoldResult.Error -> {
+                            promoterAssignments.releaseLock(entry.id)
                             val (status, code) = hold.code.toHttp()
                             return@post call.respondError(status, code)
                         }
@@ -494,16 +505,25 @@ fun Application.promoterGuestListRoutes(
                                     )
                             ) {
                                 is ConfirmResult.Error -> {
+                                    promoterAssignments.releaseLock(entry.id)
                                     val (status, code) = confirm.code.toHttp()
                                     return@post call.respondError(status, code)
                                 }
                                 is ConfirmResult.Success -> {
-                                    val recorded = promoterAssignments.assignIfAbsent(entry.id, confirm.booking.id)
-                                    if (!recorded) {
+                                    val finalized = promoterAssignments.finalizeAssignment(entry.id, confirm.booking.id)
+                                    if (!finalized) {
+                                        val currentBookingId = promoterAssignments.findBookingIdForEntry(entry.id)
+                                        if (currentBookingId != null && currentBookingId > 0) {
+                                            return@post call.respondError(
+                                                HttpStatusCode.Conflict,
+                                                ErrorCodes.invalid_state,
+                                                message = "Этому гостю уже назначен стол",
+                                            )
+                                        }
                                         return@post call.respondError(
-                                            HttpStatusCode.Conflict,
-                                            ErrorCodes.invalid_state,
-                                            message = "Этому гостю уже назначен стол",
+                                            HttpStatusCode.InternalServerError,
+                                            ErrorCodes.internal_error,
+                                            message = "Не удалось зафиксировать назначение стола",
                                         )
                                     }
                                     call.respond(
