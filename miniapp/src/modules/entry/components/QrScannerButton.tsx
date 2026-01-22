@@ -24,6 +24,27 @@ export default function QrScannerButton({ clubId, eventId }: QrScannerButtonProp
   const inFlightRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  const getDeniedToast = useCallback((reason?: string) => {
+    switch (reason) {
+      case 'ALREADY_USED':
+        return 'QR уже использован';
+      case 'TOKEN_INVALID':
+        return 'QR недействителен';
+      case 'TOKEN_REVOKED':
+        return 'QR отозван';
+      case 'TOKEN_EXPIRED':
+        return 'Срок действия QR истёк';
+      case 'SCOPE_MISMATCH':
+        return 'QR не относится к этому событию';
+      case 'INVALID_STATUS':
+        return 'Вход недоступен по текущему статусу';
+      case 'NOT_FOUND':
+        return 'Запись не найдена';
+      default:
+        return 'DENIED';
+    }
+  }, []);
+
   const cleanupListeners = useCallback(() => {
     const listeners = listenersRef.current;
     if (!listeners) return;
@@ -65,10 +86,15 @@ export default function QrScannerButton({ clubId, eventId }: QrScannerButtonProp
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        await hostScan({ clubId, eventId, qrPayload: text }, controller.signal);
+        const res = await hostScan({ clubId, eventId, qrPayload: text }, controller.signal);
         if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
-        setResult('ARRIVED');
-        addToast('ARRIVED');
+        if (res.data.outcomeStatus === 'DENIED') {
+          setResult('DENIED');
+          addToast(getDeniedToast(res.data.denyReason));
+          return;
+        }
+        setResult(res.data.outcomeStatus);
+        addToast(res.data.outcomeStatus);
         isScannerOpenRef.current = false;
         scanSessionRef.current += 1;
         abortRef.current = null;
@@ -101,7 +127,7 @@ export default function QrScannerButton({ clubId, eventId }: QrScannerButtonProp
         }
       }
     },
-    [abortInFlight, addToast, cleanupListeners, clubId, eventId, setResult, webApp],
+    [abortInFlight, addToast, cleanupListeners, clubId, eventId, getDeniedToast, setResult, webApp],
   );
 
   function openScanner() {

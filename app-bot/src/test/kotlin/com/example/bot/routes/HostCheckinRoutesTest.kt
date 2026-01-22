@@ -188,6 +188,40 @@ class HostCheckinRoutesTest {
         assertMiniAppNoStoreHeaders(response)
     }
 
+    @Test
+    fun `host routes forbid club scope mismatch`() = withHostApp() { checkinService, hostSearchService ->
+        val checkinResponse =
+            client.post("/api/host/checkin") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"clubId":2,"eventId":2,"guestListEntryId":3}""")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, checkinResponse.status)
+        assertEquals(ErrorCodes.forbidden, checkinResponse.errorCode())
+        coVerify(exactly = 0) { checkinService.hostCheckin(any(), any()) }
+
+        val scanResponse =
+            client.post("/api/host/checkin/scan") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"clubId":2,"eventId":2,"qrPayload":"inv:token"}""")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, scanResponse.status)
+        assertEquals(ErrorCodes.forbidden, scanResponse.errorCode())
+        coVerify(exactly = 0) { checkinService.hostScan(any(), any(), any(), any()) }
+
+        val searchResponse =
+            client.get("/api/host/checkin/search?clubId=2&eventId=2&query=Al") {
+                withInitData(initData)
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, searchResponse.status)
+        assertEquals(ErrorCodes.forbidden, searchResponse.errorCode())
+        coVerify(exactly = 0) { hostSearchService.search(any(), any(), any(), any()) }
+    }
+
     private fun withHostApp(
         roles: Set<Role> = setOf(Role.ENTRY_MANAGER),
         maxBodyBytes: Long = DEFAULT_CHECKIN_MAX_BYTES,

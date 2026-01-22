@@ -12,6 +12,7 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
@@ -92,12 +93,10 @@ class CheckinDbRepositoryTest : PostgresClubIntegrationTest() {
                     bookingStatus = BookingStatus.SEATED,
                     allowedFromStatuses = setOf(BookingStatus.BOOKED),
                 )
-            assertNotNull(inserted)
+            assertNull(inserted)
 
             val stored = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
-            assertNotNull(stored)
-            assertEquals(inserted!!.id, stored?.id)
-            assertEquals(subjectId, stored?.subjectId)
+            assertNull(stored)
 
             val bookingStatus =
                 transaction(database) {

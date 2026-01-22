@@ -508,23 +508,36 @@ class CheckinServiceImpl(
             }
 
         val record =
-            checkinRepo.insertWithBookingUpdate(
-                checkin =
-                    com.example.bot.data.club.NewCheckin(
-                        clubId = booking.clubId,
-                        eventId = booking.eventId,
-                        subjectType = CheckinSubjectType.BOOKING,
-                        subjectId = canonical.subjectId,
-                        checkedBy = actor.userId,
-                        method = method,
-                        resultStatus = resultStatus,
-                        denyReason = denyReason,
-                        occurredAt = occurredAt,
-                    ),
-                bookingId = canonical.bookingId,
-                bookingStatus = resultStatus.toBookingStatus(),
-                allowedFromStatuses = allowedBookingStatusTransitions,
-            )
+            try {
+                checkinRepo.insertWithBookingUpdate(
+                    checkin =
+                        com.example.bot.data.club.NewCheckin(
+                            clubId = booking.clubId,
+                            eventId = booking.eventId,
+                            subjectType = CheckinSubjectType.BOOKING,
+                            subjectId = canonical.subjectId,
+                            checkedBy = actor.userId,
+                            method = method,
+                            resultStatus = resultStatus,
+                            denyReason = denyReason,
+                            occurredAt = occurredAt,
+                        ),
+                    bookingId = canonical.bookingId,
+                    bookingStatus = resultStatus.toBookingStatus(),
+                    allowedFromStatuses = allowedBookingStatusTransitions,
+                )
+            } catch (ex: Exception) {
+                if (ex.isUniqueViolation()) {
+                    return CheckinServiceResult.Success(
+                        deniedOutcome(
+                            reason = HostCheckinDenyReason.ALREADY_USED,
+                            subject = bookingSubject(canonical.subjectId),
+                            bookingStatus = currentStatus,
+                        ),
+                    )
+                }
+                throw ex
+            }
         if (record == null) {
             return CheckinServiceResult.Success(
                 deniedOutcome(
@@ -626,23 +639,36 @@ class CheckinServiceImpl(
             }
 
         val record =
-            checkinRepo.insertWithEntryUpdate(
-                checkin =
-                    com.example.bot.data.club.NewCheckin(
-                        clubId = guestList.clubId,
-                        eventId = guestList.eventId,
-                        subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
-                        subjectId = entryId.toString(),
-                        checkedBy = actor.userId,
-                        method = CheckinMethod.NAME,
-                        resultStatus = resultStatus,
-                        denyReason = denyReason,
-                        occurredAt = occurredAt,
-                    ),
-                entryId = entryId,
-                entryStatus = resultStatus.toEntryStatus(),
-                invitationUse = null,
-            )
+            try {
+                checkinRepo.insertWithEntryUpdate(
+                    checkin =
+                        com.example.bot.data.club.NewCheckin(
+                            clubId = guestList.clubId,
+                            eventId = guestList.eventId,
+                            subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
+                            subjectId = entryId.toString(),
+                            checkedBy = actor.userId,
+                            method = CheckinMethod.NAME,
+                            resultStatus = resultStatus,
+                            denyReason = denyReason,
+                            occurredAt = occurredAt,
+                        ),
+                    entryId = entryId,
+                    entryStatus = resultStatus.toEntryStatus(),
+                    invitationUse = null,
+                )
+            } catch (ex: Exception) {
+                if (ex.isUniqueViolation()) {
+                    return CheckinServiceResult.Success(
+                        deniedOutcome(
+                            reason = HostCheckinDenyReason.ALREADY_USED,
+                            subject = entrySubject(entryId),
+                            entryStatus = entry.status,
+                        ),
+                    )
+                }
+                throw ex
+            }
         if (record == null) {
             return CheckinServiceResult.Success(
                 deniedOutcome(
@@ -738,23 +764,36 @@ class CheckinServiceImpl(
         val occurredAt = clock.instant().truncatedTo(ChronoUnit.SECONDS)
         val resultStatus = calculateResultStatus(card.arrivalWindowEnd, occurredAt)
         val record =
-            checkinRepo.insertWithEntryUpdate(
-                checkin =
-                    com.example.bot.data.club.NewCheckin(
-                        clubId = card.clubId,
-                        eventId = card.eventId,
-                        subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
-                        subjectId = card.entryId.toString(),
-                        checkedBy = actor.userId,
-                        method = CheckinMethod.QR,
-                        resultStatus = resultStatus,
-                        denyReason = null,
-                        occurredAt = occurredAt,
-                    ),
-                entryId = card.entryId,
-                entryStatus = resultStatus.toEntryStatus(),
-                invitationUse = InvitationUse(card.invitationId, occurredAt),
-            )
+            try {
+                checkinRepo.insertWithEntryUpdate(
+                    checkin =
+                        com.example.bot.data.club.NewCheckin(
+                            clubId = card.clubId,
+                            eventId = card.eventId,
+                            subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
+                            subjectId = card.entryId.toString(),
+                            checkedBy = actor.userId,
+                            method = CheckinMethod.QR,
+                            resultStatus = resultStatus,
+                            denyReason = null,
+                            occurredAt = occurredAt,
+                        ),
+                    entryId = card.entryId,
+                    entryStatus = resultStatus.toEntryStatus(),
+                    invitationUse = InvitationUse(card.invitationId, occurredAt),
+                )
+            } catch (ex: Exception) {
+                if (ex.isUniqueViolation()) {
+                    return CheckinServiceResult.Success(
+                        deniedOutcome(
+                            reason = HostCheckinDenyReason.ALREADY_USED,
+                            subject = invitationSubject(card.invitationId, card.entryId),
+                            entryStatus = card.entryStatus,
+                        ),
+                    )
+                }
+                throw ex
+            }
         if (record == null) {
             return CheckinServiceResult.Success(
                 deniedOutcome(
