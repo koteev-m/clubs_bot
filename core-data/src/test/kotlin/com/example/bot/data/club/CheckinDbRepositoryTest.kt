@@ -92,10 +92,11 @@ class CheckinDbRepositoryTest : PostgresClubIntegrationTest() {
                     bookingStatus = BookingStatus.SEATED,
                     allowedFromStatuses = setOf(BookingStatus.BOOKED),
                 )
+            assertNotNull(inserted)
 
             val stored = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
             assertNotNull(stored)
-            assertEquals(inserted.id, stored?.id)
+            assertEquals(inserted!!.id, stored?.id)
             assertEquals(subjectId, stored?.subjectId)
 
             val bookingStatus =
@@ -176,10 +177,11 @@ class CheckinDbRepositoryTest : PostgresClubIntegrationTest() {
                     bookingStatus = BookingStatus.SEATED,
                     allowedFromStatuses = setOf(BookingStatus.BOOKED),
                 )
+            assertNotNull(inserted)
 
             val stored = checkinRepo.findBySubject(CheckinSubjectType.BOOKING, subjectId)
             assertNotNull(stored)
-            assertEquals(inserted.id, stored?.id)
+            assertEquals(inserted!!.id, stored?.id)
             assertEquals(subjectId, stored?.subjectId)
 
             val bookingStatus =

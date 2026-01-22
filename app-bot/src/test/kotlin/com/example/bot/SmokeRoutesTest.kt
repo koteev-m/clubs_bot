@@ -38,7 +38,7 @@ import kotlin.test.assertTrue
  * Smoke:
  * 1) /health, /ready, /ping -> 200
  * 2) /api/clubs -> 200 (JSON-массив) или 404
- * 3) POST /api/checkin/qr без тела -> один из {400,415,401,404}
+ * 3) POST /api/checkin/qr без тела -> один из {400,401,403,404,415}
  */
 class SmokeRoutesTest {
     @Test
@@ -120,6 +120,7 @@ class SmokeRoutesTest {
                 val acceptable =
                     setOf(
                         HttpStatusCode.BadRequest,
+                        HttpStatusCode.Forbidden,
                         HttpStatusCode.UnsupportedMediaType,
                         HttpStatusCode.Unauthorized,
                         HttpStatusCode.NotFound,

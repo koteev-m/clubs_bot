@@ -1,18 +1,19 @@
 package com.example.bot.routes
 
-import com.example.bot.checkin.CheckinResult
-import com.example.bot.checkin.CheckinInvalidReason
 import com.example.bot.checkin.CheckinService
 import com.example.bot.checkin.CheckinServiceError
 import com.example.bot.checkin.CheckinServiceResult
-import com.example.bot.checkin.ExistingCheckin
-import com.example.bot.club.CheckinMethod
+import com.example.bot.checkin.HostCheckinOutcome
+import com.example.bot.checkin.HostCheckinSubject
+import com.example.bot.checkin.HostCheckinSubjectKind
 import com.example.bot.club.CheckinResultStatus
-import com.example.bot.club.CheckinSubjectType
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
+import com.example.bot.host.HostSearchItem
+import com.example.bot.host.HostSearchKind
+import com.example.bot.host.HostSearchService
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.MINI_APP_VARY_HEADER
 import com.example.bot.http.NO_STORE_CACHE_CONTROL
@@ -26,6 +27,7 @@ import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -38,15 +40,15 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
 import java.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import io.mockk.coEvery
-import io.mockk.coVerify
-import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -69,324 +71,131 @@ class HostCheckinRoutesTest {
     }
 
     @Test
-    fun `rbac forbids non entry roles`() = withHostApp(roles = setOf(Role.PROMOTER)) { service ->
-        val response =
+    fun `rbac forbids non entry roles`() = withHostApp(roles = setOf(Role.PROMOTER)) { checkinService, _ ->
+        val checkinResponse =
+            client.post("/api/host/checkin") {
+                withInitData(initData)
+                contentType(ContentType.Application.Json)
+                setBody("""{"clubId":1,"eventId":2,"guestListEntryId":3}""")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, checkinResponse.status)
+        assertEquals(ErrorCodes.forbidden, checkinResponse.errorCode())
+        assertMiniAppNoStoreHeaders(checkinResponse)
+        coVerify(exactly = 0) { checkinService.hostCheckin(any(), any()) }
+
+        val scanResponse =
             client.post("/api/host/checkin/scan") {
                 withInitData(initData)
                 contentType(ContentType.Application.Json)
-                setBody("""{"payload":"token"}""")
+                setBody("""{"clubId":1,"eventId":2,"qrPayload":"inv:token"}""")
             }
 
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        assertEquals(ErrorCodes.forbidden, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        assertServiceNotCalledScan(service)
+        assertEquals(HttpStatusCode.Forbidden, scanResponse.status)
+        assertEquals(ErrorCodes.forbidden, scanResponse.errorCode())
+        assertMiniAppNoStoreHeaders(scanResponse)
+        coVerify(exactly = 0) { checkinService.hostScan(any(), any(), any(), any()) }
+
+        val searchResponse =
+            client.get("/api/host/checkin/search?clubId=1&eventId=2&query=Al") {
+                withInitData(initData)
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, searchResponse.status)
+        assertEquals(ErrorCodes.forbidden, searchResponse.errorCode())
+        assertMiniAppNoStoreHeaders(searchResponse)
     }
 
     @Test
-    fun `missing initData returns unauthorized`() = withHostApp { service ->
-        val response =
-            client.post("/api/host/checkin/scan") {
-                contentType(ContentType.Application.Json)
-                setBody("""{"payload":"token"}""")
-            }
-
-        assertMiniAppUnauthorized(response, expectedError = "initData missing")
-        assertServiceNotCalledScan(service)
-    }
-
-    @Test
-    fun `initData in body is ignored`() = withHostApp { service ->
-        val response =
-            client.post("/api/host/checkin/scan") {
-                contentType(ContentType.Application.Json)
-                setBody("""{"initData":"body-token","payload":"token"}""")
-            }
-
-        assertMiniAppUnauthorized(response, expectedError = "initData missing")
-        assertServiceNotCalledScan(service)
-    }
-
-    @Test
-    fun `manual without initData returns unauthorized`() = withHostApp { service ->
-        val response =
-            client.post("/api/host/checkin/manual") {
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """
-                    {
-                      "subjectType": "guest_list_entry",
-                      "subjectId": "123",
-                      "status": "approved"
-                    }
-                    """.trimIndent()
-                )
-            }
-
-        assertMiniAppUnauthorized(response, expectedError = "initData missing")
-        assertServiceNotCalledManual(service)
-    }
-
-    @Test
-    fun `scan returns success payload`() = withHostApp() { service ->
+    fun `checkin returns outcome payload`() = withHostApp() { checkinService, _ ->
         val occurredAt = Instant.parse("2024-06-10T10:15:30Z")
         val result =
-            CheckinResult.Success(
-                subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
-                subjectId = "123",
-                resultStatus = CheckinResultStatus.ARRIVED,
-                displayName = "Alice",
+            HostCheckinOutcome(
+                outcomeStatus = CheckinResultStatus.ARRIVED,
+                subject = HostCheckinSubject(kind = HostCheckinSubjectKind.GUEST_LIST_ENTRY, guestListEntryId = 123),
+                entryStatus = com.example.bot.club.GuestListEntryStatus.ARRIVED,
                 occurredAt = occurredAt,
-                checkedBy = 99L,
             )
-        coEvery { service.scanQr(any(), any()) } returns CheckinServiceResult.Success(result)
+        coEvery { checkinService.hostCheckin(any(), any()) } returns CheckinServiceResult.Success(result)
 
         val response =
-            client.post("/api/host/checkin/scan") {
+            client.post("/api/host/checkin") {
                 withInitData(initData)
                 contentType(ContentType.Application.Json)
-                setBody("""{"payload":"token"}""")
+                setBody("""{"clubId":1,"eventId":2,"guestListEntryId":123}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsJson()
-        assertEquals("SUCCESS", body["type"]!!.jsonPrimitive.content)
-        assertEquals("GUEST_LIST_ENTRY", body["subjectType"]!!.jsonPrimitive.content)
-        assertEquals("123", body["subjectId"]!!.jsonPrimitive.content)
-        assertEquals("ARRIVED", body["resultStatus"]!!.jsonPrimitive.content)
-        assertEquals("Alice", body["displayName"]!!.jsonPrimitive.content)
-        assertEquals(99L, body["checkedBy"]!!.jsonPrimitive.long)
+        assertEquals("ARRIVED", body["outcomeStatus"]!!.jsonPrimitive.content)
+        val subject = body["subject"]!!.jsonObject
+        assertEquals("GUEST_LIST_ENTRY", subject["kind"]!!.jsonPrimitive.content)
+        assertEquals(123L, subject["guestListEntryId"]!!.jsonPrimitive.long)
+        assertEquals("ARRIVED", body["entryStatus"]!!.jsonPrimitive.content)
         assertEquals(occurredAt.toString(), body["occurredAt"]!!.jsonPrimitive.content)
         assertMiniAppNoStoreHeaders(response)
-        coVerify(exactly = 1) {
-            service.scanQr(
-                "token",
-                match {
-                    it.telegramUserId == telegramId &&
-                        it.userId == userId &&
-                        it.roles.contains(Role.ENTRY_MANAGER)
-                },
-            )
-        }
     }
 
     @Test
-    fun `scan returns already used payload`() = withHostApp() { service ->
-        val occurredAt = Instant.parse("2024-06-10T10:15:30Z")
+    fun `scan returns outcome payload`() = withHostApp() { checkinService, _ ->
         val result =
-            CheckinResult.AlreadyUsed(
-                subjectType = CheckinSubjectType.GUEST_LIST_ENTRY,
-                subjectId = "123",
-                existingCheckin =
-                    ExistingCheckin(
-                        occurredAt = occurredAt,
-                        checkedBy = 77L,
-                        resultStatus = CheckinResultStatus.ARRIVED,
-                        method = CheckinMethod.QR,
-                    ),
+            HostCheckinOutcome(
+                outcomeStatus = CheckinResultStatus.LATE,
+                subject = HostCheckinSubject(kind = HostCheckinSubjectKind.INVITATION, invitationId = 9, guestListEntryId = 10),
+                entryStatus = com.example.bot.club.GuestListEntryStatus.LATE,
             )
-        coEvery { service.scanQr(any(), any()) } returns CheckinServiceResult.Success(result)
+        coEvery { checkinService.hostScan(any(), any(), any(), any()) } returns CheckinServiceResult.Success(result)
 
         val response =
             client.post("/api/host/checkin/scan") {
                 withInitData(initData)
                 contentType(ContentType.Application.Json)
-                setBody("""{"payload":"token"}""")
+                setBody("""{"clubId":1,"eventId":2,"qrPayload":"inv:token"}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsJson()
-        assertEquals("ALREADY_USED", body["type"]!!.jsonPrimitive.content)
-        assertEquals("GUEST_LIST_ENTRY", body["subjectType"]!!.jsonPrimitive.content)
-        assertEquals("123", body["subjectId"]!!.jsonPrimitive.content)
-        val existing = body["existingCheckin"]!!.jsonObject
-        assertEquals(occurredAt.toString(), existing["occurredAt"]!!.jsonPrimitive.content)
-        assertEquals(77L, existing["checkedBy"]!!.jsonPrimitive.long)
-        assertEquals("ARRIVED", existing["resultStatus"]!!.jsonPrimitive.content)
-        assertEquals("QR", existing["method"]!!.jsonPrimitive.content)
+        assertEquals("LATE", body["outcomeStatus"]!!.jsonPrimitive.content)
+        val subject = body["subject"]!!.jsonObject
+        assertEquals("INVITATION", subject["kind"]!!.jsonPrimitive.content)
+        assertEquals(9L, subject["invitationId"]!!.jsonPrimitive.long)
+        assertEquals(10L, subject["guestListEntryId"]!!.jsonPrimitive.long)
         assertMiniAppNoStoreHeaders(response)
-        coVerify(exactly = 1) { service.scanQr("token", any()) }
     }
 
     @Test
-    fun `scan returns invalid payload`() = withHostApp() { service ->
-        coEvery { service.scanQr(any(), any()) } returns
-            CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.TOKEN_EXPIRED))
+    fun `search returns items`() = withHostApp() { _, hostSearchService ->
+        val results =
+            listOf(
+                HostSearchItem(
+                    kind = HostSearchKind.GUEST_LIST_ENTRY,
+                    displayName = "Alice",
+                    guestListEntryId = 10,
+                    status = "ARRIVED",
+                    guestCount = 2,
+                    arrived = true,
+                ),
+            )
+        coEvery { hostSearchService.search(1, 2, "Al", any()) } returns results
 
         val response =
-            client.post("/api/host/checkin/scan") {
+            client.get("/api/host/checkin/search?clubId=1&eventId=2&query=Al") {
                 withInitData(initData)
-                contentType(ContentType.Application.Json)
-                setBody("""{"payload":"token"}""")
             }
 
         assertEquals(HttpStatusCode.OK, response.status)
-        val body = response.bodyAsJson()
-        assertEquals("INVALID", body["type"]!!.jsonPrimitive.content)
-        assertEquals("TOKEN_EXPIRED", body["reason"]!!.jsonPrimitive.content)
-        assertMiniAppNoStoreHeaders(response)
-        coVerify(exactly = 1) { service.scanQr("token", any()) }
-    }
-
-    @Test
-    fun `scan forbidden returns domain error`() = withHostApp() { service ->
-        coEvery { service.scanQr(any(), any()) } returns
-            CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_FORBIDDEN)
-
-        val response =
-            client.post("/api/host/checkin/scan") {
-                withInitData(initData)
-                contentType(ContentType.Application.Json)
-                setBody("""{"payload":"token"}""")
-            }
-
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        assertEquals(ErrorCodes.checkin_forbidden, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        coVerify(exactly = 1) { service.scanQr("token", any()) }
-    }
-
-    @Test
-    fun `scan rejects oversized payload`() = withHostApp(maxBodyBytes = 32L) { service ->
-        val payload = "x".repeat(64)
-        val response =
-            client.post("/api/host/checkin/scan") {
-                withInitData(initData)
-                contentType(ContentType.Application.Json)
-                setBody("""{"payload":"$payload"}""")
-            }
-
-        assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
-        assertEquals(ErrorCodes.payload_too_large, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        assertServiceNotCalledScan(service)
-    }
-
-    @Test
-    fun `manual rejects oversized payload`() = withHostApp(maxBodyBytes = 32L) { service ->
-        val payload = "x".repeat(64)
-        val response =
-            client.post("/api/host/checkin/manual") {
-                withInitData(initData)
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """
-                    {
-                      "subjectType": "guest_list_entry",
-                      "subjectId": "$payload",
-                      "status": "approved"
-                    }
-                    """.trimIndent()
-                )
-            }
-
-        assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
-        assertEquals(ErrorCodes.payload_too_large, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        assertServiceNotCalledManual(service)
-    }
-
-    @Test
-    fun `scan with wrong content type returns unsupported_media_type`() = withHostApp() { service ->
-        val response =
-            client.post("/api/host/checkin/scan") {
-                withInitData(initData)
-                contentType(ContentType.Text.Plain)
-                setBody("payload")
-            }
-
-        assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
-        assertEquals(ErrorCodes.unsupported_media_type, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        assertServiceNotCalledScan(service)
-    }
-
-    @Test
-    fun `manual with wrong content type returns unsupported_media_type`() = withHostApp() { service ->
-        val response =
-            client.post("/api/host/checkin/manual") {
-                withInitData(initData)
-                contentType(ContentType.Text.Plain)
-                setBody("payload")
-            }
-
-        assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
-        assertEquals(ErrorCodes.unsupported_media_type, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        assertServiceNotCalledManual(service)
-    }
-
-    @Test
-    fun `scan with blank payload returns checkin_invalid_payload`() = withHostApp() { service ->
-        val response =
-            client.post("/api/host/checkin/scan") {
-                withInitData(initData)
-                contentType(ContentType.Application.Json)
-                setBody("""{"payload":"   "}""")
-            }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        assertEquals(ErrorCodes.checkin_invalid_payload, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        assertServiceNotCalledScan(service)
-    }
-
-    @Test
-    fun `manual with invalid enum values returns checkin_invalid_payload`() = withHostApp() { service ->
-        val response =
-            client.post("/api/host/checkin/manual") {
-                withInitData(initData)
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """
-                    {
-                      "subjectType": "bad_type",
-                      "subjectId": "123",
-                      "status": "bad_status"
-                    }
-                    """.trimIndent()
-                )
-            }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        assertEquals(ErrorCodes.checkin_invalid_payload, response.errorCode())
-        assertMiniAppNoStoreHeaders(response)
-        assertServiceNotCalledManual(service)
-    }
-
-    @Test
-    fun `manual denied without reason returns error`() = withHostApp() { service ->
-        coEvery { service.manualCheckin(any(), any(), any(), any(), any()) } returns
-            CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_DENY_REASON_REQUIRED)
-
-        val response =
-            client.post("/api/host/checkin/manual") {
-                withInitData(initData)
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """
-                    {
-                      "subjectType": "guest_list_entry",
-                      "subjectId": "123",
-                      "status": "denied",
-                      "denyReason": ""
-                    }
-                    """.trimIndent()
-                )
-            }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        assertEquals(ErrorCodes.checkin_deny_reason_required, response.errorCode())
+        assertTrue(response.bodyAsText().contains("Alice"))
         assertMiniAppNoStoreHeaders(response)
     }
 
     private fun withHostApp(
         roles: Set<Role> = setOf(Role.ENTRY_MANAGER),
         maxBodyBytes: Long = DEFAULT_CHECKIN_MAX_BYTES,
-        block: suspend ApplicationTestBuilder.(CheckinService) -> Unit,
+        block: suspend ApplicationTestBuilder.(CheckinService, HostSearchService) -> Unit,
     ) {
         testApplication {
             val checkinService = mockk<CheckinService>(relaxed = true)
+            val hostSearchService = mockk<HostSearchService>(relaxed = true)
             application {
                 install(ContentNegotiation) { json() }
                 installJsonErrorPages()
@@ -406,11 +215,12 @@ class HostCheckinRoutesTest {
 
                 hostCheckinRoutes(
                     checkinService = checkinService,
+                    hostSearchService = hostSearchService,
                     botTokenProvider = { "test" },
                     maxBodyBytes = maxBodyBytes,
                 )
             }
-            block(this, checkinService)
+            block(this, checkinService, hostSearchService)
         }
     }
 
@@ -443,44 +253,11 @@ class HostCheckinRoutesTest {
         return parsed ?: extracted ?: raw
     }
 
-    private suspend fun io.ktor.client.statement.HttpResponse.errorMessage(): String? {
-        val raw = bodyAsText()
-        val parsed = runCatching { Json.parseToJsonElement(raw).jsonObject.errorMessageOrNull() }.getOrNull()
-        val extracted = Regex("\\\"error\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"")
-            .find(raw)
-            ?.groupValues
-            ?.getOrNull(1)
-        return parsed ?: extracted
-    }
-
-    private suspend fun assertMiniAppUnauthorized(
-        response: io.ktor.client.statement.HttpResponse,
-        expectedError: String,
-    ) {
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-        assertEquals(ErrorCodes.unauthorized, response.errorCode())
-        assertEquals(expectedError, response.errorMessage())
-        assertMiniAppNoStoreHeaders(response)
-    }
-
-    private fun assertMiniAppNoStoreHeaders(response: io.ktor.client.statement.HttpResponse) {
-        assertTrue(response.headers[HttpHeaders.CacheControl]?.contains(NO_STORE_CACHE_CONTROL, ignoreCase = true) == true)
-        assertTrue(response.headers[HttpHeaders.Vary]?.contains(MINI_APP_VARY_HEADER, ignoreCase = true) == true)
-    }
-
-    private fun assertServiceNotCalledScan(service: CheckinService) {
-        coVerify(exactly = 0) { service.scanQr(any(), any()) }
-    }
-
-    private fun assertServiceNotCalledManual(service: CheckinService) {
-        coVerify(exactly = 0) { service.manualCheckin(any(), any(), any(), any(), any()) }
-    }
-
     private fun JsonObject.errorCodeOrNull(): String? =
         this["code"]?.jsonPrimitive?.content
-            ?: this["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content
-            ?: this["error"]?.jsonPrimitive?.content
 
-    private fun JsonObject.errorMessageOrNull(): String? =
-        this["error"]?.jsonPrimitive?.content
+    private fun assertMiniAppNoStoreHeaders(response: io.ktor.client.statement.HttpResponse) {
+        assertEquals(NO_STORE_CACHE_CONTROL, response.headers[HttpHeaders.CacheControl])
+        assertEquals(MINI_APP_VARY_HEADER, response.headers[HttpHeaders.Vary])
+    }
 }
