@@ -546,14 +546,15 @@ fun Application.promoterGuestListRoutes(
                     } finally {
                         if (!confirmSucceeded) {
                             withContext(NonCancellable) {
-                                runCatching { promoterAssignments.releaseLock(entry.id) }
-                                    .onFailure { throwable ->
-                                        logger.warn(
-                                            "promoter.assign.release_lock_failed entry_id={}",
-                                            entry.id,
-                                            throwable,
-                                        )
-                                    }
+                                try {
+                                    promoterAssignments.releaseLock(entry.id)
+                                } catch (throwable: Throwable) {
+                                    logger.warn(
+                                        "promoter.assign.release_lock_failed entry_id={}",
+                                        entry.id,
+                                        throwable,
+                                    )
+                                }
                             }
                         }
                     }
