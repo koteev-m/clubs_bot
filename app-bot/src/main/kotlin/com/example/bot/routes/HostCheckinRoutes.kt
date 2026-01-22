@@ -1,13 +1,16 @@
 package com.example.bot.routes
 
-import com.example.bot.checkin.CheckinResult
 import com.example.bot.checkin.CheckinService
 import com.example.bot.checkin.CheckinServiceError
 import com.example.bot.checkin.CheckinServiceResult
-import com.example.bot.club.CheckinResultStatus
-import com.example.bot.club.CheckinSubjectType
+import com.example.bot.checkin.HostCheckinAction
+import com.example.bot.checkin.HostCheckinOutcome
+import com.example.bot.checkin.HostCheckinRequest
+import com.example.bot.checkin.HostCheckinSubject
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
+import com.example.bot.host.HostSearchItem
+import com.example.bot.host.HostSearchService
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
@@ -16,7 +19,9 @@ import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
+import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
+import com.example.bot.security.rbac.clubScoped
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -29,59 +34,69 @@ import io.ktor.server.plugins.requestsize.maxRequestSize
 import io.ktor.server.request.contentType
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import java.util.Locale
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
-import java.util.Locale
 
 private val logger = LoggerFactory.getLogger("HostCheckinRoutes")
 
 @Serializable
-private data class CheckinScanRequest(
-    val payload: String,
-)
-
-@Serializable
-private data class CheckinManualRequest(
-    val subjectType: String,
-    val subjectId: String,
-    val status: String,
+private data class HostCheckinRequestPayload(
+    val clubId: Long,
+    val eventId: Long,
+    val bookingId: String? = null,
+    val guestListEntryId: Long? = null,
+    val invitationToken: String? = null,
+    val action: String? = null,
     val denyReason: String? = null,
 )
 
 @Serializable
-private data class CheckinResponse(
-    val type: CheckinResponseType,
-    val subjectType: String? = null,
-    val subjectId: String? = null,
-    val resultStatus: String? = null,
-    val occurredAt: String? = null,
-    val checkedBy: Long? = null,
-    val displayName: String? = null,
-    val existingCheckin: ExistingCheckinResponse? = null,
-    val reason: String? = null,
+private data class HostScanRequest(
+    val clubId: Long,
+    val eventId: Long,
+    val qrPayload: String,
 )
 
 @Serializable
-private enum class CheckinResponseType {
-    SUCCESS,
-    ALREADY_USED,
-    INVALID,
-    FORBIDDEN,
-}
+private data class HostCheckinResponse(
+    val outcomeStatus: String,
+    val denyReason: String? = null,
+    val subject: HostCheckinSubjectResponse,
+    val bookingStatus: String? = null,
+    val entryStatus: String? = null,
+    val occurredAt: String? = null,
+)
 
 @Serializable
-private data class ExistingCheckinResponse(
-    val occurredAt: String,
-    val checkedBy: Long?,
-    val resultStatus: String,
-    val method: String,
+private data class HostCheckinSubjectResponse(
+    val kind: String,
+    val bookingId: String? = null,
+    val guestListEntryId: Long? = null,
+    val invitationId: Long? = null,
+)
+
+@Serializable
+private data class HostSearchItemResponse(
+    val kind: String,
+    val displayName: String,
+    val bookingId: String? = null,
+    val guestListEntryId: Long? = null,
+    val status: String,
+    val guestCount: Int,
+    val arrived: Boolean,
+    val tableNumber: Int? = null,
+    val arrivalWindowStart: String? = null,
+    val arrivalWindowEnd: String? = null,
 )
 
 fun Application.hostCheckinRoutes(
     checkinService: CheckinService,
+    hostSearchService: HostSearchService,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
     maxBodyBytes: Long = readCheckinMaxBodyBytesFromEnvOrDefault(),
 ) {
@@ -95,70 +110,96 @@ fun Application.hostCheckinRoutes(
             }
             withMiniAppAuth(allowInitDataFromBody = false) { botTokenProvider() }
 
-            authorize(Role.ENTRY_MANAGER, Role.CLUB_ADMIN, Role.OWNER, Role.GLOBAL_ADMIN) {
-                post("/scan") {
-                    if (!call.request.contentType().match(ContentType.Application.Json)) {
-                        logger.warn("host.checkin.scan invalid_content_type")
-                        return@post call.respondCheckinError(
-                            HttpStatusCode.UnsupportedMediaType,
-                            ErrorCodes.unsupported_media_type,
-                        )
+            authorize(
+                Role.ENTRY_MANAGER,
+                Role.MANAGER,
+                Role.CLUB_ADMIN,
+                Role.HEAD_MANAGER,
+                Role.OWNER,
+                Role.GLOBAL_ADMIN,
+            ) {
+                clubScoped(ClubScope.Own) {
+                    post {
+                        if (!call.request.contentType().match(ContentType.Application.Json)) {
+                            logger.warn("host.checkin invalid_content_type")
+                            return@post call.respondCheckinError(
+                                HttpStatusCode.UnsupportedMediaType,
+                                ErrorCodes.unsupported_media_type,
+                            )
+                        }
+
+                        val body = call.receiveOrNull<HostCheckinRequestPayload>()
+                            ?: return@post call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val action = parseAction(body.action)
+                            ?: return@post call.respondCheckinError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.checkin_invalid_payload,
+                            )
+                        val payload =
+                            HostCheckinRequest(
+                                clubId = body.clubId,
+                                eventId = body.eventId,
+                                bookingId = body.bookingId?.trim()?.takeIf { it.isNotBlank() },
+                                guestListEntryId = body.guestListEntryId,
+                                invitationToken = body.invitationToken?.trim()?.takeIf { it.isNotBlank() },
+                                action = action,
+                                denyReason = body.denyReason?.trim()?.takeIf { it.isNotBlank() },
+                            )
+                        val actor = call.toAuthContext()
+                        val result = checkinService.hostCheckin(payload, actor)
+                        call.respondCheckinResult(result)
                     }
 
-                    val body = call.receiveOrNull<CheckinScanRequest>()
-                        ?: return@post call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-                    val payload = body.payload.trim()
-                    if (payload.isBlank()) {
-                        logger.warn("host.checkin.scan invalid_payload length=0")
-                        return@post call.respondCheckinError(
-                            HttpStatusCode.BadRequest,
-                            ErrorCodes.checkin_invalid_payload,
-                        )
+                    post("/scan") {
+                        if (!call.request.contentType().match(ContentType.Application.Json)) {
+                            logger.warn("host.checkin.scan invalid_content_type")
+                            return@post call.respondCheckinError(
+                                HttpStatusCode.UnsupportedMediaType,
+                                ErrorCodes.unsupported_media_type,
+                            )
+                        }
+
+                        val body = call.receiveOrNull<HostScanRequest>()
+                            ?: return@post call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val payload = body.qrPayload.trim()
+                        if (payload.isBlank()) {
+                            logger.warn("host.checkin.scan invalid_payload length=0")
+                            return@post call.respondCheckinError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.checkin_invalid_payload,
+                            )
+                        }
+
+                        val actor = call.toAuthContext()
+                        val result = checkinService.hostScan(payload, body.clubId, body.eventId, actor)
+                        call.respondCheckinResult(result)
                     }
 
-                    val actor = call.toAuthContext()
-                    val result = checkinService.scanQr(payload, actor)
-                    call.respondCheckinResult(result)
-                }
+                    get("/search") {
+                        val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
+                        val eventId = call.request.queryParameters["eventId"]?.toLongOrNull()
+                        val query = call.request.queryParameters["query"]?.trim().orEmpty()
+                        val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 20
+                        if (clubId == null || clubId <= 0 || eventId == null || eventId <= 0) {
+                            logger.warn("host.checkin.search validation_error club_id={} event_id={}", clubId, eventId)
+                            return@get call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+                        if (query.length < 2) {
+                            logger.warn("host.checkin.search validation_error length={}", query.length)
+                            return@get call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
 
-                post("/manual") {
-                    if (!call.request.contentType().match(ContentType.Application.Json)) {
-                        logger.warn("host.checkin.manual invalid_content_type")
-                        return@post call.respondCheckinError(
-                            HttpStatusCode.UnsupportedMediaType,
-                            ErrorCodes.unsupported_media_type,
-                        )
+                        val results = hostSearchService.search(clubId, eventId, query, limit)
+                        val response = results.map { it.toResponse() }
+                        call.respond(response)
                     }
-
-                    val body = call.receiveOrNull<CheckinManualRequest>()
-                        ?: return@post call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-                    val subjectType = parseSubjectType(body.subjectType)
-                    val status = parseResultStatus(body.status)
-                    val subjectId = body.subjectId.trim()
-                    if (subjectType == null || status == null || subjectId.isBlank()) {
-                        logger.warn("host.checkin.manual invalid_payload")
-                        return@post call.respondCheckinError(
-                            HttpStatusCode.BadRequest,
-                            ErrorCodes.checkin_invalid_payload,
-                        )
-                    }
-
-                    val actor = call.toAuthContext()
-                    val result = checkinService.manualCheckin(
-                        subjectType = subjectType,
-                        subjectId = subjectId,
-                        status = status,
-                        denyReason = body.denyReason?.takeIf { it.isNotBlank() },
-                        actor = actor,
-                    )
-                    call.respondCheckinResult(result)
                 }
             }
         }
     }
 }
 
-private suspend fun ApplicationCall.respondCheckinResult(result: CheckinServiceResult<CheckinResult>) {
+private suspend fun ApplicationCall.respondCheckinResult(result: CheckinServiceResult<HostCheckinOutcome>) {
     when (result) {
         is CheckinServiceResult.Success -> respond(result.value.toResponse())
         is CheckinServiceResult.Failure -> {
@@ -177,51 +218,46 @@ private fun CheckinServiceError.toHttpError(): Pair<HttpStatusCode, String> =
             HttpStatusCode.BadRequest to ErrorCodes.checkin_deny_reason_required
     }
 
-private fun CheckinResult.toResponse(): CheckinResponse =
-    when (this) {
-        is CheckinResult.Success ->
-            CheckinResponse(
-                type = CheckinResponseType.SUCCESS,
-                subjectType = subjectType.name,
-                subjectId = subjectId,
-                resultStatus = resultStatus.name,
-                occurredAt = occurredAt.toString(),
-                checkedBy = checkedBy,
-                displayName = displayName,
-            )
-        is CheckinResult.AlreadyUsed ->
-            CheckinResponse(
-                type = CheckinResponseType.ALREADY_USED,
-                subjectType = subjectType.name,
-                subjectId = subjectId,
-                existingCheckin = existingCheckin.toResponse(),
-            )
-        is CheckinResult.Invalid ->
-            CheckinResponse(
-                type = CheckinResponseType.INVALID,
-                reason = reason.name,
-            )
-        CheckinResult.Forbidden ->
-            CheckinResponse(type = CheckinResponseType.FORBIDDEN)
-    }
-
-private fun com.example.bot.checkin.ExistingCheckin.toResponse(): ExistingCheckinResponse =
-    ExistingCheckinResponse(
-        occurredAt = occurredAt.toString(),
-        checkedBy = checkedBy,
-        resultStatus = resultStatus.name,
-        method = method.name,
+private fun HostCheckinOutcome.toResponse(): HostCheckinResponse =
+    HostCheckinResponse(
+        outcomeStatus = outcomeStatus.name,
+        denyReason = denyReason,
+        subject = subject.toResponse(),
+        bookingStatus = bookingStatus?.name,
+        entryStatus = entryStatus?.name,
+        occurredAt = occurredAt?.toString(),
     )
 
-private fun parseSubjectType(value: String?): CheckinSubjectType? =
-    value?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
-        runCatching { CheckinSubjectType.valueOf(raw.uppercase(Locale.ROOT)) }.getOrNull()
-    }
+private fun HostCheckinSubject.toResponse(): HostCheckinSubjectResponse =
+    HostCheckinSubjectResponse(
+        kind = kind.name,
+        bookingId = bookingId,
+        guestListEntryId = guestListEntryId,
+        invitationId = invitationId,
+    )
 
-private fun parseResultStatus(value: String?): CheckinResultStatus? =
-    value?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
-        runCatching { CheckinResultStatus.valueOf(raw.uppercase(Locale.ROOT)) }.getOrNull()
+private fun HostSearchItem.toResponse(): HostSearchItemResponse =
+    HostSearchItemResponse(
+        kind = kind.name,
+        displayName = displayName,
+        bookingId = bookingId,
+        guestListEntryId = guestListEntryId,
+        status = status,
+        guestCount = guestCount,
+        arrived = arrived,
+        tableNumber = tableNumber,
+        arrivalWindowStart = arrivalWindowStart?.toString(),
+        arrivalWindowEnd = arrivalWindowEnd?.toString(),
+    )
+
+private fun parseAction(value: String?): HostCheckinAction? {
+    val normalized = value?.trim()?.uppercase(Locale.ROOT)
+    return when (normalized) {
+        null, "", "ARRIVE", "ARRIVED" -> HostCheckinAction.AUTO
+        "DENY" -> HostCheckinAction.DENY
+        else -> null
     }
+}
 
 private suspend inline fun <reified T : Any> ApplicationCall.receiveOrNull(): T? =
     runCatching { receive<T>() }.getOrNull()

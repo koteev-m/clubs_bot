@@ -674,10 +674,25 @@ class CheckinDbRepository(
         entryId: Long,
         entryStatus: GuestListEntryStatus,
         invitationUse: InvitationUse?,
-    ): CheckinRecord {
+    ): CheckinRecord? {
         val createdAt = now()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                if (invitationUse != null) {
+                    val updated =
+                        InvitationsTable.update({
+                        (InvitationsTable.id eq invitationUse.invitationId) and
+                            InvitationsTable.usedAt.isNull() and
+                            InvitationsTable.revokedAt.isNull()
+                        }) {
+                            it[InvitationsTable.usedAt] = invitationUse.usedAt.toOffsetDateTime()
+                            it[InvitationsTable.token] = null
+                        }
+                    if (updated == 0) {
+                        return@newSuspendedTransaction null
+                    }
+                }
+
                 val id =
                     CheckinsTable.insert {
                         it[clubId] = checkin.clubId
@@ -695,17 +710,6 @@ class CheckinDbRepository(
                 GuestListEntriesTable.update({ GuestListEntriesTable.id eq entryId }) {
                     it[GuestListEntriesTable.status] = entryStatus.name
                     it[updatedAt] = now()
-                }
-
-                if (invitationUse != null) {
-                    InvitationsTable.update({
-                        (InvitationsTable.id eq invitationUse.invitationId) and
-                            InvitationsTable.usedAt.isNull() and
-                            InvitationsTable.revokedAt.isNull()
-                    }) {
-                        it[InvitationsTable.usedAt] = invitationUse.usedAt.toOffsetDateTime()
-                        it[InvitationsTable.token] = null
-                    }
                 }
 
                 CheckinRecord(
@@ -730,10 +734,27 @@ class CheckinDbRepository(
         bookingId: java.util.UUID,
         bookingStatus: BookingStatus,
         allowedFromStatuses: Set<BookingStatus> = setOf(BookingStatus.BOOKED),
-    ): CheckinRecord {
+    ): CheckinRecord? {
         val createdAt = now()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val updated =
+                if (allowedFromStatuses.isNotEmpty()) {
+                    val allowedNames = allowedFromStatuses.map { it.name }
+                    BookingsTable.update({
+                        (BookingsTable.id eq bookingId) and (BookingsTable.status inList allowedNames)
+                    }) { statement ->
+                        statement[status] = bookingStatus.name
+                        statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
+                    }
+                } else {
+                    1
+                }
+
+                if (updated == 0) {
+                    return@newSuspendedTransaction null
+                }
+
                 val id =
                     CheckinsTable.insert {
                         it[clubId] = checkin.clubId
@@ -747,16 +768,6 @@ class CheckinDbRepository(
                         it[occurredAt] = checkin.occurredAt.toOffsetDateTime()
                         it[CheckinsTable.createdAt] = createdAt
                     } get CheckinsTable.id
-
-                if (allowedFromStatuses.isNotEmpty()) {
-                    val allowedNames = allowedFromStatuses.map { it.name }
-                    BookingsTable.update({
-                        (BookingsTable.id eq bookingId) and (BookingsTable.status inList allowedNames)
-                    }) { statement ->
-                        statement[status] = bookingStatus.name
-                        statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
-                    }
-                }
 
                 CheckinRecord(
                     id = id,

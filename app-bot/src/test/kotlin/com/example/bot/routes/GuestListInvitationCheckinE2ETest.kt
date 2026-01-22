@@ -15,6 +15,7 @@ import com.example.bot.booking.a3.BookingState
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.plugins.configureSecurity
+import com.example.bot.http.ErrorCodes
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.defaultRequest
 import com.example.bot.testing.withInitData
@@ -176,12 +177,21 @@ class GuestListInvitationCheckinE2ETest {
         val scanResponse =
             entryClient.post("/api/host/checkin/scan") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"payload":"inv:$token"}""")
+                setBody("""{"clubId":$clubId,"eventId":$eventId,"qrPayload":"inv:$token"}""")
             }
         assertEquals(HttpStatusCode.OK, scanResponse.status)
         val scanBody = scanResponse.bodyAsJson()
-        assertEquals("SUCCESS", scanBody["type"]!!.jsonPrimitive.content)
-        assertEquals("ARRIVED", scanBody["resultStatus"]!!.jsonPrimitive.content)
+        assertEquals("ARRIVED", scanBody["outcomeStatus"]!!.jsonPrimitive.content)
+
+        val secondScan =
+            entryClient.post("/api/host/checkin/scan") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"clubId":$clubId,"eventId":$eventId,"qrPayload":"inv:$token"}""")
+            }
+        assertEquals(HttpStatusCode.OK, secondScan.status)
+        val secondBody = secondScan.bodyAsJson()
+        assertEquals("DENIED", secondBody["outcomeStatus"]!!.jsonPrimitive.content)
+        assertEquals("ALREADY_USED", secondBody["denyReason"]!!.jsonPrimitive.content)
 
         val entranceResponse =
             entryClient.get("/api/host/entrance?clubId=$clubId&eventId=$eventId")
@@ -199,12 +209,11 @@ class GuestListInvitationCheckinE2ETest {
         val response =
             entryClient.post("/api/host/checkin/scan") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"payload":"garbage"}""")
+                setBody("""{"clubId":$clubId,"eventId":$eventId,"qrPayload":"garbage"}""")
             }
 
-        assertEquals(HttpStatusCode.OK, response.status)
-        val body = response.bodyAsJson()
-        assertEquals("INVALID", body["type"]!!.jsonPrimitive.content)
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.checkin_invalid_payload, response.errorCode())
     }
 
     @Test
@@ -215,7 +224,7 @@ class GuestListInvitationCheckinE2ETest {
         val response =
             promoterClient.post("/api/host/checkin/scan") {
                 contentType(ContentType.Application.Json)
-                setBody("""{"payload":"inv_token"}""")
+                setBody("""{"clubId":$clubId,"eventId":$eventId,"qrPayload":"inv_token"}""")
             }
 
         assertEquals(HttpStatusCode.Forbidden, response.status)
@@ -315,8 +324,10 @@ class GuestListInvitationCheckinE2ETest {
             invitationService = get(),
             botTokenProvider = { com.example.bot.webapp.TEST_BOT_TOKEN },
         )
+        val hostSearchService = mockk<com.example.bot.host.HostSearchService>(relaxed = true)
         hostCheckinRoutes(
             checkinService = get(),
+            hostSearchService = hostSearchService,
             botTokenProvider = { com.example.bot.webapp.TEST_BOT_TOKEN },
         )
         hostEntranceRoutes(

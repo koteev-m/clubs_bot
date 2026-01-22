@@ -3,6 +3,8 @@ package com.example.bot.checkin
 import com.example.bot.club.CheckinMethod
 import com.example.bot.club.CheckinResultStatus
 import com.example.bot.club.CheckinSubjectType
+import com.example.bot.club.GuestListEntryStatus
+import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.db.envInt
 import org.slf4j.LoggerFactory
 import java.time.Instant
@@ -38,6 +40,54 @@ enum class CheckinInvalidReason {
     TOKEN_USED,
     BOOKING_INVALID,
 }
+
+enum class HostCheckinAction {
+    AUTO,
+    DENY,
+}
+
+enum class HostCheckinSubjectKind {
+    BOOKING,
+    GUEST_LIST_ENTRY,
+    INVITATION,
+}
+
+enum class HostCheckinDenyReason {
+    NOT_FOUND,
+    ALREADY_USED,
+    ALREADY_CHECKED_IN,
+    INVALID_STATUS,
+    SCOPE_MISMATCH,
+    TOKEN_INVALID,
+    TOKEN_REVOKED,
+    TOKEN_EXPIRED,
+}
+
+data class HostCheckinRequest(
+    val clubId: Long,
+    val eventId: Long,
+    val bookingId: String? = null,
+    val guestListEntryId: Long? = null,
+    val invitationToken: String? = null,
+    val action: HostCheckinAction = HostCheckinAction.AUTO,
+    val denyReason: String? = null,
+)
+
+data class HostCheckinSubject(
+    val kind: HostCheckinSubjectKind,
+    val bookingId: String? = null,
+    val guestListEntryId: Long? = null,
+    val invitationId: Long? = null,
+)
+
+data class HostCheckinOutcome(
+    val outcomeStatus: CheckinResultStatus,
+    val denyReason: String? = null,
+    val subject: HostCheckinSubject,
+    val bookingStatus: BookingStatus? = null,
+    val entryStatus: GuestListEntryStatus? = null,
+    val occurredAt: Instant? = null,
+)
 
 sealed interface CheckinResult {
     data class Success(
@@ -94,4 +144,16 @@ interface CheckinService {
         denyReason: String?,
         actor: com.example.bot.data.security.AuthContext,
     ): CheckinServiceResult<CheckinResult>
+
+    suspend fun hostCheckin(
+        request: HostCheckinRequest,
+        actor: com.example.bot.data.security.AuthContext,
+    ): CheckinServiceResult<HostCheckinOutcome>
+
+    suspend fun hostScan(
+        payload: String,
+        clubId: Long,
+        eventId: Long,
+        actor: com.example.bot.data.security.AuthContext,
+    ): CheckinServiceResult<HostCheckinOutcome>
 }

@@ -48,6 +48,7 @@ import com.example.bot.routes.clubsRoutes
 import com.example.bot.booking.a3.Booking
 import com.example.bot.host.BookingProvider
 import com.example.bot.host.HostEntranceService
+import com.example.bot.host.HostSearchService
 import com.example.bot.notifications.LoggingNotificationService
 import com.example.bot.notifications.NotificationService
 import com.example.bot.promoter.invites.PromoterInviteService
@@ -63,6 +64,7 @@ import com.example.bot.routes.guestListRoutes
 import com.example.bot.routes.hostEntranceRoutes
 import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.hostCheckinRoutes
+import com.example.bot.routes.hostWaitlistRoutes
 import com.example.bot.routes.adminClubsRoutes
 import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminHallPlanRoutes
@@ -183,6 +185,7 @@ fun Application.module() {
     val guestListDbRepository by inject<GuestListDbRepository>()
     val guestListCsvParser by inject<GuestListCsvParser>()
     val bookingService by inject<BookingService>()
+    val bookingRepository by inject<com.example.bot.data.booking.core.BookingRepository>()
     val bookingState by inject<com.example.bot.booking.a3.BookingState>()
     val clubsRepository by inject<ClubsRepository>()
     val eventsRepository by inject<EventsRepository>()
@@ -221,6 +224,7 @@ fun Application.module() {
             eventsRepository = eventsRepository,
         )
     val shiftChecklistService = ShiftChecklistService(clock = appClock)
+    val hostSearchService = HostSearchService(bookingRepository, guestListRepository, guestListDbRepository)
 
     // 7) Метрики
     val registry = Metrics.globalRegistry
@@ -339,13 +343,16 @@ fun Application.module() {
         notificationService = notificationService,
         clock = appClock,
     )
+    hostWaitlistRoutes(
+        repository = waitlistRepository,
+    )
     hostEntranceRoutes(service = hostEntranceService)
     hostChecklistRoutes(
         checklistService = shiftChecklistService,
         eventsRepository = eventsRepository,
         clock = appClock,
     )
-    hostCheckinRoutes(checkinService = checkinService)
+    hostCheckinRoutes(checkinService = checkinService, hostSearchService = hostSearchService)
 
     // 9) Прочее
     routing {

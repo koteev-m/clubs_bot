@@ -59,6 +59,17 @@ data class BookingRecord(
     val updatedAt: Instant,
 )
 
+data class BookingSearchRecord(
+    val id: UUID,
+    val clubId: Long,
+    val eventId: Long,
+    val guestName: String?,
+    val guestsCount: Int,
+    val status: BookingStatus,
+    val arrivalBy: Instant?,
+    val tableNumber: Int,
+)
+
 data class BookingHold(
     val id: UUID,
     val clubId: Long,

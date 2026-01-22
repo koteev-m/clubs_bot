@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTelegram } from '../../../app/providers/TelegramProvider';
 import { useEntryStore } from '../state/entry.store';
-import { checkinQr } from '../api/entry.api';
+import { hostScan } from '../api/entry.api';
 import { useUiStore } from '../../../shared/store/ui';
 import { getApiErrorInfo, isRequestCanceled } from '../../../shared/api/error';
 
+interface QrScannerButtonProps {
+  clubId: number;
+  eventId: number;
+}
+
 /** Button triggering Telegram QR scanner. */
-export default function QrScannerButton() {
+export default function QrScannerButton({ clubId, eventId }: QrScannerButtonProps) {
   const webApp = useTelegram();
   const { setResult } = useEntryStore();
   const { addToast } = useUiStore();
@@ -60,7 +65,7 @@ export default function QrScannerButton() {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        await checkinQr(text, controller.signal);
+        await hostScan({ clubId, eventId, qrPayload: text }, controller.signal);
         if (sessionId !== scanSessionRef.current || !isScannerOpenRef.current) return;
         setResult('ARRIVED');
         addToast('ARRIVED');
@@ -78,11 +83,11 @@ export default function QrScannerButton() {
           return;
         }
         setResult('DENIED');
-        if (code === 'invalid' || code === 'invalid_qr' || code === 'not_found') {
+        if (code === 'invalid' || code === 'invalid_qr' || code === 'not_found' || code === 'checkin_invalid_payload') {
           addToast('QR недействителен');
           return;
         }
-        if (code === 'forbidden') {
+        if (code === 'forbidden' || code === 'checkin_forbidden') {
           addToast('Доступ запрещён');
           return;
         }
@@ -96,10 +101,14 @@ export default function QrScannerButton() {
         }
       }
     },
-    [abortInFlight, addToast, cleanupListeners, setResult, webApp],
+    [abortInFlight, addToast, cleanupListeners, clubId, eventId, setResult, webApp],
   );
 
   function openScanner() {
+    if (!clubId || !eventId) {
+      addToast('Укажите клуб и событие');
+      return;
+    }
     cleanupListeners();
     abortInFlight();
     scanSessionRef.current += 1;
@@ -127,7 +136,7 @@ export default function QrScannerButton() {
   }
 
   return (
-    <button type="button" onClick={openScanner} className="p-2 border">
+    <button type="button" onClick={openScanner} className="p-2 border w-full">
       Сканировать QR
     </button>
   );

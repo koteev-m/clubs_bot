@@ -15,12 +15,15 @@ import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.lowerCase
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -374,6 +377,49 @@ class BookingRepository(
             createdAt = this[BookingsTable.createdAt].toInstant(),
             updatedAt = this[BookingsTable.updatedAt].toInstant(),
         )
+
+    suspend fun searchByGuestName(
+        clubId: Long,
+        eventId: Long,
+        query: String,
+        limit: Int,
+    ): List<BookingSearchRecord> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty() || limit <= 0) return emptyList()
+        val safeLimit = limit.coerceAtMost(50)
+        return withTxRetry {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val likePattern = "%${escapeLike(trimmed.lowercase())}%"
+                BookingsTable
+                    .selectAll()
+                    .where {
+                        (BookingsTable.clubId eq clubId) and
+                            (BookingsTable.eventId eq eventId) and
+                            (BookingsTable.guestName.isNotNull()) and
+                            (BookingsTable.guestName.lowerCase() like likePattern)
+                    }
+                    .orderBy(BookingsTable.createdAt to SortOrder.DESC)
+                    .limit(safeLimit)
+                    .map { row ->
+                        BookingSearchRecord(
+                            id = row[BookingsTable.id],
+                            clubId = row[BookingsTable.clubId],
+                            eventId = row[BookingsTable.eventId],
+                            guestName = row[BookingsTable.guestName],
+                            guestsCount = row[BookingsTable.guestsCount],
+                            status = BookingStatus.valueOf(row[BookingsTable.status]),
+                            arrivalBy = row[BookingsTable.arrivalBy]?.toInstant(),
+                            tableNumber = row[BookingsTable.tableNumber],
+                        )
+                    }
+            }
+        }
+    }
+
+    private fun escapeLike(value: String): String =
+        value.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
 }
 
 class BookingHoldRepository(
