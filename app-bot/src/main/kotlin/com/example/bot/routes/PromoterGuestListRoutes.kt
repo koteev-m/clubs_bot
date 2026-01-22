@@ -55,7 +55,12 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("PromoterGuestListRoutes")
 
 @Serializable
 private data class CreateGuestListRequest(
@@ -540,7 +545,16 @@ fun Application.promoterGuestListRoutes(
                         }
                     } finally {
                         if (!confirmSucceeded) {
-                            promoterAssignments.releaseLock(entry.id)
+                            withContext(NonCancellable) {
+                                runCatching { promoterAssignments.releaseLock(entry.id) }
+                                    .onFailure { throwable ->
+                                        logger.warn(
+                                            "promoter.assign.release_lock_failed entry_id={}",
+                                            entry.id,
+                                            throwable,
+                                        )
+                                    }
+                            }
                         }
                     }
                 }
