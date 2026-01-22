@@ -474,67 +474,73 @@ fun Application.promoterGuestListRoutes(
                     }
                     val idem = "promoter-assign:${entry.id}"
                     val holdHash = hashRequestCanonical(mapOf("tableId" to payload.tableId, "eventId" to payload.eventId, "guests" to 1))
-                    when (
-                        val hold =
-                            bookingState.hold(
-                                userId = context.user.id,
-                                clubId = list.clubId,
-                                tableId = table.id,
-                                eventId = payload.eventId,
-                                guestCount = 1,
-                                idempotencyKey = idem,
-                                requestHash = holdHash,
-                                promoterId = context.user.id,
-                            )
-                    ) {
-                        is HoldResult.Error -> {
-                            promoterAssignments.releaseLock(entry.id)
-                            val (status, code) = hold.code.toHttp()
-                            return@post call.respondError(status, code)
-                        }
-                        is HoldResult.Success -> {
-                            val confirmHash = hashRequestCanonical(mapOf("bookingId" to hold.booking.id))
-                            when (
-                                val confirm =
-                                    bookingState.confirm(
-                                        userId = context.user.id,
-                                        clubId = list.clubId,
-                                        bookingId = hold.booking.id,
-                                        idempotencyKey = "promoter-confirm:${hold.booking.id}",
-                                        requestHash = confirmHash,
-                                    )
-                            ) {
-                                is ConfirmResult.Error -> {
-                                    promoterAssignments.releaseLock(entry.id)
-                                    val (status, code) = confirm.code.toHttp()
-                                    return@post call.respondError(status, code)
-                                }
-                                is ConfirmResult.Success -> {
-                                    val finalized = promoterAssignments.finalizeAssignment(entry.id, confirm.booking.id)
-                                    if (!finalized) {
-                                        val currentBookingId = promoterAssignments.findBookingIdForEntry(entry.id)
-                                        if (currentBookingId != null && currentBookingId > 0) {
+                    var confirmSucceeded = false
+                    try {
+                        when (
+                            val hold =
+                                bookingState.hold(
+                                    userId = context.user.id,
+                                    clubId = list.clubId,
+                                    tableId = table.id,
+                                    eventId = payload.eventId,
+                                    guestCount = 1,
+                                    idempotencyKey = idem,
+                                    requestHash = holdHash,
+                                    promoterId = context.user.id,
+                                )
+                        ) {
+                            is HoldResult.Error -> {
+                                val (status, code) = hold.code.toHttp()
+                                return@post call.respondError(status, code)
+                            }
+                            is HoldResult.Success -> {
+                                val confirmHash = hashRequestCanonical(mapOf("bookingId" to hold.booking.id))
+                                when (
+                                    val confirm =
+                                        bookingState.confirm(
+                                            userId = context.user.id,
+                                            clubId = list.clubId,
+                                            bookingId = hold.booking.id,
+                                            idempotencyKey = "promoter-confirm:${hold.booking.id}",
+                                            requestHash = confirmHash,
+                                        )
+                                ) {
+                                    is ConfirmResult.Error -> {
+                                        val (status, code) = confirm.code.toHttp()
+                                        return@post call.respondError(status, code)
+                                    }
+                                    is ConfirmResult.Success -> {
+                                        confirmSucceeded = true
+                                        val finalized = promoterAssignments.finalizeAssignment(entry.id, confirm.booking.id)
+                                        if (!finalized) {
+                                            val currentBookingId = promoterAssignments.findBookingIdForEntry(entry.id)
+                                            if (currentBookingId != null && currentBookingId > 0) {
+                                                return@post call.respondError(
+                                                    HttpStatusCode.Conflict,
+                                                    ErrorCodes.invalid_state,
+                                                    message = "Этому гостю уже назначен стол",
+                                                )
+                                            }
                                             return@post call.respondError(
-                                                HttpStatusCode.Conflict,
-                                                ErrorCodes.invalid_state,
-                                                message = "Этому гостю уже назначен стол",
+                                                HttpStatusCode.InternalServerError,
+                                                ErrorCodes.internal_error,
+                                                message = "Не удалось зафиксировать назначение стола",
                                             )
                                         }
-                                        return@post call.respondError(
-                                            HttpStatusCode.InternalServerError,
-                                            ErrorCodes.internal_error,
-                                            message = "Не удалось зафиксировать назначение стола",
+                                        call.respond(
+                                            PromoterBookingAssignResponse(
+                                                bookingId = confirm.booking.id,
+                                                tableId = table.id,
+                                                eventId = payload.eventId,
+                                            ),
                                         )
                                     }
-                                    call.respond(
-                                        PromoterBookingAssignResponse(
-                                            bookingId = confirm.booking.id,
-                                            tableId = table.id,
-                                            eventId = payload.eventId,
-                                        ),
-                                    )
                                 }
                             }
+                        }
+                    } finally {
+                        if (!confirmSucceeded) {
+                            promoterAssignments.releaseLock(entry.id)
                         }
                     }
                 }
