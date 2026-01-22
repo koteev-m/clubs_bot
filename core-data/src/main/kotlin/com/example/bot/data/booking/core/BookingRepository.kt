@@ -29,6 +29,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.Locale
 import java.util.UUID
 
 private val ACTIVE_STATUSES = listOf(BookingStatus.BOOKED.name, BookingStatus.SEATED.name)
@@ -389,7 +390,7 @@ class BookingRepository(
         val safeLimit = limit.coerceAtMost(50)
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                val likePattern = "%${escapeLike(trimmed.lowercase())}%"
+                val likePattern = "%${escapeLike(trimmed.lowercase(Locale.ROOT))}%"
                 BookingsTable
                     .selectAll()
                     .where {

@@ -145,6 +145,9 @@ fun Application.hostCheckinRoutes(
                                 action = action,
                                 denyReason = body.denyReason?.trim()?.takeIf { it.isNotBlank() },
                             )
+                        if (!call.rbacContext().canAccessClub(payload.clubId)) {
+                            return@post call.respondCheckinError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                        }
                         val actor = call.toAuthContext()
                         val result = checkinService.hostCheckin(payload, actor)
                         call.respondCheckinResult(result)
@@ -169,6 +172,9 @@ fun Application.hostCheckinRoutes(
                                 ErrorCodes.checkin_invalid_payload,
                             )
                         }
+                        if (!call.rbacContext().canAccessClub(body.clubId)) {
+                            return@post call.respondCheckinError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                        }
 
                         val actor = call.toAuthContext()
                         val result = checkinService.hostScan(payload, body.clubId, body.eventId, actor)
@@ -187,6 +193,9 @@ fun Application.hostCheckinRoutes(
                         if (query.length < 2) {
                             logger.warn("host.checkin.search validation_error length={}", query.length)
                             return@get call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+                        if (!call.rbacContext().canAccessClub(clubId)) {
+                            return@get call.respondCheckinError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
 
                         val results = hostSearchService.search(clubId, eventId, query, limit)
@@ -257,6 +266,14 @@ private fun parseAction(value: String?): HostCheckinAction? {
         "DENY" -> HostCheckinAction.DENY
         else -> null
     }
+}
+
+private val GLOBAL_ROLES: Set<Role> =
+    setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+
+private fun com.example.bot.security.rbac.RbacContext.canAccessClub(clubId: Long): Boolean {
+    if (roles.any { it in GLOBAL_ROLES }) return true
+    return clubId in clubIds
 }
 
 private suspend inline fun <reified T : Any> ApplicationCall.receiveOrNull(): T? =

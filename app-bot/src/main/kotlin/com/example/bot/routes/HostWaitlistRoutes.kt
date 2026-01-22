@@ -10,6 +10,7 @@ import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
+import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
@@ -77,6 +78,9 @@ fun Application.hostWaitlistRoutes(
                             logger.warn("host.waitlist validation_error club_id={} event_id={}", clubId, eventId)
                             return@get call.respondWaitlistError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                         }
+                        if (!call.rbacContext().canAccessClub(clubId)) {
+                            return@get call.respondWaitlistError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                        }
 
                         val items = repository.listQueue(clubId, eventId)
                         val response = items.map { it.toResponse() }
@@ -95,6 +99,9 @@ fun Application.hostWaitlistRoutes(
                         if (body.clubId <= 0 || body.eventId <= 0) {
                             logger.warn("host.waitlist invite validation_error club_id={} event_id={}", body.clubId, body.eventId)
                             return@post call.respondWaitlistError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                        }
+                        if (!call.rbacContext().canAccessClub(body.clubId)) {
+                            return@post call.respondWaitlistError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
 
                         val entry = repository.get(id)
@@ -136,3 +143,11 @@ private fun com.example.bot.club.WaitlistEntry.toResponse(): HostWaitlistEntryRe
         expiresAt = expiresAt?.toString(),
         createdAt = createdAt.toString(),
     )
+
+private val GLOBAL_ROLES: Set<Role> =
+    setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
+
+private fun com.example.bot.security.rbac.RbacContext.canAccessClub(clubId: Long): Boolean {
+    if (roles.any { it in GLOBAL_ROLES }) return true
+    return clubId in clubIds
+}

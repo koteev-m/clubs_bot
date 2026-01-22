@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 
+type EntryCheckinResult = 'ARRIVED' | 'LATE' | 'DENIED';
+
 interface EntryState {
-  lastResult?: string;
-  setResult: (r: string) => void;
+  lastResult?: EntryCheckinResult;
+  setResult: (r: EntryCheckinResult) => void;
 }
 
 /** Store for Entry mode check-in results. */

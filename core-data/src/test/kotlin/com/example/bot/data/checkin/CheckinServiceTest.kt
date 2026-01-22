@@ -26,6 +26,7 @@ import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
 import io.mockk.coEvery
 import io.mockk.mockk
+import java.sql.SQLException
 import java.time.Duration
 import java.time.Clock
 import java.time.Instant
@@ -121,6 +122,31 @@ class CheckinServiceTest {
         val payload = (result as CheckinServiceResult.Success).value
         assertEquals(CheckinResultStatus.DENIED, payload.outcomeStatus)
         assertEquals("ALREADY_CHECKED_IN", payload.denyReason)
+    }
+
+    @Test
+    fun `host checkin entry returns denied on unique violation`() = runBlocking {
+        val entry = entryRecord(id = 21, guestListId = 31, status = GuestListEntryStatus.CONFIRMED)
+        val guestList = guestListRecord(id = entry.guestListId)
+
+        coEvery { guestListEntryRepo.findById(entry.id) } returns entry
+        coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, entry.id.toString()) } returns null
+        coEvery { checkinRepo.insertWithEntryUpdate(any(), any(), any(), any()) } throws SQLException("duplicate", "23505")
+
+        val result = service.hostCheckin(
+            HostCheckinRequest(
+                clubId = guestList.clubId,
+                eventId = guestList.eventId,
+                guestListEntryId = entry.id,
+            ),
+            actor,
+        )
+
+        check(result is CheckinServiceResult.Success)
+        val payload = (result as CheckinServiceResult.Success).value
+        assertEquals(CheckinResultStatus.DENIED, payload.outcomeStatus)
+        assertEquals("ALREADY_USED", payload.denyReason)
     }
 
     private fun bookingRecord(
