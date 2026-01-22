@@ -57,7 +57,12 @@ class PromoterBookingAssignmentsRepository(
             ?: return if (tryInsert(entryId, IN_PROGRESS_BOOKING_ID, now)) {
                 AcquireLockResult.Acquired
             } else {
-                AcquireLockResult.InProgress
+                val refreshed = getAssignment(entryId)
+                if (refreshed != null && refreshed.bookingId > IN_PROGRESS_BOOKING_ID) {
+                    AcquireLockResult.AlreadyAssigned(refreshed.bookingId)
+                } else {
+                    AcquireLockResult.InProgress
+                }
             }
         if (current.bookingId > IN_PROGRESS_BOOKING_ID) {
             return AcquireLockResult.AlreadyAssigned(current.bookingId)
@@ -111,28 +116,6 @@ class PromoterBookingAssignmentsRepository(
                 } > 0
             }
         }
-
-    suspend fun assignIfAbsent(entryId: Long, bookingId: Long): Boolean {
-        val now = now()
-        return try {
-            withTxRetry {
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    PromoterBookingAssignmentsTable.insert {
-                        it[PromoterBookingAssignmentsTable.entryId] = entryId
-                        it[PromoterBookingAssignmentsTable.bookingId] = bookingId
-                        it[PromoterBookingAssignmentsTable.createdAt] = now
-                    }
-                }
-            }
-            true
-        } catch (ex: Throwable) {
-            if (ex.isUniqueViolation()) {
-                false
-            } else {
-                throw ex
-            }
-        }
-    }
 
     private suspend fun tryInsert(entryId: Long, bookingId: Long, createdAt: OffsetDateTime): Boolean =
         try {
