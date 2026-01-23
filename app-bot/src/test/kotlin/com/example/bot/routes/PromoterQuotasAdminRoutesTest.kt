@@ -106,10 +106,26 @@ class PromoterQuotasAdminRoutesTest {
             client.post("/api/admin/quotas") {
                 header("X-Telegram-Init-Data", "init")
                 contentType(ContentType.Application.Json)
-                setBody("""{"clubId":0,"promoterId":1,"tableId":1,"quota":0,"expiresAt":"oops"}""")
+                setBody("""{"clubId":0,"promoterId":1,"tableId":1,"quota":-1,"expiresAt":"oops"}""")
             }
         assertEquals(HttpStatusCode.BadRequest, invalidFields.status)
         assertEquals(ErrorCodes.validation_error, invalidFields.errorCode())
+    }
+
+    @Test
+    fun `get rejects non admins`() = withApp(roles = setOf(Role.PROMOTER)) { _, _ ->
+        val response =
+            client.get("/api/admin/quotas?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+    }
+
+    @Test
+    fun `get rejects club scope mismatch`() = withApp(clubIds = setOf(2)) { _, _ ->
+        val response =
+            client.get("/api/admin/quotas?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
     }
 
     @Test
@@ -198,6 +214,8 @@ class PromoterQuotasAdminRoutesTest {
     private fun relaxedAuditRepository() = mockk<com.example.bot.data.booking.core.AuditLogRepository>(relaxed = true)
 
     private fun withApp(
+        roles: Set<Role> = setOf(Role.CLUB_ADMIN),
+        clubIds: Set<Long> = setOf(1),
         block: suspend ApplicationTestBuilder.(InMemoryPromoterQuotaRepository, PromoterQuotaService) -> Unit,
     ) {
         val repo = InMemoryPromoterQuotaRepository()
@@ -207,7 +225,7 @@ class PromoterQuotasAdminRoutesTest {
                 install(ContentNegotiation) { json() }
                 install(RbacPlugin) {
                     userRepository = StubUserRepository()
-                    userRoleRepository = StubUserRoleRepository(setOf(Role.CLUB_ADMIN))
+                    userRoleRepository = StubUserRoleRepository(roles, clubIds)
                     auditLogRepository = relaxedAuditRepository()
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
@@ -240,10 +258,11 @@ class PromoterQuotasAdminRoutesTest {
 
     private class StubUserRoleRepository(
         private val roles: Set<Role>,
+        private val clubIds: Set<Long>,
     ) : UserRoleRepository {
         override suspend fun listRoles(userId: Long): Set<Role> = roles
 
-        override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
+        override suspend fun listClubIdsFor(userId: Long): Set<Long> = clubIds
     }
 
     companion object {

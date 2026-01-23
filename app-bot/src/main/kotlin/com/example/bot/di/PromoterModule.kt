@@ -1,5 +1,8 @@
 package com.example.bot.di
 
+import com.example.bot.data.promoter.PromoterAdminRepositoryImpl
+import com.example.bot.promoter.admin.PromoterAdminRepository
+import com.example.bot.promoter.admin.PromoterAdminService
 import com.example.bot.promoter.invites.InMemoryPromoterInviteRepository
 import com.example.bot.promoter.invites.PromoterInviteRepository
 import com.example.bot.promoter.invites.PromoterInviteService
@@ -20,4 +23,7 @@ val promoterModule =
 
         single<PromoterQuotaRepository> { InMemoryPromoterQuotaRepository() }
         single { PromoterQuotaService(get(), get()) }
+
+        single<PromoterAdminRepository> { PromoterAdminRepositoryImpl(get(), get()) }
+        single { PromoterAdminService(get(), get(), get()) }
     }

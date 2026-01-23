@@ -12,8 +12,24 @@
   - Создание клубов (`POST /api/admin/clubs`) доступно только `OWNER`/`GLOBAL_ADMIN`.
   - `CLUB_ADMIN` ограничен только клубами из RBAC-контекста — `isAdminClubAllowed(clubId)`.
   - Любые действия по залам/столам проверяют принадлежность клуба перед изменением.
+  - Админские endpoints промоутеров/квот (`GET /api/admin/promoters`, `POST /api/admin/promoters/{id}/access`,
+    `GET|POST|PUT /api/admin/quotas`) доступны `OWNER`/`GLOBAL_ADMIN`/`HEAD_MANAGER`/`CLUB_ADMIN` и проверяют club scope.
   - Promoter ограничен своими guest lists (owner/promoter) и `clubIds` из RBAC.
   - Для не‑глобальных ролей пустой `clubIds` означает отсутствие доступа к клубам (deny‑by‑default).
+
+### 1.2) Admin: промоутеры и квоты
+
+- `GET /api/admin/promoters?clubId={clubId}`: список промоутеров клуба, их доступ и квоты.
+  - Ответ: `{ promoters: [{ promoterId, telegramUserId, username, displayName, accessEnabled, quotas: [{ tableId, quota, held, expiresAt }] }] }`.
+- `POST /api/admin/promoters/{promoterUserId}/access`
+  - Payload: `{ clubId: number, enabled: boolean }`.
+  - Ответ: `{ enabled: boolean }`.
+- `POST /api/admin/quotas` (upsert, сброс held)
+  - Payload: `{ clubId, promoterId, tableId, quota, expiresAt }`.
+  - Ответ: `{ quota: { clubId, promoterId, tableId, quota, held, expiresAt } }`.
+- `PUT /api/admin/quotas` (обновление, сохраняет held)
+  - Payload: `{ clubId, promoterId, tableId, quota, expiresAt }`.
+  - Ответ: `{ quota: { clubId, promoterId, tableId, quota, held, expiresAt } }`.
 
 ## 1.1) Promoter bookings
 

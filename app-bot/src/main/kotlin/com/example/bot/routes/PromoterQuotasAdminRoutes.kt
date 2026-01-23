@@ -8,6 +8,8 @@ import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promoter.quotas.PromoterQuota
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.security.rbac.authorize
+import com.example.bot.security.rbac.canAccessClub
+import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -27,6 +29,7 @@ import org.slf4j.LoggerFactory
 
 private const val VARY_HEADER = "X-Telegram-Init-Data"
 private const val NO_STORE = "no-store"
+private const val MAX_PROMOTER_QUOTA = 1000
 
 @Serializable
 private data class PromoterQuotaPayload(
@@ -64,11 +67,14 @@ fun Application.promoterQuotasAdminRoutes(
         route("/api/admin/quotas") {
             withMiniAppAuth { botTokenProvider() }
 
-            authorize(Role.CLUB_ADMIN, Role.OWNER, Role.GLOBAL_ADMIN) {
+            authorize(Role.CLUB_ADMIN, Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER) {
                 get {
                     val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
                     if (clubId == null || clubId <= 0) {
                         return@get call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    }
+                    if (!call.rbacContext().canAccessClub(clubId)) {
+                        return@get call.respondAdminError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
 
                     val quotas = promoterQuotaService.listByClub(clubId, Instant.now(clock))
@@ -82,6 +88,9 @@ fun Application.promoterQuotasAdminRoutes(
 
                     val quota = payload.toQuotaOrNull()
                         ?: return@post call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    if (!call.rbacContext().canAccessClub(quota.clubId)) {
+                        return@post call.respondAdminError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                    }
 
                     val saved = promoterQuotaService.createOrReplace(quota)
                     logger.info(
@@ -99,6 +108,9 @@ fun Application.promoterQuotasAdminRoutes(
 
                     val quota = payload.toQuotaOrNull()
                         ?: return@put call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    if (!call.rbacContext().canAccessClub(quota.clubId)) {
+                        return@put call.respondAdminError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                    }
 
                     val updated = promoterQuotaService.updateExisting(quota)
                         ?: return@put call.respondAdminError(HttpStatusCode.NotFound, ErrorCodes.not_found)
@@ -119,7 +131,7 @@ fun Application.promoterQuotasAdminRoutes(
 private fun PromoterQuotaPayload.toQuotaOrNull(): PromoterQuota? {
     val expiresAt = runCatching { Instant.parse(this.expiresAt) }.getOrNull() ?: return null
     if (clubId <= 0 || promoterId <= 0 || tableId <= 0) return null
-    if (quota < 1) return null
+    if (quota < 0 || quota > MAX_PROMOTER_QUOTA) return null
     return PromoterQuota(
         clubId = clubId,
         promoterId = promoterId,
