@@ -51,6 +51,7 @@ import com.example.bot.host.HostEntranceService
 import com.example.bot.host.HostSearchService
 import com.example.bot.notifications.LoggingNotificationService
 import com.example.bot.notifications.NotificationService
+import com.example.bot.promoter.admin.PromoterAdminService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
@@ -80,6 +81,7 @@ import com.example.bot.routes.pingRoute
 import com.example.bot.routes.promoterInvitesRoutes
 import com.example.bot.routes.promoterGuestListRoutes
 import com.example.bot.routes.promoterQuotasAdminRoutes
+import com.example.bot.routes.promoterAdminRoutes
 import com.example.bot.routes.promoterRatingRoutes
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.trackOfNightRoutes
@@ -204,6 +206,7 @@ fun Application.module() {
     val promoterInviteService by inject<PromoterInviteService>()
     val promoterRatingService by inject<PromoterRatingService>()
     val promoterQuotaService by inject<PromoterQuotaService>()
+    val promoterAdminService by inject<PromoterAdminService>()
     val promoterAssignments by inject<PromoterBookingAssignmentsRepository>()
     val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
@@ -286,6 +289,7 @@ fun Application.module() {
     )
     promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
+    promoterAdminRoutes(promoterAdminService = promoterAdminService)
     adminClubsRoutes(adminClubsRepository = adminClubsRepository)
     adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
     adminHallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)

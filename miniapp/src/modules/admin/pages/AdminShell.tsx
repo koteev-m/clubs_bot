@@ -5,6 +5,9 @@ import AdminForbidden from './AdminForbidden';
 import ClubsScreen from './ClubsScreen';
 import ClubHallsScreen from './ClubHallsScreen';
 import HallEditorScreen from './HallEditorScreen';
+import PromotersQuotasScreen from './PromotersQuotasScreen';
+
+type AdminSection = 'clubs' | 'promoters';
 
 const parseClubId = () => {
   const params = new URLSearchParams(window.location.search);
@@ -22,14 +25,26 @@ const parseHallId = () => {
   return id;
 };
 
-const setAdminParamsInUrl = (clubId: number | null, hallId: number | null) => {
+const parseSection = (): AdminSection => {
+  const params = new URLSearchParams(window.location.search);
+  const section = params.get('section');
+  if (section === 'promoters') return 'promoters';
+  return 'clubs';
+};
+
+const setAdminParamsInUrl = (section: AdminSection, clubId: number | null, hallId: number | null) => {
   const url = new URL(window.location.href);
+  if (section === 'promoters') {
+    url.searchParams.set('section', 'promoters');
+  } else {
+    url.searchParams.delete('section');
+  }
   if (clubId) {
     url.searchParams.set('clubId', String(clubId));
   } else {
     url.searchParams.delete('clubId');
   }
-  if (hallId && clubId) {
+  if (hallId && clubId && section === 'clubs') {
     url.searchParams.set('hallId', String(hallId));
   } else {
     url.searchParams.delete('hallId');
@@ -47,6 +62,7 @@ const removeAdminMode = () => {
 
 export default function AdminShell() {
   const addToast = useUiStore((state) => state.addToast);
+  const [section, setSection] = useState<AdminSection>(() => parseSection());
   const [clubId, setClubId] = useState<number | null>(() => parseClubId());
   const [hallId, setHallId] = useState<number | null>(() => (parseClubId() ? parseHallId() : null));
   const [forbidden, setForbidden] = useState(false);
@@ -54,23 +70,25 @@ export default function AdminShell() {
 
   useEffect(() => {
     const handlePopState = () => {
+      const nextSection = parseSection();
       const nextClubId = parseClubId();
+      setSection(nextSection);
       setClubId(nextClubId);
-      setHallId(nextClubId ? parseHallId() : null);
+      setHallId(nextSection === 'clubs' && nextClubId ? parseHallId() : null);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const handleSelectClub = useCallback((id: number) => {
-    setAdminParamsInUrl(id, null);
+    setAdminParamsInUrl('clubs', id, null);
     setClubId(id);
     setHallId(null);
     window.scrollTo(0, 0);
   }, []);
 
   const handleBackToClubs = useCallback(() => {
-    setAdminParamsInUrl(null, null);
+    setAdminParamsInUrl('clubs', null, null);
     setClubId(null);
     setHallId(null);
     window.scrollTo(0, 0);
@@ -78,17 +96,46 @@ export default function AdminShell() {
 
   const handleOpenHallEditor = useCallback((id: number) => {
     if (!clubId) return;
-    setAdminParamsInUrl(clubId, id);
+    setAdminParamsInUrl('clubs', clubId, id);
     setHallId(id);
     window.scrollTo(0, 0);
   }, [clubId]);
 
   const handleBackToHalls = useCallback(() => {
     if (!clubId) return;
-    setAdminParamsInUrl(clubId, null);
+    setAdminParamsInUrl('clubs', clubId, null);
     setHallId(null);
     window.scrollTo(0, 0);
   }, [clubId]);
+
+  const handleSelectClubForPromoters = useCallback((id: number) => {
+    if (id <= 0) {
+      setAdminParamsInUrl('promoters', null, null);
+      setSection('promoters');
+      setClubId(null);
+      setHallId(null);
+      return;
+    }
+    setAdminParamsInUrl('promoters', id, null);
+    setSection('promoters');
+    setClubId(id);
+    setHallId(null);
+    window.scrollTo(0, 0);
+  }, []);
+
+  const handleSwitchSection = useCallback(
+    (next: AdminSection) => {
+      setSection(next);
+      if (next === 'promoters') {
+        setAdminParamsInUrl('promoters', clubId, null);
+        setHallId(null);
+      } else {
+        setAdminParamsInUrl('clubs', clubId, hallId);
+      }
+      window.scrollTo(0, 0);
+    },
+    [clubId, hallId],
+  );
 
   const handleForbidden = useCallback(() => {
     setForbidden(true);
@@ -102,6 +149,15 @@ export default function AdminShell() {
     if (forbidden) {
       return <AdminForbidden onExit={removeAdminMode} />;
     }
+    if (section === 'promoters') {
+      return (
+        <PromotersQuotasScreen
+          clubId={clubId}
+          onSelectClub={handleSelectClubForPromoters}
+          onForbidden={handleForbidden}
+        />
+      );
+    }
     if (clubId && hallId) {
       return <HallEditorScreen clubId={clubId} hallId={hallId} onBack={handleBackToHalls} />;
     }
@@ -109,18 +165,49 @@ export default function AdminShell() {
       return <ClubHallsScreen clubId={clubId} onBack={handleBackToClubs} onOpenEditor={handleOpenHallEditor} />;
     }
     return <ClubsScreen onSelectClub={handleSelectClub} onForbidden={handleForbidden} />;
-  }, [clubId, forbidden, hallId, handleBackToClubs, handleBackToHalls, handleForbidden, handleOpenHallEditor, handleSelectClub]);
+  }, [
+    clubId,
+    forbidden,
+    hallId,
+    handleBackToClubs,
+    handleBackToHalls,
+    handleForbidden,
+    handleOpenHallEditor,
+    handleSelectClub,
+    handleSelectClubForPromoters,
+    section,
+  ]);
 
   return (
     <div
       className="min-h-screen bg-gray-50 pb-20"
       style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
     >
-      <header className="sticky top-0 z-10 flex items-center justify-between bg-white px-4 py-3 shadow-sm">
-        <h1 className="text-base font-semibold text-gray-900">Admin</h1>
-        <button type="button" className="text-sm text-blue-600" onClick={removeAdminMode}>
-          Выйти
-        </button>
+      <header className="sticky top-0 z-10 bg-white px-4 py-3 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h1 className="text-base font-semibold text-gray-900">Admin</h1>
+          <button type="button" className="text-sm text-blue-600" onClick={removeAdminMode}>
+            Выйти
+          </button>
+        </div>
+        {!forbidden && (
+          <div className="mt-3 flex gap-2 text-xs font-medium">
+            <button
+              type="button"
+              className={`rounded px-3 py-1 ${section === 'clubs' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              onClick={() => handleSwitchSection('clubs')}
+            >
+              Клубы и залы
+            </button>
+            <button
+              type="button"
+              className={`rounded px-3 py-1 ${section === 'promoters' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              onClick={() => handleSwitchSection('promoters')}
+            >
+              Промоутеры и квоты
+            </button>
+          </div>
+        )}
       </header>
       {content}
       <ToastHost />

@@ -10,6 +10,7 @@ import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
+import com.example.bot.security.rbac.canAccessClub
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -143,11 +144,3 @@ private fun com.example.bot.club.WaitlistEntry.toResponse(): HostWaitlistEntryRe
         expiresAt = expiresAt?.toString(),
         createdAt = createdAt.toString(),
     )
-
-private val GLOBAL_ROLES: Set<Role> =
-    setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
-
-private fun com.example.bot.security.rbac.RbacContext.canAccessClub(clubId: Long): Boolean {
-    if (roles.any { it in GLOBAL_ROLES }) return true
-    return clubId in clubIds
-}
