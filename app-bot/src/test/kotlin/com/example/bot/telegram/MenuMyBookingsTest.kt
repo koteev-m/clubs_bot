@@ -458,6 +458,8 @@ private fun insertBooking(
 private object MyBookingsUsersTable : LongIdTable("users") {
     val telegramUserId = long("telegram_user_id")
     val username = text("username").nullable()
+    val displayName = text("display_name").nullable()
+    val phoneE164 = text("phone_e164").nullable()
 }
 
 private object MyBookingsClubsTable : org.jetbrains.exposed.sql.Table("clubs") {

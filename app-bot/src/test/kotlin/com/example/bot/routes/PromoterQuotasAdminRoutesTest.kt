@@ -129,6 +129,27 @@ class PromoterQuotasAdminRoutesTest {
     }
 
     @Test
+    fun `post rejects club scope mismatch`() = withApp(clubIds = setOf(2)) { _, _ ->
+        val response =
+            client.post("/api/admin/quotas") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "clubId":1,
+                    "promoterId":5,
+                    "tableId":10,
+                    "quota":3,
+                    "expiresAt":"${now.plusSeconds(500)}"
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        assertEquals(ErrorCodes.forbidden, response.errorCode())
+    }
+
+    @Test
     fun `post creates quota with held reset`() = withApp { repo, _ ->
         val response =
             client.post("/api/admin/quotas") {
@@ -172,6 +193,27 @@ class PromoterQuotasAdminRoutesTest {
 
         assertEquals(HttpStatusCode.NotFound, response.status)
         assertEquals(ErrorCodes.not_found, response.errorCode())
+    }
+
+    @Test
+    fun `put rejects club scope mismatch`() = withApp(clubIds = setOf(2)) { _, _ ->
+        val response =
+            client.put("/api/admin/quotas") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "clubId":1,
+                    "promoterId":5,
+                    "tableId":10,
+                    "quota":3,
+                    "expiresAt":"${now.plusSeconds(500)}"
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        assertEquals(ErrorCodes.forbidden, response.errorCode())
     }
 
     @Test
