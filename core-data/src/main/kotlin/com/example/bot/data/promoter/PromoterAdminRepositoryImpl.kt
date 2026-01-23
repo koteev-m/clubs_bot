@@ -1,13 +1,17 @@
 package com.example.bot.data.promoter
 
+import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.withTxRetry
 import com.example.bot.data.security.Role
+import com.example.bot.data.security.UserRolesTable
+import com.example.bot.data.security.UsersTable
 import com.example.bot.promoter.admin.PromoterAccessUpdateResult
 import com.example.bot.promoter.admin.PromoterAdminProfile
 import com.example.bot.promoter.admin.PromoterAdminRepository
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
@@ -16,29 +20,10 @@ import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
-import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
-
-private object PromoterUsersTable : Table("users") {
-    val id = long("id")
-    val telegramUserId = long("telegram_user_id")
-    val username = text("username").nullable()
-    val displayName = text("display_name").nullable()
-
-    override val primaryKey = PrimaryKey(id)
-}
-
-private object PromoterUserRolesTable : Table("user_roles") {
-    val id = long("id")
-    val userId = long("user_id")
-    val roleCode = text("role_code")
-    val scopeType = text("scope_type")
-    val scopeClubId = long("scope_club_id").nullable()
-
-    override val primaryKey = PrimaryKey(id)
-}
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 
 private object PromoterClubAccessTable : Table("promoter_club_access") {
     val clubId = long("club_id")
@@ -55,7 +40,7 @@ class PromoterAdminRepositoryImpl(
 ) : PromoterAdminRepository {
     override suspend fun listPromotersByClub(clubId: Long): List<PromoterAdminProfile> =
         withTxRetry {
-            transaction(db) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 val accessByPromoter =
                     PromoterClubAccessTable
                         .selectAll()
@@ -65,32 +50,32 @@ class PromoterAdminRepositoryImpl(
                         }
 
                 val promotersByRole =
-                    PromoterUserRolesTable
+                    UserRolesTable
                         .selectAll()
                         .where {
-                            (PromoterUserRolesTable.roleCode eq Role.PROMOTER.name) and
-                                (PromoterUserRolesTable.scopeType eq "CLUB") and
-                                (PromoterUserRolesTable.scopeClubId eq clubId)
+                            (UserRolesTable.roleCode eq Role.PROMOTER.name) and
+                                (UserRolesTable.scopeType eq "CLUB") and
+                                (UserRolesTable.scopeClubId eq clubId)
                         }.mapTo(mutableSetOf()) { row ->
-                            row[PromoterUserRolesTable.userId]
+                            row[UserRolesTable.userId]
                         }
 
                 val promoterIds = (accessByPromoter.keys + promotersByRole).distinct()
-                if (promoterIds.isEmpty()) return@transaction emptyList()
+                if (promoterIds.isEmpty()) return@newSuspendedTransaction emptyList()
 
                 val usersById =
-                    PromoterUsersTable
+                    UsersTable
                         .selectAll()
-                        .where { PromoterUsersTable.id inList promoterIds }
-                        .associateBy { it[PromoterUsersTable.id] }
+                        .where { UsersTable.id inList promoterIds }
+                        .associateBy { it[UsersTable.id] }
 
                 promoterIds.mapNotNull { promoterId ->
                     val userRow = usersById[promoterId] ?: return@mapNotNull null
                     PromoterAdminProfile(
                         promoterId = promoterId,
-                        telegramUserId = userRow[PromoterUsersTable.telegramUserId],
-                        username = userRow[PromoterUsersTable.username],
-                        displayName = userRow[PromoterUsersTable.displayName],
+                        telegramUserId = userRow[UsersTable.telegramUserId],
+                        username = userRow[UsersTable.username],
+                        displayName = userRow[UsersTable.displayName],
                         accessEnabled = accessByPromoter[promoterId] ?: promotersByRole.contains(promoterId),
                     )
                 }
@@ -103,13 +88,13 @@ class PromoterAdminRepositoryImpl(
         enabled: Boolean,
     ): PromoterAccessUpdateResult =
         withTxRetry {
-            transaction(db) {
-                PromoterUsersTable
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                UsersTable
                     .selectAll()
-                    .where { PromoterUsersTable.id eq promoterId }
+                    .where { UsersTable.id eq promoterId }
                     .limit(1)
                     .firstOrNull()
-                    ?: return@transaction PromoterAccessUpdateResult.NotFound
+                    ?: return@newSuspendedTransaction PromoterAccessUpdateResult.NotFound
 
                 upsertAccessRow(clubId, promoterId, enabled)
                 syncUserRole(clubId, promoterId, enabled)
@@ -132,11 +117,32 @@ class PromoterAdminRepositoryImpl(
                 it[updatedAt] = now
             }
         if (updated == 0) {
+            tryInsertAccessRow(clubId, promoterId, enabled, now)
+        }
+    }
+
+    private fun tryInsertAccessRow(
+        clubId: Long,
+        promoterId: Long,
+        enabled: Boolean,
+        now: java.time.OffsetDateTime,
+    ) {
+        try {
             PromoterClubAccessTable.insert {
                 it[this.clubId] = clubId
                 it[this.promoterUserId] = promoterId
                 it[this.accessEnabled] = enabled
                 it[this.updatedAt] = now
+            }
+        } catch (ex: Exception) {
+            if (!ex.isUniqueViolation()) {
+                throw ex
+            }
+            PromoterClubAccessTable.update(
+                where = { (PromoterClubAccessTable.clubId eq clubId) and (PromoterClubAccessTable.promoterUserId eq promoterId) },
+            ) {
+                it[accessEnabled] = enabled
+                it[updatedAt] = now
             }
         }
     }
@@ -148,30 +154,36 @@ class PromoterAdminRepositoryImpl(
     ) {
         if (enabled) {
             val exists =
-                PromoterUserRolesTable
+                UserRolesTable
                     .selectAll()
                     .where {
-                        (PromoterUserRolesTable.userId eq promoterId) and
-                            (PromoterUserRolesTable.roleCode eq Role.PROMOTER.name) and
-                            (PromoterUserRolesTable.scopeType eq "CLUB") and
-                            (PromoterUserRolesTable.scopeClubId eq clubId)
+                        (UserRolesTable.userId eq promoterId) and
+                            (UserRolesTable.roleCode eq Role.PROMOTER.name) and
+                            (UserRolesTable.scopeType eq "CLUB") and
+                            (UserRolesTable.scopeClubId eq clubId)
                     }.limit(1)
                     .firstOrNull() != null
             if (!exists) {
-                PromoterUserRolesTable.insert {
-                    it[userId] = promoterId
-                    it[roleCode] = Role.PROMOTER.name
-                    it[scopeType] = "CLUB"
-                    it[scopeClubId] = clubId
+                try {
+                    UserRolesTable.insert {
+                        it[userId] = promoterId
+                        it[roleCode] = Role.PROMOTER.name
+                        it[scopeType] = "CLUB"
+                        it[scopeClubId] = clubId
+                    }
+                } catch (ex: Exception) {
+                    if (!ex.isUniqueViolation()) {
+                        throw ex
+                    }
                 }
             }
         } else {
-            PromoterUserRolesTable.deleteWhere {
-                (PromoterUserRolesTable.userId eq promoterId) and
-                    (PromoterUserRolesTable.roleCode eq Role.PROMOTER.name) and
-                    (PromoterUserRolesTable.scopeType eq "CLUB") and
-                    (PromoterUserRolesTable.scopeClubId eq clubId)
+            UserRolesTable.deleteWhere {
+                (UserRolesTable.userId eq promoterId) and
+                    (UserRolesTable.roleCode eq Role.PROMOTER.name) and
+                    (UserRolesTable.scopeType eq "CLUB") and
+                    (UserRolesTable.scopeClubId eq clubId)
             }
         }
-        }
+    }
 }

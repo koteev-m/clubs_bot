@@ -142,6 +142,19 @@ class PromoterAdminRoutesTest {
         assertEquals(false, state.repository.enabled[10])
     }
 
+    @Test
+    fun `access update returns not found for unknown promoter`() = withApp { _ ->
+        val response =
+            client.post("/api/admin/promoters/404/access") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody("""{"clubId":1,"enabled":true}""")
+            }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertEquals(ErrorCodes.not_found, response.errorCode())
+    }
+
     private fun relaxedAuditRepository() = mockk<com.example.bot.data.booking.core.AuditLogRepository>(relaxed = true)
 
     private fun withApp(
