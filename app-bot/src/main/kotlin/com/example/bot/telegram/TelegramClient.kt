@@ -6,6 +6,7 @@ import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.DeleteWebhook
 import com.pengrad.telegrambot.request.GetUpdates
 import com.pengrad.telegrambot.request.GetWebhookInfo
+import com.pengrad.telegrambot.request.SendMessage
 import com.pengrad.telegrambot.request.SetWebhook
 import com.pengrad.telegrambot.response.BaseResponse
 import com.pengrad.telegrambot.response.GetWebhookInfoResponse
@@ -31,6 +32,17 @@ class TelegramClient(
         withContext(Dispatchers.IO + MDCContext()) {
             @Suppress("UNCHECKED_CAST")
             bot.execute(request as BaseRequest<*, *>) as BaseResponse
+        }
+
+    suspend fun sendMessage(
+        chatId: Long,
+        text: String,
+        threadId: Int? = null,
+    ): BaseResponse =
+        withContext(Dispatchers.IO + MDCContext()) {
+            val request = SendMessage(chatId, text)
+            threadId?.let { request.messageThreadId(it) }
+            bot.execute(request)
         }
 
     @Suppress("SpreadOperator")
