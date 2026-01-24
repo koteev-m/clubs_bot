@@ -53,7 +53,6 @@ import com.example.bot.notifications.LoggingNotificationService
 import com.example.bot.notifications.NotificationService
 import com.example.bot.notifications.OpsNotificationServiceConfig
 import com.example.bot.notifications.TelegramOperationalNotificationService
-import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.promoter.admin.PromoterAdminService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
@@ -100,7 +99,6 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.ApplicationStopped
-import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
@@ -219,9 +217,11 @@ fun Application.module() {
     val checkinService by inject<CheckinService>()
     val userRepository by inject<UserRepository>()
     val supportService by inject<SupportService>()
-    val opsChatConfigRepository by inject<ClubOpsChatConfigRepository>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
+    val telegramClient by inject<TelegramClient>()
+    val opsNotificationConfig by inject<OpsNotificationServiceConfig>()
+    val opsNotificationService by inject<TelegramOperationalNotificationService>()
     val hostEntranceService =
         HostEntranceService(
             guestListRepository = guestListRepository,
@@ -243,14 +243,6 @@ fun Application.module() {
     UiWaitlistMetrics.bind(registry)
 
     val config = appConfig
-    val telegramClient = TelegramClient(config.bot.token, config.localApi.baseUrl.takeIf { config.localApi.enabled })
-    val opsNotificationConfig = OpsNotificationServiceConfig.fromEnv()
-    val opsNotificationService =
-        TelegramOperationalNotificationService(
-            telegramClient = telegramClient,
-            configRepository = opsChatConfigRepository,
-            config = opsNotificationConfig,
-        )
     val invitationTelegramHandler =
         InvitationTelegramHandler(
             send = telegramClient::send,
@@ -271,23 +263,31 @@ fun Application.module() {
         )
 
     environment.monitor.subscribe(ApplicationStarted) {
-        if (opsNotificationConfig.enabled) {
+        when {
+            !opsNotificationConfig.enabled -> {
+                opsNotificationLogger.info("TelegramOperationalNotificationService disabled by config")
+            }
+            config.bot.token.isBlank() -> {
+                opsNotificationLogger.warn("TelegramOperationalNotificationService disabled: telegram token is blank")
+            }
+            else -> {
             opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
             opsNotificationService.start()
-        } else {
-            opsNotificationLogger.info("TelegramOperationalNotificationService disabled by config")
+            }
         }
     }
 
-    environment.monitor.subscribe(ApplicationStopping) {
-        if (opsNotificationConfig.enabled) {
+    environment.monitor.subscribe(ApplicationStopped) {
+        if (opsNotificationConfig.enabled && config.bot.token.isNotBlank()) {
             runBlocking {
-                runCatching { opsNotificationService.stop() }
+                runCatching { opsNotificationService.shutdown() }
                     .onSuccess { opsNotificationLogger.info("TelegramOperationalNotificationService stopped") }
                     .onFailure { opsNotificationLogger.warn("TelegramOperationalNotificationService stop failed", it) }
             }
-        } else {
+        } else if (!opsNotificationConfig.enabled) {
             opsNotificationLogger.info("TelegramOperationalNotificationService disabled by config, skip stop")
+        } else {
+            opsNotificationLogger.warn("TelegramOperationalNotificationService disabled: telegram token is blank, skip stop")
         }
     }
 

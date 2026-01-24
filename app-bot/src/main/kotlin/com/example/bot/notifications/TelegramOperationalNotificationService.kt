@@ -165,17 +165,24 @@ data class OpsNotificationServiceConfig(
  * Отправка выполняется в отдельной корутине (SupervisorJob + Dispatchers.IO).
  */
 class TelegramOperationalNotificationService(
-    private val telegramClient: TelegramClient,
+    private val telegramClient: TelegramClient?,
     private val configRepository: ClubOpsChatConfigRepository,
     private val renderer: OpsNotificationRenderer = OpsNotificationRenderer,
     private val config: OpsNotificationServiceConfig = OpsNotificationServiceConfig(),
 ) {
     private val logger = LoggerFactory.getLogger(TelegramOperationalNotificationService::class.java)
     private val channel = Channel<OpsDomainNotification>(config.queueCapacity)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val supervisorJob = SupervisorJob()
+    private val scope = CoroutineScope(supervisorJob + Dispatchers.IO)
     private var job: Job? = null
 
+    fun isConfigured(): Boolean = telegramClient != null
+
     fun start() {
+        if (telegramClient == null) {
+            logger.warn("Operational notifications disabled: telegram client is not configured")
+            return
+        }
         if (job?.isActive == true) {
             logger.debug("Operational notification worker already running")
             return
@@ -207,7 +214,22 @@ class TelegramOperationalNotificationService(
         job = null
     }
 
+    suspend fun shutdown() {
+        stop()
+        channel.close()
+        supervisorJob.cancel()
+    }
+
     fun enqueue(event: OpsDomainNotification) {
+        if (telegramClient == null) {
+            logger.warn(
+                "ops notification dropped event={} club_id={} subject_id_hash={} reason=client_not_configured",
+                event.event,
+                event.clubId,
+                subjectFingerprint(event.subjectId),
+            )
+            return
+        }
         val result = channel.trySend(event)
         if (result.isFailure) {
             logger.warn(
@@ -251,13 +273,14 @@ class TelegramOperationalNotificationService(
         threadId: Int?,
         text: String,
     ) {
+        val client = telegramClient ?: return
         var attempt = 0
         while (attempt < config.maxAttempts) {
             attempt += 1
             try {
                 val response =
                     withTimeout(config.sendTimeout.toMillis()) {
-                        telegramClient.sendMessage(chatId, text, threadId)
+                        client.sendMessage(chatId, text, threadId)
                     }
                 if (response.isOk) {
                     return
