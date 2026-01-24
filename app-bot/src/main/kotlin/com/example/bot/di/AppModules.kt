@@ -12,6 +12,7 @@ fun appModules(): List<Module> =
         add(healthModule)
         add(musicModule)
         add(notifyModule)
+        add(opsNotificationsModule)
         add(outboxAdminModule)
         add(paymentsModule)
         add(refundWorkerModule)
