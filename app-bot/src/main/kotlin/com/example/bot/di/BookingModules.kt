@@ -18,6 +18,7 @@ import com.example.bot.data.club.GuestListRepositoryImpl
 import com.example.bot.data.club.GuestListServiceImpl
 import com.example.bot.data.club.InvitationDbRepository
 import com.example.bot.data.club.CheckinDbRepository
+import com.example.bot.data.club.ClubOpsChatConfigRepositoryImpl
 import com.example.bot.data.club.InvitationServiceImpl
 import com.example.bot.data.club.WaitlistRepositoryImpl
 import com.example.bot.data.checkin.CheckinServiceImpl
@@ -47,6 +48,7 @@ import com.example.bot.telegram.bookings.MyBookingsService
 import com.example.bot.workers.OutboxWorker
 import com.example.bot.workers.SendOutcome
 import com.example.bot.workers.SendPort
+import com.example.bot.opschat.ClubOpsChatConfigRepository
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.tracing.Tracer
 import kotlinx.serialization.json.JsonObject
@@ -77,6 +79,7 @@ val bookingModule =
         single { GuestListEntryDbRepository(get()) }
         single { InvitationDbRepository(get()) }
         single { CheckinDbRepository(get()) }
+        single<ClubOpsChatConfigRepository> { ClubOpsChatConfigRepositoryImpl(get()) }
         single<GuestListService> { GuestListServiceImpl(get(), get()) }
         single<InvitationService> { InvitationServiceImpl(get(), get(), get()) }
         single<CheckinService> { CheckinServiceImpl(get(), get(), get(), get(), get()) }

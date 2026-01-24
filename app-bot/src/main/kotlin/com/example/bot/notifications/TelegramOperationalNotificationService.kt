@@ -34,6 +34,57 @@ data class OpsNotificationServiceConfig(
         require(maxAttempts > 0) { "maxAttempts must be positive" }
         require(!retryDelay.isNegative) { "retryDelay must not be negative" }
     }
+
+    companion object {
+        private val configLogger = LoggerFactory.getLogger("OpsNotificationConfig")
+
+        fun fromEnv(env: (String) -> String? = System::getenv): OpsNotificationServiceConfig {
+            val defaults = OpsNotificationServiceConfig()
+            val queueCapacity = readInt(env, "OPS_NOTIFY_QUEUE_CAPACITY", defaults.queueCapacity) { it > 0 }
+            val sendTimeoutMs = readLong(env, "OPS_NOTIFY_SEND_TIMEOUT_MS", defaults.sendTimeout.toMillis()) { it > 0 }
+            val maxAttempts = readInt(env, "OPS_NOTIFY_MAX_ATTEMPTS", defaults.maxAttempts) { it > 0 }
+            val retryDelayMs = readLong(env, "OPS_NOTIFY_RETRY_DELAY_MS", defaults.retryDelay.toMillis()) { it >= 0 }
+
+            return OpsNotificationServiceConfig(
+                queueCapacity = queueCapacity,
+                sendTimeout = Duration.ofMillis(sendTimeoutMs),
+                maxAttempts = maxAttempts,
+                retryDelay = Duration.ofMillis(retryDelayMs),
+            )
+        }
+
+        private fun readInt(
+            env: (String) -> String?,
+            name: String,
+            default: Int,
+            predicate: (Int) -> Boolean,
+        ): Int {
+            val raw = env(name) ?: return default
+            val value = raw.toIntOrNull()
+            return if (value != null && predicate(value)) {
+                value
+            } else {
+                configLogger.warn("$name is invalid, using default")
+                default
+            }
+        }
+
+        private fun readLong(
+            env: (String) -> String?,
+            name: String,
+            default: Long,
+            predicate: (Long) -> Boolean,
+        ): Long {
+            val raw = env(name) ?: return default
+            val value = raw.toLongOrNull()
+            return if (value != null && predicate(value)) {
+                value
+            } else {
+                configLogger.warn("$name is invalid, using default")
+                default
+            }
+        }
+    }
 }
 
 /**

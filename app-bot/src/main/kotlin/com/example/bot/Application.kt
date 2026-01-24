@@ -51,6 +51,9 @@ import com.example.bot.host.HostEntranceService
 import com.example.bot.host.HostSearchService
 import com.example.bot.notifications.LoggingNotificationService
 import com.example.bot.notifications.NotificationService
+import com.example.bot.notifications.OpsNotificationServiceConfig
+import com.example.bot.notifications.TelegramOperationalNotificationService
+import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.promoter.admin.PromoterAdminService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
@@ -95,7 +98,9 @@ import com.example.bot.telegram.TelegramCallbackRouter
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStarted
 import io.ktor.server.application.ApplicationStopped
+import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
@@ -104,6 +109,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.Metrics
+import kotlinx.coroutines.runBlocking
 import org.koin.core.logger.Level
 import org.koin.core.module.Module
 import org.koin.ktor.ext.inject
@@ -118,8 +124,8 @@ import java.util.jar.JarFile
 import java.time.Clock
 import java.time.ZoneId
 import com.example.bot.host.ShiftChecklistService
+import org.slf4j.LoggerFactory
 import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.runBlocking
 
 @Suppress("unused")
 fun Application.module() {
@@ -213,6 +219,7 @@ fun Application.module() {
     val checkinService by inject<CheckinService>()
     val userRepository by inject<UserRepository>()
     val supportService by inject<SupportService>()
+    val opsChatConfigRepository by inject<ClubOpsChatConfigRepository>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
     val hostEntranceService =
@@ -237,6 +244,13 @@ fun Application.module() {
 
     val config = appConfig
     val telegramClient = TelegramClient(config.bot.token, config.localApi.baseUrl.takeIf { config.localApi.enabled })
+    val opsNotificationConfig = OpsNotificationServiceConfig.fromEnv()
+    val opsNotificationService =
+        TelegramOperationalNotificationService(
+            telegramClient = telegramClient,
+            configRepository = opsChatConfigRepository,
+            config = opsNotificationConfig,
+        )
     val invitationTelegramHandler =
         InvitationTelegramHandler(
             send = telegramClient::send,
@@ -255,6 +269,19 @@ fun Application.module() {
             supportHandler = supportTelegramHandler::handle,
             invitationHandler = invitationTelegramHandler::handle,
         )
+
+    environment.monitor.subscribe(ApplicationStarted) {
+        opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
+        opsNotificationService.start()
+    }
+
+    environment.monitor.subscribe(ApplicationStopping) {
+        runBlocking {
+            runCatching { opsNotificationService.stop() }
+                .onSuccess { opsNotificationLogger.info("TelegramOperationalNotificationService stopped") }
+                .onFailure { opsNotificationLogger.warn("TelegramOperationalNotificationService stop failed: ${it.message}") }
+        }
+    }
 
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
     errorCodesRoutes()
@@ -368,6 +395,8 @@ fun Application.module() {
         bookingState.close()
     }
 }
+
+private val opsNotificationLogger = LoggerFactory.getLogger("OpsNotificationService")
 
 // Сканер Koin‑модулей в пакете com.example.bot.di
 @Suppress("NestedBlockDepth")
