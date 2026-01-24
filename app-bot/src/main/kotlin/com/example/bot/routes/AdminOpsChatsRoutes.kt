@@ -22,6 +22,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 
@@ -76,8 +77,13 @@ fun Application.adminOpsChatsRoutes(
 
                 put {
                     val payload =
-                        runCatching { call.receive<OpsChatConfigPayload>() }.getOrNull()
-                            ?: return@put call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        try {
+                            call.receive<OpsChatConfigPayload>()
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            return@put call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        }
 
                     val upsert =
                         payload.toUpsertOrNull()

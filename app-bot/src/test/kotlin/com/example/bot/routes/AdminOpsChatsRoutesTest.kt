@@ -27,6 +27,7 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.mockk
 import java.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -34,24 +35,23 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Test
-import io.mockk.mockk
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 
 class AdminOpsChatsRoutesTest {
     private val now = Instant.parse("2024-06-01T12:00:00Z")
     private val telegramId = 99L
 
-    @Before
+    @BeforeEach
     fun setUp() {
         System.setProperty("TELEGRAM_BOT_TOKEN", "test")
         overrideMiniAppValidatorForTesting { _, _ -> TelegramMiniUser(id = telegramId) }
     }
 
-    @After
+    @AfterEach
     fun tearDown() {
         resetMiniAppValidator()
     }
@@ -80,6 +80,7 @@ class AdminOpsChatsRoutesTest {
         val invalidJson = client.put("/api/admin/ops-chats") { header("X-Telegram-Init-Data", "init") }
         assertEquals(HttpStatusCode.BadRequest, invalidJson.status)
         assertEquals(ErrorCodes.invalid_json, invalidJson.errorCode())
+        invalidJson.assertNoStoreHeaders()
 
         val invalidFields =
             client.put("/api/admin/ops-chats") {
@@ -112,6 +113,28 @@ class AdminOpsChatsRoutesTest {
     fun `get rejects club scope mismatch`() = withApp(clubIds = setOf(2)) { _ ->
         val response =
             client.get("/api/admin/ops-chats?clubId=1") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        assertEquals(ErrorCodes.forbidden, response.errorCode())
+        response.assertNoStoreHeaders()
+    }
+
+    @Test
+    fun `put rejects club scope mismatch`() = withApp(clubIds = setOf(2)) { _ ->
+        val response =
+            client.put("/api/admin/ops-chats") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                        "clubId":1,
+                        "chatId":-100,
+                        "bookingsThreadId":10,
+                        "checkinThreadId":11,
+                        "supportThreadId":null
+                    }""",
+                )
+            }
 
         assertEquals(HttpStatusCode.Forbidden, response.status)
         assertEquals(ErrorCodes.forbidden, response.errorCode())
