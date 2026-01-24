@@ -16,8 +16,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
+import java.security.MessageDigest
 import java.time.Duration
 
 data class OpsNotificationServiceConfig(
@@ -59,7 +61,19 @@ class TelegramOperationalNotificationService(
             scope.launch(CoroutineName("ops-notification-worker")) {
                 while (isActive) {
                     val event = channel.receive()
-                    dispatch(event)
+                    try {
+                        dispatch(event)
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (exception: Exception) {
+                        logger.warn(
+                            "ops notification processing failed event={} club_id={} subject_id_hash={}",
+                            event.event,
+                            event.clubId,
+                            subjectFingerprint(event.subjectId),
+                            exception,
+                        )
+                    }
                 }
             }
     }
@@ -74,10 +88,10 @@ class TelegramOperationalNotificationService(
         val result = channel.trySend(event)
         if (result.isFailure) {
             logger.warn(
-                "ops notification dropped event={} club_id={} subject_id={}",
+                "ops notification dropped event={} club_id={} subject_id_hash={}",
                 event.event,
                 event.clubId,
-                event.subjectId,
+                subjectFingerprint(event.subjectId),
             )
         }
     }
@@ -86,10 +100,10 @@ class TelegramOperationalNotificationService(
         val config = configRepository.getByClubId(event.clubId)
         if (config == null) {
             logger.warn(
-                "ops notification config missing event={} club_id={} subject_id={}",
+                "ops notification config missing event={} club_id={} subject_id_hash={}",
                 event.event,
                 event.clubId,
-                event.subjectId,
+                subjectFingerprint(event.subjectId),
             )
             return
         }
@@ -125,9 +139,11 @@ class TelegramOperationalNotificationService(
                 if (response.isOk) {
                     return
                 }
+            } catch (_: TimeoutCancellationException) {
+                // treat timeout as a failed attempt and retry
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (_: Throwable) {
+            } catch (_: Exception) {
                 // swallow and retry
             }
             if (attempt < config.maxAttempts && !config.retryDelay.isZero) {
@@ -135,11 +151,20 @@ class TelegramOperationalNotificationService(
             }
         }
         logger.warn(
-            "ops notification send failed event={} club_id={} subject_id={} attempts={}",
+            "ops notification send failed event={} club_id={} subject_id_hash={} attempts={}",
             event.event,
             event.clubId,
-            event.subjectId,
+            subjectFingerprint(event.subjectId),
             config.maxAttempts,
         )
+    }
+
+    private fun subjectFingerprint(subjectId: String?): String =
+        subjectId?.let { hashSubjectId(it) } ?: "absent"
+
+    private fun hashSubjectId(subjectId: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = digest.digest(subjectId.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString(separator = "") { "%02x".format(it) }.take(12)
     }
 }
