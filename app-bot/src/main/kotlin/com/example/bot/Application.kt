@@ -13,6 +13,7 @@ import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.security.UserRepository
+import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
 import com.example.bot.coredata.CoreDataSeed
@@ -70,6 +71,7 @@ import com.example.bot.routes.hostWaitlistRoutes
 import com.example.bot.routes.adminClubsRoutes
 import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminHallPlanRoutes
+import com.example.bot.routes.adminOpsChatsRoutes
 import com.example.bot.routes.adminTablesRoutes
 import com.example.bot.routes.hallPlanRoutes
 import com.example.bot.routes.layoutRoutes
@@ -215,6 +217,7 @@ fun Application.module() {
     val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
     val checkinService by inject<CheckinService>()
+    val opsChatConfigRepository by inject<ClubOpsChatConfigRepository>()
     val userRepository by inject<UserRepository>()
     val supportService by inject<SupportService>()
     val appClock = Clock.systemUTC()
@@ -308,6 +311,7 @@ fun Application.module() {
     promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
     promoterAdminRoutes(promoterAdminService = promoterAdminService)
+    adminOpsChatsRoutes(repository = opsChatConfigRepository)
     adminClubsRoutes(adminClubsRepository = adminClubsRepository)
     adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
     adminHallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)

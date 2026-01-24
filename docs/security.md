@@ -31,6 +31,44 @@
   - Payload: `{ clubId, promoterId, tableId, quota, expiresAt }`.
   - Ответ: `{ quota: { clubId, promoterId, tableId, quota, held, expiresAt } }`.
 
+### 1.3) Admin: ops chats
+
+- Назначение: конфиг маршрутизации ops-уведомлений на клубный чат и треды.
+- Доступ: `OWNER` / `GLOBAL_ADMIN` / `HEAD_MANAGER` / `CLUB_ADMIN`.
+- Обязательные инварианты: `withMiniAppAuth(initData)`, `Cache-Control: no-store`, `Vary: X-Telegram-Init-Data`, club scope.
+- `GET /api/admin/ops-chats?clubId={clubId}`
+  - Возвращает `{ config }`, где `config` — объект или `null`, если настройки ещё не заданы.
+  - Ответ 200:
+    ```json
+    {
+      "config": {
+        "clubId": 1,
+        "chatId": -1001234567890,
+        "bookingsThreadId": 10,
+        "checkinThreadId": 11,
+        "supportThreadId": null,
+        "updatedAt": "2024-06-01T12:00:00Z"
+      }
+    }
+    ```
+- `PUT /api/admin/ops-chats`
+  - Payload:
+    ```json
+    {
+      "clubId": 1,
+      "chatId": -1001234567890,
+      "bookingsThreadId": 10,
+      "checkinThreadId": 11,
+      "supportThreadId": null
+    }
+    ```
+  - Валидация:
+    - `clubId > 0`
+    - `chatId != 0` (допускаются отрицательные chatId)
+    - `bookingsThreadId`, `checkinThreadId`, `supportThreadId` — `null` или `> 0`
+  - Ответ: `{ config: { ... } }` (включая `updatedAt`).
+  - Ошибки: `validation_error`, `invalid_json`, `forbidden` (scope mismatch).
+
 ## 1.1) Promoter bookings
 
 - Привязка guest list entry ↔ booking хранится персистентно в БД (не в памяти).
