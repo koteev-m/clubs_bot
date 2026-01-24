@@ -141,13 +141,21 @@ data class OpsNotificationServiceConfig(
             return default
         }
 
-        private fun rawPreview(raw: String): String =
-            if (raw.length <= RAW_PREVIEW_LIMIT) {
-                raw
+        private fun rawPreview(raw: String): String {
+            val sanitized = sanitizePreview(raw)
+            return if (sanitized.length <= RAW_PREVIEW_LIMIT) {
+                sanitized
             } else {
-                "${raw.take(RAW_PREVIEW_LIMIT)}…"
+                "${sanitized.take(RAW_PREVIEW_LIMIT)}…"
             }
         }
+
+        private fun sanitizePreview(raw: String): String =
+            buildString(raw.length) {
+                raw.forEach { ch ->
+                    append(if (ch.isISOControl()) ' ' else ch)
+                }
+            }
     }
 }
 
