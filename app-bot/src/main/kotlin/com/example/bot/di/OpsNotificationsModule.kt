@@ -17,10 +17,17 @@ val opsNotificationsModule =
             )
         }
         single {
+            val opsConfig = get<OpsNotificationServiceConfig>()
+            val config = ConfigProvider.current()
             TelegramOperationalNotificationService(
-                telegramClient = get(),
+                telegramClient =
+                    if (opsConfig.enabled && config.bot.token.isNotBlank()) {
+                        get()
+                    } else {
+                        null
+                    },
                 configRepository = get(),
-                config = get(),
+                config = opsConfig,
             )
         }
     }

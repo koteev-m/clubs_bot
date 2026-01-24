@@ -21,6 +21,7 @@ import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
 import java.security.MessageDigest
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class OpsNotificationServiceConfig(
     val enabled: Boolean = true,
@@ -175,12 +176,22 @@ class TelegramOperationalNotificationService(
     private val supervisorJob = SupervisorJob()
     private val scope = CoroutineScope(supervisorJob + Dispatchers.IO)
     private var job: Job? = null
+    private val disabledLogged = AtomicBoolean(false)
+    private val notConfiguredLogged = AtomicBoolean(false)
 
     fun isConfigured(): Boolean = telegramClient != null
 
     fun start() {
+        if (!config.enabled) {
+            if (disabledLogged.compareAndSet(false, true)) {
+                logger.info("Operational notifications disabled by config")
+            }
+            return
+        }
         if (telegramClient == null) {
-            logger.warn("Operational notifications disabled: telegram client is not configured")
+            if (notConfiguredLogged.compareAndSet(false, true)) {
+                logger.warn("Operational notifications disabled: telegram client is not configured")
+            }
             return
         }
         if (job?.isActive == true) {
@@ -221,13 +232,7 @@ class TelegramOperationalNotificationService(
     }
 
     fun enqueue(event: OpsDomainNotification) {
-        if (telegramClient == null) {
-            logger.warn(
-                "ops notification dropped event={} club_id={} subject_id_hash={} reason=client_not_configured",
-                event.event,
-                event.clubId,
-                subjectFingerprint(event.subjectId),
-            )
+        if (!config.enabled || telegramClient == null) {
             return
         }
         val result = channel.trySend(event)

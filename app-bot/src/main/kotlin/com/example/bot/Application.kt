@@ -51,7 +51,6 @@ import com.example.bot.host.HostEntranceService
 import com.example.bot.host.HostSearchService
 import com.example.bot.notifications.LoggingNotificationService
 import com.example.bot.notifications.NotificationService
-import com.example.bot.notifications.OpsNotificationServiceConfig
 import com.example.bot.notifications.TelegramOperationalNotificationService
 import com.example.bot.promoter.admin.PromoterAdminService
 import com.example.bot.promoter.invites.PromoterInviteService
@@ -98,6 +97,7 @@ import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStarted
+import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
@@ -220,7 +220,6 @@ fun Application.module() {
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
     val telegramClient by inject<TelegramClient>()
-    val opsNotificationConfig by inject<OpsNotificationServiceConfig>()
     val opsNotificationService by inject<TelegramOperationalNotificationService>()
     val hostEntranceService =
         HostEntranceService(
@@ -263,31 +262,15 @@ fun Application.module() {
         )
 
     environment.monitor.subscribe(ApplicationStarted) {
-        when {
-            !opsNotificationConfig.enabled -> {
-                opsNotificationLogger.info("TelegramOperationalNotificationService disabled by config")
-            }
-            config.bot.token.isBlank() -> {
-                opsNotificationLogger.warn("TelegramOperationalNotificationService disabled: telegram token is blank")
-            }
-            else -> {
-            opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
-            opsNotificationService.start()
-            }
-        }
+        opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
+        opsNotificationService.start()
     }
 
-    environment.monitor.subscribe(ApplicationStopped) {
-        if (opsNotificationConfig.enabled && config.bot.token.isNotBlank()) {
-            runBlocking {
-                runCatching { opsNotificationService.shutdown() }
-                    .onSuccess { opsNotificationLogger.info("TelegramOperationalNotificationService stopped") }
-                    .onFailure { opsNotificationLogger.warn("TelegramOperationalNotificationService stop failed", it) }
-            }
-        } else if (!opsNotificationConfig.enabled) {
-            opsNotificationLogger.info("TelegramOperationalNotificationService disabled by config, skip stop")
-        } else {
-            opsNotificationLogger.warn("TelegramOperationalNotificationService disabled: telegram token is blank, skip stop")
+    environment.monitor.subscribe(ApplicationStopping) {
+        runBlocking {
+            runCatching { opsNotificationService.shutdown() }
+                .onSuccess { opsNotificationLogger.info("TelegramOperationalNotificationService stopped") }
+                .onFailure { opsNotificationLogger.warn("TelegramOperationalNotificationService stop failed", it) }
         }
     }
 
