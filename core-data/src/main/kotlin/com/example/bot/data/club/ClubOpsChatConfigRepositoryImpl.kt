@@ -74,7 +74,7 @@ class ClubOpsChatConfigRepositoryImpl(
                 it[supportThreadId] = config.supportThreadId
                 it[updatedAt] = now
             }
-        } catch (error: Throwable) {
+        } catch (error: Exception) {
             if (error.isUniqueViolation()) {
                 updateConfig(config, now)
             } else {
