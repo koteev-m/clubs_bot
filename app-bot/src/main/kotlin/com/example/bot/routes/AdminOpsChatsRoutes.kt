@@ -35,7 +35,9 @@ private data class OpsChatConfigPayload(
     val chatId: Long,
     val bookingsThreadId: Int?,
     val checkinThreadId: Int?,
+    val guestListsThreadId: Int?,
     val supportThreadId: Int?,
+    val alertsThreadId: Int?,
 )
 
 @Serializable
@@ -44,7 +46,9 @@ private data class OpsChatConfigView(
     val chatId: Long,
     val bookingsThreadId: Int?,
     val checkinThreadId: Int?,
+    val guestListsThreadId: Int?,
     val supportThreadId: Int?,
+    val alertsThreadId: Int?,
     val updatedAt: String,
 )
 
@@ -111,13 +115,17 @@ private fun OpsChatConfigPayload.toUpsertOrNull(): ClubOpsChatConfigUpsert? {
     if (chatId == 0L) return null
     if (bookingsThreadId != null && bookingsThreadId <= 0) return null
     if (checkinThreadId != null && checkinThreadId <= 0) return null
+    if (guestListsThreadId != null && guestListsThreadId <= 0) return null
     if (supportThreadId != null && supportThreadId <= 0) return null
+    if (alertsThreadId != null && alertsThreadId <= 0) return null
     return ClubOpsChatConfigUpsert(
         clubId = clubId,
         chatId = chatId,
         bookingsThreadId = bookingsThreadId,
         checkinThreadId = checkinThreadId,
+        guestListsThreadId = guestListsThreadId,
         supportThreadId = supportThreadId,
+        alertsThreadId = alertsThreadId,
     )
 }
 
@@ -127,7 +135,9 @@ private fun ClubOpsChatConfig.toView(): OpsChatConfigView =
         chatId = chatId,
         bookingsThreadId = bookingsThreadId,
         checkinThreadId = checkinThreadId,
+        guestListsThreadId = guestListsThreadId,
         supportThreadId = supportThreadId,
+        alertsThreadId = alertsThreadId,
         updatedAt = updatedAt.toString(),
     )
 

@@ -60,13 +60,18 @@ class OpsNotificationRendererTest {
     fun `renders event-specific labels`() {
         val expectations =
             mapOf(
+                OpsNotificationEvent.NEW_BOOKING to "Создано бронирование",
                 OpsNotificationEvent.BOOKING_CREATED to "Создано бронирование",
+                OpsNotificationEvent.BOOKING_UPDATED to "Обновлено бронирование",
                 OpsNotificationEvent.BOOKING_CANCELLED to "Отмена бронирования",
                 OpsNotificationEvent.BOOKING_SEATED to "Гость рассажен",
                 OpsNotificationEvent.GUEST_ARRIVED to "Гость прибыл",
                 OpsNotificationEvent.GUEST_DENIED to "Отказ в доступе гостю",
                 OpsNotificationEvent.GUEST_LATE to "Гость опаздывает",
+                OpsNotificationEvent.GUEST_LIST_CREATED to "Создан гостевой список",
                 OpsNotificationEvent.QUESTION_FROM_USER to "Вопрос от пользователя",
+                OpsNotificationEvent.SUPPORT_QUESTION_CREATED to "Новый вопрос в поддержку",
+                OpsNotificationEvent.SYSTEM_ALERT to "Системный алерт",
             )
 
         expectations.forEach { (event, label) ->

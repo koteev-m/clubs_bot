@@ -31,6 +31,10 @@ import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
+import com.example.bot.opschat.NoopOpsNotificationPublisher
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.toRangeString
 import com.example.bot.plugins.miniAppBotTokenProvider
@@ -277,6 +281,7 @@ fun Application.promoterGuestListRoutes(
     adminTablesRepository: AdminTablesRepository,
     bookingState: BookingState,
     promoterAssignments: PromoterBookingAssignmentsRepository,
+    opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     clock: Clock = Clock.systemUTC(),
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
@@ -658,6 +663,16 @@ fun Application.promoterGuestListRoutes(
                                     call.respondError(status, code)
                                 }
                                 is GuestListServiceResult.Success -> {
+                                    runCatching {
+                                        opsPublisher.enqueue(
+                                            OpsDomainNotification(
+                                                clubId = created.value.clubId,
+                                                event = OpsNotificationEvent.GUEST_LIST_CREATED,
+                                                subjectId = created.value.id.toString(),
+                                                occurredAt = created.value.createdAt,
+                                            ),
+                                        )
+                                    }
                                     call.respond(
                                         HttpStatusCode.Created,
                                         CreateGuestListResponse(

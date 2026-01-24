@@ -60,7 +60,9 @@ class ClubOpsChatConfigRepositoryImpl(
             it[chatId] = config.chatId
             it[bookingsThreadId] = config.bookingsThreadId
             it[checkinThreadId] = config.checkinThreadId
+            it[guestListsThreadId] = config.guestListsThreadId
             it[supportThreadId] = config.supportThreadId
+            it[alertsThreadId] = config.alertsThreadId
             it[updatedAt] = now
         }
 
@@ -71,7 +73,9 @@ class ClubOpsChatConfigRepositoryImpl(
                 it[chatId] = config.chatId
                 it[bookingsThreadId] = config.bookingsThreadId
                 it[checkinThreadId] = config.checkinThreadId
+                it[guestListsThreadId] = config.guestListsThreadId
                 it[supportThreadId] = config.supportThreadId
+                it[alertsThreadId] = config.alertsThreadId
                 it[updatedAt] = now
             }
         } catch (error: Exception) {
@@ -90,7 +94,9 @@ private fun ResultRow.toClubOpsChatConfig(): ClubOpsChatConfig =
         chatId = this[ClubOpsChatConfigTable.chatId],
         bookingsThreadId = this[ClubOpsChatConfigTable.bookingsThreadId],
         checkinThreadId = this[ClubOpsChatConfigTable.checkinThreadId],
+        guestListsThreadId = this[ClubOpsChatConfigTable.guestListsThreadId],
         supportThreadId = this[ClubOpsChatConfigTable.supportThreadId],
+        alertsThreadId = this[ClubOpsChatConfigTable.alertsThreadId],
         updatedAt = this[ClubOpsChatConfigTable.updatedAt].toInstant(),
     )
 

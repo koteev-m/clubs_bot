@@ -281,7 +281,11 @@ fun Application.module() {
     errorCodesRoutes()
     pingRoute()
     guestListRoutes(repository = guestListRepository, parser = guestListCsvParser)
-    bookingA3Routes(bookingState = bookingState, meterRegistry = registry)
+    bookingA3Routes(
+        bookingState = bookingState,
+        meterRegistry = registry,
+        opsPublisher = opsNotificationService,
+    )
     meBookingsRoutes(
         bookingState = bookingState,
         eventsRepository = eventsRepository,
@@ -307,6 +311,7 @@ fun Application.module() {
         adminTablesRepository = adminTablesRepository,
         bookingState = bookingState,
         promoterAssignments = promoterAssignments,
+        opsPublisher = opsNotificationService,
     )
     promoterRatingRoutes(promoterRatingService = promoterRatingService)
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
@@ -342,6 +347,7 @@ fun Application.module() {
         supportService = supportService,
         userRepository = userRepository,
         sendTelegram = telegramClient::send,
+        opsPublisher = opsNotificationService,
         clubNameProvider = clubNameProvider@{ clubId ->
             clubNameCache[clubId]?.let { return@clubNameProvider it }
             try {

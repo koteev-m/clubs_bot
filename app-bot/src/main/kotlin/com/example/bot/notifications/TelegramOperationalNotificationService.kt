@@ -4,6 +4,7 @@ import com.example.bot.opschat.ClubOpsChatConfig
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationCategory
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.telegram.TelegramClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
@@ -170,7 +171,7 @@ class TelegramOperationalNotificationService(
     private val configRepository: ClubOpsChatConfigRepository,
     private val renderer: OpsNotificationRenderer = OpsNotificationRenderer,
     private val config: OpsNotificationServiceConfig = OpsNotificationServiceConfig(),
-) {
+) : OpsNotificationPublisher {
     private val logger = LoggerFactory.getLogger(TelegramOperationalNotificationService::class.java)
     private val channel = Channel<OpsDomainNotification>(config.queueCapacity)
     private val supervisorJob = SupervisorJob()
@@ -231,17 +232,17 @@ class TelegramOperationalNotificationService(
         supervisorJob.cancel()
     }
 
-    fun enqueue(event: OpsDomainNotification) {
+    override fun enqueue(notification: OpsDomainNotification) {
         if (!config.enabled || telegramClient == null) {
             return
         }
-        val result = channel.trySend(event)
+        val result = channel.trySend(notification)
         if (result.isFailure) {
             logger.warn(
                 "ops notification dropped event={} club_id={} subject_id_hash={}",
-                event.event,
-                event.clubId,
-                subjectFingerprint(event.subjectId),
+                notification.event,
+                notification.clubId,
+                subjectFingerprint(notification.subjectId),
             )
         }
     }
@@ -269,7 +270,9 @@ class TelegramOperationalNotificationService(
         when (category) {
             OpsNotificationCategory.BOOKINGS -> config.bookingsThreadId
             OpsNotificationCategory.CHECKIN -> config.checkinThreadId
+            OpsNotificationCategory.GUEST_LISTS -> config.guestListsThreadId
             OpsNotificationCategory.SUPPORT -> config.supportThreadId
+            OpsNotificationCategory.ALERTS -> config.alertsThreadId
         }
 
     private suspend fun sendWithRetry(

@@ -4,6 +4,7 @@ import com.example.bot.booking.BookingService
 import com.example.bot.data.booking.core.PaymentsBookingRepository
 import com.example.bot.data.repo.PaymentsRepositoryImpl
 import com.example.bot.observability.MetricsProvider
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.payments.PaymentsRepository
 import com.example.bot.payments.finalize.DefaultPaymentsFinalizeService
 import com.example.bot.payments.finalize.PaymentsFinalizeService
@@ -28,6 +29,7 @@ val paymentsModule =
                 bookingRepository = get<PaymentsBookingRepository>(),
                 metricsProvider = metricsProvider,
                 tracer = tracer,
+                opsPublisher = get<OpsNotificationPublisher>(),
             )
         }
     }

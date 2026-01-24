@@ -20,6 +20,10 @@ import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
 import com.example.bot.support.buildSupportReplyMessage
 import com.example.bot.telegram.SupportCallbacks
+import com.example.bot.opschat.NoopOpsNotificationPublisher
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.request.BaseRequest
@@ -116,6 +120,7 @@ fun Application.supportRoutes(
     userRepository: UserRepository,
     sendTelegram: suspend (BaseRequest<*, *>) -> BaseResponse,
     clubNameProvider: suspend (clubId: Long) -> String? = { null },
+    opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     routing {
@@ -156,6 +161,16 @@ fun Application.supportRoutes(
                     is SupportServiceResult.Success -> {
                         val ticket = result.value.ticket
                         logger.info("support.ticket.create id={} club_id={}", ticket.id, clubId)
+                        runCatching {
+                            opsPublisher.enqueue(
+                                OpsDomainNotification(
+                                    clubId = ticket.clubId,
+                                    event = OpsNotificationEvent.SUPPORT_QUESTION_CREATED,
+                                    subjectId = ticket.id.toString(),
+                                    occurredAt = ticket.createdAt,
+                                ),
+                            )
+                        }
                         call.respond(
                             HttpStatusCode.Created,
                             TicketResponse(

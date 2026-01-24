@@ -8,7 +8,9 @@ object ClubOpsChatConfigTable : Table("club_ops_chat_config") {
     val chatId = long("chat_id")
     val bookingsThreadId = integer("bookings_thread_id").nullable()
     val checkinThreadId = integer("checkin_thread_id").nullable()
+    val guestListsThreadId = integer("guest_lists_thread_id").nullable()
     val supportThreadId = integer("support_thread_id").nullable()
+    val alertsThreadId = integer("alerts_thread_id").nullable()
     val updatedAt = timestampWithTimeZone("updated_at")
 
     override val primaryKey = PrimaryKey(clubId)

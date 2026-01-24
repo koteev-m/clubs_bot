@@ -9,6 +9,10 @@ import com.example.bot.data.booking.core.BookingRecord
 import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.booking.core.OutboxRepository
 import com.example.bot.data.db.withTxRetry
+import com.example.bot.opschat.NoopOpsNotificationPublisher
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.promo.PromoAttributionCoordinator
 import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.serialization.json.JsonObject
@@ -66,6 +70,7 @@ class BookingService(
     private val holdRepository: BookingHoldRepository,
     private val outboxRepository: OutboxRepository,
     private val auditLogRepository: AuditLogRepository,
+    private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     private val promoAttribution: PromoAttributionCoordinator = PromoAttributionCoordinator.Noop,
     private val meterRegistry: MeterRegistry? = null,
 ) {
@@ -157,112 +162,125 @@ class BookingService(
         holdId: UUID,
         idempotencyKey: String,
     ): BookingCmdResult =
-        withTxRetry {
-            val existingBooking = bookingRepository.findByIdempotencyKey(idempotencyKey)
-            if (existingBooking != null) {
-                log(
-                    action = "booking.confirm",
-                    clubId = existingBooking.clubId,
-                    outcome = "idempotent",
-                    meta = buildJsonObject { put("bookingId", existingBooking.id.toString()) },
-                )
-                return@withTxRetry BookingCmdResult.AlreadyBooked(existingBooking.id)
-            }
+        run {
+            var notification: OpsDomainNotification? = null
+            val result =
+                withTxRetry {
+                    val existingBooking = bookingRepository.findByIdempotencyKey(idempotencyKey)
+                    if (existingBooking != null) {
+                        log(
+                            action = "booking.confirm",
+                            clubId = existingBooking.clubId,
+                            outcome = "idempotent",
+                            meta = buildJsonObject { put("bookingId", existingBooking.id.toString()) },
+                        )
+                        return@withTxRetry BookingCmdResult.AlreadyBooked(existingBooking.id)
+                    }
 
-            val holdResult = holdRepository.consumeHold(holdId)
-            val hold =
-                when (holdResult) {
-                    is BookingCoreResult.Success -> holdResult.value
-                    is BookingCoreResult.Failure -> {
-                        return@withTxRetry when (holdResult.error) {
-                            BookingCoreError.HoldExpired -> {
-                                log("booking.confirm", null, "hold_expired", null)
-                                BookingCmdResult.HoldExpired
+                    val holdResult = holdRepository.consumeHold(holdId)
+                    val hold =
+                        when (holdResult) {
+                            is BookingCoreResult.Success -> holdResult.value
+                            is BookingCoreResult.Failure -> {
+                                return@withTxRetry when (holdResult.error) {
+                                    BookingCoreError.HoldExpired -> {
+                                        log("booking.confirm", null, "hold_expired", null)
+                                        BookingCmdResult.HoldExpired
+                                    }
+
+                                    BookingCoreError.HoldNotFound -> {
+                                        log("booking.confirm", null, "hold_not_found", null)
+                                        BookingCmdResult.NotFound
+                                    }
+
+                                    BookingCoreError.OptimisticRetryExceeded -> {
+                                        log("booking.confirm", null, "retry_exceeded", null)
+                                        BookingCmdResult.IdempotencyConflict
+                                    }
+
+                                    else -> {
+                                        log("booking.confirm", null, "unexpected", null)
+                                        throw IllegalStateException("unexpected hold consume error: ${holdResult.error}")
+                                    }
+                                }
                             }
+                        }
 
-                            BookingCoreError.HoldNotFound -> {
-                                log("booking.confirm", null, "hold_not_found", null)
-                                BookingCmdResult.NotFound
-                            }
+                    val activeExists =
+                        bookingRepository.existsActiveFor(hold.tableId, hold.slotStart, hold.slotEnd)
+                    if (activeExists) {
+                        log(
+                            "booking.confirm",
+                            hold.clubId,
+                            "duplicate_active",
+                            buildJsonObject {
+                                put("holdId", hold.id.toString())
+                            },
+                        )
+                        return@withTxRetry BookingCmdResult.DuplicateActiveBooking
+                    }
 
-                            BookingCoreError.OptimisticRetryExceeded -> {
-                                log("booking.confirm", null, "retry_exceeded", null)
-                                BookingCmdResult.IdempotencyConflict
-                            }
+                    val booked =
+                        bookingRepository.createBooked(
+                            clubId = hold.clubId,
+                            tableId = hold.tableId,
+                            slotStart = hold.slotStart,
+                            slotEnd = hold.slotEnd,
+                            guests = hold.guests,
+                            minRate = hold.minDeposit,
+                            idempotencyKey = idempotencyKey,
+                        )
+                    when (booked) {
+                        is BookingCoreResult.Success -> {
+                            val record = booked.value
+                            log(
+                                action = "booking.confirm",
+                                clubId = record.clubId,
+                                outcome = "booked",
+                                meta = buildJsonObject { put("bookingId", record.id.toString()) },
+                            )
+                            notification =
+                                OpsDomainNotification(
+                                    clubId = record.clubId,
+                                    event = OpsNotificationEvent.NEW_BOOKING,
+                                    subjectId = record.id.toString(),
+                                    occurredAt = record.createdAt,
+                                )
+                            BookingCmdResult.Booked(record.id)
+                        }
 
-                            else -> {
-                                log("booking.confirm", null, "unexpected", null)
-                                throw IllegalStateException("unexpected hold consume error: ${holdResult.error}")
+                        is BookingCoreResult.Failure -> {
+                            when (booked.error) {
+                                BookingCoreError.DuplicateActiveBooking -> {
+                                    log("booking.confirm", hold.clubId, "duplicate_active", null)
+                                    BookingCmdResult.DuplicateActiveBooking
+                                }
+
+                                BookingCoreError.IdempotencyConflict -> {
+                                    log("booking.confirm", hold.clubId, "idem_conflict", null)
+                                    BookingCmdResult.IdempotencyConflict
+                                }
+
+                                BookingCoreError.BookingNotFound -> {
+                                    log("booking.confirm", hold.clubId, "not_found", null)
+                                    BookingCmdResult.NotFound
+                                }
+
+                                BookingCoreError.OptimisticRetryExceeded -> {
+                                    log("booking.confirm", hold.clubId, "retry_exceeded", null)
+                                    BookingCmdResult.IdempotencyConflict
+                                }
+
+                                else -> {
+                                    log("booking.confirm", hold.clubId, "unexpected", null)
+                                    throw IllegalStateException("unexpected booking error: ${booked.error}")
+                                }
                             }
                         }
                     }
                 }
-
-            val activeExists =
-                bookingRepository.existsActiveFor(hold.tableId, hold.slotStart, hold.slotEnd)
-            if (activeExists) {
-                log(
-                    "booking.confirm",
-                    hold.clubId,
-                    "duplicate_active",
-                    buildJsonObject {
-                        put("holdId", hold.id.toString())
-                    },
-                )
-                return@withTxRetry BookingCmdResult.DuplicateActiveBooking
-            }
-
-            val booked =
-                bookingRepository.createBooked(
-                    clubId = hold.clubId,
-                    tableId = hold.tableId,
-                    slotStart = hold.slotStart,
-                    slotEnd = hold.slotEnd,
-                    guests = hold.guests,
-                    minRate = hold.minDeposit,
-                    idempotencyKey = idempotencyKey,
-                )
-            when (booked) {
-                is BookingCoreResult.Success -> {
-                    val record = booked.value
-                    log(
-                        action = "booking.confirm",
-                        clubId = record.clubId,
-                        outcome = "booked",
-                        meta = buildJsonObject { put("bookingId", record.id.toString()) },
-                    )
-                    BookingCmdResult.Booked(record.id)
-                }
-
-                is BookingCoreResult.Failure -> {
-                    when (booked.error) {
-                        BookingCoreError.DuplicateActiveBooking -> {
-                            log("booking.confirm", hold.clubId, "duplicate_active", null)
-                            BookingCmdResult.DuplicateActiveBooking
-                        }
-
-                        BookingCoreError.IdempotencyConflict -> {
-                            log("booking.confirm", hold.clubId, "idem_conflict", null)
-                            BookingCmdResult.IdempotencyConflict
-                        }
-
-                        BookingCoreError.BookingNotFound -> {
-                            log("booking.confirm", hold.clubId, "not_found", null)
-                            BookingCmdResult.NotFound
-                        }
-
-                        BookingCoreError.OptimisticRetryExceeded -> {
-                            log("booking.confirm", hold.clubId, "retry_exceeded", null)
-                            BookingCmdResult.IdempotencyConflict
-                        }
-
-                        else -> {
-                            log("booking.confirm", hold.clubId, "unexpected", null)
-                            throw IllegalStateException("unexpected booking error: ${booked.error}")
-                        }
-                    }
-                }
-            }
+            notification?.let { notifyBestEffort(it) }
+            result
         }
 
     suspend fun finalize(
@@ -370,6 +388,14 @@ class BookingService(
                 meterRegistry?.counter(metricName, "club_id", clubId.toString())?.increment()
                 outboxRepository.enqueue(outboxTopic, payload)
                 log(action, clubId, "ok", payload)
+                notifyBestEffort(
+                    OpsDomainNotification(
+                        clubId = record.clubId,
+                        event = OpsNotificationEvent.BOOKING_UPDATED,
+                        subjectId = record.id.toString(),
+                        occurredAt = record.updatedAt,
+                    ),
+                )
                 BookingStatusUpdateResult.Success(record)
             }
 
@@ -414,4 +440,8 @@ class BookingService(
             put("bookingId", bookingId.toString())
             status?.let { put("status", it.name) }
         }
+
+    private fun notifyBestEffort(notification: OpsDomainNotification) {
+        runCatching { opsPublisher.enqueue(notification) }
+    }
 }

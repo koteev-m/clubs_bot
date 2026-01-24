@@ -14,6 +14,9 @@ import com.example.bot.support.TicketStatus
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.response.BaseResponse
 import io.mockk.mockk
@@ -80,6 +83,10 @@ class SupportGuestRoutesTest {
         assertEquals("booking", payload["topic"]!!.jsonPrimitive.content)
         assertEquals("opened", payload["status"]!!.jsonPrimitive.content)
         assertTrue(payload["updatedAt"]!!.jsonPrimitive.content.isNotBlank())
+        assertEquals(1, context.opsPublisher.notifications.size)
+        val notification = context.opsPublisher.notifications.single()
+        assertEquals(clubId, notification.clubId)
+        assertEquals(OpsNotificationEvent.SUPPORT_QUESTION_CREATED, notification.event)
     }
 
     @Test
@@ -379,6 +386,7 @@ class SupportGuestRoutesTest {
             response.assertNoStoreHeaders()
             assertEquals("validation_error", response.errorCode())
         }
+        assertTrue(context.opsPublisher.notifications.isEmpty())
     }
 
     @Test
@@ -595,6 +603,7 @@ class SupportGuestRoutesTest {
     private data class TestContext(
         val database: Database,
         val supportService: SupportService,
+        val opsPublisher: RecordingOpsPublisher,
     )
 
     private fun withSupportApp(block: suspend ApplicationTestBuilder.(TestContext) -> Unit) =
@@ -605,6 +614,7 @@ class SupportGuestRoutesTest {
             val userRepository = ExposedUserRepository(setup.database)
             val userRoleRepository = StubUserRoleRepository()
             val telegramSender = RecordingTelegramSender()
+            val opsPublisher = RecordingOpsPublisher()
             application {
                 install(ContentNegotiation) { json() }
                 install(RbacPlugin) {
@@ -624,10 +634,11 @@ class SupportGuestRoutesTest {
                     supportService = supportService,
                     userRepository = userRepository,
                     sendTelegram = telegramSender::send,
+                    opsPublisher = opsPublisher,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
-            block(TestContext(setup.database, supportService))
+            block(TestContext(setup.database, supportService, opsPublisher))
         }
 
     private fun prepareDatabase(): DbSetup {
@@ -738,6 +749,14 @@ class SupportGuestRoutesTest {
         suspend fun send(request: BaseRequest<*, *>): BaseResponse {
             requests += request
             return mockk()
+        }
+    }
+
+    private class RecordingOpsPublisher : OpsNotificationPublisher {
+        val notifications = mutableListOf<OpsDomainNotification>()
+
+        override fun enqueue(notification: OpsDomainNotification) {
+            notifications += notification
         }
     }
 }
