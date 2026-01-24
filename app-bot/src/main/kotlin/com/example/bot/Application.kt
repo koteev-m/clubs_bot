@@ -271,15 +271,23 @@ fun Application.module() {
         )
 
     environment.monitor.subscribe(ApplicationStarted) {
-        opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
-        opsNotificationService.start()
+        if (opsNotificationConfig.enabled) {
+            opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
+            opsNotificationService.start()
+        } else {
+            opsNotificationLogger.info("TelegramOperationalNotificationService disabled by config")
+        }
     }
 
     environment.monitor.subscribe(ApplicationStopping) {
-        runBlocking {
-            runCatching { opsNotificationService.stop() }
-                .onSuccess { opsNotificationLogger.info("TelegramOperationalNotificationService stopped") }
-                .onFailure { opsNotificationLogger.warn("TelegramOperationalNotificationService stop failed: ${it.message}") }
+        if (opsNotificationConfig.enabled) {
+            runBlocking {
+                runCatching { opsNotificationService.stop() }
+                    .onSuccess { opsNotificationLogger.info("TelegramOperationalNotificationService stopped") }
+                    .onFailure { opsNotificationLogger.warn("TelegramOperationalNotificationService stop failed", it) }
+            }
+        } else {
+            opsNotificationLogger.info("TelegramOperationalNotificationService disabled by config, skip stop")
         }
     }
 

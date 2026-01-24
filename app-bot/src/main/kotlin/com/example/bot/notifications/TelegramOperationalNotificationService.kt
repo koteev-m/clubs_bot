@@ -23,6 +23,7 @@ import java.security.MessageDigest
 import java.time.Duration
 
 data class OpsNotificationServiceConfig(
+    val enabled: Boolean = true,
     val queueCapacity: Int = 500,
     val sendTimeout: Duration = Duration.ofSeconds(3),
     val maxAttempts: Int = 3,
@@ -37,15 +38,54 @@ data class OpsNotificationServiceConfig(
 
     companion object {
         private val configLogger = LoggerFactory.getLogger("OpsNotificationConfig")
+        private const val RAW_PREVIEW_LIMIT = 32
+        private const val QUEUE_CAPACITY_MIN = 1
+        private const val QUEUE_CAPACITY_MAX = 5000
+        private const val MAX_ATTEMPTS_MIN = 1
+        private const val MAX_ATTEMPTS_MAX = 10
+        private const val SEND_TIMEOUT_MIN_MS = 1L
+        private const val SEND_TIMEOUT_MAX_MS = 30000L
+        private const val RETRY_DELAY_MIN_MS = 0L
+        private const val RETRY_DELAY_MAX_MS = 60000L
 
         fun fromEnv(env: (String) -> String? = System::getenv): OpsNotificationServiceConfig {
             val defaults = OpsNotificationServiceConfig()
-            val queueCapacity = readInt(env, "OPS_NOTIFY_QUEUE_CAPACITY", defaults.queueCapacity) { it > 0 }
-            val sendTimeoutMs = readLong(env, "OPS_NOTIFY_SEND_TIMEOUT_MS", defaults.sendTimeout.toMillis()) { it > 0 }
-            val maxAttempts = readInt(env, "OPS_NOTIFY_MAX_ATTEMPTS", defaults.maxAttempts) { it > 0 }
-            val retryDelayMs = readLong(env, "OPS_NOTIFY_RETRY_DELAY_MS", defaults.retryDelay.toMillis()) { it >= 0 }
+            val enabled = readBoolean(env, "OPS_NOTIFY_ENABLED", defaults.enabled)
+            val queueCapacity =
+                readInt(
+                    env,
+                    "OPS_NOTIFY_QUEUE_CAPACITY",
+                    defaults.queueCapacity,
+                    min = QUEUE_CAPACITY_MIN,
+                    max = QUEUE_CAPACITY_MAX,
+                )
+            val sendTimeoutMs =
+                readLong(
+                    env,
+                    "OPS_NOTIFY_SEND_TIMEOUT_MS",
+                    defaults.sendTimeout.toMillis(),
+                    min = SEND_TIMEOUT_MIN_MS,
+                    max = SEND_TIMEOUT_MAX_MS,
+                )
+            val maxAttempts =
+                readInt(
+                    env,
+                    "OPS_NOTIFY_MAX_ATTEMPTS",
+                    defaults.maxAttempts,
+                    min = MAX_ATTEMPTS_MIN,
+                    max = MAX_ATTEMPTS_MAX,
+                )
+            val retryDelayMs =
+                readLong(
+                    env,
+                    "OPS_NOTIFY_RETRY_DELAY_MS",
+                    defaults.retryDelay.toMillis(),
+                    min = RETRY_DELAY_MIN_MS,
+                    max = RETRY_DELAY_MAX_MS,
+                )
 
             return OpsNotificationServiceConfig(
+                enabled = enabled,
                 queueCapacity = queueCapacity,
                 sendTimeout = Duration.ofMillis(sendTimeoutMs),
                 maxAttempts = maxAttempts,
@@ -57,31 +97,55 @@ data class OpsNotificationServiceConfig(
             env: (String) -> String?,
             name: String,
             default: Int,
-            predicate: (Int) -> Boolean,
+            min: Int,
+            max: Int,
         ): Int {
             val raw = env(name) ?: return default
-            val value = raw.toIntOrNull()
-            return if (value != null && predicate(value)) {
-                value
-            } else {
-                configLogger.warn("$name is invalid, using default")
-                default
+            val value = raw.toIntOrNull() ?: return logInvalid(name, raw, default, "non-numeric")
+            if (value < min || value > max) {
+                return logInvalid(name, raw, default, "out-of-range[$min..$max]")
             }
+            return value
         }
 
         private fun readLong(
             env: (String) -> String?,
             name: String,
             default: Long,
-            predicate: (Long) -> Boolean,
+            min: Long,
+            max: Long,
         ): Long {
             val raw = env(name) ?: return default
-            val value = raw.toLongOrNull()
-            return if (value != null && predicate(value)) {
-                value
+            val value = raw.toLongOrNull() ?: return logInvalid(name, raw, default, "non-numeric")
+            if (value < min || value > max) {
+                return logInvalid(name, raw, default, "out-of-range[$min..$max]")
+            }
+            return value
+        }
+
+        private fun readBoolean(
+            env: (String) -> String?,
+            name: String,
+            default: Boolean,
+        ): Boolean {
+            val raw = env(name) ?: return default
+            val value = raw.toBooleanStrictOrNull()
+            return value ?: logInvalid(name, raw, default, "non-boolean")
+        }
+
+        private fun <T> logInvalid(name: String, raw: String, default: T, reason: String): T {
+            val preview = rawPreview(raw)
+            configLogger.warn(
+                "$name is invalid ($reason, raw=$preview, length=${raw.length}), using default=$default",
+            )
+            return default
+        }
+
+        private fun rawPreview(raw: String): String =
+            if (raw.length <= RAW_PREVIEW_LIMIT) {
+                raw
             } else {
-                configLogger.warn("$name is invalid, using default")
-                default
+                "${raw.take(RAW_PREVIEW_LIMIT)}…"
             }
         }
     }
