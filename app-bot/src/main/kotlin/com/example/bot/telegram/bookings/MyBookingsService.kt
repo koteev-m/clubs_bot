@@ -6,6 +6,10 @@ import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.core.OutboxRepository
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
+import com.example.bot.opschat.NoopOpsNotificationPublisher
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.text.BotLocales
 import com.example.bot.text.BotTexts
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +41,7 @@ class MyBookingsService(
     private val userRepository: UserRepository,
     private val outboxRepository: OutboxRepository,
     private val metrics: MyBookingsMetrics,
+    private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     private val logger = LoggerFactory.getLogger(MyBookingsService::class.java)
@@ -124,6 +129,14 @@ class MyBookingsService(
 
         val message = buildCancelMessage(info, user, texts, lang)
         enqueueOutbox(info, message)
+        notifyBestEffort(
+            OpsDomainNotification(
+                clubId = info.clubId,
+                event = OpsNotificationEvent.BOOKING_CANCELLED,
+                subjectId = info.id.toString(),
+                occurredAt = Instant.now(clock),
+            ),
+        )
         metrics.incCancelOk(info.clubId)
         logger.info("mybookings.cancel: ok booking={} user={} clubId={}", info.id, user.id, info.clubId)
         return CancelResult.Ok(info.copy(status = BookingStatus.CANCELLED))
@@ -406,6 +419,10 @@ class MyBookingsMetrics(
     ): io.micrometer.core.instrument.Counter =
         registry?.counter(name, SOURCE_TAG, SOURCE_VALUE, CLUB_TAG, clubId.toString())
             ?: NoopCounter
+
+    private fun notifyBestEffort(notification: OpsDomainNotification) {
+        runCatching { opsPublisher.enqueue(notification) }
+    }
 
     private object NoopCounter : io.micrometer.core.instrument.Counter {
         override fun count(): Double = 0.0

@@ -16,8 +16,14 @@ import com.example.bot.telemetry.maskBookingId
 import com.example.bot.telemetry.setRefundAmount
 import com.example.bot.telemetry.setResult
 import com.example.bot.telemetry.spanSuspending
+import com.example.bot.opschat.NoopOpsNotificationPublisher
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import io.micrometer.tracing.Tracer
 import org.slf4j.MDC
+import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import com.example.bot.payments.PaymentsRepository.Result.Status as ActionStatus
@@ -28,6 +34,8 @@ class DefaultPaymentsService(
     private val bookingRepository: PaymentsBookingRepository,
     private val metricsProvider: MetricsProvider?,
     private val tracer: Tracer?,
+    private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
+    private val clock: Clock = Clock.systemUTC(),
 ) : PaymentsService {
     private data class BookingLedger(
         var status: BookingStatus = BookingStatus.BOOKED,
@@ -147,6 +155,14 @@ class DefaultPaymentsService(
                             result = Result(ActionStatus.OK, reason),
                         )
                         setResult(PaymentsMetrics.Result.Ok)
+                        notifyBestEffort(
+                            OpsDomainNotification(
+                                clubId = clubId,
+                                event = OpsNotificationEvent.BOOKING_CANCELLED,
+                                subjectId = bookingId.toString(),
+                                occurredAt = Instant.now(clock),
+                            ),
+                        )
                         PaymentsService.CancelResult(
                             bookingId = bookingId,
                             idempotent = false,
@@ -376,6 +392,10 @@ class DefaultPaymentsService(
         synchronized(ledger) {
             ledger.status = status
         }
+    }
+
+    private fun notifyBestEffort(notification: OpsDomainNotification) {
+        runCatching { opsPublisher.enqueue(notification) }
     }
 
     private fun PaymentsSpanScope.handleExistingCancel(

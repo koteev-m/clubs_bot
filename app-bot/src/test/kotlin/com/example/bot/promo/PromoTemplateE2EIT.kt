@@ -21,6 +21,7 @@ import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
+import com.example.bot.opschat.NoopOpsNotificationPublisher
 import com.example.bot.telegram.TelegramClient
 import com.example.bot.testing.PostgresAppTest
 import com.example.bot.webhook.WebhookReply
@@ -131,7 +132,16 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                             )
                         }
                         single<PromoAttributionCoordinator> { get<PromoAttributionService>() }
-                        single { BookingService(get(), get(), get(), get(), get()) }
+                        single {
+                            BookingService(
+                                bookingRepository = get(),
+                                holdRepository = get(),
+                                outboxRepository = get(),
+                                auditLogRepository = get(),
+                                opsPublisher = NoopOpsNotificationPublisher,
+                                promoAttribution = get(),
+                            )
+                        }
                         single {
                             BookingTemplateService(
                                 get(),

@@ -80,7 +80,13 @@ class BookingTemplateFlowIT : PostgresAppTest() {
         val auditRepository =
             com.example.bot.data.booking.core
                 .AuditLogRepository(database, clock)
-        bookingService = BookingService(bookingRepository, holdRepository, outboxRepository, auditRepository)
+        bookingService =
+            BookingService(
+                bookingRepository = bookingRepository,
+                holdRepository = holdRepository,
+                outboxRepository = outboxRepository,
+                auditLogRepository = auditRepository,
+            )
         val templateRepository = BookingTemplateRepositoryImpl(database, clock)
         val notificationsOutbox = NotificationsOutboxRepository(database)
         userRepository = ExposedUserRepository(database)

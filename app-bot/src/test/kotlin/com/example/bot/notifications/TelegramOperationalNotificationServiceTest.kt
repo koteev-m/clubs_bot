@@ -39,7 +39,9 @@ class TelegramOperationalNotificationServiceTest {
                             chatId = 456L,
                             bookingsThreadId = 99,
                             checkinThreadId = 11,
+                            guestListsThreadId = 33,
                             supportThreadId = 22,
+                            alertsThreadId = 44,
                             updatedAt = Instant.parse("2025-01-01T00:00:00Z"),
                         )
 
@@ -97,7 +99,9 @@ class TelegramOperationalNotificationServiceTest {
                             chatId = 456L,
                             bookingsThreadId = 99,
                             checkinThreadId = 11,
+                            guestListsThreadId = 33,
                             supportThreadId = 22,
+                            alertsThreadId = 44,
                             updatedAt = Instant.parse("2025-01-01T00:00:00Z"),
                         )
 
@@ -152,7 +156,9 @@ class TelegramOperationalNotificationServiceTest {
                     chatId = 456L,
                     bookingsThreadId = 99,
                     checkinThreadId = 11,
+                    guestListsThreadId = 33,
                     supportThreadId = 22,
+                    alertsThreadId = 44,
                     updatedAt = Instant.parse("2025-01-01T00:00:00Z"),
                 )
             val repo = mockk<ClubOpsChatConfigRepository>()

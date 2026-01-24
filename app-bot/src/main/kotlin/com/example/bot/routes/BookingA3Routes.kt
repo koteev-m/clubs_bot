@@ -11,6 +11,10 @@ import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.logging.MdcContext
 import com.example.bot.logging.spanSuspended
+import com.example.bot.opschat.NoopOpsNotificationPublisher
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
@@ -66,6 +70,7 @@ private data class ConfirmPayload(val bookingId: Long)
 fun Application.bookingA3Routes(
     bookingState: BookingState,
     meterRegistry: MeterRegistry? = null,
+    opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     val logger = LoggerFactory.getLogger("BookingA3Routes")
@@ -322,6 +327,18 @@ fun Application.bookingA3Routes(
                                             result.booking.status,
                                         )
                                     }
+                                    if (!result.cached) {
+                                        runCatching {
+                                            opsPublisher.enqueue(
+                                                OpsDomainNotification(
+                                                    clubId = result.booking.clubId,
+                                                    event = OpsNotificationEvent.NEW_BOOKING,
+                                                    subjectId = result.booking.id.toString(),
+                                                    occurredAt = result.booking.createdAt,
+                                                ),
+                                            )
+                                        }
+                                    }
                                     call.respondBooking(result.bodyJson)
                                 }
 
@@ -440,6 +457,18 @@ fun Application.bookingA3Routes(
                             result.booking.status,
                             result.booking.guestCount,
                         )
+                        if (!result.cached) {
+                            runCatching {
+                                opsPublisher.enqueue(
+                                    OpsDomainNotification(
+                                        clubId = result.booking.clubId,
+                                        event = OpsNotificationEvent.BOOKING_UPDATED,
+                                        subjectId = result.booking.id.toString(),
+                                        occurredAt = result.booking.updatedAt,
+                                    ),
+                                )
+                            }
+                        }
                         call.respondBooking(result.bodyJson)
                     }
 

@@ -46,7 +46,9 @@
         "chatId": -1001234567890,
         "bookingsThreadId": 10,
         "checkinThreadId": 11,
+        "guestListsThreadId": 12,
         "supportThreadId": null,
+        "alertsThreadId": 99,
         "updatedAt": "2024-06-01T12:00:00Z"
       }
     }
@@ -59,15 +61,30 @@
       "chatId": -1001234567890,
       "bookingsThreadId": 10,
       "checkinThreadId": 11,
-      "supportThreadId": null
+      "guestListsThreadId": 12,
+      "supportThreadId": null,
+      "alertsThreadId": 99
     }
     ```
   - Валидация:
     - `clubId > 0`
     - `chatId != 0` (допускаются отрицательные chatId)
-    - `bookingsThreadId`, `checkinThreadId`, `supportThreadId` — `null` или `> 0`
+    - `bookingsThreadId`, `checkinThreadId`, `guestListsThreadId`, `supportThreadId`, `alertsThreadId` — `null` или `> 0`
   - Ответ: `{ config: { ... } }` (включая `updatedAt`).
   - Ошибки: `validation_error`, `invalid_json`, `forbidden` (scope mismatch).
+
+### 1.4) Ops-события и треды
+
+- Маршрутизация происходит по категории:
+  - `BOOKINGS` → `bookingsThreadId`
+  - `GUEST_LISTS` → `guestListsThreadId`
+  - `SUPPORT` → `supportThreadId`
+  - `ALERTS` → `alertsThreadId`
+- Минимальный набор событий:
+  - `NEW_BOOKING`, `BOOKING_UPDATED`, `BOOKING_CANCELLED` → `BOOKINGS`
+  - `GUEST_LIST_CREATED` → `GUEST_LISTS`
+  - `SUPPORT_QUESTION_CREATED` → `SUPPORT`
+  - `SYSTEM_ALERT` → `ALERTS`
 
 ## 1.1) Promoter bookings
 
@@ -90,6 +107,7 @@
 - counts, sizeBytes
 - sha256 (или префикс), contentType
 - requestId
+- ops-уведомления: только технические идентификаторы (id сущностей), без текста обращений и персональных данных
 
 ### Audit (grep‑чеклист)
 

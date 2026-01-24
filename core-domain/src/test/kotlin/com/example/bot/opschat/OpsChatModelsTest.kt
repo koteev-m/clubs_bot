@@ -14,7 +14,9 @@ class OpsChatModelsTest {
                 chatId = -100,
                 bookingsThreadId = null,
                 checkinThreadId = null,
+                guestListsThreadId = null,
                 supportThreadId = null,
+                alertsThreadId = null,
             )
         }
     }
@@ -27,7 +29,9 @@ class OpsChatModelsTest {
                 chatId = 0,
                 bookingsThreadId = null,
                 checkinThreadId = null,
+                guestListsThreadId = null,
                 supportThreadId = null,
+                alertsThreadId = null,
             )
         }
     }
@@ -40,7 +44,9 @@ class OpsChatModelsTest {
                 chatId = -100,
                 bookingsThreadId = -1,
                 checkinThreadId = null,
+                guestListsThreadId = null,
                 supportThreadId = null,
+                alertsThreadId = null,
                 updatedAt = Instant.EPOCH,
             )
         }
@@ -54,7 +60,9 @@ class OpsChatModelsTest {
                 chatId = -1001234567890,
                 bookingsThreadId = 10,
                 checkinThreadId = 20,
-                supportThreadId = 30,
+                guestListsThreadId = 30,
+                supportThreadId = 40,
+                alertsThreadId = 50,
             )
         }
     }

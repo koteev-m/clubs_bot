@@ -32,6 +32,7 @@ import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.promo.BookingTemplateRepository
 import com.example.bot.promo.BookingTemplateService
 import com.example.bot.promo.InMemoryPromoAttributionStore
@@ -93,7 +94,7 @@ val bookingModule =
         single<UserRoleRepository> { ExposedUserRoleRepository(get()) }
 
         single { MyBookingsMetrics(runCatching { get<MeterRegistry>() }.getOrNull()) }
-        single { MyBookingsService(get(), get(), get(), get()) }
+        single { MyBookingsService(get(), get(), get(), get(), get<OpsNotificationPublisher>()) }
 
         single<PromoAttributionStore> { InMemoryPromoAttributionStore() }
 
@@ -167,6 +168,7 @@ val bookingModule =
                 get(),
                 get(),
                 get(),
+                get<OpsNotificationPublisher>(),
                 get(),
                 runCatching { get<MeterRegistry>() }.getOrNull(),
             )

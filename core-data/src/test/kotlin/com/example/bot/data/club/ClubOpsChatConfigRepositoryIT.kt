@@ -28,7 +28,9 @@ class ClubOpsChatConfigRepositoryIT : PostgresClubIntegrationTest() {
                         chatId = -1001234567890,
                         bookingsThreadId = 101,
                         checkinThreadId = null,
+                        guestListsThreadId = 707,
                         supportThreadId = 303,
+                        alertsThreadId = null,
                     ),
                 )
 
@@ -36,7 +38,9 @@ class ClubOpsChatConfigRepositoryIT : PostgresClubIntegrationTest() {
             assertEquals(-1001234567890, created.chatId)
             assertEquals(101, created.bookingsThreadId)
             assertNull(created.checkinThreadId)
+            assertEquals(707, created.guestListsThreadId)
             assertEquals(303, created.supportThreadId)
+            assertNull(created.alertsThreadId)
             assertEquals(INITIAL_INSTANT, created.updatedAt)
 
             val updated =
@@ -46,7 +50,9 @@ class ClubOpsChatConfigRepositoryIT : PostgresClubIntegrationTest() {
                         chatId = -1000000000001,
                         bookingsThreadId = null,
                         checkinThreadId = 202,
+                        guestListsThreadId = null,
                         supportThreadId = null,
+                        alertsThreadId = 808,
                     ),
                 )
 
@@ -54,7 +60,9 @@ class ClubOpsChatConfigRepositoryIT : PostgresClubIntegrationTest() {
             assertEquals(-1000000000001, updated.chatId)
             assertNull(updated.bookingsThreadId)
             assertEquals(202, updated.checkinThreadId)
+            assertNull(updated.guestListsThreadId)
             assertNull(updated.supportThreadId)
+            assertEquals(808, updated.alertsThreadId)
             assertEquals(UPDATED_INSTANT, updated.updatedAt)
 
             val loaded = updatedRepo.getByClubId(clubId)

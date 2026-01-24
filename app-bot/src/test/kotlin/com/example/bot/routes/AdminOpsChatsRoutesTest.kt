@@ -92,7 +92,9 @@ class AdminOpsChatsRoutesTest {
                         "chatId":0,
                         "bookingsThreadId":0,
                         "checkinThreadId":null,
-                        "supportThreadId":null
+                        "guestListsThreadId":null,
+                        "supportThreadId":null,
+                        "alertsThreadId":null
                     }""",
                 )
             }
@@ -131,7 +133,9 @@ class AdminOpsChatsRoutesTest {
                         "chatId":-100,
                         "bookingsThreadId":10,
                         "checkinThreadId":11,
-                        "supportThreadId":null
+                        "guestListsThreadId":12,
+                        "supportThreadId":null,
+                        "alertsThreadId":null
                     }""",
                 )
             }
@@ -153,7 +157,9 @@ class AdminOpsChatsRoutesTest {
                         "chatId":-100,
                         "bookingsThreadId":10,
                         "checkinThreadId":11,
-                        "supportThreadId":null
+                        "guestListsThreadId":12,
+                        "supportThreadId":null,
+                        "alertsThreadId":null
                     }""",
                 )
             }
@@ -163,7 +169,9 @@ class AdminOpsChatsRoutesTest {
         assertEquals(-100L, persisted.chatId)
         assertEquals(10, persisted.bookingsThreadId)
         assertEquals(11, persisted.checkinThreadId)
+        assertEquals(12, persisted.guestListsThreadId)
         assertEquals(null, persisted.supportThreadId)
+        assertEquals(null, persisted.alertsThreadId)
         response.assertNoStoreHeaders()
 
         val getResponse =
@@ -174,7 +182,9 @@ class AdminOpsChatsRoutesTest {
         assertEquals(-100L, config["chatId"]!!.jsonPrimitive.long)
         assertEquals(10, config["bookingsThreadId"]!!.jsonPrimitive.long)
         assertEquals(11, config["checkinThreadId"]!!.jsonPrimitive.long)
+        assertEquals(12, config["guestListsThreadId"]!!.jsonPrimitive.long)
         assertTrue(config["supportThreadId"] is JsonNull)
+        assertTrue(config["alertsThreadId"] is JsonNull)
         getResponse.assertNoStoreHeaders()
     }
 
@@ -243,7 +253,9 @@ class AdminOpsChatsRoutesTest {
                     chatId = config.chatId,
                     bookingsThreadId = config.bookingsThreadId,
                     checkinThreadId = config.checkinThreadId,
+                    guestListsThreadId = config.guestListsThreadId,
                     supportThreadId = config.supportThreadId,
+                    alertsThreadId = config.alertsThreadId,
                     updatedAt = now,
                 )
             storage[config.clubId] = saved

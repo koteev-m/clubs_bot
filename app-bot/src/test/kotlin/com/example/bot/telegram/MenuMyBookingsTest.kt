@@ -83,7 +83,13 @@ class MenuMyBookingsTest :
         val metrics = MyBookingsMetrics(registry)
         val userRepository = ExposedUserRepository(database)
         val outboxRepository = OutboxRepository(database)
-        val service = MyBookingsService(database, userRepository, outboxRepository, metrics)
+        val service =
+            MyBookingsService(
+                database = database,
+                userRepository = userRepository,
+                outboxRepository = outboxRepository,
+                metrics = metrics,
+            )
 
         val availability = mockk<com.example.bot.availability.AvailabilityService>()
         val bookingService = mockk<com.example.bot.booking.BookingService>()

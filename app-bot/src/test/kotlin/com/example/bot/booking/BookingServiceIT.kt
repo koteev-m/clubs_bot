@@ -65,7 +65,13 @@ class BookingServiceIT : PostgresAppTest() {
         val holdRepo = BookingHoldRepository(database, clock)
         val outboxRepo = OutboxRepository(database, clock)
         val auditRepo = AuditLogRepository(database, clock)
-        return BookingService(bookingRepo, holdRepo, outboxRepo, auditRepo, promoAttribution)
+        return BookingService(
+            bookingRepository = bookingRepo,
+            holdRepository = holdRepo,
+            outboxRepository = outboxRepo,
+            auditLogRepository = auditRepo,
+            promoAttribution = promoAttribution,
+        )
     }
 
     @Test
@@ -241,7 +247,13 @@ class BookingServiceIT : PostgresAppTest() {
             val holdRepo = BookingHoldRepository(database, clock)
             val outboxRepo = OutboxRepository(database, clock)
             val auditRepo = AuditLogRepository(database, clock)
-            val service = BookingService(bookingRepo, holdRepo, outboxRepo, auditRepo)
+            val service =
+                BookingService(
+                    bookingRepository = bookingRepo,
+                    holdRepository = holdRepo,
+                    outboxRepository = outboxRepo,
+                    auditLogRepository = auditRepo,
+                )
             val bookingId = confirmBooking(service, seed)
             service.finalize(bookingId)
 
