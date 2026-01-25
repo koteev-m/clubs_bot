@@ -163,9 +163,9 @@ class BookingService(
         idempotencyKey: String,
     ): BookingCmdResult =
         run {
-            var notification: OpsDomainNotification? = null
-            val result =
+            val (result, notification) =
                 withTxRetry {
+                    var notification: OpsDomainNotification? = null
                     val existingBooking = bookingRepository.findByIdempotencyKey(idempotencyKey)
                     if (existingBooking != null) {
                         log(
@@ -174,7 +174,7 @@ class BookingService(
                             outcome = "idempotent",
                             meta = buildJsonObject { put("bookingId", existingBooking.id.toString()) },
                         )
-                        return@withTxRetry BookingCmdResult.AlreadyBooked(existingBooking.id)
+                        return@withTxRetry BookingCmdResult.AlreadyBooked(existingBooking.id) to notification
                     }
 
                     val holdResult = holdRepository.consumeHold(holdId)
@@ -185,17 +185,17 @@ class BookingService(
                                 return@withTxRetry when (holdResult.error) {
                                     BookingCoreError.HoldExpired -> {
                                         log("booking.confirm", null, "hold_expired", null)
-                                        BookingCmdResult.HoldExpired
+                                        BookingCmdResult.HoldExpired to notification
                                     }
 
                                     BookingCoreError.HoldNotFound -> {
                                         log("booking.confirm", null, "hold_not_found", null)
-                                        BookingCmdResult.NotFound
+                                        BookingCmdResult.NotFound to notification
                                     }
 
                                     BookingCoreError.OptimisticRetryExceeded -> {
                                         log("booking.confirm", null, "retry_exceeded", null)
-                                        BookingCmdResult.IdempotencyConflict
+                                        BookingCmdResult.IdempotencyConflict to notification
                                     }
 
                                     else -> {
@@ -217,7 +217,7 @@ class BookingService(
                                 put("holdId", hold.id.toString())
                             },
                         )
-                        return@withTxRetry BookingCmdResult.DuplicateActiveBooking
+                        return@withTxRetry BookingCmdResult.DuplicateActiveBooking to notification
                     }
 
                     val booked =
@@ -246,29 +246,29 @@ class BookingService(
                                     subjectId = record.id.toString(),
                                     occurredAt = record.createdAt,
                                 )
-                            BookingCmdResult.Booked(record.id)
+                            BookingCmdResult.Booked(record.id) to notification
                         }
 
                         is BookingCoreResult.Failure -> {
                             when (booked.error) {
                                 BookingCoreError.DuplicateActiveBooking -> {
                                     log("booking.confirm", hold.clubId, "duplicate_active", null)
-                                    BookingCmdResult.DuplicateActiveBooking
+                                    BookingCmdResult.DuplicateActiveBooking to notification
                                 }
 
                                 BookingCoreError.IdempotencyConflict -> {
                                     log("booking.confirm", hold.clubId, "idem_conflict", null)
-                                    BookingCmdResult.IdempotencyConflict
+                                    BookingCmdResult.IdempotencyConflict to notification
                                 }
 
                                 BookingCoreError.BookingNotFound -> {
                                     log("booking.confirm", hold.clubId, "not_found", null)
-                                    BookingCmdResult.NotFound
+                                    BookingCmdResult.NotFound to notification
                                 }
 
                                 BookingCoreError.OptimisticRetryExceeded -> {
                                     log("booking.confirm", hold.clubId, "retry_exceeded", null)
-                                    BookingCmdResult.IdempotencyConflict
+                                    BookingCmdResult.IdempotencyConflict to notification
                                 }
 
                                 else -> {

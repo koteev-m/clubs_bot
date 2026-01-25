@@ -236,6 +236,10 @@ class MyBookingsService(
         outboxRepository.enqueue("booking.cancelled", payload)
     }
 
+    private fun notifyBestEffort(notification: OpsDomainNotification) {
+        runCatching { opsPublisher.enqueue(notification) }
+    }
+
     private fun mapRows(rows: List<ResultRow>): List<BookingInfo> {
         if (rows.isEmpty()) return emptyList()
         val clubIds = rows.map { it[BookingsTable.clubId] }.toSet()
@@ -419,10 +423,6 @@ class MyBookingsMetrics(
     ): io.micrometer.core.instrument.Counter =
         registry?.counter(name, SOURCE_TAG, SOURCE_VALUE, CLUB_TAG, clubId.toString())
             ?: NoopCounter
-
-    private fun notifyBestEffort(notification: OpsDomainNotification) {
-        runCatching { opsPublisher.enqueue(notification) }
-    }
 
     private object NoopCounter : io.micrometer.core.instrument.Counter {
         override fun count(): Double = 0.0
