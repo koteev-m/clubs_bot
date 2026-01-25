@@ -35,9 +35,9 @@ private data class OpsChatConfigPayload(
     val chatId: Long,
     val bookingsThreadId: Int?,
     val checkinThreadId: Int?,
-    val guestListsThreadId: Int?,
+    val guestListsThreadId: Int? = null,
     val supportThreadId: Int?,
-    val alertsThreadId: Int?,
+    val alertsThreadId: Int? = null,
 )
 
 @Serializable
