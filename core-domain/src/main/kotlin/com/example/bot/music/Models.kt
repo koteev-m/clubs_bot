@@ -5,11 +5,16 @@ import java.time.Instant
 /** Source type of a music item. */
 enum class MusicSource { YOUTUBE, SOUNDCLOUD, SPOTIFY, FILE, LINK }
 
+/** Type of music item in the catalog. */
+enum class MusicItemType { TRACK, SET }
+
 /** Request to create a new music item. */
 data class MusicItemCreate(
     val clubId: Long?,
     val title: String,
     val dj: String?,
+    val description: String? = null,
+    val itemType: MusicItemType = MusicItemType.TRACK,
     val source: MusicSource,
     val sourceUrl: String?,
     val durationSec: Int?,
@@ -24,14 +29,57 @@ data class MusicItemView(
     val clubId: Long?,
     val title: String,
     val dj: String?,
+    val description: String?,
+    val itemType: MusicItemType,
     val source: MusicSource,
     val sourceUrl: String?,
+    val audioAssetId: Long?,
     val telegramFileId: String?,
     val durationSec: Int?,
     val coverUrl: String?,
+    val coverAssetId: Long?,
     val tags: List<String>?,
     val publishedAt: Instant?,
 )
+
+/** Update payload for a music item (null values mean "no change"). */
+data class MusicItemUpdate(
+    val clubId: Long? = null,
+    val title: String? = null,
+    val dj: String? = null,
+    val description: String? = null,
+    val itemType: MusicItemType? = null,
+    val source: MusicSource? = null,
+    val sourceUrl: String? = null,
+    val durationSec: Int? = null,
+    val coverUrl: String? = null,
+    val tags: List<String>? = null,
+)
+
+/** Stored media asset (audio or cover). */
+data class MusicAsset(
+    val id: Long,
+    val kind: MusicAssetKind,
+    val bytes: ByteArray,
+    val contentType: String,
+    val sha256: String,
+    val sizeBytes: Long,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+/** Media asset metadata without bytes. */
+data class MusicAssetMeta(
+    val id: Long,
+    val kind: MusicAssetKind,
+    val contentType: String,
+    val sha256: String,
+    val sizeBytes: Long,
+    val updatedAt: Instant,
+)
+
+/** Asset kind (audio or cover). */
+enum class MusicAssetKind { AUDIO, COVER }
 
 /** Request to create playlist. */
 data class PlaylistCreate(

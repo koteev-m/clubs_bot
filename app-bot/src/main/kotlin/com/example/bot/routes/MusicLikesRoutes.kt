@@ -4,11 +4,13 @@ import com.example.bot.booking.a3.CanonJson
 import com.example.bot.data.security.Role
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.matchesEtag
-import com.example.bot.music.Mixtape
 import com.example.bot.music.MixtapeService
 import com.example.bot.music.MusicLikesRepository
+import com.example.bot.music.MusicItemRepository
+import com.example.bot.music.MusicItemType
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
+import com.example.bot.routes.dto.MusicSetDto
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpHeaders
@@ -42,7 +44,7 @@ private data class LikeResponse(
 private data class MixtapeResponse(
     val userId: Long,
     val weekStart: String,
-    val items: List<Long>,
+    val items: List<MusicSetDto>,
     val generatedAt: String,
 )
 
@@ -52,6 +54,7 @@ private data class MixtapeResponse(
 fun Application.musicLikesRoutes(
     likesRepository: MusicLikesRepository,
     mixtapeService: MixtapeService,
+    itemsRepository: MusicItemRepository,
     clock: Clock = Clock.systemUTC(),
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
@@ -124,15 +127,39 @@ fun Application.musicLikesRoutes(
                 get("/mixtape") {
                     val context = call.rbacContext()
                     val mixtape = mixtapeService.buildWeeklyMixtape(context.user.id)
+                    val items =
+                        itemsRepository
+                            .findByIds(mixtape.items)
+                            .filter { it.publishedAt != null && it.itemType == MusicItemType.SET }
+                    val counts = likesRepository.countsForItems(items.map { it.id })
+                    val likedByUser =
+                        likesRepository.likedItemsForUser(context.user.id, items.map { it.id })
+                    val payload =
+                        items
+                            .sortedBy { mixtape.items.indexOf(it.id) }
+                            .map {
+                                MusicSetDto(
+                                    id = it.id,
+                                    title = it.title,
+                                    dj = it.dj,
+                                    description = it.description,
+                                    durationSec = it.durationSec,
+                                    coverUrl = it.coverAssetId?.let { _ -> "/api/music/items/${it.id}/cover" } ?: it.coverUrl,
+                                    audioUrl = it.audioAssetId?.let { _ -> "/api/music/items/${it.id}/audio" } ?: it.sourceUrl,
+                                    tags = it.tags,
+                                    likesCount = counts[it.id] ?: 0,
+                                    likedByMe = it.id in likedByUser,
+                                )
+                            }
                     val generatedAt = Instant.now(clock)
                     val response =
                         MixtapeResponse(
                             userId = mixtape.userId,
                             weekStart = mixtape.weekStart.toString(),
-                            items = mixtape.items,
+                            items = payload,
                             generatedAt = generatedAt.toString(),
                         )
-                    val etag = etagForMixtape(mixtape)
+                    val etag = etagForMixtapePayload(context.user.id, mixtape.weekStart, payload.map { it.id })
                     if (matchesEtag(call.request.headers[HttpHeaders.IfNoneMatch], etag)) {
                         logger.debug("music.mixtape.not_modified user_id={} etag={}", context.user.id, etag)
                         call.response.header(HttpHeaders.ETag, etag)
@@ -153,13 +180,13 @@ private data class MixtapeEtagPayload(
     val items: List<Long>,
 )
 
-private fun etagForMixtape(mixtape: Mixtape): String {
+private fun etagForMixtapePayload(userId: Long, weekStart: Instant, items: List<Long>): String {
     val json =
         CanonJson.encodeToString(
             MixtapeEtagPayload(
-                userId = mixtape.userId,
-                weekStart = mixtape.weekStart.toString(),
-                items = mixtape.items,
+                userId = userId,
+                weekStart = weekStart.toString(),
+                items = items,
             ),
         )
     val digest = MessageDigest.getInstance("SHA-256").digest(json.toByteArray())

@@ -7,10 +7,14 @@ import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.music.MusicItemCreate
 import com.example.bot.music.MusicItemRepository
+import com.example.bot.music.MusicItemType
+import com.example.bot.music.MusicItemUpdate
 import com.example.bot.music.MusicItemView
+import com.example.bot.music.MusicLikesRepository
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.MusicService
 import com.example.bot.music.MusicSource
+import com.example.bot.music.Like
 import com.example.bot.music.PlaylistCreate
 import com.example.bot.music.PlaylistFullView
 import com.example.bot.music.PlaylistView
@@ -298,6 +302,7 @@ class TrackOfNightTest {
                 MusicService(
                     itemsRepo = itemRepository,
                     playlistsRepo = playlistRepository,
+                    likesRepository = EmptyLikesRepository(),
                     clock = clock,
                     trackOfNightRepository = trackRepository,
                 )
@@ -345,11 +350,15 @@ class TrackOfNightTest {
             clubId = 1,
             title = "Track $id",
             dj = "DJ",
+            description = null,
+            itemType = MusicItemType.TRACK,
             source = MusicSource.SPOTIFY,
             sourceUrl = null,
+            audioAssetId = null,
             telegramFileId = null,
             durationSec = 120,
             coverUrl = null,
+            coverAssetId = null,
             tags = emptyList(),
             publishedAt = now,
         )
@@ -403,6 +412,12 @@ class TrackOfNightTest {
         private val items: List<MusicItemView>,
     ) : MusicItemRepository {
         override suspend fun create(req: MusicItemCreate, actor: UserId): MusicItemView = throw UnsupportedOperationException()
+        override suspend fun update(id: Long, req: MusicItemUpdate, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun setPublished(id: Long, publishedAt: Instant?, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun attachAudioAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun attachCoverAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun getById(id: Long): MusicItemView? = items.firstOrNull { it.id == id }
+        override suspend fun findByIds(ids: List<Long>): List<MusicItemView> = items.filter { it.id in ids }
 
         override suspend fun listActive(
             clubId: Long?,
@@ -410,9 +425,23 @@ class TrackOfNightTest {
             offset: Int,
             tag: String?,
             q: String?,
+            type: MusicItemType?,
         ): List<MusicItemView> = items.drop(offset).take(limit)
 
+        override suspend fun listAll(clubId: Long?, limit: Int, offset: Int, type: MusicItemType?): List<MusicItemView> =
+            items.drop(offset).take(limit)
+
         override suspend fun lastUpdatedAt(): Instant? = null
+    }
+
+    private class EmptyLikesRepository : MusicLikesRepository {
+        override suspend fun like(userId: Long, itemId: Long, now: Instant): Boolean = false
+        override suspend fun unlike(userId: Long, itemId: Long): Boolean = false
+        override suspend fun findUserLikesSince(userId: Long, since: Instant): List<Like> = emptyList()
+        override suspend fun findAllLikesSince(since: Instant): List<Like> = emptyList()
+        override suspend fun find(userId: Long, itemId: Long): Like? = null
+        override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> = emptyMap()
+        override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()
     }
 
     private class StubUserRepository : UserRepository {

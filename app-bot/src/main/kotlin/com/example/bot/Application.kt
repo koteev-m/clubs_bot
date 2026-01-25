@@ -23,6 +23,8 @@ import com.example.bot.music.MusicLikesRepository
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.MusicService
 import com.example.bot.music.MixtapeService
+import com.example.bot.music.MusicAssetRepository
+import com.example.bot.music.MusicItemRepository
 import com.example.bot.music.TrackOfNightRepository
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.HallPlansRepository
@@ -76,6 +78,7 @@ import com.example.bot.routes.adminTablesRoutes
 import com.example.bot.routes.hallPlanRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
+import com.example.bot.routes.adminMusicRoutes
 import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.musicLikesRoutes
 import com.example.bot.routes.ownerHealthRoutes
@@ -203,6 +206,8 @@ fun Application.module() {
     val adminClubsRepository by inject<AdminClubsRepository>()
     val adminHallsRepository by inject<AdminHallsRepository>()
     val hallPlansRepository by inject<HallPlansRepository>()
+    val musicItemsRepository by inject<MusicItemRepository>()
+    val musicAssetsRepository by inject<MusicAssetRepository>()
     val musicService by inject<MusicService>()
     val musicLikesRepository by inject<MusicLikesRepository>()
     val mixtapeService by inject<MixtapeService>()
@@ -321,6 +326,7 @@ fun Application.module() {
     adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
     adminHallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)
     adminTablesRoutes(adminTablesRepository = adminTablesRepository, adminHallsRepository = adminHallsRepository)
+    adminMusicRoutes(itemsRepository = musicItemsRepository, assetsRepository = musicAssetsRepository, clock = appClock)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository, layoutAssetsRepository = layoutAssetsRepository)
     hallPlanRoutes(hallPlansRepository = hallPlansRepository)
@@ -329,10 +335,17 @@ fun Application.module() {
         layoutRepository = layoutRepository,
         clock = appClock,
     )
-    musicRoutes(service = musicService)
+    musicRoutes(
+        service = musicService,
+        itemsRepository = musicItemsRepository,
+        likesRepository = musicLikesRepository,
+        assetsRepository = musicAssetsRepository,
+        mixtapeService = mixtapeService,
+    )
     musicLikesRoutes(
         likesRepository = musicLikesRepository,
         mixtapeService = mixtapeService,
+        itemsRepository = musicItemsRepository,
         clock = appClock,
     )
     trackOfNightRoutes(

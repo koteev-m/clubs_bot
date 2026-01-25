@@ -10,10 +10,13 @@ import com.example.bot.music.Mixtape
 import com.example.bot.music.MixtapeService
 import com.example.bot.music.MusicItemCreate
 import com.example.bot.music.MusicItemRepository
+import com.example.bot.music.MusicItemType
+import com.example.bot.music.MusicItemUpdate
 import com.example.bot.music.MusicItemView
 import com.example.bot.music.MusicLikesRepository
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.MusicService
+import com.example.bot.music.MusicSource
 import com.example.bot.music.PlaylistCreate
 import com.example.bot.music.PlaylistFullView
 import com.example.bot.music.PlaylistView
@@ -155,7 +158,10 @@ class MusicLikesRoutesTest {
             val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
             assertEquals(telegramId, body["userId"]!!.jsonPrimitive.long)
             assertEquals("2024-06-10T00:00:00Z", body["weekStart"]!!.jsonPrimitive.content)
-            assertEquals(listOf(10L, 20L), body["items"]!!.jsonArray.map { it.jsonPrimitive.long })
+            val items = body["items"]!!.jsonArray
+            assertEquals(2, items.size)
+            assertEquals(10L, items[0].jsonObject["id"]!!.jsonPrimitive.long)
+            assertEquals(20L, items[1].jsonObject["id"]!!.jsonPrimitive.long)
         }
 
     @Test
@@ -201,6 +207,7 @@ class MusicLikesRoutesTest {
                             MusicService(
                                 itemsRepo = FakeItemRepo(),
                                 playlistsRepo = FakePlaylistRepo(),
+                                likesRepository = emptyLikesRepository,
                                 clock = clock,
                                 trackOfNightRepository = EmptyTrackOfNightRepository(),
                             ),
@@ -209,6 +216,7 @@ class MusicLikesRoutesTest {
             musicLikesRoutes(
                 likesRepository = likesRepo,
                 mixtapeService = mixtapeServiceInstance,
+                itemsRepository = FakeItemRepo(),
                 clock = clock,
                 botTokenProvider = { "test" },
             )
@@ -246,6 +254,12 @@ class MusicLikesRoutesTest {
 
         override suspend fun find(userId: Long, itemId: Long): Like? = storage.firstOrNull { it.userId == userId && it.itemId == itemId }
 
+        override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> =
+            itemIds.associateWith { id -> storage.count { it.itemId == id } }
+
+        override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> =
+            storage.filter { it.userId == userId && it.itemId in itemIds }.mapTo(mutableSetOf()) { it.itemId }
+
         fun likesCount(): Int = storage.size
     }
 
@@ -267,13 +281,48 @@ class MusicLikesRoutesTest {
         override suspend fun findUserLikesSince(userId: Long, since: Instant): List<Like> = emptyList()
         override suspend fun findAllLikesSince(since: Instant): List<Like> = emptyList()
         override suspend fun find(userId: Long, itemId: Long): Like? = null
+        override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> = emptyMap()
+        override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()
     }
 
-    private class FakeItemRepo : MusicItemRepository {
+    private inner class FakeItemRepo : MusicItemRepository {
         override suspend fun create(req: MusicItemCreate, actor: UserId): MusicItemView = throw UnsupportedOperationException()
-        override suspend fun listActive(clubId: Long?, limit: Int, offset: Int, tag: String?, q: String?): List<MusicItemView> = emptyList()
+        override suspend fun update(id: Long, req: MusicItemUpdate, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun setPublished(id: Long, publishedAt: Instant?, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun attachAudioAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun attachCoverAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun getById(id: Long): MusicItemView? = musicItem(id)
+        override suspend fun findByIds(ids: List<Long>): List<MusicItemView> = ids.map { musicItem(it) }
+        override suspend fun listActive(
+            clubId: Long?,
+            limit: Int,
+            offset: Int,
+            tag: String?,
+            q: String?,
+            type: MusicItemType?,
+        ): List<MusicItemView> = emptyList()
+        override suspend fun listAll(clubId: Long?, limit: Int, offset: Int, type: MusicItemType?): List<MusicItemView> = emptyList()
         override suspend fun lastUpdatedAt(): Instant? = null
     }
+
+    private fun musicItem(id: Long): MusicItemView =
+        MusicItemView(
+            id = id,
+            clubId = null,
+            title = "Track $id",
+            dj = "DJ",
+            description = null,
+            itemType = MusicItemType.SET,
+            source = MusicSource.FILE,
+            sourceUrl = null,
+            audioAssetId = null,
+            telegramFileId = null,
+            durationSec = 120,
+            coverUrl = null,
+            coverAssetId = null,
+            tags = listOf("house"),
+            publishedAt = Instant.EPOCH,
+        )
 
     private class FakePlaylistRepo : MusicPlaylistRepository {
         override suspend fun create(req: PlaylistCreate, actor: UserId): PlaylistView = throw UnsupportedOperationException()

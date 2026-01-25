@@ -4,6 +4,8 @@ package com.example.bot.data.music
 
 import com.example.bot.music.MusicItemCreate
 import com.example.bot.music.MusicItemRepository
+import com.example.bot.music.MusicItemType
+import com.example.bot.music.MusicItemUpdate
 import com.example.bot.music.MusicItemView
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.MusicSource
@@ -14,6 +16,7 @@ import com.example.bot.music.UserId
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -36,11 +39,13 @@ class MusicItemRepositoryImpl(
                         it[clubId] = req.clubId
                         it[title] = req.title
                         it[dj] = req.dj
+                        it[description] = req.description
+                        it[itemType] = req.itemType.name
                         it[sourceType] = req.source.name
                         it[sourceUrl] = req.sourceUrl
                         it[durationSec] = req.durationSec
                         it[coverUrl] = req.coverUrl
-                        it[tags] = req.tags?.joinToString(",")
+                        it[tags] = req.tags?.takeIf { it.isNotEmpty() }?.joinToString(",")
                         it[publishedAt] = req.publishedAt?.atOffset(ZoneOffset.UTC)
                         it[createdBy] = actor
                     }.resultedValues!!
@@ -48,16 +53,112 @@ class MusicItemRepositoryImpl(
             row.toView()
         }
 
+    override suspend fun update(
+        id: Long,
+        req: MusicItemUpdate,
+        actor: UserId,
+    ): MusicItemView? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val updated =
+                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                    req.clubId?.let { value -> it[clubId] = value }
+                    req.title?.let { value -> it[title] = value }
+                    req.dj?.let { value -> it[dj] = value }
+                    req.description?.let { value -> it[description] = value }
+                    req.itemType?.let { value -> it[itemType] = value.name }
+                    req.source?.let { value -> it[sourceType] = value.name }
+                    req.sourceUrl?.let { value -> it[sourceUrl] = value }
+                    req.durationSec?.let { value -> it[durationSec] = value }
+                    req.coverUrl?.let { value -> it[coverUrl] = value }
+                    req.tags?.let { value -> it[tags] = value.takeIf { it.isNotEmpty() }?.joinToString(",") }
+                    it[updatedAt] = Instant.now().atOffset(ZoneOffset.UTC)
+                }
+            if (updated == 0) {
+                return@newSuspendedTransaction null
+            }
+            MusicItemsTable
+                .selectAll()
+                .where { MusicItemsTable.id eq id }
+                .firstOrNull()
+                ?.toView()
+        }
+
+    override suspend fun setPublished(
+        id: Long,
+        publishedAt: Instant?,
+        actor: UserId,
+    ): MusicItemView? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val updated =
+                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                    it[this.publishedAt] = publishedAt?.atOffset(ZoneOffset.UTC)
+                    it[updatedAt] = Instant.now().atOffset(ZoneOffset.UTC)
+                }
+            if (updated == 0) return@newSuspendedTransaction null
+            MusicItemsTable.selectAll().where { MusicItemsTable.id eq id }.firstOrNull()?.toView()
+        }
+
+    override suspend fun attachAudioAsset(
+        id: Long,
+        assetId: Long,
+        actor: UserId,
+    ): MusicItemView? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val updated =
+                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                    it[audioAssetId] = assetId
+                    it[updatedAt] = Instant.now().atOffset(ZoneOffset.UTC)
+                }
+            if (updated == 0) return@newSuspendedTransaction null
+            MusicItemsTable.selectAll().where { MusicItemsTable.id eq id }.firstOrNull()?.toView()
+        }
+
+    override suspend fun attachCoverAsset(
+        id: Long,
+        assetId: Long,
+        actor: UserId,
+    ): MusicItemView? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val updated =
+                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                    it[coverAssetId] = assetId
+                    it[updatedAt] = Instant.now().atOffset(ZoneOffset.UTC)
+                }
+            if (updated == 0) return@newSuspendedTransaction null
+            MusicItemsTable.selectAll().where { MusicItemsTable.id eq id }.firstOrNull()?.toView()
+        }
+
+    override suspend fun getById(id: Long): MusicItemView? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            MusicItemsTable
+                .selectAll()
+                .where { MusicItemsTable.id eq id }
+                .firstOrNull()
+                ?.toView()
+        }
+
+    override suspend fun findByIds(ids: List<Long>): List<MusicItemView> {
+        if (ids.isEmpty()) return emptyList()
+        return newSuspendedTransaction(Dispatchers.IO, db) {
+            MusicItemsTable
+                .selectAll()
+                .where { MusicItemsTable.id inList ids }
+                .map { it.toView() }
+        }
+    }
+
     override suspend fun listActive(
         clubId: Long?,
         limit: Int,
         offset: Int,
         tag: String?,
         q: String?,
+        type: MusicItemType?,
     ): List<MusicItemView> =
         newSuspendedTransaction(Dispatchers.IO, db) {
-            var cond: Op<Boolean> = MusicItemsTable.isActive eq true
+            var cond: Op<Boolean> = (MusicItemsTable.isActive eq true) and MusicItemsTable.publishedAt.isNotNull()
             if (clubId != null) cond = cond and (MusicItemsTable.clubId eq clubId)
+            if (type != null) cond = cond and (MusicItemsTable.itemType eq type.name)
             // tag filtering omitted for simplicity
             if (!q.isNullOrBlank()) {
                 val likeValue = "%$q%"
@@ -67,6 +168,24 @@ class MusicItemRepositoryImpl(
                 .selectAll()
                 .where { cond }
                 .orderBy(MusicItemsTable.publishedAt, SortOrder.DESC)
+                .limit(limit, offset.toLong())
+                .map { it.toView() }
+        }
+
+    override suspend fun listAll(
+        clubId: Long?,
+        limit: Int,
+        offset: Int,
+        type: MusicItemType?,
+    ): List<MusicItemView> =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            var cond: Op<Boolean> = MusicItemsTable.isActive eq true
+            if (clubId != null) cond = cond and (MusicItemsTable.clubId eq clubId)
+            if (type != null) cond = cond and (MusicItemsTable.itemType eq type.name)
+            MusicItemsTable
+                .selectAll()
+                .where { cond }
+                .orderBy(MusicItemsTable.updatedAt, SortOrder.DESC)
                 .limit(limit, offset.toLong())
                 .map { it.toView() }
         }
@@ -88,11 +207,15 @@ class MusicItemRepositoryImpl(
             clubId = this[MusicItemsTable.clubId],
             title = this[MusicItemsTable.title],
             dj = this[MusicItemsTable.dj],
+            description = this[MusicItemsTable.description],
+            itemType = MusicItemType.valueOf(this[MusicItemsTable.itemType]),
             source = MusicSource.valueOf(this[MusicItemsTable.sourceType]),
             sourceUrl = this[MusicItemsTable.sourceUrl],
+            audioAssetId = this[MusicItemsTable.audioAssetId],
             telegramFileId = this[MusicItemsTable.telegramFileId],
             durationSec = this[MusicItemsTable.durationSec],
             coverUrl = this[MusicItemsTable.coverUrl],
+            coverAssetId = this[MusicItemsTable.coverAssetId],
             tags = this[MusicItemsTable.tags]?.split(",")?.filter { it.isNotBlank() },
             publishedAt = this[MusicItemsTable.publishedAt]?.toInstant(),
         )
@@ -218,11 +341,15 @@ class MusicPlaylistRepositoryImpl(
             clubId = this[MusicItemsTable.clubId],
             title = this[MusicItemsTable.title],
             dj = this[MusicItemsTable.dj],
+            description = this[MusicItemsTable.description],
+            itemType = MusicItemType.valueOf(this[MusicItemsTable.itemType]),
             source = MusicSource.valueOf(this[MusicItemsTable.sourceType]),
             sourceUrl = this[MusicItemsTable.sourceUrl],
+            audioAssetId = this[MusicItemsTable.audioAssetId],
             telegramFileId = this[MusicItemsTable.telegramFileId],
             durationSec = this[MusicItemsTable.durationSec],
             coverUrl = this[MusicItemsTable.coverUrl],
+            coverAssetId = this[MusicItemsTable.coverAssetId],
             tags = this[MusicItemsTable.tags]?.split(",")?.filter { it.isNotBlank() },
             publishedAt = this[MusicItemsTable.publishedAt]?.toInstant(),
         )
