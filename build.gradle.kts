@@ -232,9 +232,11 @@ subprojects {
     tasks.withType<Test>().configureEach {
         val runIt =
             project.findProperty("runIT")?.toString()?.equals("true", ignoreCase = true) == true
-        useJUnitPlatform {
-            if (!runIt) {
-                excludeTags("it")
+        if (name != "itTest") {
+            useJUnitPlatform {
+                if (!runIt) {
+                    excludeTags("it")
+                }
             }
         }
     }
