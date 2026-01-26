@@ -15,13 +15,31 @@ CREATE TABLE IF NOT EXISTS music_assets (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE music_items
-    ADD CONSTRAINT IF NOT EXISTS fk_music_items_audio_asset
-        FOREIGN KEY (audio_asset_id) REFERENCES music_assets(id) ON DELETE SET NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_music_items_audio_asset'
+    ) THEN
+        ALTER TABLE music_items
+            ADD CONSTRAINT fk_music_items_audio_asset
+                FOREIGN KEY (audio_asset_id) REFERENCES music_assets(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
-ALTER TABLE music_items
-    ADD CONSTRAINT IF NOT EXISTS fk_music_items_cover_asset
-        FOREIGN KEY (cover_asset_id) REFERENCES music_assets(id) ON DELETE SET NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_music_items_cover_asset'
+    ) THEN
+        ALTER TABLE music_items
+            ADD CONSTRAINT fk_music_items_cover_asset
+                FOREIGN KEY (cover_asset_id) REFERENCES music_assets(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_music_items_type_published
     ON music_items(item_type, published_at DESC);

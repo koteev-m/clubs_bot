@@ -141,7 +141,9 @@ fun Application.musicRoutes(
                 call.response.header(HttpHeaders.ETag, etag)
                 call.respond(HttpStatusCode.OK, payload)
             }
+        }
 
+        route("/api/music") {
             get("/items/{id}/audio") {
                 val id = call.parameters["id"]?.toLongOrNull()
                 if (id == null || id <= 0) {
