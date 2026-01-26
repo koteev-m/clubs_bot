@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Tag
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
 import testing.RequiresDocker
+import java.security.MessageDigest
 import java.time.Instant
 
 @RequiresDocker
@@ -111,21 +113,27 @@ class RepositoryTest {
                         ),
                         actor = 1,
                     )
+                val audioBytes = "audio".toByteArray()
+                val coverBytes = "cover".toByteArray()
+                val audioSha = sha256Hex(audioBytes)
+                val coverSha = sha256Hex(coverBytes)
+                assertTrue(audioSha.matches(Regex("[0-9a-f]{64}")))
+                assertTrue(coverSha.matches(Regex("[0-9a-f]{64}")))
                 val audio =
                     assetsRepo.createAsset(
                         kind = MusicAssetKind.AUDIO,
-                        bytes = "audio".toByteArray(),
+                        bytes = audioBytes,
                         contentType = "audio/mpeg",
-                        sha256 = "audio-sha",
-                        sizeBytes = 5L,
+                        sha256 = audioSha,
+                        sizeBytes = audioBytes.size.toLong(),
                     )
                 val cover =
                     assetsRepo.createAsset(
                         kind = MusicAssetKind.COVER,
-                        bytes = "cover".toByteArray(),
+                        bytes = coverBytes,
                         contentType = "image/jpeg",
-                        sha256 = "cover-sha",
-                        sizeBytes = 5L,
+                        sha256 = coverSha,
+                        sizeBytes = coverBytes.size.toLong(),
                     )
                 val withAudio = itemsRepo.attachAudioAsset(created.id, audio.id, actor = 1)
                 val withCover = itemsRepo.attachCoverAsset(created.id, cover.id, actor = 1)
@@ -133,4 +141,9 @@ class RepositoryTest {
                 assertEquals(cover.id, withCover?.coverAssetId)
             }
         }
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        return digest.joinToString("") { "%02x".format(it) }
+    }
 }
