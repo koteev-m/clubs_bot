@@ -10,11 +10,15 @@ object MusicItemsTable : Table("music_items") {
     val clubId = long("club_id").nullable()
     val title = text("title")
     val dj = text("dj").nullable()
+    val description = text("description").nullable()
+    val itemType = text("item_type").default("TRACK")
     val sourceType = text("source_type")
     val sourceUrl = text("source_url").nullable()
+    val audioAssetId = long("audio_asset_id").nullable()
     val telegramFileId = text("telegram_file_id").nullable()
     val durationSec = integer("duration_sec").nullable()
     val coverUrl = text("cover_url").nullable()
+    val coverAssetId = long("cover_asset_id").nullable()
     val tags = text("tags").nullable()
     val publishedAt = timestampWithTimeZone("published_at").nullable()
     val isActive = bool("is_active").default(true)
@@ -70,4 +74,17 @@ object MusicTrackOfNightTable : Table("music_track_of_night") {
     init {
         index("idx_music_track_of_night_marked_at", false, markedAt)
     }
+}
+
+object MusicAssetsTable : Table("music_assets") {
+    val id = long("id").autoIncrement()
+    val kind = text("kind")
+    val bytes = binary("bytes")
+    val contentType = text("content_type")
+    val sha256 = text("sha256")
+    val sizeBytes = long("size_bytes")
+    val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
+    val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestamp())
+
+    override val primaryKey = PrimaryKey(id)
 }

@@ -3,6 +3,7 @@ package com.example.bot.music
 import com.example.bot.routes.dto.MusicItemDto
 import com.example.bot.routes.dto.MusicPlaylistDetailsDto
 import com.example.bot.routes.dto.MusicPlaylistDto
+import com.example.bot.routes.dto.MusicSetDto
 import com.example.bot.music.TrackOfNightRepository
 import java.security.MessageDigest
 import java.time.Clock
@@ -12,6 +13,7 @@ import java.util.Base64
 class MusicService(
     private val itemsRepo: MusicItemRepository,
     private val playlistsRepo: MusicPlaylistRepository,
+    private val likesRepository: MusicLikesRepository,
     private val clock: Clock,
     private val trackOfNightRepository: TrackOfNightRepository,
 ) {
@@ -42,11 +44,52 @@ class MusicService(
                     title = it.title,
                     artist = it.dj,
                     durationSec = it.durationSec,
-                    coverUrl = it.coverUrl,
+                    coverUrl = it.coverUrlFor(),
+                    audioUrl = it.audioUrlFor(),
                     isTrackOfNight = it.id == trackOfNightId,
                 )
             }
 
+        return etag to payload
+    }
+
+    suspend fun listSets(
+        limit: Int = 100,
+        userId: Long?,
+    ): Pair<String, List<MusicSetDto>> {
+        val items =
+            itemsRepo.listActive(
+                clubId = null,
+                limit = limit,
+                offset = 0,
+                tag = null,
+                q = null,
+                type = MusicItemType.SET,
+            )
+        val counts = likesRepository.countsForItems(items.map { it.id })
+        val likedByUser =
+            if (userId != null) {
+                likesRepository.likedItemsForUser(userId, items.map { it.id })
+            } else {
+                emptySet()
+            }
+        val updatedAt = itemsRepo.lastUpdatedAt()
+        val etag = etagForSets(items, counts, likedByUser, userId, updatedAt)
+        val payload =
+            items.map {
+                MusicSetDto(
+                    id = it.id,
+                    title = it.title,
+                    dj = it.dj,
+                    description = it.description,
+                    durationSec = it.durationSec,
+                    coverUrl = it.coverUrlFor(),
+                    audioUrl = it.audioUrlFor(),
+                    tags = it.tags,
+                    likesCount = counts[it.id] ?: 0,
+                    likedByMe = it.id in likedByUser,
+                )
+            }
         return etag to payload
     }
 
@@ -100,7 +143,8 @@ class MusicService(
                             title = it.title,
                             artist = it.dj,
                             durationSec = it.durationSec,
-                            coverUrl = it.coverUrl,
+                            coverUrl = it.coverUrlFor(),
+                            audioUrl = it.audioUrlFor(),
                             isTrackOfNight = it.id == trackOfNightId,
                         )
                     },
@@ -123,6 +167,35 @@ class MusicService(
             .withoutPadding()
             .encodeToString(hash)
             .take(ETAG_LENGTH)
+    }
+
+    private fun etagForSets(
+        items: List<MusicItemView>,
+        counts: Map<Long, Int>,
+        likedByUser: Set<Long>,
+        userId: Long?,
+        updatedAt: Instant?,
+    ): String {
+        val countsFingerprint =
+            counts
+                .entries
+                .sortedBy { it.key }
+                .joinToString("|") { "${it.key}:${it.value}" }
+        val likedFingerprint = likedByUser.sorted().joinToString(",")
+        val seed = "sets|likes=$countsFingerprint|liked=$likedFingerprint|user=${userId ?: 0}"
+        return etagFor(updatedAt, items.size, seed)
+    }
+
+    private fun MusicItemView.coverUrlFor(): String? {
+        return coverAssetId?.let { "/api/music/items/$id/cover" } ?: coverUrl
+    }
+
+    private fun MusicItemView.audioUrlFor(): String? {
+        return when {
+            audioAssetId != null -> "/api/music/items/$id/audio"
+            sourceUrl != null -> sourceUrl
+            else -> null
+        }
     }
 }
 

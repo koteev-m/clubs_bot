@@ -10,6 +10,9 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insertIgnore
+import org.jetbrains.exposed.sql.count
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.slice
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.time.Instant
@@ -64,6 +67,36 @@ class MusicLikesRepositoryImpl(
                 .firstOrNull()
                 ?.toLike()
         }
+
+    override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> {
+        if (itemIds.isEmpty()) return emptyMap()
+        return newSuspendedTransaction(Dispatchers.IO, db) {
+            val countExpr = MusicLikesTable.userId.count()
+            MusicLikesTable
+                .slice(MusicLikesTable.itemId, countExpr)
+                .selectAll()
+                .where { MusicLikesTable.itemId inList itemIds }
+                .groupBy(MusicLikesTable.itemId)
+                .associate { row ->
+                    val itemId = row[MusicLikesTable.itemId]
+                    val countLong: Long = row[countExpr]
+                    val count = if (countLong > Int.MAX_VALUE) Int.MAX_VALUE else countLong.toInt()
+                    itemId to count
+                }
+        }
+    }
+
+    override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> {
+        if (itemIds.isEmpty()) return emptySet()
+        return newSuspendedTransaction(Dispatchers.IO, db) {
+            MusicLikesTable
+                .slice(MusicLikesTable.itemId)
+                .selectAll()
+                .where { (MusicLikesTable.userId eq userId) and (MusicLikesTable.itemId inList itemIds) }
+                .map { it[MusicLikesTable.itemId] }
+                .toSet()
+        }
+    }
 
     private fun org.jetbrains.exposed.sql.ResultRow.toLike(): Like =
         Like(

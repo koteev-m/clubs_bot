@@ -49,6 +49,36 @@ class MixtapeService(
         )
     }
 
+    /**
+     * Builds the global mixtape of the week based on likes from all users.
+     */
+    suspend fun buildWeeklyGlobalMixtape(): Mixtape {
+        val now = Instant.now(clock)
+        val since = now.minus(Duration.ofDays(LIKES_WINDOW_DAYS))
+
+        val likedIds =
+            likesRepository.findAllLikesSince(since)
+                .groupBy { it.itemId }
+                .mapValues { (_, likes) -> likes.sortedByDescending { it.createdAt } }
+                .toList()
+                .sortedWith(
+                    compareByDescending<Pair<Long, List<Like>>> { it.second.size }
+                        .thenByDescending { it.second.first().createdAt }
+                        .thenBy { it.first },
+                )
+                .map { it.first }
+
+        val recommendations = recommend(exclude = likedIds.toSet(), limit = MAX_ITEMS - likedIds.size)
+        val items = (likedIds + recommendations).take(MAX_ITEMS)
+        val weekStart = computeWeekStart(now)
+
+        return Mixtape(
+            userId = 0L,
+            items = items,
+            weekStart = weekStart,
+        )
+    }
+
     private suspend fun recommend(exclude: Set<Long>, limit: Int): List<Long> {
         if (limit <= 0) return emptyList()
         val items: List<MusicItemDto> = musicService.listItems(limit = RECOMMENDATION_POOL).second

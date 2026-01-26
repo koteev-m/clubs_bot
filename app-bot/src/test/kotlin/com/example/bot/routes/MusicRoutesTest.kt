@@ -2,7 +2,10 @@ package com.example.bot.routes
 
 import com.example.bot.music.MusicItemCreate
 import com.example.bot.music.MusicItemRepository
+import com.example.bot.music.MusicItemType
+import com.example.bot.music.MusicItemUpdate
 import com.example.bot.music.MusicItemView
+import com.example.bot.music.MusicLikesRepository
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.MusicService
 import com.example.bot.music.MusicSource
@@ -48,11 +51,15 @@ class MusicRoutesTest {
                 clubId = null,
                 title = "Track A",
                 dj = "Artist 1",
+                description = null,
+                itemType = MusicItemType.TRACK,
                 source = MusicSource.SPOTIFY,
                 sourceUrl = null,
+                audioAssetId = null,
                 telegramFileId = null,
                 durationSec = 210,
                 coverUrl = "https://example.com/a.jpg",
+                coverAssetId = null,
                 tags = emptyList(),
                 publishedAt = updatedAt,
             ),
@@ -61,11 +68,15 @@ class MusicRoutesTest {
                 clubId = null,
                 title = "Track B",
                 dj = "Artist 2",
+                description = null,
+                itemType = MusicItemType.TRACK,
                 source = MusicSource.SPOTIFY,
                 sourceUrl = null,
+                audioAssetId = null,
                 telegramFileId = null,
                 durationSec = 180,
                 coverUrl = "https://example.com/b.jpg",
+                coverAssetId = null,
                 tags = emptyList(),
                 publishedAt = updatedAt,
             ),
@@ -84,13 +95,18 @@ class MusicRoutesTest {
 
     private val playlistItems = mapOf(10L to items)
 
+    private val itemsRepository = FakeMusicItemRepository(items, updatedAt)
+    private val likesRepository = FakeMusicLikesRepository()
+    private val assetsRepository = FakeMusicAssetsRepository()
     private val service =
         MusicService(
-            itemsRepo = FakeMusicItemRepository(items, updatedAt),
+            itemsRepo = itemsRepository,
             playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
+            likesRepository = likesRepository,
             clock = fixedClock,
             trackOfNightRepository = EmptyTrackOfNightRepository(),
         )
+    private val mixtapeService = com.example.bot.music.MixtapeService(likesRepository, service, fixedClock)
 
     @Test
     fun `items endpoint returns list and respects etag`() =
@@ -98,7 +114,7 @@ class MusicRoutesTest {
             // TELEGRAM_BOT_TOKEN отдаём через Gradle Test.environment(...)
             applicationDev {
                 install(ContentNegotiation) { json() }
-                musicRoutes(service)
+                musicRoutes(service, itemsRepository, likesRepository, assetsRepository, mixtapeService)
             }
 
             val initData = createInitData()
@@ -129,7 +145,7 @@ class MusicRoutesTest {
         testApplication {
             applicationDev {
                 install(ContentNegotiation) { json() }
-                musicRoutes(service)
+                musicRoutes(service, itemsRepository, likesRepository, assetsRepository, mixtapeService)
             }
 
             val response =
@@ -147,7 +163,7 @@ class MusicRoutesTest {
         testApplication {
             applicationDev {
                 install(ContentNegotiation) { json() }
-                musicRoutes(service)
+                musicRoutes(service, itemsRepository, likesRepository, assetsRepository, mixtapeService)
             }
 
             val okResponse =
@@ -186,13 +202,36 @@ class MusicRoutesTest {
             actor: UserId,
         ): MusicItemView = throw UnsupportedOperationException("Not implemented")
 
+        override suspend fun update(
+            id: Long,
+            req: MusicItemUpdate,
+            actor: UserId,
+        ): MusicItemView? = throw UnsupportedOperationException("Not implemented")
+
+        override suspend fun setPublished(id: Long, publishedAt: Instant?, actor: UserId): MusicItemView? =
+            throw UnsupportedOperationException("Not implemented")
+
+        override suspend fun attachAudioAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? =
+            throw UnsupportedOperationException("Not implemented")
+
+        override suspend fun attachCoverAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? =
+            throw UnsupportedOperationException("Not implemented")
+
+        override suspend fun getById(id: Long): MusicItemView? = items.firstOrNull { it.id == id }
+
+        override suspend fun findByIds(ids: List<Long>): List<MusicItemView> = items.filter { it.id in ids }
+
         override suspend fun listActive(
             clubId: Long?,
             limit: Int,
             offset: Int,
             tag: String?,
             q: String?,
+            type: MusicItemType?,
         ): List<MusicItemView> = items.drop(offset).take(limit)
+
+        override suspend fun listAll(clubId: Long?, limit: Int, offset: Int, type: MusicItemType?): List<MusicItemView> =
+            items.drop(offset).take(limit)
 
         override suspend fun lastUpdatedAt(): Instant? = updatedAt
     }
@@ -239,6 +278,39 @@ class MusicRoutesTest {
 
         override suspend fun lastUpdatedAt(): Instant? = updatedAt
     }
+
+    private class FakeMusicLikesRepository : MusicLikesRepository {
+        override suspend fun like(userId: Long, itemId: Long, now: Instant): Boolean = true
+
+        override suspend fun unlike(userId: Long, itemId: Long): Boolean = true
+
+        override suspend fun findUserLikesSince(userId: Long, since: Instant): List<com.example.bot.music.Like> = emptyList()
+
+        override suspend fun findAllLikesSince(since: Instant): List<com.example.bot.music.Like> = emptyList()
+
+        override suspend fun find(userId: Long, itemId: Long): com.example.bot.music.Like? = null
+
+        override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> = emptyMap()
+
+        override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()
+    }
+
+    private class FakeMusicAssetsRepository : com.example.bot.music.MusicAssetRepository {
+        override suspend fun createAsset(
+            kind: com.example.bot.music.MusicAssetKind,
+            bytes: ByteArray,
+            contentType: String,
+            sha256: String,
+            sizeBytes: Long,
+        ): com.example.bot.music.MusicAsset {
+            throw UnsupportedOperationException("Not implemented")
+        }
+
+        override suspend fun getAsset(id: Long): com.example.bot.music.MusicAsset? = null
+
+        override suspend fun getAssetMeta(id: Long): com.example.bot.music.MusicAssetMeta? = null
+    }
+
 
     private class EmptyTrackOfNightRepository : TrackOfNightRepository {
         override suspend fun setTrackOfNight(

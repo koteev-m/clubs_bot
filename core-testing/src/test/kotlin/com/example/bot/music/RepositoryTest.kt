@@ -53,17 +53,17 @@ class RepositoryTest {
                 val created =
                     repo.create(
                         MusicItemCreate(
-                            null,
-                            "Test",
-                            "DJ",
-                            MusicSource.YOUTUBE,
-                            "http://x",
-                            60,
-                            null,
-                            listOf(
-                                "tag",
-                            ),
-                            Instant.EPOCH,
+                            clubId = null,
+                            title = "Test",
+                            dj = "DJ",
+                            description = null,
+                            itemType = MusicItemType.TRACK,
+                            source = MusicSource.YOUTUBE,
+                            sourceUrl = "http://x",
+                            durationSec = 60,
+                            coverUrl = null,
+                            tags = listOf("tag"),
+                            publishedAt = Instant.EPOCH,
                         ),
                         actor = 1,
                     )

@@ -2,6 +2,8 @@ package com.example.bot.music
 
 import com.example.bot.music.MusicItemCreate
 import com.example.bot.music.MusicItemRepository
+import com.example.bot.music.MusicItemType
+import com.example.bot.music.MusicItemUpdate
 import com.example.bot.music.MusicItemView
 import com.example.bot.music.MusicPlaylistRepository
 import com.example.bot.music.MusicSource
@@ -105,6 +107,7 @@ class MixtapeServiceTest {
             MusicService(
                 itemsRepo = FakeMusicItemRepository(items, updatedAt = now),
                 playlistsRepo = FakeMusicPlaylistRepository(updatedAt = now),
+                likesRepository = likesRepository,
                 clock = clock,
                 trackOfNightRepository = EmptyTrackOfNightRepository(),
             )
@@ -117,11 +120,15 @@ class MixtapeServiceTest {
             clubId = null,
             title = title,
             dj = null,
+            description = null,
+            itemType = MusicItemType.SET,
             source = MusicSource.SPOTIFY,
             sourceUrl = null,
+            audioAssetId = null,
             telegramFileId = null,
             durationSec = 120,
             coverUrl = null,
+            coverAssetId = null,
             tags = emptyList(),
             publishedAt = now,
         )
@@ -147,6 +154,12 @@ class MixtapeServiceTest {
 
         override suspend fun find(userId: Long, itemId: Long): Like? = likes.firstOrNull { it.userId == userId && it.itemId == itemId }
 
+        override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> =
+            itemIds.associateWith { id -> likes.count { it.itemId == id } }
+
+        override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> =
+            likes.filter { it.userId == userId && it.itemId in itemIds }.mapTo(mutableSetOf()) { it.itemId }
+
         fun addLike(like: Like) {
             likes += like
         }
@@ -157,6 +170,12 @@ class MixtapeServiceTest {
         private val updatedAt: Instant?,
     ) : MusicItemRepository {
         override suspend fun create(req: MusicItemCreate, actor: UserId): MusicItemView = throw UnsupportedOperationException()
+        override suspend fun update(id: Long, req: MusicItemUpdate, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun setPublished(id: Long, publishedAt: Instant?, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun attachAudioAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun attachCoverAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
+        override suspend fun getById(id: Long): MusicItemView? = items.firstOrNull { it.id == id }
+        override suspend fun findByIds(ids: List<Long>): List<MusicItemView> = items.filter { it.id in ids }
 
         override suspend fun listActive(
             clubId: Long?,
@@ -164,7 +183,11 @@ class MixtapeServiceTest {
             offset: Int,
             tag: String?,
             q: String?,
+            type: MusicItemType?,
         ): List<MusicItemView> = items.drop(offset).take(limit)
+
+        override suspend fun listAll(clubId: Long?, limit: Int, offset: Int, type: MusicItemType?): List<MusicItemView> =
+            items.drop(offset).take(limit)
 
         override suspend fun lastUpdatedAt(): Instant? = updatedAt
     }

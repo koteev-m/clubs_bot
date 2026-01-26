@@ -11,6 +11,7 @@ data class MusicItemDto(
     val artist: String? = null,
     val durationSec: Int? = null,
     val coverUrl: String? = null,
+    val audioUrl: String? = null,
     val isTrackOfNight: Boolean = false,
 )
 
@@ -30,4 +31,18 @@ data class MusicPlaylistDetailsDto(
     val description: String? = null,
     val coverUrl: String? = null,
     val items: List<MusicItemDto> = emptyList(),
+)
+
+@Serializable
+data class MusicSetDto(
+    val id: Long,
+    val title: String,
+    val dj: String? = null,
+    val description: String? = null,
+    val durationSec: Int? = null,
+    val coverUrl: String? = null,
+    val audioUrl: String? = null,
+    val tags: List<String>? = null,
+    val likesCount: Int = 0,
+    val likedByMe: Boolean = false,
 )

@@ -9,12 +9,48 @@ interface MusicItemRepository {
         actor: UserId,
     ): MusicItemView
 
+    suspend fun update(
+        id: Long,
+        req: MusicItemUpdate,
+        actor: UserId,
+    ): MusicItemView?
+
+    suspend fun setPublished(
+        id: Long,
+        publishedAt: Instant?,
+        actor: UserId,
+    ): MusicItemView?
+
+    suspend fun attachAudioAsset(
+        id: Long,
+        assetId: Long,
+        actor: UserId,
+    ): MusicItemView?
+
+    suspend fun attachCoverAsset(
+        id: Long,
+        assetId: Long,
+        actor: UserId,
+    ): MusicItemView?
+
+    suspend fun getById(id: Long): MusicItemView?
+
+    suspend fun findByIds(ids: List<Long>): List<MusicItemView>
+
     suspend fun listActive(
         clubId: Long?,
         limit: Int,
         offset: Int,
         tag: String?,
         q: String?,
+        type: MusicItemType? = null,
+    ): List<MusicItemView>
+
+    suspend fun listAll(
+        clubId: Long?,
+        limit: Int,
+        offset: Int,
+        type: MusicItemType? = null,
     ): List<MusicItemView>
 
     suspend fun lastUpdatedAt(): Instant?
@@ -70,6 +106,16 @@ interface MusicLikesRepository {
      * Returns a specific like if present.
      */
     suspend fun find(userId: Long, itemId: Long): Like?
+
+    /**
+     * Returns like counts for given items.
+     */
+    suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int>
+
+    /**
+     * Returns ids of items liked by the user from the provided set.
+     */
+    suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long>
 }
 
 interface TrackOfNightRepository {
@@ -95,4 +141,18 @@ interface TrackOfNightRepository {
 
     /** Latest track of night across all sets if available. */
     suspend fun currentGlobal(): TrackOfNight?
+}
+
+interface MusicAssetRepository {
+    suspend fun createAsset(
+        kind: MusicAssetKind,
+        bytes: ByteArray,
+        contentType: String,
+        sha256: String,
+        sizeBytes: Long,
+    ): MusicAsset
+
+    suspend fun getAsset(id: Long): MusicAsset?
+
+    suspend fun getAssetMeta(id: Long): MusicAssetMeta?
 }
