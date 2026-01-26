@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchWaitlist, inviteWaitlistEntry, WaitlistEntry } from '../api/entry.api';
 import { useUiStore } from '../../../shared/store/ui';
 
@@ -12,7 +12,7 @@ export default function EntryWaitlistScreen({ clubId, eventId }: EntryWaitlistSc
   const [items, setItems] = useState<WaitlistEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!clubId || !eventId) {
       addToast('Укажите клуб и событие');
       return;
@@ -26,13 +26,13 @@ export default function EntryWaitlistScreen({ clubId, eventId }: EntryWaitlistSc
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast, clubId, eventId]);
 
   useEffect(() => {
     if (clubId && eventId) {
       void load();
     }
-  }, [clubId, eventId]);
+  }, [clubId, eventId, load]);
 
   const handleInvite = async (entry: WaitlistEntry) => {
     try {

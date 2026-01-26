@@ -21,6 +21,7 @@ BEGIN
         SELECT 1
         FROM pg_constraint
         WHERE conname = 'fk_music_items_audio_asset'
+          AND conrelid = 'music_items'::regclass
     ) THEN
         ALTER TABLE music_items
             ADD CONSTRAINT fk_music_items_audio_asset
@@ -34,6 +35,7 @@ BEGIN
         SELECT 1
         FROM pg_constraint
         WHERE conname = 'fk_music_items_cover_asset'
+          AND conrelid = 'music_items'::regclass
     ) THEN
         ALTER TABLE music_items
             ADD CONSTRAINT fk_music_items_cover_asset
