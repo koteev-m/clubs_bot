@@ -66,3 +66,16 @@ tasks.test {
     }
     systemProperty("FLYWAY_LOCATIONS", "classpath:db/migration,classpath:db/migration/postgresql")
 }
+
+val itTest by tasks.registering(Test::class) {
+    description = "Runs integration tests tagged with 'it'."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("it")
+        excludeTags.clear()
+    }
+    systemProperty("FLYWAY_LOCATIONS", "classpath:db/migration,classpath:db/migration/postgresql")
+    shouldRunAfter(tasks.test)
+}
