@@ -104,6 +104,42 @@ class MusicLikesRoutesTest {
     }
 
     @Test
+    fun `post like returns 404 for unpublished set`() = withLikesApp(
+        itemsRepository =
+            FakeItemRepo(
+                mapOf(
+                    50L to
+                        musicItem(50).copy(
+                            publishedAt = null,
+                        ),
+                ),
+            ),
+    ) { _ ->
+        val response = client.post("/api/music/items/50/like") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        response.assertNoStoreHeaders()
+    }
+
+    @Test
+    fun `delete like returns 404 for non set`() = withLikesApp(
+        itemsRepository =
+            FakeItemRepo(
+                mapOf(
+                    51L to
+                        musicItem(51).copy(
+                            itemType = MusicItemType.TRACK,
+                        ),
+                ),
+            ),
+    ) { _ ->
+        val response = client.delete("/api/music/items/51/like") { header("X-Telegram-Init-Data", "init") }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        response.assertNoStoreHeaders()
+    }
+
+    @Test
     fun `delete like removes record`() = withLikesApp { repo ->
         client.post("/api/music/items/12/like") { header("X-Telegram-Init-Data", "init") }
 
@@ -186,6 +222,7 @@ class MusicLikesRoutesTest {
     private fun withLikesApp(
         roles: Set<Role> = setOf(Role.GUEST),
         mixtapeService: MixtapeService? = null,
+        itemsRepository: MusicItemRepository = FakeItemRepo(),
         block: suspend ApplicationTestBuilder.(StubMusicLikesRepository) -> Unit,
     ) = testApplication {
         val likesRepo = StubMusicLikesRepository()
@@ -205,7 +242,7 @@ class MusicLikesRoutesTest {
                         likesRepository = emptyLikesRepository,
                         musicService =
                             MusicService(
-                                itemsRepo = FakeItemRepo(),
+                                itemsRepo = itemsRepository,
                                 playlistsRepo = FakePlaylistRepo(),
                                 likesRepository = emptyLikesRepository,
                                 clock = clock,
@@ -216,7 +253,7 @@ class MusicLikesRoutesTest {
             musicLikesRoutes(
                 likesRepository = likesRepo,
                 mixtapeService = mixtapeServiceInstance,
-                itemsRepository = FakeItemRepo(),
+                itemsRepository = itemsRepository,
                 clock = clock,
                 botTokenProvider = { "test" },
             )
@@ -285,14 +322,36 @@ class MusicLikesRoutesTest {
         override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()
     }
 
-    private inner class FakeItemRepo : MusicItemRepository {
+    private inner class FakeItemRepo(
+        private val itemsById: Map<Long, MusicItemView?> = emptyMap(),
+    ) : MusicItemRepository {
         override suspend fun create(req: MusicItemCreate, actor: UserId): MusicItemView = throw UnsupportedOperationException()
         override suspend fun update(id: Long, req: MusicItemUpdate, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
         override suspend fun setPublished(id: Long, publishedAt: Instant?, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
         override suspend fun attachAudioAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
         override suspend fun attachCoverAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = throw UnsupportedOperationException()
-        override suspend fun getById(id: Long): MusicItemView? = musicItem(id)
-        override suspend fun findByIds(ids: List<Long>): List<MusicItemView> = ids.map { musicItem(it) }
+        override suspend fun getById(id: Long): MusicItemView? =
+            if (itemsById.containsKey(id)) {
+                itemsById[id]
+            } else {
+                musicItem(id)
+            }
+
+        override suspend fun findByIds(ids: List<Long>): List<MusicItemView> {
+            val result = mutableListOf<MusicItemView>()
+            for (id in ids) {
+                val item =
+                    if (itemsById.containsKey(id)) {
+                        itemsById[id]
+                    } else {
+                        musicItem(id)
+                    }
+                if (item != null) {
+                    result += item
+                }
+            }
+            return result
+        }
         override suspend fun listActive(
             clubId: Long?,
             limit: Int,

@@ -77,6 +77,7 @@ fun Application.musicLikesRoutes(
             ) {
                 post("/items/{id}/like") {
                     val itemId = call.validItemId(logger) ?: return@post
+                    if (!call.ensurePublishedSet(itemsRepository, itemId, logger)) return@post
 
                     val userId = call.rbacContext().user.id
                     val now = Instant.now(clock)
@@ -96,6 +97,7 @@ fun Application.musicLikesRoutes(
 
                 delete("/items/{id}/like") {
                     val itemId = call.validItemId(logger) ?: return@delete
+                    if (!call.ensurePublishedSet(itemsRepository, itemId, logger)) return@delete
 
                     val userId = call.rbacContext().user.id
                     likesRepository.unlike(userId, itemId)
@@ -205,4 +207,21 @@ private suspend fun ApplicationCall.validItemId(logger: Logger): Long? {
         return null
     }
     return id
+}
+
+private suspend fun ApplicationCall.ensurePublishedSet(
+    itemsRepository: MusicItemRepository,
+    itemId: Long,
+    logger: Logger,
+): Boolean {
+    val item = itemsRepository.getById(itemId)
+    if (item == null || item.publishedAt == null || item.itemType != MusicItemType.SET) {
+        logger.info("music.likes.item_not_found item_id={}", itemId)
+        respond(
+            HttpStatusCode.NotFound,
+            mapOf("error" to "item_not_found"),
+        )
+        return false
+    }
+    return true
 }

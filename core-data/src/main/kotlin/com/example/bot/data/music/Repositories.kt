@@ -159,7 +159,9 @@ class MusicItemRepositoryImpl(
             var cond: Op<Boolean> = (MusicItemsTable.isActive eq true) and MusicItemsTable.publishedAt.isNotNull()
             if (clubId != null) cond = cond and (MusicItemsTable.clubId eq clubId)
             if (type != null) cond = cond and (MusicItemsTable.itemType eq type.name)
-            // tag filtering omitted for simplicity
+            if (!tag.isNullOrBlank()) {
+                cond = cond and (MusicItemsTable.tags like "%$tag%")
+            }
             if (!q.isNullOrBlank()) {
                 val likeValue = "%$q%"
                 cond = cond and ((MusicItemsTable.title like likeValue) or (MusicItemsTable.dj like likeValue))

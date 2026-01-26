@@ -35,6 +35,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -128,6 +129,8 @@ class MusicRoutesTest {
                 }
             println("DBG music items-first: status=${firstResponse.status} body=${firstResponse.bodyAsText()}")
             assertEquals(HttpStatusCode.OK, firstResponse.status)
+            assertEquals("no-store", firstResponse.headers[HttpHeaders.CacheControl])
+            assertEquals("X-Telegram-Init-Data", firstResponse.headers[HttpHeaders.Vary])
 
             val etag = firstResponse.headers[HttpHeaders.ETag]
             assertNotNull(etag)
@@ -141,6 +144,91 @@ class MusicRoutesTest {
                 }
             println("DBG music items-cached: status=${cachedResponse.status} body=${cachedResponse.bodyAsText()}")
             assertEquals(HttpStatusCode.NotModified, cachedResponse.status)
+        }
+
+    @Test
+    fun `sets endpoint supports pagination and headers`() =
+        testApplication {
+            val sets =
+                listOf(
+                    MusicItemView(
+                        id = 300,
+                        clubId = null,
+                        title = "Set 1",
+                        dj = "DJ 1",
+                        description = null,
+                        itemType = MusicItemType.SET,
+                        source = MusicSource.SPOTIFY,
+                        sourceUrl = null,
+                        audioAssetId = null,
+                        telegramFileId = null,
+                        durationSec = 200,
+                        coverUrl = "https://example.com/set1.jpg",
+                        coverAssetId = null,
+                        tags = listOf("house"),
+                        publishedAt = updatedAt,
+                    ),
+                    MusicItemView(
+                        id = 301,
+                        clubId = null,
+                        title = "Set 2",
+                        dj = "DJ 2",
+                        description = null,
+                        itemType = MusicItemType.SET,
+                        source = MusicSource.SPOTIFY,
+                        sourceUrl = null,
+                        audioAssetId = null,
+                        telegramFileId = null,
+                        durationSec = 240,
+                        coverUrl = "https://example.com/set2.jpg",
+                        coverAssetId = null,
+                        tags = listOf("techno"),
+                        publishedAt = updatedAt,
+                    ),
+                    MusicItemView(
+                        id = 302,
+                        clubId = null,
+                        title = "Set 3",
+                        dj = "DJ 3",
+                        description = null,
+                        itemType = MusicItemType.SET,
+                        source = MusicSource.SPOTIFY,
+                        sourceUrl = null,
+                        audioAssetId = null,
+                        telegramFileId = null,
+                        durationSec = 260,
+                        coverUrl = "https://example.com/set3.jpg",
+                        coverAssetId = null,
+                        tags = listOf("house"),
+                        publishedAt = updatedAt,
+                    ),
+                )
+            val repo = FakeMusicItemRepository(sets, updatedAt)
+            val localService =
+                MusicService(
+                    itemsRepo = repo,
+                    playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
+                    likesRepository = likesRepository,
+                    clock = fixedClock,
+                    trackOfNightRepository = EmptyTrackOfNightRepository(),
+                )
+            val localMixtapeService = com.example.bot.music.MixtapeService(likesRepository, localService, fixedClock)
+
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                musicRoutes(localService, repo, likesRepository, assetsRepository, localMixtapeService)
+            }
+
+            val response =
+                client.get("/api/music/sets?limit=1&offset=1") {
+                    withInitData(createInitData())
+                }
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+            assertEquals("X-Telegram-Init-Data", response.headers[HttpHeaders.Vary])
+            val body = json.parseToJsonElement(response.bodyAsText())
+            assertEquals(1, body.jsonArray.size)
+            assertEquals(301L, body.jsonArray.first().jsonObject["id"]!!.jsonPrimitive.long)
         }
 
     @Test
@@ -392,7 +480,22 @@ class MusicRoutesTest {
             tag: String?,
             q: String?,
             type: MusicItemType?,
-        ): List<MusicItemView> = items.drop(offset).take(limit)
+        ): List<MusicItemView> {
+            var filtered = items
+            if (type != null) {
+                filtered = filtered.filter { it.itemType == type }
+            }
+            if (!tag.isNullOrBlank()) {
+                filtered = filtered.filter { it.tags?.contains(tag) == true }
+            }
+            if (!q.isNullOrBlank()) {
+                filtered =
+                    filtered.filter {
+                        it.title.contains(q, ignoreCase = true) || (it.dj?.contains(q, ignoreCase = true) ?: false)
+                    }
+            }
+            return filtered.drop(offset).take(limit)
+        }
 
         override suspend fun listAll(clubId: Long?, limit: Int, offset: Int, type: MusicItemType?): List<MusicItemView> =
             items.drop(offset).take(limit)
