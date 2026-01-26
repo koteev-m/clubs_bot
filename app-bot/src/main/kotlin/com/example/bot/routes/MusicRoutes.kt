@@ -121,8 +121,9 @@ fun Application.musicRoutes(
                         if (!call.requireMiniAppAuth()) return@get
                         val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
                         val (etag, items) = service.listItems(limit = DEFAULT_LIMIT)
-                        if (ifNoneMatch == etag) {
+                        if (matchesEtag(ifNoneMatch, etag)) {
                             logger.debug("music.items.not_modified etag={}", etag)
+                            call.response.header(HttpHeaders.ETag, etag)
                             call.respond(HttpStatusCode.NotModified)
                             return@get
                         }
@@ -147,8 +148,9 @@ fun Application.musicRoutes(
                     val q = call.request.queryParameters["q"]?.trim()?.takeIf { it.isNotBlank() }
                     val userId = call.attributes[MiniAppUserKey].id
                     val (etag, items) = service.listSets(limit = limit, offset = offset, tag = tag, q = q, userId = userId)
-                    if (ifNoneMatch == etag) {
+                    if (matchesEtag(ifNoneMatch, etag)) {
                         logger.debug("music.sets.not_modified etag={}", etag)
+                        call.response.header(HttpHeaders.ETag, etag)
                         call.respond(HttpStatusCode.NotModified)
                         return@get
                     }
@@ -163,8 +165,9 @@ fun Application.musicRoutes(
                     if (!call.requireMiniAppAuth()) return@get
                     val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
                     val (etag, playlists) = service.listPlaylists(limit = DEFAULT_LIMIT)
-                    if (ifNoneMatch == etag) {
+                    if (matchesEtag(ifNoneMatch, etag)) {
                         logger.debug("music.playlists.not_modified etag={}", etag)
+                        call.response.header(HttpHeaders.ETag, etag)
                         call.respond(HttpStatusCode.NotModified)
                         return@get
                     }
@@ -189,8 +192,9 @@ fun Application.musicRoutes(
                         return@get
                     }
                     val (etag, payload) = result
-                    if (ifNoneMatch == etag) {
+                    if (matchesEtag(ifNoneMatch, etag)) {
                         logger.debug("music.playlists.not_modified id={} etag={}", id, etag)
+                        call.response.header(HttpHeaders.ETag, etag)
                         call.respond(HttpStatusCode.NotModified)
                         return@get
                     }

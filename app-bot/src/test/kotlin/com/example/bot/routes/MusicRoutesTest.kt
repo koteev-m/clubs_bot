@@ -144,6 +144,16 @@ class MusicRoutesTest {
                 }
             println("DBG music items-cached: status=${cachedResponse.status} body=${cachedResponse.bodyAsText()}")
             assertEquals(HttpStatusCode.NotModified, cachedResponse.status)
+
+            val cachedQuoted =
+                client.get("/api/music/items") {
+                    withInitData(initData)
+                    header(HttpHeaders.IfNoneMatch, "\"$etag\"")
+                }
+            assertEquals(HttpStatusCode.NotModified, cachedQuoted.status)
+            assertEquals(etag, cachedQuoted.headers[HttpHeaders.ETag])
+            assertEquals("no-store", cachedQuoted.headers[HttpHeaders.CacheControl])
+            assertEquals("X-Telegram-Init-Data", cachedQuoted.headers[HttpHeaders.Vary])
         }
 
     @Test
@@ -226,9 +236,21 @@ class MusicRoutesTest {
             assertEquals(HttpStatusCode.OK, response.status)
             assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
             assertEquals("X-Telegram-Init-Data", response.headers[HttpHeaders.Vary])
+            val etag = response.headers[HttpHeaders.ETag]
+            assertNotNull(etag)
             val body = json.parseToJsonElement(response.bodyAsText())
             assertEquals(1, body.jsonArray.size)
             assertEquals(301L, body.jsonArray.first().jsonObject["id"]!!.jsonPrimitive.long)
+
+            val cachedResponse =
+                client.get("/api/music/sets?limit=1&offset=1") {
+                    withInitData(createInitData())
+                    header(HttpHeaders.IfNoneMatch, "\"$etag\"")
+                }
+            assertEquals(HttpStatusCode.NotModified, cachedResponse.status)
+            assertEquals(etag, cachedResponse.headers[HttpHeaders.ETag])
+            assertEquals("no-store", cachedResponse.headers[HttpHeaders.CacheControl])
+            assertEquals("X-Telegram-Init-Data", cachedResponse.headers[HttpHeaders.Vary])
         }
 
     @Test
