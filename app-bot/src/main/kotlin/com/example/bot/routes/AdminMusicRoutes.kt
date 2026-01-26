@@ -22,6 +22,8 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
+import io.ktor.server.plugins.requestsize.RequestSizeLimit
+import io.ktor.server.plugins.requestsize.maxRequestSize
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
@@ -41,6 +43,7 @@ import java.time.Instant
 
 private const val MAX_AUDIO_SIZE_BYTES = 50L * 1024 * 1024
 private const val MAX_COVER_SIZE_BYTES = 5L * 1024 * 1024
+private const val MULTIPART_OVERHEAD_BYTES = 256L * 1024
 private const val FILE_FIELD = "file"
 private val AUDIO_CONTENT_TYPES =
     setOf(
@@ -341,118 +344,130 @@ fun Application.adminMusicRoutes(
                     call.respond(HttpStatusCode.OK, updated.toAdminResponse())
                 }
 
-                put("/music/items/{id}/audio") {
-                    val id = call.parameters["id"]?.toLongOrNull()
-                    if (id == null || id <= 0) {
-                        return@put call.respondError(
-                            HttpStatusCode.BadRequest,
-                            ErrorCodes.validation_error,
-                            details = mapOf("id" to "must_be_positive"),
-                        )
+                route("/music/items/{id}/audio") {
+                    install(RequestSizeLimit) {
+                        maxRequestSize = MAX_AUDIO_SIZE_BYTES + MULTIPART_OVERHEAD_BYTES
                     }
-                    val item = itemsRepository.getById(id)
-                        ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                    if (!call.isAllowedForClub(item.clubId)) {
-                        return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
-                    }
-                    val upload =
-                        when (val result = call.receiveUpload(MAX_AUDIO_SIZE_BYTES, AUDIO_CONTENT_TYPES)) {
-                            is MusicUploadResult.Ok -> result
-                            is MusicUploadResult.Error -> {
-                                return@put call.respondError(result.status, result.code, details = result.details)
-                            }
+
+                    put {
+                        val id = call.parameters["id"]?.toLongOrNull()
+                        if (id == null || id <= 0) {
+                            return@put call.respondError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.validation_error,
+                                details = mapOf("id" to "must_be_positive"),
+                            )
                         }
-                    val asset =
-                        assetsRepository.createAsset(
-                            kind = MusicAssetKind.AUDIO,
-                            bytes = upload.bytes,
-                            contentType = upload.contentType.toString(),
-                            sha256 = upload.sha256,
-                            sizeBytes = upload.sizeBytes,
-                        )
-                    val updated =
-                        itemsRepository.attachAudioAsset(
-                            id = id,
-                            assetId = asset.id,
-                            actor = call.rbacContext().user.id,
-                        )
+                        val item = itemsRepository.getById(id)
                             ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                    logger.info(
-                        "admin.music.audio.upload item_id={} asset_id={} size_bytes={} by={}",
-                        id,
-                        asset.id,
-                        asset.sizeBytes,
-                        call.rbacContext().user.id,
-                    )
-                    call.respond(
-                        HttpStatusCode.OK,
-                        AssetUploadResponse(
-                            itemId = updated.id,
-                            assetId = asset.id,
-                            kind = MusicAssetKind.AUDIO,
-                            contentType = asset.contentType,
-                            sha256 = asset.sha256,
-                            sizeBytes = asset.sizeBytes,
-                            updatedAt = asset.updatedAt.toString(),
-                        ),
-                    )
+                        if (!call.isAllowedForClub(item.clubId)) {
+                            return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                        }
+                        val upload =
+                            when (val result = call.receiveUpload(MAX_AUDIO_SIZE_BYTES, AUDIO_CONTENT_TYPES)) {
+                                is MusicUploadResult.Ok -> result
+                                is MusicUploadResult.Error -> {
+                                    return@put call.respondError(result.status, result.code, details = result.details)
+                                }
+                            }
+                        val asset =
+                            assetsRepository.createAsset(
+                                kind = MusicAssetKind.AUDIO,
+                                bytes = upload.bytes,
+                                contentType = upload.contentType.toString(),
+                                sha256 = upload.sha256,
+                                sizeBytes = upload.sizeBytes,
+                            )
+                        val updated =
+                            itemsRepository.attachAudioAsset(
+                                id = id,
+                                assetId = asset.id,
+                                actor = call.rbacContext().user.id,
+                            )
+                                ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                        logger.info(
+                            "admin.music.audio.upload item_id={} asset_id={} size_bytes={} by={}",
+                            id,
+                            asset.id,
+                            asset.sizeBytes,
+                            call.rbacContext().user.id,
+                        )
+                        call.respond(
+                            HttpStatusCode.OK,
+                            AssetUploadResponse(
+                                itemId = updated.id,
+                                assetId = asset.id,
+                                kind = MusicAssetKind.AUDIO,
+                                contentType = asset.contentType,
+                                sha256 = asset.sha256,
+                                sizeBytes = asset.sizeBytes,
+                                updatedAt = asset.updatedAt.toString(),
+                            ),
+                        )
+                    }
                 }
 
-                put("/music/items/{id}/cover") {
-                    val id = call.parameters["id"]?.toLongOrNull()
-                    if (id == null || id <= 0) {
-                        return@put call.respondError(
-                            HttpStatusCode.BadRequest,
-                            ErrorCodes.validation_error,
-                            details = mapOf("id" to "must_be_positive"),
-                        )
+                route("/music/items/{id}/cover") {
+                    install(RequestSizeLimit) {
+                        maxRequestSize = MAX_COVER_SIZE_BYTES + MULTIPART_OVERHEAD_BYTES
                     }
-                    val item = itemsRepository.getById(id)
-                        ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                    if (!call.isAllowedForClub(item.clubId)) {
-                        return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
-                    }
-                    val upload =
-                        when (val result = call.receiveUpload(MAX_COVER_SIZE_BYTES, COVER_CONTENT_TYPES)) {
-                            is MusicUploadResult.Ok -> result
-                            is MusicUploadResult.Error -> {
-                                return@put call.respondError(result.status, result.code, details = result.details)
-                            }
+
+                    put {
+                        val id = call.parameters["id"]?.toLongOrNull()
+                        if (id == null || id <= 0) {
+                            return@put call.respondError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.validation_error,
+                                details = mapOf("id" to "must_be_positive"),
+                            )
                         }
-                    val asset =
-                        assetsRepository.createAsset(
-                            kind = MusicAssetKind.COVER,
-                            bytes = upload.bytes,
-                            contentType = upload.contentType.toString(),
-                            sha256 = upload.sha256,
-                            sizeBytes = upload.sizeBytes,
-                        )
-                    val updated =
-                        itemsRepository.attachCoverAsset(
-                            id = id,
-                            assetId = asset.id,
-                            actor = call.rbacContext().user.id,
-                        )
+                        val item = itemsRepository.getById(id)
                             ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                    logger.info(
-                        "admin.music.cover.upload item_id={} asset_id={} size_bytes={} by={}",
-                        id,
-                        asset.id,
-                        asset.sizeBytes,
-                        call.rbacContext().user.id,
-                    )
-                    call.respond(
-                        HttpStatusCode.OK,
-                        AssetUploadResponse(
-                            itemId = updated.id,
-                            assetId = asset.id,
-                            kind = MusicAssetKind.COVER,
-                            contentType = asset.contentType,
-                            sha256 = asset.sha256,
-                            sizeBytes = asset.sizeBytes,
-                            updatedAt = asset.updatedAt.toString(),
-                        ),
-                    )
+                        if (!call.isAllowedForClub(item.clubId)) {
+                            return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                        }
+                        val upload =
+                            when (val result = call.receiveUpload(MAX_COVER_SIZE_BYTES, COVER_CONTENT_TYPES)) {
+                                is MusicUploadResult.Ok -> result
+                                is MusicUploadResult.Error -> {
+                                    return@put call.respondError(result.status, result.code, details = result.details)
+                                }
+                            }
+                        val asset =
+                            assetsRepository.createAsset(
+                                kind = MusicAssetKind.COVER,
+                                bytes = upload.bytes,
+                                contentType = upload.contentType.toString(),
+                                sha256 = upload.sha256,
+                                sizeBytes = upload.sizeBytes,
+                            )
+                        val updated =
+                            itemsRepository.attachCoverAsset(
+                                id = id,
+                                assetId = asset.id,
+                                actor = call.rbacContext().user.id,
+                            )
+                                ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                        logger.info(
+                            "admin.music.cover.upload item_id={} asset_id={} size_bytes={} by={}",
+                            id,
+                            asset.id,
+                            asset.sizeBytes,
+                            call.rbacContext().user.id,
+                        )
+                        call.respond(
+                            HttpStatusCode.OK,
+                            AssetUploadResponse(
+                                itemId = updated.id,
+                                assetId = asset.id,
+                                kind = MusicAssetKind.COVER,
+                                contentType = asset.contentType,
+                                sha256 = asset.sha256,
+                                sizeBytes = asset.sizeBytes,
+                                updatedAt = asset.updatedAt.toString(),
+                            ),
+                        )
+                    }
                 }
             }
         }
