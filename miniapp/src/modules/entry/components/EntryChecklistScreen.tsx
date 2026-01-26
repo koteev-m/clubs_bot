@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchChecklist, updateChecklistItem, ChecklistItem } from '../api/entry.api';
 import { useUiStore } from '../../../shared/store/ui';
 
@@ -12,7 +12,7 @@ export default function EntryChecklistScreen({ clubId, eventId }: EntryChecklist
   const [items, setItems] = useState<ChecklistItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!clubId || !eventId) {
       addToast('Укажите клуб и событие');
       return;
@@ -26,13 +26,13 @@ export default function EntryChecklistScreen({ clubId, eventId }: EntryChecklist
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast, clubId, eventId]);
 
   useEffect(() => {
     if (clubId && eventId) {
       void load();
     }
-  }, [clubId, eventId]);
+  }, [clubId, eventId, load]);
 
   const toggleItem = async (item: ChecklistItem) => {
     try {

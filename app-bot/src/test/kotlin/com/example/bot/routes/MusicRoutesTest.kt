@@ -1,5 +1,8 @@
 package com.example.bot.routes
 
+import com.example.bot.music.MusicAsset
+import com.example.bot.music.MusicAssetKind
+import com.example.bot.music.MusicAssetMeta
 import com.example.bot.music.MusicItemCreate
 import com.example.bot.music.MusicItemRepository
 import com.example.bot.music.MusicItemType
@@ -183,6 +186,167 @@ class MusicRoutesTest {
             assertEquals(HttpStatusCode.NotFound, notFound.status)
         }
 
+    @Test
+    fun `asset endpoints available without init data only for published items`() =
+        testApplication {
+            val publishedItem =
+                MusicItemView(
+                    id = 100,
+                    clubId = null,
+                    title = "Published Track",
+                    dj = "DJ",
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.SPOTIFY,
+                    sourceUrl = null,
+                    audioAssetId = 10,
+                    telegramFileId = null,
+                    durationSec = 180,
+                    coverUrl = null,
+                    coverAssetId = 11,
+                    tags = emptyList(),
+                    publishedAt = updatedAt,
+                )
+            val unpublishedItem = publishedItem.copy(id = 101, publishedAt = null)
+            val repo = FakeMusicItemRepository(listOf(publishedItem, unpublishedItem), updatedAt)
+            val assetMetaAudio =
+                MusicAssetMeta(
+                    id = 10,
+                    kind = MusicAssetKind.AUDIO,
+                    contentType = "audio/mpeg",
+                    sha256 = "audio-sha",
+                    sizeBytes = 4,
+                    updatedAt = updatedAt,
+                )
+            val assetMetaCover =
+                MusicAssetMeta(
+                    id = 11,
+                    kind = MusicAssetKind.COVER,
+                    contentType = "image/jpeg",
+                    sha256 = "cover-sha",
+                    sizeBytes = 3,
+                    updatedAt = updatedAt,
+                )
+            val assetsRepo =
+                FakeMusicAssetsRepository(
+                    assets =
+                        mapOf(
+                            10L to
+                                MusicAsset(
+                                    id = 10,
+                                    kind = MusicAssetKind.AUDIO,
+                                    bytes = byteArrayOf(1, 2, 3, 4),
+                                    contentType = assetMetaAudio.contentType,
+                                    sha256 = assetMetaAudio.sha256,
+                                    sizeBytes = 4,
+                                    createdAt = updatedAt,
+                                    updatedAt = updatedAt,
+                                ),
+                            11L to
+                                MusicAsset(
+                                    id = 11,
+                                    kind = MusicAssetKind.COVER,
+                                    bytes = byteArrayOf(5, 6, 7),
+                                    contentType = assetMetaCover.contentType,
+                                    sha256 = assetMetaCover.sha256,
+                                    sizeBytes = 3,
+                                    createdAt = updatedAt,
+                                    updatedAt = updatedAt,
+                                ),
+                        ),
+                    metas = mapOf(10L to assetMetaAudio, 11L to assetMetaCover),
+                )
+            val localService =
+                MusicService(
+                    itemsRepo = repo,
+                    playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
+                    likesRepository = likesRepository,
+                    clock = fixedClock,
+                    trackOfNightRepository = EmptyTrackOfNightRepository(),
+                )
+            val localMixtapeService = com.example.bot.music.MixtapeService(likesRepository, localService, fixedClock)
+
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                musicRoutes(localService, repo, likesRepository, assetsRepo, localMixtapeService)
+            }
+
+            val audioOk = client.get("/api/music/items/100/audio")
+            assertEquals(HttpStatusCode.OK, audioOk.status)
+            val coverOk = client.get("/api/music/items/100/cover")
+            assertEquals(HttpStatusCode.OK, coverOk.status)
+
+            val audioHidden = client.get("/api/music/items/101/audio")
+            assertEquals(HttpStatusCode.NotFound, audioHidden.status)
+            val coverHidden = client.get("/api/music/items/101/cover")
+            assertEquals(HttpStatusCode.NotFound, coverHidden.status)
+        }
+
+    @Test
+    fun `asset endpoints return 304 with quoted etag without reading bytes`() =
+        testApplication {
+            val publishedItem =
+                MusicItemView(
+                    id = 200,
+                    clubId = null,
+                    title = "Published Track",
+                    dj = "DJ",
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.SPOTIFY,
+                    sourceUrl = null,
+                    audioAssetId = 20,
+                    telegramFileId = null,
+                    durationSec = 180,
+                    coverUrl = null,
+                    coverAssetId = null,
+                    tags = emptyList(),
+                    publishedAt = updatedAt,
+                )
+            val repo = FakeMusicItemRepository(listOf(publishedItem), updatedAt)
+            val assetMeta =
+                MusicAssetMeta(
+                    id = 20,
+                    kind = MusicAssetKind.AUDIO,
+                    contentType = "audio/mpeg",
+                    sha256 = "abc",
+                    sizeBytes = 4,
+                    updatedAt = updatedAt,
+                )
+            var getAssetCalled = false
+            val assetsRepo =
+                FakeMusicAssetsRepository(
+                    metas = mapOf(20L to assetMeta),
+                    onGetAsset = {
+                        getAssetCalled = true
+                        error("getAsset should not be called when If-None-Match matches")
+                    },
+                )
+            val localService =
+                MusicService(
+                    itemsRepo = repo,
+                    playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
+                    likesRepository = likesRepository,
+                    clock = fixedClock,
+                    trackOfNightRepository = EmptyTrackOfNightRepository(),
+                )
+            val localMixtapeService = com.example.bot.music.MixtapeService(likesRepository, localService, fixedClock)
+
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                musicRoutes(localService, repo, likesRepository, assetsRepo, localMixtapeService)
+            }
+
+            val response =
+                client.get("/api/music/items/200/audio") {
+                    header(HttpHeaders.IfNoneMatch, "\"abc\"")
+                }
+            assertEquals(HttpStatusCode.NotModified, response.status)
+            assertEquals("abc", response.headers[HttpHeaders.ETag])
+            assertEquals("private, max-age=3600, must-revalidate", response.headers[HttpHeaders.CacheControl])
+            assertEquals(false, getAssetCalled)
+        }
+
     private fun createInitData(): String {
         val params =
             linkedMapOf(
@@ -295,7 +459,11 @@ class MusicRoutesTest {
         override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()
     }
 
-    private class FakeMusicAssetsRepository : com.example.bot.music.MusicAssetRepository {
+    private class FakeMusicAssetsRepository(
+        private val assets: Map<Long, MusicAsset> = emptyMap(),
+        private val metas: Map<Long, MusicAssetMeta> = emptyMap(),
+        private val onGetAsset: ((Long) -> Unit)? = null,
+    ) : com.example.bot.music.MusicAssetRepository {
         override suspend fun createAsset(
             kind: com.example.bot.music.MusicAssetKind,
             bytes: ByteArray,
@@ -306,9 +474,12 @@ class MusicRoutesTest {
             throw UnsupportedOperationException("Not implemented")
         }
 
-        override suspend fun getAsset(id: Long): com.example.bot.music.MusicAsset? = null
+        override suspend fun getAsset(id: Long): com.example.bot.music.MusicAsset? {
+            onGetAsset?.invoke(id)
+            return assets[id]
+        }
 
-        override suspend fun getAssetMeta(id: Long): com.example.bot.music.MusicAssetMeta? = null
+        override suspend fun getAssetMeta(id: Long): com.example.bot.music.MusicAssetMeta? = metas[id]
     }
 
 

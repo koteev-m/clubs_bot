@@ -23,7 +23,9 @@ test('entry QR flow keeps scanner open on denied outcome', async ({ page }) => {
   await expect(page.locator('text=ARRIVED')).toHaveCount(0);
   await page.evaluate(() => {
     const cb = window.Telegram?.WebApp?.events?.qrTextReceived;
-    cb && cb({ data: 'code2' });
+    if (cb) {
+      cb({ data: 'code2' });
+    }
   });
   await expect.poll(() => requestCount).toBe(2);
   await expect.poll(async () => page.evaluate(() => window.__scanCloseCount)).toBe(0);
