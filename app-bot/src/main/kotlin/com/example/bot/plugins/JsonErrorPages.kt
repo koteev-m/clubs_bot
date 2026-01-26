@@ -2,6 +2,7 @@ package com.example.bot.plugins
 
 import com.example.bot.http.ApiErrorHandledKey
 import com.example.bot.http.ErrorCodes
+import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -25,6 +26,7 @@ fun Application.installJsonErrorPages() {
             if (contentType?.startsWith(ContentType.Application.Json.toString()) == true) {
                 return@status
             }
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
         }
 
@@ -35,6 +37,7 @@ fun Application.installJsonErrorPages() {
                 call.respond(HttpStatusCode.PayloadTooLarge)
                 return@exception
             }
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
         }
 
@@ -82,5 +85,11 @@ fun Application.installJsonErrorPages() {
             logger.error("unhandled exception for API path {}", call.request.path(), cause)
             call.respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
         }
+    }
+}
+
+private fun io.ktor.server.application.ApplicationCall.ensureMiniAppNoStoreHeadersIfNeeded() {
+    if (request.path().startsWith("/api/admin")) {
+        ensureMiniAppNoStoreHeaders()
     }
 }

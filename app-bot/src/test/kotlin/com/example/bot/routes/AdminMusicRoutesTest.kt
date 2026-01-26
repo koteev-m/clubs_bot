@@ -5,6 +5,8 @@ import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.http.ErrorCodes
+import com.example.bot.http.MINI_APP_VARY_HEADER
+import com.example.bot.http.NO_STORE_CACHE_CONTROL
 import com.example.bot.music.MusicAsset
 import com.example.bot.music.MusicAssetKind
 import com.example.bot.music.MusicAssetMeta
@@ -16,6 +18,7 @@ import com.example.bot.music.MusicItemUpdate
 import com.example.bot.music.MusicItemView
 import com.example.bot.music.MusicSource
 import com.example.bot.plugins.TelegramMiniUser
+import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.security.auth.TelegramPrincipal
@@ -193,6 +196,52 @@ class AdminMusicRoutesTest {
     }
 
     @Test
+    fun `upload rejects request size limit payload with no-store headers`() = withApp { itemsRepo, _ ->
+        val item =
+            itemsRepo.create(
+                MusicItemCreate(
+                    clubId = 1,
+                    title = "Cover",
+                    dj = null,
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.FILE,
+                    sourceUrl = null,
+                    durationSec = null,
+                    coverUrl = null,
+                    tags = null,
+                    publishedAt = null,
+                ),
+                actor = 1,
+            )
+
+        val oversized = ByteArray(6 * 1024 * 1024) { 1 }
+        val response =
+            client.put("/api/admin/music/items/${item.id}/cover") {
+                header("X-Telegram-Init-Data", "init")
+                setBody(
+                    MultiPartFormDataContent(
+                        formData {
+                            append(
+                                "file",
+                                oversized,
+                                Headers.build {
+                                    append(HttpHeaders.ContentType, ContentType.Image.PNG.toString())
+                                    append(HttpHeaders.ContentDisposition, "filename=\"cover.png\"")
+                                },
+                            )
+                        },
+                    ),
+                )
+            }
+
+        assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
+        assertTrue(response.bodyAsText().contains(ErrorCodes.payload_too_large))
+        assertEquals(NO_STORE_CACHE_CONTROL, response.headers[HttpHeaders.CacheControl])
+        assertEquals(MINI_APP_VARY_HEADER, response.headers[HttpHeaders.Vary])
+    }
+
+    @Test
     fun `happy path create upload publish`() = withApp { itemsRepo, _ ->
         val createResponse =
             client.post("/api/admin/music/items") {
@@ -266,6 +315,7 @@ class AdminMusicRoutesTest {
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
+                installJsonErrorPages()
                 install(RbacPlugin) {
                     userRepository = StubUserRepository()
                     userRoleRepository = StubUserRoleRepository(roles, clubIds)
