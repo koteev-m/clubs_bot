@@ -54,16 +54,19 @@ class MusicService(
     }
 
     suspend fun listSets(
-        limit: Int = 100,
+        limit: Int = 20,
+        offset: Int = 0,
+        tag: String? = null,
+        q: String? = null,
         userId: Long?,
     ): Pair<String, List<MusicSetDto>> {
         val items =
             itemsRepo.listActive(
                 clubId = null,
                 limit = limit,
-                offset = 0,
-                tag = null,
-                q = null,
+                offset = offset,
+                tag = tag,
+                q = q,
                 type = MusicItemType.SET,
             )
         val counts = likesRepository.countsForItems(items.map { it.id })
@@ -74,7 +77,7 @@ class MusicService(
                 emptySet()
             }
         val updatedAt = itemsRepo.lastUpdatedAt()
-        val etag = etagForSets(items, counts, likedByUser, userId, updatedAt)
+        val etag = etagForSets(items, counts, likedByUser, userId, updatedAt, limit, offset, tag, q)
         val payload =
             items.map {
                 MusicSetDto(
@@ -175,6 +178,10 @@ class MusicService(
         likedByUser: Set<Long>,
         userId: Long?,
         updatedAt: Instant?,
+        limit: Int,
+        offset: Int,
+        tag: String?,
+        q: String?,
     ): String {
         val countsFingerprint =
             counts
@@ -182,7 +189,9 @@ class MusicService(
                 .sortedBy { it.key }
                 .joinToString("|") { "${it.key}:${it.value}" }
         val likedFingerprint = likedByUser.sorted().joinToString(",")
-        val seed = "sets|likes=$countsFingerprint|liked=$likedFingerprint|user=${userId ?: 0}"
+        val seed =
+            "sets|limit=$limit|offset=$offset|tag=${tag.orEmpty()}|q=${q.orEmpty()}|" +
+                "likes=$countsFingerprint|liked=$likedFingerprint|user=${userId ?: 0}"
         return etagFor(updatedAt, items.size, seed)
     }
 
