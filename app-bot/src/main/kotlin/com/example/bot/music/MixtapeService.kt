@@ -1,6 +1,5 @@
 package com.example.bot.music
 
-import com.example.bot.routes.dto.MusicItemDto
 import java.time.Clock
 import java.time.DayOfWeek
 import java.time.Duration
@@ -81,7 +80,15 @@ class MixtapeService(
 
     private suspend fun recommend(exclude: Set<Long>, limit: Int): List<Long> {
         if (limit <= 0) return emptyList()
-        val items: List<MusicItemDto> = musicService.listItems(limit = RECOMMENDATION_POOL).second
+        val items =
+            musicService
+                .listSets(
+                    limit = RECOMMENDATION_POOL,
+                    offset = 0,
+                    tag = null,
+                    q = null,
+                    userId = null,
+                ).second
         return items
             .sortedBy { it.id }
             .map { it.id }

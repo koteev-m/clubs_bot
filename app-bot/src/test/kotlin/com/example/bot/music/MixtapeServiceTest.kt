@@ -99,6 +99,55 @@ class MixtapeServiceTest {
         assertEquals(listOf(2L, 4L), first.items.take(2))
     }
 
+    @Test
+    fun `recommendations only include published sets`() = runBlocking {
+        val likesRepo = StubMusicLikesRepository()
+        val items =
+            listOf(
+                musicItem(id = 10, title = "Unpublished", publishedAt = null),
+                musicItem(id = 20, title = "Published"),
+            )
+
+        val service = mixtapeService(likesRepo, items)
+        val mixtape = service.buildWeeklyMixtape(1)
+
+        assertEquals(listOf(20L), mixtape.items)
+    }
+
+    @Test
+    fun `recommendations never include tracks`() = runBlocking {
+        val likesRepo = StubMusicLikesRepository()
+        val items =
+            listOf(
+                musicItem(id = 5, title = "Track", type = MusicItemType.TRACK),
+                musicItem(id = 6, title = "Set", type = MusicItemType.SET),
+            )
+
+        val service = mixtapeService(likesRepo, items)
+        val mixtape = service.buildWeeklyMixtape(1)
+
+        assertEquals(listOf(6L), mixtape.items)
+    }
+
+    @Test
+    fun `global mixtape order is deterministic for equal data`() = runBlocking {
+        val likesRepo = StubMusicLikesRepository()
+        likesRepo.addLike(Like(userId = 1, itemId = 1, createdAt = now.minusSeconds(200)))
+        likesRepo.addLike(Like(userId = 2, itemId = 1, createdAt = now.minusSeconds(100)))
+        likesRepo.addLike(Like(userId = 3, itemId = 2, createdAt = now.minusSeconds(300)))
+        likesRepo.addLike(Like(userId = 4, itemId = 2, createdAt = now.minusSeconds(50)))
+        likesRepo.addLike(Like(userId = 5, itemId = 3, createdAt = now.minusSeconds(400)))
+        likesRepo.addLike(Like(userId = 6, itemId = 4, createdAt = now.minusSeconds(250)))
+        likesRepo.addLike(Like(userId = 7, itemId = 4, createdAt = now.minusSeconds(100)))
+
+        val service = mixtapeService(likesRepo, emptyList())
+        val first = service.buildWeeklyGlobalMixtape()
+        val second = service.buildWeeklyGlobalMixtape()
+
+        assertEquals(listOf(2L, 1L, 4L, 3L), first.items)
+        assertEquals(first, second)
+    }
+
     private fun mixtapeService(
         likesRepository: MusicLikesRepository,
         items: List<MusicItemView>,
@@ -114,14 +163,19 @@ class MixtapeServiceTest {
         return MixtapeService(likesRepository, musicService, clock)
     }
 
-    private fun musicItem(id: Long, title: String): MusicItemView =
+    private fun musicItem(
+        id: Long,
+        title: String,
+        type: MusicItemType = MusicItemType.SET,
+        publishedAt: Instant? = now,
+    ): MusicItemView =
         MusicItemView(
             id = id,
             clubId = null,
             title = title,
             dj = null,
             description = null,
-            itemType = MusicItemType.SET,
+            itemType = type,
             source = MusicSource.SPOTIFY,
             sourceUrl = null,
             audioAssetId = null,
@@ -130,7 +184,7 @@ class MixtapeServiceTest {
             coverUrl = null,
             coverAssetId = null,
             tags = emptyList(),
-            publishedAt = now,
+            publishedAt = publishedAt,
         )
 
     private class StubMusicLikesRepository : MusicLikesRepository {
@@ -184,7 +238,14 @@ class MixtapeServiceTest {
             tag: String?,
             q: String?,
             type: MusicItemType?,
-        ): List<MusicItemView> = items.drop(offset).take(limit)
+        ): List<MusicItemView> =
+            items
+                .asSequence()
+                .filter { it.publishedAt != null }
+                .filter { type == null || it.itemType == type }
+                .drop(offset)
+                .take(limit)
+                .toList()
 
         override suspend fun listAll(clubId: Long?, limit: Int, offset: Int, type: MusicItemType?): List<MusicItemView> =
             items.drop(offset).take(limit)
