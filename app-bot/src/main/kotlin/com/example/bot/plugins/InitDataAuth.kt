@@ -147,13 +147,13 @@ private suspend fun extractInitData(
     allowInitDataFromBody: Boolean,
     maxInitDataBodyBytes: Long,
 ): String? {
-    val q = call.request.queryParameters["initData"]?.takeIf { it.isNotBlank() }
     val h =
         call.request.header("X-Telegram-Init-Data")?.takeIf { it.isNotBlank() }
             ?: call.request.header("X-Telegram-InitData")?.takeIf { it.isNotBlank() }
+    val q = call.request.queryParameters["initData"]?.takeIf { it.isNotBlank() }
 
-    if (!q.isNullOrBlank()) return q
     if (!h.isNullOrBlank()) return h
+    if (!q.isNullOrBlank()) return q
     if (!allowInitDataFromBody) return null
     return extractInitDataFromBodyOrNull(call, maxInitDataBodyBytes)
 }
