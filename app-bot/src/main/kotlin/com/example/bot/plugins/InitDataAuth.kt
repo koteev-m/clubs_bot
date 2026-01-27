@@ -149,8 +149,8 @@ private suspend fun extractInitData(
 ): String? {
     val q = call.request.queryParameters["initData"]?.takeIf { it.isNotBlank() }
     val h =
-        call.request.header("X-Telegram-InitData")?.takeIf { it.isNotBlank() }
-            ?: call.request.header("X-Telegram-Init-Data")?.takeIf { it.isNotBlank() }
+        call.request.header("X-Telegram-Init-Data")?.takeIf { it.isNotBlank() }
+            ?: call.request.header("X-Telegram-InitData")?.takeIf { it.isNotBlank() }
 
     if (!q.isNullOrBlank()) return q
     if (!h.isNullOrBlank()) return h

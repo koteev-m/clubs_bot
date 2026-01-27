@@ -36,8 +36,8 @@ export const MusicPage: React.FC = () => {
             coverUrl: item.coverUrl ?? undefined,
             audioUrl: item.audioUrl ?? undefined,
             tags: item.tags ?? undefined,
-            likesCount: item.likesCount ?? 0,
-            likedByMe: item.likedByMe ?? false,
+            likesCount: item.likesCount,
+            likedByMe: item.likedByMe,
           })),
         );
       })
@@ -70,8 +70,8 @@ export const MusicPage: React.FC = () => {
             coverUrl: item.coverUrl ?? undefined,
             audioUrl: item.audioUrl ?? undefined,
             tags: item.tags ?? undefined,
-            likesCount: item.likesCount ?? 0,
-            likedByMe: item.likedByMe ?? false,
+            likesCount: item.likesCount,
+            likedByMe: item.likedByMe,
           })),
         );
         setPersonalMixtape(
@@ -83,8 +83,8 @@ export const MusicPage: React.FC = () => {
             coverUrl: item.coverUrl ?? undefined,
             audioUrl: item.audioUrl ?? undefined,
             tags: item.tags ?? undefined,
-            likesCount: item.likesCount ?? 0,
-            likedByMe: item.likedByMe ?? false,
+            likesCount: item.likesCount,
+            likedByMe: item.likedByMe,
           })),
         );
       })
@@ -111,7 +111,7 @@ export const MusicPage: React.FC = () => {
               ? {
                   ...item,
                   likedByMe: !liked,
-                  likesCount: Math.max(0, (item.likesCount ?? 0) + (liked ? -1 : 1)),
+                  likesCount: Math.max(0, item.likesCount + (liked ? -1 : 1)),
                 }
               : item,
           ),
@@ -122,7 +122,7 @@ export const MusicPage: React.FC = () => {
               ? {
                   ...item,
                   likedByMe: !liked,
-                  likesCount: Math.max(0, (item.likesCount ?? 0) + (liked ? -1 : 1)),
+                  likesCount: Math.max(0, item.likesCount + (liked ? -1 : 1)),
                 }
               : item,
           ),
@@ -133,7 +133,7 @@ export const MusicPage: React.FC = () => {
               ? {
                   ...item,
                   likedByMe: !liked,
-                  likesCount: Math.max(0, (item.likesCount ?? 0) + (liked ? -1 : 1)),
+                  likesCount: Math.max(0, item.likesCount + (liked ? -1 : 1)),
                 }
               : item,
           ),

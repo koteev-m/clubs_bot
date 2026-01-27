@@ -19,8 +19,8 @@ export interface MusicSetDto {
   coverUrl?: string | null;
   audioUrl?: string | null;
   tags?: string[] | null;
-  likesCount?: number;
-  likedByMe?: boolean;
+  likesCount: number;
+  likedByMe: boolean;
 }
 
 export interface MixtapeResponseDto {
@@ -28,6 +28,12 @@ export interface MixtapeResponseDto {
   weekStart: string;
   items: MusicSetDto[];
   generatedAt: string;
+}
+
+export interface LikeResponse {
+  itemId: number;
+  liked: boolean;
+  likedAt?: string | null;
 }
 
 /** Lists music items. */
@@ -61,13 +67,13 @@ export async function getPersonalMixtape(): Promise<MixtapeResponseDto> {
   return res.data;
 }
 
-export async function likeSet(id: number) {
-  const res = await http.post(`/api/music/items/${id}/like`);
+export async function likeSet(id: number): Promise<LikeResponse> {
+  const res = await http.post<LikeResponse>(`/api/music/items/${id}/like`);
   return res.data;
 }
 
-export async function unlikeSet(id: number) {
-  const res = await http.delete(`/api/music/items/${id}/like`);
+export async function unlikeSet(id: number): Promise<LikeResponse> {
+  const res = await http.delete<LikeResponse>(`/api/music/items/${id}/like`);
   return res.data;
 }
 

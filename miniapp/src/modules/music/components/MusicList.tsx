@@ -9,8 +9,8 @@ export interface MusicItemProps {
   audioUrl?: string;
   tags?: string[];
   isTrackOfNight?: boolean;
-  likesCount?: number;
-  likedByMe?: boolean;
+  likesCount: number;
+  likedByMe: boolean;
 }
 
 /** Renders simple list of music items. */
@@ -22,7 +22,7 @@ export const MusicList: React.FC<{
     <div>
       {items.map((it) => (
         <div key={it.id} className="p-2 border-b">
-          {it.coverUrl && <img src={it.coverUrl} alt={it.title} className="w-20 h-20" />}
+          {it.coverUrl && <img src={it.coverUrl} alt={it.title} className="w-20 h-20 object-cover" />}
           <div className="flex items-center gap-2">
             <div>{it.title}</div>
             {it.isTrackOfNight && (
@@ -41,19 +41,13 @@ export const MusicList: React.FC<{
             </div>
           )}
           <div className="mt-2 flex items-center gap-3">
-            {it.audioUrl && (
-              <a href={it.audioUrl} target="_blank" rel="noreferrer" className="text-blue-500">
-                Слушать
-              </a>
-            )}
-            {typeof it.likesCount === 'number' && (
-              <span className="text-xs text-gray-500">❤ {it.likesCount}</span>
-            )}
+            {it.audioUrl && <audio controls src={it.audioUrl} className="w-full max-w-xs" />}
+            <span className="text-xs text-gray-500">❤ {it.likesCount}</span>
             {onToggleLike && (
               <button
                 type="button"
                 className={`text-xs ${it.likedByMe ? 'text-red-600' : 'text-gray-500'}`}
-                onClick={() => onToggleLike(it.id, !!it.likedByMe)}
+                onClick={() => onToggleLike(it.id, it.likedByMe)}
               >
                 {it.likedByMe ? 'Убрать лайк' : 'Лайкнуть'}
               </button>
