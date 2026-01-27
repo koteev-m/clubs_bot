@@ -63,4 +63,44 @@ class MiniAppAuthTest {
                 }
             assertEquals(HttpStatusCode.Unauthorized, invalid.status)
         }
+
+    @Test
+    fun `withMiniAppAuth prefers init data from header over query`() {
+        overrideMiniAppValidatorForTesting { raw, _ ->
+            if (raw == "from-header") {
+                TelegramMiniUser(id = 1)
+            } else {
+                null
+            }
+        }
+
+        try {
+            testApplication {
+                application {
+                    installMiniAppAuthStatusPage()
+                    install(ContentNegotiation) { json() }
+                    routing {
+                        route("/t") {
+                            withMiniAppAuth { TEST_BOT_TOKEN }
+                            get {
+                                if (call.attributes.contains(MiniAppUserKey)) {
+                                    call.respond(HttpStatusCode.OK)
+                                } else {
+                                    call.respond(HttpStatusCode.Unauthorized)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val response =
+                    client.get("/t?initData=from-query") {
+                        header("X-Telegram-Init-Data", "from-header")
+                    }
+                assertEquals(HttpStatusCode.OK, response.status)
+            }
+        } finally {
+            resetMiniAppValidator()
+        }
+    }
 }
