@@ -4,8 +4,17 @@
 - `music_items` хранит и треки, и DJ-сеты; тип фиксируется в `item_type` (`TRACK` или `SET`).
 - Публикация управляется через `published_at`. Опубликованные элементы видны в гостевой ленте и микстейпах, черновики — только в админке.
 - `music_assets` хранит бинарные файлы (аудио/обложки) с контрольной суммой SHA-256.
+- `MusicItemType`: `TRACK`, `SET`.
+- `MusicSource`: `YOUTUBE`, `SOUNDCLOUD`, `SPOTIFY`, `FILE`, `LINK`.
 
 ## Инварианты
+- Miniapp API (`/api/music/*`, `/api/me/*`, `/api/admin/*`) всегда отвечает с заголовками:
+  - `Cache-Control: no-store`;
+  - `Vary: X-Telegram-Init-Data`;
+  - применяется и для `304/401/413/...` ответов (включая ошибки и not-modified).
+- Публичная раздача ассетов `/api/music/items/{id}/audio|cover` использует другие заголовки:
+  - `Cache-Control: private, max-age=3600, must-revalidate`;
+  - `ETag` = SHA-256 контента; при совпадении `If-None-Match` возвращается `304` с теми же cache-заголовками.
 - Гостевой API (miniapp роли, включая GUEST) возвращает только `item_type = SET` и `published_at != null`:
   - `/api/music/sets` — список сетов;
   - `/api/music/mixtape/week` и `/api/me/mixtape` — только опубликованные сеты;
@@ -18,6 +27,7 @@
 - Для клубных элементов требуется доступ администратора к клубу; глобальные элементы разрешены только для OWNER/GLOBAL_ADMIN.
 
 ## Рекомендации для клиентов
+- `initData` передавать только в заголовке `X-Telegram-Init-Data`, не в query string. Query-параметр `initData` поддерживается только как legacy fallback.
 - Для публичных лент использовать `ETag` и `If-None-Match`.
 - Для отображения аудио использовать `audioUrl` (внутренние ссылки), для внешних источников — `sourceUrl` (если поле заполнено).
 
@@ -26,11 +36,13 @@
 - `GET /api/admin/music/items?type=SET`
   - `curl -H "X-Telegram-Init-Data: <initData>" "https://<host>/api/admin/music/items?type=SET"`
 - `POST /api/admin/music/items`
+  - Тело запроса: `title` (обязательно), `itemType` (обязательно), `source` (обязательно), `clubId`, `dj`, `description`, `sourceUrl`, `durationSec`, `coverUrl`, `tags`, `published` (по умолчанию `false`).
   - `curl -X POST -H "Content-Type: application/json" -H "X-Telegram-Init-Data: <initData>" \`
-    `-d '{"title":"Night Set","itemType":"SET","source":"INTERNAL","published":false}' https://<host>/api/admin/music/items`
+    `-d '{"title":"Night Set","itemType":"SET","source":"FILE"}' https://<host>/api/admin/music/items`
+- `POST /api/admin/music/items/{id}/publish`
+  - `curl -X POST -H "X-Telegram-Init-Data: <initData>" https://<host>/api/admin/music/items/10/publish`
 - `GET /api/admin/music/items/{id}`
 - `PUT /api/admin/music/items/{id}`
-- `POST /api/admin/music/items/{id}/publish`
 - `POST /api/admin/music/items/{id}/unpublish`
 - `PUT /api/admin/music/items/{id}/audio` (multipart, поле `file`)
   - `curl -X PUT -H "X-Telegram-Init-Data: <initData>" -F "file=@set.mp3" https://<host>/api/admin/music/items/10/audio`
