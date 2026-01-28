@@ -46,6 +46,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
+import java.security.MessageDigest
+import java.util.Base64
 import org.slf4j.MDC
 
 private val jsonParser = Json { ignoreUnknownKeys = true }
@@ -377,11 +379,13 @@ internal data class RbacState(
     ) {
         val userId = success?.user?.id
         val ip = call.request.local.remoteAddress
+        val method = call.request.httpMethod.value
+        val path = call.request.path()
         val meta =
             buildJsonObject {
                 put("reason", reason)
-                put("method", call.request.httpMethod.value)
-                put("path", call.request.path())
+                put("method", method)
+                put("path", path)
                 put("result", result)
             }
         withIdempotencyMdc(call) {
@@ -395,7 +399,7 @@ internal data class RbacState(
                     entityType = StandardAuditEntityType.HTTP_ACCESS,
                     entityId = null,
                     action = actionForResult(result),
-                    fingerprint = fingerprintFromMdc(),
+                    fingerprint = fingerprintFromMdc(method, path, result),
                     metadata = metaWithIp(meta, ip),
                 ),
             )
@@ -440,7 +444,19 @@ private fun actionForResult(result: String): StandardAuditAction =
         else -> StandardAuditAction.LEGACY
     }
 
-private fun fingerprintFromMdc(): String = MDC.get("idempotency_key") ?: java.util.UUID.randomUUID().toString()
+private fun fingerprintFromMdc(
+    method: String,
+    path: String,
+    result: String,
+): String {
+    val idempotencyKey = MDC.get("idempotency_key")
+    if (idempotencyKey.isNullOrBlank()) {
+        return java.util.UUID.randomUUID().toString()
+    }
+    val payload = "rbac|$idempotencyKey|$method|$path|$result"
+    val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+}
 
 private fun metaWithIp(
     meta: JsonObject,
