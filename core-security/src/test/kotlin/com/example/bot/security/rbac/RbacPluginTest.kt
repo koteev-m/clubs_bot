@@ -1,6 +1,8 @@
 package com.example.bot.security.rbac
 
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.StandardAuditAction
+import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
@@ -47,7 +49,14 @@ class RbacPluginTest {
             val response = client.get("/secure")
             assertEquals(HttpStatusCode.Unauthorized, response.status)
             coVerify(exactly = 1) {
-                auditRepo.log(null, "http_access", "/secure", null, "access_denied", any(), any())
+                auditRepo.append(
+                    match {
+                        it.actorUserId == null &&
+                            it.clubId == null &&
+                            it.entityType == StandardAuditEntityType.HTTP_ACCESS &&
+                            it.action == StandardAuditAction.ACCESS_DENIED
+                    },
+                )
             }
         }
 
@@ -71,7 +80,14 @@ class RbacPluginTest {
             val response = client.get("/secure") { header("X-Telegram-Id", "1") }
             assertEquals(HttpStatusCode.Forbidden, response.status)
             coVerify(exactly = 1) {
-                auditRepo.log(1L, "http_access", "/secure", null, "access_denied", any(), any())
+                auditRepo.append(
+                    match {
+                        it.actorUserId == 1L &&
+                            it.clubId == null &&
+                            it.entityType == StandardAuditEntityType.HTTP_ACCESS &&
+                            it.action == StandardAuditAction.ACCESS_DENIED
+                    },
+                )
             }
         }
 
@@ -97,7 +113,14 @@ class RbacPluginTest {
             val response = client.get("/clubs/42/bookings") { header("X-Telegram-Id", "1") }
             assertEquals(HttpStatusCode.Forbidden, response.status)
             coVerify(exactly = 1) {
-                auditRepo.log(1L, "http_access", "/clubs/42/bookings", 42L, "access_denied", any(), any())
+                auditRepo.append(
+                    match {
+                        it.actorUserId == 1L &&
+                            it.clubId == 42L &&
+                            it.entityType == StandardAuditEntityType.HTTP_ACCESS &&
+                            it.action == StandardAuditAction.ACCESS_DENIED
+                    },
+                )
             }
         }
 
@@ -124,13 +147,20 @@ class RbacPluginTest {
             assertEquals(HttpStatusCode.OK, response.status)
             assertEquals("ok", response.bodyAsText())
             coVerify(exactly = 1) {
-                auditRepo.log(1L, "http_access", "/clubs/42/bookings", 42L, "access_granted", any(), any())
+                auditRepo.append(
+                    match {
+                        it.actorUserId == 1L &&
+                            it.clubId == 42L &&
+                            it.entityType == StandardAuditEntityType.HTTP_ACCESS &&
+                            it.action == StandardAuditAction.ACCESS_GRANTED
+                    },
+                )
             }
         }
 
     private fun relaxedAuditRepo(): AuditLogRepository {
         val repo = mockk<AuditLogRepository>(relaxed = true)
-        coEvery { repo.log(any(), any(), any(), any(), any(), any(), any()) } returns 1L
+        coEvery { repo.append(any()) } returns 1L
         return repo
     }
 

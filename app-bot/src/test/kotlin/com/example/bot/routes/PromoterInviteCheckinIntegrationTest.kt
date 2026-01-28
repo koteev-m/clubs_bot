@@ -9,7 +9,7 @@ import com.example.bot.club.GuestListOwnerType
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListStatus
 import com.example.bot.club.ParsedGuest
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository

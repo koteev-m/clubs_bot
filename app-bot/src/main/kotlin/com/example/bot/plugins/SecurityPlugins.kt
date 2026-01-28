@@ -1,6 +1,7 @@
 package com.example.bot.plugins
 
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.security.auth.TelegramPrincipal
@@ -27,7 +28,7 @@ fun Application.configureSecurity() {
     val database = Database.connect(dataSource)
     val userRepository = ExposedUserRepository(database)
     val userRoleRepository = ExposedUserRoleRepository(database)
-    val auditLogRepository = AuditLogRepository(database)
+    val auditLogRepository: AuditLogRepository = AuditLogRepositoryImpl(database)
 
     install(RbacPlugin) {
         this.userRepository = userRepository

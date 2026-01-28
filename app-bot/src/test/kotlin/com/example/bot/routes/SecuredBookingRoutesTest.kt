@@ -4,7 +4,7 @@ import com.example.bot.booking.BookingCmdResult
 import com.example.bot.booking.BookingService
 import com.example.bot.booking.BookingStatusUpdateResult
 import com.example.bot.data.booking.BookingStatus
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.booking.core.BookingRecord
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
@@ -117,7 +117,7 @@ private fun prepareDatabase(): BookingDbSetup {
         .configure()
         .dataSource(ds)
         .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-        .target("9")
+        .target("33")
         .load()
         .migrate()
 
@@ -125,10 +125,9 @@ private fun prepareDatabase(): BookingDbSetup {
 
     // локальные правки схемы для совместимости (как в других тестах)
     transaction(db) {
-        listOf("action", "result").forEach { column ->
+        listOf("action").forEach { column ->
             exec("""ALTER TABLE audit_log ALTER COLUMN $column RENAME TO "$column"""")
         }
-        exec("ALTER TABLE audit_log ALTER COLUMN resource_id DROP NOT NULL")
     }
 
     return BookingDbSetup(ds, db)

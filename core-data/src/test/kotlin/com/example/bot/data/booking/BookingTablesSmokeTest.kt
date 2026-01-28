@@ -37,10 +37,10 @@ class BookingTablesSmokeTest {
     }
 
     @Test
-    fun `audit log meta is jsonb`() {
+    fun `audit log metadata is text`() {
         assertEquals(
-            "org.jetbrains.exposed.sql.json.JsonBColumnType",
-            AuditLogTable.meta.columnType::class.qualifiedName,
+            "org.jetbrains.exposed.sql.TextColumnType",
+            AuditLogTable.metadataJson.columnType::class.qualifiedName,
         )
     }
 }

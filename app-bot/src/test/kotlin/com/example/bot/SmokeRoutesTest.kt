@@ -2,7 +2,7 @@ package com.example.bot
 
 import com.example.bot.clubs.InMemoryClubsRepository
 import com.example.bot.clubs.InMemoryEventsRepository
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository

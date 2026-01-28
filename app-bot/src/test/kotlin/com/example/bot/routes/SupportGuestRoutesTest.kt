@@ -1,6 +1,7 @@
 package com.example.bot.routes
 
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRoleRepository
@@ -620,7 +621,7 @@ class SupportGuestRoutesTest {
                 install(RbacPlugin) {
                     this.userRepository = userRepository
                     this.userRoleRepository = userRoleRepository
-                    this.auditLogRepository = AuditLogRepository(setup.database)
+                    this.auditLogRepository = AuditLogRepositoryImpl(setup.database)
                     principalExtractor = { call ->
                         if (call.attributes.contains(MiniAppUserKey)) {
                             val principal = call.attributes[MiniAppUserKey]

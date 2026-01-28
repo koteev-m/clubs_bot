@@ -1,6 +1,9 @@
 package com.example.bot.security.rbac
 
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogEvent
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.StandardAuditAction
+import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
@@ -378,16 +381,23 @@ internal data class RbacState(
             buildJsonObject {
                 put("reason", reason)
                 put("method", call.request.httpMethod.value)
+                put("path", call.request.path())
+                put("result", result)
             }
         withIdempotencyMdc(call) {
-            auditLogRepository.log(
-                userId = userId,
-                action = "http_access",
-                resource = call.request.path(),
-                clubId = clubId,
-                result = result,
-                ip = ip,
-                meta = meta,
+            auditLogRepository.append(
+                AuditLogEvent(
+                    clubId = clubId,
+                    nightId = null,
+                    actorUserId = userId,
+                    actorRole = success?.roles?.joinToString(",") { it.name },
+                    subjectUserId = null,
+                    entityType = StandardAuditEntityType.HTTP_ACCESS,
+                    entityId = null,
+                    action = actionForResult(result),
+                    fingerprint = fingerprintFromMdc(),
+                    metadata = metaWithIp(meta, ip),
+                ),
             )
         }
     }
@@ -422,6 +432,28 @@ private suspend fun withIdempotencyMdc(
         }
     }
 }
+
+private fun actionForResult(result: String): StandardAuditAction =
+    when (result) {
+        "access_granted" -> StandardAuditAction.ACCESS_GRANTED
+        "access_denied" -> StandardAuditAction.ACCESS_DENIED
+        else -> StandardAuditAction.LEGACY
+    }
+
+private fun fingerprintFromMdc(): String = MDC.get("idempotency_key") ?: java.util.UUID.randomUUID().toString()
+
+private fun metaWithIp(
+    meta: JsonObject,
+    ip: String?,
+): JsonObject =
+    if (ip == null) {
+        meta
+    } else {
+        buildJsonObject {
+            meta.forEach { (key, value) -> put(key, value) }
+            put("ip", ip)
+        }
+    }
 
 private val clubResolutionKey = AttributeKey<ClubResolution>("rbac.club.resolution")
 

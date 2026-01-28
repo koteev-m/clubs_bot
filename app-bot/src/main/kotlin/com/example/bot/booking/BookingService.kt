@@ -1,7 +1,10 @@
 package com.example.bot.booking
 
 import com.example.bot.data.booking.BookingStatus
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogEvent
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.CustomAuditAction
+import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.booking.core.BookingCoreError
 import com.example.bot.data.booking.core.BookingCoreResult
 import com.example.bot.data.booking.core.BookingHoldRepository
@@ -347,14 +350,28 @@ class BookingService(
         outcome: String,
         meta: JsonObject?,
     ) {
-        auditLogRepository.log(
-            userId = null,
-            action = action,
-            resource = "booking",
-            clubId = clubId,
-            result = outcome,
-            ip = null,
-            meta = meta,
+        val metadata =
+            buildJsonObject {
+                put("result", outcome)
+                meta?.forEach { (key, value) ->
+                    if (key != "result") {
+                        put(key, value)
+                    }
+                }
+            }
+        auditLogRepository.append(
+            AuditLogEvent(
+                clubId = clubId,
+                nightId = null,
+                actorUserId = null,
+                actorRole = null,
+                subjectUserId = null,
+                entityType = StandardAuditEntityType.BOOKING,
+                entityId = null,
+                action = CustomAuditAction(action),
+                fingerprint = UUID.randomUUID().toString(),
+                metadata = metadata,
+            ),
         )
     }
 
