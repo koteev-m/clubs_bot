@@ -4,7 +4,7 @@ import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
-import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.booking.core.BookingOutboxTable
@@ -66,11 +66,12 @@ class BookingServiceIT : PostgresAppTest() {
         val holdRepo = BookingHoldRepository(database, clock)
         val outboxRepo = OutboxRepository(database, clock)
         val auditRepo = AuditLogRepositoryImpl(database, clock)
+        val auditLogger = AuditLogger(auditRepo)
         return BookingService(
             bookingRepository = bookingRepo,
             holdRepository = holdRepo,
             outboxRepository = outboxRepo,
-            auditLogRepository = auditRepo,
+            auditLogger = auditLogger,
             promoAttribution = promoAttribution,
         )
     }
@@ -248,12 +249,13 @@ class BookingServiceIT : PostgresAppTest() {
             val holdRepo = BookingHoldRepository(database, clock)
             val outboxRepo = OutboxRepository(database, clock)
             val auditRepo = AuditLogRepositoryImpl(database, clock)
+            val auditLogger = AuditLogger(auditRepo)
             val service =
                 BookingService(
                     bookingRepository = bookingRepo,
                     holdRepository = holdRepo,
                     outboxRepository = outboxRepo,
-                    auditLogRepository = auditRepo,
+                    auditLogger = auditLogger,
                 )
             val bookingId = confirmBooking(service, seed)
             service.finalize(bookingId)

@@ -6,6 +6,7 @@ import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.core.OutboxRepository
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.opschat.NoopOpsNotificationPublisher
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationEvent
@@ -40,6 +41,7 @@ class MyBookingsService(
     private val database: org.jetbrains.exposed.sql.Database,
     private val userRepository: UserRepository,
     private val outboxRepository: OutboxRepository,
+    private val auditLogger: AuditLogger,
     private val metrics: MyBookingsMetrics,
     private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     private val clock: Clock = Clock.systemUTC(),
@@ -129,6 +131,13 @@ class MyBookingsService(
 
         val message = buildCancelMessage(info, user, texts, lang)
         enqueueOutbox(info, message)
+        auditLogger.bookingCancelled(
+            bookingId = info.id,
+            clubId = info.clubId,
+            actorUserId = user.id,
+            subjectUserId = user.id,
+            source = "telegram",
+        )
         notifyBestEffort(
             OpsDomainNotification(
                 clubId = info.clubId,

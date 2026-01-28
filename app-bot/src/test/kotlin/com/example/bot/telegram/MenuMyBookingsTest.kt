@@ -9,6 +9,8 @@ import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.booking.core.BookingOutboxTable
 import com.example.bot.data.booking.core.OutboxRepository
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.telegram.bookings.MyBookingsMetrics
 import com.example.bot.telegram.bookings.MyBookingsService
@@ -83,11 +85,14 @@ class MenuMyBookingsTest :
         val metrics = MyBookingsMetrics(registry)
         val userRepository = ExposedUserRepository(database)
         val outboxRepository = OutboxRepository(database)
+        val auditRepository = mockk<AuditLogRepository>(relaxed = true)
+        val auditLogger = AuditLogger(auditRepository)
         val service =
             MyBookingsService(
                 database = database,
                 userRepository = userRepository,
                 outboxRepository = outboxRepository,
+                auditLogger = auditLogger,
                 metrics = metrics,
             )
 

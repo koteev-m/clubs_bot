@@ -23,6 +23,7 @@ import com.example.bot.club.GuestListStatus
 import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceError
 import com.example.bot.club.InvitationServiceResult
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.club.CheckinDbRepository
@@ -45,6 +46,7 @@ class CheckinServiceImpl(
     private val guestListRepo: GuestListDbRepository,
     private val guestListEntryRepo: GuestListEntryDbRepository,
     private val bookingRepo: BookingRepository,
+    private val auditLogger: AuditLogger,
     private val checkinConfig: CheckinConfig = CheckinConfig.fromEnv(),
     private val bookingQrConfig: BookingQrConfig = BookingQrConfig.fromEnv(),
     private val clock: Clock = Clock.systemUTC(),
@@ -229,6 +231,7 @@ class CheckinServiceImpl(
                         InvitationUse(card.invitationId, occurredAt)
                     },
                 displayName = card.displayName,
+                subjectUserId = null,
             )
         } catch (ex: Exception) {
             if (ex.isUniqueViolation()) {
@@ -304,6 +307,7 @@ class CheckinServiceImpl(
                 entryStatus = status.toEntryStatus(),
                 invitationUse = null,
                 displayName = entry.displayName,
+                subjectUserId = entry.telegramUserId,
             )
         } catch (ex: Exception) {
             if (ex.isUniqueViolation()) {
@@ -547,6 +551,19 @@ class CheckinServiceImpl(
                 ),
             )
         }
+        record?.let {
+            auditLogger.visitCheckedIn(
+                clubId = booking.clubId,
+                nightId = booking.eventId,
+                checkinId = it.id,
+                actorUserId = actor.userId,
+                subjectUserId = null,
+                method = it.method.name,
+                subjectType = it.subjectType.name,
+                subjectId = it.subjectId,
+                resultStatus = it.resultStatus.name,
+            )
+        }
 
         return CheckinServiceResult.Success(
             HostCheckinOutcome(
@@ -678,6 +695,19 @@ class CheckinServiceImpl(
                 ),
             )
         }
+        record?.let {
+            auditLogger.visitCheckedIn(
+                clubId = guestList.clubId,
+                nightId = guestList.eventId,
+                checkinId = it.id,
+                actorUserId = actor.userId,
+                subjectUserId = entry.telegramUserId,
+                method = it.method.name,
+                subjectType = it.subjectType.name,
+                subjectId = it.subjectId,
+                resultStatus = it.resultStatus.name,
+            )
+        }
 
         return CheckinServiceResult.Success(
             HostCheckinOutcome(
@@ -803,6 +833,19 @@ class CheckinServiceImpl(
                 ),
             )
         }
+        record?.let {
+            auditLogger.visitCheckedIn(
+                clubId = card.clubId,
+                nightId = card.eventId,
+                checkinId = it.id,
+                actorUserId = actor.userId,
+                subjectUserId = null,
+                method = it.method.name,
+                subjectType = it.subjectType.name,
+                subjectId = it.subjectId,
+                resultStatus = it.resultStatus.name,
+            )
+        }
 
         return CheckinServiceResult.Success(
             HostCheckinOutcome(
@@ -870,6 +913,17 @@ class CheckinServiceImpl(
                 allowedFromStatuses = allowedBookingStatusTransitions,
             ) ?: return CheckinServiceResult.Failure(CheckinServiceError.CHECKIN_INVALID_PAYLOAD)
 
+        auditLogger.visitCheckedIn(
+            clubId = booking.clubId,
+            nightId = booking.eventId,
+            checkinId = record.id,
+            actorUserId = actor.userId,
+            subjectUserId = null,
+            method = record.method.name,
+            subjectType = record.subjectType.name,
+            subjectId = record.subjectId,
+            resultStatus = record.resultStatus.name,
+        )
         return CheckinServiceResult.Success(
             CheckinResult.Success(
                 subjectType = record.subjectType,
@@ -907,6 +961,7 @@ class CheckinServiceImpl(
         entryStatus: GuestListEntryStatus,
         invitationUse: InvitationUse?,
         displayName: String?,
+        subjectUserId: Long?,
     ): CheckinServiceResult<CheckinResult> {
         val record =
             checkinRepo.insertWithEntryUpdate(
@@ -916,6 +971,19 @@ class CheckinServiceImpl(
                 invitationUse = invitationUse,
             ) ?: return CheckinServiceResult.Success(CheckinResult.Invalid(CheckinInvalidReason.TOKEN_USED))
 
+        if (record.clubId != null && record.eventId != null) {
+            auditLogger.visitCheckedIn(
+                clubId = record.clubId,
+                nightId = record.eventId,
+                checkinId = record.id,
+                actorUserId = record.checkedBy,
+                subjectUserId = subjectUserId,
+                method = record.method.name,
+                subjectType = record.subjectType.name,
+                subjectId = record.subjectId,
+                resultStatus = record.resultStatus.name,
+            )
+        }
         return CheckinServiceResult.Success(
             CheckinResult.Success(
                 subjectType = record.subjectType,

@@ -7,6 +7,8 @@ import com.example.bot.booking.legacy.Either
 import com.example.bot.booking.payments.ConfirmInput
 import com.example.bot.booking.payments.PaymentMode
 import com.example.bot.booking.payments.PaymentsService
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.payments.PaymentsRepository.Action
 import com.example.bot.payments.PaymentsRepository.PaymentRecord
 import com.example.bot.payments.PaymentsRepository.Result
@@ -23,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 class PaymentsServiceTest {
     private val bookingService = mockk<BookingService>()
+    private val auditRepo = mockk<AuditLogRepository>(relaxed = true)
+    private val auditLogger = AuditLogger(auditRepo)
 
     /**
      * Простая in-memory реализация репозитория, не завязанная на конкретные конструкторы
@@ -89,7 +93,7 @@ class PaymentsServiceTest {
             override suspend fun findActionByIdempotencyKey(key: String): SavedAction? = actions[key]
         }
 
-    private val service = PaymentsService(bookingService, repo)
+    private val service = PaymentsService(bookingService, repo, auditLogger)
 
     /**
      * Создание ConfirmInput без жёсткой привязки к именам его параметров.

@@ -5,6 +5,7 @@ import com.example.bot.booking.legacy.BookingError
 import com.example.bot.booking.legacy.BookingService
 import com.example.bot.booking.legacy.ConfirmRequest
 import com.example.bot.booking.legacy.Either
+import com.example.bot.audit.AuditLogger
 import com.example.bot.payments.PaymentsRepository
 import java.math.BigDecimal
 import java.util.UUID
@@ -17,6 +18,7 @@ private val MINORS_IN_MAJOR = BigDecimal(100)
 class PaymentsService(
     private val bookingService: BookingService,
     private val paymentsRepo: PaymentsRepository,
+    private val auditLogger: AuditLogger,
 ) {
     /**
      * Starts confirmation flow respecting [policy].
@@ -48,11 +50,27 @@ class PaymentsService(
             }
             PaymentMode.PROVIDER_DEPOSIT -> {
                 val totalMinor = total.multiply(MINORS_IN_MAJOR).longValueExact()
-                Either.Right(createPendingPayment("PROVIDER", policy.currency, totalMinor, idemKey))
+                Either.Right(
+                    createPendingPayment(
+                        provider = "PROVIDER",
+                        currency = policy.currency,
+                        amountMinor = totalMinor,
+                        idemKey = idemKey,
+                        input = input,
+                    ),
+                )
             }
             PaymentMode.STARS_DIGITAL -> {
                 val totalMinor = total.longValueExact()
-                Either.Right(createPendingPayment("STARS", "XTR", totalMinor, idemKey))
+                Either.Right(
+                    createPendingPayment(
+                        provider = "STARS",
+                        currency = "XTR",
+                        amountMinor = totalMinor,
+                        idemKey = idemKey,
+                        input = input,
+                    ),
+                )
             }
         }
     }
@@ -62,15 +80,27 @@ class PaymentsService(
         currency: String,
         amountMinor: Long,
         idemKey: String,
+        input: ConfirmInput,
     ): ConfirmResult {
         val payload = UUID.randomUUID().toString()
-        paymentsRepo.createInitiated(
-            bookingId = null,
-            provider = provider,
-            currency = currency,
+        val record =
+            paymentsRepo.createInitiated(
+                bookingId = null,
+                provider = provider,
+                currency = currency,
+                amountMinor = amountMinor,
+                payload = payload,
+                idempotencyKey = idemKey,
+            )
+        auditLogger.tableDepositCreated(
+            depositId = record.id,
+            clubId = input.clubId,
+            tableId = input.tableId,
+            tableNumber = input.tableNumber,
+            guests = input.guestsCount,
             amountMinor = amountMinor,
-            payload = payload,
-            idempotencyKey = idemKey,
+            currency = currency,
+            provider = provider,
         )
         val invoice =
             InvoiceInfo(

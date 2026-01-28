@@ -13,6 +13,8 @@ import com.example.bot.club.GuestListStatus
 import com.example.bot.club.InvitationCard
 import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceResult
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.core.BookingRecord
 import com.example.bot.data.booking.core.BookingRepository
@@ -43,6 +45,8 @@ class CheckinServiceTest {
     private val guestListRepo: GuestListDbRepository = mockk()
     private val guestListEntryRepo: GuestListEntryDbRepository = mockk()
     private val bookingRepo: BookingRepository = mockk()
+    private val auditRepo: AuditLogRepository = mockk(relaxed = true)
+    private val auditLogger = AuditLogger(auditRepo)
     private val bookingSecret = "booking-secret"
     private val bookingQrConfig = BookingQrConfig(secret = bookingSecret, oldSecret = null, ttl = Duration.ofHours(12))
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2024-07-01T18:00:00Z"), ZoneOffset.UTC)
@@ -53,6 +57,7 @@ class CheckinServiceTest {
             guestListRepo,
             guestListEntryRepo,
             bookingRepo,
+            auditLogger,
             CheckinConfig(lateGraceMinutes = 0),
             bookingQrConfig = bookingQrConfig,
             clock = fixedClock,
