@@ -4,7 +4,8 @@ import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.support.SupportRepository
 import com.example.bot.data.support.SupportServiceImpl
 import com.example.bot.plugins.MiniAppUserKey
@@ -303,7 +304,7 @@ class SupportAdminRoutesTest {
                 install(RbacPlugin) {
                     this.userRepository = userRepository
                     this.userRoleRepository = userRoleRepository
-                    this.auditLogRepository = AuditLogRepository(setup.database)
+                    this.auditLogRepository = AuditLogRepositoryImpl(setup.database)
                     principalExtractor = { call ->
                         if (call.attributes.contains(MiniAppUserKey)) {
                             val principal = call.attributes[MiniAppUserKey]

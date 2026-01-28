@@ -899,36 +899,4 @@ class OutboxRepository(
         )
 }
 
-class AuditLogRepository(
-    private val db: Database,
-    private val clock: Clock = Clock.systemUTC(),
-) {
-    suspend fun log(
-        userId: Long?,
-        action: String,
-        resource: String,
-        clubId: Long?,
-        result: String,
-        ip: String?,
-        meta: JsonObject?,
-    ): Long {
-        val now = Instant.now(clock).toOffsetDateTime()
-        return withTxRetry {
-            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                com.example.bot.data.audit.AuditLogTable.insert {
-                    it[com.example.bot.data.audit.AuditLogTable.userId] = userId
-                    it[com.example.bot.data.audit.AuditLogTable.action] = action
-                    it[com.example.bot.data.audit.AuditLogTable.resource] = resource
-                    it[com.example.bot.data.audit.AuditLogTable.resourceId] = null
-                    it[com.example.bot.data.audit.AuditLogTable.clubId] = clubId
-                    it[com.example.bot.data.audit.AuditLogTable.ip] = ip
-                    it[com.example.bot.data.audit.AuditLogTable.result] = result
-                    it[com.example.bot.data.audit.AuditLogTable.meta] = meta ?: JsonObject(emptyMap())
-                    it[com.example.bot.data.audit.AuditLogTable.createdAt] = now
-                }[com.example.bot.data.audit.AuditLogTable.id]
-            }
-        }
-    }
-}
-
 private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

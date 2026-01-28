@@ -4,7 +4,7 @@ import com.example.bot.club.GuestListOwnerType
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListStatus
 import com.example.bot.data.booking.EventsTable
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListRepositoryImpl
 import com.example.bot.data.security.Role
@@ -720,10 +720,9 @@ private fun prepareDatabase(): GLDbSetup {
         .migrate()
     val database = Database.connect(dataSource)
     transaction(database) {
-        listOf("action", "result").forEach { column ->
+        listOf("action").forEach { column ->
             exec("""ALTER TABLE audit_log ALTER COLUMN $column RENAME TO "$column"""")
         }
-        exec("ALTER TABLE audit_log ALTER COLUMN resource_id DROP NOT NULL")
     }
     return GLDbSetup(dataSource, database)
 }

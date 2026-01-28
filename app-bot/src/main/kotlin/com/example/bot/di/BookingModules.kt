@@ -6,7 +6,8 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListService
 import com.example.bot.club.InvitationService
 import com.example.bot.club.WaitlistRepository
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.booking.core.OutboxRepository
@@ -72,7 +73,7 @@ val bookingModule =
         single { BookingHoldRepository(get()) }
         single { OutboxRepository(get()) }
         single { NotificationsOutboxRepository(get()) }
-        single { AuditLogRepository(get()) }
+        single<AuditLogRepository> { AuditLogRepositoryImpl(get()) }
 
         single<GuestListRepository> { GuestListRepositoryImpl(get()) }
         single<WaitlistRepository> { WaitlistRepositoryImpl(get()) }

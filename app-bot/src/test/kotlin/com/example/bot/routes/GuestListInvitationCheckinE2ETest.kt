@@ -383,10 +383,9 @@ class GuestListInvitationCheckinE2ETest {
             .migrate()
         val database = Database.connect(dataSource)
         transaction(database) {
-            listOf("action", "result").forEach { column ->
+            listOf("action").forEach { column ->
                 exec("""ALTER TABLE audit_log ALTER COLUMN $column RENAME TO "$column"""")
             }
-            exec("ALTER TABLE audit_log ALTER COLUMN resource_id DROP NOT NULL")
         }
         return DbSetup(dataSource, database)
     }

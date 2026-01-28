@@ -10,7 +10,7 @@ emits audit log records for every allow/deny decision.
 install(RbacPlugin) {
     userRepository = ExposedUserRepository(database)
     userRoleRepository = ExposedUserRoleRepository(database)
-    auditLogRepository = AuditLogRepository(database)
+    auditLogRepository = AuditLogRepositoryImpl(database)
     principalExtractor = { call ->
         call.request.header("X-Telegram-Id")?.toLongOrNull()?.let { id ->
             TelegramPrincipal(id, call.request.header("X-Telegram-Username"))
@@ -21,7 +21,7 @@ install(RbacPlugin) {
 
 * `userRepository` resolves `users.telegram_user_id` → internal `users.id`.
 * `userRoleRepository` loads user roles and club scope ids (`user_roles`).
-* `auditLogRepository` writes to `audit_log` (`result = access_granted/access_denied`).
+* `auditLogRepository` writes to `audit_log` (`action = ACCESS_GRANTED/ACCESS_DENIED`).
 * `principalExtractor` can reuse any authentication mechanism (default is `call.principal()`).
 
 `RbacPlugin` automatically enables `DoubleReceive` to safely inspect the request body when

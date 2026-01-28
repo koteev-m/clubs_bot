@@ -1,6 +1,6 @@
 package com.example.bot.routes
 
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.booking.core.BookingOutboxTable
 import com.example.bot.data.notifications.NotificationsOutboxTable
 import com.example.bot.data.notifications.OutboxStatus

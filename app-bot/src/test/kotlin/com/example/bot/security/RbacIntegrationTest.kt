@@ -1,5 +1,6 @@
 package com.example.bot.security
 
+import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.audit.AuditLogTable
 import com.example.bot.data.security.Role
 import com.example.bot.plugins.DataSourceHolder
@@ -24,6 +25,9 @@ import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.deleteAll
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -210,9 +214,13 @@ class RbacIntegrationTest {
     ) {
         transaction(database) {
             val record = AuditLogTable.selectAll().single()
-            record[AuditLogTable.result] shouldBe result
+            record[AuditLogTable.action] shouldBe result.uppercase()
+            record[AuditLogTable.entityType] shouldBe StandardAuditEntityType.HTTP_ACCESS.value
             record[AuditLogTable.clubId] shouldBe clubId
-            record[AuditLogTable.userId] shouldBe userId
+            record[AuditLogTable.actorUserId] shouldBe userId
+            val metadata =
+                Json.parseToJsonElement(record[AuditLogTable.metadataJson]).jsonObject
+            metadata["result"]?.jsonPrimitive?.content shouldBe result
         }
     }
 }

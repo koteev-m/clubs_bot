@@ -1,6 +1,6 @@
 package com.example.bot.security
 
-import com.example.bot.data.booking.core.AuditLogRepository
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
@@ -26,7 +26,7 @@ import io.mockk.mockk
 class RbacFeatureFlagTest :
     FunSpec({
         val auditRepo = mockk<AuditLogRepository>(relaxed = true)
-        coEvery { auditRepo.log(any(), any(), any(), any(), any(), any(), any()) } returns 1L
+        coEvery { auditRepo.append(any()) } returns 1L
 
         fun configFor(enabled: Boolean): MapApplicationConfig =
             MapApplicationConfig("app.RBAC_ENABLED" to enabled.toString())

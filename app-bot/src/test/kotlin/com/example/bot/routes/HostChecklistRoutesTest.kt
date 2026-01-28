@@ -251,7 +251,7 @@ class HostChecklistRoutesTest {
         override suspend fun listClubIdsFor(userId: Long): Set<Long> = setOf(1)
     }
 
-    private fun relaxedAuditRepository() = io.mockk.mockk<com.example.bot.data.booking.core.AuditLogRepository>(relaxed = true)
+    private fun relaxedAuditRepository() = io.mockk.mockk<com.example.bot.audit.AuditLogRepository>(relaxed = true)
 
     private suspend fun io.ktor.client.statement.HttpResponse.bodyAsJson(): JsonObject =
         Json.parseToJsonElement(bodyAsText()).jsonObject

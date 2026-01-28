@@ -244,7 +244,7 @@ class PromoterRatingRoutesTest {
         }
     }
 
-    private fun relaxedAuditRepository() = io.mockk.mockk<com.example.bot.data.booking.core.AuditLogRepository>(relaxed = true)
+    private fun relaxedAuditRepository() = io.mockk.mockk<com.example.bot.audit.AuditLogRepository>(relaxed = true)
 
     private class StubUserRepository : UserRepository {
         override suspend fun getByTelegramId(id: Long): User? = User(id = 1, telegramId = id, username = "tester")

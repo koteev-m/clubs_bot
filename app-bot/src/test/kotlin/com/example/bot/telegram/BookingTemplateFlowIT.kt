@@ -6,6 +6,7 @@ import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.booking.core.BookingOutboxTable
+import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.db.Clubs
 import com.example.bot.data.notifications.NotificationsOutboxRepository
 import com.example.bot.data.notifications.NotificationsOutboxTable
@@ -77,9 +78,7 @@ class BookingTemplateFlowIT : PostgresAppTest() {
         val outboxRepository =
             com.example.bot.data.booking.core
                 .OutboxRepository(database, clock)
-        val auditRepository =
-            com.example.bot.data.booking.core
-                .AuditLogRepository(database, clock)
+        val auditRepository = AuditLogRepositoryImpl(database, clock)
         bookingService =
             BookingService(
                 bookingRepository = bookingRepository,

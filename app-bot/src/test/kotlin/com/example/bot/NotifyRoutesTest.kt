@@ -155,18 +155,16 @@ private fun prepareSecurityData(): JdbcDataSource {
         .configure()
         .dataSource(dataSource)
         .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-        .target("8")
+        .target("33")
         .load()
         .migrate()
     val database = Database.connect(dataSource)
     transaction(database) {
         listOf(
             "action",
-            "result",
         ).forEach { column ->
             exec("""ALTER TABLE audit_log ALTER COLUMN $column RENAME TO "$column"""")
         }
-        exec("ALTER TABLE audit_log ALTER COLUMN resource_id DROP NOT NULL")
         val userId =
             UsersTable.insert {
                 it[telegramUserId] = 1L

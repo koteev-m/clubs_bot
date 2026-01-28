@@ -253,7 +253,7 @@ class PromoterQuotasAdminRoutesTest {
         response.assertNoStoreHeaders()
     }
 
-    private fun relaxedAuditRepository() = mockk<com.example.bot.data.booking.core.AuditLogRepository>(relaxed = true)
+    private fun relaxedAuditRepository() = mockk<com.example.bot.audit.AuditLogRepository>(relaxed = true)
 
     private fun withApp(
         roles: Set<Role> = setOf(Role.CLUB_ADMIN),

@@ -1,5 +1,9 @@
 package com.example.bot.data.booking.core
 
+import com.example.bot.audit.AuditLogEvent
+import com.example.bot.audit.CustomAuditAction
+import com.example.bot.audit.StandardAuditEntityType
+import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.audit.AuditLogTable
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
@@ -14,6 +18,7 @@ import testing.RequiresDocker
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 
 @RequiresDocker
 @Tag("it")
@@ -22,9 +27,24 @@ class AuditLogRepositoryIT : PostgresIntegrationTest() {
     fun `log writes audit record`() =
         runBlocking {
             val clock = Clock.fixed(Instant.parse("2025-04-01T08:15:00Z"), ZoneOffset.UTC)
-            val repo = AuditLogRepository(database, clock)
+            val repo = AuditLogRepositoryImpl(database, clock)
             val meta = buildJsonObject { put("bookingId", "abc") }
-            val id = repo.log(42L, "BOOKING_CREATED", "booking", 7L, "OK", "127.0.0.1", meta)
+            val fingerprint = UUID.randomUUID().toString()
+            val id =
+                repo.append(
+                    AuditLogEvent(
+                        clubId = 7L,
+                        nightId = null,
+                        actorUserId = 42L,
+                        actorRole = null,
+                        subjectUserId = null,
+                        entityType = StandardAuditEntityType.BOOKING,
+                        entityId = null,
+                        action = CustomAuditAction("BOOKING_CREATED"),
+                        fingerprint = fingerprint,
+                        metadata = meta,
+                    ),
+                )
             val stored =
                 transaction(database) {
                     AuditLogTable
@@ -33,9 +53,54 @@ class AuditLogRepositoryIT : PostgresIntegrationTest() {
                         .firstOrNull()
                 } ?: fail("audit record not found")
             assertEquals("BOOKING_CREATED", stored[AuditLogTable.action])
-            assertEquals("booking", stored[AuditLogTable.resource])
-            assertEquals("OK", stored[AuditLogTable.result])
-            assertEquals("127.0.0.1", stored[AuditLogTable.ip])
-            assertEquals(meta, stored[AuditLogTable.meta])
+            assertEquals("BOOKING", stored[AuditLogTable.entityType])
+            assertEquals(fingerprint, stored[AuditLogTable.fingerprint])
+            assertEquals(meta.toString(), stored[AuditLogTable.metadataJson])
+        }
+
+    @Test
+    fun `append is idempotent for fingerprint`() =
+        runBlocking {
+            val repo = AuditLogRepositoryImpl(database)
+            val fingerprint = "fingerprint-1"
+            val id =
+                repo.append(
+                    AuditLogEvent(
+                        clubId = 1L,
+                        nightId = null,
+                        actorUserId = 10L,
+                        actorRole = null,
+                        subjectUserId = null,
+                        entityType = StandardAuditEntityType.BOOKING,
+                        entityId = null,
+                        action = CustomAuditAction("BOOKING_CREATED"),
+                        fingerprint = fingerprint,
+                        metadata = buildJsonObject { put("bookingId", "abc") },
+                    ),
+                )
+            val secondId =
+                repo.append(
+                    AuditLogEvent(
+                        clubId = 1L,
+                        nightId = null,
+                        actorUserId = 10L,
+                        actorRole = null,
+                        subjectUserId = null,
+                        entityType = StandardAuditEntityType.BOOKING,
+                        entityId = null,
+                        action = CustomAuditAction("BOOKING_CREATED"),
+                        fingerprint = fingerprint,
+                        metadata = buildJsonObject { put("bookingId", "abc") },
+                    ),
+                )
+            assertEquals(id, secondId)
+            val total =
+                transaction(database) {
+                    AuditLogTable
+                        .selectAll()
+                        .where { AuditLogTable.fingerprint eq fingerprint }
+                        .count()
+                }
+            assertEquals(1, total)
         }
 }
