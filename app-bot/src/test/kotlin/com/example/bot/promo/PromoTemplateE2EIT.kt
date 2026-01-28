@@ -6,7 +6,7 @@ import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
-import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.booking.core.BookingOutboxTable
@@ -117,6 +117,7 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                         single { ExposedUserRoleRepository(get()) }
                         single { NotificationsOutboxRepository(get()) }
                         single { AuditLogRepositoryImpl(get(), get()) }
+                        single { AuditLogger(get()) }
                         single { BookingRepository(get(), get()) }
                         single { BookingHoldRepository(get(), get()) }
                         single { OutboxRepository(get(), get()) }
@@ -138,7 +139,7 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                                 bookingRepository = get(),
                                 holdRepository = get(),
                                 outboxRepository = get(),
-                                auditLogRepository = get(),
+                                auditLogger = get(),
                                 opsPublisher = NoopOpsNotificationPublisher,
                                 promoAttribution = get(),
                             )

@@ -1,10 +1,7 @@
 package com.example.bot.booking
 
 import com.example.bot.data.booking.BookingStatus
-import com.example.bot.audit.AuditLogEvent
-import com.example.bot.audit.AuditLogRepository
-import com.example.bot.audit.CustomAuditAction
-import com.example.bot.audit.StandardAuditEntityType
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.booking.core.BookingCoreError
 import com.example.bot.data.booking.core.BookingCoreResult
 import com.example.bot.data.booking.core.BookingHoldRepository
@@ -72,7 +69,7 @@ class BookingService(
     private val bookingRepository: BookingRepository,
     private val holdRepository: BookingHoldRepository,
     private val outboxRepository: OutboxRepository,
-    private val auditLogRepository: AuditLogRepository,
+    private val auditLogger: AuditLogger,
     private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     private val promoAttribution: PromoAttributionCoordinator = PromoAttributionCoordinator.Noop,
     private val meterRegistry: MeterRegistry? = null,
@@ -98,6 +95,7 @@ class BookingService(
                         buildJsonObject {
                             put("holdId", existingHold.id.toString())
                         },
+                        entityId = existingHold.id.toString(),
                     )
                     BookingCmdResult.HoldCreated(existingHold.id)
                 } else {
@@ -108,6 +106,7 @@ class BookingService(
                         buildJsonObject {
                             put("existingHoldId", existingHold.id.toString())
                         },
+                        entityId = existingHold.id.toString(),
                     )
                     BookingCmdResult.IdempotencyConflict
                 }
@@ -116,7 +115,7 @@ class BookingService(
             val hasActiveBooking =
                 bookingRepository.existsActiveFor(req.tableId, req.slotStart, req.slotEnd)
             if (hasActiveBooking) {
-                log("booking.hold", req.clubId, "duplicate_active", null)
+                log("booking.hold", req.clubId, "duplicate_active", null, entityId = null)
                 return@withTxRetry BookingCmdResult.DuplicateActiveBooking
             }
 
@@ -136,6 +135,7 @@ class BookingService(
                         clubId = req.clubId,
                         outcome = "created",
                         meta = buildJsonObject { put("holdId", result.value.id.toString()) },
+                        entityId = result.value.id.toString(),
                     )
                     BookingCmdResult.HoldCreated(result.value.id)
                 }
@@ -143,17 +143,17 @@ class BookingService(
                 is BookingCoreResult.Failure -> {
                     when (result.error) {
                         BookingCoreError.ActiveHoldExists -> {
-                            log("booking.hold", req.clubId, "duplicate_active", null)
+                            log("booking.hold", req.clubId, "duplicate_active", null, entityId = null)
                             BookingCmdResult.DuplicateActiveBooking
                         }
 
                         BookingCoreError.OptimisticRetryExceeded -> {
-                            log("booking.hold", req.clubId, "retry_exceeded", null)
+                            log("booking.hold", req.clubId, "retry_exceeded", null, entityId = null)
                             BookingCmdResult.IdempotencyConflict
                         }
 
                         else -> {
-                            log("booking.hold", req.clubId, "unexpected", null)
+                            log("booking.hold", req.clubId, "unexpected", null, entityId = null)
                             throw IllegalStateException("unexpected hold error: ${result.error}")
                         }
                     }
@@ -176,6 +176,7 @@ class BookingService(
                             clubId = existingBooking.clubId,
                             outcome = "idempotent",
                             meta = buildJsonObject { put("bookingId", existingBooking.id.toString()) },
+                            entityId = existingBooking.id.toString(),
                         )
                         return@withTxRetry BookingCmdResult.AlreadyBooked(existingBooking.id) to notification
                     }
@@ -187,22 +188,22 @@ class BookingService(
                             is BookingCoreResult.Failure -> {
                                 return@withTxRetry when (holdResult.error) {
                                     BookingCoreError.HoldExpired -> {
-                                        log("booking.confirm", null, "hold_expired", null)
+                                        log("booking.confirm", null, "hold_expired", null, entityId = null)
                                         BookingCmdResult.HoldExpired to notification
                                     }
 
                                     BookingCoreError.HoldNotFound -> {
-                                        log("booking.confirm", null, "hold_not_found", null)
+                                        log("booking.confirm", null, "hold_not_found", null, entityId = null)
                                         BookingCmdResult.NotFound to notification
                                     }
 
                                     BookingCoreError.OptimisticRetryExceeded -> {
-                                        log("booking.confirm", null, "retry_exceeded", null)
+                                        log("booking.confirm", null, "retry_exceeded", null, entityId = null)
                                         BookingCmdResult.IdempotencyConflict to notification
                                     }
 
                                     else -> {
-                                        log("booking.confirm", null, "unexpected", null)
+                                        log("booking.confirm", null, "unexpected", null, entityId = null)
                                         throw IllegalStateException("unexpected hold consume error: ${holdResult.error}")
                                     }
                                 }
@@ -219,6 +220,7 @@ class BookingService(
                             buildJsonObject {
                                 put("holdId", hold.id.toString())
                             },
+                            entityId = hold.id.toString(),
                         )
                         return@withTxRetry BookingCmdResult.DuplicateActiveBooking to notification
                     }
@@ -241,6 +243,14 @@ class BookingService(
                                 clubId = record.clubId,
                                 outcome = "booked",
                                 meta = buildJsonObject { put("bookingId", record.id.toString()) },
+                                entityId = record.id.toString(),
+                            )
+                            auditLogger.bookingCreated(
+                                bookingId = record.id,
+                                clubId = record.clubId,
+                                tableId = record.tableId,
+                                eventId = record.eventId,
+                                guests = record.guests,
                             )
                             notification =
                                 OpsDomainNotification(
@@ -255,27 +265,27 @@ class BookingService(
                         is BookingCoreResult.Failure -> {
                             when (booked.error) {
                                 BookingCoreError.DuplicateActiveBooking -> {
-                                    log("booking.confirm", hold.clubId, "duplicate_active", null)
+                                    log("booking.confirm", hold.clubId, "duplicate_active", null, entityId = hold.id.toString())
                                     BookingCmdResult.DuplicateActiveBooking to notification
                                 }
 
                                 BookingCoreError.IdempotencyConflict -> {
-                                    log("booking.confirm", hold.clubId, "idem_conflict", null)
+                                    log("booking.confirm", hold.clubId, "idem_conflict", null, entityId = hold.id.toString())
                                     BookingCmdResult.IdempotencyConflict to notification
                                 }
 
                                 BookingCoreError.BookingNotFound -> {
-                                    log("booking.confirm", hold.clubId, "not_found", null)
+                                    log("booking.confirm", hold.clubId, "not_found", null, entityId = hold.id.toString())
                                     BookingCmdResult.NotFound to notification
                                 }
 
                                 BookingCoreError.OptimisticRetryExceeded -> {
-                                    log("booking.confirm", hold.clubId, "retry_exceeded", null)
+                                    log("booking.confirm", hold.clubId, "retry_exceeded", null, entityId = hold.id.toString())
                                     BookingCmdResult.IdempotencyConflict to notification
                                 }
 
                                 else -> {
-                                    log("booking.confirm", hold.clubId, "unexpected", null)
+                                    log("booking.confirm", hold.clubId, "unexpected", null, entityId = hold.id.toString())
                                     throw IllegalStateException("unexpected booking error: ${booked.error}")
                                 }
                             }
@@ -294,27 +304,26 @@ class BookingService(
             val booking = bookingRepository.findById(bookingId)
             val record =
                 booking ?: run {
-                    log("booking.finalize", null, "not_found", null)
+                    log("booking.finalize", null, "not_found", null, entityId = bookingId.toString())
                     return@withTxRetry BookingCmdResult.NotFound
                 }
 
             promoAttribution.attachPending(record.id, telegramUserId)
 
-            val payload =
-                buildJsonObject {
-                    put("bookingId", record.id.toString())
-                    put("tableId", record.tableId)
-                    put("clubId", record.clubId)
-                    put("slotStart", record.slotStart.toString())
-                    put("slotEnd", record.slotEnd.toString())
-                }
-            outboxRepository.enqueue("booking.confirmed", payload)
-            log(
-                action = "booking.finalize",
-                clubId = record.clubId,
-                outcome = "sent",
-                meta = payload,
-            )
+        val payload =
+            buildJsonObject {
+                put("bookingId", record.id.toString())
+                put("tableId", record.tableId)
+                put("clubId", record.clubId)
+            }
+        outboxRepository.enqueue("booking.confirmed", payload)
+        log(
+            action = "booking.finalize",
+            clubId = record.clubId,
+            outcome = "sent",
+            meta = payload,
+            entityId = record.id.toString(),
+        )
             BookingCmdResult.Booked(record.id)
         }
 
@@ -349,6 +358,7 @@ class BookingService(
         clubId: Long?,
         outcome: String,
         meta: JsonObject?,
+        entityId: String? = null,
     ) {
         val metadata =
             buildJsonObject {
@@ -359,20 +369,7 @@ class BookingService(
                     }
                 }
             }
-        auditLogRepository.append(
-            AuditLogEvent(
-                clubId = clubId,
-                nightId = null,
-                actorUserId = null,
-                actorRole = null,
-                subjectUserId = null,
-                entityType = StandardAuditEntityType.BOOKING,
-                entityId = null,
-                action = CustomAuditAction(action),
-                fingerprint = UUID.randomUUID().toString(),
-                metadata = metadata,
-            ),
-        )
+        auditLogger.bookingAction(action, clubId, entityId, metadata)
     }
 
     private suspend fun updateStatus(
@@ -386,15 +383,15 @@ class BookingService(
         val current =
             bookingRepository.findById(bookingId)
                 ?: run {
-                    log(action, clubId, "not_found", metaFor(bookingId, null))
+                    log(action, clubId, "not_found", metaFor(bookingId, null), entityId = bookingId.toString())
                     return BookingStatusUpdateResult.NotFound
                 }
         if (current.clubId != clubId) {
-            log(action, clubId, "not_found", metaFor(bookingId, null))
+            log(action, clubId, "not_found", metaFor(bookingId, null), entityId = bookingId.toString())
             return BookingStatusUpdateResult.NotFound
         }
         if (current.status != BookingStatus.BOOKED) {
-            log(action, clubId, "conflict", metaFor(bookingId, current.status))
+            log(action, clubId, "conflict", metaFor(bookingId, current.status), entityId = bookingId.toString())
             return BookingStatusUpdateResult.Conflict(current)
         }
 
@@ -404,7 +401,7 @@ class BookingService(
                 val payload = payloadFor(record)
                 meterRegistry?.counter(metricName, "club_id", clubId.toString())?.increment()
                 outboxRepository.enqueue(outboxTopic, payload)
-                log(action, clubId, "ok", payload)
+                log(action, clubId, "ok", payload, entityId = record.id.toString())
                 notifyBestEffort(
                     OpsDomainNotification(
                         clubId = record.clubId,
@@ -419,18 +416,18 @@ class BookingService(
             is BookingCoreResult.Failure -> {
                 when (updated.error) {
                     BookingCoreError.BookingNotFound -> {
-                        log(action, clubId, "not_found", metaFor(bookingId, null))
+                        log(action, clubId, "not_found", metaFor(bookingId, null), entityId = bookingId.toString())
                         BookingStatusUpdateResult.NotFound
                     }
 
                     BookingCoreError.OptimisticRetryExceeded -> {
                         val refreshed = bookingRepository.findById(bookingId) ?: current
-                        log(action, clubId, "retry_exceeded", metaFor(bookingId, refreshed.status))
+                        log(action, clubId, "retry_exceeded", metaFor(bookingId, refreshed.status), entityId = bookingId.toString())
                         BookingStatusUpdateResult.Conflict(refreshed)
                     }
 
                     else -> {
-                        log(action, clubId, "unexpected", metaFor(bookingId, current.status))
+                        log(action, clubId, "unexpected", metaFor(bookingId, current.status), entityId = bookingId.toString())
                         throw IllegalStateException("unexpected booking status update error: ${updated.error}")
                     }
                 }
@@ -444,8 +441,6 @@ class BookingService(
             put("clubId", record.clubId)
             put("tableId", record.tableId)
             put("status", record.status.name)
-            put("slotStart", record.slotStart.toString())
-            put("slotEnd", record.slotEnd.toString())
             put("guests", record.guests)
         }
 

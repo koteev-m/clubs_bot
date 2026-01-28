@@ -6,6 +6,7 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListService
 import com.example.bot.club.InvitationService
 import com.example.bot.club.WaitlistRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.core.BookingHoldRepository
@@ -74,6 +75,7 @@ val bookingModule =
         single { OutboxRepository(get()) }
         single { NotificationsOutboxRepository(get()) }
         single<AuditLogRepository> { AuditLogRepositoryImpl(get()) }
+        single { AuditLogger(get()) }
 
         single<GuestListRepository> { GuestListRepositoryImpl(get()) }
         single<WaitlistRepository> { WaitlistRepositoryImpl(get()) }
@@ -84,7 +86,7 @@ val bookingModule =
         single<ClubOpsChatConfigRepository> { ClubOpsChatConfigRepositoryImpl(get()) }
         single<GuestListService> { GuestListServiceImpl(get(), get()) }
         single<InvitationService> { InvitationServiceImpl(get(), get(), get()) }
-        single<CheckinService> { CheckinServiceImpl(get(), get(), get(), get(), get()) }
+        single<CheckinService> { CheckinServiceImpl(get(), get(), get(), get(), get(), get()) }
         single { PromoterBookingAssignmentsRepository(get()) }
 
         single<PromoLinkRepository> { PromoLinkRepositoryImpl(get()) }
@@ -95,7 +97,7 @@ val bookingModule =
         single<UserRoleRepository> { ExposedUserRoleRepository(get()) }
 
         single { MyBookingsMetrics(runCatching { get<MeterRegistry>() }.getOrNull()) }
-        single { MyBookingsService(get(), get(), get(), get(), get<OpsNotificationPublisher>()) }
+        single { MyBookingsService(get(), get(), get(), get(), get(), get<OpsNotificationPublisher>()) }
 
         single<PromoAttributionStore> { InMemoryPromoAttributionStore() }
 

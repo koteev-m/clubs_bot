@@ -8,6 +8,8 @@ import com.example.bot.booking.payments.ConfirmInput
 import com.example.bot.booking.payments.ConfirmResult
 import com.example.bot.booking.payments.PaymentMode
 import com.example.bot.booking.payments.PaymentsService
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.payments.PaymentsRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -23,7 +25,9 @@ import java.util.UUID
 class PaymentsServiceUnitTest {
     private val bookingService = mockk<BookingService>()
     private val repo = mockk<PaymentsRepository>(relaxed = true)
-    private val service = PaymentsService(bookingService, repo)
+    private val auditRepo = mockk<AuditLogRepository>(relaxed = true)
+    private val auditLogger = AuditLogger(auditRepo)
+    private val service = PaymentsService(bookingService, repo, auditLogger)
 
     @Test
     fun `should create pending payment for provider deposit`() =
