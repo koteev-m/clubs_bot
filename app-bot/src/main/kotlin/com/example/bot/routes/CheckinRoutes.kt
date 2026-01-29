@@ -368,6 +368,25 @@ fun Application.checkinRoutes(
                                                 )
                                             }
                                         if (marked == null) {
+                                            val updatedEntry =
+                                                withContext(Dispatchers.IO + MDCContext()) {
+                                                    repository.findEntry(entry.id)
+                                                }
+                                            if (updatedEntry != null &&
+                                                updatedEntry.status in alreadyCheckedInStatuses &&
+                                                updatedEntry.checkedInAt != null
+                                            ) {
+                                                UiCheckinMetrics.incError()
+                                                currentResult = CheckinScanResult.ALREADY_CHECKED_IN
+                                                call.respondError(
+                                                    HttpStatusCode.Conflict,
+                                                    ErrorCodes.already_checked_in,
+                                                    message = ErrorCodes.already_checked_in,
+                                                    details = alreadyCheckedInDetails(updatedEntry),
+                                                )
+                                                return@withIds
+                                            }
+
                                             UiCheckinMetrics.incError()
                                             currentResult = CheckinScanResult.UNABLE_TO_MARK
                                             logger.warn(
