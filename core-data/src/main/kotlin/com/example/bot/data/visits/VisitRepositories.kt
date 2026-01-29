@@ -1,6 +1,5 @@
 package com.example.bot.data.visits
 
-import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.toOffsetDateTimeUtc
 import com.example.bot.data.db.withRetriedTx
 import com.example.bot.data.security.Role
@@ -13,7 +12,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
-import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -68,25 +67,21 @@ class NightOverrideRepository(
                         it[OperationalNightOverridesTable.updatedAt] = now
                     }
                 if (updated == 0) {
-                    try {
-                        OperationalNightOverridesTable.insert {
+                    val inserted =
+                        OperationalNightOverridesTable.insertIgnore {
                             it[OperationalNightOverridesTable.clubId] = clubId
                             it[OperationalNightOverridesTable.nightStartUtc] = nightStart
                             it[OperationalNightOverridesTable.earlyCutoffAt] = earlyCutoff
                             it[OperationalNightOverridesTable.createdAt] = now
                             it[OperationalNightOverridesTable.updatedAt] = now
                         }
-                    } catch (ex: Exception) {
-                        if (ex.isUniqueViolation()) {
-                            OperationalNightOverridesTable.update({
-                                (OperationalNightOverridesTable.clubId eq clubId) and
-                                    (OperationalNightOverridesTable.nightStartUtc eq nightStart)
-                            }) {
-                                it[OperationalNightOverridesTable.earlyCutoffAt] = earlyCutoff
-                                it[OperationalNightOverridesTable.updatedAt] = now
-                            }
-                        } else {
-                            throw ex
+                    if (inserted.insertedCount == 0) {
+                        OperationalNightOverridesTable.update({
+                            (OperationalNightOverridesTable.clubId eq clubId) and
+                                (OperationalNightOverridesTable.nightStartUtc eq nightStart)
+                        }) {
+                            it[OperationalNightOverridesTable.earlyCutoffAt] = earlyCutoff
+                            it[OperationalNightOverridesTable.updatedAt] = now
                         }
                     }
                 }
@@ -149,8 +144,8 @@ class VisitRepository(
         val isEarly = cutoff != null && !input.firstCheckinAt.isAfter(cutoff)
         return withRetriedTx(name = "visit.checkin", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                try {
-                    ClubVisitsTable.insert {
+                val inserted =
+                    ClubVisitsTable.insertIgnore {
                         it[clubId] = input.clubId
                         it[nightStartUtc] = nightStart
                         it[eventId] = input.eventId
@@ -164,19 +159,10 @@ class VisitRepository(
                         it[createdAt] = now
                         it[updatedAt] = now
                     }
-                    val createdVisit =
-                        findVisit(input.clubId, nightStart, input.userId)
-                            ?: error("Failed to load club visit after insert")
-                    VisitCheckInResult(created = true, visit = createdVisit)
-                } catch (ex: Exception) {
-                    if (!ex.isUniqueViolation()) {
-                        throw ex
-                    }
-                    val existingVisit =
-                        findVisit(input.clubId, nightStart, input.userId)
-                            ?: error("Failed to load existing club visit after unique violation")
-                    VisitCheckInResult(created = false, visit = existingVisit)
-                }
+                val visit =
+                    findVisit(input.clubId, nightStart, input.userId)
+                        ?: error("Failed to load club visit after insert")
+                VisitCheckInResult(created = inserted.insertedCount > 0, visit = visit)
             }
         }
     }

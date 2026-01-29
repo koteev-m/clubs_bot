@@ -1,6 +1,5 @@
 package com.example.bot.data.gamification
 
-import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.toOffsetDateTimeUtc
 import com.example.bot.data.db.withRetriedTx
 import kotlinx.coroutines.Dispatchers
@@ -11,7 +10,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
-import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -64,8 +63,8 @@ class GamificationSettingsRepository(
                         it[updatedAt] = now
                     }
                 if (updated == 0) {
-                    try {
-                        ClubGamificationSettingsTable.insert {
+                    val inserted =
+                        ClubGamificationSettingsTable.insertIgnore {
                             it[clubId] = settings.clubId
                             it[stampsEnabled] = settings.stampsEnabled
                             it[earlyEnabled] = settings.earlyEnabled
@@ -76,22 +75,18 @@ class GamificationSettingsRepository(
                             it[earlyWindowMinutes] = settings.earlyWindowMinutes
                             it[updatedAt] = now
                         }
-                    } catch (ex: Exception) {
-                        if (ex.isUniqueViolation()) {
-                            ClubGamificationSettingsTable.update({
-                                ClubGamificationSettingsTable.clubId eq settings.clubId
-                            }) {
-                                it[stampsEnabled] = settings.stampsEnabled
-                                it[earlyEnabled] = settings.earlyEnabled
-                                it[badgesEnabled] = settings.badgesEnabled
-                                it[prizesEnabled] = settings.prizesEnabled
-                                it[contestsEnabled] = settings.contestsEnabled
-                                it[tablesLoyaltyEnabled] = settings.tablesLoyaltyEnabled
-                                it[earlyWindowMinutes] = settings.earlyWindowMinutes
-                                it[updatedAt] = now
-                            }
-                        } else {
-                            throw ex
+                    if (inserted.insertedCount == 0) {
+                        ClubGamificationSettingsTable.update({
+                            ClubGamificationSettingsTable.clubId eq settings.clubId
+                        }) {
+                            it[stampsEnabled] = settings.stampsEnabled
+                            it[earlyEnabled] = settings.earlyEnabled
+                            it[badgesEnabled] = settings.badgesEnabled
+                            it[prizesEnabled] = settings.prizesEnabled
+                            it[contestsEnabled] = settings.contestsEnabled
+                            it[tablesLoyaltyEnabled] = settings.tablesLoyaltyEnabled
+                            it[earlyWindowMinutes] = settings.earlyWindowMinutes
+                            it[updatedAt] = now
                         }
                     }
                 }
@@ -158,24 +153,16 @@ class UserBadgeRepository(
     ): UserBadge =
         withRetriedTx(name = "badge.tryEarn", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                try {
-                    UserBadgesTable.insert {
-                        it[UserBadgesTable.clubId] = clubId
-                        it[UserBadgesTable.userId] = userId
-                        it[UserBadgesTable.badgeId] = badgeId
-                        it[UserBadgesTable.earnedAt] = earnedAt.toOffsetDateTimeUtc()
-                        it[UserBadgesTable.fingerprint] = fingerprint
-                    }
-                    findUserBadgeByFingerprint(fingerprint)
-                        ?: error("Failed to load user badge after insert")
-                } catch (ex: Exception) {
-                    if (!ex.isUniqueViolation()) {
-                        throw ex
-                    }
-                    findUserBadgeByFingerprint(fingerprint)
-                        ?: findUserBadgeByKey(clubId, userId, badgeId)
-                        ?: error("Failed to load user badge after unique violation")
+                UserBadgesTable.insertIgnore {
+                    it[UserBadgesTable.clubId] = clubId
+                    it[UserBadgesTable.userId] = userId
+                    it[UserBadgesTable.badgeId] = badgeId
+                    it[UserBadgesTable.earnedAt] = earnedAt.toOffsetDateTimeUtc()
+                    it[UserBadgesTable.fingerprint] = fingerprint
                 }
+                findUserBadgeByFingerprint(fingerprint)
+                    ?: findUserBadgeByKey(clubId, userId, badgeId)
+                    ?: error("Failed to load user badge after insert")
             }
         }
 
@@ -303,28 +290,20 @@ class CouponRepository(
     ): RewardCoupon =
         withRetriedTx(name = "coupon.tryIssue", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                try {
-                    RewardCouponsTable.insert {
-                        it[RewardCouponsTable.clubId] = clubId
-                        it[RewardCouponsTable.userId] = userId
-                        it[RewardCouponsTable.prizeId] = prizeId
-                        it[RewardCouponsTable.status] = CouponStatus.AVAILABLE.name
-                        it[RewardCouponsTable.reasonCode] = null
-                        it[RewardCouponsTable.fingerprint] = fingerprint
-                        it[RewardCouponsTable.issuedAt] = issuedAt.toOffsetDateTimeUtc()
-                        it[RewardCouponsTable.expiresAt] = expiresAt?.toOffsetDateTimeUtc()
-                        it[RewardCouponsTable.issuedBy] = issuedBy
-                        it[RewardCouponsTable.updatedAt] = issuedAt.toOffsetDateTimeUtc()
-                    }
-                    findCouponByFingerprint(fingerprint)
-                        ?: error("Failed to load reward coupon after insert")
-                } catch (ex: Exception) {
-                    if (!ex.isUniqueViolation()) {
-                        throw ex
-                    }
-                    findCouponByFingerprint(fingerprint)
-                        ?: error("Failed to load reward coupon after unique violation")
+                RewardCouponsTable.insertIgnore {
+                    it[RewardCouponsTable.clubId] = clubId
+                    it[RewardCouponsTable.userId] = userId
+                    it[RewardCouponsTable.prizeId] = prizeId
+                    it[RewardCouponsTable.status] = CouponStatus.AVAILABLE.name
+                    it[RewardCouponsTable.reasonCode] = null
+                    it[RewardCouponsTable.fingerprint] = fingerprint
+                    it[RewardCouponsTable.issuedAt] = issuedAt.toOffsetDateTimeUtc()
+                    it[RewardCouponsTable.expiresAt] = expiresAt?.toOffsetDateTimeUtc()
+                    it[RewardCouponsTable.issuedBy] = issuedBy
+                    it[RewardCouponsTable.updatedAt] = issuedAt.toOffsetDateTimeUtc()
                 }
+                findCouponByFingerprint(fingerprint)
+                    ?: error("Failed to load reward coupon after insert")
             }
         }
 
