@@ -18,12 +18,27 @@ import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListRepositoryImpl
 import com.example.bot.data.club.GuestListServiceImpl
+import com.example.bot.club.EventRepository
+import com.example.bot.data.club.EventRepositoryImpl
 import com.example.bot.data.club.InvitationDbRepository
 import com.example.bot.data.club.CheckinDbRepository
 import com.example.bot.data.club.ClubOpsChatConfigRepositoryImpl
 import com.example.bot.data.club.InvitationServiceImpl
 import com.example.bot.data.club.WaitlistRepositoryImpl
 import com.example.bot.data.checkin.CheckinServiceImpl
+import com.example.bot.data.gamification.BadgeRepository
+import com.example.bot.data.gamification.BadgeRepositoryAdapter
+import com.example.bot.data.gamification.CouponRepository
+import com.example.bot.data.gamification.CouponRepositoryAdapter
+import com.example.bot.data.gamification.GamificationSettingsRepository
+import com.example.bot.data.gamification.GamificationSettingsRepositoryAdapter
+import com.example.bot.data.gamification.PrizeRepository
+import com.example.bot.data.gamification.PrizeRepositoryAdapter
+import com.example.bot.data.gamification.RewardLadderRepository
+import com.example.bot.data.gamification.RewardLadderRepositoryAdapter
+import com.example.bot.data.gamification.UserBadgeRepository
+import com.example.bot.data.gamification.UserBadgeRepositoryAdapter
+import com.example.bot.data.gamification.VisitMetricsRepositoryAdapter
 import com.example.bot.data.notifications.NotificationsOutboxRepository
 import com.example.bot.data.promo.BookingTemplateRepositoryImpl
 import com.example.bot.data.promo.PromoAttributionRepositoryImpl
@@ -32,8 +47,18 @@ import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
+import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.VisitRepository
 import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
+import com.example.bot.gamification.BadgeRepository as DomainBadgeRepository
+import com.example.bot.gamification.CouponRepository as DomainCouponRepository
+import com.example.bot.gamification.GamificationEngine
+import com.example.bot.gamification.GamificationSettingsRepository as DomainGamificationSettingsRepository
+import com.example.bot.gamification.PrizeRepository as DomainPrizeRepository
+import com.example.bot.gamification.RewardLadderRepository as DomainRewardLadderRepository
+import com.example.bot.gamification.UserBadgeRepository as DomainUserBadgeRepository
+import com.example.bot.gamification.VisitMetricsRepository
 import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.promo.BookingTemplateRepository
 import com.example.bot.promo.BookingTemplateService
@@ -86,7 +111,54 @@ val bookingModule =
         single<ClubOpsChatConfigRepository> { ClubOpsChatConfigRepositoryImpl(get()) }
         single<GuestListService> { GuestListServiceImpl(get(), get()) }
         single<InvitationService> { InvitationServiceImpl(get(), get(), get()) }
-        single<CheckinService> { CheckinServiceImpl(get(), get(), get(), get(), get(), get()) }
+        single<EventRepository> { EventRepositoryImpl(get()) }
+        single { NightOverrideRepository(get()) }
+        single { VisitRepository(get()) }
+
+        single { GamificationSettingsRepository(get()) }
+        single { BadgeRepository(get()) }
+        single { UserBadgeRepository(get()) }
+        single { RewardLadderRepository(get()) }
+        single { CouponRepository(get()) }
+        single { PrizeRepository(get()) }
+
+        single<DomainGamificationSettingsRepository> { GamificationSettingsRepositoryAdapter(get()) }
+        single<DomainBadgeRepository> { BadgeRepositoryAdapter(get()) }
+        single<DomainUserBadgeRepository> { UserBadgeRepositoryAdapter(get()) }
+        single<DomainRewardLadderRepository> { RewardLadderRepositoryAdapter(get()) }
+        single<DomainCouponRepository> { CouponRepositoryAdapter(get()) }
+        single<DomainPrizeRepository> { PrizeRepositoryAdapter(get()) }
+        single<VisitMetricsRepository> { VisitMetricsRepositoryAdapter(get()) }
+
+        single {
+            GamificationEngine(
+                get<DomainGamificationSettingsRepository>(),
+                get<DomainBadgeRepository>(),
+                get<DomainUserBadgeRepository>(),
+                get<DomainRewardLadderRepository>(),
+                get<DomainPrizeRepository>(),
+                get<DomainCouponRepository>(),
+                get<VisitMetricsRepository>(),
+                get(),
+            )
+        }
+
+        single<CheckinService> {
+            CheckinServiceImpl(
+                checkinRepo = get(),
+                invitationService = get(),
+                guestListRepo = get(),
+                guestListEntryRepo = get(),
+                bookingRepo = get(),
+                auditLogger = get(),
+                userRepository = get(),
+                eventRepository = get<EventRepository>(),
+                nightOverrideRepository = get(),
+                visitRepository = get(),
+                gamificationSettingsRepository = get(),
+                gamificationEngine = get(),
+            )
+        }
         single { PromoterBookingAssignmentsRepository(get()) }
 
         single<PromoLinkRepository> { PromoLinkRepositoryImpl(get()) }

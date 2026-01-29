@@ -41,10 +41,12 @@ class GamificationRepositoriesTest {
             val first = repo.tryIssue("coupon-fp", clubId, userId, prizeId, issuedAt)
             val second = repo.tryIssue("coupon-fp", clubId, userId, prizeId, issuedAt)
 
-            assertEquals(first.id, second.id)
+            assertEquals(first.coupon.id, second.coupon.id)
+            assertTrue(first.created)
+            assertFalse(second.created)
 
-            val redeemed = repo.redeem(first.id, managerId = userId, now = issuedAt.plusSeconds(60))
-            val redeemedAgain = repo.redeem(first.id, managerId = userId, now = issuedAt.plusSeconds(120))
+            val redeemed = repo.redeem(first.coupon.id, managerId = userId, now = issuedAt.plusSeconds(60))
+            val redeemedAgain = repo.redeem(first.coupon.id, managerId = userId, now = issuedAt.plusSeconds(120))
 
             assertTrue(redeemed)
             assertFalse(redeemedAgain)
@@ -66,7 +68,9 @@ class GamificationRepositoriesTest {
             val first = repo.tryEarn("badge-fp", clubId, userId, badgeId, earnedAt)
             val second = repo.tryEarn("badge-fp", clubId, userId, badgeId, earnedAt)
 
-            assertEquals(first.id, second.id)
+            assertEquals(first.badge.id, second.badge.id)
+            assertTrue(first.created)
+            assertFalse(second.created)
 
             val total =
                 newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {

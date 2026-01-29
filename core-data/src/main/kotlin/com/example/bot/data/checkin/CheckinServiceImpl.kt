@@ -33,6 +33,13 @@ import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
+import com.example.bot.data.security.UserRepository
+import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.VisitCheckInInput
+import com.example.bot.data.visits.VisitRepository
+import com.example.bot.gamification.GamificationEngine
+import com.example.bot.data.gamification.GamificationSettingsRepository
+import com.example.bot.data.gamification.toDomain
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -47,6 +54,12 @@ class CheckinServiceImpl(
     private val guestListEntryRepo: GuestListEntryDbRepository,
     private val bookingRepo: BookingRepository,
     private val auditLogger: AuditLogger,
+    private val userRepository: UserRepository,
+    private val eventRepository: com.example.bot.club.EventRepository,
+    private val nightOverrideRepository: NightOverrideRepository,
+    private val visitRepository: VisitRepository,
+    private val gamificationSettingsRepository: GamificationSettingsRepository,
+    private val gamificationEngine: GamificationEngine,
     private val checkinConfig: CheckinConfig = CheckinConfig.fromEnv(),
     private val bookingQrConfig: BookingQrConfig = BookingQrConfig.fromEnv(),
     private val clock: Clock = Clock.systemUTC(),
@@ -704,6 +717,11 @@ class CheckinServiceImpl(
                 subjectId = it.subjectId,
                 resultStatus = it.resultStatus.name,
             )
+            attemptVisitGamification(
+                record = it,
+                subjectTelegramUserId = entry.telegramUserId,
+                actor = actor,
+            )
         }
 
         return CheckinServiceResult.Success(
@@ -842,6 +860,12 @@ class CheckinServiceImpl(
                 subjectId = it.subjectId,
                 resultStatus = it.resultStatus.name,
             )
+            val entry = guestListEntryRepo.findById(card.entryId)
+            attemptVisitGamification(
+                record = it,
+                subjectTelegramUserId = entry?.telegramUserId,
+                actor = actor,
+            )
         }
 
         return CheckinServiceResult.Success(
@@ -921,6 +945,11 @@ class CheckinServiceImpl(
             subjectId = record.subjectId,
             resultStatus = record.resultStatus.name,
         )
+        attemptVisitGamification(
+            record = record,
+            subjectTelegramUserId = null,
+            actor = actor,
+        )
         return CheckinServiceResult.Success(
             CheckinResult.Success(
                 subjectType = record.subjectType,
@@ -980,6 +1009,18 @@ class CheckinServiceImpl(
                 subjectId = record.subjectId,
                 resultStatus = record.resultStatus.name,
             )
+            val actorUserId = record.checkedBy
+            if (actorUserId != null) {
+                attemptVisitGamification(
+                    record = record,
+                    subjectTelegramUserId = subjectUserId,
+                    actor = AuthContext(
+                        userId = actorUserId,
+                        telegramUserId = null,
+                        roles = emptySet(),
+                    ),
+                )
+            }
         }
         return CheckinServiceResult.Success(
             CheckinResult.Success(
@@ -991,6 +1032,76 @@ class CheckinServiceImpl(
                 checkedBy = record.checkedBy,
             ),
         )
+    }
+
+    private suspend fun attemptVisitGamification(
+        record: com.example.bot.data.club.CheckinRecord,
+        subjectTelegramUserId: Long?,
+        actor: AuthContext,
+    ) {
+        if (record.clubId == null || record.eventId == null) return
+        if (record.resultStatus == CheckinResultStatus.DENIED) return
+        if (subjectTelegramUserId == null) return
+        if (actor.userId <= 0) return
+        val subjectUser =
+            try {
+                userRepository.getByTelegramId(subjectTelegramUserId)
+            } catch (ex: Exception) {
+                logger.warn("visit.gamification.user_lookup_failed clubId={} eventId={}", record.clubId, record.eventId, ex)
+                null
+            } ?: return
+        val event =
+            try {
+                eventRepository.get(record.eventId)
+            } catch (ex: Exception) {
+                logger.warn("visit.gamification.event_lookup_failed clubId={} eventId={}", record.clubId, record.eventId, ex)
+                null
+            } ?: return
+        val nightStartUtc = event.startAt
+        val effectiveEarlyCutoff =
+            try {
+                nightOverrideRepository.getOverride(record.clubId, nightStartUtc)?.earlyCutoffAt
+                    ?: gamificationSettingsRepository.getByClubId(record.clubId)?.earlyWindowMinutes
+                        ?.let { minutes -> nightStartUtc.plus(Duration.ofMinutes(minutes.toLong())) }
+            } catch (ex: Exception) {
+                logger.warn("visit.gamification.early_cutoff_failed clubId={} eventId={}", record.clubId, record.eventId, ex)
+                null
+            }
+        val visitResult =
+            try {
+                visitRepository.tryCheckIn(
+                    VisitCheckInInput(
+                        clubId = record.clubId,
+                        nightStartUtc = nightStartUtc,
+                        eventId = record.eventId,
+                        userId = subjectUser.id,
+                        actorUserId = actor.userId,
+                        actorRole = actor.roles.firstOrNull(),
+                        entryType = record.subjectType.name,
+                        firstCheckinAt = record.occurredAt,
+                        effectiveEarlyCutoffAt = effectiveEarlyCutoff,
+                    ),
+                )
+            } catch (ex: Exception) {
+                logger.warn("visit.gamification.visit_create_failed clubId={} eventId={}", record.clubId, record.eventId, ex)
+                return
+            }
+
+        if (record.subjectType == CheckinSubjectType.BOOKING) {
+            runCatching {
+                visitRepository.markHasTable(record.clubId, nightStartUtc, subjectUser.id, hasTable = true)
+            }.onFailure { ex ->
+                logger.warn("visit.gamification.mark_table_failed clubId={} eventId={}", record.clubId, record.eventId, ex)
+            }
+        }
+
+        if (!visitResult.created) return
+
+        try {
+            gamificationEngine.onVisitCreated(visitResult.visit.toDomain(), clock.instant())
+        } catch (ex: Exception) {
+            logger.warn("visit.gamification.failed clubId={} eventId={}", record.clubId, record.eventId, ex)
+        }
     }
 
     private fun com.example.bot.data.club.CheckinRecord.toAlreadyUsed(): CheckinResult.AlreadyUsed =
