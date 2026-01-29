@@ -8,7 +8,7 @@
 
 - **Miniapp guest-list QR** (`/api/clubs/{clubId}/checkin/scan`) доступен только для ролей `CLUB_ADMIN`, `MANAGER`, `ENTRY_MANAGER` и проходит `clubScoped(ClubScope.Own)`.【F:app-bot/src/main/kotlin/com/example/bot/routes/CheckinRoutes.kt†L55-L89】
 - **Host check-in** (`/api/host/checkin`, `/api/host/checkin/scan`) также ограничен теми же ролями и проверкой доступа к клубу (`canAccessClub`).【F:app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt†L87-L155】
-- Внутри сервисного слоя контроль ролей дублируется: **разрешены только** `ENTRY_MANAGER`, `MANAGER`, `CLUB_ADMIN` — иначе возвращается `CHECKIN_FORBIDDEN`.【F:core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt†L58-L166】【F:core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt†L285-L296】
+- Внутри сервисного слоя контроль ролей дублируется: **разрешены только** `ENTRY_MANAGER`, `MANAGER`, `CLUB_ADMIN`. Для `hostCheckin`/`hostScan` и `handleInvitationCheckin` при нарушении ролей возвращается `Failure(CHECKIN_FORBIDDEN)`, а для `scanQr`/`manualCheckin` — `Success(CheckinResult.Forbidden)` (это не ошибка сервиса, а результат запрета).【F:core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt†L58-L296】【F:core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt†L727-L750】
 
 ### «Штампы» (checkins) и неизменяемость
 
@@ -73,6 +73,18 @@ ROLE_ASSIGNMENT:CREATE:club:GLOBAL:user:9001:role:MANAGER:scope:GLOBAL:v1
 
 ## Примеры ошибок API (code / ErrorCodes)
 
+Большинство API ошибок возвращаются в формате `ApiError` (через `respondError`/`StatusPages`), но **miniapp initData auth** (плагин `InitDataAuth`) при отказе возвращает другой JSON без `requestId`/`status`/`details`.【F:app-bot/src/main/kotlin/com/example/bot/http/ApiError.kt†L1-L44】【F:app-bot/src/main/kotlin/com/example/bot/plugins/JsonErrorPages.kt†L1-L92】【F:app-bot/src/main/kotlin/com/example/bot/plugins/InitDataAuth.kt†L68-L130】
+
+```json
+{
+  "error": "initData missing",
+  "message": "initData missing",
+  "code": "unauthorized"
+}
+```
+
+В 401 из initData auth клиенты должны опираться на поле `code`, а не на наличие `requestId` или стандартного shape ответа ошибки.【F:app-bot/src/main/kotlin/com/example/bot/plugins/InitDataAuth.kt†L68-L130】
+
 Формат ошибки (`ApiError`):
 
 ```json
@@ -93,6 +105,7 @@ ROLE_ASSIGNMENT:CREATE:club:GLOBAL:user:9001:role:MANAGER:scope:GLOBAL:v1
 - **400** `checkin_invalid_payload` — неправильный payload (host).【F:app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt†L118-L133】【F:app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt†L166-L179】
 - **400** `checkin_deny_reason_required` — запрет без `denyReason` (host).【F:app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt†L217-L235】
 - **403** `checkin_forbidden` / `forbidden` — нет роли или нет доступа к клубу (host).【F:app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt†L133-L150】【F:app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt†L217-L235】
+- **401** `unauthorized` — miniapp initData отсутствует/некорректна (schema отличается от `ApiError`, см. выше).【F:app-bot/src/main/kotlin/com/example/bot/plugins/InitDataAuth.kt†L68-L130】
 - **404** `checkin_subject_not_found` — субъект не найден (host).【F:app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt†L217-L235】
 - **409** `already_checked_in` — запись уже отмечена (miniapp).【F:app-bot/src/main/kotlin/com/example/bot/routes/CheckinRoutes.kt†L265-L291】
 - **409** `outside_arrival_window` — слишком рано (miniapp, без статуса `CALLED`).【F:app-bot/src/main/kotlin/com/example/bot/routes/CheckinRoutes.kt†L294-L313】
