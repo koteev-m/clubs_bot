@@ -188,17 +188,17 @@ class BookingService(
                             is BookingCoreResult.Failure -> {
                                 return@withTxRetry when (holdResult.error) {
                                     BookingCoreError.HoldExpired -> {
-                                        log("booking.confirm", null, "hold_expired", null, entityId = null)
+                                        log("booking.confirm", null, "hold_expired", null, entityId = holdId.toString())
                                         BookingCmdResult.HoldExpired to notification
                                     }
 
                                     BookingCoreError.HoldNotFound -> {
-                                        log("booking.confirm", null, "hold_not_found", null, entityId = null)
+                                        log("booking.confirm", null, "hold_not_found", null, entityId = holdId.toString())
                                         BookingCmdResult.NotFound to notification
                                     }
 
                                     BookingCoreError.OptimisticRetryExceeded -> {
-                                        log("booking.confirm", null, "retry_exceeded", null, entityId = null)
+                                        log("booking.confirm", null, "retry_exceeded", null, entityId = holdId.toString())
                                         BookingCmdResult.IdempotencyConflict to notification
                                     }
 
