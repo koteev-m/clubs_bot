@@ -123,6 +123,52 @@ class EntryManagerCheckInSmokeTest {
         }
 
     @Test
+    fun `concurrent checkin returns already_checked_in after stale read`() =
+        testApplication {
+            val guestListRepository = EMGuestListRepository()
+            val module = emBaseModule(guestListRepository = guestListRepository)
+            applicationDev { emConfigureApp(module) }
+
+            val issued = EM_FIXED_NOW.minusSeconds(60)
+            val qrToken = QrGuestListCodec.encode(EM_LIST_ID, EM_ENTRY_ID, issued, EM_QR_SECRET)
+            val initData = emCreateInitData()
+            val path = "/api/clubs/$EM_CLUB_ID/checkin/scan"
+
+            val first =
+                client.post(path) {
+                    contentType(ContentType.Application.Json)
+                    withInitData(initData)
+                    setBody("""{"qr":"$qrToken"}""")
+                }
+            assertEquals(HttpStatusCode.OK, first.status)
+
+            val staleEntry =
+                guestListRepository.currentEntry().copy(
+                    status = GuestListEntryStatus.PLANNED,
+                    checkedInAt = null,
+                    checkedInBy = null,
+                )
+            val updatedEntry = guestListRepository.currentEntry()
+            guestListRepository.simulateConcurrentCheckin(staleEntry, updatedEntry)
+
+            val second =
+                client.post(path) {
+                    contentType(ContentType.Application.Json)
+                    withInitData(initData)
+                    setBody("""{"qr":"$qrToken"}""")
+                }
+
+            val secondBody = second.bodyAsText()
+            println("DBG concurrent-checkin: status=${second.status} body=$secondBody")
+
+            assertAll(
+                { assertEquals(HttpStatusCode.Conflict, second.status) },
+                { assertTrue(secondBody.contains(ErrorCodes.already_checked_in)) },
+                { assertTrue(!secondBody.contains(ErrorCodes.unable_to_mark)) },
+            )
+        }
+
+    @Test
     fun `malformed or expired qr returns 400`() =
         testApplication {
             val module = emBaseModule()
@@ -385,6 +431,10 @@ private fun emBaseModule(
 private class EMGuestListRepository : GuestListRepository {
     private var list: GuestList? = defaultList()
     private var entry: GuestListEntry? = defaultEntry()
+    private var staleEntryOnFirstFind: GuestListEntry? = null
+    private var updatedEntryAfterConflict: GuestListEntry? = null
+    private var forceSetEntryStatusNull = false
+    private var findEntryCalls = 0
 
     override suspend fun createList(
         clubId: Long,
@@ -400,7 +450,18 @@ private class EMGuestListRepository : GuestListRepository {
 
     override suspend fun getList(id: Long): GuestList? = if (list?.id == id) list else null
 
-    override suspend fun findEntry(id: Long): GuestListEntry? = if (entry?.id == id) entry else null
+    override suspend fun findEntry(id: Long): GuestListEntry? {
+        findEntryCalls += 1
+        val stale = staleEntryOnFirstFind
+        if (findEntryCalls == 1 && stale?.id == id) {
+            return stale
+        }
+        val updated = updatedEntryAfterConflict
+        if (findEntryCalls > 1 && updated?.id == id) {
+            return updated
+        }
+        return if (entry?.id == id) entry else null
+    }
 
     override suspend fun listListsByClub(
         clubId: Long,
@@ -423,6 +484,7 @@ private class EMGuestListRepository : GuestListRepository {
         checkedInBy: Long?,
         at: Instant?,
     ): GuestListEntry? {
+        if (forceSetEntryStatusNull) return null
         val current = entry
         if (current?.id != entryId) return null
         val updated =
@@ -472,6 +534,16 @@ private class EMGuestListRepository : GuestListRepository {
     }
 
     fun currentEntry(): GuestListEntry = requireNotNull(entry) { "Entry not configured" }
+
+    fun simulateConcurrentCheckin(
+        staleEntry: GuestListEntry,
+        updatedEntry: GuestListEntry,
+    ) {
+        staleEntryOnFirstFind = staleEntry
+        updatedEntryAfterConflict = updatedEntry
+        forceSetEntryStatusNull = true
+        findEntryCalls = 0
+    }
 
     companion object {
         private fun defaultList(): GuestList =
