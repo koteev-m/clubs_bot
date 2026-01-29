@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS club_visits (
     event_id BIGINT NULL REFERENCES events(id) ON DELETE SET NULL,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     first_checkin_at TIMESTAMPTZ NOT NULL,
-    actor_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
     actor_role TEXT NULL,
     entry_type TEXT NOT NULL,
     is_early BOOLEAN NOT NULL,
@@ -23,9 +23,6 @@ CREATE TABLE IF NOT EXISTS club_visits (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (club_id, night_start_utc, user_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_operational_night_overrides_club_night_start
-    ON operational_night_overrides (club_id, night_start_utc);
 
 CREATE INDEX IF NOT EXISTS idx_club_visits_club_night_start
     ON club_visits (club_id, night_start_utc);
