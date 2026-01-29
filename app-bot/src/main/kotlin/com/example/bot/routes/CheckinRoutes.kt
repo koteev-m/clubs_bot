@@ -22,6 +22,7 @@ import com.example.bot.metrics.QrRotationConfig
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
+import com.example.bot.security.rbac.rbacContext
 import com.example.bot.telemetry.Tracing
 import com.example.bot.telemetry.CheckinScanResult
 import com.example.bot.telemetry.setCheckinResult
@@ -331,6 +332,18 @@ fun Application.checkinRoutes(
                                             return@withIds
                                         }
 
+                                        if (entry.status in alreadyCheckedInStatuses && entry.checkedInAt != null) {
+                                            UiCheckinMetrics.incError()
+                                            currentResult = CheckinScanResult.ALREADY_CHECKED_IN
+                                            call.respondError(
+                                                HttpStatusCode.Conflict,
+                                                ErrorCodes.already_checked_in,
+                                                message = ErrorCodes.already_checked_in,
+                                                details = alreadyCheckedInDetails(entry),
+                                            )
+                                            return@withIds
+                                        }
+
                                         val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
                                         if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
                                             UiCheckinMetrics.incError()
@@ -344,11 +357,17 @@ fun Application.checkinRoutes(
                                             UiCheckinMetrics.incLateOverride()
                                         }
 
+                                        val checkedInAt = Instant.now(clock)
                                         val marked =
                                             withContext(Dispatchers.IO + MDCContext()) {
-                                                repository.markArrived(entry.id, Instant.now(clock))
+                                                repository.setEntryStatus(
+                                                    entryId = entry.id,
+                                                    status = GuestListEntryStatus.CHECKED_IN,
+                                                    checkedInBy = call.rbacContext().user.id,
+                                                    at = checkedInAt,
+                                                )
                                             }
-                                        if (!marked) {
+                                        if (marked == null) {
                                             UiCheckinMetrics.incError()
                                             currentResult = CheckinScanResult.UNABLE_TO_MARK
                                             logger.warn(
@@ -394,4 +413,17 @@ private fun isWithinWindow(
     val afterStart = start?.let { !now.isBefore(it) } ?: true
     val beforeEnd = end?.let { !now.isAfter(it) } ?: true
     return afterStart && beforeEnd
+}
+
+private val alreadyCheckedInStatuses = setOf(
+    GuestListEntryStatus.CHECKED_IN,
+    GuestListEntryStatus.ARRIVED,
+    GuestListEntryStatus.LATE,
+)
+
+private fun alreadyCheckedInDetails(entry: com.example.bot.club.GuestListEntry): Map<String, String> {
+    val details = mutableMapOf<String, String>()
+    entry.checkedInAt?.let { details["occurred_at"] = it.toString() }
+    entry.checkedInBy?.let { details["checked_by"] = it.toString() }
+    return details
 }

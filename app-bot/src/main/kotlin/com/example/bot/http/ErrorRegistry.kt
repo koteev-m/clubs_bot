@@ -18,7 +18,7 @@ data class ErrorCodesPayload(
 )
 
 object ErrorRegistry {
-    const val version: Int = 8
+    const val version: Int = 9
     val etag: String = "\"error-codes-v$version\""
     const val cacheControl: String = "public, max-age=300, stale-while-revalidate=30, stale-if-error=86400"
 
@@ -34,6 +34,7 @@ object ErrorRegistry {
     ).sortedBy { it.code }
 
     val checkin: List<ErrorCodeInfo> = listOf(
+        ErrorCodeInfo(ErrorCodes.already_checked_in, HttpStatusCode.Conflict.value),
         ErrorCodeInfo(ErrorCodes.invalid_json, HttpStatusCode.BadRequest.value),
         ErrorCodeInfo(ErrorCodes.invalid_qr_length, HttpStatusCode.BadRequest.value),
         ErrorCodeInfo(ErrorCodes.invalid_qr_format, HttpStatusCode.BadRequest.value),

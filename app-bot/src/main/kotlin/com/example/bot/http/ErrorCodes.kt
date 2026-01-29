@@ -42,6 +42,7 @@ object ErrorCodes {
     const val checkin_invalid_payload: String = "checkin_invalid_payload"
     const val checkin_subject_not_found: String = "checkin_subject_not_found"
     const val checkin_deny_reason_required: String = "checkin_deny_reason_required"
+    const val already_checked_in: String = "already_checked_in"
 
     // Booking (A3)
     const val table_not_available: String = "table_not_available"

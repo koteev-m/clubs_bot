@@ -3,6 +3,7 @@ package com.example.bot.http
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.callid.callId
+import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import io.ktor.util.AttributeKey
 import kotlinx.serialization.Serializable
@@ -31,6 +32,9 @@ suspend fun ApplicationCall.respondError(
         status = status.value,
         details = details,
     )
+    if (request.path().startsWith("/api/")) {
+        ensureMiniAppNoStoreHeaders()
+    }
     attributes.put(ApiErrorHandledKey, true)
     respond(status, body)
 }

@@ -115,9 +115,6 @@ fun Application.hostCheckinRoutes(
                 Role.ENTRY_MANAGER,
                 Role.MANAGER,
                 Role.CLUB_ADMIN,
-                Role.HEAD_MANAGER,
-                Role.OWNER,
-                Role.GLOBAL_ADMIN,
             ) {
                 clubScoped(ClubScope.Own) {
                     post {

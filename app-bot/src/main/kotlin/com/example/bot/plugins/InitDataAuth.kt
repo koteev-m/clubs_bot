@@ -1,6 +1,7 @@
 package com.example.bot.plugins
 
 import com.example.bot.http.ErrorCodes
+import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.security.auth.InitDataValidator
 import com.example.bot.security.auth.TelegramUser
 import io.ktor.http.ContentType
@@ -160,6 +161,7 @@ private suspend fun extractInitData(
 
 private suspend fun ApplicationCall.respondUnauthorized(reason: String) {
     logger.info("Mini App request unauthorized: {}", reason)
+    ensureMiniAppNoStoreHeaders()
     attributes.put(MiniAppAuthErrorHandledKey, true)
     respond(
         HttpStatusCode.Unauthorized,

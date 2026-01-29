@@ -49,6 +49,7 @@ fun Application.installJsonErrorPages() {
             if (wwwAuthenticate != null) {
                 call.response.headers.append(HttpHeaders.WWWAuthenticate, wwwAuthenticate, false)
             }
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.Unauthorized, ErrorCodes.unauthorized)
         }
 
@@ -59,37 +60,42 @@ fun Application.installJsonErrorPages() {
             if (retryAfter != null) {
                 call.response.headers.append(HttpHeaders.RetryAfter, retryAfter, false)
             }
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.TooManyRequests, ErrorCodes.rate_limited)
         }
 
         status(HttpStatusCode.Forbidden) { call, _ ->
             if (!call.request.path().startsWith("/api/")) return@status
             if (call.attributes.contains(ApiErrorHandledKey)) return@status
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
         }
 
         status(HttpStatusCode.UnsupportedMediaType) { call, _ ->
             if (!call.request.path().startsWith("/api/")) return@status
             if (call.attributes.contains(ApiErrorHandledKey)) return@status
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.UnsupportedMediaType, ErrorCodes.unsupported_media_type)
         }
 
         status(HttpStatusCode.NotFound) { call, _ ->
             if (!call.request.path().startsWith("/api/")) return@status
             if (call.attributes.contains(ApiErrorHandledKey)) return@status
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
         }
 
         exception<Throwable> { call, cause ->
             if (!call.request.path().startsWith("/api/")) throw cause
             logger.error("unhandled exception for API path {}", call.request.path(), cause)
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
         }
     }
 }
 
 private fun io.ktor.server.application.ApplicationCall.ensureMiniAppNoStoreHeadersIfNeeded() {
-    if (request.path().startsWith("/api/admin")) {
+    if (request.path().startsWith("/api/")) {
         ensureMiniAppNoStoreHeaders()
     }
 }
