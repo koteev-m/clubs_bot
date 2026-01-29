@@ -24,8 +24,13 @@ import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListEntryRecord
 import com.example.bot.data.club.GuestListRecord
+import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
+import com.example.bot.data.security.UserRepository
+import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.VisitRepository
+import com.example.bot.gamification.GamificationEngine
 import io.mockk.coEvery
 import io.mockk.mockk
 import java.sql.SQLException
@@ -45,6 +50,12 @@ class CheckinServiceTest {
     private val guestListRepo: GuestListDbRepository = mockk()
     private val guestListEntryRepo: GuestListEntryDbRepository = mockk()
     private val bookingRepo: BookingRepository = mockk()
+    private val userRepository: UserRepository = mockk()
+    private val eventRepository: com.example.bot.club.EventRepository = mockk()
+    private val nightOverrideRepository: NightOverrideRepository = mockk()
+    private val visitRepository: VisitRepository = mockk()
+    private val gamificationSettingsRepository: GamificationSettingsRepository = mockk()
+    private val gamificationEngine: GamificationEngine = mockk()
     private val auditRepo: AuditLogRepository = mockk(relaxed = true)
     private val auditLogger = AuditLogger(auditRepo)
     private val bookingSecret = "booking-secret"
@@ -58,6 +69,12 @@ class CheckinServiceTest {
             guestListEntryRepo,
             bookingRepo,
             auditLogger,
+            userRepository,
+            eventRepository,
+            nightOverrideRepository,
+            visitRepository,
+            gamificationSettingsRepository,
+            gamificationEngine,
             CheckinConfig(lateGraceMinutes = 0),
             bookingQrConfig = bookingQrConfig,
             clock = fixedClock,
@@ -68,10 +85,12 @@ class CheckinServiceTest {
     @Test
     fun `host scan invitation denies when invitation already used`() = runBlocking {
         val card = invitationCard(entryId = 5, guestListId = 6)
+        val entry = entryRecord(id = card.entryId, guestListId = card.guestListId, status = GuestListEntryStatus.CONFIRMED)
         val checkin = checkinRecord(subjectId = card.entryId.toString(), occurredAt = fixedClock.instant())
 
         coEvery { invitationService.resolveInvitation("token") } returns InvitationServiceResult.Success(card)
         coEvery { guestListRepo.findById(card.guestListId) } returns guestListRecord(id = card.guestListId)
+        coEvery { guestListEntryRepo.findById(card.entryId) } returns entry
         coEvery { checkinRepo.insertWithEntryUpdate(any(), any(), any(), any()) } returnsMany listOf(checkin, null)
 
         val first = service.hostScan("inv:token", card.clubId, card.eventId, actor)

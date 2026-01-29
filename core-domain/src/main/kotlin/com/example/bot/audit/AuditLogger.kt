@@ -5,6 +5,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.time.Instant
 import java.util.UUID
 
 class AuditLogger(
@@ -116,6 +117,66 @@ class AuditLogger(
                     put("amountMinor", amountMinor)
                     put("currency", currency)
                     put("provider", provider)
+                },
+        )
+    }
+
+    suspend fun badgeEarned(
+        clubId: Long,
+        userId: Long,
+        badgeId: Long,
+        fingerprint: String,
+        conditionType: String,
+        threshold: Int,
+        windowDays: Int?,
+        earnedAt: Instant,
+    ) {
+        append(
+            clubId = clubId,
+            subjectUserId = userId,
+            entityType = StandardAuditEntityType.BADGE,
+            action = CustomAuditAction("EARN"),
+            fingerprint = "BADGE:EARN:$fingerprint:v1",
+            entityId = badgeId,
+            metadata =
+                buildJsonObject {
+                    put("badgeId", badgeId)
+                    put("conditionType", conditionType)
+                    put("threshold", threshold)
+                    windowDays?.let { put("windowDays", it) }
+                    put("earnedAt", earnedAt.toString())
+                },
+        )
+    }
+
+    suspend fun couponIssued(
+        clubId: Long,
+        userId: Long,
+        couponId: Long,
+        prizeId: Long,
+        fingerprint: String,
+        metricType: String,
+        threshold: Int,
+        windowDays: Int?,
+        issuedAt: Instant,
+        expiresAt: Instant?,
+    ) {
+        append(
+            clubId = clubId,
+            subjectUserId = userId,
+            entityType = StandardAuditEntityType.COUPON,
+            action = CustomAuditAction("ISSUE"),
+            fingerprint = "COUPON:ISSUE:$fingerprint:v1",
+            entityId = couponId,
+            metadata =
+                buildJsonObject {
+                    put("couponId", couponId)
+                    put("prizeId", prizeId)
+                    put("metricType", metricType)
+                    put("threshold", threshold)
+                    windowDays?.let { put("windowDays", it) }
+                    put("issuedAt", issuedAt.toString())
+                    expiresAt?.let { put("expiresAt", it.toString()) }
                 },
         )
     }

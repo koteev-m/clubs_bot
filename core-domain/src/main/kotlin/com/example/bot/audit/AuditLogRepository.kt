@@ -59,6 +59,8 @@ sealed interface AuditEntityType {
 enum class StandardAuditEntityType(override val value: String) : AuditEntityType {
     BOOKING("BOOKING"),
     VISIT("VISIT"),
+    BADGE("BADGE"),
+    COUPON("COUPON"),
     TABLE_DEPOSIT("TABLE_DEPOSIT"),
     SHIFT_REPORT("SHIFT_REPORT"),
     ROLE_ASSIGNMENT("ROLE_ASSIGNMENT"),

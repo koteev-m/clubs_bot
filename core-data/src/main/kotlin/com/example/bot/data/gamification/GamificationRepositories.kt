@@ -141,6 +141,11 @@ data class UserBadge(
     val createdAt: Instant,
 )
 
+data class UserBadgeIssueResult(
+    val badge: UserBadge,
+    val created: Boolean,
+)
+
 class UserBadgeRepository(
     private val db: Database,
 ) {
@@ -150,19 +155,22 @@ class UserBadgeRepository(
         userId: Long,
         badgeId: Long,
         earnedAt: Instant,
-    ): UserBadge =
+    ): UserBadgeIssueResult =
         withRetriedTx(name = "badge.tryEarn", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                UserBadgesTable.insertIgnore {
+                val inserted =
+                    UserBadgesTable.insertIgnore {
                     it[UserBadgesTable.clubId] = clubId
                     it[UserBadgesTable.userId] = userId
                     it[UserBadgesTable.badgeId] = badgeId
                     it[UserBadgesTable.earnedAt] = earnedAt.toOffsetDateTimeUtc()
                     it[UserBadgesTable.fingerprint] = fingerprint
                 }
-                findUserBadgeByFingerprint(fingerprint)
-                    ?: findUserBadgeByKey(clubId, userId, badgeId)
-                    ?: error("Failed to load user badge after insert")
+                val badge =
+                    findUserBadgeByFingerprint(fingerprint)
+                        ?: findUserBadgeByKey(clubId, userId, badgeId)
+                        ?: error("Failed to load user badge after insert")
+                UserBadgeIssueResult(badge = badge, created = inserted.insertedCount > 0)
             }
         }
 
@@ -236,20 +244,43 @@ class RewardLadderRepository(
 ) {
     suspend fun listEnabledLevels(
         clubId: Long,
-        metricType: String,
     ): List<RewardLadderLevel> =
         withRetriedTx(name = "reward.ladder.listEnabled", readOnly = true, database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 RewardLadderLevelsTable
                     .selectAll()
                     .where {
-                        (RewardLadderLevelsTable.clubId eq clubId) and
-                            (RewardLadderLevelsTable.metricType eq metricType) and
-                            (RewardLadderLevelsTable.enabled eq true)
+                        (RewardLadderLevelsTable.clubId eq clubId) and (RewardLadderLevelsTable.enabled eq true)
                     }.orderBy(RewardLadderLevelsTable.orderIndex, SortOrder.ASC)
                     .map { it.toRewardLadderLevel() }
             }
         }
+
+    suspend fun listEnabledLevels(
+        clubId: Long,
+        metricType: String,
+    ): List<RewardLadderLevel> =
+        listEnabledLevels(clubId).filter { it.metricType == metricType }
+}
+
+class PrizeRepository(
+    private val db: Database,
+) {
+    suspend fun listByIds(
+        clubId: Long,
+        prizeIds: Set<Long>,
+    ): List<Prize> {
+        if (prizeIds.isEmpty()) return emptyList()
+        return withRetriedTx(name = "prize.listByIds", readOnly = true, database = db) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                PrizesTable
+                    .selectAll()
+                    .where { (PrizesTable.clubId eq clubId) and (PrizesTable.id inList prizeIds.toList()) }
+                    .orderBy(PrizesTable.id, SortOrder.ASC)
+                    .map { it.toPrize() }
+            }
+        }
+    }
 }
 
 enum class CouponStatus {
@@ -276,6 +307,11 @@ data class RewardCoupon(
     val updatedAt: Instant,
 )
 
+data class CouponIssueResult(
+    val coupon: RewardCoupon,
+    val created: Boolean,
+)
+
 class CouponRepository(
     private val db: Database,
 ) {
@@ -287,10 +323,11 @@ class CouponRepository(
         issuedAt: Instant,
         expiresAt: Instant? = null,
         issuedBy: Long? = null,
-    ): RewardCoupon =
+    ): CouponIssueResult =
         withRetriedTx(name = "coupon.tryIssue", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                RewardCouponsTable.insertIgnore {
+                val inserted =
+                    RewardCouponsTable.insertIgnore {
                     it[RewardCouponsTable.clubId] = clubId
                     it[RewardCouponsTable.userId] = userId
                     it[RewardCouponsTable.prizeId] = prizeId
@@ -302,8 +339,10 @@ class CouponRepository(
                     it[RewardCouponsTable.issuedBy] = issuedBy
                     it[RewardCouponsTable.updatedAt] = issuedAt.toOffsetDateTimeUtc()
                 }
-                findCouponByFingerprint(fingerprint)
-                    ?: error("Failed to load reward coupon after insert")
+                val coupon =
+                    findCouponByFingerprint(fingerprint)
+                        ?: error("Failed to load reward coupon after insert")
+                CouponIssueResult(coupon = coupon, created = inserted.insertedCount > 0)
             }
         }
 
@@ -425,4 +464,19 @@ private fun ResultRow.toRewardCoupon(): RewardCoupon =
         redeemedBy = this[RewardCouponsTable.redeemedBy],
         createdAt = this[RewardCouponsTable.createdAt].toInstant(),
         updatedAt = this[RewardCouponsTable.updatedAt].toInstant(),
+    )
+
+private fun ResultRow.toPrize(): Prize =
+    Prize(
+        id = this[PrizesTable.id],
+        clubId = this[PrizesTable.clubId],
+        code = this[PrizesTable.code],
+        titleRu = this[PrizesTable.titleRu],
+        description = this[PrizesTable.description],
+        terms = this[PrizesTable.terms],
+        enabled = this[PrizesTable.enabled],
+        limitTotal = this[PrizesTable.limitTotal],
+        expiresInDays = this[PrizesTable.expiresInDays],
+        createdAt = this[PrizesTable.createdAt].toInstant(),
+        updatedAt = this[PrizesTable.updatedAt].toInstant(),
     )

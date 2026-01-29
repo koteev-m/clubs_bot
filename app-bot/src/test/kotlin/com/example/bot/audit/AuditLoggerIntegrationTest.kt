@@ -23,8 +23,13 @@ import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListEntryRecord
 import com.example.bot.data.club.GuestListRecord
+import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
+import com.example.bot.data.security.UserRepository
+import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.VisitRepository
+import com.example.bot.gamification.GamificationEngine
 import com.example.bot.payments.PaymentsRepository
 import java.math.BigDecimal
 import java.time.Clock
@@ -51,6 +56,12 @@ class AuditLoggerIntegrationTest {
         val guestListRepo = mockk<GuestListDbRepository>()
         val guestListEntryRepo = mockk<GuestListEntryDbRepository>()
         val bookingRepo = mockk<BookingRepository>()
+        val userRepository = mockk<UserRepository>()
+        val eventRepository = mockk<com.example.bot.club.EventRepository>()
+        val nightOverrideRepository = mockk<NightOverrideRepository>()
+        val visitRepository = mockk<VisitRepository>()
+        val gamificationSettingsRepository = mockk<GamificationSettingsRepository>()
+        val gamificationEngine = mockk<GamificationEngine>()
 
         val entry =
             GuestListEntryRecord(
@@ -98,6 +109,7 @@ class AuditLoggerIntegrationTest {
         coEvery { guestListRepo.findById(entry.guestListId) } returns guestList
         coEvery { checkinRepo.findBySubject(CheckinSubjectType.GUEST_LIST_ENTRY, entry.id.toString()) } returns null
         coEvery { checkinRepo.insertWithEntryUpdate(any(), any(), any(), any()) } returns record
+        coEvery { userRepository.getByTelegramId(entry.telegramUserId!!) } returns null
 
         val service =
             CheckinServiceImpl(
@@ -107,6 +119,12 @@ class AuditLoggerIntegrationTest {
                 guestListEntryRepo = guestListEntryRepo,
                 bookingRepo = bookingRepo,
                 auditLogger = auditLogger,
+                userRepository = userRepository,
+                eventRepository = eventRepository,
+                nightOverrideRepository = nightOverrideRepository,
+                visitRepository = visitRepository,
+                gamificationSettingsRepository = gamificationSettingsRepository,
+                gamificationEngine = gamificationEngine,
                 checkinConfig = CheckinConfig(lateGraceMinutes = 0),
                 bookingQrConfig = BookingQrConfig(secret = "qr-secret", oldSecret = null, ttl = Duration.ofHours(1)),
                 clock = fixedClock,
