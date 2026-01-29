@@ -57,6 +57,7 @@ private const val ROTATION_INTERNAL_USER_ID = 9000L
 private const val ROTATION_CLUB_ID = 42L
 private const val ROTATION_LIST_ID = 4242L
 private const val ROTATION_ENTRY_ID = 5151L
+private const val ROTATION_ENTRY_ID_OLD_SECRET = 5152L
 private const val PRIMARY_QR_SECRET = "primary_secret"
 private const val OLD_QR_SECRET = "old_secret"
 
@@ -73,7 +74,7 @@ class QrSecretRotationTest {
 
         val issued = ROTATION_FIXED_NOW.minusSeconds(30)
         val primaryQr = QrGuestListCodec.encode(ROTATION_LIST_ID, ROTATION_ENTRY_ID, issued, PRIMARY_QR_SECRET)
-        val oldSecretQr = QrGuestListCodec.encode(ROTATION_LIST_ID, ROTATION_ENTRY_ID, issued, OLD_QR_SECRET)
+        val oldSecretQr = QrGuestListCodec.encode(ROTATION_LIST_ID, ROTATION_ENTRY_ID_OLD_SECRET, issued, OLD_QR_SECRET)
         val initData = rotationInitData()
 
         val path = "/api/clubs/$ROTATION_CLUB_ID/checkin/scan"
@@ -233,24 +234,16 @@ private class RotationGuestListRepository : GuestListRepository {
             createdAt = ROTATION_FIXED_NOW,
         )
 
-    private val entry =
-        GuestListEntry(
-            id = ROTATION_ENTRY_ID,
-            listId = ROTATION_LIST_ID,
-            fullName = "Guest",
-            phone = null,
-            guestsCount = 1,
-            notes = null,
-            status = GuestListEntryStatus.PLANNED,
-            checkedInAt = null,
-            checkedInBy = null,
-        )
+    private val entries = mutableMapOf<Long, GuestListEntry>(
+        ROTATION_ENTRY_ID to defaultEntry(ROTATION_ENTRY_ID),
+        ROTATION_ENTRY_ID_OLD_SECRET to defaultEntry(ROTATION_ENTRY_ID_OLD_SECRET),
+    )
 
     override suspend fun getList(id: Long): GuestList? = if (id == list.id) list else null
 
-    override suspend fun findEntry(id: Long): GuestListEntry? = if (id == entry.id) entry else null
+    override suspend fun findEntry(id: Long): GuestListEntry? = entries[id]
 
-    override suspend fun markArrived(entryId: Long, at: Instant): Boolean = entryId == entry.id
+    override suspend fun markArrived(entryId: Long, at: Instant): Boolean = entries.containsKey(entryId)
 
     // Unused operations
     override suspend fun createList(
@@ -276,8 +269,22 @@ private class RotationGuestListRepository : GuestListRepository {
         status: GuestListEntryStatus,
     ): GuestListEntry = throw UnsupportedOperationException()
 
-    override suspend fun setEntryStatus(entryId: Long, status: GuestListEntryStatus, checkedInBy: Long?, at: Instant?): GuestListEntry? =
-        throw UnsupportedOperationException()
+    override suspend fun setEntryStatus(
+        entryId: Long,
+        status: GuestListEntryStatus,
+        checkedInBy: Long?,
+        at: Instant?,
+    ): GuestListEntry? {
+        val current = entries[entryId] ?: return null
+        val updated =
+            current.copy(
+                status = status,
+                checkedInAt = if (status == GuestListEntryStatus.CHECKED_IN) at else null,
+                checkedInBy = if (status == GuestListEntryStatus.CHECKED_IN) checkedInBy else null,
+            )
+        entries[entryId] = updated
+        return updated
+    }
 
     override suspend fun listEntries(
         listId: Long,
@@ -294,6 +301,19 @@ private class RotationGuestListRepository : GuestListRepository {
         page: Int,
         size: Int,
     ): GuestListEntryPage = throw UnsupportedOperationException()
+
+    private fun defaultEntry(id: Long): GuestListEntry =
+        GuestListEntry(
+            id = id,
+            listId = ROTATION_LIST_ID,
+            fullName = "Guest",
+            phone = null,
+            guestsCount = 1,
+            notes = null,
+            status = GuestListEntryStatus.PLANNED,
+            checkedInAt = null,
+            checkedInBy = null,
+        )
 }
 
 private class RotationUserRepository : UserRepository {

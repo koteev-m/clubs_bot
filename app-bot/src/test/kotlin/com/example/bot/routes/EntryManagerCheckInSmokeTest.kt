@@ -17,6 +17,7 @@ import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.guestlists.GuestListRepository
 import com.example.bot.guestlists.QrGuestListCodec
+import com.example.bot.http.ErrorCodes
 import com.example.bot.metrics.AppMetricsBinder
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.installMetrics
@@ -104,7 +105,8 @@ class EntryManagerCheckInSmokeTest {
                     withInitData(initData)
                     setBody("""{"qr":"$qrToken"}""")
                 }
-            println("DBG happy path: status2=${second.status}")
+            val secondError = second.bodyAsText()
+            println("DBG happy path: status2=${second.status} body2=$secondError")
 
             val afterMetrics = emCurrentPrometheusSnapshot()
             val totalAfter = afterMetrics.metricValue("ui_checkin_scan_total")
@@ -113,7 +115,8 @@ class EntryManagerCheckInSmokeTest {
             assertAll(
                 { assertEquals(HttpStatusCode.OK, first.status) },
                 { assertTrue(firstBody.contains("\"ARRIVED\"")) },
-                { assertEquals(HttpStatusCode.OK, second.status) },
+                { assertEquals(HttpStatusCode.Conflict, second.status) },
+                { assertTrue(secondError.contains(ErrorCodes.already_checked_in)) },
                 { assertTrue(totalAfter >= totalBefore + 1.0) },
                 { assertTrue(durationCountAfter >= durationCountBefore + 1.0) },
             )
@@ -230,6 +233,31 @@ class EntryManagerCheckInSmokeTest {
             println("DBG list-mismatch: ${response.status} ${response.bodyAsText()}")
 
             assertEquals(HttpStatusCode.BadRequest, response.status)
+        }
+
+    @Test
+    fun `promoter role is forbidden to check in`() =
+        testApplication {
+            val module =
+                emBaseModule(
+                    userRoleRepository = EMUserRoleRepository(roles = setOf(Role.PROMOTER)),
+                )
+            applicationDev { emConfigureApp(module) }
+
+            val issued = EM_FIXED_NOW.minusSeconds(30)
+            val qrToken = QrGuestListCodec.encode(EM_LIST_ID, EM_ENTRY_ID, issued, EM_QR_SECRET)
+            val initData = emCreateInitData()
+
+            val response =
+                client.post("/api/clubs/$EM_CLUB_ID/checkin/scan") {
+                    contentType(ContentType.Application.Json)
+                    withInitData(initData)
+                    setBody("""{"qr":"$qrToken"}""")
+                }
+
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            val body = response.bodyAsText()
+            assertTrue(body.contains(ErrorCodes.forbidden))
         }
 
     @Test
@@ -394,7 +422,18 @@ private class EMGuestListRepository : GuestListRepository {
         status: GuestListEntryStatus,
         checkedInBy: Long?,
         at: Instant?,
-    ): GuestListEntry? = throw UnsupportedOperationException()
+    ): GuestListEntry? {
+        val current = entry
+        if (current?.id != entryId) return null
+        val updated =
+            current.copy(
+                status = status,
+                checkedInAt = if (status == GuestListEntryStatus.CHECKED_IN) at else null,
+                checkedInBy = if (status == GuestListEntryStatus.CHECKED_IN) checkedInBy else null,
+            )
+        entry = updated
+        return updated
+    }
 
     override suspend fun listEntries(
         listId: Long,
