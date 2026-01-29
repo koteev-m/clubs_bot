@@ -128,7 +128,10 @@ class AuditLoggerIntegrationTest {
         val event = auditRepo.events.first()
         assertEquals(StandardAuditEntityType.VISIT, event.entityType)
         assertEquals(StandardAuditAction.CHECKIN, event.action)
-        assertTrue(event.fingerprint.startsWith("VISIT:CHECKIN:club:${guestList.clubId}:night:${guestList.eventId}:user:"))
+        assertEquals(
+            "VISIT:CHECKIN:club:${guestList.clubId}:night:${guestList.eventId}:checkin:${record.id}:v1",
+            event.fingerprint,
+        )
     }
 
     @Test

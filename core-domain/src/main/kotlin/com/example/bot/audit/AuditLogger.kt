@@ -1,9 +1,11 @@
 package com.example.bot.audit
 
-import java.util.UUID
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.util.UUID
 
 class AuditLogger(
     private val repository: AuditLogRepository,
@@ -65,7 +67,6 @@ class AuditLogger(
         subjectId: String,
         resultStatus: String,
     ) {
-        val userId = subjectUserId ?: actorUserId ?: 0L
         append(
             clubId = clubId,
             nightId = nightId,
@@ -74,7 +75,11 @@ class AuditLogger(
             entityType = StandardAuditEntityType.VISIT,
             action = StandardAuditAction.CHECKIN,
             fingerprint =
-                "VISIT:CHECKIN:club:$clubId:night:$nightId:user:$userId",
+                fingerprint(
+                    StandardAuditEntityType.VISIT.value,
+                    StandardAuditAction.CHECKIN.value,
+                    "club:$clubId:night:$nightId:checkin:$checkinId",
+                ),
             entityId = checkinId,
             metadata =
                 buildJsonObject {
@@ -127,7 +132,12 @@ class AuditLogger(
             actorUserId = actorUserId,
             entityType = StandardAuditEntityType.SHIFT_REPORT,
             action = CustomAuditAction("CLOSE"),
-            fingerprint = fingerprint(StandardAuditEntityType.SHIFT_REPORT.value, "CLOSE", shiftId),
+            fingerprint =
+                fingerprint(
+                    StandardAuditEntityType.SHIFT_REPORT.value,
+                    "CLOSE",
+                    "club:$clubId:night:$nightId:shift:$shiftId",
+                ),
             entityId = null,
             metadata =
                 buildJsonObject {
@@ -149,7 +159,12 @@ class AuditLogger(
             subjectUserId = subjectUserId,
             entityType = StandardAuditEntityType.ROLE_ASSIGNMENT,
             action = StandardAuditAction.CREATE,
-            fingerprint = fingerprint(StandardAuditEntityType.ROLE_ASSIGNMENT.value, StandardAuditAction.CREATE.value, "$subjectUserId:$role"),
+            fingerprint =
+                fingerprint(
+                    StandardAuditEntityType.ROLE_ASSIGNMENT.value,
+                    StandardAuditAction.CREATE.value,
+                    "club:${clubId ?: "GLOBAL"}:user:$subjectUserId:role:$role:scope:${scope ?: "GLOBAL"}",
+                ),
             entityId = null,
             metadata =
                 buildJsonObject {
@@ -165,11 +180,18 @@ class AuditLogger(
         entityId: String?,
         metadata: JsonObject?,
     ) {
+        val outcome = metadata?.get("result")?.jsonPrimitive?.contentOrNull ?: "unknown"
+        val entityIdOrRandom = entityId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
         append(
             clubId = clubId,
             entityType = StandardAuditEntityType.BOOKING,
             action = CustomAuditAction(action),
-            fingerprint = fingerprint(StandardAuditEntityType.BOOKING.value, action.uppercase(), entityId ?: "unknown"),
+            fingerprint =
+                fingerprint(
+                    StandardAuditEntityType.BOOKING.value,
+                    action.uppercase(),
+                    "$entityIdOrRandom:$outcome",
+                ),
             entityId = null,
             metadata = metadata,
         )
