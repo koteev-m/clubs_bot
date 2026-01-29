@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS club_gamification_settings (
     contests_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     tables_loyalty_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     early_window_minutes INTEGER NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT club_gamification_settings_early_window_minutes_check
+        CHECK (early_window_minutes IS NULL OR early_window_minutes >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS badges (
@@ -22,7 +24,8 @@ CREATE TABLE IF NOT EXISTS badges (
     window_days INTEGER NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_badges_club_code UNIQUE (club_id, code)
+    CONSTRAINT uq_badges_club_code UNIQUE (club_id, code),
+    CONSTRAINT badges_threshold_check CHECK (threshold >= 1)
 );
 
 CREATE TABLE IF NOT EXISTS user_badges (
@@ -52,7 +55,9 @@ CREATE TABLE IF NOT EXISTS prizes (
     expires_in_days INTEGER NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_prizes_club_code UNIQUE (club_id, code)
+    CONSTRAINT uq_prizes_club_code UNIQUE (club_id, code),
+    CONSTRAINT prizes_limit_total_check CHECK (limit_total IS NULL OR limit_total >= 1),
+    CONSTRAINT prizes_expires_in_days_check CHECK (expires_in_days IS NULL OR expires_in_days >= 1)
 );
 
 CREATE TABLE IF NOT EXISTS reward_ladder_levels (
@@ -60,13 +65,16 @@ CREATE TABLE IF NOT EXISTS reward_ladder_levels (
     club_id BIGINT NOT NULL REFERENCES clubs(id),
     metric_type TEXT NOT NULL,
     threshold INTEGER NOT NULL,
-    window_days INTEGER NULL,
+    window_days INTEGER NOT NULL DEFAULT 0,
     prize_id BIGINT NOT NULL REFERENCES prizes(id),
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     order_index INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_reward_ladder_levels UNIQUE (club_id, metric_type, threshold, window_days)
+    CONSTRAINT uq_reward_ladder_levels UNIQUE (club_id, metric_type, threshold, window_days),
+    CONSTRAINT reward_ladder_levels_threshold_check CHECK (threshold >= 1),
+    CONSTRAINT reward_ladder_levels_order_index_check CHECK (order_index >= 0),
+    CONSTRAINT reward_ladder_levels_window_days_check CHECK (window_days >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS reward_coupons (
@@ -84,7 +92,9 @@ CREATE TABLE IF NOT EXISTS reward_coupons (
     redeemed_by BIGINT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_reward_coupons_fingerprint UNIQUE (fingerprint)
+    CONSTRAINT uq_reward_coupons_fingerprint UNIQUE (fingerprint),
+    CONSTRAINT reward_coupons_status_check
+        CHECK (status IN ('AVAILABLE', 'REDEEMED', 'EXPIRED', 'CANCELLED'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_reward_coupons_club_user_status
