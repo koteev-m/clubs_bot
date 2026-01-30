@@ -9,6 +9,7 @@ import com.example.bot.data.security.Role
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
+import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
@@ -105,8 +106,18 @@ fun Route.securedBookingRoutes(bookingService: BookingService) {
                                     mapOf("error" to "invalid_payload"),
                                 )
                             }
+                    val context = call.rbacContext()
+                    val guestUserId = if (Role.GUEST in context.roles) context.user.id else null
+                    val promoterUserId = if (Role.PROMOTER in context.roles) context.user.id else null
                     val result =
-                        withContext(Dispatchers.IO + MDCContext()) { bookingService.confirm(holdId, idempotencyKey) }
+                        withContext(Dispatchers.IO + MDCContext()) {
+                            bookingService.confirm(
+                                holdId,
+                                idempotencyKey,
+                                guestUserId = guestUserId,
+                                promoterUserId = promoterUserId,
+                            )
+                        }
                     respondBookingResult(call, result)
                 }
             }

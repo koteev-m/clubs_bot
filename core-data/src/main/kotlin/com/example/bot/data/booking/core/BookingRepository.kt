@@ -115,6 +115,8 @@ class BookingRepository(
         guests: Int,
         minRate: BigDecimal,
         idempotencyKey: String,
+        guestUserId: Long? = null,
+        promoterUserId: Long? = null,
     ): BookingCoreResult<BookingRecord> {
         val start = slotStart.toOffsetDateTime()
         val end = slotEnd.toOffsetDateTime()
@@ -146,7 +148,17 @@ class BookingRepository(
                         BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
                     } else {
                         BookingCoreResult.Success(
-                            insertBooking(clubId, tableId, start, end, guests, minRate, idempotencyKey),
+                            insertBooking(
+                                clubId = clubId,
+                                tableId = tableId,
+                                slotStart = start,
+                                slotEnd = end,
+                                guests = guests,
+                                minRate = minRate,
+                                idempotencyKey = idempotencyKey,
+                                guestUserId = guestUserId,
+                                promoterUserId = promoterUserId,
+                            ),
                         )
                     }
                 }
@@ -255,6 +267,8 @@ class BookingRepository(
         guests: Int,
         minRate: BigDecimal,
         idempotencyKey: String,
+        guestUserId: Long?,
+        promoterUserId: Long?,
     ): BookingRecord {
         val now = Instant.now(clock)
         val tableRow =
@@ -282,10 +296,10 @@ class BookingRepository(
             it[BookingsTable.clubId] = clubId
             it[BookingsTable.tableId] = tableId
             it[BookingsTable.tableNumber] = tableRow[TablesTable.tableNumber]
-            it[BookingsTable.guestUserId] = null
+            it[BookingsTable.guestUserId] = guestUserId?.takeIf { value -> value > 0 }
             it[BookingsTable.guestName] = null
             it[BookingsTable.phoneE164] = null
-            it[BookingsTable.promoterUserId] = null
+            it[BookingsTable.promoterUserId] = promoterUserId?.takeIf { value -> value > 0 }
             it[BookingsTable.guestsCount] = guests
             it[BookingsTable.minDeposit] = minRate
             it[BookingsTable.totalDeposit] = minRate

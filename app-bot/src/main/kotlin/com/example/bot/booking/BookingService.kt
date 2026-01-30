@@ -164,6 +164,8 @@ class BookingService(
     suspend fun confirm(
         holdId: UUID,
         idempotencyKey: String,
+        guestUserId: Long? = null,
+        promoterUserId: Long? = null,
     ): BookingCmdResult =
         run {
             val (result, notification) =
@@ -234,6 +236,8 @@ class BookingService(
                             guests = hold.guests,
                             minRate = hold.minDeposit,
                             idempotencyKey = idempotencyKey,
+                            guestUserId = guestUserId,
+                            promoterUserId = promoterUserId,
                         )
                     when (booked) {
                         is BookingCoreResult.Success -> {

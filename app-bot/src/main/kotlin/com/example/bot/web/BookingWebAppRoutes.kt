@@ -491,6 +491,8 @@ fun Application.installBookingWebApp() {
                         it[guestsCount]    = req.guestsCount
                         it[minDeposit]     = minDep
                         it[totalDeposit]   = total
+                        it[slotStart]      = event[Events.startAt]
+                        it[slotEnd]        = event[Events.endAt]
                         it[arrivalBy]      = req.arrivalBy?.let(Instant::parse)
                         it[status]         = "CONFIRMED"
                         it[Bookings.qrSecret] = qrCodeSecret
@@ -614,6 +616,8 @@ private object Bookings : Table("bookings") {
     val guestsCount = integer("guests_count")
     val minDeposit = decimal("min_deposit", 12, 2)
     val totalDeposit = decimal("total_deposit", 12, 2)
+    val slotStart = timestamptz("slot_start")
+    val slotEnd = timestamptz("slot_end")
     val arrivalBy = timestamptz("arrival_by").nullable()
     val status = text("status")
     val qrSecret = varchar("qr_secret", 64)

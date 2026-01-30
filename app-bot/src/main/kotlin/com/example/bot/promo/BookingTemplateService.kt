@@ -239,7 +239,14 @@ class BookingTemplateService(
                 logger.debug("applyTemplate hold result {}", holdResult)
                 return holdResult
             }
-            when (val confirmed = bookingService.confirm(holdResult.holdId, "$idempotency:confirm")) {
+            when (
+                val confirmed =
+                    bookingService.confirm(
+                        holdResult.holdId,
+                        "$idempotency:confirm",
+                        promoterUserId = template.promoterUserId,
+                    )
+            ) {
                 is BookingCmdResult.Booked ->
                     finalizeAndNotify(
                         confirmed.bookingId,
