@@ -40,6 +40,7 @@ import com.example.bot.data.visits.VisitRepository
 import com.example.bot.gamification.GamificationEngine
 import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.gamification.toDomain
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -55,6 +56,7 @@ class CheckinServiceImpl(
     private val bookingRepo: BookingRepository,
     private val auditLogger: AuditLogger,
     private val userRepository: UserRepository,
+    private val promoterBookingAssignmentsRepository: PromoterBookingAssignmentsRepository,
     private val eventRepository: com.example.bot.club.EventRepository,
     private val nightOverrideRepository: NightOverrideRepository,
     private val visitRepository: VisitRepository,
@@ -1124,10 +1126,55 @@ class CheckinServiceImpl(
         }
     }
 
-    private fun resolveBookingSubjectUserId(
+    private suspend fun resolveBookingSubjectUserId(
         booking: com.example.bot.data.booking.core.BookingRecord,
-    ): Long? =
-        booking.guestUserId?.takeIf { it > 0 } ?: booking.promoterUserId?.takeIf { it > 0 }
+    ): Long? {
+        booking.guestUserId?.takeIf { it > 0 }?.let { return it }
+
+        val bookingId = booking.id.leastSignificantBits
+        if (bookingId <= 0) return null
+        val entryId =
+            try {
+                promoterBookingAssignmentsRepository.findEntryIdForBooking(bookingId)
+            } catch (ex: Exception) {
+                logger.warn(
+                    "checkin.booking.assignment_lookup_failed clubId={} eventId={} bookingId={}",
+                    booking.clubId,
+                    booking.eventId,
+                    bookingId,
+                    ex,
+                )
+                null
+            } ?: return null
+        val entry =
+            try {
+                guestListEntryRepo.findById(entryId)
+            } catch (ex: Exception) {
+                logger.warn(
+                    "checkin.booking.entry_lookup_failed clubId={} eventId={} bookingId={} entryId={}",
+                    booking.clubId,
+                    booking.eventId,
+                    bookingId,
+                    entryId,
+                    ex,
+                )
+                null
+            } ?: return null
+        val telegramUserId = entry.telegramUserId?.takeIf { it > 0 } ?: return null
+        return try {
+            userRepository.getByTelegramId(telegramUserId)?.id?.takeIf { it > 0 }
+        } catch (ex: Exception) {
+            logger.warn(
+                "checkin.booking.user_lookup_failed clubId={} eventId={} bookingId={} entryId={}",
+                booking.clubId,
+                booking.eventId,
+                bookingId,
+                entryId,
+                ex,
+            )
+            null
+        }
+    }
 
     private fun com.example.bot.data.club.CheckinRecord.toAlreadyUsed(): CheckinResult.AlreadyUsed =
         CheckinResult.AlreadyUsed(

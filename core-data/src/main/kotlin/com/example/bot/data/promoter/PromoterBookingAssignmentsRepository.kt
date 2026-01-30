@@ -93,6 +93,18 @@ class PromoterBookingAssignmentsRepository(
             }
         }
 
+    suspend fun findEntryIdForBooking(bookingId: Long): Long? =
+        withTxRetry {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                PromoterBookingAssignmentsTable
+                    .slice(PromoterBookingAssignmentsTable.entryId)
+                    .select { PromoterBookingAssignmentsTable.bookingId eq bookingId }
+                    .limit(1)
+                    .firstOrNull()
+                    ?.get(PromoterBookingAssignmentsTable.entryId)
+            }
+        }
+
     suspend fun finalizeAssignment(entryId: Long, bookingId: Long): Boolean =
         withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {

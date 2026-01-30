@@ -152,6 +152,7 @@ val bookingModule =
                 bookingRepo = get(),
                 auditLogger = get(),
                 userRepository = get(),
+                promoterBookingAssignmentsRepository = get(),
                 eventRepository = get<EventRepository>(),
                 nightOverrideRepository = get(),
                 visitRepository = get(),

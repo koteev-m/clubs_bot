@@ -23,6 +23,7 @@ import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListEntryRecord
 import com.example.bot.data.club.GuestListRecord
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
@@ -111,6 +112,7 @@ class AuditLoggerIntegrationTest {
         coEvery { checkinRepo.insertWithEntryUpdate(any(), any(), any(), any()) } returns record
         coEvery { userRepository.getByTelegramId(entry.telegramUserId!!) } returns null
 
+        val promoterBookingAssignmentsRepository = mockk<PromoterBookingAssignmentsRepository>()
         val service =
             CheckinServiceImpl(
                 checkinRepo = checkinRepo,
@@ -120,6 +122,7 @@ class AuditLoggerIntegrationTest {
                 bookingRepo = bookingRepo,
                 auditLogger = auditLogger,
                 userRepository = userRepository,
+                promoterBookingAssignmentsRepository = promoterBookingAssignmentsRepository,
                 eventRepository = eventRepository,
                 nightOverrideRepository = nightOverrideRepository,
                 visitRepository = visitRepository,

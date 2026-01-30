@@ -80,6 +80,25 @@ class BookingRepositoryIT : PostgresIntegrationTest() {
         }
 
     @Test
+    fun `create booking stores guest user id when provided`() =
+        runBlocking {
+            val context = seedData()
+            val result =
+                bookingRepo.createBooked(
+                    clubId = context.clubId,
+                    tableId = context.tableId,
+                    slotStart = context.slotStart,
+                    slotEnd = context.slotEnd,
+                    guests = 2,
+                    minRate = BigDecimal("120.00"),
+                    idempotencyKey = "guest-user-id",
+                    guestUserId = 42,
+                )
+            val created = (result as BookingCoreResult.Success).value
+            assertEquals(42, created.guestUserId)
+        }
+
+    @Test
     fun `set status updates record`() =
         runBlocking {
             val context = seedData()
