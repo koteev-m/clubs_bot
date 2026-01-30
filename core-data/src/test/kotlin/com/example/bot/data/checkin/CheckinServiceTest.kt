@@ -29,9 +29,13 @@ import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.ClubVisit
+import com.example.bot.data.visits.VisitCheckInResult
 import com.example.bot.data.visits.VisitRepository
+import com.example.bot.gamification.GamificationDelta
 import com.example.bot.gamification.GamificationEngine
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import java.sql.SQLException
 import java.time.Duration
@@ -173,11 +177,109 @@ class CheckinServiceTest {
         assertEquals("ALREADY_USED", payload.denyReason)
     }
 
+    @Test
+    fun `host checkin booking creates visit and gamification when user resolved`() = runBlocking {
+        val bookingId = UUID(0L, 15L)
+        val booking = bookingRecord(id = bookingId, status = BookingStatus.BOOKED, guestUserId = 42)
+        val occurredAt = fixedClock.instant()
+        val checkin = bookingCheckinRecord(occurredAt = occurredAt, subjectId = "15")
+        val visit =
+            ClubVisit(
+                id = 99,
+                clubId = booking.clubId,
+                nightStartUtc = fixedClock.instant().minusSeconds(3600),
+                eventId = booking.eventId,
+                userId = booking.guestUserId ?: 0,
+                firstCheckinAt = occurredAt,
+                actorUserId = actor.userId,
+                actorRole = Role.ENTRY_MANAGER,
+                entryType = CheckinSubjectType.BOOKING.name,
+                isEarly = false,
+                hasTable = false,
+                createdAt = occurredAt,
+                updatedAt = occurredAt,
+            )
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "15") } returns null
+        coEvery { checkinRepo.insertWithBookingUpdate(any(), any(), any(), any()) } returns checkin
+        coEvery { eventRepository.get(booking.eventId) } returns event(booking)
+        coEvery { nightOverrideRepository.getOverride(booking.clubId, any()) } returns null
+        coEvery { gamificationSettingsRepository.getByClubId(booking.clubId) } returns null
+        coEvery { visitRepository.tryCheckIn(any()) } returns VisitCheckInResult(created = true, visit = visit)
+        coEvery { visitRepository.markHasTable(any(), any(), any(), any()) } returns true
+        coEvery { gamificationEngine.onVisitCreated(any(), any()) } returns GamificationDelta()
+
+        val result =
+            service.hostCheckin(
+                HostCheckinRequest(clubId = booking.clubId, eventId = booking.eventId, bookingId = "15"),
+                actor,
+            )
+
+        check(result is CheckinServiceResult.Success)
+        coVerify {
+            visitRepository.tryCheckIn(
+                match { input ->
+                    input.userId == booking.guestUserId &&
+                        input.firstCheckinAt == occurredAt &&
+                        input.clubId == booking.clubId &&
+                        input.eventId == booking.eventId
+                },
+            )
+        }
+        coVerify(exactly = 1) { gamificationEngine.onVisitCreated(any(), occurredAt) }
+    }
+
+    @Test
+    fun `host checkin booking skips gamification when visit already exists`() = runBlocking {
+        val bookingId = UUID(0L, 16L)
+        val booking = bookingRecord(id = bookingId, status = BookingStatus.BOOKED, guestUserId = 77)
+        val occurredAt = fixedClock.instant()
+        val checkin = bookingCheckinRecord(occurredAt = occurredAt, subjectId = "16")
+        val visit =
+            ClubVisit(
+                id = 100,
+                clubId = booking.clubId,
+                nightStartUtc = fixedClock.instant().minusSeconds(3600),
+                eventId = booking.eventId,
+                userId = booking.guestUserId ?: 0,
+                firstCheckinAt = occurredAt,
+                actorUserId = actor.userId,
+                actorRole = Role.ENTRY_MANAGER,
+                entryType = CheckinSubjectType.BOOKING.name,
+                isEarly = false,
+                hasTable = false,
+                createdAt = occurredAt,
+                updatedAt = occurredAt,
+            )
+
+        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "16") } returns null
+        coEvery { checkinRepo.insertWithBookingUpdate(any(), any(), any(), any()) } returns checkin
+        coEvery { eventRepository.get(booking.eventId) } returns event(booking)
+        coEvery { nightOverrideRepository.getOverride(booking.clubId, any()) } returns null
+        coEvery { gamificationSettingsRepository.getByClubId(booking.clubId) } returns null
+        coEvery { visitRepository.tryCheckIn(any()) } returns VisitCheckInResult(created = false, visit = visit)
+        coEvery { visitRepository.markHasTable(any(), any(), any(), any()) } returns true
+        coEvery { gamificationEngine.onVisitCreated(any(), any()) } returns GamificationDelta()
+
+        val result =
+            service.hostCheckin(
+                HostCheckinRequest(clubId = booking.clubId, eventId = booking.eventId, bookingId = "16"),
+                actor,
+            )
+
+        check(result is CheckinServiceResult.Success)
+        coVerify { visitRepository.tryCheckIn(any()) }
+        coVerify(exactly = 0) { gamificationEngine.onVisitCreated(any(), any()) }
+    }
+
     private fun bookingRecord(
         id: UUID,
         status: BookingStatus,
         clubId: Long = 1,
         eventId: Long = 2,
+        guestUserId: Long? = null,
     ): BookingRecord =
         BookingRecord(
             id = id,
@@ -185,6 +287,8 @@ class CheckinServiceTest {
             tableId = 10,
             tableNumber = 5,
             eventId = eventId,
+            guestUserId = guestUserId,
+            promoterUserId = null,
             guests = 2,
             minRate = java.math.BigDecimal("10.00"),
             totalRate = java.math.BigDecimal("20.00"),
@@ -196,6 +300,37 @@ class CheckinServiceTest {
             idempotencyKey = "key",
             createdAt = fixedClock.instant(),
             updatedAt = fixedClock.instant(),
+        )
+
+    private fun bookingCheckinRecord(
+        occurredAt: Instant,
+        subjectId: String,
+        clubId: Long = 1,
+        eventId: Long = 2,
+    ): CheckinRecord =
+        CheckinRecord(
+            id = 22,
+            clubId = clubId,
+            eventId = eventId,
+            subjectType = CheckinSubjectType.BOOKING,
+            subjectId = subjectId,
+            checkedBy = 10,
+            method = CheckinMethod.NAME,
+            resultStatus = CheckinResultStatus.ARRIVED,
+            denyReason = null,
+            occurredAt = occurredAt,
+            createdAt = occurredAt,
+        )
+
+    private fun event(booking: BookingRecord): com.example.bot.club.Event =
+        com.example.bot.club.Event(
+            id = booking.eventId,
+            clubId = booking.clubId,
+            title = "Event",
+            startAt = fixedClock.instant().minusSeconds(3600),
+            endAt = fixedClock.instant(),
+            isSpecial = false,
+            posterUrl = null,
         )
 
     private fun invitationCard(entryId: Long, guestListId: Long): InvitationCard =

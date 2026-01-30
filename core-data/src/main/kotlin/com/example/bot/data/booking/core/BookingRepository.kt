@@ -366,6 +366,8 @@ class BookingRepository(
             tableId = this[BookingsTable.tableId],
             tableNumber = this[BookingsTable.tableNumber],
             eventId = this[BookingsTable.eventId],
+            guestUserId = this[BookingsTable.guestUserId],
+            promoterUserId = this[BookingsTable.promoterUserId],
             guests = this[BookingsTable.guestsCount],
             minRate = this[BookingsTable.minDeposit],
             totalRate = this[BookingsTable.totalDeposit],

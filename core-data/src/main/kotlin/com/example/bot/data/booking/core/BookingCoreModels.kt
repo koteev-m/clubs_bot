@@ -46,6 +46,8 @@ data class BookingRecord(
     val tableId: Long,
     val tableNumber: Int,
     val eventId: Long,
+    val guestUserId: Long? = null,
+    val promoterUserId: Long? = null,
     val guests: Int,
     val minRate: BigDecimal,
     val totalRate: BigDecimal,
