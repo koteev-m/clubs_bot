@@ -4,6 +4,10 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { getApiErrorInfo, isRequestCanceled } from '../../../shared/api/error';
 import QrCodeBlock from '../../../shared/ui/QrCodeBlock';
+import { useGuestStore } from '../../guest/state/guest.store';
+import { useClubGamification } from '../../guest/hooks/useClubGamification';
+import AuthorizationRequired from '../../../shared/ui/AuthorizationRequired';
+import CouponList from '../../../shared/ui/CouponList';
 
 interface CountdownProps {
   arriveBy: string;
@@ -31,6 +35,14 @@ export default function MyNights() {
   const isMounted = useRef(true);
   const controllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
+  const { selectedClub } = useGuestStore();
+  const {
+    status: gamificationStatus,
+    data: gamification,
+    errorMessage: gamificationError,
+    canRetry: gamificationCanRetry,
+    reload: reloadGamification,
+  } = useClubGamification(selectedClub);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -178,6 +190,10 @@ export default function MyNights() {
     );
   };
 
+  if (gamificationStatus === 'unauthorized') {
+    return <AuthorizationRequired />;
+  }
+
   return (
     <div className="p-4 space-y-3 bg-gray-50 min-h-screen">
       <div className="flex gap-2">
@@ -205,11 +221,60 @@ export default function MyNights() {
         </button>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
+      <section className="space-y-2">
+        <div className="text-base font-semibold">Мои купоны</div>
+        {!selectedClub && (
+          <div className="rounded-lg border border-dashed border-gray-200 bg-white p-4 text-sm text-gray-500">
+            Выберите клуб, чтобы увидеть купоны и историю посещений.
+          </div>
+        )}
+        {selectedClub && gamificationStatus === 'loading' && <div className="text-sm text-gray-500">Загрузка...</div>}
+        {selectedClub && gamificationStatus === 'error' && (
+          <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm text-red-700 space-y-3">
+            <div>{gamificationError}</div>
+            {gamificationCanRetry && (
+              <button
+                className="rounded bg-red-600 px-3 py-2 text-sm text-white"
+                type="button"
+                onClick={() => void reloadGamification()}
+              >
+                Повторить
+              </button>
+            )}
+          </div>
+        )}
+        {selectedClub && gamificationStatus === 'ready' && gamification && (
+          <CouponList coupons={gamification.coupons} />
+        )}
+      </section>
+      <section className="space-y-2">
+        <div className="text-base font-semibold">История посещений</div>
+        {selectedClub && gamificationStatus === 'ready' && gamification ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatCard label="Всего визитов" value={gamification.totals.visitsAllTime} />
+            <StatCard label="Визитов за период" value={gamification.totals.visitsInWindow} />
+            <StatCard label="Ранних визитов" value={gamification.totals.earlyInWindow} />
+            <StatCard label="Ночей за столом" value={gamification.totals.tableNightsInWindow} />
+          </div>
+        ) : null}
+        {selectedClub && gamificationStatus === 'loading' && (
+          <div className="text-sm text-gray-500">Загрузка истории...</div>
+        )}
+      </section>
       {loading && <div>Загрузка...</div>}
       {!loading && !error && bookings.length === 0 && (
         <div className="text-sm text-gray-500">Бронирования не найдены</div>
       )}
       <div className="space-y-3">{bookings.map(renderBooking)}</div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="text-lg font-semibold text-gray-900">{value}</div>
     </div>
   );
 }
