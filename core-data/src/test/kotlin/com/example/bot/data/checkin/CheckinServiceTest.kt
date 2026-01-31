@@ -280,7 +280,8 @@ class CheckinServiceTest {
 
     @Test
     fun `host checkin booking resolves guest via promoter assignment`() = runBlocking {
-        val bookingId = UUID(0L, 15L)
+        val bookingId = randomUuidWithNegativeLsb()
+        val assignmentBookingId = PromoterBookingAssignmentsRepository.toAssignmentBookingId(bookingId)!!
         val booking = bookingRecord(
             id = bookingId,
             status = BookingStatus.BOOKED,
@@ -309,10 +310,10 @@ class CheckinServiceTest {
                 updatedAt = occurredAt,
             )
 
-        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { bookingRepo.findById(any()) } returns booking
         coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "15") } returns null
         coEvery { checkinRepo.insertWithBookingUpdate(any(), any(), any(), any()) } returns checkin
-        coEvery { promoterBookingAssignmentsRepository.findEntryIdForBooking(15L) } returns entryId
+        coEvery { promoterBookingAssignmentsRepository.findEntryIdForBooking(assignmentBookingId) } returns entryId
         coEvery { guestListEntryRepo.findById(entryId) } returns entry
         coEvery { userRepository.getByTelegramId(entry.telegramUserId!!) } returns resolvedUser
         coEvery { eventRepository.get(booking.eventId) } returns event(booking)
@@ -347,7 +348,8 @@ class CheckinServiceTest {
 
     @Test
     fun `host checkin booking skips visit when guest cannot be resolved`() = runBlocking {
-        val bookingId = UUID(0L, 17L)
+        val bookingId = randomUuidWithNegativeLsb()
+        val assignmentBookingId = PromoterBookingAssignmentsRepository.toAssignmentBookingId(bookingId)!!
         val booking = bookingRecord(
             id = bookingId,
             status = BookingStatus.BOOKED,
@@ -357,10 +359,10 @@ class CheckinServiceTest {
         val occurredAt = fixedClock.instant()
         val checkin = bookingCheckinRecord(occurredAt = occurredAt, subjectId = "17")
 
-        coEvery { bookingRepo.findById(bookingId) } returns booking
+        coEvery { bookingRepo.findById(any()) } returns booking
         coEvery { checkinRepo.findBySubject(CheckinSubjectType.BOOKING, "17") } returns null
         coEvery { checkinRepo.insertWithBookingUpdate(any(), any(), any(), any()) } returns checkin
-        coEvery { promoterBookingAssignmentsRepository.findEntryIdForBooking(17L) } returns null
+        coEvery { promoterBookingAssignmentsRepository.findEntryIdForBooking(assignmentBookingId) } returns null
 
         val result =
             service.hostCheckin(
@@ -432,6 +434,14 @@ class CheckinServiceTest {
             isSpecial = false,
             posterUrl = null,
         )
+
+    private fun randomUuidWithNegativeLsb(): UUID {
+        var id = UUID.randomUUID()
+        while (id.leastSignificantBits >= 0L) {
+            id = UUID.randomUUID()
+        }
+        return id
+    }
 
     private fun invitationCard(entryId: Long, guestListId: Long): InvitationCard =
         InvitationCard(
