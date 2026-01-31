@@ -387,7 +387,7 @@ fun Application.adminGamificationRoutes(
                             return@delete call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         }
                         logger.info("admin.gamification.badges.delete club_id={} badge_id={} by={}", clubId, payload.id, call.rbacContext().user.id)
-                        call.respond(HttpStatusCode.NoContent, Unit)
+                        call.respond(HttpStatusCode.NoContent)
                     }
                 }
 
@@ -479,7 +479,7 @@ fun Application.adminGamificationRoutes(
                             return@delete call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         }
                         logger.info("admin.gamification.prizes.delete club_id={} prize_id={} by={}", clubId, payload.id, call.rbacContext().user.id)
-                        call.respond(HttpStatusCode.NoContent, Unit)
+                        call.respond(HttpStatusCode.NoContent)
                     }
                 }
 
@@ -569,7 +569,7 @@ fun Application.adminGamificationRoutes(
                             return@delete call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         }
                         logger.info("admin.gamification.ladder.delete club_id={} level_id={} by={}", clubId, payload.id, call.rbacContext().user.id)
-                        call.respond(HttpStatusCode.NoContent, Unit)
+                        call.respond(HttpStatusCode.NoContent)
                     }
                 }
             }
@@ -621,23 +621,27 @@ private fun AdminPrizeRequest.validatePrize(): Map<String, String> = validatePri
     code = code,
     titleRu = titleRu,
     limitTotal = limitTotal,
+    expiresInDays = expiresInDays,
 )
 
 private fun AdminPrizeUpdateRequest.validatePrize(): Map<String, String> = validatePrizeFields(
     code = code,
     titleRu = titleRu,
     limitTotal = limitTotal,
+    expiresInDays = expiresInDays,
 )
 
 private fun validatePrizeFields(
     code: String,
     titleRu: String,
     limitTotal: Int?,
+    expiresInDays: Int?,
 ): Map<String, String> {
     val errors = mutableMapOf<String, String>()
     if (code.isBlank()) errors["code"] = "must_not_be_blank"
     if (titleRu.isBlank()) errors["titleRu"] = "must_not_be_blank"
     if (limitTotal != null && limitTotal < 1) errors["limitTotal"] = "must_be_at_least_1"
+    if (expiresInDays != null && expiresInDays < 1) errors["expiresInDays"] = "must_be_at_least_1"
     return errors
 }
 

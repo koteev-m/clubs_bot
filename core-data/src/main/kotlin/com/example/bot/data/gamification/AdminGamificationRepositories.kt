@@ -36,6 +36,7 @@ import java.time.Instant
 
 class AdminGamificationSettingsRepositoryImpl(
     private val repository: GamificationSettingsRepository,
+    private val clock: Clock = Clock.systemUTC(),
 ) : AdminGamificationSettingsRepository {
     override suspend fun getByClubId(clubId: Long): AdminGamificationSettings? =
         repository.getByClubId(clubId)?.toAdmin()
@@ -52,7 +53,7 @@ class AdminGamificationSettingsRepositoryImpl(
                     contestsEnabled = settings.contestsEnabled,
                     tablesLoyaltyEnabled = settings.tablesLoyaltyEnabled,
                     earlyWindowMinutes = settings.earlyWindowMinutes,
-                    updatedAt = Instant.EPOCH,
+                    updatedAt = Instant.now(clock),
                 ),
             ).toAdmin()
 
