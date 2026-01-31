@@ -71,6 +71,7 @@ import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.hostCheckinRoutes
 import com.example.bot.routes.hostWaitlistRoutes
 import com.example.bot.routes.adminClubsRoutes
+import com.example.bot.routes.adminGamificationRoutes
 import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminHallPlanRoutes
 import com.example.bot.routes.adminOpsChatsRoutes
@@ -206,6 +207,11 @@ fun Application.module() {
     val adminTablesRepository by inject<AdminTablesRepository>()
     val adminClubsRepository by inject<AdminClubsRepository>()
     val adminHallsRepository by inject<AdminHallsRepository>()
+    val adminGamificationSettingsRepository by inject<com.example.bot.admin.AdminGamificationSettingsRepository>()
+    val adminNightOverrideRepository by inject<com.example.bot.admin.AdminNightOverrideRepository>()
+    val adminBadgeRepository by inject<com.example.bot.admin.AdminBadgeRepository>()
+    val adminPrizeRepository by inject<com.example.bot.admin.AdminPrizeRepository>()
+    val adminRewardLadderRepository by inject<com.example.bot.admin.AdminRewardLadderRepository>()
     val hallPlansRepository by inject<HallPlansRepository>()
     val musicItemsRepository by inject<MusicItemRepository>()
     val musicAssetsRepository by inject<MusicAssetRepository>()
@@ -332,6 +338,13 @@ fun Application.module() {
     adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
     adminHallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)
     adminTablesRoutes(adminTablesRepository = adminTablesRepository, adminHallsRepository = adminHallsRepository)
+    adminGamificationRoutes(
+        settingsRepository = adminGamificationSettingsRepository,
+        nightOverrideRepository = adminNightOverrideRepository,
+        badgeRepository = adminBadgeRepository,
+        prizeRepository = adminPrizeRepository,
+        rewardLadderRepository = adminRewardLadderRepository,
+    )
     adminMusicRoutes(itemsRepository = musicItemsRepository, assetsRepository = musicAssetsRepository, clock = appClock)
     clubsRoutes(clubsRepository = clubsRepository, eventsRepository = eventsRepository)
     layoutRoutes(layoutRepository = layoutRepository, layoutAssetsRepository = layoutAssetsRepository)

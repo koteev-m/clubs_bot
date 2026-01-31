@@ -26,6 +26,16 @@ import com.example.bot.data.club.ClubOpsChatConfigRepositoryImpl
 import com.example.bot.data.club.InvitationServiceImpl
 import com.example.bot.data.club.WaitlistRepositoryImpl
 import com.example.bot.data.checkin.CheckinServiceImpl
+import com.example.bot.admin.AdminBadgeRepository
+import com.example.bot.admin.AdminGamificationSettingsRepository
+import com.example.bot.admin.AdminNightOverrideRepository
+import com.example.bot.admin.AdminPrizeRepository
+import com.example.bot.admin.AdminRewardLadderRepository
+import com.example.bot.data.gamification.AdminBadgeRepositoryImpl
+import com.example.bot.data.gamification.AdminGamificationSettingsRepositoryImpl
+import com.example.bot.data.gamification.AdminNightOverrideRepositoryImpl
+import com.example.bot.data.gamification.AdminPrizeRepositoryImpl
+import com.example.bot.data.gamification.AdminRewardLadderRepositoryImpl
 import com.example.bot.data.gamification.BadgeRepository
 import com.example.bot.data.gamification.BadgeRepositoryAdapter
 import com.example.bot.data.gamification.CouponRepository
@@ -124,6 +134,11 @@ val bookingModule =
         single { RewardLadderRepository(get()) }
         single { CouponRepository(get()) }
         single { PrizeRepository(get()) }
+        single<AdminGamificationSettingsRepository> { AdminGamificationSettingsRepositoryImpl(get()) }
+        single<AdminNightOverrideRepository> { AdminNightOverrideRepositoryImpl(get()) }
+        single<AdminBadgeRepository> { AdminBadgeRepositoryImpl(get()) }
+        single<AdminPrizeRepository> { AdminPrizeRepositoryImpl(get()) }
+        single<AdminRewardLadderRepository> { AdminRewardLadderRepositoryImpl(get()) }
 
         single<DomainGamificationSettingsRepository> { GamificationSettingsRepositoryAdapter(get()) }
         single<DomainBadgeRepository> { BadgeRepositoryAdapter(get()) }
