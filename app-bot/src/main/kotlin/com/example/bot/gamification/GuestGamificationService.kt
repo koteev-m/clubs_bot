@@ -9,6 +9,7 @@ import com.example.bot.data.gamification.UserBadge as DataUserBadge
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.Locale
 import kotlinx.serialization.Serializable
 
 interface GamificationReadRepository {
@@ -128,7 +129,12 @@ class GuestGamificationService(
         val rewardLevels = readRepository.listEnabledRewardLevels(clubId)
         val coupons = readRepository.listCoupons(clubId, userId, couponStatuses)
         val prizeIds = (rewardLevels.map { it.prizeId } + coupons.map { it.prizeId }).toSet()
-        val prizes = readRepository.listPrizes(clubId, prizeIds).associateBy { it.id }
+        val prizes =
+            if (prizeIds.isEmpty()) {
+                emptyMap()
+            } else {
+                readRepository.listPrizes(clubId, prizeIds).associateBy { it.id }
+            }
 
         val counts = mutableMapOf<MetricKey, Long>()
         suspend fun metricCount(metricType: MetricType, windowDays: Int?): Long {
@@ -213,7 +219,13 @@ class GuestGamificationService(
         metricCount: suspend (MetricType, Int?) -> Long,
         prizes: Map<Long, DataPrize>,
     ): DataRewardLadderLevel? {
-        for (level in levels) {
+        val sortedLevels =
+            levels
+                .asSequence()
+                .filter { metricType.matches(it.metricType) }
+                .sortedWith(compareBy<DataRewardLadderLevel> { it.orderIndex }.thenBy { it.threshold })
+                .toList()
+        for (level in sortedLevels) {
             if (!metricType.matches(level.metricType)) continue
             val prize = prizes[level.prizeId] ?: continue
             if (!prize.enabled) continue
@@ -250,7 +262,7 @@ class GuestGamificationService(
 
         companion object {
             fun fromMetricType(metricType: String): MetricType? {
-                val normalized = metricType.trim().uppercase()
+                val normalized = metricType.trim().uppercase(Locale.ROOT)
                 return entries.firstOrNull { normalized == it.dbValue || normalized in it.aliases }
             }
         }
