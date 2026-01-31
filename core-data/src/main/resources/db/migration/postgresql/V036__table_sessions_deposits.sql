@@ -1,0 +1,63 @@
+CREATE TABLE IF NOT EXISTS table_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    club_id BIGINT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+    night_start_utc TIMESTAMPTZ NOT NULL,
+    table_id BIGINT NOT NULL REFERENCES tables(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL CHECK (status IN ('OPEN','CLOSED')),
+    open_marker SMALLINT NULL CHECK (open_marker IN (1)),
+    opened_at TIMESTAMPTZ NOT NULL,
+    closed_at TIMESTAMPTZ NULL,
+    opened_by BIGINT NOT NULL REFERENCES users(id),
+    closed_by BIGINT NULL REFERENCES users(id),
+    note TEXT NULL,
+    UNIQUE (club_id, night_start_utc, table_id, open_marker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_table_sessions_club_night
+    ON table_sessions (club_id, night_start_utc);
+
+CREATE INDEX IF NOT EXISTS idx_table_sessions_club_night_status
+    ON table_sessions (club_id, night_start_utc, status);
+
+CREATE INDEX IF NOT EXISTS idx_table_sessions_table_club_night
+    ON table_sessions (table_id, club_id, night_start_utc);
+
+CREATE TABLE IF NOT EXISTS table_deposits (
+    id BIGSERIAL PRIMARY KEY,
+    club_id BIGINT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+    night_start_utc TIMESTAMPTZ NOT NULL,
+    table_id BIGINT NOT NULL REFERENCES tables(id) ON DELETE RESTRICT,
+    table_session_id BIGINT NOT NULL REFERENCES table_sessions(id) ON DELETE CASCADE,
+    payment_id UUID NULL REFERENCES payments(id) ON DELETE SET NULL,
+    booking_id UUID NULL REFERENCES bookings(id) ON DELETE SET NULL,
+    guest_user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+    amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0),
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by BIGINT NOT NULL REFERENCES users(id),
+    updated_at TIMESTAMPTZ NOT NULL,
+    updated_by BIGINT NOT NULL REFERENCES users(id),
+    update_reason TEXT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_table_deposits_club_night
+    ON table_deposits (club_id, night_start_utc);
+
+CREATE INDEX IF NOT EXISTS idx_table_deposits_table_session
+    ON table_deposits (table_session_id);
+
+CREATE INDEX IF NOT EXISTS idx_table_deposits_payment
+    ON table_deposits (payment_id);
+
+CREATE INDEX IF NOT EXISTS idx_table_deposits_guest_club_night
+    ON table_deposits (guest_user_id, club_id, night_start_utc);
+
+CREATE TABLE IF NOT EXISTS table_deposit_allocations (
+    id BIGSERIAL PRIMARY KEY,
+    deposit_id BIGINT NOT NULL REFERENCES table_deposits(id) ON DELETE CASCADE,
+    category_code TEXT NOT NULL,
+    amount_minor BIGINT NOT NULL CHECK (amount_minor >= 0),
+    UNIQUE (deposit_id, category_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_table_deposit_allocations_deposit
+    ON table_deposit_allocations (deposit_id);
