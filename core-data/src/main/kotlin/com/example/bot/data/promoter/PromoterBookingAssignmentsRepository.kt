@@ -7,6 +7,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -58,13 +59,13 @@ class PromoterBookingAssignmentsRepository(
                 AcquireLockResult.Acquired
             } else {
                 val refreshed = getAssignment(entryId)
-                if (refreshed != null && refreshed.bookingId > IN_PROGRESS_BOOKING_ID) {
+                if (refreshed != null && refreshed.bookingId != IN_PROGRESS_BOOKING_ID) {
                     AcquireLockResult.AlreadyAssigned(refreshed.bookingId)
                 } else {
                     AcquireLockResult.InProgress
                 }
             }
-        if (current.bookingId > IN_PROGRESS_BOOKING_ID) {
+        if (current.bookingId != IN_PROGRESS_BOOKING_ID) {
             return AcquireLockResult.AlreadyAssigned(current.bookingId)
         }
         val cutoff = now.minus(staleAfter)
@@ -74,7 +75,7 @@ class PromoterBookingAssignmentsRepository(
                 return AcquireLockResult.Acquired
             }
             val refreshed = getAssignment(entryId)
-            if (refreshed != null && refreshed.bookingId > IN_PROGRESS_BOOKING_ID) {
+            if (refreshed != null && refreshed.bookingId != IN_PROGRESS_BOOKING_ID) {
                 return AcquireLockResult.AlreadyAssigned(refreshed.bookingId)
             }
         }
@@ -182,8 +183,14 @@ class PromoterBookingAssignmentsRepository(
 
     private fun now(): OffsetDateTime = Instant.now(clock).atOffset(ZoneOffset.UTC)
 
-    private companion object {
-        private const val IN_PROGRESS_BOOKING_ID = 0L
+    companion object {
+        const val IN_PROGRESS_BOOKING_ID = 0L
         private val DEFAULT_LOCK_STALE_AFTER = Duration.ofMinutes(20)
+
+        fun toAssignmentBookingId(bookingId: Long): Long? = bookingId.takeUnless { it == IN_PROGRESS_BOOKING_ID }
+
+        fun toAssignmentBookingId(bookingId: UUID): Long? = toAssignmentBookingId(bookingId.leastSignificantBits)
+
+        fun isFinalizedBookingId(bookingId: Long): Boolean = bookingId != IN_PROGRESS_BOOKING_ID
     }
 }

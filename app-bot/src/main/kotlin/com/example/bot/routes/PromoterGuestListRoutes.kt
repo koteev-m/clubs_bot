@@ -521,10 +521,19 @@ fun Application.promoterGuestListRoutes(
                                     }
                                     is ConfirmResult.Success -> {
                                         confirmSucceeded = true
-                                        val finalized = promoterAssignments.finalizeAssignment(entry.id, confirm.booking.id)
+                                        val assignmentBookingId =
+                                            PromoterBookingAssignmentsRepository.toAssignmentBookingId(confirm.booking.id)
+                                                ?: return@post call.respondError(
+                                                    HttpStatusCode.InternalServerError,
+                                                    ErrorCodes.internal_error,
+                                                    message = "Некорректный booking id для назначения",
+                                                )
+                                        val finalized = promoterAssignments.finalizeAssignment(entry.id, assignmentBookingId)
                                         if (!finalized) {
                                             val currentBookingId = promoterAssignments.findBookingIdForEntry(entry.id)
-                                            if (currentBookingId != null && currentBookingId > 0) {
+                                            if (currentBookingId != null &&
+                                                PromoterBookingAssignmentsRepository.isFinalizedBookingId(currentBookingId)
+                                            ) {
                                                 return@post call.respondError(
                                                     HttpStatusCode.Conflict,
                                                     ErrorCodes.invalid_state,

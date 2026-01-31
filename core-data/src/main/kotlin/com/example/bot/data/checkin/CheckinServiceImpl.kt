@@ -1131,8 +1131,7 @@ class CheckinServiceImpl(
     ): Long? {
         booking.guestUserId?.takeIf { it > 0 }?.let { return it }
 
-        val bookingId = booking.id.leastSignificantBits
-        if (bookingId <= 0) return null
+        val bookingId = PromoterBookingAssignmentsRepository.toAssignmentBookingId(booking.id) ?: return null
         val entryId =
             try {
                 promoterBookingAssignmentsRepository.findEntryIdForBooking(bookingId)
