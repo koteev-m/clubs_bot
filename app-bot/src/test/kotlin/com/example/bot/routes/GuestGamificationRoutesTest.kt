@@ -126,6 +126,26 @@ class GuestGamificationRoutesTest {
         assertEquals("FREE_BAR", couponPrize["code"]!!.jsonPrimitive.content)
     }
 
+    @Test
+    fun `200 returns next reward sorted by ladder levels`() =
+        withGamificationAppCustom(
+            readRepo = OutOfOrderRewardLevelsRepository(),
+            visitRepo = OutOfOrderVisitMetricsRepository(now),
+        ) {
+            val response = client.get("/api/me/clubs/$clubId/gamification") { header("X-Telegram-Init-Data", "init") }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+
+            val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            val rewards = body["nextRewards"]!!.jsonArray
+            assertEquals(1, rewards.size)
+            val reward = rewards.first().jsonObject
+            assertEquals("VISITS", reward["metricType"]!!.jsonPrimitive.content)
+            assertEquals(5, reward["threshold"]!!.jsonPrimitive.int)
+            assertEquals(30, reward["windowDays"]!!.jsonPrimitive.int)
+            assertEquals(3, reward["current"]!!.jsonPrimitive.long)
+        }
+
     private fun withGamificationApp(
         block: suspend ApplicationTestBuilder.(FakeVisitMetricsRepository) -> Unit,
     ) = testApplication {
@@ -153,6 +173,35 @@ class GuestGamificationRoutesTest {
             )
         }
         block(visitRepo)
+    }
+
+    private fun withGamificationAppCustom(
+        readRepo: GamificationReadRepository,
+        visitRepo: VisitMetricsRepository,
+        block: suspend ApplicationTestBuilder.() -> Unit,
+    ) = testApplication {
+        val clubsRepository = InMemoryClubsRepository(listOf(club()))
+        val service =
+            GuestGamificationService(
+                readRepository = readRepo,
+                visitMetricsRepository = visitRepo,
+                clock = clock,
+            )
+        application {
+            install(ContentNegotiation) { json() }
+            install(RbacPlugin) {
+                userRepository = StubUserRepository(userId = userId, telegramId = telegramId)
+                userRoleRepository = StubUserRoleRepository(roles = setOf(Role.GUEST), clubIds = setOf(clubId))
+                auditLogRepository = relaxedAuditRepository()
+                principalExtractor = { TelegramPrincipal(telegramId, "tester") }
+            }
+            guestGamificationRoutes(
+                clubsRepository = clubsRepository,
+                gamificationService = service,
+                botTokenProvider = { "test" },
+            )
+        }
+        block()
     }
 
     private fun club(): Club =
@@ -329,6 +378,76 @@ class GuestGamificationRoutesTest {
                 ),
             )
         }
+    }
+
+    private class OutOfOrderRewardLevelsRepository : GamificationReadRepository {
+        override suspend fun listEnabledBadges(clubId: Long): List<Badge> = emptyList()
+
+        override suspend fun listUserBadges(clubId: Long, userId: Long): List<UserBadge> = emptyList()
+
+        override suspend fun listEnabledRewardLevels(clubId: Long): List<RewardLadderLevel> =
+            listOf(
+                RewardLadderLevel(
+                    id = 100,
+                    clubId = clubId,
+                    metricType = "VISITS",
+                    threshold = 10,
+                    windowDays = 30,
+                    prizeId = 1,
+                    enabled = true,
+                    orderIndex = 0,
+                    createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+                    updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                ),
+                RewardLadderLevel(
+                    id = 101,
+                    clubId = clubId,
+                    metricType = "VISITS",
+                    threshold = 5,
+                    windowDays = 30,
+                    prizeId = 1,
+                    enabled = true,
+                    orderIndex = 0,
+                    createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+                    updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                ),
+            )
+
+        override suspend fun listPrizes(clubId: Long, prizeIds: Set<Long>): List<Prize> =
+            listOf(
+                Prize(
+                    id = 1,
+                    clubId = clubId,
+                    code = "VISIT_5",
+                    titleRu = "5 визитов",
+                    description = "Подарок",
+                    terms = "Только для гостей",
+                    enabled = true,
+                    limitTotal = null,
+                    expiresInDays = null,
+                    createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+                    updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                ),
+            ).filter { it.id in prizeIds }
+
+        override suspend fun listCoupons(
+            clubId: Long,
+            userId: Long,
+            statuses: Set<CouponStatus>,
+        ): List<RewardCoupon> = emptyList()
+    }
+
+    private class OutOfOrderVisitMetricsRepository(private val now: Instant) : VisitMetricsRepository {
+        override suspend fun countVisits(userId: Long, clubId: Long, sinceUtc: Instant?): Long =
+            when (sinceUtc) {
+                null -> 3
+                now.minus(Duration.ofDays(30)) -> 3
+                else -> 0
+            }
+
+        override suspend fun countEarlyVisits(userId: Long, clubId: Long, sinceUtc: Instant?): Long = 0
+
+        override suspend fun countTableNights(userId: Long, clubId: Long, sinceUtc: Instant?): Long = 0
     }
 
     private class FakeVisitMetricsRepository(private val now: Instant) : VisitMetricsRepository {
