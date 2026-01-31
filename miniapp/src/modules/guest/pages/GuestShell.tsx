@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import GuestHome from './GuestHome';
 import MyBookingPage from './MyBookingPage';
+import ClubProfile from './ClubProfile';
 import MyNights from '../../mynights/pages/MyNights';
 import MusicPage from '../../music/pages/MusicPage';
 import ToastHost from '../../../widgets/ToastHost';
 
-type GuestTab = 'book' | 'my_booking' | 'my_nights' | 'music';
+type GuestTab = 'book' | 'my_booking' | 'club_profile' | 'my_nights' | 'music';
 
 type TabConfig = {
   key: GuestTab;
@@ -15,6 +16,7 @@ type TabConfig = {
 const tabs: TabConfig[] = [
   { key: 'book', label: 'Забронировать' },
   { key: 'my_booking', label: 'Моя бронь' },
+  { key: 'club_profile', label: 'Профиль клуба' },
   { key: 'my_nights', label: 'Мои ночи' },
   { key: 'music', label: 'Музыка' },
 ];
@@ -23,6 +25,7 @@ const resolveTab = (value: string | null): GuestTab => {
   switch (value) {
     case 'book':
     case 'my_booking':
+    case 'club_profile':
     case 'my_nights':
     case 'music':
       return value;
@@ -76,6 +79,8 @@ export default function GuestShell() {
     switch (activeTab) {
       case 'my_booking':
         return <MyBookingPage />;
+      case 'club_profile':
+        return <ClubProfile />;
       case 'my_nights':
         return <MyNights />;
       case 'music':
