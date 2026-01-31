@@ -184,6 +184,28 @@ class AdminGamificationRoutesTest {
         assertEquals("2024-06-01T20:00:00Z", clearBody["nightStartUtc"]!!.jsonPrimitive.content)
     }
 
+    @Test
+    fun `prize expiresInDays must be at least 1`() = withApp { _ ->
+        val response =
+            client.post("/api/admin/clubs/1/gamification/prizes") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                        "code":"trial",
+                        "titleRu":"Пробный",
+                        "enabled":true,
+                        "expiresInDays":0
+                    }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.validation_error, response.errorCode())
+        val details = response.bodyAsJson()["details"]!!.jsonObject
+        assertEquals("must_be_at_least_1", details["expiresInDays"]!!.jsonPrimitive.content)
+    }
+
     private fun withApp(
         roles: Set<Role> = setOf(Role.CLUB_ADMIN),
         clubIds: Set<Long> = setOf(1),

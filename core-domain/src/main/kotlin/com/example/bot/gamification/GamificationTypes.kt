@@ -1,5 +1,7 @@
 package com.example.bot.gamification
 
+import java.util.Locale
+
 enum class GamificationMetricType(
     private val aliases: Set<String>,
 ) {
@@ -8,7 +10,7 @@ enum class GamificationMetricType(
     TABLE_NIGHTS(setOf("TABLE_NIGHTS", "TABLE_VISITS", "TABLE_VISIT", "TABLE")),
     ;
 
-    fun matches(value: String): Boolean = value.trim().uppercase() in aliases
+    fun matches(value: String): Boolean = value.trim().uppercase(Locale.ROOT) in aliases
 
     companion object {
         fun isAllowed(value: String): Boolean = entries.any { it.matches(value) }
@@ -25,7 +27,7 @@ enum class BadgeConditionType(
     TABLE_NIGHTS(setOf("TABLE_NIGHTS", "TABLE_VISITS", "TABLE_VISIT", "TABLE")),
     ;
 
-    fun matches(value: String): Boolean = value.trim().uppercase() in aliases
+    fun matches(value: String): Boolean = value.trim().uppercase(Locale.ROOT) in aliases
 
     companion object {
         fun isAllowed(value: String): Boolean = entries.any { it.matches(value) }
