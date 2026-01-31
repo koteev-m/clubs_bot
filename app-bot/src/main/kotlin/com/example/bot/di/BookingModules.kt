@@ -39,6 +39,9 @@ import com.example.bot.data.gamification.RewardLadderRepositoryAdapter
 import com.example.bot.data.gamification.UserBadgeRepository
 import com.example.bot.data.gamification.UserBadgeRepositoryAdapter
 import com.example.bot.data.gamification.VisitMetricsRepositoryAdapter
+import com.example.bot.gamification.DefaultGamificationReadRepository
+import com.example.bot.gamification.GamificationReadRepository
+import com.example.bot.gamification.GuestGamificationService
 import com.example.bot.data.notifications.NotificationsOutboxRepository
 import com.example.bot.data.promo.BookingTemplateRepositoryImpl
 import com.example.bot.data.promo.PromoAttributionRepositoryImpl
@@ -129,6 +132,21 @@ val bookingModule =
         single<DomainCouponRepository> { CouponRepositoryAdapter(get()) }
         single<DomainPrizeRepository> { PrizeRepositoryAdapter(get()) }
         single<VisitMetricsRepository> { VisitMetricsRepositoryAdapter(get()) }
+        single<GamificationReadRepository> {
+            DefaultGamificationReadRepository(
+                badgeRepository = get(),
+                userBadgeRepository = get(),
+                rewardLadderRepository = get(),
+                prizeRepository = get(),
+                couponRepository = get(),
+            )
+        }
+        single {
+            GuestGamificationService(
+                readRepository = get(),
+                visitMetricsRepository = get(),
+            )
+        }
 
         single {
             GamificationEngine(

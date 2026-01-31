@@ -75,6 +75,7 @@ import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminHallPlanRoutes
 import com.example.bot.routes.adminOpsChatsRoutes
 import com.example.bot.routes.adminTablesRoutes
+import com.example.bot.routes.guestGamificationRoutes
 import com.example.bot.routes.hallPlanRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
@@ -222,6 +223,7 @@ fun Application.module() {
     val invitationService by inject<InvitationService>()
     val ownerHealthService by inject<com.example.bot.owner.OwnerHealthService>()
     val checkinService by inject<CheckinService>()
+    val guestGamificationService by inject<com.example.bot.gamification.GuestGamificationService>()
     val opsChatConfigRepository by inject<ClubOpsChatConfigRepository>()
     val userRepository by inject<UserRepository>()
     val supportService by inject<SupportService>()
@@ -296,6 +298,10 @@ fun Application.module() {
         eventsRepository = eventsRepository,
         clubsRepository = clubsRepository,
         meterRegistry = registry,
+    )
+    guestGamificationRoutes(
+        clubsRepository = clubsRepository,
+        gamificationService = guestGamificationService,
     )
     checkinRoutes(
         repository = guestListRepository,
