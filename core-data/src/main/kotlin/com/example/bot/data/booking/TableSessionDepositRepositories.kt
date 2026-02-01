@@ -17,6 +17,7 @@ import org.jetbrains.exposed.sql.sum
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
 import java.time.Instant
+import java.util.Locale
 import java.util.UUID
 
 enum class TableSessionStatus {
@@ -80,11 +81,12 @@ class TableSessionRepository(
         val nightStart = nightStartUtc.toOffsetDateTimeUtc()
         val openedAt = now.toOffsetDateTimeUtc()
         return withRetriedTx(name = "tableSession.open", database = db) {
-            try {
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    val row =
-                        TableSessionsTable
-                            .insert {
+            var lastConflict: Throwable? = null
+            repeat(2) {
+                try {
+                    return@withRetriedTx newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                        val sessionId =
+                            TableSessionsTable.insert {
                                 it[TableSessionsTable.clubId] = clubId
                                 it[TableSessionsTable.nightStartUtc] = nightStart
                                 it[TableSessionsTable.tableId] = tableId
@@ -93,18 +95,27 @@ class TableSessionRepository(
                                 it[TableSessionsTable.openedAt] = openedAt
                                 it[TableSessionsTable.openedBy] = actorId
                                 it[TableSessionsTable.note] = note
-                            }.resultedValues
-                            ?.first()
-                            ?: error("Failed to insert table session for clubId=$clubId tableId=$tableId")
-                    row.toTableSession()
-                }
-            } catch (ex: Throwable) {
-                if (!ex.isUniqueViolation()) throw ex
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    findOpenSession(clubId, nightStart, tableId)
-                        ?: error("Failed to load existing open session for clubId=$clubId tableId=$tableId")
+                            }[TableSessionsTable.id]
+                        val row =
+                            TableSessionsTable
+                                .selectAll()
+                                .where { TableSessionsTable.id eq sessionId }
+                                .limit(1)
+                                .firstOrNull()
+                                ?: error("Failed to load inserted table session for clubId=$clubId tableId=$tableId")
+                        row.toTableSession()
+                    }
+                } catch (ex: Throwable) {
+                    if (!ex.isUniqueViolation()) throw ex
+                    val existing =
+                        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                            findOpenSession(clubId, nightStart, tableId)
+                        }
+                    if (existing != null) return@withRetriedTx existing
+                    lastConflict = ex
                 }
             }
+            throw lastConflict ?: error("Failed to open table session for clubId=$clubId tableId=$tableId")
         }
     }
 
@@ -180,32 +191,36 @@ class TableDepositRepository(
         actorId: Long,
         now: Instant,
     ): TableDeposit {
-        validateAllocations(amountMinor, allocations)
+        val normalizedAllocations = normalizeAllocations(allocations)
+        validateAllocations(amountMinor, normalizedAllocations)
         val nightStart = nightStartUtc.toOffsetDateTimeUtc()
         val nowUtc = now.toOffsetDateTimeUtc()
         return withRetriedTx(name = "tableDeposit.create", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val depositId =
+                    TableDepositsTable.insert {
+                        it[TableDepositsTable.clubId] = clubId
+                        it[TableDepositsTable.nightStartUtc] = nightStart
+                        it[TableDepositsTable.tableId] = tableId
+                        it[TableDepositsTable.tableSessionId] = sessionId
+                        it[TableDepositsTable.paymentId] = paymentId
+                        it[TableDepositsTable.bookingId] = bookingId
+                        it[TableDepositsTable.guestUserId] = guestUserId
+                        it[TableDepositsTable.amountMinor] = amountMinor
+                        it[TableDepositsTable.createdAt] = nowUtc
+                        it[TableDepositsTable.createdBy] = actorId
+                        it[TableDepositsTable.updatedAt] = nowUtc
+                        it[TableDepositsTable.updatedBy] = actorId
+                        it[TableDepositsTable.updateReason] = null
+                    }[TableDepositsTable.id]
+                val savedAllocations = insertAllocations(depositId, normalizedAllocations)
                 val row =
                     TableDepositsTable
-                        .insert {
-                            it[TableDepositsTable.clubId] = clubId
-                            it[TableDepositsTable.nightStartUtc] = nightStart
-                            it[TableDepositsTable.tableId] = tableId
-                            it[TableDepositsTable.tableSessionId] = sessionId
-                            it[TableDepositsTable.paymentId] = paymentId
-                            it[TableDepositsTable.bookingId] = bookingId
-                            it[TableDepositsTable.guestUserId] = guestUserId
-                            it[TableDepositsTable.amountMinor] = amountMinor
-                            it[TableDepositsTable.createdAt] = nowUtc
-                            it[TableDepositsTable.createdBy] = actorId
-                            it[TableDepositsTable.updatedAt] = nowUtc
-                            it[TableDepositsTable.updatedBy] = actorId
-                            it[TableDepositsTable.updateReason] = null
-                        }.resultedValues
-                        ?.first()
-                        ?: error("Failed to insert table deposit for clubId=$clubId sessionId=$sessionId")
-                val depositId = row[TableDepositsTable.id]
-                val savedAllocations = insertAllocations(depositId, allocations)
+                        .selectAll()
+                        .where { TableDepositsTable.id eq depositId }
+                        .limit(1)
+                        .firstOrNull()
+                        ?: error("Failed to load inserted table deposit for clubId=$clubId sessionId=$sessionId")
                 row.toTableDeposit(savedAllocations)
             }
         }
@@ -221,7 +236,8 @@ class TableDepositRepository(
         now: Instant,
     ): TableDeposit {
         require(reason.trim().isNotEmpty()) { "Update reason must be provided" }
-        validateAllocations(amountMinor, allocations)
+        val normalizedAllocations = normalizeAllocations(allocations)
+        validateAllocations(amountMinor, normalizedAllocations)
         val nowUtc = now.toOffsetDateTimeUtc()
         return withRetriedTx(name = "tableDeposit.update", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
@@ -239,7 +255,7 @@ class TableDepositRepository(
                     error("Table deposit not found for clubId=$clubId depositId=$depositId")
                 }
                 TableDepositAllocationsTable.deleteWhere { TableDepositAllocationsTable.depositId eq depositId }
-                val savedAllocations = insertAllocations(depositId, allocations)
+                val savedAllocations = insertAllocations(depositId, normalizedAllocations)
                 val row =
                     TableDepositsTable
                         .selectAll()
@@ -334,6 +350,25 @@ class TableDepositRepository(
         } else {
             require(total == amountMinor) { "Allocations total must match deposit amount" }
         }
+    }
+
+    private fun normalizeAllocations(
+        allocations: List<AllocationInput>,
+    ): List<AllocationInput> {
+        val normalized =
+            allocations.map { allocation ->
+                val normalizedCode = allocation.categoryCode.trim().uppercase(Locale.ROOT)
+                require(normalizedCode.isNotBlank()) { "Allocation categoryCode must not be blank" }
+                allocation.copy(categoryCode = normalizedCode)
+            }
+        val duplicates =
+            normalized.groupBy { it.categoryCode }
+                .filterValues { it.size > 1 }
+                .keys
+        require(duplicates.isEmpty()) {
+            "Duplicate allocation categoryCode: ${duplicates.sorted().joinToString()}"
+        }
+        return normalized
     }
 
     private fun insertAllocations(

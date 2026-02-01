@@ -223,6 +223,231 @@ class TableSessionDepositRepositoryTest {
             assertEquals(80, updated.allocations.first().amountMinor)
         }
 
+    @Test
+    fun `createDeposit normalizes category codes`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+
+            val deposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = " bar ", amountMinor = 100)),
+                    actorId = actorId,
+                    now = now,
+                )
+
+            assertEquals("BAR", deposit.allocations.single().categoryCode)
+        }
+
+    @Test
+    fun `createDeposit rejects duplicate category codes after normalization`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+
+            try {
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(
+                        AllocationInput(categoryCode = "bar", amountMinor = 60),
+                        AllocationInput(categoryCode = " BAR ", amountMinor = 40),
+                    ),
+                    actorId = actorId,
+                    now = now,
+                )
+                fail("Expected createDeposit to throw IllegalArgumentException")
+            } catch (ex: IllegalArgumentException) {
+                // expected
+            }
+        }
+
+    @Test
+    fun `sumDepositsForNight returns total for club night`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+
+            repo.createDeposit(
+                clubId = clubId,
+                nightStartUtc = nightStart,
+                tableId = tableId,
+                sessionId = session.id,
+                guestUserId = null,
+                bookingId = null,
+                paymentId = null,
+                amountMinor = 100,
+                allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                actorId = actorId,
+                now = now,
+            )
+            repo.createDeposit(
+                clubId = clubId,
+                nightStartUtc = nightStart,
+                tableId = tableId,
+                sessionId = session.id,
+                guestUserId = null,
+                bookingId = null,
+                paymentId = null,
+                amountMinor = 50,
+                allocations = listOf(AllocationInput(categoryCode = "VIP", amountMinor = 50)),
+                actorId = actorId,
+                now = now,
+            )
+
+            val otherClubId = insertClub()
+            val otherTableId = insertTable(otherClubId)
+            val otherSession = sessionRepo.openSession(otherClubId, nightStart, otherTableId, actorId, now, note = null)
+            repo.createDeposit(
+                clubId = otherClubId,
+                nightStartUtc = nightStart,
+                tableId = otherTableId,
+                sessionId = otherSession.id,
+                guestUserId = null,
+                bookingId = null,
+                paymentId = null,
+                amountMinor = 200,
+                allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 200)),
+                actorId = actorId,
+                now = now,
+            )
+
+            val total = repo.sumDepositsForNight(clubId, nightStart)
+
+            assertEquals(150, total)
+        }
+
+    @Test
+    fun `allocationSummaryForNight aggregates by category`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+
+            repo.createDeposit(
+                clubId = clubId,
+                nightStartUtc = nightStart,
+                tableId = tableId,
+                sessionId = session.id,
+                guestUserId = null,
+                bookingId = null,
+                paymentId = null,
+                amountMinor = 100,
+                allocations = listOf(
+                    AllocationInput(categoryCode = "bar", amountMinor = 60),
+                    AllocationInput(categoryCode = "vip", amountMinor = 40),
+                ),
+                actorId = actorId,
+                now = now,
+            )
+            repo.createDeposit(
+                clubId = clubId,
+                nightStartUtc = nightStart,
+                tableId = tableId,
+                sessionId = session.id,
+                guestUserId = null,
+                bookingId = null,
+                paymentId = null,
+                amountMinor = 50,
+                allocations = listOf(AllocationInput(categoryCode = " BAR ", amountMinor = 50)),
+                actorId = actorId,
+                now = now,
+            )
+
+            val summary = repo.allocationSummaryForNight(clubId, nightStart)
+
+            assertEquals(mapOf("BAR" to 110L, "VIP" to 40L), summary)
+        }
+
+    @Test
+    fun `listDepositsForSession returns allocations`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+
+            val first =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 120,
+                    allocations = listOf(
+                        AllocationInput(categoryCode = "BAR", amountMinor = 60),
+                        AllocationInput(categoryCode = "VIP", amountMinor = 60),
+                    ),
+                    actorId = actorId,
+                    now = now,
+                )
+            val second =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 80,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 80)),
+                    actorId = actorId,
+                    now = now,
+                )
+
+            val deposits = repo.listDepositsForSession(clubId, session.id)
+
+            assertEquals(2, deposits.size)
+            val loadedById = deposits.associateBy { it.id }
+            assertEquals(first.allocations, loadedById[first.id]?.allocations)
+            assertEquals(second.allocations, loadedById[second.id]?.allocations)
+        }
+
     private suspend fun insertClub(): Long =
         newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
             Clubs.insert {
