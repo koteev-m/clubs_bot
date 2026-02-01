@@ -76,3 +76,44 @@ object BookingsTable : Table("bookings") {
     val updatedAt = timestampWithTimeZone("updated_at")
     override val primaryKey = PrimaryKey(id)
 }
+
+object TableSessionsTable : Table("table_sessions") {
+    val id = long("id").autoIncrement()
+    val clubId = long("club_id")
+    val nightStartUtc = timestampWithTimeZone("night_start_utc")
+    val tableId = long("table_id")
+    val status = text("status")
+    val openMarker = short("open_marker").nullable()
+    val openedAt = timestampWithTimeZone("opened_at")
+    val closedAt = timestampWithTimeZone("closed_at").nullable()
+    val openedBy = long("opened_by")
+    val closedBy = long("closed_by").nullable()
+    val note = text("note").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+object TableDepositsTable : Table("table_deposits") {
+    val id = long("id").autoIncrement()
+    val clubId = long("club_id")
+    val nightStartUtc = timestampWithTimeZone("night_start_utc")
+    val tableId = long("table_id")
+    val tableSessionId = long("table_session_id")
+    val paymentId = uuid("payment_id").nullable()
+    val bookingId = uuid("booking_id").nullable()
+    val guestUserId = long("guest_user_id").nullable()
+    val amountMinor = long("amount_minor")
+    val createdAt = timestampWithTimeZone("created_at")
+    val createdBy = long("created_by")
+    val updatedAt = timestampWithTimeZone("updated_at")
+    val updatedBy = long("updated_by")
+    val updateReason = text("update_reason").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+object TableDepositAllocationsTable : Table("table_deposit_allocations") {
+    val id = long("id").autoIncrement()
+    val depositId = long("deposit_id")
+    val categoryCode = text("category_code")
+    val amountMinor = long("amount_minor")
+    override val primaryKey = PrimaryKey(id)
+}
