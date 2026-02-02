@@ -193,6 +193,101 @@ fun Application.adminTableOpsRoutes(
                                 call = call,
                             ) ?: return@post
 
+                        val allocations = payload.allocations.toAllocationInputs()
+                        val amountMinor = payload.depositAmount ?: 0L
+
+                        val activeSession =
+                            tableSessionRepository.findActiveSession(clubId, nightStartUtc, tableId)
+                        if (activeSession != null) {
+                            val deposits = tableDepositRepository.listDepositsForSession(clubId, activeSession.id)
+                            val existingDeposit =
+                                deposits.maxWithOrNull(
+                                    compareBy<TableDeposit> { it.createdAt }.thenBy { it.id },
+                                )
+                            if (existingDeposit != null) {
+                                val responseTable = table.toNightResponse(activeSession, existingDeposit)
+                                return@post call.respond(
+                                    HttpStatusCode.OK,
+                                    AdminSeatTableResponse(
+                                        sessionId = activeSession.id,
+                                        depositId = existingDeposit.id,
+                                        table = responseTable,
+                                    ),
+                                )
+                            }
+
+                            val deposit =
+                                runCatching {
+                                    tableDepositRepository.createDeposit(
+                                        clubId = clubId,
+                                        nightStartUtc = nightStartUtc,
+                                        tableId = tableId,
+                                        sessionId = activeSession.id,
+                                        guestUserId = resolvedGuestUserId,
+                                        bookingId = null,
+                                        paymentId = null,
+                                        amountMinor = amountMinor,
+                                        allocations = allocations,
+                                        actorId = actorId,
+                                        now = now,
+                                    )
+                                }.getOrElse { ex ->
+                                    if (ex is IllegalArgumentException) {
+                                        return@post call.respondValidationErrors(mapDepositValidationError(ex))
+                                    }
+                                    logger.warn(
+                                        "admin.tables.seat.deposit_failed clubId={} tableId={} sessionId={}",
+                                        clubId,
+                                        tableId,
+                                        activeSession.id,
+                                        ex,
+                                    )
+                                    return@post call.respondError(
+                                        HttpStatusCode.InternalServerError,
+                                        ErrorCodes.internal_error,
+                                    )
+                                }
+
+                            auditLogger.tableDepositCreated(
+                                clubId = clubId,
+                                nightStartUtc = nightStartUtc,
+                                tableId = tableId,
+                                sessionId = activeSession.id,
+                                depositId = deposit.id,
+                                guestUserId = resolvedGuestUserId,
+                                amountMinor = deposit.amountMinor,
+                                allocations = deposit.allocations.map { it.categoryCode to it.amountMinor },
+                                actorUserId = actorId,
+                                actorRole = actorRole?.name,
+                            )
+
+                            if (resolvedGuestUserId != null) {
+                                markHasTableIfPossible(
+                                    visitRepository = visitRepository,
+                                    nightOverrideRepository = nightOverrideRepository,
+                                    settingsRepository = gamificationSettingsRepository,
+                                    clubId = clubId,
+                                    nightStartUtc = nightStartUtc,
+                                    eventId = resolvedEventId,
+                                    guestUserId = resolvedGuestUserId,
+                                    actorId = actorId,
+                                    actorRole = actorRole,
+                                    now = now,
+                                    logger = logger,
+                                )
+                            }
+
+                            val responseTable = table.toNightResponse(activeSession, deposit)
+                            return@post call.respond(
+                                HttpStatusCode.Created,
+                                AdminSeatTableResponse(
+                                    sessionId = activeSession.id,
+                                    depositId = deposit.id,
+                                    table = responseTable,
+                                ),
+                            )
+                        }
+
                         val note = payload.note?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_NOTE_LENGTH)
                         val session =
                             tableSessionRepository.openSession(
@@ -203,8 +298,6 @@ fun Application.adminTableOpsRoutes(
                                 now = now,
                                 note = note,
                             )
-                        val allocations = payload.allocations.toAllocationInputs()
-                        val amountMinor = payload.depositAmount ?: 0L
                         val deposit =
                             runCatching {
                                 tableDepositRepository.createDeposit(
@@ -221,6 +314,9 @@ fun Application.adminTableOpsRoutes(
                                     now = now,
                                 )
                             }.getOrElse { ex ->
+                                if (ex is IllegalArgumentException) {
+                                    return@post call.respondValidationErrors(mapDepositValidationError(ex))
+                                }
                                 logger.warn(
                                     "admin.tables.seat.deposit_failed clubId={} tableId={} sessionId={}",
                                     clubId,
@@ -228,7 +324,10 @@ fun Application.adminTableOpsRoutes(
                                     session.id,
                                     ex,
                                 )
-                                return@post call.respondValidationErrors(mapOf("allocations" to "invalid"))
+                                return@post call.respondError(
+                                    HttpStatusCode.InternalServerError,
+                                    ErrorCodes.internal_error,
+                                )
                             }
 
                         auditLogger.tableSessionOpened(
@@ -354,16 +453,33 @@ fun Application.adminTableOpsRoutes(
                         val actorId = call.rbacContext().user.id
                         val actorRole = call.rbacContext().roles.firstOrNull()
                         val allocations = payload.allocations.toAllocationInputs()
+                        val reason = payload.reason.trim()
                         val updated =
-                            tableDepositRepository.updateDeposit(
-                                clubId = clubId,
-                                depositId = depositId,
-                                amountMinor = payload.amount,
-                                allocations = allocations,
-                                reason = payload.reason.trim(),
-                                actorId = actorId,
-                                now = now,
-                            )
+                            runCatching {
+                                tableDepositRepository.updateDeposit(
+                                    clubId = clubId,
+                                    depositId = depositId,
+                                    amountMinor = payload.amount,
+                                    allocations = allocations,
+                                    reason = reason,
+                                    actorId = actorId,
+                                    now = now,
+                                )
+                            }.getOrElse { ex ->
+                                if (ex is IllegalArgumentException) {
+                                    return@put call.respondValidationErrors(mapDepositValidationError(ex))
+                                }
+                                logger.warn(
+                                    "admin.deposits.update_failed clubId={} depositId={}",
+                                    clubId,
+                                    depositId,
+                                    ex,
+                                )
+                                return@put call.respondError(
+                                    HttpStatusCode.InternalServerError,
+                                    ErrorCodes.internal_error,
+                                )
+                            }
                         auditLogger.tableDepositUpdated(
                             clubId = clubId,
                             nightStartUtc = nightStartUtc,
@@ -373,7 +489,7 @@ fun Application.adminTableOpsRoutes(
                             guestUserId = updated.guestUserId,
                             amountMinor = updated.amountMinor,
                             allocations = updated.allocations.map { it.categoryCode to it.amountMinor },
-                            reason = payload.reason.trim(),
+                            reason = reason,
                             actorUserId = actorId,
                             actorRole = actorRole?.name,
                         )
@@ -426,8 +542,13 @@ private suspend fun resolveGuestUserId(
 
             is GuestQrResolveResult.Success -> {
                 eventId = resolution.eventId
+                val resolvedId = resolution.guestUserId
+                if (guestUserId != null && resolvedId != null && guestUserId != resolvedId) {
+                    call.respondValidationErrors(mapOf("guestUserId" to "qr_mismatch"))
+                    return null
+                }
                 if (guestUserId == null) {
-                    guestUserId = resolution.guestUserId
+                    guestUserId = resolvedId
                 }
             }
         }
@@ -460,8 +581,11 @@ private fun AdminUpdateDepositRequest.validateDepositUpdate(): Map<String, Strin
     if (amount < 0) {
         errors["amount"] = "must_be_non_negative"
     }
-    if (reason.isBlank()) {
+    val trimmedReason = reason.trim()
+    if (trimmedReason.isBlank()) {
         errors["reason"] = "required"
+    } else if (trimmedReason.length > MAX_NOTE_LENGTH) {
+        errors["reason"] = "too_long"
     }
     errors.putAll(validateAllocations(amount, allocations))
     return errors
@@ -502,6 +626,16 @@ private fun validateAllocations(
 
 private fun List<AdminDepositAllocationRequest>.toAllocationInputs(): List<AllocationInput> =
     map { AllocationInput(categoryCode = it.categoryCode.trim(), amountMinor = it.amount) }
+
+private fun mapDepositValidationError(ex: IllegalArgumentException): Map<String, String> {
+    val message = ex.message.orEmpty().lowercase(Locale.ROOT)
+    return when {
+        message.contains("reason") -> mapOf("reason" to "invalid")
+        message.contains("categorycode") || message.contains("allocation") || message.contains("amount") ->
+            mapOf("allocations" to "invalid")
+        else -> mapOf("allocations" to "invalid")
+    }
+}
 
 private suspend fun markHasTableIfPossible(
     visitRepository: VisitRepository,
