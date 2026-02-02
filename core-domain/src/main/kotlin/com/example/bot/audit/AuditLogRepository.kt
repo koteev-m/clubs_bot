@@ -62,6 +62,7 @@ enum class StandardAuditEntityType(override val value: String) : AuditEntityType
     BADGE("BADGE"),
     COUPON("COUPON"),
     TABLE_DEPOSIT("TABLE_DEPOSIT"),
+    TABLE_SESSION("TABLE_SESSION"),
     SHIFT_REPORT("SHIFT_REPORT"),
     ROLE_ASSIGNMENT("ROLE_ASSIGNMENT"),
     HTTP_ACCESS("HTTP_ACCESS"),

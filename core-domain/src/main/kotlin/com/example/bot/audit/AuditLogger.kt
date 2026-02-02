@@ -1,6 +1,7 @@
 package com.example.bot.audit
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -117,6 +118,150 @@ class AuditLogger(
                     put("amountMinor", amountMinor)
                     put("currency", currency)
                     put("provider", provider)
+                },
+        )
+    }
+
+    suspend fun tableSessionOpened(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+        sessionId: Long,
+        actorUserId: Long?,
+        actorRole: String?,
+        guestUserId: Long?,
+        note: String?,
+    ) {
+        append(
+            clubId = clubId,
+            actorUserId = actorUserId,
+            actorRole = actorRole,
+            subjectUserId = guestUserId,
+            entityType = StandardAuditEntityType.TABLE_SESSION,
+            action = StandardAuditAction.CREATE,
+            fingerprint = fingerprint(StandardAuditEntityType.TABLE_SESSION.value, StandardAuditAction.CREATE.value, sessionId.toString()),
+            entityId = sessionId,
+            metadata =
+                buildJsonObject {
+                    put("nightStartUtc", nightStartUtc.toString())
+                    put("tableId", tableId)
+                    note?.let { put("note", it) }
+                },
+        )
+    }
+
+    suspend fun tableSessionClosed(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+        sessionId: Long,
+        actorUserId: Long?,
+        actorRole: String?,
+        guestUserId: Long?,
+    ) {
+        append(
+            clubId = clubId,
+            actorUserId = actorUserId,
+            actorRole = actorRole,
+            subjectUserId = guestUserId,
+            entityType = StandardAuditEntityType.TABLE_SESSION,
+            action = CustomAuditAction("CLOSE"),
+            fingerprint = fingerprint(StandardAuditEntityType.TABLE_SESSION.value, "CLOSE", sessionId.toString()),
+            entityId = sessionId,
+            metadata =
+                buildJsonObject {
+                    put("nightStartUtc", nightStartUtc.toString())
+                    put("tableId", tableId)
+                },
+        )
+    }
+
+    suspend fun tableDepositCreated(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+        sessionId: Long,
+        depositId: Long,
+        guestUserId: Long?,
+        amountMinor: Long,
+        allocations: List<Pair<String, Long>>,
+        actorUserId: Long?,
+        actorRole: String?,
+    ) {
+        append(
+            clubId = clubId,
+            actorUserId = actorUserId,
+            actorRole = actorRole,
+            subjectUserId = guestUserId,
+            entityType = StandardAuditEntityType.TABLE_DEPOSIT,
+            action = StandardAuditAction.CREATE,
+            fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, StandardAuditAction.CREATE.value, depositId.toString()),
+            entityId = depositId,
+            metadata =
+                buildJsonObject {
+                    put("nightStartUtc", nightStartUtc.toString())
+                    put("tableId", tableId)
+                    put("sessionId", sessionId)
+                    put("amountMinor", amountMinor)
+                    put(
+                        "allocations",
+                        buildJsonArray {
+                            allocations.forEach { (code, amount) ->
+                                add(
+                                    buildJsonObject {
+                                        put("categoryCode", code)
+                                        put("amountMinor", amount)
+                                    },
+                                )
+                            }
+                        },
+                    )
+                },
+        )
+    }
+
+    suspend fun tableDepositUpdated(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+        sessionId: Long,
+        depositId: Long,
+        guestUserId: Long?,
+        amountMinor: Long,
+        allocations: List<Pair<String, Long>>,
+        reason: String,
+        actorUserId: Long?,
+        actorRole: String?,
+    ) {
+        append(
+            clubId = clubId,
+            actorUserId = actorUserId,
+            actorRole = actorRole,
+            subjectUserId = guestUserId,
+            entityType = StandardAuditEntityType.TABLE_DEPOSIT,
+            action = StandardAuditAction.UPDATE,
+            fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, StandardAuditAction.UPDATE.value, depositId.toString()),
+            entityId = depositId,
+            metadata =
+                buildJsonObject {
+                    put("nightStartUtc", nightStartUtc.toString())
+                    put("tableId", tableId)
+                    put("sessionId", sessionId)
+                    put("amountMinor", amountMinor)
+                    put("reason", reason)
+                    put(
+                        "allocations",
+                        buildJsonArray {
+                            allocations.forEach { (code, amount) ->
+                                add(
+                                    buildJsonObject {
+                                        put("categoryCode", code)
+                                        put("amountMinor", amount)
+                                    },
+                                )
+                            }
+                        },
+                    )
                 },
         )
     }

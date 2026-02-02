@@ -8,11 +8,17 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.admin.AdminClubsRepository
 import com.example.bot.admin.AdminHallsRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.security.UserRepository
+import com.example.bot.data.booking.TableDepositRepository
+import com.example.bot.data.booking.TableSessionRepository
+import com.example.bot.data.gamification.GamificationSettingsRepository
+import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.VisitRepository
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
@@ -75,6 +81,7 @@ import com.example.bot.routes.adminGamificationRoutes
 import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminHallPlanRoutes
 import com.example.bot.routes.adminOpsChatsRoutes
+import com.example.bot.routes.adminTableOpsRoutes
 import com.example.bot.routes.adminTablesRoutes
 import com.example.bot.routes.guestGamificationRoutes
 import com.example.bot.routes.hallPlanRoutes
@@ -96,6 +103,7 @@ import com.example.bot.routes.trackOfNightRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.invitationRoutes
 import com.example.bot.routes.telegramWebhookRoutes
+import com.example.bot.tables.GuestQrResolver
 import com.example.bot.telegram.InvitationTelegramHandler
 import com.example.bot.telegram.SupportTelegramHandler
 import com.example.bot.telegram.TelegramClient
@@ -212,6 +220,13 @@ fun Application.module() {
     val adminBadgeRepository by inject<com.example.bot.admin.AdminBadgeRepository>()
     val adminPrizeRepository by inject<com.example.bot.admin.AdminPrizeRepository>()
     val adminRewardLadderRepository by inject<com.example.bot.admin.AdminRewardLadderRepository>()
+    val auditLogger by inject<AuditLogger>()
+    val tableSessionRepository by inject<TableSessionRepository>()
+    val tableDepositRepository by inject<TableDepositRepository>()
+    val visitRepository by inject<VisitRepository>()
+    val nightOverrideRepository by inject<NightOverrideRepository>()
+    val gamificationSettingsRepository by inject<GamificationSettingsRepository>()
+    val guestQrResolver by inject<GuestQrResolver>()
     val hallPlansRepository by inject<HallPlansRepository>()
     val musicItemsRepository by inject<MusicItemRepository>()
     val musicAssetsRepository by inject<MusicAssetRepository>()
@@ -338,6 +353,17 @@ fun Application.module() {
     adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
     adminHallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)
     adminTablesRoutes(adminTablesRepository = adminTablesRepository, adminHallsRepository = adminHallsRepository)
+    adminTableOpsRoutes(
+        adminTablesRepository = adminTablesRepository,
+        tableSessionRepository = tableSessionRepository,
+        tableDepositRepository = tableDepositRepository,
+        visitRepository = visitRepository,
+        nightOverrideRepository = nightOverrideRepository,
+        gamificationSettingsRepository = gamificationSettingsRepository,
+        auditLogger = auditLogger,
+        guestQrResolver = guestQrResolver,
+        clock = appClock,
+    )
     adminGamificationRoutes(
         settingsRepository = adminGamificationSettingsRepository,
         nightOverrideRepository = adminNightOverrideRepository,

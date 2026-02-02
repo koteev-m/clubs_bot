@@ -159,6 +159,19 @@ class TableSessionRepository(
         }
     }
 
+    suspend fun findActiveSession(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+    ): TableSession? {
+        val nightStart = nightStartUtc.toOffsetDateTimeUtc()
+        return withRetriedTx(name = "tableSession.findActive", readOnly = true, database = db) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                findOpenSession(clubId, nightStart, tableId)
+            }
+        }
+    }
+
     private fun findOpenSession(
         clubId: Long,
         nightStart: java.time.OffsetDateTime,
@@ -336,6 +349,26 @@ class TableDepositRepository(
                 rows.map { row ->
                     row.toTableDeposit(allocations[row[TableDepositsTable.id]].orEmpty())
                 }
+            }
+        }
+
+    suspend fun findById(
+        clubId: Long,
+        depositId: Long,
+    ): TableDeposit? =
+        withRetriedTx(name = "tableDeposit.findById", readOnly = true, database = db) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val row =
+                    TableDepositsTable
+                        .selectAll()
+                        .where {
+                            (TableDepositsTable.id eq depositId) and
+                                (TableDepositsTable.clubId eq clubId)
+                        }.limit(1)
+                        .firstOrNull()
+                        ?: return@newSuspendedTransaction null
+                val allocations = loadAllocations(listOf(row[TableDepositsTable.id]))
+                row.toTableDeposit(allocations[row[TableDepositsTable.id]].orEmpty())
             }
         }
 
