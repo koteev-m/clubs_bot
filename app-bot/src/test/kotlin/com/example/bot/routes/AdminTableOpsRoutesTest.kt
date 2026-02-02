@@ -28,6 +28,7 @@ import com.example.bot.tables.GuestQrResolveResult
 import com.example.bot.tables.GuestQrResolver
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -72,6 +73,7 @@ class AdminTableOpsRoutesTest {
     fun `seat table with qr creates session and deposit and marks hasTable`() = withApp { deps ->
         coEvery { deps.guestQrResolver.resolveGuest(1, any(), any()) } returns
             GuestQrResolveResult.Success(guestUserId = 42, eventId = 999, listId = 1, entryId = 2)
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
         coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
             tableSession(id = 55, tableId = 10)
         coEvery {
@@ -118,6 +120,7 @@ class AdminTableOpsRoutesTest {
 
     @Test
     fun `seat table without qr skips visit updates`() = withApp { deps ->
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
         coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
             tableSession(id = 100, tableId = 10)
         coEvery {
@@ -186,6 +189,99 @@ class AdminTableOpsRoutesTest {
                     "mode":"NO_QR",
                     "depositAmount":1000,
                     "allocations":[{"categoryCode":"BAR","amount":500}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.validation_error, response.errorCode())
+        response.assertNoStoreHeaders()
+    }
+
+    @Test
+    fun `seat when already occupied returns existing and does not create new deposit or visits`() = withApp { deps ->
+        val session = tableSession(id = 55, tableId = 10)
+        val deposit = tableDeposit(id = 77, sessionId = 55, tableId = 10, guestUserId = 42)
+        coEvery { deps.guestQrResolver.resolveGuest(1, any(), any()) } returns
+            GuestQrResolveResult.Success(guestUserId = 42, eventId = 999, listId = 1, entryId = 2)
+        coEvery { deps.tableSessionRepository.findActiveSession(1, any(), 10) } returns session
+        coEvery { deps.tableDepositRepository.listDepositsForSession(1, 55) } returns listOf(deposit)
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"WITH_QR",
+                    "guestPassQr":"GL:1:2:10:deadbeef",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(55, body["sessionId"]!!.jsonPrimitive.long)
+        assertEquals(77, body["depositId"]!!.jsonPrimitive.long)
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 0) { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        }
+        coVerify(exactly = 0) { deps.visitRepository.tryCheckIn(any()) }
+        coVerify(exactly = 0) { deps.visitRepository.markHasTable(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `seat with qr rejects guest user mismatch`() = withApp { deps ->
+        coEvery { deps.guestQrResolver.resolveGuest(1, any(), any()) } returns
+            GuestQrResolveResult.Success(guestUserId = 42, eventId = 999, listId = 1, entryId = 2)
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"WITH_QR",
+                    "guestPassQr":"GL:1:2:10:deadbeef",
+                    "guestUserId":777,
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ErrorCodes.validation_error, response.errorCode())
+        response.assertNoStoreHeaders()
+    }
+
+    @Test
+    fun `update deposit rejects too long reason`() = withApp { _ ->
+        val response =
+            client.put("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/deposits/10") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "amount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}],
+                    "reason":"${"a".repeat(501)}"
                 }""",
                 )
             }
