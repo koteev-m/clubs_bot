@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.ResultRow
+import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.and
@@ -398,6 +399,10 @@ class TableDepositRepository(
             TableDepositAllocationsTable
                 .selectAll()
                 .where { TableDepositAllocationsTable.depositId inList depositIds }
+                .orderBy(
+                    TableDepositAllocationsTable.depositId to SortOrder.ASC,
+                    TableDepositAllocationsTable.id to SortOrder.ASC,
+                )
         val result = LinkedHashMap<Long, MutableList<TableDepositAllocation>>()
         for (row in rows) {
             val depositId = row[TableDepositAllocationsTable.depositId]
