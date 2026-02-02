@@ -63,6 +63,16 @@ data class TableDepositAllocation(
     val amountMinor: Long,
 )
 
+data class OpenSessionResult(
+    val session: TableSession,
+    val created: Boolean,
+)
+
+data class EnsureDepositResult(
+    val deposit: TableDeposit,
+    val created: Boolean,
+)
+
 data class AllocationInput(
     val categoryCode: String,
     val amountMinor: Long,
@@ -79,6 +89,24 @@ class TableSessionRepository(
         now: Instant,
         note: String?,
     ): TableSession {
+        return openSessionIdempotent(
+            clubId = clubId,
+            nightStartUtc = nightStartUtc,
+            tableId = tableId,
+            actorId = actorId,
+            now = now,
+            note = note,
+        ).session
+    }
+
+    suspend fun openSessionIdempotent(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+        actorId: Long,
+        now: Instant,
+        note: String?,
+    ): OpenSessionResult {
         val nightStart = nightStartUtc.toOffsetDateTimeUtc()
         val openedAt = now.toOffsetDateTimeUtc()
         return withRetriedTx(name = "tableSession.open", database = db) {
@@ -104,7 +132,7 @@ class TableSessionRepository(
                                 .limit(1)
                                 .firstOrNull()
                                 ?: error("Failed to load inserted table session for clubId=$clubId tableId=$tableId")
-                        row.toTableSession()
+                        OpenSessionResult(row.toTableSession(), created = true)
                     }
                 } catch (ex: Throwable) {
                     if (!ex.isUniqueViolation()) throw ex
@@ -112,7 +140,7 @@ class TableSessionRepository(
                         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                             findOpenSession(clubId, nightStart, tableId)
                         }
-                    if (existing != null) return@withRetriedTx existing
+                    if (existing != null) return@withRetriedTx OpenSessionResult(existing, created = false)
                     lastConflict = ex
                 }
             }
@@ -236,6 +264,84 @@ class TableDepositRepository(
                         .firstOrNull()
                         ?: error("Failed to load inserted table deposit for clubId=$clubId sessionId=$sessionId")
                 row.toTableDeposit(savedAllocations)
+            }
+        }
+    }
+
+    suspend fun ensureSeatDepositIdempotent(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+        sessionId: Long,
+        guestUserId: Long?,
+        bookingId: UUID?,
+        paymentId: UUID?,
+        amountMinor: Long,
+        allocations: List<AllocationInput>,
+        actorId: Long,
+        now: Instant,
+    ): EnsureDepositResult {
+        val normalizedAllocations = normalizeAllocations(allocations)
+        validateAllocations(amountMinor, normalizedAllocations)
+        val nightStart = nightStartUtc.toOffsetDateTimeUtc()
+        val nowUtc = now.toOffsetDateTimeUtc()
+        return withRetriedTx(name = "tableDeposit.ensureSeat", database = db) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                TableSessionsTable
+                    .slice(TableSessionsTable.id)
+                    .selectAll()
+                    .where {
+                        (TableSessionsTable.id eq sessionId) and
+                            (TableSessionsTable.clubId eq clubId)
+                    }.forUpdate()
+                    .firstOrNull()
+                    ?: error("Table session not found for clubId=$clubId sessionId=$sessionId")
+
+                val existingRow =
+                    TableDepositsTable
+                        .selectAll()
+                        .where {
+                            (TableDepositsTable.clubId eq clubId) and
+                                (TableDepositsTable.tableSessionId eq sessionId)
+                        }.orderBy(
+                            TableDepositsTable.createdAt to SortOrder.DESC,
+                            TableDepositsTable.id to SortOrder.DESC,
+                        ).limit(1)
+                        .firstOrNull()
+                if (existingRow != null) {
+                    val allocationsByDeposit = loadAllocations(listOf(existingRow[TableDepositsTable.id]))
+                    val deposit =
+                        existingRow.toTableDeposit(
+                            allocationsByDeposit[existingRow[TableDepositsTable.id]].orEmpty(),
+                        )
+                    return@newSuspendedTransaction EnsureDepositResult(deposit, created = false)
+                }
+
+                val depositId =
+                    TableDepositsTable.insert {
+                        it[TableDepositsTable.clubId] = clubId
+                        it[TableDepositsTable.nightStartUtc] = nightStart
+                        it[TableDepositsTable.tableId] = tableId
+                        it[TableDepositsTable.tableSessionId] = sessionId
+                        it[TableDepositsTable.paymentId] = paymentId
+                        it[TableDepositsTable.bookingId] = bookingId
+                        it[TableDepositsTable.guestUserId] = guestUserId
+                        it[TableDepositsTable.amountMinor] = amountMinor
+                        it[TableDepositsTable.createdAt] = nowUtc
+                        it[TableDepositsTable.createdBy] = actorId
+                        it[TableDepositsTable.updatedAt] = nowUtc
+                        it[TableDepositsTable.updatedBy] = actorId
+                        it[TableDepositsTable.updateReason] = null
+                    }[TableDepositsTable.id]
+                val savedAllocations = insertAllocations(depositId, normalizedAllocations)
+                val row =
+                    TableDepositsTable
+                        .selectAll()
+                        .where { TableDepositsTable.id eq depositId }
+                        .limit(1)
+                        .firstOrNull()
+                        ?: error("Failed to load inserted table deposit for clubId=$clubId sessionId=$sessionId")
+                EnsureDepositResult(row.toTableDeposit(savedAllocations), created = true)
             }
         }
     }

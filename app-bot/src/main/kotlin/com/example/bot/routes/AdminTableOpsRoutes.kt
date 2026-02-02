@@ -198,109 +198,24 @@ fun Application.adminTableOpsRoutes(
 
                         val activeSession =
                             tableSessionRepository.findActiveSession(clubId, nightStartUtc, tableId)
-                        if (activeSession != null) {
-                            val deposits = tableDepositRepository.listDepositsForSession(clubId, activeSession.id)
-                            val existingDeposit =
-                                deposits.maxWithOrNull(
-                                    compareBy<TableDeposit> { it.createdAt }.thenBy { it.id },
-                                )
-                            if (existingDeposit != null) {
-                                val responseTable = table.toNightResponse(activeSession, existingDeposit)
-                                return@post call.respond(
-                                    HttpStatusCode.OK,
-                                    AdminSeatTableResponse(
-                                        sessionId = activeSession.id,
-                                        depositId = existingDeposit.id,
-                                        table = responseTable,
-                                    ),
-                                )
-                            }
-
-                            val deposit =
-                                runCatching {
-                                    tableDepositRepository.createDeposit(
-                                        clubId = clubId,
-                                        nightStartUtc = nightStartUtc,
-                                        tableId = tableId,
-                                        sessionId = activeSession.id,
-                                        guestUserId = resolvedGuestUserId,
-                                        bookingId = null,
-                                        paymentId = null,
-                                        amountMinor = amountMinor,
-                                        allocations = allocations,
-                                        actorId = actorId,
-                                        now = now,
-                                    )
-                                }.getOrElse { ex ->
-                                    if (ex is IllegalArgumentException) {
-                                        return@post call.respondValidationErrors(mapDepositValidationError(ex))
-                                    }
-                                    logger.warn(
-                                        "admin.tables.seat.deposit_failed clubId={} tableId={} sessionId={}",
-                                        clubId,
-                                        tableId,
-                                        activeSession.id,
-                                        ex,
-                                    )
-                                    return@post call.respondError(
-                                        HttpStatusCode.InternalServerError,
-                                        ErrorCodes.internal_error,
-                                    )
-                                }
-
-                            auditLogger.tableDepositCreated(
-                                clubId = clubId,
-                                nightStartUtc = nightStartUtc,
-                                tableId = tableId,
-                                sessionId = activeSession.id,
-                                depositId = deposit.id,
-                                guestUserId = resolvedGuestUserId,
-                                amountMinor = deposit.amountMinor,
-                                allocations = deposit.allocations.map { it.categoryCode to it.amountMinor },
-                                actorUserId = actorId,
-                                actorRole = actorRole?.name,
-                            )
-
-                            if (resolvedGuestUserId != null) {
-                                markHasTableIfPossible(
-                                    visitRepository = visitRepository,
-                                    nightOverrideRepository = nightOverrideRepository,
-                                    settingsRepository = gamificationSettingsRepository,
+                        val note = payload.note?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_NOTE_LENGTH)
+                        val (session, sessionCreated) =
+                            if (activeSession != null) {
+                                activeSession to false
+                            } else {
+                                tableSessionRepository.openSessionIdempotent(
                                     clubId = clubId,
                                     nightStartUtc = nightStartUtc,
-                                    eventId = resolvedEventId,
-                                    guestUserId = resolvedGuestUserId,
+                                    tableId = tableId,
                                     actorId = actorId,
-                                    actorRole = actorRole,
                                     now = now,
-                                    logger = logger,
-                                )
+                                    note = note,
+                                ).let { it.session to it.created }
                             }
 
-                            val responseTable = table.toNightResponse(activeSession, deposit)
-                            return@post call.respond(
-                                HttpStatusCode.Created,
-                                AdminSeatTableResponse(
-                                    sessionId = activeSession.id,
-                                    depositId = deposit.id,
-                                    table = responseTable,
-                                ),
-                            )
-                        }
-
-                        val note = payload.note?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_NOTE_LENGTH)
-                        val session =
-                            tableSessionRepository.openSession(
-                                clubId = clubId,
-                                nightStartUtc = nightStartUtc,
-                                tableId = tableId,
-                                actorId = actorId,
-                                now = now,
-                                note = note,
-                            )
-                        val deposit =
+                        val depositResult =
                             runCatching {
-                                tableDepositRepository.createDeposit(
+                                tableDepositRepository.ensureSeatDepositIdempotent(
                                     clubId = clubId,
                                     nightStartUtc = nightStartUtc,
                                     tableId = tableId,
@@ -329,31 +244,36 @@ fun Application.adminTableOpsRoutes(
                                     ErrorCodes.internal_error,
                                 )
                             }
+                        val deposit = depositResult.deposit
 
-                        auditLogger.tableSessionOpened(
-                            clubId = clubId,
-                            nightStartUtc = nightStartUtc,
-                            tableId = tableId,
-                            sessionId = session.id,
-                            actorUserId = actorId,
-                            actorRole = actorRole?.name,
-                            guestUserId = resolvedGuestUserId,
-                            note = note,
-                        )
-                        auditLogger.tableDepositCreated(
-                            clubId = clubId,
-                            nightStartUtc = nightStartUtc,
-                            tableId = tableId,
-                            sessionId = session.id,
-                            depositId = deposit.id,
-                            guestUserId = resolvedGuestUserId,
-                            amountMinor = deposit.amountMinor,
-                            allocations = deposit.allocations.map { it.categoryCode to it.amountMinor },
-                            actorUserId = actorId,
-                            actorRole = actorRole?.name,
-                        )
+                        if (sessionCreated) {
+                            auditLogger.tableSessionOpened(
+                                clubId = clubId,
+                                nightStartUtc = nightStartUtc,
+                                tableId = tableId,
+                                sessionId = session.id,
+                                actorUserId = actorId,
+                                actorRole = actorRole?.name,
+                                guestUserId = resolvedGuestUserId,
+                                note = note,
+                            )
+                        }
+                        if (depositResult.created) {
+                            auditLogger.tableDepositCreated(
+                                clubId = clubId,
+                                nightStartUtc = nightStartUtc,
+                                tableId = tableId,
+                                sessionId = session.id,
+                                depositId = deposit.id,
+                                guestUserId = resolvedGuestUserId,
+                                amountMinor = deposit.amountMinor,
+                                allocations = deposit.allocations.map { it.categoryCode to it.amountMinor },
+                                actorUserId = actorId,
+                                actorRole = actorRole?.name,
+                            )
+                        }
 
-                        if (resolvedGuestUserId != null) {
+                        if (depositResult.created && resolvedGuestUserId != null) {
                             markHasTableIfPossible(
                                 visitRepository = visitRepository,
                                 nightOverrideRepository = nightOverrideRepository,
@@ -371,7 +291,7 @@ fun Application.adminTableOpsRoutes(
 
                         val responseTable = table.toNightResponse(session, deposit)
                         call.respond(
-                            HttpStatusCode.Created,
+                            if (depositResult.created) HttpStatusCode.Created else HttpStatusCode.OK,
                             AdminSeatTableResponse(
                                 sessionId = session.id,
                                 depositId = deposit.id,
