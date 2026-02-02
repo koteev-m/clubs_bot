@@ -9,6 +9,8 @@ import com.example.bot.club.WaitlistRepository
 import com.example.bot.audit.AuditLogger
 import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.audit.AuditLogRepositoryImpl
+import com.example.bot.data.booking.TableDepositRepository
+import com.example.bot.data.booking.TableSessionRepository
 import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.booking.core.BookingRepository
 import com.example.bot.data.booking.core.OutboxRepository
@@ -60,6 +62,8 @@ import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
+import com.example.bot.tables.DefaultGuestQrResolver
+import com.example.bot.tables.GuestQrResolver
 import com.example.bot.data.visits.NightOverrideRepository
 import com.example.bot.data.visits.VisitRepository
 import com.example.bot.plugins.DataSourceHolder
@@ -114,6 +118,9 @@ val bookingModule =
         single { NotificationsOutboxRepository(get()) }
         single<AuditLogRepository> { AuditLogRepositoryImpl(get()) }
         single { AuditLogger(get()) }
+        single { TableSessionRepository(get()) }
+        single { TableDepositRepository(get()) }
+        single<GuestQrResolver> { DefaultGuestQrResolver(get(), get(), get()) }
 
         single<GuestListRepository> { GuestListRepositoryImpl(get()) }
         single<WaitlistRepository> { WaitlistRepositoryImpl(get()) }
