@@ -27,7 +27,9 @@ export default function ProgressCard({ rewards }: { rewards: GuestGamificationRe
       <div className="text-base font-semibold">Следующая награда</div>
       <div className="space-y-3">
         {rewards.map((reward) => {
-          const progress = reward.threshold > 0 ? Math.min(100, Math.round((reward.current / reward.threshold) * 100)) : 0;
+          const progressRaw =
+            reward.threshold > 0 ? Math.min(100, Math.round((reward.current / reward.threshold) * 100)) : 0;
+          const progress = Number.isFinite(progressRaw) ? progressRaw : 0;
           return (
             <div key={`${reward.metricType}-${reward.prize.id}`} className="space-y-2">
               <div className="flex items-center justify-between">

@@ -3,7 +3,7 @@ import { AdminApiError } from '../api/admin.api';
 import { AdminNightTable, getTablesForNight } from '../api/adminTableOps.api';
 import { isRequestCanceled } from '../../../shared/api/error';
 
-type NightTablesStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unauthorized';
+type NightTablesStatus = 'idle' | 'loading' | 'ready' | 'error' | 'unauthorized' | 'forbidden';
 
 interface NightTablesState {
   status: NightTablesStatus;
@@ -12,7 +12,7 @@ interface NightTablesState {
   canRetry: boolean;
 }
 
-export function useNightTables(clubId?: number, nightKey?: string) {
+export function useNightTables(clubId?: number, nightKey?: string, onForbidden?: () => void) {
   const [state, setState] = useState<NightTablesState>({
     status: 'idle',
     data: null,
@@ -45,6 +45,11 @@ export function useNightTables(clubId?: number, nightKey?: string) {
           setState({ status: 'unauthorized', data: null, errorMessage: 'Нужна авторизация', canRetry: false });
           return;
         }
+        if (status === 403) {
+          onForbidden?.();
+          setState({ status: 'forbidden', data: null, errorMessage: 'Нет доступа', canRetry: false });
+          return;
+        }
         if (!status) {
           setState({
             status: 'error',
@@ -68,7 +73,7 @@ export function useNightTables(clubId?: number, nightKey?: string) {
       }
       setState({ status: 'error', data: null, errorMessage: 'Не удалось загрузить данные', canRetry: false });
     }
-  }, [clubId, nightKey]);
+  }, [clubId, nightKey, onForbidden]);
 
   useEffect(() => {
     void load();
