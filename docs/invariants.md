@@ -27,6 +27,61 @@
 - **Miniapp guest-list scan:** чек-ин возможен только внутри окна `arrivalWindowStart..arrivalWindowEnd`. Если запись помечена `CALLED`, то допустим ранний приход (выход за окно разрешён). Вне окна возвращается `outside_arrival_window`.【F:app-bot/src/main/kotlin/com/example/bot/routes/CheckinRoutes.kt†L275-L313】
 - **CheckinServiceImpl:** результат `ARRIVED`/`LATE` определяется по `arrivalWindowEnd + lateGraceMinutes` (по умолчанию 15 минут). Отдельной блокировки раннего прихода здесь нет — это проверяется на уровне miniapp-роутов, а не сервиса.【F:core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt†L846-L858】【F:core-data/src/main/kotlin/com/example/bot/checkin/CheckinModels.kt†L12-L27】
 
+## Столы и депозиты (table_sessions, table_deposits)
+
+### Термины и сущности
+
+- **Операционный стол** — сущность, с которой работают админ-операции «посадить/освободить стол». Source of truth — таблицы layout-холла (`hall_tables`) через `AdminTablesRepository`/`LayoutDbRepository` (используются для `GET /api/admin/clubs/{clubId}/nights/{nightStartUtc}/tables`).【F:core-data/src/main/kotlin/com/example/bot/data/layout/LayoutTables.kt†L21-L43】【F:core-data/src/main/kotlin/com/example/bot/data/layout/LayoutDbRepository.kt†L63-L112】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L129-L184】
+- **Session** (`table_sessions`) — факт занятости стола в конкретную ночь (`night_start_utc`). Статусы: `OPEN`/`CLOSED`. Уникальность гарантируется связкой `club_id + night_start_utc + table_id + open_marker`, где `open_marker=1` только для `OPEN`, поэтому **одна открытая сессия на стол в ночь** — инвариант уровня БД.【F:core-data/src/main/resources/db/migration/postgresql/V036__table_sessions_deposits.sql†L1-L14】【F:core-data/src/main/resources/db/migration/postgresql/V037__table_sessions_deposits_constraints.sql†L1-L7】【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L66-L148】
+- **Deposit** (`table_deposits`) — факт внесения депозита для сессии стола и конкретной ночи (FK в `table_sessions` + дублирование `club_id`, `night_start_utc`, `table_id` под консистентность). Поля:
+  - `guest_user_id` может быть `NULL` для NO_QR сценариев или когда гость не резолвится по QR (без геймификации/visit-метрик).
+  - `booking_id` может быть `NULL` для ручных посадок без привязки к бронированию.
+  - `payment_id` nullable и указывает на запись в `payments` при наличии платежного чека; FK настроен `ON DELETE SET NULL` и используется для reconciliation с платежами при наличии значения.【F:core-data/src/main/resources/db/migration/postgresql/V036__table_sessions_deposits.sql†L25-L49】【F:core-data/src/main/resources/db/migration/postgresql/V037__table_sessions_deposits_constraints.sql†L8-L12】【F:core-data/src/main/kotlin/com/example/bot/data/booking/BookingTables.kt†L80-L112】
+- **Allocations** (`table_deposit_allocations`) — разбиение депозита по категориям. Инварианты:
+  - суммы `allocations.amount_minor` должны строго равняться `deposit.amount_minor`;
+  - категории нормализуются в UPPERCASE и должны быть уникальными в рамках депозита;
+  - суммы и депозит не могут быть отрицательными.【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L304-L409】
+
+### Сценарии
+
+#### A) WITH_QR
+
+1. **Резолв гостя**: `GuestQrResolver` валидирует формат/TTL QR, проверяет соответствие клубу, грузит guest-list entry и пытается найти пользователя по `telegramUserId`. При успехе возвращает `guestUserId` и `eventId` списка.【F:app-bot/src/main/kotlin/com/example/bot/tables/GuestQrResolver.kt†L36-L105】
+2. **Создание session + deposit**:
+   - если активная сессия уже есть — используется она, иначе открывается новая (`openSession`) и затем создаётся депозит (`createDeposit`).【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L197-L372】【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L66-L149】【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L187-L239】
+3. **Отметка «ночь со столом» (hasTable)**:
+   - при наличии `guestUserId` создаётся/обновляется визит с `entryType = "TABLE_DEPOSIT"` и `hasTable = true` через `VisitRepository.tryCheckIn` и `markHasTable`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L640-L684】【F:core-data/src/main/kotlin/com/example/bot/data/visits/VisitRepositories.kt†L86-L186】
+
+#### B) NO_QR
+
+1. **Создание session + deposit** без `guest_user_id` (guest остаётся `NULL`): `mode = NO_QR`, `guestPassQr` не требуется; депозит создаётся с `guestUserId = null`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L69-L114】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L197-L352】
+2. **Ограничения**:
+   - отсутствует привязка к гостю → **нет** геймификации/метрик по визитам (`hasTable` не отмечается).
+   - любые downstream процессы, завязанные на `guest_user_id`, недоступны для этого депозита.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L265-L357】【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L32-L55】
+
+### Редактирование и аудит
+
+- `updateDeposit` **требует reason**: валидация в API и `TableDepositRepository` запрещает обновление без причины и проверяет длину. Запись обновляет `amount_minor`, `allocations`, `updated_at/by`, `update_reason`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L401-L587】【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L245-L303】
+- **Audit log** при операциях со столами и депозитами:
+  - `TABLE_SESSION:CREATE/CLOSE` пишет `nightStartUtc`, `tableId`, `sessionId`, `actor`, (опц.) `guestUserId` и `note`.【F:core-domain/src/main/kotlin/com/example/bot/audit/AuditLogger.kt†L96-L150】
+  - `TABLE_DEPOSIT:CREATE/UPDATE` пишет `nightStartUtc`, `tableId`, `sessionId`, `amountMinor`, `allocations`, `reason` (для update).【F:core-domain/src/main/kotlin/com/example/bot/audit/AuditLogger.kt†L152-L218】
+  - **Запрещено логирование QR/секретов**: `AuditLogRepositoryImpl` редактирует/удаляет поля `initdata`, `qr`, `token`, `phone` и скрывает похожие на телефон значения.【F:core-data/src/main/kotlin/com/example/bot/data/audit/AuditLogRepositoryImpl.kt†L64-L140】
+
+### Финансы и reconciliation
+
+- **Сумма депозитов за ночь**: `TableDepositRepository.sumDepositsForNight(clubId, nightStartUtc)` возвращает сумму `amount_minor` для `table_deposits` по ночи.【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L314-L341】
+- **Распределение по категориям**: `TableDepositRepository.allocationSummaryForNight(clubId, nightStartUtc)` агрегирует `table_deposit_allocations` по `category_code` с суммами по ночи.【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L343-L381】
+- **Связь с платежами**: `table_deposits.payment_id` — nullable FK на `payments(id)` (ON DELETE SET NULL). При наличии значения reconciliation выполняется join по `payment_id` ↔ `payments.id`, иначе депозит считается неподтверждённым оплатой и связывается только по ночи/столу/сессии.【F:core-data/src/main/resources/db/migration/postgresql/V036__table_sessions_deposits.sql†L25-L49】
+
+### API: основные эндпоинты
+
+- `GET /api/admin/clubs/{clubId}/nights/{nightStartUtc}/tables` — список столов с активными сессиями/депозитами (`activeSessionId`, `activeDeposit`).【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L129-L187】
+- `POST /api/admin/clubs/{clubId}/nights/{nightStartUtc}/tables/{tableId}/seat` — посадка стола.
+  - Request: `mode` (`WITH_QR`/`NO_QR`), `guestPassQr?`, `guestUserId?`, `depositAmount`, `allocations[]`, `note?`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L69-L114】
+  - Response: `sessionId`, `depositId`, `table` с `activeSessionId`/`activeDeposit`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L90-L114】
+- `POST /api/admin/clubs/{clubId}/nights/{nightStartUtc}/tables/{tableId}/free` — закрытие сессии стола.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L374-L427】
+- `PUT /api/admin/clubs/{clubId}/nights/{nightStartUtc}/deposits/{depositId}` — обновление суммы и allocations, **reason обязателен**; ответ возвращает обновлённый депозит.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L429-L497】
+
 ## Audit log: контракт и ограничения
 
 ### Что пишем в `audit_log`
