@@ -6,8 +6,9 @@ import ClubsScreen from './ClubsScreen';
 import ClubHallsScreen from './ClubHallsScreen';
 import HallEditorScreen from './HallEditorScreen';
 import PromotersQuotasScreen from './PromotersQuotasScreen';
+import ManagerTablesScreen from './ManagerTablesScreen';
 
-type AdminSection = 'clubs' | 'promoters';
+type AdminSection = 'clubs' | 'promoters' | 'tables';
 
 const parseClubId = () => {
   const params = new URLSearchParams(window.location.search);
@@ -29,6 +30,7 @@ const parseSection = (): AdminSection => {
   const params = new URLSearchParams(window.location.search);
   const section = params.get('section');
   if (section === 'promoters') return 'promoters';
+  if (section === 'tables') return 'tables';
   return 'clubs';
 };
 
@@ -36,6 +38,8 @@ const setAdminParamsInUrl = (section: AdminSection, clubId: number | null, hallI
   const url = new URL(window.location.href);
   if (section === 'promoters') {
     url.searchParams.set('section', 'promoters');
+  } else if (section === 'tables') {
+    url.searchParams.set('section', 'tables');
   } else {
     url.searchParams.delete('section');
   }
@@ -123,11 +127,22 @@ export default function AdminShell() {
     window.scrollTo(0, 0);
   }, []);
 
+  const handleSelectClubForTables = useCallback((id: number | null) => {
+    setAdminParamsInUrl('tables', id, null);
+    setSection('tables');
+    setClubId(id);
+    setHallId(null);
+    window.scrollTo(0, 0);
+  }, []);
+
   const handleSwitchSection = useCallback(
     (next: AdminSection) => {
       setSection(next);
       if (next === 'promoters') {
         setAdminParamsInUrl('promoters', clubId, null);
+        setHallId(null);
+      } else if (next === 'tables') {
+        setAdminParamsInUrl('tables', clubId, null);
         setHallId(null);
       } else {
         setAdminParamsInUrl('clubs', clubId, hallId);
@@ -158,6 +173,9 @@ export default function AdminShell() {
         />
       );
     }
+    if (section === 'tables') {
+      return <ManagerTablesScreen clubId={clubId} onSelectClub={handleSelectClubForTables} onForbidden={handleForbidden} />;
+    }
     if (clubId && hallId) {
       return <HallEditorScreen clubId={clubId} hallId={hallId} onBack={handleBackToHalls} />;
     }
@@ -175,6 +193,7 @@ export default function AdminShell() {
     handleOpenHallEditor,
     handleSelectClub,
     handleSelectClubForPromoters,
+    handleSelectClubForTables,
     section,
   ]);
 
@@ -205,6 +224,13 @@ export default function AdminShell() {
               onClick={() => handleSwitchSection('promoters')}
             >
               Промоутеры и квоты
+            </button>
+            <button
+              type="button"
+              className={`rounded px-3 py-1 ${section === 'tables' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              onClick={() => handleSwitchSection('tables')}
+            >
+              Столы
             </button>
           </div>
         )}
