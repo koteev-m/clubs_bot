@@ -143,7 +143,7 @@ export default function ManagerTablesScreen({ clubId, onSelectClub, onForbidden 
   const requestIdRef = useRef(0);
   const nightRequestIdRef = useRef(0);
 
-  const { status, data, errorMessage, canRetry, reload } = useNightTables(clubId ?? undefined, selectedNight);
+  const { status, data, errorMessage, canRetry, reload } = useNightTables(clubId ?? undefined, selectedNight, onForbidden);
 
   useEffect(() => {
     if (status === 'unauthorized') {
@@ -174,6 +174,9 @@ export default function ManagerTablesScreen({ clubId, onSelectClub, onForbidden 
         }
         if (error.status === 403) {
           onForbidden();
+          setClubsError('Нет доступа');
+          setClubsStatus('error');
+          setClubsCanRetry(false);
           return;
         }
         if (!error.status) {
@@ -237,6 +240,13 @@ export default function ManagerTablesScreen({ clubId, onSelectClub, onForbidden 
           setNightsStatus('unauthorized');
           return;
         }
+        if (statusCode === 403) {
+          onForbidden();
+          setNightsError('Нет доступа');
+          setNightsStatus('error');
+          setNightsCanRetry(false);
+          return;
+        }
         if (!statusCode) {
           setNightsError('Не удалось связаться с сервером');
           setNightsCanRetry(true);
@@ -257,7 +267,7 @@ export default function ManagerTablesScreen({ clubId, onSelectClub, onForbidden 
         nightsAbortRef.current = null;
       }
     }
-  }, [clubId, selectedNight]);
+  }, [clubId, onForbidden, selectedNight]);
 
   useEffect(() => {
     if (!clubId) return;
@@ -485,6 +495,9 @@ export default function ManagerTablesScreen({ clubId, onSelectClub, onForbidden 
           )}
         </div>
       );
+    }
+    if (status === 'forbidden') {
+      return <div className="text-sm text-gray-500">Нет доступа к столам.</div>;
     }
     if (status === 'ready' && data && data.length === 0) {
       return <div className="text-sm text-gray-500">Столы не найдены.</div>;

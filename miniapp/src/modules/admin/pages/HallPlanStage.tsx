@@ -170,8 +170,10 @@ export default function HallPlanStage({
     tables.forEach((table) => {
       const source =
         dragging && dragging.tableId === table.id ? { x: dragging.x, y: dragging.y } : table;
-      const left = metrics.offsetX + source.x * metrics.width;
-      const top = metrics.offsetY + source.y * metrics.height;
+      const leftRaw = metrics.offsetX + source.x * metrics.width;
+      const topRaw = metrics.offsetY + source.y * metrics.height;
+      const left = Number.isFinite(leftRaw) ? leftRaw : 0;
+      const top = Number.isFinite(topRaw) ? topRaw : 0;
       map.set(table.id, { left, top });
     });
     return map;
