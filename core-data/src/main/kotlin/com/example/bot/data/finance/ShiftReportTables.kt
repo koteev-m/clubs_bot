@@ -83,7 +83,6 @@ object ShiftReportsTable : Table("shift_reports") {
 
     init {
         uniqueIndex("uq_shift_reports_club_night", clubId, nightStartUtc)
-        index("idx_shift_reports_club_night", false, clubId, nightStartUtc)
         index("idx_shift_reports_club_status", false, clubId, status)
     }
 }
