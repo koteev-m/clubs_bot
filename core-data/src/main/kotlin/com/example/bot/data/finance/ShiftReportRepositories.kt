@@ -429,6 +429,15 @@ class ShiftReportRepository(
         payload: ShiftReportUpdatePayload,
     ): ShiftReport? {
         validatePeople(payload.peopleWomen, payload.peopleMen, payload.peopleRejected)
+        val duplicateBraceletTypes =
+            payload.bracelets
+                .groupingBy { it.braceletTypeId }
+                .eachCount()
+                .filter { it.value > 1 }
+                .keys
+        require(duplicateBraceletTypes.isEmpty()) {
+            "Bracelet types must be unique in payload ids=$duplicateBraceletTypes"
+        }
         payload.bracelets.forEach { require(it.count >= 0) { "Bracelet count must be non-negative" } }
         val now = Instant.now(clock).toOffsetDateTimeUtc()
         return withRetriedTx(name = "shiftReport.updateDraft", database = database) {
@@ -437,6 +446,7 @@ class ShiftReportRepository(
                     ShiftReportsTable
                         .selectAll()
                         .where { ShiftReportsTable.id eq reportId }
+                        .forUpdate()
                         .limit(1)
                         .firstOrNull()
                         ?: return@newSuspendedTransaction null
@@ -449,13 +459,18 @@ class ShiftReportRepository(
 
                 val resolvedEntries = resolveRevenueEntries(clubId, payload.revenueEntries)
 
-                ShiftReportsTable.update({ ShiftReportsTable.id eq reportId }) {
-                    it[peopleWomen] = payload.peopleWomen
-                    it[peopleMen] = payload.peopleMen
-                    it[peopleRejected] = payload.peopleRejected
-                    it[comment] = payload.comment
-                    it[updatedAt] = now
-                }
+                val updated =
+                    ShiftReportsTable.update({
+                        (ShiftReportsTable.id eq reportId) and
+                            (ShiftReportsTable.status eq ShiftReportStatus.DRAFT.name)
+                    }) {
+                        it[peopleWomen] = payload.peopleWomen
+                        it[peopleMen] = payload.peopleMen
+                        it[peopleRejected] = payload.peopleRejected
+                        it[comment] = payload.comment
+                        it[updatedAt] = now
+                    }
+                if (updated == 0) return@newSuspendedTransaction null
 
                 ShiftReportBraceletsTable.deleteWhere { ShiftReportBraceletsTable.reportId eq reportId }
                 if (payload.bracelets.isNotEmpty()) {
@@ -504,6 +519,7 @@ class ShiftReportRepository(
                     ShiftReportsTable
                         .selectAll()
                         .where { ShiftReportsTable.id eq reportId }
+                        .forUpdate()
                         .limit(1)
                         .firstOrNull()
                         ?: return@newSuspendedTransaction false
@@ -543,15 +559,11 @@ class ShiftReportRepository(
         clubId: Long,
         nightStartUtc: Instant,
     ): DepositHints {
-        return try {
-            val repo = TableDepositRepository(database)
-            DepositHints(
-                sumDepositsForNight = repo.sumDepositsForNight(clubId, nightStartUtc),
-                allocationSummaryForNight = repo.allocationSummaryForNight(clubId, nightStartUtc),
-            )
-        } catch (ex: NoClassDefFoundError) {
-            DepositHints(sumDepositsForNight = 0, allocationSummaryForNight = emptyMap())
-        }
+        val repo = TableDepositRepository(database)
+        return DepositHints(
+            sumDepositsForNight = repo.sumDepositsForNight(clubId, nightStartUtc),
+            allocationSummaryForNight = repo.allocationSummaryForNight(clubId, nightStartUtc),
+        )
     }
 
     private fun validatePeople(women: Int, men: Int, rejected: Int) {
@@ -574,7 +586,17 @@ class ShiftReportRepository(
         clubId: Long,
         inputs: List<RevenueEntryInput>,
     ): List<ShiftReportRevenueEntry> {
-        val articleIds = inputs.mapNotNull { it.articleId }.distinct()
+        val payloadArticleIds = inputs.mapNotNull { it.articleId }
+        val duplicateArticleIds =
+            payloadArticleIds
+                .groupingBy { it }
+                .eachCount()
+                .filter { it.value > 1 }
+                .keys
+        require(duplicateArticleIds.isEmpty()) {
+            "Revenue entries must be unique by articleId ids=$duplicateArticleIds"
+        }
+        val articleIds = payloadArticleIds.distinct()
         val articles = loadArticles(clubId, articleIds)
         val groupIds = inputs.mapNotNull { it.groupId }.toMutableSet()
         groupIds.addAll(articles.values.map { it.groupId })
@@ -585,7 +607,9 @@ class ShiftReportRepository(
             if (input.articleId != null) {
                 val article =
                     articles[input.articleId]
-                        ?: error("Revenue article ${input.articleId} not found for clubId=$clubId")
+                        ?: throw IllegalArgumentException(
+                            "Revenue article ${input.articleId} not found for clubId=$clubId",
+                        )
                 ShiftReportRevenueEntry(
                     id = 0,
                     reportId = 0,
@@ -600,11 +624,11 @@ class ShiftReportRepository(
             } else {
                 val name = input.name?.trim().orEmpty()
                 require(name.isNotEmpty()) { "Revenue entry name is required" }
-                val groupId = input.groupId ?: error("Revenue entry groupId is required")
+                val groupId = requireNotNull(input.groupId) { "Revenue entry groupId is required" }
                 val includeInTotal =
-                    input.includeInTotal ?: error("Revenue entry includeInTotal is required")
+                    requireNotNull(input.includeInTotal) { "Revenue entry includeInTotal is required" }
                 val showSeparately =
-                    input.showSeparately ?: error("Revenue entry showSeparately is required")
+                    requireNotNull(input.showSeparately) { "Revenue entry showSeparately is required" }
                 ShiftReportRevenueEntry(
                     id = 0,
                     reportId = 0,
