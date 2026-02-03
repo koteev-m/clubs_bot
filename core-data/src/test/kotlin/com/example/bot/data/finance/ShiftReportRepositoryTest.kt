@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -189,6 +190,157 @@ class ShiftReportRepositoryTest {
             assertEquals(2, hints.allocationSummaryForNight.size)
             assertEquals(110, hints.allocationSummaryForNight["BAR"])
             assertEquals(40, hints.allocationSummaryForNight["FOOD"])
+        }
+
+    @Test
+    fun `updateDraft rejects ad-hoc revenue entry with missing fields`() =
+        runBlocking {
+            val clubId = insertClub()
+            val reportRepo = ShiftReportRepository(testDb.database)
+            val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
+            try {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets = emptyList(),
+                        revenueEntries =
+                            listOf(
+                                RevenueEntryInput(
+                                    articleId = null,
+                                    name = "Adhoc",
+                                    groupId = null,
+                                    amountMinor = 100,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
+                                ),
+                            ),
+                    ),
+                )
+                fail("Expected IllegalArgumentException")
+            } catch (_: IllegalArgumentException) {
+            }
+        }
+
+    @Test
+    fun `updateDraft rejects unknown revenue article`() =
+        runBlocking {
+            val clubId = insertClub()
+            val reportRepo = ShiftReportRepository(testDb.database)
+            val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
+            try {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets = emptyList(),
+                        revenueEntries =
+                            listOf(
+                                RevenueEntryInput(
+                                    articleId = 999,
+                                    name = null,
+                                    groupId = null,
+                                    amountMinor = 100,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
+                                ),
+                            ),
+                    ),
+                )
+                fail("Expected IllegalArgumentException")
+            } catch (_: IllegalArgumentException) {
+            }
+        }
+
+    @Test
+    fun `updateDraft rejects duplicate bracelet types`() =
+        runBlocking {
+            val clubId = insertClub()
+            val templateRepo = ShiftReportTemplateRepository(testDb.database)
+            val bracelet = templateRepo.createBraceletType(clubId, "VIP", 0)
+            val reportRepo = ShiftReportRepository(testDb.database)
+            val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
+            try {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets =
+                            listOf(
+                                ShiftReportBraceletInput(bracelet.id, 1),
+                                ShiftReportBraceletInput(bracelet.id, 2),
+                            ),
+                        revenueEntries = emptyList(),
+                    ),
+                )
+                fail("Expected IllegalArgumentException")
+            } catch (_: IllegalArgumentException) {
+            }
+        }
+
+    @Test
+    fun `updateDraft rejects duplicate revenue article entries`() =
+        runBlocking {
+            val clubId = insertClub()
+            val templateRepo = ShiftReportTemplateRepository(testDb.database)
+            val group = templateRepo.createRevenueGroup(clubId, "Bar", 0)
+            val article =
+                templateRepo.createRevenueArticle(
+                    clubId = clubId,
+                    groupId = group.id,
+                    name = "Cocktails",
+                    includeInTotal = true,
+                    showSeparately = false,
+                    orderIndex = 0,
+                )
+            val reportRepo = ShiftReportRepository(testDb.database)
+            val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
+            try {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets = emptyList(),
+                        revenueEntries =
+                            listOf(
+                                RevenueEntryInput(
+                                    articleId = article.id,
+                                    name = null,
+                                    groupId = null,
+                                    amountMinor = 100,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
+                                ),
+                                RevenueEntryInput(
+                                    articleId = article.id,
+                                    name = null,
+                                    groupId = null,
+                                    amountMinor = 200,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
+                                ),
+                            ),
+                    ),
+                )
+                fail("Expected IllegalArgumentException")
+            } catch (_: IllegalArgumentException) {
+            }
         }
 
     private suspend fun insertClub(): Long =
