@@ -51,6 +51,8 @@ import com.example.bot.data.gamification.RewardLadderRepositoryAdapter
 import com.example.bot.data.gamification.UserBadgeRepository
 import com.example.bot.data.gamification.UserBadgeRepositoryAdapter
 import com.example.bot.data.gamification.VisitMetricsRepositoryAdapter
+import com.example.bot.data.finance.ShiftReportRepository
+import com.example.bot.data.finance.ShiftReportTemplateRepository
 import com.example.bot.gamification.DefaultGamificationReadRepository
 import com.example.bot.gamification.GamificationReadRepository
 import com.example.bot.gamification.GuestGamificationService
@@ -120,6 +122,8 @@ val bookingModule =
         single { AuditLogger(get()) }
         single { TableSessionRepository(get()) }
         single { TableDepositRepository(get()) }
+        single { ShiftReportRepository(get()) }
+        single { ShiftReportTemplateRepository(get()) }
         single<GuestQrResolver> { DefaultGuestQrResolver(get(), get(), get()) }
 
         single<GuestListRepository> { GuestListRepositoryImpl(get()) }

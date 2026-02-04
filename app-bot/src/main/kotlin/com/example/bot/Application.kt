@@ -77,6 +77,8 @@ import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.hostCheckinRoutes
 import com.example.bot.routes.hostWaitlistRoutes
 import com.example.bot.routes.adminClubsRoutes
+import com.example.bot.routes.adminFinanceShiftRoutes
+import com.example.bot.routes.adminFinanceTemplateRoutes
 import com.example.bot.routes.adminGamificationRoutes
 import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminHallPlanRoutes
@@ -221,6 +223,8 @@ fun Application.module() {
     val adminPrizeRepository by inject<com.example.bot.admin.AdminPrizeRepository>()
     val adminRewardLadderRepository by inject<com.example.bot.admin.AdminRewardLadderRepository>()
     val auditLogger by inject<AuditLogger>()
+    val shiftReportRepository by inject<com.example.bot.data.finance.ShiftReportRepository>()
+    val shiftReportTemplateRepository by inject<com.example.bot.data.finance.ShiftReportTemplateRepository>()
     val tableSessionRepository by inject<TableSessionRepository>()
     val tableDepositRepository by inject<TableDepositRepository>()
     val visitRepository by inject<VisitRepository>()
@@ -364,6 +368,13 @@ fun Application.module() {
         guestQrResolver = guestQrResolver,
         clock = appClock,
     )
+    adminFinanceShiftRoutes(
+        shiftReportRepository = shiftReportRepository,
+        templateRepository = shiftReportTemplateRepository,
+        auditLogger = auditLogger,
+        clock = appClock,
+    )
+    adminFinanceTemplateRoutes(templateRepository = shiftReportTemplateRepository)
     adminGamificationRoutes(
         settingsRepository = adminGamificationSettingsRepository,
         nightOverrideRepository = adminNightOverrideRepository,

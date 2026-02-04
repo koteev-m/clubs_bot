@@ -352,6 +352,68 @@ class AuditLogger(
         )
     }
 
+    suspend fun shiftReportClosed(
+        clubId: Long,
+        nightStartUtc: Instant,
+        reportId: Long,
+        totalAmountMinor: Long,
+        groupTotals: List<Pair<Long, Long>>,
+        depositSumMinor: Long,
+        allocationSummary: Map<String, Long>,
+        diffMinor: Long,
+        actorUserId: Long?,
+        actorRole: String?,
+    ) {
+        append(
+            clubId = clubId,
+            actorUserId = actorUserId,
+            actorRole = actorRole,
+            entityType = StandardAuditEntityType.SHIFT_REPORT,
+            action = CustomAuditAction("CLOSE"),
+            fingerprint =
+                fingerprint(
+                    StandardAuditEntityType.SHIFT_REPORT.value,
+                    "CLOSE",
+                    "club:$clubId:night:${nightStartUtc}:report:$reportId",
+                ),
+            entityId = reportId,
+            metadata =
+                buildJsonObject {
+                    put("nightStartUtc", nightStartUtc.toString())
+                    put("reportId", reportId)
+                    put("totalAmountMinor", totalAmountMinor)
+                    put(
+                        "groupTotals",
+                        buildJsonArray {
+                            groupTotals.forEach { (groupId, amountMinor) ->
+                                add(
+                                    buildJsonObject {
+                                        put("groupId", groupId)
+                                        put("amountMinor", amountMinor)
+                                    },
+                                )
+                            }
+                        },
+                    )
+                    put("depositSumMinor", depositSumMinor)
+                    put(
+                        "allocationSummary",
+                        buildJsonArray {
+                            allocationSummary.forEach { (code, amount) ->
+                                add(
+                                    buildJsonObject {
+                                        put("categoryCode", code)
+                                        put("amountMinor", amount)
+                                    },
+                                )
+                            }
+                        },
+                    )
+                    put("diffMinor", diffMinor)
+                },
+        )
+    }
+
     suspend fun roleGranted(
         clubId: Long?,
         actorUserId: Long?,
