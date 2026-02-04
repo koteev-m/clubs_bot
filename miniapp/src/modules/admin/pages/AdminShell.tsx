@@ -7,8 +7,9 @@ import ClubHallsScreen from './ClubHallsScreen';
 import HallEditorScreen from './HallEditorScreen';
 import PromotersQuotasScreen from './PromotersQuotasScreen';
 import ManagerTablesScreen from './ManagerTablesScreen';
+import FinanceShiftScreen from './FinanceShiftScreen';
 
-type AdminSection = 'clubs' | 'promoters' | 'tables';
+type AdminSection = 'clubs' | 'promoters' | 'tables' | 'finance';
 
 const parseClubId = () => {
   const params = new URLSearchParams(window.location.search);
@@ -31,6 +32,7 @@ const parseSection = (): AdminSection => {
   const section = params.get('section');
   if (section === 'promoters') return 'promoters';
   if (section === 'tables') return 'tables';
+  if (section === 'finance') return 'finance';
   return 'clubs';
 };
 
@@ -40,6 +42,8 @@ const setAdminParamsInUrl = (section: AdminSection, clubId: number | null, hallI
     url.searchParams.set('section', 'promoters');
   } else if (section === 'tables') {
     url.searchParams.set('section', 'tables');
+  } else if (section === 'finance') {
+    url.searchParams.set('section', 'finance');
   } else {
     url.searchParams.delete('section');
   }
@@ -135,6 +139,14 @@ export default function AdminShell() {
     window.scrollTo(0, 0);
   }, []);
 
+  const handleSelectClubForFinance = useCallback((id: number | null) => {
+    setAdminParamsInUrl('finance', id, null);
+    setSection('finance');
+    setClubId(id);
+    setHallId(null);
+    window.scrollTo(0, 0);
+  }, []);
+
   const handleSwitchSection = useCallback(
     (next: AdminSection) => {
       setSection(next);
@@ -143,6 +155,9 @@ export default function AdminShell() {
         setHallId(null);
       } else if (next === 'tables') {
         setAdminParamsInUrl('tables', clubId, null);
+        setHallId(null);
+      } else if (next === 'finance') {
+        setAdminParamsInUrl('finance', clubId, null);
         setHallId(null);
       } else {
         setAdminParamsInUrl('clubs', clubId, hallId);
@@ -176,6 +191,9 @@ export default function AdminShell() {
     if (section === 'tables') {
       return <ManagerTablesScreen clubId={clubId} onSelectClub={handleSelectClubForTables} onForbidden={handleForbidden} />;
     }
+    if (section === 'finance') {
+      return <FinanceShiftScreen clubId={clubId} onSelectClub={handleSelectClubForFinance} onForbidden={handleForbidden} />;
+    }
     if (clubId && hallId) {
       return <HallEditorScreen clubId={clubId} hallId={hallId} onBack={handleBackToHalls} />;
     }
@@ -193,6 +211,7 @@ export default function AdminShell() {
     handleOpenHallEditor,
     handleSelectClub,
     handleSelectClubForPromoters,
+    handleSelectClubForFinance,
     handleSelectClubForTables,
     section,
   ]);
@@ -231,6 +250,13 @@ export default function AdminShell() {
               onClick={() => handleSwitchSection('tables')}
             >
               Столы
+            </button>
+            <button
+              type="button"
+              className={`rounded px-3 py-1 ${section === 'finance' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              onClick={() => handleSwitchSection('finance')}
+            >
+              Финансы
             </button>
           </div>
         )}
