@@ -362,7 +362,7 @@ class ShiftReportTemplateRepository(
                 .where { (ClubRevenueGroupsTable.id eq groupId) and (ClubRevenueGroupsTable.clubId eq clubId) }
                 .limit(1)
                 .any()
-        require(exists) { "Revenue group $groupId not found for clubId=$clubId" }
+        require(exists) { "unknown_revenue_group" }
     }
 }
 
@@ -436,9 +436,9 @@ class ShiftReportRepository(
                 .filter { it.value > 1 }
                 .keys
         require(duplicateBraceletTypes.isEmpty()) {
-            "Bracelet types must be unique in payload ids=$duplicateBraceletTypes"
+            "duplicate_bracelet_type"
         }
-        payload.bracelets.forEach { require(it.count >= 0) { "Bracelet count must be non-negative" } }
+        payload.bracelets.forEach { require(it.count >= 0) { "bracelet_count_negative" } }
         val now = Instant.now(clock).toOffsetDateTimeUtc()
         return withRetriedTx(name = "shiftReport.updateDraft", database = database) {
             newSuspendedTransaction(context = Dispatchers.IO, db = database) {
@@ -536,11 +536,11 @@ class ShiftReportRepository(
                         .selectAll()
                         .where { ShiftReportBraceletsTable.reportId eq reportId }
                         .map { it[ShiftReportBraceletsTable.count] }
-                bracelets.forEach { require(it >= 0) { "Bracelet count must be non-negative" } }
+                bracelets.forEach { require(it >= 0) { "bracelet_count_negative" } }
                 val revenueEntries = loadRevenueEntries(reportId)
-                revenueEntries.forEach { require(it.amountMinor >= 0) { "Revenue amount must be non-negative" } }
+                revenueEntries.forEach { require(it.amountMinor >= 0) { "revenue_amount_negative" } }
                 validateRevenueGroups(clubId, revenueEntries.map { it.groupId })
-                revenueEntries.forEach { require(it.name.isNotBlank()) { "Revenue entry name is required" } }
+                revenueEntries.forEach { require(it.name.isNotBlank()) { "revenue_entry_name_required" } }
 
                 ShiftReportsTable.update({
                     (ShiftReportsTable.id eq reportId) and
@@ -567,7 +567,7 @@ class ShiftReportRepository(
     }
 
     private fun validatePeople(women: Int, men: Int, rejected: Int) {
-        require(women >= 0 && men >= 0 && rejected >= 0) { "People counts must be non-negative" }
+        require(women >= 0 && men >= 0 && rejected >= 0) { "people_count_negative" }
     }
 
     private fun ensureBraceletTypesExist(clubId: Long, braceletTypeIds: List<Long>) {
@@ -579,7 +579,7 @@ class ShiftReportRepository(
                 .map { it[ClubBraceletTypesTable.id] }
                 .toSet()
         val missing = braceletTypeIds.filterNot { existing.contains(it) }
-        require(missing.isEmpty()) { "Bracelet types not found for clubId=$clubId ids=$missing" }
+        require(missing.isEmpty()) { "unknown_bracelet_type" }
     }
 
     private fun resolveRevenueEntries(
@@ -594,7 +594,7 @@ class ShiftReportRepository(
                 .filter { it.value > 1 }
                 .keys
         require(duplicateArticleIds.isEmpty()) {
-            "Revenue entries must be unique by articleId ids=$duplicateArticleIds"
+            "duplicate_revenue_article"
         }
         val articleIds = payloadArticleIds.distinct()
         val articles = loadArticles(clubId, articleIds)
@@ -603,19 +603,23 @@ class ShiftReportRepository(
         validateRevenueGroups(clubId, groupIds.toList())
 
         return inputs.mapIndexed { index, input ->
-            require(input.amountMinor >= 0) { "Revenue amount must be non-negative" }
+            require(input.amountMinor >= 0) { "revenue_amount_negative" }
             if (input.articleId != null) {
                 val article =
                     articles[input.articleId]
                         ?: throw IllegalArgumentException(
-                            "Revenue article ${input.articleId} not found for clubId=$clubId",
+                            "unknown_revenue_article",
                         )
+                if (input.groupId != null && input.groupId != article.groupId) {
+                    throw IllegalArgumentException("revenue_article_group_mismatch")
+                }
+                val name = input.name?.takeIf { it.isNotBlank() } ?: article.name
                 ShiftReportRevenueEntry(
                     id = 0,
                     reportId = 0,
                     articleId = input.articleId,
-                    name = input.name ?: article.name,
-                    groupId = input.groupId ?: article.groupId,
+                    name = name,
+                    groupId = article.groupId,
                     amountMinor = input.amountMinor,
                     includeInTotal = input.includeInTotal ?: article.includeInTotal,
                     showSeparately = input.showSeparately ?: article.showSeparately,
@@ -623,12 +627,12 @@ class ShiftReportRepository(
                 )
             } else {
                 val name = input.name?.trim().orEmpty()
-                require(name.isNotEmpty()) { "Revenue entry name is required" }
-                val groupId = requireNotNull(input.groupId) { "Revenue entry groupId is required" }
+                require(name.isNotEmpty()) { "revenue_entry_name_required" }
+                val groupId = requireNotNull(input.groupId) { "revenue_entry_group_required" }
                 val includeInTotal =
-                    requireNotNull(input.includeInTotal) { "Revenue entry includeInTotal is required" }
+                    requireNotNull(input.includeInTotal) { "revenue_entry_include_in_total_required" }
                 val showSeparately =
-                    requireNotNull(input.showSeparately) { "Revenue entry showSeparately is required" }
+                    requireNotNull(input.showSeparately) { "revenue_entry_show_separately_required" }
                 ShiftReportRevenueEntry(
                     id = 0,
                     reportId = 0,
@@ -653,7 +657,7 @@ class ShiftReportRepository(
                 .map { it[ClubRevenueGroupsTable.id] }
                 .toSet()
         val missing = groupIds.filterNot { existing.contains(it) }
-        require(missing.isEmpty()) { "Revenue groups not found for clubId=$clubId ids=$missing" }
+        require(missing.isEmpty()) { "unknown_revenue_group" }
     }
 
     private fun loadArticles(
