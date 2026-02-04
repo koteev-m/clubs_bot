@@ -25,6 +25,12 @@ export function getApiErrorInfo(error: unknown): { code: string; hasResponse: bo
 }
 
 export function isRequestCanceled(error: unknown): boolean {
+  if (typeof error === 'object' && error && 'isAbort' in error) {
+    return Boolean((error as { isAbort?: boolean }).isAbort);
+  }
+  if (error instanceof DOMException) {
+    return error.name === 'AbortError';
+  }
   if (!axios.isAxiosError(error)) return false;
   return error.code === 'ERR_CANCELED' || error.name === 'CanceledError';
 }

@@ -34,6 +34,10 @@ describe('api error helpers', () => {
     expect(isRequestCanceled(error)).toBe(true);
   });
 
+  it('detects canceled custom errors', () => {
+    expect(isRequestCanceled({ isAbort: true })).toBe(true);
+  });
+
   it('does not treat regular errors as canceled', () => {
     expect(isRequestCanceled(new Error('Boom'))).toBe(false);
   });
