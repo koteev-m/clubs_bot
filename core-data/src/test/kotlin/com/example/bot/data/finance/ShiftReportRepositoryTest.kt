@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -198,31 +198,29 @@ class ShiftReportRepositoryTest {
             val clubId = insertClub()
             val reportRepo = ShiftReportRepository(testDb.database)
             val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
-            assertThrows(IllegalArgumentException::class.java) {
-                runBlocking {
-                    reportRepo.updateDraft(
-                        report.id,
-                        ShiftReportUpdatePayload(
-                            peopleWomen = 0,
-                            peopleMen = 0,
-                            peopleRejected = 0,
-                            comment = null,
-                            bracelets = emptyList(),
-                            revenueEntries =
-                                listOf(
-                                    RevenueEntryInput(
-                                        articleId = null,
-                                        name = "Adhoc",
-                                        groupId = null,
-                                        amountMinor = 100,
-                                        includeInTotal = null,
-                                        showSeparately = null,
-                                        orderIndex = null,
-                                    ),
+            assertThrowsSuspend<IllegalArgumentException> {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets = emptyList(),
+                        revenueEntries =
+                            listOf(
+                                RevenueEntryInput(
+                                    articleId = null,
+                                    name = "Adhoc",
+                                    groupId = null,
+                                    amountMinor = 100,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
                                 ),
-                        ),
-                    )
-                }
+                            ),
+                    ),
+                )
             }
         }
 
@@ -232,31 +230,29 @@ class ShiftReportRepositoryTest {
             val clubId = insertClub()
             val reportRepo = ShiftReportRepository(testDb.database)
             val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
-            assertThrows(IllegalArgumentException::class.java) {
-                runBlocking {
-                    reportRepo.updateDraft(
-                        report.id,
-                        ShiftReportUpdatePayload(
-                            peopleWomen = 0,
-                            peopleMen = 0,
-                            peopleRejected = 0,
-                            comment = null,
-                            bracelets = emptyList(),
-                            revenueEntries =
-                                listOf(
-                                    RevenueEntryInput(
-                                        articleId = 999,
-                                        name = null,
-                                        groupId = null,
-                                        amountMinor = 100,
-                                        includeInTotal = null,
-                                        showSeparately = null,
-                                        orderIndex = null,
-                                    ),
+            assertThrowsSuspend<IllegalArgumentException> {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets = emptyList(),
+                        revenueEntries =
+                            listOf(
+                                RevenueEntryInput(
+                                    articleId = 999,
+                                    name = null,
+                                    groupId = null,
+                                    amountMinor = 100,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
                                 ),
-                        ),
-                    )
-                }
+                            ),
+                    ),
+                )
             }
         }
 
@@ -268,24 +264,22 @@ class ShiftReportRepositoryTest {
             val bracelet = templateRepo.createBraceletType(clubId, "VIP", 0)
             val reportRepo = ShiftReportRepository(testDb.database)
             val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
-            assertThrows(IllegalArgumentException::class.java) {
-                runBlocking {
-                    reportRepo.updateDraft(
-                        report.id,
-                        ShiftReportUpdatePayload(
-                            peopleWomen = 0,
-                            peopleMen = 0,
-                            peopleRejected = 0,
-                            comment = null,
-                            bracelets =
-                                listOf(
-                                    ShiftReportBraceletInput(bracelet.id, 1),
-                                    ShiftReportBraceletInput(bracelet.id, 2),
-                                ),
-                            revenueEntries = emptyList(),
-                        ),
-                    )
-                }
+            assertThrowsSuspend<IllegalArgumentException> {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets =
+                            listOf(
+                                ShiftReportBraceletInput(bracelet.id, 1),
+                                ShiftReportBraceletInput(bracelet.id, 2),
+                            ),
+                        revenueEntries = emptyList(),
+                    ),
+                )
             }
         }
 
@@ -306,40 +300,38 @@ class ShiftReportRepositoryTest {
                 )
             val reportRepo = ShiftReportRepository(testDb.database)
             val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
-            assertThrows(IllegalArgumentException::class.java) {
-                runBlocking {
-                    reportRepo.updateDraft(
-                        report.id,
-                        ShiftReportUpdatePayload(
-                            peopleWomen = 0,
-                            peopleMen = 0,
-                            peopleRejected = 0,
-                            comment = null,
-                            bracelets = emptyList(),
-                            revenueEntries =
-                                listOf(
-                                    RevenueEntryInput(
-                                        articleId = article.id,
-                                        name = null,
-                                        groupId = null,
-                                        amountMinor = 100,
-                                        includeInTotal = null,
-                                        showSeparately = null,
-                                        orderIndex = null,
-                                    ),
-                                    RevenueEntryInput(
-                                        articleId = article.id,
-                                        name = null,
-                                        groupId = null,
-                                        amountMinor = 200,
-                                        includeInTotal = null,
-                                        showSeparately = null,
-                                        orderIndex = null,
-                                    ),
+            assertThrowsSuspend<IllegalArgumentException> {
+                reportRepo.updateDraft(
+                    report.id,
+                    ShiftReportUpdatePayload(
+                        peopleWomen = 0,
+                        peopleMen = 0,
+                        peopleRejected = 0,
+                        comment = null,
+                        bracelets = emptyList(),
+                        revenueEntries =
+                            listOf(
+                                RevenueEntryInput(
+                                    articleId = article.id,
+                                    name = null,
+                                    groupId = null,
+                                    amountMinor = 100,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
                                 ),
-                        ),
-                    )
-                }
+                                RevenueEntryInput(
+                                    articleId = article.id,
+                                    name = null,
+                                    groupId = null,
+                                    amountMinor = 200,
+                                    includeInTotal = null,
+                                    showSeparately = null,
+                                    orderIndex = null,
+                                ),
+                            ),
+                    ),
+                )
             }
         }
 
@@ -349,7 +341,6 @@ class ShiftReportRepositoryTest {
             val clubId = insertClub()
             val templateRepo = ShiftReportTemplateRepository(testDb.database)
             val group = templateRepo.createRevenueGroup(clubId, "Bar", 0)
-            val otherGroup = templateRepo.createRevenueGroup(clubId, "Kitchen", 1)
             val article =
                 templateRepo.createRevenueArticle(
                     clubId = clubId,
@@ -362,8 +353,8 @@ class ShiftReportRepositoryTest {
             val reportRepo = ShiftReportRepository(testDb.database)
             val report = reportRepo.getOrCreateDraft(clubId, Instant.parse("2024-03-01T20:00:00Z"))
 
-            assertThrows(IllegalArgumentException::class.java) {
-                runBlocking {
+            val ex =
+                assertThrowsSuspend<IllegalArgumentException> {
                     reportRepo.updateDraft(
                         report.id,
                         ShiftReportUpdatePayload(
@@ -377,7 +368,7 @@ class ShiftReportRepositoryTest {
                                     RevenueEntryInput(
                                         articleId = article.id,
                                         name = null,
-                                        groupId = otherGroup.id,
+                                        groupId = 999999,
                                         amountMinor = 100,
                                         includeInTotal = null,
                                         showSeparately = null,
@@ -387,8 +378,22 @@ class ShiftReportRepositoryTest {
                         ),
                     )
                 }
-            }
+            assertEquals("revenue_article_group_mismatch", ex.message)
         }
+
+    private suspend inline fun <reified T : Throwable> assertThrowsSuspend(
+        noinline block: suspend () -> Unit,
+    ): T {
+        try {
+            block()
+        } catch (ex: Throwable) {
+            if (ex is T) {
+                return ex
+            }
+            throw ex
+        }
+        return fail("Expected ${T::class.java.name} to be thrown")
+    }
 
     private suspend fun insertClub(): Long =
         newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {

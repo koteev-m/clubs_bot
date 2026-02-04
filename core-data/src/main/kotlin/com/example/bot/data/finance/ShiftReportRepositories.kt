@@ -598,8 +598,12 @@ class ShiftReportRepository(
         }
         val articleIds = payloadArticleIds.distinct()
         val articles = loadArticles(clubId, articleIds)
-        val groupIds = inputs.mapNotNull { it.groupId }.toMutableSet()
-        groupIds.addAll(articles.values.map { it.groupId })
+        val adHocGroupIds =
+            inputs
+                .filter { it.articleId == null }
+                .mapNotNull { it.groupId }
+                .toSet()
+        val groupIds = adHocGroupIds + articles.values.map { it.groupId }
         validateRevenueGroups(clubId, groupIds.toList())
 
         return inputs.mapIndexed { index, input ->
@@ -613,7 +617,8 @@ class ShiftReportRepository(
                 if (input.groupId != null && input.groupId != article.groupId) {
                     throw IllegalArgumentException("revenue_article_group_mismatch")
                 }
-                val name = input.name?.takeIf { it.isNotBlank() } ?: article.name
+                val nameOverride = input.name?.trim()?.takeIf { it.isNotEmpty() }
+                val name = nameOverride ?: article.name
                 ShiftReportRevenueEntry(
                     id = 0,
                     reportId = 0,
