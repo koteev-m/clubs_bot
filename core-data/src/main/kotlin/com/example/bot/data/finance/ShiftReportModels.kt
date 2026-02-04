@@ -18,6 +18,13 @@ data class ClubBraceletType(
     val updatedAt: Instant,
 )
 
+data class ClubReportTemplateData(
+    val template: ClubReportTemplate,
+    val bracelets: List<ClubBraceletType>,
+    val revenueGroups: List<ClubRevenueGroup>,
+    val revenueArticles: List<ClubRevenueArticle>,
+)
+
 data class ClubRevenueGroup(
     val id: Long,
     val clubId: Long,
@@ -65,6 +72,12 @@ data class ShiftReportBracelet(
     val reportId: Long,
     val braceletTypeId: Long,
     val count: Int,
+)
+
+data class ShiftReportDetails(
+    val report: ShiftReport,
+    val bracelets: List<ShiftReportBracelet>,
+    val revenueEntries: List<ShiftReportRevenueEntry>,
 )
 
 data class ShiftReportRevenueEntry(

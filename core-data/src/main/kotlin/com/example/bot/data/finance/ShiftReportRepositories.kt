@@ -62,6 +62,38 @@ class ShiftReportTemplateRepository(
         }
     }
 
+    suspend fun getTemplateData(clubId: Long): ClubReportTemplateData {
+        val template = getOrCreateTemplate(clubId)
+        return withRetriedTx(name = "shiftReportTemplate.getData", database = database) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = database) {
+                val bracelets =
+                    ClubBraceletTypesTable
+                        .selectAll()
+                        .where { ClubBraceletTypesTable.clubId eq clubId }
+                        .orderBy(ClubBraceletTypesTable.orderIndex, SortOrder.ASC)
+                        .map { it.toClubBraceletType() }
+                val groups =
+                    ClubRevenueGroupsTable
+                        .selectAll()
+                        .where { ClubRevenueGroupsTable.clubId eq clubId }
+                        .orderBy(ClubRevenueGroupsTable.orderIndex, SortOrder.ASC)
+                        .map { it.toClubRevenueGroup() }
+                val articles =
+                    ClubRevenueArticlesTable
+                        .selectAll()
+                        .where { ClubRevenueArticlesTable.clubId eq clubId }
+                        .orderBy(ClubRevenueArticlesTable.orderIndex, SortOrder.ASC)
+                        .map { it.toClubRevenueArticle() }
+                ClubReportTemplateData(
+                    template = template,
+                    bracelets = bracelets,
+                    revenueGroups = groups,
+                    revenueArticles = articles,
+                )
+            }
+        }
+    }
+
     suspend fun createBraceletType(
         clubId: Long,
         name: String,
@@ -506,6 +538,33 @@ class ShiftReportRepository(
             }
         }
     }
+
+    suspend fun getDetails(reportId: Long): ShiftReportDetails? =
+        withRetriedTx(name = "shiftReport.getDetails", database = database) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = database) {
+                val report =
+                    ShiftReportsTable
+                        .selectAll()
+                        .where { ShiftReportsTable.id eq reportId }
+                        .limit(1)
+                        .firstOrNull()
+                        ?.toShiftReport()
+                        ?: return@newSuspendedTransaction null
+                val bracelets =
+                    ShiftReportBraceletsTable
+                        .selectAll()
+                        .where { ShiftReportBraceletsTable.reportId eq reportId }
+                        .map { row ->
+                            ShiftReportBracelet(
+                                reportId = row[ShiftReportBraceletsTable.reportId],
+                                braceletTypeId = row[ShiftReportBraceletsTable.braceletTypeId],
+                                count = row[ShiftReportBraceletsTable.count],
+                            )
+                        }
+                val revenueEntries = loadRevenueEntries(reportId)
+                ShiftReportDetails(report, bracelets, revenueEntries)
+            }
+        }
 
     suspend fun close(
         reportId: Long,
