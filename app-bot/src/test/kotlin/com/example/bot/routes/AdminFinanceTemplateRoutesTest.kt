@@ -6,6 +6,7 @@ import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
+import com.example.bot.http.ErrorCodes
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
@@ -111,6 +112,67 @@ class AdminFinanceTemplateRoutesTest {
             }
 
         assertEquals(HttpStatusCode.Forbidden, response.status)
+    }
+
+    @Test
+    fun `reorder bracelets rejects duplicate ids`() = withApp { deps ->
+        val response =
+            client.post("/api/admin/clubs/1/finance/template/bracelets/reorder") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "ids":[10,10]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(ErrorCodes.validation_error, body["code"]!!.jsonPrimitive.content)
+        assertEquals("must_be_unique", body["details"]!!.jsonObject["ids"]!!.jsonPrimitive.content)
+        coVerify(exactly = 0) { deps.templateRepository.reorderBraceletTypes(any(), any()) }
+    }
+
+    @Test
+    fun `reorder revenue groups rejects unknown ids`() = withApp { deps ->
+        coEvery { deps.templateRepository.reorderRevenueGroups(1, listOf(10, 20)) } returns 1
+
+        val response =
+            client.post("/api/admin/clubs/1/finance/template/revenue-groups/reorder") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "ids":[10,20]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(ErrorCodes.validation_error, body["code"]!!.jsonPrimitive.content)
+        assertEquals("not_found", body["details"]!!.jsonObject["ids"]!!.jsonPrimitive.content)
+        coVerify(exactly = 1) { deps.templateRepository.reorderRevenueGroups(1, listOf(10, 20)) }
+    }
+
+    @Test
+    fun `reorder revenue articles returns ok for valid ids`() = withApp { deps ->
+        coEvery { deps.templateRepository.reorderRevenueArticles(1, listOf(10, 20)) } returns 2
+
+        val response =
+            client.post("/api/admin/clubs/1/finance/template/revenue-articles/reorder") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "ids":[10,20]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        coVerify(exactly = 1) { deps.templateRepository.reorderRevenueArticles(1, listOf(10, 20)) }
     }
 
     private fun withApp(

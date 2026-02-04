@@ -151,8 +151,19 @@ class AdminFinanceShiftRoutesTest {
         coVerify(exactly = 0) { deps.shiftReportRepository.close(any(), any(), any()) }
     }
 
+    @Test
+    fun `close returns forbidden for manager role`() = withApp(roles = setOf(Role.MANAGER)) { deps ->
+        val response =
+            client.post("/api/admin/clubs/1/finance/shift/10/close") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        coVerify(exactly = 0) { deps.shiftReportRepository.getDetails(any()) }
+    }
+
     private fun withApp(
-        roles: Set<Role> = setOf(Role.MANAGER),
+        roles: Set<Role> = setOf(Role.HEAD_MANAGER),
         clubIds: Set<Long> = setOf(1),
         thresholdMinor: Long? = null,
         block: suspend ApplicationTestBuilder.(Deps) -> Unit,

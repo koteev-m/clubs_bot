@@ -155,7 +155,10 @@ fun Application.adminFinanceTemplateRoutes(
                             if (errors.isNotEmpty()) {
                                 return@post call.respondValidationErrors(errors)
                             }
-                            templateRepository.reorderBraceletTypes(clubId, payload.ids)
+                            val updated = templateRepository.reorderBraceletTypes(clubId, payload.ids)
+                            if (updated < payload.ids.size) {
+                                return@post call.respondValidationErrors(mapOf("ids" to "not_found"))
+                            }
                             call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
                         }
                     }
@@ -225,7 +228,10 @@ fun Application.adminFinanceTemplateRoutes(
                             if (errors.isNotEmpty()) {
                                 return@post call.respondValidationErrors(errors)
                             }
-                            templateRepository.reorderRevenueGroups(clubId, payload.ids)
+                            val updated = templateRepository.reorderRevenueGroups(clubId, payload.ids)
+                            if (updated < payload.ids.size) {
+                                return@post call.respondValidationErrors(mapOf("ids" to "not_found"))
+                            }
                             call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
                         }
                     }
@@ -331,7 +337,10 @@ fun Application.adminFinanceTemplateRoutes(
                             if (errors.isNotEmpty()) {
                                 return@post call.respondValidationErrors(errors)
                             }
-                            templateRepository.reorderRevenueArticles(clubId, payload.ids)
+                            val updated = templateRepository.reorderRevenueArticles(clubId, payload.ids)
+                            if (updated < payload.ids.size) {
+                                return@post call.respondValidationErrors(mapOf("ids" to "not_found"))
+                            }
                             call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
                         }
                     }
@@ -385,6 +394,9 @@ private fun validateReorder(payload: ReorderRequest): Map<String, String> {
     val invalid = payload.ids.indexOfFirst { it <= 0 }
     if (invalid >= 0) {
         return mapOf("ids[$invalid]" to "must_be_positive")
+    }
+    if (payload.ids.toSet().size != payload.ids.size) {
+        return mapOf("ids" to "must_be_unique")
     }
     return emptyMap()
 }
