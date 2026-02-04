@@ -201,7 +201,7 @@ fun Application.adminFinanceShiftRoutes(
             intercept(ApplicationCallPipeline.Setup) { call.ensureMiniAppNoStoreHeaders() }
             withMiniAppAuth { botTokenProvider() }
 
-            authorize(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER, Role.CLUB_ADMIN, Role.MANAGER) {
+            authorize(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER, Role.CLUB_ADMIN) {
                 route("/clubs/{clubId}") {
                     route("/nights/{nightStartUtc}/finance") {
                         get("/shift") {
