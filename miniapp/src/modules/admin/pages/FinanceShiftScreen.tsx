@@ -10,7 +10,6 @@ import {
   closeShiftReport,
   createFinanceBraceletType,
   createFinanceRevenueArticle,
-  disableFinanceBraceletType,
   updateShiftReport,
 } from '../api/adminFinance.api';
 import { useShiftReport } from '../hooks/useShiftReport';
@@ -48,6 +47,15 @@ type RevenueEntryRow = {
   hasExisting: boolean;
   isCustom: boolean;
   isTemplateArticle: boolean;
+};
+
+type ValidationFocusTarget =
+  | { type: 'bracelet'; key: string; field?: 'name' | 'count' }
+  | { type: 'revenue'; key: string; field?: 'name' | 'group' | 'amount' };
+
+type ValidationResult = {
+  error?: string;
+  focus?: ValidationFocusTarget;
 };
 
 const createKey = () => Math.random().toString(36).slice(2);
@@ -155,6 +163,66 @@ const normalizeGroupLabel = (group?: AdminFinanceRevenueGroup | null) => {
   return group.name || `Группа #${group.id}`;
 };
 
+export const validateShiftReportDraft = ({
+  bracelets,
+  revenueEntries,
+}: {
+  bracelets: BraceletRow[];
+  revenueEntries: RevenueEntryRow[];
+}): ValidationResult => {
+  const braceletIds = new Set<number>();
+  for (const row of bracelets) {
+    const parsed = parseNonNegativeInt(row.count);
+    if (parsed.error || parsed.value === null) {
+      return { error: `Браслеты: ${parsed.error}`, focus: { type: 'bracelet', key: row.key, field: 'count' } };
+    }
+    if (!row.braceletTypeId) {
+      return {
+        error: 'Сохраните браслет в шаблон перед сохранением отчета',
+        focus: { type: 'bracelet', key: row.key, field: 'name' },
+      };
+    }
+    const shouldInclude = parsed.value > 0 || row.hasExisting;
+    if (shouldInclude) {
+      if (braceletIds.has(row.braceletTypeId)) {
+        return { error: 'Браслет дублируется в списке', focus: { type: 'bracelet', key: row.key } };
+      }
+      braceletIds.add(row.braceletTypeId);
+    }
+  }
+
+  const revenueArticleIds = new Set<number>();
+  for (const entry of revenueEntries) {
+    const parsed = parseNonNegativeAmount(entry.amount);
+    if (parsed.error || parsed.value === null) {
+      return {
+        error: `Статья "${entry.name || 'без названия'}": ${parsed.error}`,
+        focus: { type: 'revenue', key: entry.key, field: 'amount' },
+      };
+    }
+    const shouldInclude = parsed.value > 0 || entry.hasExisting || entry.isCustom;
+    if (entry.articleId != null && shouldInclude) {
+      if (revenueArticleIds.has(entry.articleId)) {
+        return { error: 'Статья выручки дублируется', focus: { type: 'revenue', key: entry.key } };
+      }
+      revenueArticleIds.add(entry.articleId);
+    }
+    if (entry.articleId == null && shouldInclude) {
+      if (!entry.name.trim()) {
+        return { error: 'Укажите название для разовой статьи', focus: { type: 'revenue', key: entry.key, field: 'name' } };
+      }
+      if (!entry.groupId) {
+        return { error: 'Укажите группу для разовой статьи', focus: { type: 'revenue', key: entry.key, field: 'group' } };
+      }
+      if (typeof entry.includeInTotal !== 'boolean' || typeof entry.showSeparately !== 'boolean') {
+        return { error: 'Укажите параметры для разовой статьи', focus: { type: 'revenue', key: entry.key, field: 'amount' } };
+      }
+    }
+  }
+
+  return {};
+};
+
 export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }: FinanceShiftScreenProps) {
   const addToast = useUiStore((state) => state.addToast);
   const [clubs, setClubs] = useState<AdminClub[]>([]);
@@ -185,6 +253,26 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
   const nightRequestIdRef = useRef(0);
 
   const { status, data, errorMessage, canRetry, reload } = useShiftReport(clubId ?? undefined, selectedNight, onForbidden);
+
+  const focusOnValidationTarget = useCallback((target?: ValidationFocusTarget) => {
+    if (!target) return;
+    const baseSelector = target.type === 'bracelet' ? `[data-bracelet-key="${target.key}"]` : `[data-revenue-key="${target.key}"]`;
+    const fieldSelector =
+      target.type === 'bracelet'
+        ? target.field
+          ? `[data-bracelet-field="${target.field}"]`
+          : 'input,select,textarea,button'
+        : target.field
+          ? `[data-revenue-field="${target.field}"]`
+          : 'input,select,textarea,button';
+    const container = document.querySelector(baseSelector);
+    const focusTarget =
+      (container?.querySelector(fieldSelector) as HTMLElement | null) ?? (container instanceof HTMLElement ? container : null);
+    if (focusTarget) {
+      focusTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      focusTarget.focus?.();
+    }
+  }, []);
 
   useEffect(() => {
     if (status === 'unauthorized') {
@@ -525,56 +613,22 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
     async () => {
       if (!clubId) return { payload: [], error: 'Выберите клуб' };
       const resolved: AdminShiftReportUpdatePayload['bracelets'] = [];
-      const updates: Array<{ key: string; braceletTypeId: number; savedToTemplate: boolean }> = [];
       for (const row of bracelets) {
         const parsed = parseNonNegativeInt(row.count);
         if (parsed.error || parsed.value === null) {
           return { payload: [], error: `Браслеты: ${parsed.error}` };
         }
-        let braceletTypeId = row.braceletTypeId;
+        const braceletTypeId = row.braceletTypeId;
         if (!braceletTypeId) {
-          const name = row.name.trim();
-          if (!name) {
-            return { payload: [], error: 'Укажите название для добавленного браслета' };
-          }
-          try {
-            const orderIndex = details ? details.template.bracelets.length : 0;
-            const created = await createFinanceBraceletType(clubId, { name, orderIndex });
-            if (!row.savedToTemplate) {
-              await disableFinanceBraceletType(clubId, created.id);
-            }
-            braceletTypeId = created.id;
-            updates.push({ key: row.key, braceletTypeId: created.id, savedToTemplate: row.savedToTemplate });
-          } catch (error) {
-            const normalized = error as AdminApiError;
-            if (normalized.status === 403) {
-              onForbidden();
-              return { payload: [], error: 'Нет доступа к шаблону браслетов' };
-            }
-            return { payload: [], error: normalized.message };
-          }
+          return { payload: [], error: 'Сохраните браслет в шаблон перед сохранением отчета' };
         }
         if (parsed.value > 0 || row.hasExisting) {
           resolved.push({ braceletTypeId: braceletTypeId!, count: parsed.value });
         }
       }
-      if (updates.length > 0) {
-        setBracelets((prev) =>
-          prev.map((item) => {
-            const update = updates.find((entry) => entry.key === item.key);
-            if (!update) return item;
-            return {
-              ...item,
-              braceletTypeId: update.braceletTypeId,
-              savedToTemplate: update.savedToTemplate,
-              isCustom: false,
-            };
-          }),
-        );
-      }
       return { payload: resolved };
     },
-    [bracelets, clubId, details, onForbidden],
+    [bracelets, clubId],
   );
 
   const buildUpdatePayload = useCallback(async () => {
@@ -632,6 +686,12 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
     if (isSaving) return;
     setFormError('');
     setCommentError('');
+    const validation = validateShiftReportDraft({ bracelets, revenueEntries });
+    if (validation.error) {
+      setFormError(validation.error);
+      focusOnValidationTarget(validation.focus);
+      return;
+    }
     setIsSaving(true);
     try {
       const update = await buildUpdatePayload();
@@ -662,12 +722,18 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
     } finally {
       setIsSaving(false);
     }
-  }, [addToast, buildUpdatePayload, details, isSaving, onForbidden]);
+  }, [addToast, bracelets, buildUpdatePayload, details, focusOnValidationTarget, isSaving, onForbidden, revenueEntries]);
 
   const handleCloseReport = useCallback(async () => {
     if (!details || isClosing) return;
     setFormError('');
     setCommentError('');
+    const validation = validateShiftReportDraft({ bracelets, revenueEntries });
+    if (validation.error) {
+      setFormError(validation.error);
+      focusOnValidationTarget(validation.focus);
+      return;
+    }
     setIsClosing(true);
     try {
       const update = await buildUpdatePayload();
@@ -714,7 +780,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
     } finally {
       setIsClosing(false);
     }
-  }, [addToast, buildUpdatePayload, details, isClosing, onForbidden]);
+  }, [addToast, bracelets, buildUpdatePayload, details, focusOnValidationTarget, isClosing, onForbidden, revenueEntries]);
 
   const entriesByGroup = useMemo(() => {
     const grouped = new Map<number, RevenueEntryRow[]>();
@@ -886,7 +952,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
             </div>
             <div className="space-y-2">
               {bracelets.map((row) => (
-                <div key={row.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center">
+                <div key={row.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center" data-bracelet-key={row.key}>
                   <div className="text-xs text-gray-500">
                     {row.isCustom ? (
                       <input
@@ -895,6 +961,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                         onChange={(event) =>
                           setBracelets((prev) => prev.map((item) => (item.key === row.key ? { ...item, name: event.target.value } : item)))
                         }
+                        data-bracelet-field="name"
                         placeholder="Название браслета"
                         disabled={isClosed}
                       />
@@ -909,6 +976,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                     className="w-full rounded-md border border-gray-200 p-2 text-sm"
                     value={row.count}
                     onChange={(event) => handleBraceletChange(row.key, event.target.value)}
+                    data-bracelet-field="count"
                     disabled={isClosed}
                   />
                   {row.isCustom ? (
@@ -959,7 +1027,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                   <div className="text-xs font-semibold text-gray-500">{group.name}</div>
                   {groupEntries.length === 0 && <div className="text-xs text-gray-400">Нет статей</div>}
                   {groupEntries.map((entry) => (
-                    <div key={entry.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center">
+                    <div key={entry.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center" data-revenue-key={entry.key}>
                       <div className="text-xs text-gray-500">
                         {entry.isCustom ? (
                           <input
@@ -970,6 +1038,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                                 prev.map((item) => (item.key === entry.key ? { ...item, name: event.target.value } : item)),
                               )
                             }
+                            data-revenue-field="name"
                             placeholder="Название статьи"
                             disabled={isClosed}
                           />
@@ -984,6 +1053,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                             className="mt-2 w-full rounded-md border border-gray-200 p-2 text-sm"
                             value={entry.groupId ?? ''}
                             onChange={(event) => handleRevenueToggle(entry.key, { groupId: Number(event.target.value) || null })}
+                            data-revenue-field="group"
                             disabled={isClosed}
                           >
                             <option value="">Выберите группу</option>
@@ -1000,6 +1070,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                           className="w-full rounded-md border border-gray-200 p-2 text-sm"
                           value={entry.amount}
                           onChange={(event) => handleRevenueAmountChange(entry.key, event.target.value)}
+                          data-revenue-field="amount"
                           disabled={isClosed}
                         />
                         <div className="flex gap-3 text-xs text-gray-500">
@@ -1057,12 +1128,13 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                 {revenueEntries
                   .filter((entry) => !entry.groupId)
                   .map((entry) => (
-                    <div key={entry.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center">
+                    <div key={entry.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center" data-revenue-key={entry.key}>
                       <div className="text-sm text-gray-900">{entry.name || 'Без названия'}</div>
                       <input
                         className="w-full rounded-md border border-gray-200 p-2 text-sm"
                         value={entry.amount}
                         onChange={(event) => handleRevenueAmountChange(entry.key, event.target.value)}
+                        data-revenue-field="amount"
                         disabled={isClosed}
                       />
                       <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -1081,7 +1153,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                 {disabledGroupEntries.map((entry) => {
                   const group = templateGroups.find((item) => item.id === entry.groupId);
                   return (
-                    <div key={entry.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center">
+                    <div key={entry.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center" data-revenue-key={entry.key}>
                       <div className="text-sm text-gray-900">
                         {entry.name} · {normalizeGroupLabel(group)}
                       </div>
@@ -1089,6 +1161,7 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                         className="w-full rounded-md border border-gray-200 p-2 text-sm"
                         value={entry.amount}
                         onChange={(event) => handleRevenueAmountChange(entry.key, event.target.value)}
+                        data-revenue-field="amount"
                         disabled={isClosed}
                       />
                       <div className="flex items-center gap-2 text-xs text-gray-500">
