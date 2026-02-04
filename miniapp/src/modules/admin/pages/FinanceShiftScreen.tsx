@@ -163,6 +163,17 @@ const normalizeGroupLabel = (group?: AdminFinanceRevenueGroup | null) => {
   return group.name || `Группа #${group.id}`;
 };
 
+export const resolveRevenueGroupId = (
+  value: string,
+  currentGroupId: number | null,
+  enabledGroups: AdminFinanceRevenueGroup[],
+): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return currentGroupId;
+  if (!enabledGroups.some((group) => group.id === parsed)) return currentGroupId;
+  return parsed;
+};
+
 export const validateShiftReportDraft = ({
   bracelets,
   revenueEntries,
@@ -539,6 +550,10 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
   }, []);
 
   const handleAddRevenueEntry = useCallback(() => {
+    if (enabledGroups.length === 0) {
+      setFormError('Нет групп выручки, добавьте группу в шаблон');
+      return;
+    }
     const fallbackGroupId = enabledGroups[0]?.id ?? null;
     setRevenueEntries((prev) => [
       ...prev,
@@ -1014,11 +1029,14 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                 type="button"
                 className="rounded border border-blue-200 px-2 py-1 text-xs text-blue-600"
                 onClick={handleAddRevenueEntry}
-                disabled={isClosed}
+                disabled={isClosed || enabledGroups.length === 0}
               >
                 + разово
               </button>
             </div>
+            {enabledGroups.length === 0 && (
+              <div className="text-xs text-red-500">Нет групп выручки, добавьте группу в шаблон.</div>
+            )}
 
             {enabledGroups.map((group) => {
               const groupEntries = entriesByGroup.get(group.id) ?? [];
@@ -1052,11 +1070,17 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                           <select
                             className="mt-2 w-full rounded-md border border-gray-200 p-2 text-sm"
                             value={entry.groupId ?? ''}
-                            onChange={(event) => handleRevenueToggle(entry.key, { groupId: Number(event.target.value) || null })}
+                            onChange={(event) =>
+                              handleRevenueToggle(entry.key, {
+                                groupId: resolveRevenueGroupId(event.target.value, entry.groupId, enabledGroups),
+                              })
+                            }
                             data-revenue-field="group"
-                            disabled={isClosed}
+                            disabled={isClosed || enabledGroups.length === 0}
                           >
-                            <option value="">Выберите группу</option>
+                            <option value="" disabled>
+                              Выберите группу
+                            </option>
                             {enabledGroups.map((groupOption) => (
                               <option key={groupOption.id} value={groupOption.id}>
                                 {groupOption.name}
@@ -1129,19 +1153,74 @@ export default function FinanceShiftScreen({ clubId, onSelectClub, onForbidden }
                   .filter((entry) => !entry.groupId)
                   .map((entry) => (
                     <div key={entry.key} className="grid gap-2 md:grid-cols-[2fr_1fr_auto] items-center" data-revenue-key={entry.key}>
-                      <div className="text-sm text-gray-900">{entry.name || 'Без названия'}</div>
-                      <input
-                        className="w-full rounded-md border border-gray-200 p-2 text-sm"
-                        value={entry.amount}
-                        onChange={(event) => handleRevenueAmountChange(entry.key, event.target.value)}
-                        data-revenue-field="amount"
-                        disabled={isClosed}
-                      />
-                      <div className="flex items-center gap-2 text-xs text-gray-500">
-                        <span>В итог: {entry.includeInTotal ? 'да' : 'нет'}</span>
-                        <span>·</span>
-                        <span>Индикатор: {entry.showSeparately ? 'да' : 'нет'}</span>
+                      <div className="text-xs text-gray-500">
+                        {entry.isCustom ? (
+                          <>
+                            <input
+                              className="mt-1 w-full rounded-md border border-gray-200 p-2 text-sm"
+                              value={entry.name}
+                              onChange={(event) =>
+                                setRevenueEntries((prev) =>
+                                  prev.map((item) => (item.key === entry.key ? { ...item, name: event.target.value } : item)),
+                                )
+                              }
+                              data-revenue-field="name"
+                              placeholder="Название статьи"
+                              disabled={isClosed}
+                            />
+                            <select
+                              className="mt-2 w-full rounded-md border border-gray-200 p-2 text-sm"
+                              value={entry.groupId ?? ''}
+                              onChange={(event) =>
+                                handleRevenueToggle(entry.key, {
+                                  groupId: resolveRevenueGroupId(event.target.value, entry.groupId, enabledGroups),
+                                })
+                              }
+                              data-revenue-field="group"
+                              disabled={isClosed || enabledGroups.length === 0}
+                            >
+                              <option value="" disabled>
+                                Выберите группу
+                              </option>
+                              {enabledGroups.map((groupOption) => (
+                                <option key={groupOption.id} value={groupOption.id}>
+                                  {groupOption.name}
+                                </option>
+                              ))}
+                            </select>
+                          </>
+                        ) : (
+                          <div className="text-sm text-gray-900">{entry.name || 'Без названия'}</div>
+                        )}
                       </div>
+                      <div className="space-y-2">
+                        <input
+                          className="w-full rounded-md border border-gray-200 p-2 text-sm"
+                          value={entry.amount}
+                          onChange={(event) => handleRevenueAmountChange(entry.key, event.target.value)}
+                          data-revenue-field="amount"
+                          disabled={isClosed}
+                        />
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <span>В итог: {entry.includeInTotal ? 'да' : 'нет'}</span>
+                          <span>·</span>
+                          <span>Индикатор: {entry.showSeparately ? 'да' : 'нет'}</span>
+                        </div>
+                      </div>
+                      {entry.isCustom ? (
+                        <div className="flex flex-col gap-2">
+                          <button
+                            type="button"
+                            className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600"
+                            onClick={() => handleRemoveRevenueEntry(entry.key)}
+                            disabled={isClosed}
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      ) : (
+                        <div />
+                      )}
                     </div>
                   ))}
               </div>

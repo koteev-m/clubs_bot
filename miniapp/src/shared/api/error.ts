@@ -28,7 +28,7 @@ export function isRequestCanceled(error: unknown): boolean {
   if (typeof error === 'object' && error && 'isAbort' in error) {
     return Boolean((error as { isAbort?: boolean }).isAbort);
   }
-  if (error instanceof DOMException) {
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
     return error.name === 'AbortError';
   }
   if (!axios.isAxiosError(error)) return false;
