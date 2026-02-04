@@ -79,6 +79,9 @@ data class ShiftReportRevenueEntry(
     val orderIndex: Int,
 )
 
+/**
+ * Для entries с articleId groupId берётся из статьи и не переопределяется; для ad-hoc groupId обязателен.
+ */
 data class RevenueEntryInput(
     val articleId: Long?,
     val name: String?,
