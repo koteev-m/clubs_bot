@@ -3,10 +3,16 @@ package com.example.bot.data.stories
 import com.example.bot.data.db.toOffsetDateTimeUtc
 import com.example.bot.data.db.withRetriedTx
 import kotlinx.coroutines.Dispatchers
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import org.jetbrains.exposed.sql.Column
+import org.jetbrains.exposed.sql.ColumnType
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.count
 import org.jetbrains.exposed.sql.deleteWhere
@@ -16,6 +22,7 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
+import java.sql.Clob
 import java.time.Clock
 import java.time.Instant
 
@@ -52,7 +59,7 @@ object PostEventStoriesTable : org.jetbrains.exposed.sql.Table("post_event_stori
     val nightStartUtc = timestampWithTimeZone("night_start_utc")
     val schemaVersion = integer("schema_version")
     val status = text("status")
-    val payloadJson = text("payload_json")
+    val payloadJson = jsonbString("payload_json")
     val errorCode = text("error_code").nullable()
     val generatedAt = timestampWithTimeZone("generated_at")
     val updatedAt = timestampWithTimeZone("updated_at")
@@ -73,6 +80,10 @@ object GuestSegmentsTable : org.jetbrains.exposed.sql.Table("guest_segments") {
 class PostEventStoryRepository(
     private val db: Database,
 ) {
+    private companion object {
+        val json = Json
+    }
+
     suspend fun getByClubAndNight(
         clubId: Long,
         nightStartUtc: Instant,
@@ -106,8 +117,10 @@ class PostEventStoryRepository(
                 PostEventStoriesTable
                     .selectAll()
                     .where { PostEventStoriesTable.clubId eq clubId }
-                    .orderBy(PostEventStoriesTable.nightStartUtc, SortOrder.DESC)
-                    .orderBy(PostEventStoriesTable.id, SortOrder.DESC)
+                    .orderBy(
+                        PostEventStoriesTable.nightStartUtc to SortOrder.DESC,
+                        PostEventStoriesTable.id to SortOrder.DESC,
+                    )
                     .limit(limit, offset)
                     .map { it.toPostEventStory() }
             }
@@ -126,6 +139,8 @@ class PostEventStoryRepository(
     ): PostEventStory {
         require(schemaVersion > 0) { "schemaVersion must be > 0" }
         require(payloadJson.isNotBlank()) { "payloadJson must not be blank" }
+        runCatching { json.decodeFromString<JsonElement>(payloadJson) }
+                .getOrElse { throw IllegalArgumentException("payloadJson must be valid JSON", it) }
         val nightStart = nightStartUtc.toOffsetDateTimeUtc()
         val generatedAtUtc = generatedAt.toOffsetDateTimeUtc()
         val updatedAtUtc = now.toOffsetDateTimeUtc()
@@ -160,7 +175,7 @@ class PostEventStoryRepository(
                     if (inserted.insertedCount == 0) {
                         PostEventStoriesTable.update({
                             (PostEventStoriesTable.clubId eq clubId) and
-                                (PostEventStoriesTable.nightStartUtc eq nightStart) and
+                            (PostEventStoriesTable.nightStartUtc eq nightStart) and
                                 (PostEventStoriesTable.schemaVersion eq schemaVersion)
                         }) {
                             it[PostEventStoriesTable.status] = status.name
@@ -232,12 +247,16 @@ class GuestSegmentsRepository(
                     """.trimIndent()
 
                 val statement = TransactionManager.current().connection.prepareStatement(sql, false)
-                statement[1] = windowDays
-                statement[2] = windowStart
-                statement[3] = windowStart
-                statement[4] = computedAt
-                statement[5] = clubId
-                statement.executeUpdate()
+                try {
+                    statement[1] = windowDays
+                    statement[2] = windowStart
+                    statement[3] = windowStart
+                    statement[4] = computedAt
+                    statement[5] = clubId
+                    statement.executeUpdate()
+                } finally {
+                    statement.closeIfPossible()
+                }
 
                 SegmentComputationResult(counts = buildSummaryInternal(clubId, windowDays))
             }
@@ -289,3 +308,64 @@ private fun ResultRow.toPostEventStory(): PostEventStory =
         generatedAt = this[PostEventStoriesTable.generatedAt].toInstant(),
         updatedAt = this[PostEventStoriesTable.updatedAt].toInstant(),
     )
+
+private fun Table.jsonbString(name: String): Column<String> =
+    registerColumn(name, JsonbStringColumnType())
+
+private class JsonbStringColumnType : ColumnType() {
+    override fun sqlType(): String = "JSONB"
+
+    override fun valueFromDB(value: Any): Any =
+        when (value) {
+            is String -> value
+            is Clob -> value.characterStream.use { it.readText() }
+            else -> readPgObjectValue(value) ?: error("Unexpected value for JSONB: $value (${value::class})")
+        }
+
+    override fun notNullValueToDB(value: Any): Any =
+        when (value) {
+            is String -> value
+            else -> value.toString()
+        }
+
+    override fun setParameter(
+        stmt: org.jetbrains.exposed.sql.statements.api.PreparedStatementApi,
+        index: Int,
+        value: Any?,
+    ) {
+        if (value == null) {
+            super.setParameter(stmt, index, null)
+            return
+        }
+
+        val raw = value.toString()
+        val isPostgres =
+            runCatching { TransactionManager.current().db.vendor.equals("postgresql", ignoreCase = true) }
+                .getOrDefault(false)
+        val pgObject = if (isPostgres) buildPgJsonbObject(raw) else null
+        if (pgObject != null) {
+            stmt[index] = pgObject
+            return
+        }
+
+        super.setParameter(stmt, index, raw)
+    }
+
+    private fun readPgObjectValue(value: Any): String? =
+        runCatching {
+            if (value::class.java.name == "org.postgresql.util.PGobject") {
+                value::class.java.getMethod("getValue").invoke(value) as? String
+            } else {
+                null
+            }
+        }.getOrNull()
+
+    private fun buildPgJsonbObject(value: String): Any? =
+        runCatching {
+            val clazz = Class.forName("org.postgresql.util.PGobject")
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            clazz.getMethod("setType", String::class.java).invoke(instance, "jsonb")
+            clazz.getMethod("setValue", String::class.java).invoke(instance, value)
+            instance
+        }.getOrNull()
+}

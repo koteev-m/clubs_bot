@@ -81,10 +81,10 @@ class PostEventStoryAndGuestSegmentsRepositoryTest {
             val repository = PostEventStoryRepository(testDb.database)
             val now = Instant.parse("2024-05-03T09:00:00Z")
 
-            val older =
+            val newerNight =
                 repository.upsert(
                     clubId = clubId,
-                    nightStartUtc = Instant.parse("2024-04-28T21:00:00Z"),
+                    nightStartUtc = Instant.parse("2024-05-02T21:00:00Z"),
                     schemaVersion = 1,
                     status = PostEventStoryStatus.READY,
                     payloadJson = "{\"n\":1}",
@@ -111,11 +111,24 @@ class PostEventStoryAndGuestSegmentsRepositoryTest {
                     generatedAt = now,
                     now = now,
                 )
+            val olderInsertedLater =
+                repository.upsert(
+                    clubId = clubId,
+                    nightStartUtc = Instant.parse("2024-04-28T21:00:00Z"),
+                    schemaVersion = 1,
+                    status = PostEventStoryStatus.READY,
+                    payloadJson = "{\"n\":4}",
+                    generatedAt = now,
+                    now = now,
+                )
 
             val listed = repository.listByClub(clubId = clubId, limit = 10, offset = 0)
 
-            assertEquals(3, listed.size)
-            assertEquals(listOf(sameNightSecond.id, sameNightFirst.id, older.id), listed.map { it.id })
+            assertEquals(4, listed.size)
+            assertEquals(
+                listOf(newerNight.id, sameNightSecond.id, sameNightFirst.id, olderInsertedLater.id),
+                listed.map { it.id },
+            )
         }
 
     @Test
