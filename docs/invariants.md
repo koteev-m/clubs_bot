@@ -171,3 +171,56 @@ ROLE_ASSIGNMENT:CREATE:club:GLOBAL:user:9001:role:MANAGER:scope:GLOBAL:v1
 - **403** `club_scope_mismatch` — QR относится к другому клубу (miniapp).【F:app-bot/src/main/kotlin/com/example/bot/routes/CheckinRoutes.kt†L321-L343】
 
 Полный список кодов хранится в `ErrorCodes` и реестре ошибок (`/api/.well-known/errors`).【F:app-bot/src/main/kotlin/com/example/bot/http/ErrorCodes.kt†L1-L87】
+
+## Финансы / отчёт смены (shift_reports)
+
+### Шаблон клуба (club_report_templates + справочники)
+
+- Шаблон отчёта состоит из:
+  - `bracelets types` (`club_bracelet_types`),
+  - `revenue groups` (`club_revenue_groups`),
+  - `revenue articles` (`club_revenue_articles`).
+  Все сущности шаблона отдаются в `template` внутри `ShiftReportDetailsResponse`.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportTables.kt†L6-L66】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L111-L155】
+- Для элементов шаблона используются флаги/порядок:
+  - `enabled` (по умолчанию `true`) — soft-disable в админ API шаблона;
+  - `order_index` (по умолчанию `0`) — сортировка в выдаче и при рендеринге формы;
+  - для статей выручки также `include_in_total` (по умолчанию `false`) и `show_separately` (по умолчанию `false`).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportTables.kt†L14-L66】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceTemplateRoutes.kt†L262-L273】
+
+### Структура отчёта смены (shift_reports + entries)
+
+- `shift_reports` хранит «шапку» отчёта: клуб, ночь, статус `DRAFT|CLOSED`, people counters, comment, audit-поля закрытия (`closed_at`, `closed_by`) и timestamps.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportTables.kt†L68-L88】【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportModels.kt†L51-L69】
+- Дочерние блоки отчёта:
+  - `shift_report_bracelets` — счётчики по типам браслетов (`report_id + bracelet_type_id`);
+  - `shift_report_revenue_entries` — строки выручки (`article_id` optional для ad-hoc строк, `group_id`, `amount_minor`, `include_in_total`, `show_separately`, `order_index`).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportTables.kt†L90-L119】【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportModels.kt†L71-L93】
+
+### Формулы и агрегаты
+
+- **Totals per group**: сумма `amount_minor` только по строкам, где `include_in_total=true`, затем группировка по `group_id`.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L14-L27】
+- **Total revenue**: сумма `amount_minor` только по `include_in_total=true`.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L29-L30】
+- **Non-total indicators**: все строки с `include_in_total=false`; отдельно выделяется подмножество `show_separately=true` для отдельного отображения и сверок.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L32-L37】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L448-L452】
+
+### Anti-double-count для депозитов
+
+- В выручке смены депозиты столов обычно уже представлены в `depositHints.sumDepositsForNight` (из `table_deposits`). Если ту же сумму включить в «общую выручку», получится двойной учёт. Поэтому для индикаторов типа «депозитные карты/депозиты столов» рекомендуется держать `include_in_total=false` и (если нужны в интерфейсе) `show_separately=true`. Технически это согласуется с дефолтом для новых статей (`include_in_total=false`).【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L283-L287】【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportTables.kt†L54-L56】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceTemplateRoutes.kt†L262-L264】
+- Сверка при закрытии смены считается как:
+  - `tableDepositsSum = depositHints.sumDepositsForNight`,
+  - `depositIndicatorsSum = Σ amount_minor` по строкам `show_separately && !include_in_total`,
+  - `mismatch = abs(tableDepositsSum - depositIndicatorsSum)`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L505-L515】
+
+### Правила закрытия смены
+
+- Переход статуса только `DRAFT -> CLOSED`; повторное закрытие возвращает `invalid_state`/`409` и не меняет запись.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt†L585-L613】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L279-L300】
+- Если `mismatch > SHIFT_REPORT_DEPOSIT_MISMATCH_THRESHOLD_MINOR`, то `comment` обязателен (`required_for_mismatch`).
+  - Конфиг: env `SHIFT_REPORT_DEPOSIT_MISMATCH_THRESHOLD_MINOR`.
+  - Дефолт в коде: `10_000` minor units.
+  - Значение в `.env.example`: `10000`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L48-L49】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L197-L197】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L285-L287】【F:.env.example†L228-L231】
+
+### API endpoints (финансовая смена + шаблон)
+
+- Смена:
+  - `GET /api/admin/clubs/{clubId}/nights/{nightStartUtc}/finance/shift` — получить/создать draft отчёт на ночь;
+  - `PUT /api/admin/clubs/{clubId}/finance/shift/{reportId}` — обновить draft отчёт;
+  - `POST /api/admin/clubs/{clubId}/finance/shift/{reportId}/close` — закрыть смену.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L206-L267】
+- Шаблон:
+  - `GET /api/admin/clubs/{clubId}/finance/template`;
+  - `POST|PUT|POST disable|POST reorder` для `bracelets`, `revenue-groups`, `revenue-articles` в `/api/admin/clubs/{clubId}/finance/template/...`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceTemplateRoutes.kt†L83-L147】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceTemplateRoutes.kt†L172-L239】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceTemplateRoutes.kt†L239-L343】
