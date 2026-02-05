@@ -76,14 +76,6 @@
 - **Распределение по категориям**: `TableDepositRepository.allocationSummaryForNight(clubId, nightStartUtc)` агрегирует `table_deposit_allocations` по `category_code` с суммами по ночи.【F:core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt†L343-L381】
 - **Связь с платежами**: `table_deposits.payment_id` — nullable FK на `payments(id)` с `ON DELETE SET NULL` (см. `V036__table_sessions_deposits.sql`). При наличии значения reconciliation выполняется join по `payment_id` ↔ `payments.id`, иначе депозит связывается только по ночи/столу/сессии.【F:core-data/src/main/resources/db/migration/postgresql/V036__table_sessions_deposits.sql†L25-L49】
 
-### Финансы / отчёт смены (shift_reports)
-
-- Для **article-based** revenue entry (`articleId != null`) `groupId` всегда берётся из статьи и не переопределяется payload-ом. Если в payload передан `groupId` и он отличается от `groupId` статьи — entry отклоняется с ошибкой `revenue_article_group_mismatch` (group mismatch).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt†L677-L695】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L529-L545】
-- Для **article-based** entry `name` может быть переопределён только непустым значением после `trim`; иначе используется имя статьи (`article.name`).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt†L685-L695】
-- Для **article-based** entry поля `include_in_total`/`show_separately`/`order_index` по умолчанию берутся из статьи, если не заданы в payload (`includeInTotal ?: article.includeInTotal`, `showSeparately ?: article.showSeparately`, `orderIndex ?: article.orderIndex`).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt†L696-L698】
-- Семантика `show_separately`: в non-total indicators участвуют только строки с `include_in_total=false`; `show_separately` — это подмножество именно этих строк, а при `include_in_total=true` флаг не попадает в индикаторы.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L32-L37】
-- `depositIndicatorsSum` считается только по subset `show_separately=true` среди `include_in_total=false`, поэтому строки с `include_in_total=true` в этот расчёт не входят независимо от `show_separately`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L510-L514】
-
 ### API: основные эндпоинты
 
 - `GET /api/admin/clubs/{clubId}/nights/{nightStartUtc}/tables` — список столов с активными сессиями/депозитами (`activeSessionId`, `activeDeposit`).【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L129-L187】
@@ -201,11 +193,18 @@ ROLE_ASSIGNMENT:CREATE:club:GLOBAL:user:9001:role:MANAGER:scope:GLOBAL:v1
   - `shift_report_bracelets` — счётчики по типам браслетов (`report_id + bracelet_type_id`);
   - `shift_report_revenue_entries` — строки выручки (`article_id` optional для ad-hoc строк, `group_id`, `amount_minor`, `include_in_total`, `show_separately`, `order_index`).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportTables.kt†L90-L119】【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportModels.kt†L71-L93】
 
+### Правила article-based revenue entries
+
+- Ниже правила зафиксированы на уровне API payload (`articleId`, `groupId`, `includeInTotal`, `showSeparately`, `orderIndex`); в БД этим полям соответствуют `article_id`, `group_id`, `include_in_total`, `show_separately`, `order_index`.
+- Для **article-based** revenue entry (`articleId != null`) `groupId` всегда берётся из статьи и не переопределяется payload-ом. Если в payload передан `groupId`, не совпадающий с `article.groupId`, entry отклоняется с ошибкой `revenue_article_group_mismatch` (group mismatch).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt†L677-L695】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L529-L545】
+- Для **article-based** entry поле `name` может быть переопределено только непустым значением после `trim`; иначе используется `article.name`.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt†L685-L695】
+- Для **article-based** entry поля `includeInTotal`, `showSeparately`, `orderIndex` берутся из payload только если переданы; если поле не передано, используется значение из статьи (`article.includeInTotal`, `article.showSeparately`, `article.orderIndex`).【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt†L696-L698】
+
 ### Формулы и агрегаты
 
 - **Totals per group**: сумма `amount_minor` только по строкам, где `include_in_total=true`, затем группировка по `group_id`.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L14-L27】
 - **Total revenue**: сумма `amount_minor` только по `include_in_total=true`.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L29-L30】
-- **Non-total indicators**: все строки с `include_in_total=false`; отдельно выделяется подмножество `show_separately=true` для отдельного отображения и сверок.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L32-L37】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L448-L452】
+- **Non-total indicators**: все строки с `include_in_total=false`; `show_separately=true` — подмножество именно этих строк, а строки с `include_in_total=true` в индикаторы не попадают независимо от `show_separately`.【F:core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportCalculations.kt†L32-L37】【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L448-L452】
 
 ### Anti-double-count для депозитов
 
@@ -213,7 +212,8 @@ ROLE_ASSIGNMENT:CREATE:club:GLOBAL:user:9001:role:MANAGER:scope:GLOBAL:v1
 - Сверка при закрытии смены считается как:
   - `tableDepositsSum = depositHints.sumDepositsForNight`,
   - `depositIndicatorsSum = Σ amount_minor` по строкам `show_separately && !include_in_total`,
-  - `mismatch = abs(tableDepositsSum - depositIndicatorsSum)`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L505-L515】
+  - `mismatch = abs(tableDepositsSum - depositIndicatorsSum)`.
+  `depositIndicatorsSum` считается только по subset `show_separately=true` среди `include_in_total=false`; строки с `include_in_total=true` в этот расчёт не входят независимо от `show_separately`.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt†L505-L515】
 
 ### Правила закрытия смены
 
