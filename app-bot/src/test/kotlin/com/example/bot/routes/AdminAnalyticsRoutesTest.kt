@@ -79,6 +79,26 @@ class AdminAnalyticsRoutesTest {
     }
 
     @Test
+    fun `analytics returns forbidden for club outside scope`() = withApp(clubIds = setOf(2)) { deps ->
+        val response =
+            client.get("/api/admin/clubs/1/analytics?nightStartUtc=2024-06-01T20:00:00Z&windowDays=30") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        coVerify(exactly = 0) { deps.ownerHealthService.attendanceForNight(any(), any()) }
+        coVerify(exactly = 0) { deps.visitRepository.countNightUniqueVisitors(any(), any()) }
+        coVerify(exactly = 0) { deps.visitRepository.countNightEarlyVisits(any(), any()) }
+        coVerify(exactly = 0) { deps.visitRepository.countNightTableNights(any(), any()) }
+        coVerify(exactly = 0) { deps.tableDepositRepository.sumDepositsForNight(any(), any()) }
+        coVerify(exactly = 0) { deps.tableDepositRepository.allocationSummaryForNight(any(), any()) }
+        coVerify(exactly = 0) { deps.shiftReportRepository.getByClubAndNight(any(), any()) }
+        coVerify(exactly = 0) { deps.shiftReportRepository.getDetails(any()) }
+        coVerify(exactly = 0) { deps.guestSegmentsRepository.computeSegments(any(), any(), any()) }
+        coVerify(exactly = 0) { deps.storyRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `analytics validates nightStartUtc`() = withApp { _ ->
         val response =
             client.get("/api/admin/clubs/1/analytics?nightStartUtc=bad&windowDays=30") {
@@ -141,6 +161,73 @@ class AdminAnalyticsRoutesTest {
         assertEquals(2, stories.size)
         assertEquals("2024-06-02T20:00:00Z", stories[0].jsonObject["nightStartUtc"]!!.jsonPrimitive.content)
         assertEquals("2024-06-01T20:00:00Z", stories[1].jsonObject["nightStartUtc"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `stories list returns forbidden for club outside scope`() = withApp(clubIds = setOf(2)) { deps ->
+        val response =
+            client.get("/api/admin/clubs/1/stories?limit=2&offset=0") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        coVerify(exactly = 0) { deps.storyRepository.listByClub(any(), any(), any()) }
+    }
+
+    @Test
+    fun `story details returns forbidden for club outside scope`() = withApp(clubIds = setOf(2)) { deps ->
+        val response =
+            client.get("/api/admin/clubs/1/stories/2024-06-01T20:00:00Z") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.Forbidden, response.status)
+        coVerify(exactly = 0) { deps.storyRepository.getByClubAndNight(any(), any(), any()) }
+    }
+
+    @Test
+    fun `story details returns not found when missing`() = withApp { deps ->
+        coEvery { deps.storyRepository.getByClubAndNight(1, any(), any()) } returns null
+
+        val response =
+            client.get("/api/admin/clubs/1/stories/2024-06-01T20:00:00Z") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(ErrorCodes.not_found, body["code"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `story details returns payload`() = withApp { deps ->
+        coEvery { deps.storyRepository.getByClubAndNight(1, any(), any()) } returns story()
+
+        val response =
+            client.get("/api/admin/clubs/1/stories/2024-06-01T20:00:00Z") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(1, body["schemaVersion"]!!.jsonPrimitive.int)
+        assertEquals("READY", body["status"]!!.jsonPrimitive.content)
+        assertEquals(1, body["id"]!!.jsonPrimitive.long)
+        val payload = body["payload"]!!.jsonObject
+        assertEquals(1, payload["schemaVersion"]!!.jsonPrimitive.int)
+    }
+
+    @Test
+    fun `story details validates nightStartUtc`() = withApp { deps ->
+        val response =
+            client.get("/api/admin/clubs/1/stories/bad") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(ErrorCodes.validation_error, body["code"]!!.jsonPrimitive.content)
+        coVerify(exactly = 0) { deps.storyRepository.getByClubAndNight(any(), any(), any()) }
     }
 
     private fun withApp(
