@@ -208,6 +208,24 @@ class VisitRepository(
     ): Long =
         countVisitsBase(userId, clubId, sinceUtc) { query -> query.andWhere { ClubVisitsTable.hasTable eq true } }
 
+    suspend fun countNightUniqueVisitors(
+        clubId: Long,
+        nightStartUtc: Instant,
+    ): Long =
+        countNightDistinct(clubId, nightStartUtc) { it }
+
+    suspend fun countNightEarlyVisits(
+        clubId: Long,
+        nightStartUtc: Instant,
+    ): Long =
+        countNightDistinct(clubId, nightStartUtc) { query -> query.andWhere { ClubVisitsTable.isEarly eq true } }
+
+    suspend fun countNightTableNights(
+        clubId: Long,
+        nightStartUtc: Instant,
+    ): Long =
+        countNightDistinct(clubId, nightStartUtc) { query -> query.andWhere { ClubVisitsTable.hasTable eq true } }
+
     private suspend fun countVisitsBase(
         userId: Long,
         clubId: Long,
@@ -227,6 +245,29 @@ class VisitRepository(
                 extraFilter(filtered).count()
             }
         }
+
+    private suspend fun countNightDistinct(
+        clubId: Long,
+        nightStartUtc: Instant,
+        extraFilter: (org.jetbrains.exposed.sql.Query) -> org.jetbrains.exposed.sql.Query,
+    ): Long {
+        val nightStart = nightStartUtc.toOffsetDateTimeUtc()
+        return withRetriedTx(name = "visit.countNight", readOnly = true, database = db) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val baseQuery =
+                    ClubVisitsTable
+                        .slice(ClubVisitsTable.userId)
+                        .selectAll()
+                        .where {
+                            (ClubVisitsTable.clubId eq clubId) and
+                                (ClubVisitsTable.nightStartUtc eq nightStart)
+                        }
+                extraFilter(baseQuery)
+                    .withDistinct(true)
+                    .count()
+            }
+        }
+    }
 
     private fun findVisit(
         clubId: Long,

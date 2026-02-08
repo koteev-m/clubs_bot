@@ -19,6 +19,8 @@ import com.example.bot.data.booking.TableSessionRepository
 import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.visits.NightOverrideRepository
 import com.example.bot.data.visits.VisitRepository
+import com.example.bot.data.stories.GuestSegmentsRepository
+import com.example.bot.data.stories.PostEventStoryRepository
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
@@ -77,6 +79,7 @@ import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.hostCheckinRoutes
 import com.example.bot.routes.hostWaitlistRoutes
 import com.example.bot.routes.adminClubsRoutes
+import com.example.bot.routes.adminAnalyticsRoutes
 import com.example.bot.routes.adminFinanceShiftRoutes
 import com.example.bot.routes.adminFinanceTemplateRoutes
 import com.example.bot.routes.adminGamificationRoutes
@@ -229,6 +232,8 @@ fun Application.module() {
     val tableDepositRepository by inject<TableDepositRepository>()
     val visitRepository by inject<VisitRepository>()
     val nightOverrideRepository by inject<NightOverrideRepository>()
+    val postEventStoryRepository by inject<PostEventStoryRepository>()
+    val guestSegmentsRepository by inject<GuestSegmentsRepository>()
     val gamificationSettingsRepository by inject<GamificationSettingsRepository>()
     val guestQrResolver by inject<GuestQrResolver>()
     val hallPlansRepository by inject<HallPlansRepository>()
@@ -375,6 +380,15 @@ fun Application.module() {
         clock = appClock,
     )
     adminFinanceTemplateRoutes(templateRepository = shiftReportTemplateRepository)
+    adminAnalyticsRoutes(
+        ownerHealthService = ownerHealthService,
+        visitRepository = visitRepository,
+        tableDepositRepository = tableDepositRepository,
+        shiftReportRepository = shiftReportRepository,
+        storyRepository = postEventStoryRepository,
+        guestSegmentsRepository = guestSegmentsRepository,
+        clock = appClock,
+    )
     adminGamificationRoutes(
         settingsRepository = adminGamificationSettingsRepository,
         nightOverrideRepository = adminNightOverrideRepository,

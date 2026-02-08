@@ -149,6 +149,29 @@ class OwnerHealthServiceImpl(
         }
     }
 
+    override suspend fun attendanceForNight(
+        clubId: Long,
+        nightStartUtc: Instant,
+    ): AttendanceHealth? {
+        val events =
+            eventsRepository.list(
+                clubId = clubId,
+                city = null,
+                from = nightStartUtc,
+                to = nightStartUtc.plusSeconds(36 * 60 * 60),
+                offset = 0,
+                limit = 200,
+            )
+        if (events.isEmpty()) return null
+        val eventIds = events.map { it.id }
+        val guestListsByEvent = loadGuestEntries(clubId, eventIds)
+        val bookingsByEvent = events.associate { event ->
+            val bookings = bookingState.findBookingsForEvent(clubId, event.id)
+            event.id to bookings
+        }
+        return attendanceFor(events, bookingsByEvent, guestListsByEvent).channelsView
+    }
+
     private fun currentWindow(request: OwnerHealthRequest): Pair<Instant, Instant> {
         val now = request.now
         val duration = periodDuration(request.period)
