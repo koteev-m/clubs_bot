@@ -266,6 +266,11 @@ data class OwnerHealthWatermarks(
 
 interface OwnerHealthService {
     suspend fun healthForClub(request: OwnerHealthRequest): OwnerHealthSnapshot?
+
+    suspend fun attendanceForNight(
+        clubId: Long,
+        nightStartUtc: Instant,
+    ): AttendanceHealth?
 }
 
 fun rateDelta(current: Double, previous: Double): RateDelta =

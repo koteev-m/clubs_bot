@@ -96,6 +96,8 @@ import com.example.bot.workers.OutboxWorker
 import com.example.bot.workers.SendOutcome
 import com.example.bot.workers.SendPort
 import com.example.bot.opschat.ClubOpsChatConfigRepository
+import com.example.bot.data.stories.GuestSegmentsRepository
+import com.example.bot.data.stories.PostEventStoryRepository
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.tracing.Tracer
 import kotlinx.serialization.json.JsonObject
@@ -138,6 +140,8 @@ val bookingModule =
         single<EventRepository> { EventRepositoryImpl(get()) }
         single { NightOverrideRepository(get()) }
         single { VisitRepository(get()) }
+        single { PostEventStoryRepository(get()) }
+        single { GuestSegmentsRepository(get()) }
 
         single { GamificationSettingsRepository(get()) }
         single { BadgeRepository(get()) }

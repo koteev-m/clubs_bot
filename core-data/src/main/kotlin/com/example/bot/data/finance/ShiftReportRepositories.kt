@@ -402,6 +402,25 @@ class ShiftReportRepository(
     private val database: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    suspend fun getByClubAndNight(
+        clubId: Long,
+        nightStartUtc: Instant,
+    ): ShiftReport? {
+        val nightStart = nightStartUtc.toOffsetDateTimeUtc()
+        return withRetriedTx(name = "shiftReport.getByClubNight", readOnly = true, database = database) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = database) {
+                ShiftReportsTable
+                    .selectAll()
+                    .where {
+                        (ShiftReportsTable.clubId eq clubId) and
+                            (ShiftReportsTable.nightStartUtc eq nightStart)
+                    }.limit(1)
+                    .firstOrNull()
+                    ?.toShiftReport()
+            }
+        }
+    }
+
     suspend fun getOrCreateDraft(
         clubId: Long,
         nightStartUtc: Instant,
