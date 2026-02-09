@@ -34,8 +34,10 @@ describe('useStories', () => {
   it('does not auto-load stories when disabled', async () => {
     renderHook(() => useStories(1, 20, 0, undefined, undefined, false));
 
-    await waitFor(() => {
-      expect(listStories).not.toHaveBeenCalled();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
     });
+
+    expect(listStories).not.toHaveBeenCalled();
   });
 });
