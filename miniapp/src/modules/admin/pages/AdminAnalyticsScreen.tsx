@@ -90,6 +90,7 @@ export default function AdminAnalyticsScreen({ clubId, onSelectClub, onForbidden
     storiesOffset,
     selectedNight || undefined,
     onForbidden,
+    tab === 'stories',
   );
 
   const analyticsMeta = data?.meta;
@@ -201,8 +202,8 @@ export default function AdminAnalyticsScreen({ clubId, onSelectClub, onForbidden
       if (nightsRequestIdRef.current !== requestId) return;
       setNights(response.data);
       setNightsStatus('ready');
-      if (!selectedNight && response.data.length > 0) {
-        setSelectedNight(response.data[0].startUtc);
+      if (response.data.length > 0) {
+        setSelectedNight((prev) => prev || response.data[0].startUtc);
       }
     } catch (error) {
       if (isRequestCanceled(error)) return;
@@ -242,7 +243,7 @@ export default function AdminAnalyticsScreen({ clubId, onSelectClub, onForbidden
         nightsAbortRef.current = null;
       }
     }
-  }, [addToast, clubId, onForbidden, selectedNight]);
+  }, [addToast, clubId, onForbidden]);
 
   useEffect(() => {
     if (!clubId) return;
