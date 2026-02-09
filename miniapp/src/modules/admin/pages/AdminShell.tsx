@@ -8,8 +8,9 @@ import HallEditorScreen from './HallEditorScreen';
 import PromotersQuotasScreen from './PromotersQuotasScreen';
 import ManagerTablesScreen from './ManagerTablesScreen';
 import FinanceShiftScreen from './FinanceShiftScreen';
+import AdminAnalyticsScreen from './AdminAnalyticsScreen';
 
-type AdminSection = 'clubs' | 'promoters' | 'tables' | 'finance';
+type AdminSection = 'clubs' | 'promoters' | 'tables' | 'finance' | 'analytics';
 
 const parseClubId = () => {
   const params = new URLSearchParams(window.location.search);
@@ -33,6 +34,7 @@ const parseSection = (): AdminSection => {
   if (section === 'promoters') return 'promoters';
   if (section === 'tables') return 'tables';
   if (section === 'finance') return 'finance';
+  if (section === 'analytics') return 'analytics';
   return 'clubs';
 };
 
@@ -44,6 +46,8 @@ const setAdminParamsInUrl = (section: AdminSection, clubId: number | null, hallI
     url.searchParams.set('section', 'tables');
   } else if (section === 'finance') {
     url.searchParams.set('section', 'finance');
+  } else if (section === 'analytics') {
+    url.searchParams.set('section', 'analytics');
   } else {
     url.searchParams.delete('section');
   }
@@ -147,6 +151,14 @@ export default function AdminShell() {
     window.scrollTo(0, 0);
   }, []);
 
+  const handleSelectClubForAnalytics = useCallback((id: number | null) => {
+    setAdminParamsInUrl('analytics', id, null);
+    setSection('analytics');
+    setClubId(id);
+    setHallId(null);
+    window.scrollTo(0, 0);
+  }, []);
+
   const handleSwitchSection = useCallback(
     (next: AdminSection) => {
       setSection(next);
@@ -158,6 +170,9 @@ export default function AdminShell() {
         setHallId(null);
       } else if (next === 'finance') {
         setAdminParamsInUrl('finance', clubId, null);
+        setHallId(null);
+      } else if (next === 'analytics') {
+        setAdminParamsInUrl('analytics', clubId, null);
         setHallId(null);
       } else {
         setAdminParamsInUrl('clubs', clubId, hallId);
@@ -194,6 +209,9 @@ export default function AdminShell() {
     if (section === 'finance') {
       return <FinanceShiftScreen clubId={clubId} onSelectClub={handleSelectClubForFinance} onForbidden={handleForbidden} />;
     }
+    if (section === 'analytics') {
+      return <AdminAnalyticsScreen clubId={clubId} onSelectClub={handleSelectClubForAnalytics} onForbidden={handleForbidden} />;
+    }
     if (clubId && hallId) {
       return <HallEditorScreen clubId={clubId} hallId={hallId} onBack={handleBackToHalls} />;
     }
@@ -212,6 +230,7 @@ export default function AdminShell() {
     handleSelectClub,
     handleSelectClubForPromoters,
     handleSelectClubForFinance,
+    handleSelectClubForAnalytics,
     handleSelectClubForTables,
     section,
   ]);
@@ -257,6 +276,13 @@ export default function AdminShell() {
               onClick={() => handleSwitchSection('finance')}
             >
               Финансы
+            </button>
+            <button
+              type="button"
+              className={`rounded px-3 py-1 ${section === 'analytics' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              onClick={() => handleSwitchSection('analytics')}
+            >
+              Аналитика
             </button>
           </div>
         )}
