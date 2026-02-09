@@ -37,6 +37,7 @@ export function useStories(
   offset = 0,
   selectedNight?: string,
   onForbidden?: () => void,
+  enabled = true,
 ) {
   const [listState, setListState] = useState<StoriesState>({
     status: 'idle',
@@ -85,6 +86,7 @@ export function useStories(
   );
 
   const loadList = useCallback(async () => {
+    if (!enabled) return;
     if (!clubId) {
       listControllerRef.current?.abort();
       setListState({ status: 'idle', items: [], errorMessage: '', canRetry: false, incompleteMap: {} });
@@ -149,9 +151,10 @@ export function useStories(
       }
       setListState({ status: 'error', items: [], errorMessage: 'Не удалось загрузить истории', canRetry: false, incompleteMap: {} });
     }
-  }, [clubId, limit, loadIncompleteFlags, offset, onForbidden]);
+  }, [clubId, enabled, limit, loadIncompleteFlags, offset, onForbidden]);
 
   const loadDetails = useCallback(async () => {
+    if (!enabled) return;
     if (!clubId || !selectedNight) {
       detailsControllerRef.current?.abort();
       setDetailsState({ status: 'idle', data: null, errorMessage: '', canRetry: false });
@@ -192,17 +195,26 @@ export function useStories(
       }
       setDetailsState({ status: 'error', data: null, errorMessage: 'Не удалось загрузить детали', canRetry: false });
     }
-  }, [clubId, onForbidden, selectedNight]);
+  }, [clubId, enabled, onForbidden, selectedNight]);
 
   useEffect(() => {
+    if (!enabled) return;
     void loadList();
     return () => listControllerRef.current?.abort();
-  }, [loadList]);
+  }, [enabled, loadList]);
 
   useEffect(() => {
+    if (!enabled) return;
     void loadDetails();
     return () => detailsControllerRef.current?.abort();
-  }, [loadDetails]);
+  }, [enabled, loadDetails]);
+
+  useEffect(() => {
+    if (!enabled) {
+      listControllerRef.current?.abort();
+      detailsControllerRef.current?.abort();
+    }
+  }, [enabled]);
 
   return {
     list: listState,

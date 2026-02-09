@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStories } from './useStories';
 import { listStories } from '../api/adminAnalytics.api';
 import { AdminApiError } from '../api/admin.api';
@@ -13,6 +13,10 @@ vi.mock('../api/adminAnalytics.api', async () => {
 });
 
 describe('useStories', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('ignores canceled list requests without switching to error state', async () => {
     vi.mocked(listStories).mockRejectedValue(new AdminApiError('aborted', { isAbort: true }));
 
@@ -25,5 +29,13 @@ describe('useStories', () => {
     expect(result.current.list.status).not.toBe('error');
     expect(result.current.list.status).not.toBe('forbidden');
     expect(result.current.list.errorMessage).toBe('');
+  });
+
+  it('does not auto-load stories when disabled', async () => {
+    renderHook(() => useStories(1, 20, 0, undefined, undefined, false));
+
+    await waitFor(() => {
+      expect(listStories).not.toHaveBeenCalled();
+    });
   });
 });
