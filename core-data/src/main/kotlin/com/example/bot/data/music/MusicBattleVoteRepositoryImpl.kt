@@ -7,12 +7,13 @@ import com.example.bot.music.MusicBattleVoteRepository
 import com.example.bot.music.MusicVoteUpsertResult
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.count
-import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertIgnore
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -62,13 +63,52 @@ class MusicBattleVoteRepositoryImpl(
             }
 
             if (existing == null) {
-                MusicBattleVotesTable.insert {
-                    it[this.battleId] = battleId
-                    it[this.userId] = userId
-                    it[this.chosenItemId] = chosenItemId
-                    it[votedAt] = now.atOffset(ZoneOffset.UTC)
+                val inserted =
+                    MusicBattleVotesTable.insertIgnore {
+                        it[this.battleId] = battleId
+                        it[this.userId] = userId
+                        it[this.chosenItemId] = chosenItemId
+                        it[votedAt] = now.atOffset(ZoneOffset.UTC)
+                    }
+                if (inserted.insertedCount > 0) {
+                    return@newSuspendedTransaction MusicVoteUpsertResult.CREATED
                 }
-                return@newSuspendedTransaction MusicVoteUpsertResult.CREATED
+
+                val currentVote =
+                    MusicBattleVotesTable
+                        .select { (MusicBattleVotesTable.battleId eq battleId) and (MusicBattleVotesTable.userId eq userId) }
+                        .limit(1)
+                        .firstOrNull()
+                        ?: error("Failed to load vote for battle=$battleId user=$userId after insertIgnore")
+
+                if (currentVote[MusicBattleVotesTable.chosenItemId] == chosenItemId) {
+                    return@newSuspendedTransaction MusicVoteUpsertResult.UNCHANGED
+                }
+
+                val updated =
+                    MusicBattleVotesTable.update({
+                        (MusicBattleVotesTable.battleId eq battleId) and
+                            (MusicBattleVotesTable.userId eq userId) and
+                            (MusicBattleVotesTable.chosenItemId neq chosenItemId)
+                    }) {
+                        it[MusicBattleVotesTable.chosenItemId] = chosenItemId
+                        it[votedAt] = now.atOffset(ZoneOffset.UTC)
+                    }
+                if (updated > 0) {
+                    return@newSuspendedTransaction MusicVoteUpsertResult.UPDATED
+                }
+
+                val reloadedVote =
+                    MusicBattleVotesTable
+                        .select { (MusicBattleVotesTable.battleId eq battleId) and (MusicBattleVotesTable.userId eq userId) }
+                        .limit(1)
+                        .firstOrNull()
+                        ?: error("Failed to load vote for battle=$battleId user=$userId after update fallback")
+                return@newSuspendedTransaction if (reloadedVote[MusicBattleVotesTable.chosenItemId] == chosenItemId) {
+                    MusicVoteUpsertResult.UNCHANGED
+                } else {
+                    MusicVoteUpsertResult.UPDATED
+                }
             }
 
             MusicBattleVotesTable.update({ (MusicBattleVotesTable.battleId eq battleId) and (MusicBattleVotesTable.userId eq userId) }) {
@@ -89,24 +129,29 @@ class MusicBattleVoteRepositoryImpl(
 
     override suspend fun aggregateVotes(battleId: Long): MusicBattleVoteAggregate? =
         newSuspendedTransaction(Dispatchers.IO, db) {
+            val battle =
+                MusicBattlesTable
+                    .select { MusicBattlesTable.id eq battleId }
+                    .limit(1)
+                    .firstOrNull()
+                    ?: return@newSuspendedTransaction null
+
+            val itemAId = battle[MusicBattlesTable.itemAId]
+            val itemBId = battle[MusicBattlesTable.itemBId]
             val countExpr = MusicBattleVotesTable.userId.count()
             val rows =
-                MusicBattlesTable
-                    .join(MusicBattleVotesTable, JoinType.LEFT, additionalConstraint = { MusicBattlesTable.id eq MusicBattleVotesTable.battleId })
+                MusicBattleVotesTable
                     .slice(
-                        MusicBattlesTable.id,
-                        MusicBattlesTable.itemAId,
-                        MusicBattlesTable.itemBId,
                         MusicBattleVotesTable.chosenItemId,
                         countExpr,
                     )
-                    .select { MusicBattlesTable.id eq battleId }
-                    .groupBy(MusicBattlesTable.id, MusicBattlesTable.itemAId, MusicBattlesTable.itemBId, MusicBattleVotesTable.chosenItemId)
+                    .select {
+                        (MusicBattleVotesTable.battleId eq battleId) and
+                            ((MusicBattleVotesTable.chosenItemId eq itemAId) or (MusicBattleVotesTable.chosenItemId eq itemBId))
+                    }
+                    .groupBy(MusicBattleVotesTable.chosenItemId)
                     .toList()
 
-            val first = rows.firstOrNull() ?: return@newSuspendedTransaction null
-            val itemAId = first[MusicBattlesTable.itemAId]
-            val itemBId = first[MusicBattlesTable.itemBId]
             var itemAVotes = 0
             var itemBVotes = 0
             for (row in rows) {
