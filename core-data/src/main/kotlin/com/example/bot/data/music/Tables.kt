@@ -76,6 +76,43 @@ object MusicTrackOfNightTable : Table("music_track_of_night") {
     }
 }
 
+
+object MusicBattlesTable : Table("music_battles") {
+    val id = long("id").autoIncrement()
+    val clubId = long("club_id").nullable()
+    val itemAId = long("item_a_id") references MusicItemsTable.id
+    val itemBId = long("item_b_id") references MusicItemsTable.id
+    val status = text("status")
+    val startsAt = timestampWithTimeZone("starts_at")
+    val endsAt = timestampWithTimeZone("ends_at")
+    val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
+    val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestamp())
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+object MusicBattleVotesTable : Table("music_battle_votes") {
+    val battleId = long("battle_id") references MusicBattlesTable.id
+    val userId = long("user_id")
+    val chosenItemId = long("chosen_item_id") references MusicItemsTable.id
+    val votedAt = timestampWithTimeZone("voted_at").defaultExpression(CurrentTimestamp())
+
+    override val primaryKey = PrimaryKey(battleId, userId)
+
+    init {
+        index("idx_music_battle_votes_battle_item", false, battleId, chosenItemId)
+    }
+}
+
+object MusicItemStemsAssetsTable : Table("music_item_stems_assets") {
+    val itemId = long("item_id") references MusicItemsTable.id
+    val assetId = long("asset_id") references MusicAssetsTable.id
+    val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
+    val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestamp())
+
+    override val primaryKey = PrimaryKey(itemId)
+}
+
 object MusicAssetsTable : Table("music_assets") {
     val id = long("id").autoIncrement()
     val kind = text("kind")
