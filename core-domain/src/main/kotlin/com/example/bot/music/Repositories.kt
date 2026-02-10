@@ -191,6 +191,8 @@ interface MusicBattleVoteRepository {
     suspend fun findUserVote(battleId: Long, userId: Long): MusicBattleVote?
 
     suspend fun aggregateVotes(battleId: Long): MusicBattleVoteAggregate?
+
+    suspend fun aggregateUserVotesSince(clubId: Long, since: Instant): Map<Long, Int>
 }
 
 interface MusicStemsRepository {
