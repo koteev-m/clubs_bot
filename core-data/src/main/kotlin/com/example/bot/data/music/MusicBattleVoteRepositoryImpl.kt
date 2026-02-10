@@ -10,6 +10,7 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.count
 import org.jetbrains.exposed.sql.insertIgnore
@@ -127,6 +128,23 @@ class MusicBattleVoteRepositoryImpl(
                 ?.toVote()
         }
 
+
+    override suspend fun aggregateUserVotesSince(clubId: Long, since: Instant): Map<Long, Int> =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val countExpr = MusicBattleVotesTable.userId.count()
+            MusicBattleVotesTable
+                .innerJoin(MusicBattlesTable)
+                .slice(MusicBattleVotesTable.userId, countExpr)
+                .select {
+                    (MusicBattlesTable.clubId eq clubId) and
+                        (MusicBattleVotesTable.votedAt greaterEq since.atOffset(ZoneOffset.UTC))
+                }
+                .groupBy(MusicBattleVotesTable.userId)
+                .associate { row ->
+                    val count = row[countExpr].coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                    row[MusicBattleVotesTable.userId] to count
+                }
+        }
     override suspend fun aggregateVotes(battleId: Long): MusicBattleVoteAggregate? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val battle =

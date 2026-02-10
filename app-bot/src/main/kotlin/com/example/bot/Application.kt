@@ -95,6 +95,7 @@ import com.example.bot.routes.meBookingsRoutes
 import com.example.bot.routes.adminMusicRoutes
 import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.musicLikesRoutes
+import com.example.bot.routes.musicBattleRoutes
 import com.example.bot.routes.ownerHealthRoutes
 import com.example.bot.routes.supportRoutes
 import com.example.bot.routes.pingRoute
@@ -243,6 +244,8 @@ fun Application.module() {
     val musicLikesRepository by inject<MusicLikesRepository>()
     val mixtapeService by inject<MixtapeService>()
     val musicPlaylistRepository by inject<MusicPlaylistRepository>()
+    val musicBattleService by inject<com.example.bot.music.MusicBattleService>()
+    val musicStemsRepository by inject<com.example.bot.music.MusicStemsRepository>()
     val trackOfNightRepository by inject<TrackOfNightRepository>()
     val waitlistRepository by inject<WaitlistRepository>()
     val promoterInviteService by inject<PromoterInviteService>()
@@ -417,6 +420,12 @@ fun Application.module() {
         mixtapeService = mixtapeService,
         itemsRepository = musicItemsRepository,
         clock = appClock,
+    )
+    musicBattleRoutes(
+        battleService = musicBattleService,
+        itemsRepository = musicItemsRepository,
+        stemsRepository = musicStemsRepository,
+        assetsRepository = musicAssetsRepository,
     )
     trackOfNightRoutes(
         trackOfNightRepository = trackOfNightRepository,

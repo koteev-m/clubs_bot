@@ -30,6 +30,20 @@
 - Голосование (`music_battle_votes`) ограничено до одного голоса пользователя на баттл (`PRIMARY KEY (battle_id, user_id)`), смена выбора разрешена только пока баттл активен и не завершился (`ACTIVE` и `now < ends_at`).
 - Stem-пакеты хранятся отдельной link-таблицей `music_item_stems_assets` (ровно один актуальный stem-asset на item, upsert по `item_id`).
 
+- API баттлов и голосования (miniapp):
+  - `GET /api/music/battles/current?clubId=...` — текущий `ACTIVE` баттл по клубу, `404 not_found` если нет активного;
+  - `GET /api/music/battles?clubId=...&limit=...&offset=...` — список баттлов;
+  - `GET /api/music/battles/{battleId}` — детали баттла;
+  - `POST /api/music/battles/{battleId}/vote` — идемпотентный upsert голоса (`{ "chosenItemId": ... }`), доступно miniapp-пользователям (роли guest+), при закрытом/неактивном баттле `409 invalid_state`, при некорректном выборе `400 validation_error`.
+- В баттлах возвращаются агрегаты `countA/countB/percentA/percentB` (проценты считаются целочисленно) и `myVote` для авторизованного пользователя.
+- `GET /api/music/items/{itemId}/stems`:
+  - доступ только для `OWNER`, `HEAD_MANAGER`, `GLOBAL_ADMIN`;
+  - раздача через тот же контракт кеширования, что и для `/audio`/`/cover` (`ETag` + `Cache-Control: private, max-age=3600, must-revalidate`);
+  - при отсутствии stem-пакета: `404 not_found`.
+- `GET /api/music/fans/ranking?clubId=...&windowDays=...`:
+  - безопасный MVP без PII других пользователей;
+  - возвращает только `myStats` (votesCast/likesGiven/points/rank) и обезличенное распределение (`topPoints`, `p50/p90/p99`, `totalFans`).
+
 ## Рекомендации для клиентов
 - `initData` передавать только в заголовке `X-Telegram-Init-Data`, не в query string. Query-параметр `initData` поддерживается только как legacy fallback.
 - Для публичных лент использовать `ETag` и `If-None-Match`.
