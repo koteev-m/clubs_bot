@@ -7,6 +7,8 @@ import com.example.bot.data.booking.TableDepositRepository
 import com.example.bot.data.booking.TableSession
 import com.example.bot.data.booking.TableSessionRepository
 import com.example.bot.data.booking.TableSessionStatus
+import com.example.bot.data.booking.EnsureDepositResult
+import com.example.bot.data.booking.OpenSessionResult
 import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
@@ -74,10 +76,10 @@ class AdminTableOpsRoutesTest {
         coEvery { deps.guestQrResolver.resolveGuest(1, any(), any()) } returns
             GuestQrResolveResult.Success(guestUserId = 42, eventId = 999, listId = 1, entryId = 2)
         coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
-        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
-            tableSession(id = 55, tableId = 10)
+        coEvery { deps.tableSessionRepository.openSessionIdempotent(any(), any(), any(), any(), any(), any()) } returns
+            OpenSessionResult(session = tableSession(id = 55, tableId = 10), created = true)
         coEvery {
-            deps.tableDepositRepository.createDeposit(
+            deps.tableDepositRepository.ensureSeatDepositIdempotent(
                 any(),
                 any(),
                 any(),
@@ -91,7 +93,10 @@ class AdminTableOpsRoutesTest {
                 any(),
             )
         } returns
-            tableDeposit(id = 77, sessionId = 55, tableId = 10, guestUserId = 42)
+            EnsureDepositResult(
+                deposit = tableDeposit(id = 77, sessionId = 55, tableId = 10, guestUserId = 42),
+                created = true,
+            )
         coEvery { deps.visitRepository.tryCheckIn(any()) } returns visitResult()
         coEvery { deps.visitRepository.markHasTable(any(), any(), any(), any()) } returns true
 
@@ -121,10 +126,10 @@ class AdminTableOpsRoutesTest {
     @Test
     fun `seat table without qr skips visit updates`() = withApp { deps ->
         coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
-        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
-            tableSession(id = 100, tableId = 10)
+        coEvery { deps.tableSessionRepository.openSessionIdempotent(any(), any(), any(), any(), any(), any()) } returns
+            OpenSessionResult(session = tableSession(id = 100, tableId = 10), created = true)
         coEvery {
-            deps.tableDepositRepository.createDeposit(
+            deps.tableDepositRepository.ensureSeatDepositIdempotent(
                 any(),
                 any(),
                 any(),
@@ -138,7 +143,10 @@ class AdminTableOpsRoutesTest {
                 any(),
             )
         } returns
-            tableDeposit(id = 200, sessionId = 100, tableId = 10, guestUserId = null)
+            EnsureDepositResult(
+                deposit = tableDeposit(id = 200, sessionId = 100, tableId = 10, guestUserId = null),
+                created = true,
+            )
 
         val response =
             client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
@@ -205,7 +213,21 @@ class AdminTableOpsRoutesTest {
         coEvery { deps.guestQrResolver.resolveGuest(1, any(), any()) } returns
             GuestQrResolveResult.Success(guestUserId = 42, eventId = 999, listId = 1, entryId = 2)
         coEvery { deps.tableSessionRepository.findActiveSession(1, any(), 10) } returns session
-        coEvery { deps.tableDepositRepository.listDepositsForSession(1, 55) } returns listOf(deposit)
+        coEvery {
+            deps.tableDepositRepository.ensureSeatDepositIdempotent(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } returns EnsureDepositResult(deposit = deposit, created = false)
 
         val response =
             client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
@@ -226,9 +248,24 @@ class AdminTableOpsRoutesTest {
         assertEquals(55, body["sessionId"]!!.jsonPrimitive.long)
         assertEquals(77, body["depositId"]!!.jsonPrimitive.long)
         response.assertNoStoreHeaders()
-        coVerify(exactly = 0) { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) {
-            deps.tableDepositRepository.createDeposit(
+            deps.tableSessionRepository.openSessionIdempotent(any(), any(), any(), any(), any(), any())
+        }
+        coVerify(exactly = 0) { deps.visitRepository.tryCheckIn(any()) }
+        coVerify(exactly = 0) { deps.visitRepository.markHasTable(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `seat table with existing session and deposit avoids side effects`() = withApp { deps ->
+        val session = tableSession(id = 99, tableId = 10)
+        val deposit = tableDeposit(id = 88, sessionId = 99, tableId = 10, guestUserId = 42)
+        coEvery { deps.guestQrResolver.resolveGuest(1, any(), any()) } returns
+            GuestQrResolveResult.Success(guestUserId = 42, eventId = 999, listId = 1, entryId = 2)
+        coEvery { deps.tableSessionRepository.findActiveSession(1, any(), 10) } returns null
+        coEvery { deps.tableSessionRepository.openSessionIdempotent(any(), any(), any(), any(), any(), any()) } returns
+            OpenSessionResult(session = session, created = false)
+        coEvery {
+            deps.tableDepositRepository.ensureSeatDepositIdempotent(
                 any(),
                 any(),
                 any(),
@@ -241,9 +278,33 @@ class AdminTableOpsRoutesTest {
                 any(),
                 any(),
             )
-        }
+        } returns EnsureDepositResult(deposit = deposit, created = false)
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"WITH_QR",
+                    "guestPassQr":"GL:1:2:10:deadbeef",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(99, body["sessionId"]!!.jsonPrimitive.long)
+        assertEquals(88, body["depositId"]!!.jsonPrimitive.long)
+        response.assertNoStoreHeaders()
         coVerify(exactly = 0) { deps.visitRepository.tryCheckIn(any()) }
         coVerify(exactly = 0) { deps.visitRepository.markHasTable(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { deps.auditLogger.tableSessionOpened(any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositCreated(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test

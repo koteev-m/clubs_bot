@@ -33,7 +33,7 @@ class TableSessionDepositRepositoryTest {
     }
 
     @Test
-    fun `openSession idempotent`() =
+    fun `openSessionIdempotent returns existing session`() =
         runBlocking {
             val clubId = insertClub()
             val tableId = insertTable(clubId)
@@ -42,10 +42,12 @@ class TableSessionDepositRepositoryTest {
             val nightStart = Instant.parse("2024-03-01T20:00:00Z")
             val now = Instant.parse("2024-03-01T20:05:00Z")
 
-            val first = repo.openSession(clubId, nightStart, tableId, actorId, now, note = "init")
-            val second = repo.openSession(clubId, nightStart, tableId, actorId, now, note = "ignored")
+            val first = repo.openSessionIdempotent(clubId, nightStart, tableId, actorId, now, note = "init")
+            val second = repo.openSessionIdempotent(clubId, nightStart, tableId, actorId, now, note = "ignored")
 
-            assertEquals(first.id, second.id)
+            assertTrue(first.created)
+            assertFalse(second.created)
+            assertEquals(first.session.id, second.session.id)
             val total =
                 newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
                     TableSessionsTable.selectAll().count()
@@ -130,6 +132,60 @@ class TableSessionDepositRepositoryTest {
             } catch (ex: IllegalArgumentException) {
                 // expected
             }
+        }
+
+    @Test
+    fun `ensureSeatDepositIdempotent returns existing deposit`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+
+            val first =
+                repo.ensureSeatDepositIdempotent(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = now,
+                )
+            val second =
+                repo.ensureSeatDepositIdempotent(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = now,
+                )
+
+            assertTrue(first.created)
+            assertFalse(second.created)
+            assertEquals(first.deposit.id, second.deposit.id)
+            assertEquals(1, second.deposit.allocations.size)
+            assertEquals("BAR", second.deposit.allocations.first().categoryCode)
+            assertEquals(100, second.deposit.allocations.first().amountMinor)
+            val total =
+                newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                    TableDepositsTable.selectAll().count()
+                }
+            assertEquals(1, total)
         }
 
     @Test
