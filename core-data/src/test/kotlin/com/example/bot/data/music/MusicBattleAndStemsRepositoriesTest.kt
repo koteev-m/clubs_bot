@@ -91,6 +91,45 @@ class MusicBattleAndStemsRepositoriesTest {
             assertEquals(1, aggregate?.itemBVotes)
         }
 
+
+    @Test
+    fun `aggregate returns zero counts for battle without votes`() =
+        runBlocking {
+            val clubId = insertClub("No Votes Club")
+            val (itemA, itemB) = insertItems(clubId)
+            val battle = createActiveBattle(clubId, itemA, itemB)
+            val voteRepo = MusicBattleVoteRepositoryImpl(testDb.database)
+
+            val aggregate = voteRepo.aggregateVotes(battle.id)
+
+            assertNotNull(aggregate)
+            assertEquals(itemA, aggregate?.itemAId)
+            assertEquals(itemB, aggregate?.itemBId)
+            assertEquals(0, aggregate?.itemAVotes)
+            assertEquals(0, aggregate?.itemBVotes)
+        }
+
+    @Test
+    fun `aggregate returns zero for side without votes`() =
+        runBlocking {
+            val clubId = insertClub("One Side Club")
+            val voterOne = insertUser("one-side-voter-one")
+            val voterTwo = insertUser("one-side-voter-two")
+            val (itemA, itemB) = insertItems(clubId)
+            val battle = createActiveBattle(clubId, itemA, itemB)
+            val voteRepo = MusicBattleVoteRepositoryImpl(testDb.database)
+            val now = Instant.parse("2024-04-01T21:00:00Z")
+
+            voteRepo.upsertVote(battle.id, voterOne, itemA, now)
+            voteRepo.upsertVote(battle.id, voterTwo, itemA, now.plusSeconds(10))
+
+            val aggregate = voteRepo.aggregateVotes(battle.id)
+
+            assertNotNull(aggregate)
+            assertEquals(2, aggregate?.itemAVotes)
+            assertEquals(0, aggregate?.itemBVotes)
+        }
+
     @Test
     fun `list recent battles uses stable ordering by startsAt and id`() =
         runBlocking {
