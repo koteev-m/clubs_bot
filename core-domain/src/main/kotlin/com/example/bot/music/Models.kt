@@ -136,3 +136,45 @@ data class TrackOfNight(
     val markedBy: Long,
     val markedAt: Instant,
 )
+
+enum class MusicBattleStatus { DRAFT, ACTIVE, CLOSED }
+
+data class MusicBattle(
+    val id: Long,
+    val clubId: Long?,
+    val itemAId: Long,
+    val itemBId: Long,
+    val status: MusicBattleStatus,
+    val startsAt: Instant,
+    val endsAt: Instant,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+data class MusicBattleVote(
+    val battleId: Long,
+    val userId: Long,
+    val chosenItemId: Long,
+    val votedAt: Instant,
+)
+
+data class MusicBattleVoteAggregate(
+    val battleId: Long,
+    val itemAId: Long,
+    val itemBId: Long,
+    val itemAVotes: Int,
+    val itemBVotes: Int,
+)
+
+enum class MusicVoteUpsertResult {
+    CREATED,
+    UPDATED,
+    UNCHANGED,
+}
+
+data class MusicStemsPackage(
+    val itemId: Long,
+    val assetId: Long,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)

@@ -156,3 +156,47 @@ interface MusicAssetRepository {
 
     suspend fun getAssetMeta(id: Long): MusicAssetMeta?
 }
+
+interface MusicBattleRepository {
+    suspend fun create(
+        clubId: Long?,
+        itemAId: Long,
+        itemBId: Long,
+        status: MusicBattleStatus,
+        startsAt: Instant,
+        endsAt: Instant,
+    ): MusicBattle
+
+    suspend fun getById(id: Long): MusicBattle?
+
+    suspend fun findCurrentActive(clubId: Long?, now: Instant): MusicBattle?
+
+    suspend fun listRecent(
+        clubId: Long?,
+        limit: Int,
+        offset: Int,
+    ): List<MusicBattle>
+
+    suspend fun setStatus(id: Long, status: MusicBattleStatus, updatedAt: Instant): Boolean
+}
+
+interface MusicBattleVoteRepository {
+    suspend fun upsertVote(
+        battleId: Long,
+        userId: Long,
+        chosenItemId: Long,
+        now: Instant,
+    ): MusicVoteUpsertResult
+
+    suspend fun findUserVote(battleId: Long, userId: Long): MusicBattleVote?
+
+    suspend fun aggregateVotes(battleId: Long): MusicBattleVoteAggregate?
+}
+
+interface MusicStemsRepository {
+    suspend fun linkStemAsset(itemId: Long, assetId: Long, now: Instant): MusicStemsPackage
+
+    suspend fun unlinkStemAsset(itemId: Long): Boolean
+
+    suspend fun getStemAsset(itemId: Long): MusicStemsPackage?
+}
