@@ -114,6 +114,7 @@ import com.example.bot.telegram.InvitationTelegramHandler
 import com.example.bot.telegram.SupportTelegramHandler
 import com.example.bot.telegram.TelegramClient
 import com.example.bot.telegram.TelegramCallbackRouter
+import com.example.bot.telegram.TelegramGuestFallbackHandler
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -298,10 +299,21 @@ fun Application.module() {
             supportService = supportService,
             userRepository = userRepository,
         )
+    val telegramGuestFallbackHandler =
+        TelegramGuestFallbackHandler(
+            send = telegramClient::send,
+            bookingState = bookingState,
+            clubsRepository = clubsRepository,
+            userRepository = userRepository,
+            supportService = supportService,
+            botUsername = config.bot.username,
+            qrSecretProvider = { System.getenv("QR_SECRET") ?: "" },
+        )
     val telegramCallbackRouter =
         TelegramCallbackRouter(
             supportHandler = supportTelegramHandler::handle,
             invitationHandler = invitationTelegramHandler::handle,
+            guestFallbackHandler = telegramGuestFallbackHandler::handle,
         )
 
     environment.monitor.subscribe(ApplicationStarted) {
