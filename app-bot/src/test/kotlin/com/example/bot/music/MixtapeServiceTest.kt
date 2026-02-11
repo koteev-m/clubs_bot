@@ -205,6 +205,8 @@ class MixtapeServiceTest {
             likes.filter { it.userId == userId && !it.createdAt.isBefore(since) }
 
         override suspend fun findAllLikesSince(since: Instant): List<Like> = likes.filter { !it.createdAt.isBefore(since) }
+        override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> =
+            likes.filter { !it.createdAt.isBefore(since) }.groupingBy { it.userId }.eachCount()
 
         override suspend fun find(userId: Long, itemId: Long): Like? = likes.firstOrNull { it.userId == userId && it.itemId == itemId }
 

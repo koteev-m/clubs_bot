@@ -576,6 +576,7 @@ class MusicRoutesTest {
         override suspend fun findUserLikesSince(userId: Long, since: Instant): List<com.example.bot.music.Like> = emptyList()
 
         override suspend fun findAllLikesSince(since: Instant): List<com.example.bot.music.Like> = emptyList()
+        override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> = emptyMap()
 
         override suspend fun find(userId: Long, itemId: Long): com.example.bot.music.Like? = null
 

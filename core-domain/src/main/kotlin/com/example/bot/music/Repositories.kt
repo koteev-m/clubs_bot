@@ -103,6 +103,11 @@ interface MusicLikesRepository {
     suspend fun findAllLikesSince(since: Instant): List<Like>
 
     /**
+     * Returns like counts per user for items of the provided club in the inclusive range [since; now].
+     */
+    suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int>
+
+    /**
      * Returns a specific like if present.
      */
     suspend fun find(userId: Long, itemId: Long): Like?

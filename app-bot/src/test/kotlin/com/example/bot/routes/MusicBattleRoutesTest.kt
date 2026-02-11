@@ -49,7 +49,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -58,6 +58,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MusicBattleRoutesTest {
@@ -145,6 +146,60 @@ class MusicBattleRoutesTest {
     }
 
     @Test
+    fun `fans ranking returns deterministic stats without pii`() = withBattleApp(
+        likesAggregation = mapOf(100L to 5, 200L to 3),
+        votesAggregation = mapOf(100L to 2, 200L to 4),
+    ) { _, _, _ ->
+        val response =
+            client.get("/api/music/fans/ranking?clubId=10&windowDays=30") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(setOf("myStats", "distribution"), body.keys)
+        assertFalse(body.containsKey("userIds"))
+
+        val myStats = body["myStats"]!!.jsonObject
+        assertEquals(2, myStats["votesCast"]!!.jsonPrimitive.int)
+        assertEquals(5, myStats["likesGiven"]!!.jsonPrimitive.int)
+        assertEquals(9, myStats["points"]!!.jsonPrimitive.int)
+        assertEquals(2, myStats["rank"]!!.jsonPrimitive.int)
+
+        val distribution = body["distribution"]!!.jsonObject
+        val topPoints = distribution["topPoints"] as JsonArray
+        assertEquals(listOf(11, 9), topPoints.map { it.jsonPrimitive.int })
+    }
+
+    @Test
+    fun `vote same choice after closed is ok`() = withBattleApp { _, voteRepo, _ ->
+        voteRepo as StubVoteRepository
+        voteRepo.seedVote(
+            battleId = 2,
+            userId = telegramId,
+            chosenItemId = 11,
+            votedAt = now.minusSeconds(1800),
+        )
+
+        val response = vote(2, 11)
+
+        assertEquals(HttpStatusCode.OK, response.status)
+    }
+
+    @Test
+    fun `battle details with unpublished item returns not found`() = withBattleApp(
+        itemsRepo = StubItemsRepository(unpublishedItemIds = setOf(11L)),
+    ) { _, _, _ ->
+        val response =
+            client.get("/api/music/battles/1") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertTrue(response.bodyAsText().contains("not_found"))
+    }
+
+    @Test
     fun `stems endpoint allows owner and denies guest`() = withBattleApp(roles = setOf(Role.GUEST)) { _, _, _ ->
         val denied =
             client.get("/api/music/items/11/stems") {
@@ -172,12 +227,14 @@ class MusicBattleRoutesTest {
 
     private fun withBattleApp(
         roles: Set<Role> = setOf(Role.GUEST),
+        itemsRepo: MusicItemRepository = StubItemsRepository(),
+        likesAggregation: Map<Long, Int> = emptyMap(),
+        votesAggregation: Map<Long, Int> = emptyMap(),
         block: suspend ApplicationTestBuilder.(MusicBattleRepository, MusicBattleVoteRepository, MusicStemsRepository) -> Unit,
     ) = testApplication {
         val battleRepo = StubBattleRepository(now)
-        val voteRepo = StubVoteRepository(battleRepo)
-        val itemsRepo = StubItemsRepository()
-        val likesRepo = StubLikesRepository()
+        val voteRepo = StubVoteRepository(battleRepo, now, votesAggregation)
+        val likesRepo = StubLikesRepository(likesAggregation)
         val stemsRepo = StubStemsRepository()
         val assetsRepo = StubAssetsRepository()
         val service = MusicBattleService(battleRepo, voteRepo, itemsRepo, likesRepo, clock)
@@ -240,15 +297,31 @@ class MusicBattleRoutesTest {
         override suspend fun setStatus(id: Long, status: MusicBattleStatus, updatedAt: Instant): Boolean = false
     }
 
-    private class StubVoteRepository(private val battles: MusicBattleRepository) : MusicBattleVoteRepository {
+    private class StubVoteRepository(
+        private val battles: MusicBattleRepository,
+        private val now: Instant,
+        private val aggregateVotesByUser: Map<Long, Int>,
+    ) : MusicBattleVoteRepository {
         private val votes = mutableMapOf<Pair<Long, Long>, MusicBattleVote>()
 
         override suspend fun upsertVote(battleId: Long, userId: Long, chosenItemId: Long, now: Instant): MusicVoteUpsertResult {
+            val battle = battles.getById(battleId) ?: throw IllegalArgumentException("Battle $battleId not found")
             val key = battleId to userId
             val existing = votes[key]
             if (existing?.chosenItemId == chosenItemId) return MusicVoteUpsertResult.UNCHANGED
+
+            val isActive =
+                battle.status == MusicBattleStatus.ACTIVE &&
+                    !this.now.isBefore(battle.startsAt) &&
+                    this.now.isBefore(battle.endsAt)
+            if (!isActive) throw IllegalStateException("Battle $battleId is not open for vote changes")
+
             votes[key] = MusicBattleVote(battleId, userId, chosenItemId, now)
             return if (existing == null) MusicVoteUpsertResult.CREATED else MusicVoteUpsertResult.UPDATED
+        }
+
+        fun seedVote(battleId: Long, userId: Long, chosenItemId: Long, votedAt: Instant) {
+            votes[battleId to userId] = MusicBattleVote(battleId, userId, chosenItemId, votedAt)
         }
 
         override suspend fun findUserVote(battleId: Long, userId: Long): MusicBattleVote? = votes[battleId to userId]
@@ -266,10 +339,14 @@ class MusicBattleRoutesTest {
         }
 
         override suspend fun aggregateUserVotesSince(clubId: Long, since: Instant): Map<Long, Int> =
-            votes.values.filter { !it.votedAt.isBefore(since) }.groupingBy { it.userId }.eachCount()
+            if (aggregateVotesByUser.isNotEmpty()) aggregateVotesByUser else votes.values.filter { !it.votedAt.isBefore(since) }.groupingBy { it.userId }.eachCount()
     }
 
-    private class StubItemsRepository : MusicItemRepository {
+    private class StubItemsRepository(
+        private val unpublishedItemIds: Set<Long> = emptySet(),
+        private val nonSetItemIds: Set<Long> = emptySet(),
+        private val clubOverrides: Map<Long, Long?> = emptyMap(),
+    ) : MusicItemRepository {
         private val itemA =
             MusicItemView(
                 id = 11,
@@ -290,23 +367,38 @@ class MusicBattleRoutesTest {
             )
         private val itemB = itemA.copy(id = 12, title = "Set B", dj = "DJ B")
 
+        private fun adjusted(item: MusicItemView): MusicItemView {
+            val publishedAt = if (item.id in unpublishedItemIds) null else item.publishedAt
+            val itemType = if (item.id in nonSetItemIds) MusicItemType.TRACK else item.itemType
+            val clubId = clubOverrides[item.id] ?: item.clubId
+            return item.copy(publishedAt = publishedAt, itemType = itemType, clubId = clubId)
+        }
+
         override suspend fun create(req: MusicItemCreate, actor: UserId): MusicItemView = throw UnsupportedOperationException()
         override suspend fun update(id: Long, req: MusicItemUpdate, actor: UserId): MusicItemView? = null
         override suspend fun setPublished(id: Long, publishedAt: Instant?, actor: UserId): MusicItemView? = null
         override suspend fun attachAudioAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = null
         override suspend fun attachCoverAsset(id: Long, assetId: Long, actor: UserId): MusicItemView? = null
-        override suspend fun getById(id: Long): MusicItemView? = when (id) { 11L -> itemA; 12L -> itemB; else -> null }
+        override suspend fun getById(id: Long): MusicItemView? =
+            when (id) {
+                11L -> adjusted(itemA)
+                12L -> adjusted(itemB)
+                else -> null
+            }
         override suspend fun findByIds(ids: List<Long>): List<MusicItemView> = ids.mapNotNull { getById(it) }
         override suspend fun listActive(clubId: Long?, limit: Int, offset: Int, tag: String?, q: String?, type: MusicItemType?): List<MusicItemView> = emptyList()
         override suspend fun listAll(clubId: Long?, limit: Int, offset: Int, type: MusicItemType?): List<MusicItemView> = emptyList()
         override suspend fun lastUpdatedAt(): Instant? = null
     }
 
-    private class StubLikesRepository : MusicLikesRepository {
+    private class StubLikesRepository(
+        private val aggregateLikesByUser: Map<Long, Int> = emptyMap(),
+    ) : MusicLikesRepository {
         override suspend fun like(userId: Long, itemId: Long, now: Instant): Boolean = false
         override suspend fun unlike(userId: Long, itemId: Long): Boolean = false
         override suspend fun findUserLikesSince(userId: Long, since: Instant): List<Like> = emptyList()
         override suspend fun findAllLikesSince(since: Instant): List<Like> = emptyList()
+        override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> = aggregateLikesByUser
         override suspend fun find(userId: Long, itemId: Long): Like? = null
         override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> = emptyMap()
         override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()
