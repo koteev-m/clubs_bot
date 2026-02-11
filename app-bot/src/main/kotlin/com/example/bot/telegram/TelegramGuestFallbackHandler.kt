@@ -158,7 +158,15 @@ class TelegramGuestFallbackHandler(
         if (callbackQuery == null) return false
         val data = callbackQuery.data() ?: return false
         if (!data.startsWith("ask:club:")) return false
-        val chat = callbackQuery.message()?.chat() ?: return false
+        val message = callbackQuery.message()
+        val chat = message?.chat()
+        if (chat == null) {
+            send(
+                AnswerCallbackQuery(callbackQuery.id())
+                    .text("Не удалось открыть форму вопроса. Откройте чат с ботом и попробуйте снова."),
+            )
+            return true
+        }
         if (!isPrivateChat(chat)) {
             send(AnswerCallbackQuery(callbackQuery.id()).text("Команда доступна только в личке с ботом."))
             return true
@@ -175,7 +183,6 @@ class TelegramGuestFallbackHandler(
         }
 
         send(AnswerCallbackQuery(callbackQuery.id()).text("Клуб выбран."))
-        val message = callbackQuery.message() ?: return false
         val request =
             SendMessage(message.chat().id(), "Вы выбрали $clubName. Ответьте на это сообщение вопросом. clubId:$clubId")
                 .replyMarkup(ForceReply())
@@ -187,13 +194,11 @@ class TelegramGuestFallbackHandler(
     private suspend fun handleAskReply(message: Message): Boolean {
         if (!isPrivateChat(message.chat())) return false
         val markerText = message.replyToMessage()?.text().orEmpty()
+        if (!isAskMarkerText(markerText)) return false
         val clubId = parseClubIdMarker(markerText)
         if (clubId == null) {
-            if (markerText.contains("clubId:", ignoreCase = true)) {
-                sendToMessage(message, "Не удалось определить клуб. Начните заново через /ask.")
-                return true
-            }
-            return false
+            sendToMessage(message, "Не удалось определить клуб. Начните заново через /ask.")
+            return true
         }
         val user = resolveUser(message) ?: return true
         val question = message.text()?.trim().orEmpty()
@@ -284,6 +289,11 @@ class TelegramGuestFallbackHandler(
         val marker = Regex("clubId:(\\d+)")
         val id = marker.find(text)?.groupValues?.getOrNull(1)
         return id?.toLongOrNull()
+    }
+
+    private fun isAskMarkerText(text: String): Boolean {
+        return text.contains("Ответьте на это сообщение", ignoreCase = true) &&
+            text.contains("clubId:", ignoreCase = true)
     }
 
     private fun applyThread(

@@ -21,6 +21,7 @@ import com.pengrad.telegrambot.model.Chat
 import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.model.User as TelegramUser
+import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.SendMessage
 import com.pengrad.telegrambot.response.BaseResponse
@@ -124,6 +125,18 @@ class TelegramGuestFallbackHandlerTest {
     }
 
     @Test
+    fun `ask callback without message still answers callback query`() = runBlocking {
+        val sender = FallbackRecordingTelegramSender()
+        val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
+
+        val handled = handler.handle(askCallbackUpdateWithoutMessage("ask:club:1"))
+
+        assertTrue(handled)
+        assertTrue(sender.requests.any { it is AnswerCallbackQuery })
+        assertTrue(sender.requests.none { it is SendMessage })
+    }
+
+    @Test
     fun `ask reply without marker is not handled`() = runBlocking {
         val sender = FallbackRecordingTelegramSender()
         val handler =
@@ -153,6 +166,17 @@ class TelegramGuestFallbackHandlerTest {
 
         assertTrue(handled)
         assertEquals("Не удалось определить клуб. Начните заново через /ask.", sender.lastText())
+    }
+
+    @Test
+    fun `reply to non-ask message containing clubId is not handled`() = runBlocking {
+        val sender = FallbackRecordingTelegramSender()
+        val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
+
+        val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Просто текст clubId:1"))
+
+        assertFalse(handled)
+        assertTrue(sender.requests.isEmpty())
     }
 
     @Test
@@ -359,6 +383,19 @@ private fun askCallbackUpdate(data: String): Update {
     every { chat.id() } returns 42L
     every { chat.type() } returns type
     every { type.name } returns "Private"
+
+    return update
+}
+
+private fun askCallbackUpdateWithoutMessage(data: String): Update {
+    val update = mockk<Update>()
+    val callback = mockk<CallbackQuery>()
+
+    every { update.callbackQuery() } returns callback
+    every { update.message() } returns null
+    every { callback.data() } returns data
+    every { callback.id() } returns "cb-id"
+    every { callback.message() } returns null
 
     return update
 }
