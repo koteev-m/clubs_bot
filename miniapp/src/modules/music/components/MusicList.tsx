@@ -11,13 +11,16 @@ export interface MusicItemProps {
   isTrackOfNight?: boolean;
   likesCount: number;
   likedByMe: boolean;
+  hasStems?: boolean;
 }
 
 /** Renders simple list of music items. */
 export const MusicList: React.FC<{
   items: MusicItemProps[];
   onToggleLike?: (id: number, liked: boolean) => void;
-}> = ({ items, onToggleLike }) => {
+  onDownloadStems?: (id: number) => void;
+  stemsErrorByItem?: Record<number, string>;
+}> = ({ items, onToggleLike, onDownloadStems, stemsErrorByItem }) => {
   return (
     <div>
       {items.map((it) => (
@@ -52,7 +55,17 @@ export const MusicList: React.FC<{
                 {it.likedByMe ? 'Убрать лайк' : 'Лайкнуть'}
               </button>
             )}
+            {onDownloadStems && it.hasStems && (
+              <button
+                type="button"
+                className="text-xs text-blue-600"
+                onClick={() => onDownloadStems(it.id)}
+              >
+                Скачать stems
+              </button>
+            )}
           </div>
+          {stemsErrorByItem?.[it.id] && <div className="text-xs text-red-600 mt-1">{stemsErrorByItem[it.id]}</div>}
         </div>
       ))}
     </div>
