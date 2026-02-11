@@ -124,7 +124,7 @@ class TelegramGuestFallbackHandlerTest {
     }
 
     @Test
-    fun `ask reply without marker returns validation error`() = runBlocking {
+    fun `ask reply without marker is not handled`() = runBlocking {
         val sender = FallbackRecordingTelegramSender()
         val handler =
             handler(
@@ -133,8 +133,25 @@ class TelegramGuestFallbackHandlerTest {
                 bookings = emptyList(),
             )
 
-        handler.handle(messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение"))
+        val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение"))
 
+        assertFalse(handled)
+        assertTrue(sender.requests.isEmpty())
+    }
+
+    @Test
+    fun `ask reply with malformed marker returns validation error`() = runBlocking {
+        val sender = FallbackRecordingTelegramSender()
+        val handler =
+            handler(
+                sender = sender,
+                now = Instant.parse("2026-01-01T20:00:00Z"),
+                bookings = emptyList(),
+            )
+
+        val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение. clubId:abc"))
+
+        assertTrue(handled)
         assertEquals("Не удалось определить клуб. Начните заново через /ask.", sender.lastText())
     }
 
