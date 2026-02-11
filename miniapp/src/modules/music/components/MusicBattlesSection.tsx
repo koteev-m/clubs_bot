@@ -29,7 +29,8 @@ export const MusicBattlesSection: React.FC<{ clubId?: number; enabled?: boolean 
   const battlesList = useBattlesList(clubId, 5, 0, enabled);
   const voteState = useBattleVote();
 
-  const activeBattle = voteState.data ?? currentBattle.battle;
+  const activeBattle =
+    currentBattle.battle && voteState.data?.id === currentBattle.battle.id ? voteState.data : currentBattle.battle;
 
   const handleVote = async (chosenItemId: number) => {
     if (!activeBattle) return;

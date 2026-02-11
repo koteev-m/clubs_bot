@@ -25,6 +25,34 @@ const baseVoteState = {
   reset: vi.fn(),
 };
 
+
+const staleVoteBattle = {
+  id: 999,
+  clubId: 1,
+  status: 'ACTIVE',
+  startsAt: '2025-01-01T00:00:00Z',
+  endsAt: '2025-01-01T01:00:00Z',
+  itemA: {
+    id: 1,
+    title: 'Track A',
+    likesCount: 0,
+    likedByMe: false,
+  },
+  itemB: {
+    id: 2,
+    title: 'Track B',
+    likesCount: 0,
+    likedByMe: false,
+  },
+  votes: {
+    countA: 10,
+    countB: 5,
+    percentA: 67,
+    percentB: 33,
+    myVote: null,
+  },
+};
+
 describe('MusicBattlesSection', () => {
   it('renders empty state when there is no active battle', () => {
     vi.mocked(useBattle).mockReturnValue({
@@ -40,6 +68,24 @@ describe('MusicBattlesSection', () => {
     render(<MusicBattlesSection clubId={1} enabled />);
 
     expect(screen.getByText('Сейчас нет активного battle')).toBeTruthy();
+  });
+
+
+  it('renders empty state when current battle is null even if vote data exists', () => {
+    vi.mocked(useBattle).mockReturnValue({
+      status: 'ready',
+      battle: null,
+      errorMessage: '',
+      canRetry: false,
+      reload: vi.fn(async () => {}),
+    });
+    vi.mocked(useBattlesList).mockReturnValue(baseListState);
+    vi.mocked(useBattleVote).mockReturnValue({ ...baseVoteState, data: staleVoteBattle });
+
+    render(<MusicBattlesSection clubId={1} enabled />);
+
+    expect(screen.getByText('Сейчас нет активного battle')).toBeTruthy();
+    expect(screen.queryByText('Track A vs Track B')).toBeNull();
   });
 
   it('renders unauthorized caveat', () => {
