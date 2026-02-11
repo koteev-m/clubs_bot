@@ -119,6 +119,21 @@ class MusicBattleRoutesTest {
     }
 
     @Test
+    fun `vote on unpublished battle item returns not found and does not persist vote`() =
+        withBattleApp(itemsRepo = StubItemsRepository(unpublishedItemIds = setOf(11L))) { _, votes, _ ->
+            val response =
+                client.post("/api/music/battles/1/vote") {
+                    header("X-Telegram-Init-Data", "init")
+                    header(HttpHeaders.ContentType, "application/json")
+                    setBody("{" + "\"chosenItemId\":11}")
+                }
+
+            assertEquals(HttpStatusCode.NotFound, response.status)
+            assertTrue(response.bodyAsText().contains("not_found"))
+            assertFalse((votes as StubVoteRepository).hasVote(battleId = 1L, userId = telegramId))
+        }
+
+    @Test
     fun `vote idempotency keeps counts stable for same choice`() = withBattleApp { _, _, _ ->
         val first = vote(1, 11)
         val second = vote(1, 11)
@@ -323,6 +338,8 @@ class MusicBattleRoutesTest {
         fun seedVote(battleId: Long, userId: Long, chosenItemId: Long, votedAt: Instant) {
             votes[battleId to userId] = MusicBattleVote(battleId, userId, chosenItemId, votedAt)
         }
+
+        fun hasVote(battleId: Long, userId: Long): Boolean = votes.containsKey(battleId to userId)
 
         override suspend fun findUserVote(battleId: Long, userId: Long): MusicBattleVote? = votes[battleId to userId]
 
