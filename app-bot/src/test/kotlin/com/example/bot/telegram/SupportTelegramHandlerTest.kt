@@ -133,7 +133,7 @@ class TelegramCallbackRouterTest {
             TelegramCallbackRouter(
                 supportHandler = { supportCalls++ },
                 invitationHandler = { invitationCalls++ },
-                guestFallbackHandler = {},
+                guestFallbackHandler = { false },
             )
         val update = mockCallbackUpdate("support_rate:1:up")
 
@@ -149,7 +149,7 @@ class TelegramCallbackRouterTest {
             TelegramCallbackRouter(
                 supportHandler = { throw AssertionError("support should not be called") },
                 invitationHandler = {},
-                guestFallbackHandler = {},
+                guestFallbackHandler = { false },
             )
         val updateConfirm = mockCallbackUpdate("inv_confirm:abc")
         val updateDecline = mockCallbackUpdate("inv_decline:xyz")
@@ -166,7 +166,7 @@ class TelegramCallbackRouterTest {
             TelegramCallbackRouter(
                 supportHandler = { supportCalls++ },
                 invitationHandler = { invitationCalls++ },
-                guestFallbackHandler = {},
+                guestFallbackHandler = { false },
             )
         val update = mockCallbackUpdate("other:callback")
 
@@ -177,14 +177,17 @@ class TelegramCallbackRouterTest {
     }
 
     @Test
-    fun `routes non callback updates to invitation handler`() = runBlocking {
+    fun `routes non callback updates to invitation handler when fallback ignored update`() = runBlocking {
         var invitationCalls = 0
         var fallbackCalls = 0
         val router =
             TelegramCallbackRouter(
                 supportHandler = { throw AssertionError("support should not be called") },
                 invitationHandler = { invitationCalls++ },
-                guestFallbackHandler = { fallbackCalls++ },
+                guestFallbackHandler = {
+                    fallbackCalls++
+                    false
+                },
             )
         val update = mockk<Update>()
         every { update.callbackQuery() } returns null
@@ -196,13 +199,38 @@ class TelegramCallbackRouterTest {
     }
 
     @Test
+    fun `routes non callback updates only to fallback when handled`() = runBlocking {
+        var invitationCalls = 0
+        var fallbackCalls = 0
+        val router =
+            TelegramCallbackRouter(
+                supportHandler = { throw AssertionError("support should not be called") },
+                invitationHandler = { invitationCalls++ },
+                guestFallbackHandler = {
+                    fallbackCalls++
+                    true
+                },
+            )
+        val update = mockk<Update>()
+        every { update.callbackQuery() } returns null
+
+        router.route(update)
+
+        assertEquals(0, invitationCalls)
+        assertEquals(1, fallbackCalls)
+    }
+
+    @Test
     fun `routes ask callback to guest fallback handler`() = runBlocking {
         var fallbackCalls = 0
         val router =
             TelegramCallbackRouter(
                 supportHandler = { throw AssertionError("support should not be called") },
                 invitationHandler = { throw AssertionError("invitation should not be called") },
-                guestFallbackHandler = { fallbackCalls++ },
+                guestFallbackHandler = {
+                    fallbackCalls++
+                    true
+                },
             )
         val update = mockCallbackUpdate("ask:club:10")
 

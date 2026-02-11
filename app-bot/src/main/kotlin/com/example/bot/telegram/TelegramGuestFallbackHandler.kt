@@ -36,31 +36,47 @@ class TelegramGuestFallbackHandler(
 ) {
     private val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(zoneId)
 
-    suspend fun handle(update: Update) {
-        handleAskCallback(update.callbackQuery())
-        val message = update.message() ?: return
+    suspend fun handle(update: Update): Boolean {
+        if (handleAskCallback(update.callbackQuery())) {
+            return true
+        }
+        val message = update.message() ?: return false
         val text = message.text()?.trim().orEmpty()
 
         if (text.equals("/cancel", ignoreCase = true) || text.startsWith("/cancel@", ignoreCase = true)) {
             if (isPrivateChat(message.chat())) {
                 sendToMessage(message, "Ок, отменено. Когда будете готовы, используйте /ask.")
+                return true
             }
-            return
+            return false
         }
 
         if (message.replyToMessage() != null) {
-            handleAskReply(message)
-            return
+            return handleAskReply(message)
         }
 
-        if (!isPrivateChat(message.chat())) return
+        if (!isPrivateChat(message.chat())) return false
 
         when {
-            isCommand(text, "qr", "my_pass") -> handleQr(message)
-            isCommand(text, "my", "next_booking") -> handleMy(message)
-            isCommand(text, "invites") -> handleInvitesInfo(message)
-            isCommand(text, "ask", "ask_club") -> handleAskStart(message)
+            isCommand(text, "qr", "my_pass") -> {
+                handleQr(message)
+                return true
+            }
+            isCommand(text, "my", "next_booking") -> {
+                handleMy(message)
+                return true
+            }
+            isCommand(text, "invites") -> {
+                handleInvitesInfo(message)
+                return true
+            }
+            isCommand(text, "ask", "ask_club") -> {
+                handleAskStart(message)
+                return true
+            }
         }
+
+        return false
     }
 
     private suspend fun handleQr(message: Message) {
@@ -138,53 +154,57 @@ class TelegramGuestFallbackHandler(
         send(request)
     }
 
-    private suspend fun handleAskCallback(callbackQuery: CallbackQuery?) {
-        if (callbackQuery == null) return
-        val data = callbackQuery.data() ?: return
-        if (!data.startsWith("ask:club:")) return
-        val chat = callbackQuery.message()?.chat() ?: return
+    private suspend fun handleAskCallback(callbackQuery: CallbackQuery?): Boolean {
+        if (callbackQuery == null) return false
+        val data = callbackQuery.data() ?: return false
+        if (!data.startsWith("ask:club:")) return false
+        val chat = callbackQuery.message()?.chat() ?: return false
         if (!isPrivateChat(chat)) {
             send(AnswerCallbackQuery(callbackQuery.id()).text("Команда доступна только в личке с ботом."))
-            return
+            return true
         }
         val clubId = data.removePrefix("ask:club:").toLongOrNull()
         if (clubId == null) {
             send(AnswerCallbackQuery(callbackQuery.id()).text("Некорректный клуб."))
-            return
+            return true
         }
         val clubName = clubsRepository.getById(clubId)?.name
         if (clubName == null) {
             send(AnswerCallbackQuery(callbackQuery.id()).text("Клуб не найден."))
-            return
+            return true
         }
 
         send(AnswerCallbackQuery(callbackQuery.id()).text("Клуб выбран."))
-        val message = callbackQuery.message() ?: return
+        val message = callbackQuery.message() ?: return false
         val request =
             SendMessage(message.chat().id(), "Вы выбрали $clubName. Ответьте на это сообщение вопросом. clubId:$clubId")
                 .replyMarkup(ForceReply())
         applyThread(request, message.threadIdOrNull())
         send(request)
+        return true
     }
 
-    private suspend fun handleAskReply(message: Message) {
-        if (!isPrivateChat(message.chat())) return
+    private suspend fun handleAskReply(message: Message): Boolean {
+        if (!isPrivateChat(message.chat())) return false
         val markerText = message.replyToMessage()?.text().orEmpty()
         val clubId = parseClubIdMarker(markerText)
         if (clubId == null) {
-            sendToMessage(message, "Не удалось определить клуб. Начните заново через /ask.")
-            return
+            if (markerText.contains("clubId:", ignoreCase = true)) {
+                sendToMessage(message, "Не удалось определить клуб. Начните заново через /ask.")
+                return true
+            }
+            return false
         }
-        val user = resolveUser(message) ?: return
+        val user = resolveUser(message) ?: return true
         val question = message.text()?.trim().orEmpty()
         if (question.isBlank()) {
             sendToMessage(message, "Напишите текст вопроса одним сообщением.")
-            return
+            return true
         }
         val club = clubsRepository.getById(clubId)
         if (club == null) {
             sendToMessage(message, "Выбранный клуб больше неактуален. Начните заново через /ask.")
-            return
+            return true
         }
 
         when (
@@ -201,6 +221,7 @@ class TelegramGuestFallbackHandler(
             is SupportServiceResult.Success -> sendToMessage(message, "Вопрос отправлен в клуб. Мы скоро ответим.")
             is SupportServiceResult.Failure -> sendToMessage(message, "Не удалось отправить вопрос. Попробуйте позже.")
         }
+        return true
     }
 
     private suspend fun sendForceReply(message: Message, text: String) {

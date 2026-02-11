@@ -5,14 +5,16 @@ import com.pengrad.telegrambot.model.Update
 class TelegramCallbackRouter(
     private val supportHandler: suspend (Update) -> Unit,
     private val invitationHandler: suspend (Update) -> Unit,
-    private val guestFallbackHandler: suspend (Update) -> Unit,
+    private val guestFallbackHandler: suspend (Update) -> Boolean,
 ) {
     suspend fun route(update: Update) {
         val callbackData = update.callbackQuery()?.data()
         when {
             callbackData == null -> {
-                guestFallbackHandler(update)
-                invitationHandler(update)
+                val handledByFallback = guestFallbackHandler(update)
+                if (!handledByFallback) {
+                    invitationHandler(update)
+                }
             }
             SupportCallbacks.isRateCallback(callbackData) -> supportHandler(update)
             callbackData.startsWith(InvitationTelegramHandler.CALLBACK_CONFIRM_PREFIX) ||
