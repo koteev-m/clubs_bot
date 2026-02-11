@@ -28,6 +28,19 @@ const mapSetToItem = (item: MusicSetDto): MusicItemProps => ({
   hasStems: item.hasStems ?? false,
 });
 
+
+const sanitizeStemsFileName = (fileName: string): string => {
+  const withoutPathSeparators = fileName.replace(/[\\/]/g, '');
+  const withoutControlChars = Array.from(withoutPathSeparators)
+    .filter((char) => {
+      const charCode = char.charCodeAt(0);
+      return charCode >= 32 && charCode !== 127;
+    })
+    .join('');
+  const sanitized = withoutControlChars.trim();
+  return sanitized || 'stems.zip';
+};
+
 /** Page displaying music items. */
 export const MusicPage: React.FC = () => {
   const selectedClub = useGuestStore((state) => state.selectedClub);
@@ -69,6 +82,7 @@ export const MusicPage: React.FC = () => {
       });
     return () => {
       controller.abort();
+      musicRequestRef.current += 1;
     };
   }, []);
 
@@ -99,6 +113,7 @@ export const MusicPage: React.FC = () => {
 
     return () => {
       controller.abort();
+      mixtapeRequestRef.current += 1;
     };
   }, []);
 
@@ -152,9 +167,14 @@ export const MusicPage: React.FC = () => {
         const blobUrl = URL.createObjectURL(result.blob);
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = result.fileName;
+        link.download = sanitizeStemsFileName(result.fileName);
+        link.style.display = 'none';
+        document.body.appendChild(link);
         link.click();
-        URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(link);
+        setTimeout(() => {
+          URL.revokeObjectURL(blobUrl);
+        }, 0);
       })
       .catch((nextError: unknown) => {
         if (isRequestCanceled(nextError)) return;
