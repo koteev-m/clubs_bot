@@ -12,18 +12,18 @@ class MusicBattleService(
 ) {
     suspend fun getCurrent(clubId: Long, userId: Long?): BattleDetails? {
         val battle = battlesRepository.findCurrentActive(clubId = clubId, now = Instant.now(clock)) ?: return null
-        return toDetails(battle, userId)
+        return toDetailsOrNull(battle, userId)
     }
 
     suspend fun getById(battleId: Long, userId: Long?): BattleDetails? {
         val battle = battlesRepository.getById(battleId) ?: return null
-        return toDetails(battle, userId)
+        return toDetailsOrNull(battle, userId)
     }
 
     suspend fun list(clubId: Long, limit: Int, offset: Int, userId: Long?): List<BattleDetails> {
         val battles = battlesRepository.listRecent(clubId = clubId, limit = limit, offset = offset)
         return battles.mapNotNull { battle ->
-            runCatching { toDetails(battle, userId) }.getOrNull()
+            toDetailsOrNull(battle, userId)
         }
     }
 
@@ -31,20 +31,20 @@ class MusicBattleService(
         val now = Instant.now(clock)
         val battle = battlesRepository.getById(battleId) ?: throw BattleNotFoundException()
         if (chosenItemId != battle.itemAId && chosenItemId != battle.itemBId) throw InvalidBattleChoiceException()
-        val isActive =
-            battle.status == MusicBattleStatus.ACTIVE &&
-                !now.isBefore(battle.startsAt) &&
-                now.isBefore(battle.endsAt)
-        if (!isActive) throw BattleInvalidStateException()
-        votesRepository.upsertVote(battleId = battleId, userId = userId, chosenItemId = chosenItemId, now = now)
-        return VoteResult(details = toDetails(battle, userId), chosenItemId = chosenItemId)
+        try {
+            votesRepository.upsertVote(battleId = battleId, userId = userId, chosenItemId = chosenItemId, now = now)
+        } catch (_: IllegalStateException) {
+            throw BattleInvalidStateException()
+        } catch (_: IllegalArgumentException) {
+            throw BattleNotFoundException()
+        }
+        return VoteResult(details = toDetailsOrNull(battle, userId) ?: throw BattleNotFoundException(), chosenItemId = chosenItemId)
     }
 
     suspend fun fanRanking(clubId: Long, windowDays: Int, userId: Long): FanRanking {
         val now = Instant.now(clock)
         val since = now.minusSeconds(windowDays.toLong() * 24L * 3600L)
-        val likesInWindow = likesRepository.findAllLikesSince(since)
-        val likesByUser = likesInWindow.groupingBy { it.userId }.eachCount()
+        val likesByUser = likesRepository.aggregateUserLikesSince(clubId = clubId, since = since)
         val votesByUser = votesRepository.aggregateUserVotesSince(clubId = clubId, since = since)
 
         val userIds = (likesByUser.keys + votesByUser.keys).toSet()
@@ -72,10 +72,13 @@ class MusicBattleService(
         )
     }
 
-    private suspend fun toDetails(battle: MusicBattle, userId: Long?): BattleDetails {
+    private suspend fun toDetailsOrNull(battle: MusicBattle, userId: Long?): BattleDetails? {
         val items = itemsRepository.findByIds(listOf(battle.itemAId, battle.itemBId)).associateBy { it.id }
-        val itemA = requireNotNull(items[battle.itemAId])
-        val itemB = requireNotNull(items[battle.itemBId])
+        val itemA = items[battle.itemAId] ?: return null
+        val itemB = items[battle.itemBId] ?: return null
+        if (itemA.itemType != MusicItemType.SET || itemB.itemType != MusicItemType.SET) return null
+        if (itemA.publishedAt == null || itemB.publishedAt == null) return null
+        if (battle.clubId != null && (itemA.clubId != battle.clubId || itemB.clubId != battle.clubId)) return null
         val aggregate =
             votesRepository.aggregateVotes(battle.id)
                 ?: MusicBattleVoteAggregate(

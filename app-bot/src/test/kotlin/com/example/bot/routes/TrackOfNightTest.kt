@@ -439,6 +439,7 @@ class TrackOfNightTest {
         override suspend fun unlike(userId: Long, itemId: Long): Boolean = false
         override suspend fun findUserLikesSince(userId: Long, since: Instant): List<Like> = emptyList()
         override suspend fun findAllLikesSince(since: Instant): List<Like> = emptyList()
+        override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> = emptyMap()
         override suspend fun find(userId: Long, itemId: Long): Like? = null
         override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> = emptyMap()
         override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()

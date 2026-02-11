@@ -59,6 +59,23 @@ class MusicLikesRepositoryImpl(
                 .map { it.toLike() }
         }
 
+    override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val countExpr = MusicLikesTable.userId.count()
+            MusicLikesTable
+                .innerJoin(MusicItemsTable)
+                .slice(MusicLikesTable.userId, countExpr)
+                .select {
+                    (MusicItemsTable.clubId eq clubId) and
+                        (MusicLikesTable.likedAt greaterEq since.atOffset(ZoneOffset.UTC))
+                }
+                .groupBy(MusicLikesTable.userId)
+                .associate { row ->
+                    val count = row[countExpr].coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                    row[MusicLikesTable.userId] to count
+                }
+        }
+
     override suspend fun find(userId: Long, itemId: Long): Like? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicLikesTable

@@ -288,6 +288,8 @@ class MusicLikesRoutesTest {
             storage.filter { it.userId == userId && !it.createdAt.isBefore(since) }
 
         override suspend fun findAllLikesSince(since: Instant): List<Like> = storage.filter { !it.createdAt.isBefore(since) }
+        override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> =
+            storage.filter { !it.createdAt.isBefore(since) }.groupingBy { it.userId }.eachCount()
 
         override suspend fun find(userId: Long, itemId: Long): Like? = storage.firstOrNull { it.userId == userId && it.itemId == itemId }
 
@@ -317,6 +319,7 @@ class MusicLikesRoutesTest {
         override suspend fun unlike(userId: Long, itemId: Long): Boolean = false
         override suspend fun findUserLikesSince(userId: Long, since: Instant): List<Like> = emptyList()
         override suspend fun findAllLikesSince(since: Instant): List<Like> = emptyList()
+        override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> = emptyMap()
         override suspend fun find(userId: Long, itemId: Long): Like? = null
         override suspend fun countsForItems(itemIds: Collection<Long>): Map<Long, Int> = emptyMap()
         override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> = emptySet()
