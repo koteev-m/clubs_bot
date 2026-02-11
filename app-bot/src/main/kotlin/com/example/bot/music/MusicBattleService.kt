@@ -30,15 +30,19 @@ class MusicBattleService(
     suspend fun vote(battleId: Long, userId: Long, chosenItemId: Long): VoteResult {
         val now = Instant.now(clock)
         val battle = battlesRepository.getById(battleId) ?: throw BattleNotFoundException()
+        val visibleItems = loadVisibleBattleItems(battle) ?: throw BattleNotFoundException()
         if (chosenItemId != battle.itemAId && chosenItemId != battle.itemBId) throw InvalidBattleChoiceException()
         try {
             votesRepository.upsertVote(battleId = battleId, userId = userId, chosenItemId = chosenItemId, now = now)
-        } catch (_: IllegalStateException) {
-            throw BattleInvalidStateException()
-        } catch (_: IllegalArgumentException) {
-            throw BattleNotFoundException()
+        } catch (e: IllegalStateException) {
+            if (e.message?.contains("not open for vote changes") == true) throw BattleInvalidStateException()
+            throw e
+        } catch (e: IllegalArgumentException) {
+            if (e.message?.contains("Battle ") == true && e.message?.contains(" not found") == true) throw BattleNotFoundException()
+            throw e
         }
-        return VoteResult(details = toDetailsOrNull(battle, userId) ?: throw BattleNotFoundException(), chosenItemId = chosenItemId)
+        val (itemA, itemB) = visibleItems
+        return VoteResult(details = toDetails(battle, itemA, itemB, userId), chosenItemId = chosenItemId)
     }
 
     suspend fun fanRanking(clubId: Long, windowDays: Int, userId: Long): FanRanking {
@@ -73,12 +77,11 @@ class MusicBattleService(
     }
 
     private suspend fun toDetailsOrNull(battle: MusicBattle, userId: Long?): BattleDetails? {
-        val items = itemsRepository.findByIds(listOf(battle.itemAId, battle.itemBId)).associateBy { it.id }
-        val itemA = items[battle.itemAId] ?: return null
-        val itemB = items[battle.itemBId] ?: return null
-        if (itemA.itemType != MusicItemType.SET || itemB.itemType != MusicItemType.SET) return null
-        if (itemA.publishedAt == null || itemB.publishedAt == null) return null
-        if (battle.clubId != null && (itemA.clubId != battle.clubId || itemB.clubId != battle.clubId)) return null
+        val (itemA, itemB) = loadVisibleBattleItems(battle) ?: return null
+        return toDetails(battle, itemA, itemB, userId)
+    }
+
+    private suspend fun toDetails(battle: MusicBattle, itemA: MusicItemView, itemB: MusicItemView, userId: Long?): BattleDetails {
         val aggregate =
             votesRepository.aggregateVotes(battle.id)
                 ?: MusicBattleVoteAggregate(
@@ -103,6 +106,16 @@ class MusicBattleService(
             itemB = itemB,
             votes = VoteAggregateView(aggregate.itemAVotes, aggregate.itemBVotes, percentA, percentB, myVote),
         )
+    }
+
+    private suspend fun loadVisibleBattleItems(battle: MusicBattle): Pair<MusicItemView, MusicItemView>? {
+        val items = itemsRepository.findByIds(listOf(battle.itemAId, battle.itemBId)).associateBy { it.id }
+        val itemA = items[battle.itemAId] ?: return null
+        val itemB = items[battle.itemBId] ?: return null
+        if (itemA.itemType != MusicItemType.SET || itemB.itemType != MusicItemType.SET) return null
+        if (itemA.publishedAt == null || itemB.publishedAt == null) return null
+        if (battle.clubId != null && (itemA.clubId != battle.clubId || itemB.clubId != battle.clubId)) return null
+        return itemA to itemB
     }
 
     private fun percentile(points: List<Int>, ratio: Double): Int {
