@@ -27,3 +27,37 @@
 - Нельзя иметь два HOLD одновременно.
 - Депозиты/доплаты/охрана — только через операции, без “перезаписи итоговой суммы”.
 - После закрытия смены финансы заморожены, правки только через супер-роль + причина + аудит.
+
+=== REPO DELIVERY RULES (обязательно для всех задач) ===
+
+### Definition of Done (DoD)
+- Изменение считается завершённым только если выполнены все пункты:
+  1. Обновлён production-код.
+  2. Добавлены/обновлены тесты под изменённое поведение.
+  3. Выполнены проверки Gradle и зафиксирован результат (pass/fail с причиной).
+- Минимум для локальной проверки: `./gradlew test`.
+- Для задач по hardening и readiness дополнительно прогонять lint/static/IT набор.
+
+### Engineering standards
+- Kotlin style: соблюдаем `ktlint`; читаемый и явный код без скрытой магии.
+- Static analysis: `detekt` обязателен для новых/изменённых участков.
+- Коррутины: не проглатывать `CancellationException` через `catch (Throwable/Exception)`; если перехват широкого типа неизбежен — `CancellationException` обязательно rethrow.
+- Единый формат API ошибок: не вводить ad-hoc структуры, использовать общий error envelope проекта.
+
+### Security guardrails (prod/stage)
+- Все security-critical проверки работают в режиме fail-closed для `prod`/`stage`.
+- Запрещено логировать чувствительные данные: `initData`, любые секреты, `qrSecret`, `Idempotency-Key`.
+- Использование `initData` в query-string в `prod` запрещено (допускаются только безопасные каналы передачи, принятые в проекте).
+- Любые исключения из правил выше требуют явного обоснования, теста и записи в документации.
+
+### Test requirements for risky areas
+- Любые изменения в `routing`, `security`, `payments` обязаны сопровождаться:
+  - тестами через Ktor test host;
+  - и (где есть работа с БД/транзакциями/блокировками) интеграционными тестами на Postgres.
+
+### Recommended commands
+- Базовый прогон: `./gradlew clean test`
+- Интеграционные тесты: `./gradlew test -PrunIT=true`
+- Линт и статанализ: `./gradlew detekt ktlintCheck`
+- Форматирование + проверки + тесты: `scripts/verify.sh`
+- CI-like прогон локально: `scripts/verify.sh ci`

@@ -18,6 +18,22 @@ Exposed 0.49 and Micrometer, targets JDK 21 and is packaged as a self-contained
 | `miniapp` | Static Mini App assets served via `webAppRoutes()`. |
 | `tools` | Auxiliary utilities (perf harness, smoke checks). |
 
+## Local verification
+
+Use a single script for reproducible local checks before commits/PRs:
+
+```bash
+scripts/verify.sh
+```
+
+CI-like run (clean + static checks + unit/integration tests):
+
+```bash
+scripts/verify.sh ci
+```
+
+The script wraps Gradle tasks in this order: `formatAll`, `staticCheck`, `test`, `test -PrunIT=true`.
+
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 
 `GET /api/clubs?city=&q=&tag=&genre=&date=&page=&size=` accepts optional filters:
