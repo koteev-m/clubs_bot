@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 mode="${1:-full}"
 
 run_cmd() {
-  echo "\n==> $*"
+  printf '\n==> %s\n' "$*"
   "$@"
 }
 
@@ -19,7 +19,8 @@ run_full() {
 }
 
 run_ci() {
-  run_cmd ./gradlew --no-daemon clean staticCheck test -PrunIT=true
+  run_cmd ./gradlew --no-daemon clean staticCheck test
+  run_cmd ./gradlew --no-daemon test -PrunIT=true
 }
 
 case "$mode" in
@@ -35,4 +36,4 @@ case "$mode" in
     ;;
 esac
 
-echo "\nverify.sh completed in '$mode' mode."
+printf "\nverify.sh completed in '%s' mode.\n" "$mode"
