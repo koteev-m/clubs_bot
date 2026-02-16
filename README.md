@@ -26,13 +26,16 @@ Use a single script for reproducible local checks before commits/PRs:
 scripts/verify.sh
 ```
 
-CI-like run (clean + static checks + unit/integration tests):
+CI-like run:
 
 ```bash
 scripts/verify.sh ci
 ```
 
-The script wraps Gradle tasks in this order: `formatAll`, `staticCheck`, `test`, `test -PrunIT=true`.
+`scripts/verify.sh` modes and task order:
+
+- `full`: `formatAll` → `staticCheck` → `test` → `test -PrunIT=true`.
+- `ci`: `clean staticCheck test` → `test -PrunIT=true`.
 
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 
