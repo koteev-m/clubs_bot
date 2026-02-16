@@ -7,7 +7,9 @@ cd "$ROOT_DIR"
 mode="${1:-full}"
 
 run_cmd() {
-  printf '\n==> %s\n' "$*"
+  printf '\n==> '
+  printf '%q ' "$@"
+  printf '\n'
   "$@"
 }
 
@@ -31,9 +33,9 @@ case "$mode" in
     run_ci
     ;;
   *)
-    echo "Usage: scripts/verify.sh [full|ci]" >&2
+    printf 'Usage: scripts/verify.sh [full|ci]\n' >&2
     exit 2
     ;;
 esac
 
-printf "\nverify.sh completed in '%s' mode.\n" "$mode"
+printf '\nverify.sh completed in %s mode.\n' "$mode"
