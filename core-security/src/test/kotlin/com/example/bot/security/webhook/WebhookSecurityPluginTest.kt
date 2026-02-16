@@ -73,7 +73,7 @@ class WebhookSecurityPluginTest :
             }
         }
 
-        "duplicate update returns 409 and logs after threshold" {
+        "duplicate update returns 200 and logs after threshold" {
             withTestApp({ duplicateSuspicionThreshold = 2 }) { env ->
                 suspend fun post(updateId: Long) =
                     env.client.post("/webhook") {
@@ -83,10 +83,10 @@ class WebhookSecurityPluginTest :
                     }
 
                 post(5).status shouldBe HttpStatusCode.OK
-                post(5).status shouldBe HttpStatusCode.Conflict
-                post(5).status shouldBe HttpStatusCode.Conflict
+                post(5).status shouldBe HttpStatusCode.OK
+                post(5).status shouldBe HttpStatusCode.OK
                 val response = post(5)
-                response.status shouldBe HttpStatusCode.Conflict
+                response.status shouldBe HttpStatusCode.OK
                 val reasons = runBlocking { env.suspiciousRepo.listRecent().map { it.reason } }
                 reasons shouldContain SuspiciousIpReason.DUPLICATE_UPDATE
             }

@@ -14,6 +14,8 @@ import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.security.UserRepository
+import com.example.bot.data.security.webhook.SuspiciousIpRepository
+import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.data.booking.TableDepositRepository
 import com.example.bot.data.booking.TableSessionRepository
 import com.example.bot.data.gamification.GamificationSettingsRepository
@@ -260,6 +262,8 @@ fun Application.module() {
     val guestGamificationService by inject<com.example.bot.gamification.GuestGamificationService>()
     val opsChatConfigRepository by inject<ClubOpsChatConfigRepository>()
     val userRepository by inject<UserRepository>()
+    val suspiciousIpRepository by inject<SuspiciousIpRepository>()
+    val webhookUpdateDedupRepository by inject<WebhookUpdateDedupRepository>()
     val supportService by inject<SupportService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
@@ -472,6 +476,8 @@ fun Application.module() {
     )
     telegramWebhookRoutes(
         expectedSecret = config.webhook.secretToken,
+        dedupRepository = webhookUpdateDedupRepository,
+        suspiciousIpRepository = suspiciousIpRepository,
         onUpdate = { update -> telegramCallbackRouter.route(update) },
     )
     waitlistRoutes(

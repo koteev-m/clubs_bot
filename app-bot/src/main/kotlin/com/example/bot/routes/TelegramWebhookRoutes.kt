@@ -1,52 +1,60 @@
 package com.example.bot.routes
 
+import com.example.bot.data.security.webhook.SuspiciousIpRepository
+import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
+import com.example.bot.security.webhook.WebhookSecurity
+import com.example.bot.security.webhook.WebhookSecurityConfig
+import com.example.bot.security.webhook.webhookRawBody
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.utility.BotUtils
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
-import io.ktor.server.request.header
-import io.ktor.server.request.receiveText
+import io.ktor.server.application.install
 import io.ktor.server.response.respond
 import io.ktor.server.routing.post
+import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import org.slf4j.LoggerFactory
 import kotlin.coroutines.cancellation.CancellationException
 
-private const val SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
-
 fun Application.telegramWebhookRoutes(
     expectedSecret: String?,
+    dedupRepository: WebhookUpdateDedupRepository,
+    suspiciousIpRepository: SuspiciousIpRepository,
+    security: WebhookSecurityConfig.() -> Unit = {},
     onUpdate: suspend (Update) -> Unit,
 ) {
     val logger = LoggerFactory.getLogger("TelegramWebhookRoutes")
 
     routing {
-        post("/telegram/webhook") {
-            if (!expectedSecret.isNullOrBlank()) {
-                val providedSecret = call.request.header(SECRET_HEADER)
-                if (providedSecret != expectedSecret) {
-                    logger.warn("webhook: invalid secret token")
-                    call.respond(HttpStatusCode.Unauthorized)
+        route("/telegram/webhook") {
+            install(WebhookSecurity) {
+                requireSecret = !expectedSecret.isNullOrBlank()
+                secretToken = expectedSecret
+                this.dedupRepository = dedupRepository
+                this.suspiciousIpRepository = suspiciousIpRepository
+                security(this)
+            }
+
+            post {
+                val body = call.webhookRawBody().decodeToString()
+                val update = runCatching { BotUtils.parseUpdate(body) }.getOrNull()
+                if (update == null) {
+                    logger.warn("webhook: invalid update payload")
+                    call.respond(HttpStatusCode.BadRequest)
                     return@post
                 }
-            }
 
-            val body = call.receiveText()
-            val update = runCatching { BotUtils.parseUpdate(body) }.getOrNull()
-            if (update == null) {
-                logger.warn("webhook: invalid update payload")
-                call.respond(HttpStatusCode.BadRequest)
-                return@post
-            }
+                try {
+                    onUpdate(update)
+                } catch (t: CancellationException) {
+                    throw t
+                } catch (t: Throwable) {
+                    logger.warn("webhook: handler failed: {}", t.javaClass.simpleName)
+                }
 
-            try {
-                onUpdate(update)
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                logger.warn("webhook: handler failed: {}", t.javaClass.simpleName)
+                call.respond(HttpStatusCode.OK, "OK")
             }
-
-            call.respond(HttpStatusCode.OK, "OK")
         }
     }
 }

@@ -1,7 +1,7 @@
 # Webhook Security
 
 This document describes the production-ready webhook hardening implemented in the bot
-service. The goal is to ensure that `/webhook` is resilient against spoofing, resource
+service. The goal is to ensure that `/telegram/webhook` is resilient against spoofing, resource
 exhaustion and replay attacks while providing actionable observability.
 
 ## Request validation pipeline
@@ -10,7 +10,7 @@ exhaustion and replay attacks while providing actionable observability.
    `X-Telegram-Bot-Api-Secret-Token` that matches the configured secret. Missing or
    incorrect secrets result in `401 Unauthorized` and the source is logged to the
    suspicious IP journal.
-2. **HTTP method** – only `POST /webhook` is accepted. Any other method returns
+2. **HTTP method** – only `POST /telegram/webhook` is accepted. Any other method returns
    `405 Method Not Allowed`.
 3. **Content-Type** – requests must be `application/json`; other types return
    `415 Unsupported Media Type`.
@@ -20,8 +20,8 @@ exhaustion and replay attacks while providing actionable observability.
 5. **Body parsing** – empty bodies or JSON documents without `update_id` return
    `400 Bad Request`.
 6. **Idempotency / deduplication** – update identifiers are stored in the
-   `webhook_update_dedup` table for 24 hours. Duplicates receive `409 Duplicate update`
-   and processing stops.
+   `webhook_update_dedup` table for 24 hours. Duplicates receive `200 OK` but are not
+   passed to the update handler, which prevents retries and replay processing.
 7. **MDC enrichment** – `Idempotency-Key` headers and `update_id` are placed in the MDC
    for downstream logging.
 
@@ -63,7 +63,7 @@ we also log the source IP as suspicious.
 ```
 ┌────────────┐        ┌─────────────┐        ┌────────────────────┐
 │ Telegram   │ 443/TLS│ External    │ 8080   │ Ktor Bot Service    │
-│ ingress IP │ ─────▶ │ Ingress/NLB │ ─────▶ │ /webhook + security │
+│ ingress IP │ ─────▶ │ Ingress/NLB │ ─────▶ │ /telegram/webhook + security │
 └────────────┘        └─────────────┘        └────────────────────┘
 ```
 
@@ -82,7 +82,7 @@ allow-lists can be enforced either at the ingress or at the service level.
                                             ▼
                                     ┌────────────────────┐
                                     │ Ktor Bot Service    │
-                                    │ /webhook + security │
+                                    │ /telegram/webhook + security │
                                     └────────────────────┘
 ```
 
@@ -125,5 +125,4 @@ reverse proxy.
 | Incorrect `Content-Type`          | 415         | `INVALID_CONTENT_TYPE`     |
 | Payload exceeds size limit        | 413         | `PAYLOAD_TOO_LARGE`        |
 | Empty body / invalid JSON         | 400         | `EMPTY_BODY` / `MALFORMED_JSON` |
-| Duplicate `update_id` within 24 h | 409         | `DUPLICATE_UPDATE` (on threshold) |
-
+| Duplicate `update_id` within 24 h | 200         | `DUPLICATE_UPDATE` (on threshold) |

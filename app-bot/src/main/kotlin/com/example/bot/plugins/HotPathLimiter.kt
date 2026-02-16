@@ -105,6 +105,7 @@ fun Application.installHotPathLimiterDefaults() {
     val defaults =
         listOf(
             "/webhook",
+            "/telegram/webhook",
             "/api/clubs/",
             "/api/guest-lists/import",
         )
