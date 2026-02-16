@@ -16,7 +16,7 @@ fun Route.telegramSetupRoutes(
     allowedUpdates: List<String>,
 ) {
     get("/telegram/setup-webhook") {
-        val url = "$baseUrl/webhook"
+        val url = "$baseUrl/telegram/webhook"
         val resp = client.setWebhook(url, secret, maxConnections, allowedUpdates)
         call.respond(mapOf("ok" to resp.isOk))
     }

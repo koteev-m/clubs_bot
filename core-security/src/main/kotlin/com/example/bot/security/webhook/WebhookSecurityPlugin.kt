@@ -161,7 +161,7 @@ val WebhookSecurity =
                             "count=${result.duplicateCount}",
                         )
                     }
-                    call.respondText("Duplicate update", status = HttpStatusCode.Conflict)
+                    call.respondText("OK", status = HttpStatusCode.OK)
                     return@onCall
                 }
             }
