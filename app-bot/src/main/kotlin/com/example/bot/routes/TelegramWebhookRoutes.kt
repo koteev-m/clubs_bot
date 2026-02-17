@@ -2,11 +2,12 @@ package com.example.bot.routes
 
 import com.example.bot.config.BotRunMode
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
+import com.example.bot.data.security.webhook.TelegramWebhookEnqueueResult
+import com.example.bot.data.security.webhook.TelegramWebhookIngressRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.security.webhook.WebhookSecurity
 import com.example.bot.security.webhook.WebhookSecurityConfig
 import com.example.bot.security.webhook.webhookRawBody
-import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.utility.BotUtils
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -16,15 +17,14 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import org.slf4j.LoggerFactory
-import kotlin.coroutines.cancellation.CancellationException
 
 fun Application.telegramWebhookRoutes(
     expectedSecret: String?,
     runMode: BotRunMode,
     dedupRepository: WebhookUpdateDedupRepository,
+    ingressRepository: TelegramWebhookIngressRepository,
     suspiciousIpRepository: SuspiciousIpRepository,
     security: WebhookSecurityConfig.() -> Unit = {},
-    onUpdate: suspend (Update) -> Unit,
 ) {
     val logger = LoggerFactory.getLogger("TelegramWebhookRoutes")
     if (runMode == BotRunMode.POLLING) {
@@ -54,12 +54,17 @@ fun Application.telegramWebhookRoutes(
                     return@post
                 }
 
-                try {
-                    onUpdate(update)
-                } catch (t: CancellationException) {
-                    throw t
-                } catch (t: Throwable) {
-                    logger.warn("webhook: handler failed: {}", t.javaClass.simpleName)
+                when (
+                    ingressRepository.enqueue(
+                        updateId = update.updateId().toLong(),
+                        payloadJson = body,
+                    )
+                ) {
+                    is TelegramWebhookEnqueueResult.Duplicate -> {
+                        logger.debug("webhook: duplicate update_id={} already queued", update.updateId())
+                    }
+
+                    is TelegramWebhookEnqueueResult.Enqueued -> Unit
                 }
 
                 call.respond(HttpStatusCode.OK, "OK")

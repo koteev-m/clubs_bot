@@ -16,6 +16,7 @@ import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
+import com.example.bot.data.security.webhook.TelegramWebhookIngressRepository
 import com.example.bot.data.booking.TableDepositRepository
 import com.example.bot.data.booking.TableSessionRepository
 import com.example.bot.data.gamification.GamificationSettingsRepository
@@ -117,6 +118,8 @@ import com.example.bot.telegram.SupportTelegramHandler
 import com.example.bot.telegram.TelegramClient
 import com.example.bot.telegram.TelegramCallbackRouter
 import com.example.bot.telegram.TelegramGuestFallbackHandler
+import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
+import com.example.bot.telegram.webhook.TelegramWebhookIngressWorker
 import com.example.bot.web.installBookingWebApp
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -264,6 +267,7 @@ fun Application.module() {
     val userRepository by inject<UserRepository>()
     val suspiciousIpRepository by inject<SuspiciousIpRepository>()
     val webhookUpdateDedupRepository by inject<WebhookUpdateDedupRepository>()
+    val telegramWebhookIngressRepository by inject<TelegramWebhookIngressRepository>()
     val supportService by inject<SupportService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
@@ -320,13 +324,24 @@ fun Application.module() {
             guestFallbackHandler = telegramGuestFallbackHandler::handle,
         )
 
+    val telegramWebhookIngressMetrics = TelegramWebhookIngressMetrics(registry)
+    val telegramWebhookIngressWorker =
+        TelegramWebhookIngressWorker(
+            repository = telegramWebhookIngressRepository,
+            onUpdate = { update -> telegramCallbackRouter.route(update) },
+            metrics = telegramWebhookIngressMetrics,
+        )
+
     environment.monitor.subscribe(ApplicationStarted) {
         opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
         opsNotificationService.start()
+        telegramWebhookIngressWorker.start()
     }
 
     environment.monitor.subscribe(ApplicationStopping) {
         runBlocking {
+            runCatching { telegramWebhookIngressWorker.shutdown() }
+                .onFailure { opsNotificationLogger.warn("TelegramWebhookIngressWorker stop failed", it) }
             runCatching { opsNotificationService.shutdown() }
                 .onSuccess { opsNotificationLogger.info("TelegramOperationalNotificationService stopped") }
                 .onFailure { opsNotificationLogger.warn("TelegramOperationalNotificationService stop failed", it) }
@@ -478,8 +493,8 @@ fun Application.module() {
         expectedSecret = config.webhook.secretToken,
         runMode = config.runMode,
         dedupRepository = webhookUpdateDedupRepository,
+        ingressRepository = telegramWebhookIngressRepository,
         suspiciousIpRepository = suspiciousIpRepository,
-        onUpdate = { update -> telegramCallbackRouter.route(update) },
     )
     waitlistRoutes(
         repository = waitlistRepository,
