@@ -15,10 +15,10 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withTimeout
 
 class ProductionPluginsTest :
@@ -94,6 +94,9 @@ class ProductionPluginsTest :
             HotPathMetrics.throttled.set(0)
             HotPathMetrics.active.set(0)
             HotPathMetrics.availablePermits.set(0)
+            val firstEntered = CompletableDeferred<Unit>()
+            val releaseFirst = CompletableDeferred<Unit>()
+            val handlerHits = AtomicInteger(0)
 
             testApplication {
                 environment {
@@ -108,7 +111,14 @@ class ProductionPluginsTest :
                     installHotPathLimiterDefaults()
                     routing {
                         get("/webhook/test") {
-                            delay(200)
+                            val hits = handlerHits.incrementAndGet()
+                            if (hits > 1) {
+                                throw IllegalStateException("Second request reached handler")
+                            }
+                            if (!firstEntered.isCompleted) {
+                                firstEntered.complete(Unit)
+                            }
+                            releaseFirst.await()
                             call.respondText("OK")
                         }
                     }
@@ -118,14 +128,32 @@ class ProductionPluginsTest :
                 withTimeout(5_000) {
                     coroutineScope {
                         val first = async { httpClient.get("/webhook/test") }
-                        delay(50)
+                        withTimeout(2_000) {
+                            firstEntered.await()
+                        }
+
                         val second = async { httpClient.get("/webhook/test") }
 
-                        val responses = awaitAll(first, second)
-                        responses.count { it.status == HttpStatusCode.OK } shouldBe 1
-                        responses.count { it.status == HttpStatusCode.TooManyRequests } shouldBe 1
-                        responses.first { it.status == HttpStatusCode.OK }.bodyAsText() shouldBe "OK"
-                        responses.first { it.status == HttpStatusCode.TooManyRequests }.headers[HttpHeaders.RetryAfter] shouldBe "7"
+                        try {
+                            val secondResponse =
+                                withTimeout(2_000) {
+                                    second.await()
+                                }
+                            secondResponse.status shouldBe HttpStatusCode.TooManyRequests
+                            secondResponse.headers[HttpHeaders.RetryAfter] shouldBe "7"
+                        } finally {
+                            if (!releaseFirst.isCompleted) {
+                                releaseFirst.complete(Unit)
+                            }
+                        }
+
+                        val firstResponse =
+                            withTimeout(2_000) {
+                                first.await()
+                            }
+                        firstResponse.status shouldBe HttpStatusCode.OK
+                        firstResponse.bodyAsText() shouldBe "OK"
+                        handlerHits.get() shouldBe 1
                         HotPathMetrics.throttled.get() shouldBe 1
                     }
                 }
