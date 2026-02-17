@@ -3,39 +3,40 @@ package com.example.bot.routes
 import com.example.bot.config.BotRunMode
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.SuspiciousIpTable
+import com.example.bot.data.security.webhook.TelegramWebhookIngressRepository
+import com.example.bot.data.security.webhook.TelegramWebhookUpdatesTable
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupTable
 import com.example.bot.security.webhook.TELEGRAM_SECRET_HEADER
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
-import io.kotest.assertions.throwables.shouldThrow
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
-import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
 
 private const val SECRET = "secret-token"
 
 class TelegramWebhookRoutesTest :
     StringSpec({
-        "same update twice calls handler once" {
+        "same update twice creates one ingress row" {
             withTelegramWebhookApp { env ->
                 val first = env.client.post("/telegram/webhook") { validRequest(101) }
                 val second = env.client.post("/telegram/webhook") { validRequest(101) }
 
                 first.status shouldBe HttpStatusCode.OK
                 second.status shouldBe HttpStatusCode.OK
-                env.handledUpdates.get() shouldBe 1
+                env.ingressRepository.pendingCount() shouldBe 1
             }
         }
 
@@ -49,7 +50,7 @@ class TelegramWebhookRoutesTest :
                     }
 
                 response.status shouldBe HttpStatusCode.Unauthorized
-                env.handledUpdates.get() shouldBe 0
+                env.ingressRepository.pendingCount() shouldBe 0
             }
         }
 
@@ -63,7 +64,7 @@ class TelegramWebhookRoutesTest :
                     }
 
                 response.status shouldBe HttpStatusCode.UnsupportedMediaType
-                env.handledUpdates.get() shouldBe 0
+                env.ingressRepository.pendingCount() shouldBe 0
             }
         }
 
@@ -77,7 +78,7 @@ class TelegramWebhookRoutesTest :
                     }
 
                 response.status shouldBe HttpStatusCode.PayloadTooLarge
-                env.handledUpdates.get() shouldBe 0
+                env.ingressRepository.pendingCount() shouldBe 0
             }
         }
 
@@ -91,7 +92,7 @@ class TelegramWebhookRoutesTest :
                     }
 
                 response.status shouldBe HttpStatusCode.BadRequest
-                env.handledUpdates.get() shouldBe 0
+                env.ingressRepository.pendingCount() shouldBe 0
             }
         }
 
@@ -102,11 +103,11 @@ class TelegramWebhookRoutesTest :
                     driver = "org.h2.Driver",
                 )
             transaction(database) {
-                SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable)
+                SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable, TelegramWebhookUpdatesTable)
             }
             val suspiciousRepository = SuspiciousIpRepository(database)
             val dedupRepository = WebhookUpdateDedupRepository(database)
-            val handledUpdates = AtomicInteger(0)
+            val ingressRepository = TelegramWebhookIngressRepository(database)
 
             testApplication {
                 application {
@@ -114,8 +115,8 @@ class TelegramWebhookRoutesTest :
                         expectedSecret = " ",
                         runMode = BotRunMode.WEBHOOK,
                         dedupRepository = dedupRepository,
+                        ingressRepository = ingressRepository,
                         suspiciousIpRepository = suspiciousRepository,
-                        onUpdate = { handledUpdates.incrementAndGet() },
                     )
                 }
 
@@ -123,14 +124,14 @@ class TelegramWebhookRoutesTest :
                     startApplication()
                 }
 
-                handledUpdates.get() shouldBe 0
+                ingressRepository.pendingCount() shouldBe 0
             }
         }
     })
 
 private data class TelegramWebhookTestEnv(
     val app: ApplicationTestBuilder,
-    val handledUpdates: AtomicInteger,
+    val ingressRepository: TelegramWebhookIngressRepository,
 ) {
     val client get() = app.client
 }
@@ -145,12 +146,12 @@ private fun withTelegramWebhookApp(
             driver = "org.h2.Driver",
         )
     transaction(database) {
-        SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable)
+        SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable, TelegramWebhookUpdatesTable)
     }
 
     val suspiciousRepository = SuspiciousIpRepository(database)
     val dedupRepository = WebhookUpdateDedupRepository(database)
-    val handledUpdates = AtomicInteger(0)
+    val ingressRepository = TelegramWebhookIngressRepository(database)
 
     testApplication {
         application {
@@ -158,17 +159,17 @@ private fun withTelegramWebhookApp(
                 expectedSecret = SECRET,
                 runMode = BotRunMode.WEBHOOK,
                 dedupRepository = dedupRepository,
+                ingressRepository = ingressRepository,
                 suspiciousIpRepository = suspiciousRepository,
                 security = {
                     if (maxBodySizeBytes != null) {
                         this.maxBodySizeBytes = maxBodySizeBytes
                     }
                 },
-                onUpdate = { handledUpdates.incrementAndGet() },
             )
         }
 
-        block(TelegramWebhookTestEnv(this, handledUpdates))
+        block(TelegramWebhookTestEnv(this, ingressRepository))
     }
 }
 

@@ -32,3 +32,23 @@ object WebhookUpdateDedupTable : Table("webhook_update_dedup") {
         index("idx_webhook_update_dedup_first_seen", false, firstSeenAt)
     }
 }
+
+object TelegramWebhookUpdatesTable : Table("telegram_webhook_updates") {
+    val id = long("id").autoIncrement()
+    val updateId = long("update_id")
+    val receivedAt = timestampWithTimeZone("received_at").defaultExpression(CurrentTimestamp())
+    val payloadJson = text("payload_json")
+    val status = varchar("status", length = 16)
+    val attempts = integer("attempts").default(0)
+    val nextAttemptAt = timestampWithTimeZone("next_attempt_at").defaultExpression(CurrentTimestamp())
+    val lastError = text("last_error").nullable()
+    val processedAt = timestampWithTimeZone("processed_at").nullable()
+
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex("uq_telegram_webhook_updates_update_id", updateId)
+        index("idx_telegram_webhook_updates_status_next_attempt", false, status, nextAttemptAt)
+        index("idx_telegram_webhook_updates_received_at", false, receivedAt)
+    }
+}
