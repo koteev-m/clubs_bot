@@ -18,6 +18,7 @@ import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withTimeout
 
 class ProductionPluginsTest :
@@ -118,14 +119,13 @@ class ProductionPluginsTest :
                     coroutineScope {
                         val first = async { httpClient.get("/webhook/test") }
                         delay(50)
-                        val second = httpClient.get("/webhook/test")
+                        val second = async { httpClient.get("/webhook/test") }
 
-                        val firstResponse = first.await()
-                        firstResponse.status shouldBe HttpStatusCode.OK
-                        firstResponse.bodyAsText() shouldBe "OK"
-
-                        second.status shouldBe HttpStatusCode.TooManyRequests
-                        second.headers[HttpHeaders.RetryAfter] shouldBe "7"
+                        val responses = awaitAll(first, second)
+                        responses.count { it.status == HttpStatusCode.OK } shouldBe 1
+                        responses.count { it.status == HttpStatusCode.TooManyRequests } shouldBe 1
+                        responses.first { it.status == HttpStatusCode.OK }.bodyAsText() shouldBe "OK"
+                        responses.first { it.status == HttpStatusCode.TooManyRequests }.headers[HttpHeaders.RetryAfter] shouldBe "7"
                         HotPathMetrics.throttled.get() shouldBe 1
                     }
                 }
