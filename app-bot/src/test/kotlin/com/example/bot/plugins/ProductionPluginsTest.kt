@@ -113,7 +113,11 @@ class ProductionPluginsTest :
                         get("/webhook/test") {
                             val hits = handlerHits.incrementAndGet()
                             if (hits > 1) {
-                                throw IllegalStateException("Second request reached handler")
+                                call.respondText(
+                                    "Second request reached handler",
+                                    status = HttpStatusCode.InternalServerError,
+                                )
+                                return@get
                             }
                             if (!firstEntered.isCompleted) {
                                 firstEntered.complete(Unit)
