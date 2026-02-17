@@ -1,5 +1,6 @@
 package com.example.bot.routes
 
+import com.example.bot.config.BotRunMode
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.SuspiciousIpTable
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
@@ -7,6 +8,7 @@ import com.example.bot.data.security.webhook.WebhookUpdateDedupTable
 import com.example.bot.security.webhook.TELEGRAM_SECRET_HEADER
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.assertions.throwables.shouldThrow
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -92,6 +94,38 @@ class TelegramWebhookRoutesTest :
                 env.handledUpdates.get() shouldBe 0
             }
         }
+
+        "blank secret in webhook mode fails fast and does not expose route" {
+            val database =
+                Database.connect(
+                    url = "jdbc:h2:mem:telegram-webhook-${UUID.randomUUID()};DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
+                    driver = "org.h2.Driver",
+                )
+            transaction(database) {
+                SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable)
+            }
+            val suspiciousRepository = SuspiciousIpRepository(database)
+            val dedupRepository = WebhookUpdateDedupRepository(database)
+            val handledUpdates = AtomicInteger(0)
+
+            testApplication {
+                application {
+                    telegramWebhookRoutes(
+                        expectedSecret = " ",
+                        runMode = BotRunMode.WEBHOOK,
+                        dedupRepository = dedupRepository,
+                        suspiciousIpRepository = suspiciousRepository,
+                        onUpdate = { handledUpdates.incrementAndGet() },
+                    )
+                }
+
+                shouldThrow<IllegalStateException> {
+                    startApplication()
+                }
+
+                handledUpdates.get() shouldBe 0
+            }
+        }
     })
 
 private data class TelegramWebhookTestEnv(
@@ -122,6 +156,7 @@ private fun withTelegramWebhookApp(
         application {
             telegramWebhookRoutes(
                 expectedSecret = SECRET,
+                runMode = BotRunMode.WEBHOOK,
                 dedupRepository = dedupRepository,
                 suspiciousIpRepository = suspiciousRepository,
                 security = {
