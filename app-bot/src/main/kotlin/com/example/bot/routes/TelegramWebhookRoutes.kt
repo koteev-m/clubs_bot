@@ -1,5 +1,6 @@
 package com.example.bot.routes
 
+import com.example.bot.config.BotRunMode
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.security.webhook.WebhookSecurity
@@ -19,18 +20,26 @@ import kotlin.coroutines.cancellation.CancellationException
 
 fun Application.telegramWebhookRoutes(
     expectedSecret: String?,
+    runMode: BotRunMode,
     dedupRepository: WebhookUpdateDedupRepository,
     suspiciousIpRepository: SuspiciousIpRepository,
     security: WebhookSecurityConfig.() -> Unit = {},
     onUpdate: suspend (Update) -> Unit,
 ) {
     val logger = LoggerFactory.getLogger("TelegramWebhookRoutes")
+    if (runMode == BotRunMode.POLLING) {
+        logger.info("webhook: route registration skipped in polling mode")
+        return
+    }
+    val webhookSecret =
+        expectedSecret?.takeUnless { it.isBlank() }
+            ?: throw IllegalStateException("WEBHOOK_SECRET_TOKEN must be configured in WEBHOOK mode")
 
     routing {
         route("/telegram/webhook") {
             install(WebhookSecurity) {
-                requireSecret = !expectedSecret.isNullOrBlank()
-                secretToken = expectedSecret
+                requireSecret = true
+                secretToken = webhookSecret
                 this.dedupRepository = dedupRepository
                 this.suspiciousIpRepository = suspiciousIpRepository
                 security(this)

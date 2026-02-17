@@ -476,6 +476,7 @@ fun Application.module() {
     )
     telegramWebhookRoutes(
         expectedSecret = config.webhook.secretToken,
+        runMode = config.runMode,
         dedupRepository = webhookUpdateDedupRepository,
         suspiciousIpRepository = suspiciousIpRepository,
         onUpdate = { update -> telegramCallbackRouter.route(update) },
