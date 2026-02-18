@@ -20,10 +20,13 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.coEvery
+import io.mockk.mockk
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
 private const val SECRET = "secret-token"
 
@@ -135,6 +138,38 @@ class TelegramWebhookRoutesTest :
 
                 first.status shouldBe HttpStatusCode.ServiceUnavailable
                 second.status shouldBe HttpStatusCode.ServiceUnavailable
+            }
+        }
+
+        "enqueue cancellation is rethrown" {
+            val ingressRepository = mockk<TelegramWebhookIngressRepository>()
+            coEvery { ingressRepository.enqueue(any(), any()) } throws CancellationException("cancelled")
+
+            val database =
+                Database.connect(
+                    url = "jdbc:h2:mem:telegram-webhook-${UUID.randomUUID()};DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
+                    driver = "org.h2.Driver",
+                )
+            transaction(database) {
+                SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable)
+            }
+            val suspiciousRepository = SuspiciousIpRepository(database)
+            val dedupRepository = WebhookUpdateDedupRepository(database)
+
+            testApplication {
+                application {
+                    telegramWebhookRoutes(
+                        expectedSecret = SECRET,
+                        runMode = BotRunMode.WEBHOOK,
+                        dedupRepository = dedupRepository,
+                        ingressRepository = ingressRepository,
+                        suspiciousIpRepository = suspiciousRepository,
+                    )
+                }
+
+                val response = client.post("/telegram/webhook") { validRequest(302) }
+
+                response.status shouldBe HttpStatusCode.InternalServerError
             }
         }
     })
