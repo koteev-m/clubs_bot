@@ -76,3 +76,12 @@ metadata:
         add_header Cache-Control "public, max-age=31536000, immutable" always;
       }
 ```
+
+## Startup guard для RBAC (обязательно)
+- Для `APP_PROFILE=stage|prod` запуск приложения **блокируется**, если `RBAC_ENABLED=false`.
+- Переменная `ALLOW_INSECURE_DEV=true` разрешена только для `dev/test/local` и нужна исключительно для локальной отладки.
+- Для `stage/prod` значение `ALLOW_INSECURE_DEV=true` считается ошибкой конфигурации и приводит к остановке на старте.
+- Рекомендуемая политика для продовых окружений:
+  - `APP_PROFILE=stage` или `APP_PROFILE=prod`
+  - `RBAC_ENABLED=true`
+  - `ALLOW_INSECURE_DEV=false` (или переменная не задана)

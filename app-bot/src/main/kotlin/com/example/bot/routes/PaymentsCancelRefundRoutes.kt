@@ -5,6 +5,7 @@ import com.example.bot.di.PaymentsService
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.envBool
+import com.example.bot.plugins.envString
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.RbacPlugin
@@ -73,8 +74,16 @@ fun Application.paymentsCancelRefundRoutes(miniAppBotTokenProvider: () -> String
         return
     }
 
+    val profile = (envString("APP_PROFILE") ?: envString("APP_ENV") ?: "dev").uppercase()
+    val prodLike = profile == "PROD" || profile == "STAGE"
     val rbacEnabled = envBool("RBAC_ENABLED", default = false)
     val rbacAvailable = rbacEnabled && pluginOrNull(RbacPlugin) != null
+    if (prodLike && !rbacAvailable) {
+        error("paymentsCancelRefundRoutes blocked in $profile: RBAC is unavailable")
+    }
+    if (!rbacAvailable) {
+        logger.warn { "[payments] cancel/refund routes running without RBAC (ALLOW_INSECURE_DEV=true)" }
+    }
     val koin = getKoin()
 
     routing {
