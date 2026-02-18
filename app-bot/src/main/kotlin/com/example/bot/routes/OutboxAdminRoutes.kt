@@ -111,14 +111,25 @@ fun Application.outboxAdminRoutes(
         return
     }
 
+    val profile = (envString("APP_PROFILE") ?: envString("APP_ENV") ?: "dev").uppercase()
+    val prodLike = profile == "PROD" || profile == "STAGE"
     val rbacEnabled = envBool("RBAC_ENABLED", default = false)
     val rbacAvailable = rbacEnabled && pluginOrNull(RbacPlugin) != null
+    if (prodLike && !rbacAvailable) {
+        error("Outbox admin routes blocked in $profile: RBAC is unavailable")
+    }
 
     val resolvedMetrics = metricsProvider ?: runCatching { getKoin().get<MetricsProvider>() }.getOrNull()
     val resolvedTracer = tracer ?: runCatching { getKoin().get<Tracer>() }.getOrNull()
     val actorBase = envString("OUTBOX_ADMIN_ACTOR", default = "outbox-admin") ?: "outbox-admin"
 
-    logger.info { "Outbox admin routes enabled (defaultMaxRows=1000, maxRowsCap=10000, rbac=$rbacAvailable)" }
+    logger.info {
+        "Outbox admin routes enabled (defaultMaxRows=1000, maxRowsCap=10000, rbac=$rbacAvailable, " +
+            "profile=$profile)"
+    }
+    if (!rbacAvailable) {
+        logger.warn { "Outbox admin routes running without RBAC (ALLOW_INSECURE_DEV=true)" }
+    }
 
     routing {
         route("/api/admin/outbox") {

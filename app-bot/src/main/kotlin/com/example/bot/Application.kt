@@ -44,6 +44,7 @@ import com.example.bot.layout.LayoutRepository
 import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.configureLoggingAndRequestId
 import com.example.bot.plugins.configureSecurity
+import com.example.bot.plugins.enforceRbacStartupGuard
 import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installCorsFromEnv
 import com.example.bot.plugins.installDiagTime
@@ -210,6 +211,7 @@ fun Application.module() {
 
     // 5) Security
     configureSecurity()
+    enforceRbacStartupGuard()
 
     // 6) Инжект сервисов
     val guestListRepository by inject<GuestListRepository>()
