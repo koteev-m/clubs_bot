@@ -46,4 +46,38 @@ class RbacStartupGuardTest {
             }
         }
     }
+
+    @Test
+    fun `production profile with disabled rbac fails on startup`() {
+        assertFailsWith<IllegalStateException> {
+            testApplication {
+                application {
+                    enforceRbacStartupGuard { key ->
+                        when (key) {
+                            "APP_PROFILE" -> "production"
+                            "RBAC_ENABLED" -> "false"
+                            else -> null
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `unknown profile fails closed on startup`() {
+        assertFailsWith<IllegalArgumentException> {
+            testApplication {
+                application {
+                    enforceRbacStartupGuard { key ->
+                        when (key) {
+                            "APP_PROFILE" -> "qa"
+                            else -> null
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
