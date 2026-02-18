@@ -74,8 +74,8 @@ fun Application.paymentsCancelRefundRoutes(miniAppBotTokenProvider: () -> String
         return
     }
 
-    val profile = (envString("APP_PROFILE") ?: envString("APP_ENV") ?: "dev").uppercase()
-    val prodLike = profile == "PROD" || profile == "STAGE"
+    val profile = (envString("APP_PROFILE") ?: envString("APP_ENV") ?: "dev").trim().uppercase()
+    val prodLike = profile in setOf("PROD", "PRODUCTION", "STAGE", "STAGING")
     val rbacEnabled = envBool("RBAC_ENABLED", default = false)
     val rbacAvailable = rbacEnabled && pluginOrNull(RbacPlugin) != null
     if (prodLike && !rbacAvailable) {

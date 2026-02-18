@@ -7,8 +7,10 @@ import mu.KotlinLogging
 
 private val logger = KotlinLogging.logger("RbacStartupGuard")
 
-private val knownProdLikeProfiles = setOf("PROD", "STAGE")
-private val knownDevLikeProfiles = setOf("DEV", "TEST", "LOCAL")
+private val knownProdLikeProfiles = setOf("PROD", "PRODUCTION", "STAGE", "STAGING")
+private val knownDevLikeProfiles = setOf("DEV", "DEVELOPMENT", "TEST", "LOCAL")
+private val knownProfiles = knownProdLikeProfiles + knownDevLikeProfiles
+private val allowedProfilesMessage = knownProfiles.sorted().joinToString(", ")
 
 data class RbacStartupPolicy(
     val profile: String,
@@ -24,9 +26,13 @@ internal fun resolveRbacStartupPolicy(readValue: (String) -> String?): RbacStart
     val rbacEnabled = parseBooleanEnv(readValue("RBAC_ENABLED"), default = false)
     val allowInsecureDev = parseBooleanEnv(readValue("ALLOW_INSECURE_DEV"), default = false)
 
+    require(profile in knownProfiles) {
+        "Неизвестный APP_PROFILE/APP_ENV: '$profile'. Допустимые значения: $allowedProfilesMessage"
+    }
+
     require(profile !in knownProdLikeProfiles || !allowInsecureDev) {
         "ALLOW_INSECURE_DEV=true запрещён для профиля $profile. " +
-            "Для PROD/STAGE RBAC должен быть включён без исключений."
+            "Для прод-профилей RBAC должен быть включён без исключений."
     }
 
     if (profile in knownProdLikeProfiles && !rbacEnabled) {
@@ -83,4 +89,3 @@ private fun parseBooleanEnv(raw: String?, default: Boolean): Boolean =
         "false" -> false
         else -> default
     }
-
