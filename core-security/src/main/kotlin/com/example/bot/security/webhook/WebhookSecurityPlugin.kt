@@ -47,6 +47,7 @@ class WebhookSecurityConfig {
     var secretToken: String? = null
     var maxBodySizeBytes: Long = BotLimits.Webhook.maxPayloadBytes
     var dedupRepository: WebhookUpdateDedupRepository? = null
+    var enableDedup: Boolean = true
     var suspiciousIpRepository: SuspiciousIpRepository? = null
     var duplicateSuspicionThreshold: Int = BotLimits.Webhook.duplicateSuspiciousThreshold
     var json: Json = Json { ignoreUnknownKeys = true }
@@ -63,6 +64,7 @@ val WebhookSecurity =
                 dedupRepository =
                     pluginConfig.dedupRepository
                         ?: error("WebhookUpdateDedupRepository must be provided"),
+                enableDedup = pluginConfig.enableDedup,
                 suspiciousRepository =
                     pluginConfig.suspiciousIpRepository
                         ?: error("SuspiciousIpRepository must be provided"),
@@ -149,20 +151,22 @@ val WebhookSecurity =
 
             val mdcKeys = state.applyMdc(call)
             state.registerMdcCleanup(call, mdcKeys)
-            when (val result = state.dedupRepository.mark(updateId)) {
-                is DedupResult.FirstSeen -> Unit
-                is DedupResult.Duplicate -> {
-                    state.logger.debug("Duplicate update {}", updateId)
-                    if (result.duplicateCount >= state.duplicateThreshold) {
-                        state.recordSuspicious(
-                            remoteIp,
-                            userAgent,
-                            SuspiciousIpReason.DUPLICATE_UPDATE,
-                            "count=${result.duplicateCount}",
-                        )
+            if (state.enableDedup) {
+                when (val result = state.dedupRepository.mark(updateId)) {
+                    is DedupResult.FirstSeen -> Unit
+                    is DedupResult.Duplicate -> {
+                        state.logger.debug("Duplicate update {}", updateId)
+                        if (result.duplicateCount >= state.duplicateThreshold) {
+                            state.recordSuspicious(
+                                remoteIp,
+                                userAgent,
+                                SuspiciousIpReason.DUPLICATE_UPDATE,
+                                "count=${result.duplicateCount}",
+                            )
+                        }
+                        call.respondText("OK", status = HttpStatusCode.OK)
+                        return@onCall
                     }
-                    call.respondText("OK", status = HttpStatusCode.OK)
-                    return@onCall
                 }
             }
         }
@@ -173,6 +177,7 @@ private data class WebhookSecurityState(
     val secretToken: String?,
     val maxBodySize: Long,
     val dedupRepository: WebhookUpdateDedupRepository,
+    val enableDedup: Boolean,
     val suspiciousRepository: SuspiciousIpRepository,
     val duplicateThreshold: Int,
     val json: Json,

@@ -14,7 +14,6 @@ import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
-import java.time.Instant
 
 class TelegramWebhookIngressWorker(
     private val repository: TelegramWebhookIngressRepository,
@@ -57,25 +56,58 @@ class TelegramWebhookIngressWorker(
                     }
 
                     claimed.forEach { queued ->
-                        val processingStartedAt = Instant.now(clock)
                         try {
                             onUpdate(BotUtils.parseUpdate(queued.payloadJson))
-                            repository.markDone(queued.id)
-                            metrics.recordProcessed(
-                                receivedAt = queued.receivedAt,
-                                processingStartedAt = processingStartedAt,
-                                clock = clock,
-                            )
+                            try {
+                                val done =
+                                    repository.markDone(
+                                        id = queued.id,
+                                        claimAttempt = queued.claimAttempt,
+                                    )
+                                if (done) {
+                                    metrics.recordProcessed(receivedAt = queued.receivedAt, clock = clock)
+                                } else {
+                                    logger.debug(
+                                        "webhook worker: stale completion ignored update_id={} claim_attempt={}",
+                                        queued.updateId,
+                                        queued.claimAttempt,
+                                    )
+                                }
+                            } catch (markDoneError: Throwable) {
+                                if (markDoneError is CancellationException) {
+                                    throw markDoneError
+                                }
+                                logger.warn("webhook worker: markDone failed update_id={}", queued.updateId, markDoneError)
+                                metrics.recordWorkerFailure()
+                                delay(failureDelay.toMillis())
+                            }
                         } catch (ce: CancellationException) {
                             throw ce
                         } catch (t: Throwable) {
                             logger.warn("webhook worker: update_id={} failed", queued.updateId, t)
-                            repository.markFailed(
-                                id = queued.id,
-                                attempts = queued.attempts + 1,
-                                error = t.message ?: t.javaClass.simpleName,
-                            )
                             metrics.recordProcessingFailure()
+                            try {
+                                val failed =
+                                    repository.markFailed(
+                                        id = queued.id,
+                                        claimAttempt = queued.claimAttempt,
+                                        error = t.message ?: t.javaClass.simpleName,
+                                    )
+                                if (!failed) {
+                                    logger.debug(
+                                        "webhook worker: stale failure mark ignored update_id={} claim_attempt={}",
+                                        queued.updateId,
+                                        queued.claimAttempt,
+                                    )
+                                }
+                            } catch (markError: Throwable) {
+                                if (markError is CancellationException) {
+                                    throw markError
+                                }
+                                logger.warn("webhook worker: markFailed failed update_id={}", queued.updateId, markError)
+                                metrics.recordWorkerFailure()
+                                delay(failureDelay.toMillis())
+                            }
                         }
                     }
                     metrics.refreshQueueStats(repository, clock)

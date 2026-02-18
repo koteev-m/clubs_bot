@@ -10,10 +10,13 @@ import kotlinx.coroutines.delay
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.Duration
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -43,6 +46,7 @@ class TelegramWebhookIngressWorkerTest :
 
             processed.get() shouldBe 1
             statusOf(database, 1) shouldBe TelegramWebhookUpdateStatus.DONE
+            payloadOf(database, 1) shouldBe ""
         }
 
         "failed update is retried by new worker instance" {
@@ -68,7 +72,7 @@ class TelegramWebhookIngressWorkerTest :
 
             transaction(database) {
                 TelegramWebhookUpdatesTable.update({ TelegramWebhookUpdatesTable.updateId eq 2L }) {
-                    it[TelegramWebhookUpdatesTable.nextAttemptAt] = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(1)
+                    it[TelegramWebhookUpdatesTable.nextAttemptAt] = OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1)
                 }
             }
 
@@ -88,6 +92,43 @@ class TelegramWebhookIngressWorkerTest :
 
             processed.get() shouldBe 1
             statusOf(database, 2) shouldBe TelegramWebhookUpdateStatus.DONE
+        }
+
+        "worker reclaims stale processing lease" {
+            val database = testDatabase()
+            val repository = TelegramWebhookIngressRepository(database)
+            val metrics = TelegramWebhookIngressMetrics(SimpleMeterRegistry())
+            val processed = AtomicInteger(0)
+
+            transaction(database) {
+                TelegramWebhookUpdatesTable.insert {
+                    it[updateId] = 3L
+                    it[payloadJson] = """{"update_id":3}"""
+                    it[status] = TelegramWebhookUpdateStatus.PROCESSING.name
+                    it[attempts] = 2
+                    it[nextAttemptAt] = OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1)
+                    it[lastError] = null
+                    it[processedAt] = null
+                }
+            }
+
+            val worker =
+                TelegramWebhookIngressWorker(
+                    repository = repository,
+                    onUpdate = { processed.incrementAndGet() },
+                    metrics = metrics,
+                    idleDelay = Duration.ofMillis(20),
+                )
+
+            worker.start()
+            repeat(30) {
+                if (processed.get() == 1) return@repeat
+                delay(20)
+            }
+            worker.shutdown()
+
+            processed.get() shouldBe 1
+            statusOf(database, 3) shouldBe TelegramWebhookUpdateStatus.DONE
         }
     })
 
@@ -113,4 +154,15 @@ private fun statusOf(
             .where { TelegramWebhookUpdatesTable.updateId eq updateId }
             .first()[TelegramWebhookUpdatesTable.status]
             .let(TelegramWebhookUpdateStatus::valueOf)
+    }
+
+private fun payloadOf(
+    database: Database,
+    updateId: Long,
+): String =
+    transaction(database) {
+        TelegramWebhookUpdatesTable
+            .selectAll()
+            .where { TelegramWebhookUpdatesTable.updateId eq updateId }
+            .first()[TelegramWebhookUpdatesTable.payloadJson]
     }

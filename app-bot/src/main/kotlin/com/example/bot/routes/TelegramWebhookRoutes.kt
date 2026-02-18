@@ -40,6 +40,7 @@ fun Application.telegramWebhookRoutes(
             install(WebhookSecurity) {
                 requireSecret = true
                 secretToken = webhookSecret
+                enableDedup = false
                 this.dedupRepository = dedupRepository
                 this.suspiciousIpRepository = suspiciousIpRepository
                 security(this)
@@ -54,17 +55,27 @@ fun Application.telegramWebhookRoutes(
                     return@post
                 }
 
-                when (
-                    ingressRepository.enqueue(
-                        updateId = update.updateId().toLong(),
-                        payloadJson = body,
-                    )
-                ) {
-                    is TelegramWebhookEnqueueResult.Duplicate -> {
-                        logger.debug("webhook: duplicate update_id={} already queued", update.updateId())
-                    }
+                try {
+                    when (
+                        ingressRepository.enqueue(
+                            updateId = update.updateId().toLong(),
+                            payloadJson = body,
+                        )
+                    ) {
+                        is TelegramWebhookEnqueueResult.Duplicate -> {
+                            logger.debug("webhook: duplicate update_id={} already queued", update.updateId())
+                        }
 
-                    is TelegramWebhookEnqueueResult.Enqueued -> Unit
+                        is TelegramWebhookEnqueueResult.Enqueued -> Unit
+                    }
+                } catch (t: Throwable) {
+                    logger.warn(
+                        "webhook: enqueue failed update_id={} error={}",
+                        update.updateId(),
+                        t.javaClass.simpleName,
+                    )
+                    call.respond(HttpStatusCode.ServiceUnavailable)
+                    return@post
                 }
 
                 call.respond(HttpStatusCode.OK, "OK")
