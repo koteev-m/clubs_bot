@@ -16,6 +16,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 
 fun Application.telegramWebhookRoutes(
@@ -68,11 +69,13 @@ fun Application.telegramWebhookRoutes(
 
                         is TelegramWebhookEnqueueResult.Enqueued -> Unit
                     }
-                } catch (t: Throwable) {
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
                     logger.warn(
                         "webhook: enqueue failed update_id={} error={}",
                         update.updateId(),
-                        t.javaClass.simpleName,
+                        e.javaClass.simpleName,
                     )
                     call.respond(HttpStatusCode.ServiceUnavailable)
                     return@post
