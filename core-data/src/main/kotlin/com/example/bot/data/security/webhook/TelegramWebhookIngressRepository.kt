@@ -5,15 +5,14 @@ import org.jetbrains.exposed.exceptions.ExposedSQLException
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
-import org.jetbrains.exposed.sql.update
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -37,7 +36,7 @@ data class TelegramWebhookQueuedUpdate(
     val updateId: Long,
     val payloadJson: String,
     val receivedAt: Instant,
-    val attempts: Int,
+    val claimAttempt: Int,
 )
 
 data class TelegramWebhookQueueStats(
@@ -97,40 +96,59 @@ class TelegramWebhookIngressRepository(
                 if (claimed.size >= limit) {
                     break
                 }
-                val updated =
-                    execClaim(candidate.id, candidate.attempts)
+                val nextAttempt = candidate.claimAttempt + 1
+                val updated = execClaim(candidate.id, candidate.claimAttempt, nextAttempt)
                 if (updated == 1) {
-                    claimed += candidate
+                    claimed += candidate.copy(claimAttempt = nextAttempt)
                 }
             }
             claimed
         }
     }
 
-    suspend fun markDone(id: Long): Unit =
-        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            TelegramWebhookUpdatesTable.update({ TelegramWebhookUpdatesTable.id eq id }) {
-                it[status] = TelegramWebhookUpdateStatus.DONE.name
-                it[processedAt] = Instant.now(clock).toOffsetDateTime()
-                it[lastError] = null
-            }
-        }
+    suspend fun markDone(
+        id: Long,
+        claimAttempt: Int,
+    ): Boolean {
+        val processedAt = Instant.now(clock).toOffsetDateTime()
+        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            val sql =
+                """
+                UPDATE telegram_webhook_updates
+                SET status = '${TelegramWebhookUpdateStatus.DONE.name}',
+                    processed_at = '$processedAt',
+                    last_error = NULL,
+                    payload_json = ''
+                WHERE id = $id
+                  AND status = '${TelegramWebhookUpdateStatus.PROCESSING.name}'
+                  AND attempts = $claimAttempt
+                """.trimIndent()
+            connection.prepareStatement(sql, false).executeUpdate()
+        } == 1
+    }
 
     suspend fun markFailed(
         id: Long,
-        attempts: Int,
+        claimAttempt: Int,
         error: String,
-    ) {
+    ): Boolean {
         val now = Instant.now(clock)
-        val delaySeconds = min(60L, 1L shl min(attempts, 6))
+        val delaySeconds = min(60L, 1L shl min(claimAttempt, 6))
         val nextAttemptAt = now.plusSeconds(delaySeconds).toOffsetDateTime()
-        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            TelegramWebhookUpdatesTable.update({ TelegramWebhookUpdatesTable.id eq id }) {
-                it[status] = TelegramWebhookUpdateStatus.FAILED.name
-                it[lastError] = error.take(MAX_ERROR_LENGTH)
-                it[TelegramWebhookUpdatesTable.nextAttemptAt] = nextAttemptAt
-            }
-        }
+        val errorText = error.take(MAX_ERROR_LENGTH).replace("'", "''")
+        return newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            val sql =
+                """
+                UPDATE telegram_webhook_updates
+                SET status = '${TelegramWebhookUpdateStatus.FAILED.name}',
+                    last_error = '$errorText',
+                    next_attempt_at = '$nextAttemptAt'
+                WHERE id = $id
+                  AND status = '${TelegramWebhookUpdateStatus.PROCESSING.name}'
+                  AND attempts = $claimAttempt
+                """.trimIndent()
+            connection.prepareStatement(sql, false).executeUpdate()
+        } == 1
     }
 
     suspend fun queueStats(): TelegramWebhookQueueStats =
@@ -155,15 +173,18 @@ class TelegramWebhookIngressRepository(
     private fun org.jetbrains.exposed.sql.Transaction.execClaim(
         rowId: Long,
         expectedAttempts: Int,
+        nextAttempt: Int,
     ): Int {
+        val leaseUntil = Instant.now(clock).plus(PROCESSING_LEASE).toOffsetDateTime()
         val sql =
             """
             UPDATE telegram_webhook_updates
             SET status = '${TelegramWebhookUpdateStatus.PROCESSING.name}',
-                attempts = attempts + 1,
+                attempts = $nextAttempt,
+                next_attempt_at = '$leaseUntil',
                 last_error = NULL
             WHERE id = $rowId
-              AND status IN ('${TelegramWebhookUpdateStatus.NEW.name}', '${TelegramWebhookUpdateStatus.FAILED.name}')
+              AND status IN ('${TelegramWebhookUpdateStatus.NEW.name}', '${TelegramWebhookUpdateStatus.FAILED.name}', '${TelegramWebhookUpdateStatus.PROCESSING.name}')
               AND next_attempt_at <= CURRENT_TIMESTAMP
               AND attempts = $expectedAttempts
             """.trimIndent()
@@ -180,10 +201,12 @@ class TelegramWebhookIngressRepository(
 
     companion object {
         private const val MAX_ERROR_LENGTH = 1024
+        private val PROCESSING_LEASE: Duration = Duration.ofSeconds(60)
         private val claimableStatuses =
             listOf(
                 TelegramWebhookUpdateStatus.NEW.name,
                 TelegramWebhookUpdateStatus.FAILED.name,
+                TelegramWebhookUpdateStatus.PROCESSING.name,
             )
         private val queueStatuses =
             listOf(
@@ -200,7 +223,7 @@ private fun ResultRow.toQueuedUpdate(): TelegramWebhookQueuedUpdate =
         updateId = this[TelegramWebhookUpdatesTable.updateId],
         payloadJson = this[TelegramWebhookUpdatesTable.payloadJson],
         receivedAt = this[TelegramWebhookUpdatesTable.receivedAt].toInstant(),
-        attempts = this[TelegramWebhookUpdatesTable.attempts],
+        claimAttempt = this[TelegramWebhookUpdatesTable.attempts],
     )
 
 private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

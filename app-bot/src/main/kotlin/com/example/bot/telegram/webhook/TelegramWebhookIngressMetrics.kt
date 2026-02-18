@@ -42,13 +42,11 @@ class TelegramWebhookIngressMetrics(
 
     fun recordProcessed(
         receivedAt: Instant,
-        processingStartedAt: Instant,
         clock: Clock,
     ) {
         val finishedAt = Instant.now(clock)
-        val queuedDuration = Duration.between(receivedAt, finishedAt)
-        val processingDuration = Duration.between(processingStartedAt, finishedAt)
-        processingLatency.record(queuedDuration.plus(processingDuration))
+        val endToEndDuration = Duration.between(receivedAt, finishedAt)
+        processingLatency.record(endToEndDuration)
     }
 
     fun recordProcessingFailure() {

@@ -127,6 +127,16 @@ class TelegramWebhookRoutesTest :
                 ingressRepository.pendingCount() shouldBe 0
             }
         }
+
+        "enqueue failure returns retryable status for duplicate retries" {
+            withTelegramWebhookApp(createIngressTable = false) { env ->
+                val first = env.client.post("/telegram/webhook") { validRequest(301) }
+                val second = env.client.post("/telegram/webhook") { validRequest(301) }
+
+                first.status shouldBe HttpStatusCode.ServiceUnavailable
+                second.status shouldBe HttpStatusCode.ServiceUnavailable
+            }
+        }
     })
 
 private data class TelegramWebhookTestEnv(
@@ -138,6 +148,7 @@ private data class TelegramWebhookTestEnv(
 
 private fun withTelegramWebhookApp(
     maxBodySizeBytes: Long? = null,
+    createIngressTable: Boolean = true,
     block: suspend (TelegramWebhookTestEnv) -> Unit,
 ) {
     val database =
@@ -146,7 +157,11 @@ private fun withTelegramWebhookApp(
             driver = "org.h2.Driver",
         )
     transaction(database) {
-        SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable, TelegramWebhookUpdatesTable)
+        if (createIngressTable) {
+            SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable, TelegramWebhookUpdatesTable)
+        } else {
+            SchemaUtils.create(SuspiciousIpTable, WebhookUpdateDedupTable)
+        }
     }
 
     val suspiciousRepository = SuspiciousIpRepository(database)
