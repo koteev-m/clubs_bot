@@ -46,11 +46,6 @@ class HotPathLimiterConfig {
     var retryAfter: Duration = BotLimits.RateLimit.HOT_PATH_DEFAULT_RETRY_AFTER
 }
 
-private fun Application.isProdLikeProfile(): Boolean {
-    val profile = (resolveEnv("APP_PROFILE") ?: resolveEnv("APP_ENV"))?.trim()?.uppercase()
-    return profile in setOf("PROD", "PRODUCTION", "STAGE", "STAGING")
-}
-
 private fun Application.resolveCsvEnv(name: String): List<String>? {
     val rawFromConfig = environment.config.propertyOrNull("app.env.$name")?.getString()
     val raw = rawFromConfig ?: System.getenv(name)

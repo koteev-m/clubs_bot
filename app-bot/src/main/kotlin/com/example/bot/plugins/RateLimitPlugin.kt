@@ -75,11 +75,6 @@ private data class RateLimitRuleState(
     fun hasAnyRule(): Boolean = ipEnabled || (subjectEnabled && subjectPathPrefixes.isNotEmpty())
 }
 
-private fun Application.isProdLikeProfile(): Boolean {
-    val profile = (resolveEnv("APP_PROFILE") ?: resolveEnv("APP_ENV"))?.trim()?.uppercase()
-    return profile in setOf("PROD", "PRODUCTION", "STAGE", "STAGING")
-}
-
 private fun Application.resolveBooleanEnv(name: String): Boolean? {
     val rawFromConfig = environment.config.propertyOrNull("app.env.$name")?.getString()
     val raw = rawFromConfig ?: System.getenv(name)
