@@ -46,6 +46,19 @@ class HotPathLimiterConfig {
     var retryAfter: Duration = BotLimits.RateLimit.HOT_PATH_DEFAULT_RETRY_AFTER
 }
 
+private fun Application.isStageOrProdProfile(): Boolean =
+    resolveEnv("APP_PROFILE")
+        ?.trim()
+        ?.uppercase()
+        ?.let { it == "STAGE" || it == "PROD" }
+        ?: false
+
+private fun Application.resolveCsvEnv(name: String): List<String>? {
+    val rawFromConfig = environment.config.propertyOrNull("app.env.$name")?.getString()
+    val raw = rawFromConfig ?: System.getenv(name)
+    return raw?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
+}
+
 /**
  * Простые метрики плагина (без привязки к конкретному реестру; можно подключить к Micrometer извне).
  */
@@ -106,13 +119,15 @@ fun Application.installHotPathLimiterDefaults() {
         listOf(
             "/webhook",
             "/telegram/webhook",
+            "/api/host/checkin/",
             "/api/clubs/",
+            "/api/guest-lists/export",
             "/api/guest-lists/import",
         )
     val app = this
     val log = LoggerFactory.getLogger("HotPathLimiter")
     install(HotPathLimiter) {
-        pathPrefixes = defaults
+        pathPrefixes = app.resolveCsvEnv("HOT_PATH_PREFIXES") ?: defaults
         maxConcurrent =
             app
                 .resolveInt("HOT_PATH_MAX_CONCURRENT")
@@ -123,5 +138,15 @@ fun Application.installHotPathLimiterDefaults() {
                 ?: BotLimits.RateLimit.HOT_PATH_DEFAULT_RETRY_AFTER
 
         log.info("[plugin] HotPathLimiter enabled (paths={})", pathPrefixes)
+    }
+
+    val configuredPaths = resolveCsvEnv("HOT_PATH_PREFIXES") ?: defaults
+    if (configuredPaths.isEmpty()) {
+        val message = "HotPathLimiter включен, но HOT_PATH_PREFIXES пустой — защищаемые hot-path отсутствуют."
+        if (isStageOrProdProfile()) {
+            error(message)
+        } else {
+            LoggerFactory.getLogger("HotPathLimiter").warn(message)
+        }
     }
 }

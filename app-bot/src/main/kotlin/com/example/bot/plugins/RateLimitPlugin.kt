@@ -43,9 +43,11 @@ class RateLimitConfig {
         listOf(
             "/webhook",
             "/telegram/webhook",
+            "/api/host/checkin/",
+            "/api/clubs/",
+            "/api/guest-lists/export",
             "/api/bookings/confirm",
             "/api/guest-lists/import",
-            "/api/clubs/",
             "/api/admin/outbox",
         )
 
@@ -63,6 +65,39 @@ class RateLimitConfig {
     var retryAfter: Duration =
         System.getenv("RL_RETRY_AFTER_SECONDS")?.toLongOrNull()?.let(Duration::ofSeconds)
             ?: BotLimits.RateLimit.HOT_PATH_DEFAULT_RETRY_AFTER
+}
+
+private data class RateLimitRuleState(
+    val ipEnabled: Boolean,
+    val subjectEnabled: Boolean,
+    val subjectPathPrefixes: List<String>,
+) {
+    fun hasAnyRule(): Boolean = ipEnabled || (subjectEnabled && subjectPathPrefixes.isNotEmpty())
+}
+
+private fun Application.isStageOrProdProfile(): Boolean =
+    resolveEnv("APP_PROFILE")
+        ?.trim()
+        ?.uppercase()
+        ?.let { it == "STAGE" || it == "PROD" }
+        ?: false
+
+private fun Application.resolveBooleanEnv(name: String): Boolean? {
+    val rawFromConfig = environment.config.propertyOrNull("app.env.$name")?.getString()
+    val raw = rawFromConfig ?: System.getenv(name)
+    return raw?.let { value ->
+        when (value.trim().lowercase()) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
+    }
+}
+
+private fun Application.resolveCsvEnv(name: String): List<String>? {
+    val rawFromConfig = environment.config.propertyOrNull("app.env.$name")?.getString()
+    val raw = rawFromConfig ?: System.getenv(name)
+    return raw?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
 }
 
 object RateLimitMetrics {
@@ -173,14 +208,9 @@ fun Application.installRateLimitPluginDefaults() {
         app.resolveDouble("RL_SUBJECT_BURST")?.let { subjectBurst = it }
         app.resolveLong("RL_SUBJECT_TTL_SECONDS")?.let { subjectTtl = Duration.ofSeconds(it) }
         app.resolveLong("RL_RETRY_AFTER_SECONDS")?.let { retryAfter = Duration.ofSeconds(it) }
-        app
-            .resolveEnv("RL_SUBJECT_PATH_PREFIXES")
-            ?.split(',')
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?.let { subjectPathPrefixes = it }
-        ipEnabled = app.resolveFlag("RL_IP_ENABLED", ipEnabled)
-        subjectEnabled = app.resolveFlag("RL_SUBJECT_ENABLED", subjectEnabled)
+        app.resolveCsvEnv("RL_SUBJECT_PATH_PREFIXES")?.let { subjectPathPrefixes = it }
+        ipEnabled = app.resolveBooleanEnv("RL_IP_ENABLED") ?: ipEnabled
+        subjectEnabled = app.resolveBooleanEnv("RL_SUBJECT_ENABLED") ?: subjectEnabled
 
         subjectKeyExtractor = { call ->
             val initDataPrincipal =
@@ -196,5 +226,21 @@ fun Application.installRateLimitPluginDefaults() {
         }
 
         log.info("[plugin] RateLimit enabled (maxConcurrent={}, retryAfter={})", subjectBurst, retryAfter)
+    }
+
+    val ruleState =
+        RateLimitRuleState(
+            ipEnabled = resolveBooleanEnv("RL_IP_ENABLED") ?: true,
+            subjectEnabled = resolveBooleanEnv("RL_SUBJECT_ENABLED") ?: true,
+            subjectPathPrefixes = resolveCsvEnv("RL_SUBJECT_PATH_PREFIXES") ?: RateLimitConfig().subjectPathPrefixes,
+        )
+    if (!ruleState.hasAnyRule()) {
+        val message =
+            "RateLimitPlugin включен, но не настроено ни одного правила (RL_IP_ENABLED=false и RL_SUBJECT_PATH_PREFIXES пуст)."
+        if (isStageOrProdProfile()) {
+            error(message)
+        } else {
+            LoggerFactory.getLogger("RateLimitPlugin").warn(message)
+        }
     }
 }
