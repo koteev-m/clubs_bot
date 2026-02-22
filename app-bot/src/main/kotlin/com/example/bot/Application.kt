@@ -49,6 +49,9 @@ import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installCorsFromEnv
 import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installHttpSecurityFromEnv
+import com.example.bot.plugins.installHotPathLimiterDefaults
+import com.example.bot.plugins.installRateLimitPluginDefaults
+import com.example.bot.plugins.resolveFlag
 import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
@@ -167,6 +170,12 @@ fun Application.module() {
     installHttpSecurityFromEnv()
     install(ContentNegotiation) { json() }
     installRequestGuardsFromEnv()
+    if (resolveFlag("RATE_LIMIT_ENABLED", default = true)) {
+        installRateLimitPluginDefaults()
+    }
+    if (resolveFlag("HOT_PATH_ENABLED", default = true)) {
+        installHotPathLimiterDefaults()
+    }
     installJsonErrorPages()
     installWebAppCspFromEnv()
     installWebAppImmutableCacheFromEnv()
