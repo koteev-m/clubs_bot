@@ -46,12 +46,10 @@ class HotPathLimiterConfig {
     var retryAfter: Duration = BotLimits.RateLimit.HOT_PATH_DEFAULT_RETRY_AFTER
 }
 
-private fun Application.isStageOrProdProfile(): Boolean =
-    resolveEnv("APP_PROFILE")
-        ?.trim()
-        ?.uppercase()
-        ?.let { it == "STAGE" || it == "PROD" }
-        ?: false
+private fun Application.isProdLikeProfile(): Boolean {
+    val profile = (resolveEnv("APP_PROFILE") ?: resolveEnv("APP_ENV"))?.trim()?.uppercase()
+    return profile in setOf("PROD", "PRODUCTION", "STAGE", "STAGING")
+}
 
 private fun Application.resolveCsvEnv(name: String): List<String>? {
     val rawFromConfig = environment.config.propertyOrNull("app.env.$name")?.getString()
@@ -143,7 +141,7 @@ fun Application.installHotPathLimiterDefaults() {
     val configuredPaths = resolveCsvEnv("HOT_PATH_PREFIXES") ?: defaults
     if (configuredPaths.isEmpty()) {
         val message = "HotPathLimiter включен, но HOT_PATH_PREFIXES пустой — защищаемые hot-path отсутствуют."
-        if (isStageOrProdProfile()) {
+        if (isProdLikeProfile()) {
             error(message)
         } else {
             LoggerFactory.getLogger("HotPathLimiter").warn(message)

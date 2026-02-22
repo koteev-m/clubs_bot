@@ -75,12 +75,10 @@ private data class RateLimitRuleState(
     fun hasAnyRule(): Boolean = ipEnabled || (subjectEnabled && subjectPathPrefixes.isNotEmpty())
 }
 
-private fun Application.isStageOrProdProfile(): Boolean =
-    resolveEnv("APP_PROFILE")
-        ?.trim()
-        ?.uppercase()
-        ?.let { it == "STAGE" || it == "PROD" }
-        ?: false
+private fun Application.isProdLikeProfile(): Boolean {
+    val profile = (resolveEnv("APP_PROFILE") ?: resolveEnv("APP_ENV"))?.trim()?.uppercase()
+    return profile in setOf("PROD", "PRODUCTION", "STAGE", "STAGING")
+}
 
 private fun Application.resolveBooleanEnv(name: String): Boolean? {
     val rawFromConfig = environment.config.propertyOrNull("app.env.$name")?.getString()
@@ -237,7 +235,7 @@ fun Application.installRateLimitPluginDefaults() {
     if (!ruleState.hasAnyRule()) {
         val message =
             "RateLimitPlugin включен, но не настроено ни одного правила (RL_IP_ENABLED=false и RL_SUBJECT_PATH_PREFIXES пуст)."
-        if (isStageOrProdProfile()) {
+        if (isProdLikeProfile()) {
             error(message)
         } else {
             LoggerFactory.getLogger("RateLimitPlugin").warn(message)

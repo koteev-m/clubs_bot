@@ -104,10 +104,11 @@ spec:
 - `/api/host/checkin/`
 - `/api/clubs/` (включая `/nights` и `/tables/free` polling)
 - `/api/guest-lists/export`
+- `/api/guest-lists/import`
 
 Переменные настройки:
 
 - RateLimit: `RL_IP_ENABLED`, `RL_IP_RPS`, `RL_IP_BURST`, `RL_SUBJECT_ENABLED`, `RL_SUBJECT_RPS`, `RL_SUBJECT_BURST`, `RL_SUBJECT_TTL_SECONDS`, `RL_RETRY_AFTER_SECONDS`, `RL_SUBJECT_PATH_PREFIXES`.
 - HotPathLimiter: `HOT_PATH_PREFIXES`, `HOT_PATH_MAX_CONCURRENT`, `HOT_PATH_RETRY_AFTER_SEC`.
 
-Fail-fast: в `APP_PROFILE=stage|prod` запуск останавливается, если лимитер включён, но не осталось ни одного правила (`RL_IP_ENABLED=false` и пустой `RL_SUBJECT_PATH_PREFIXES`, либо пустой `HOT_PATH_PREFIXES`).
+Fail-fast: в prod-like профилях (`APP_PROFILE`/`APP_ENV` = `prod|production|stage|staging`) запуск останавливается, если лимитер включён, но не осталось ни одного правила (`RL_IP_ENABLED=false` и пустой `RL_SUBJECT_PATH_PREFIXES`, либо пустой `HOT_PATH_PREFIXES`).
