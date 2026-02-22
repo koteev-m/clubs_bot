@@ -91,3 +91,16 @@ interface PaymentsRepository {
         externalId: String?,
     )
 }
+
+/**
+ * Read-model required to safely validate Telegram pre-checkout requests.
+ */
+interface PaymentsPreCheckoutRepository {
+    data class BookingSnapshot(
+        val status: String,
+        val guestUserId: Long?,
+        val arrivalBy: Instant?,
+    )
+
+    suspend fun findBookingSnapshot(bookingId: UUID): BookingSnapshot?
+}
