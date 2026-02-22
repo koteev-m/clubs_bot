@@ -90,3 +90,24 @@ spec:
 # DR и бэкапы
 
 Политика бэкапов/PITR, правила запуска миграций и параметры пула подключений описаны в `docs/dr.md`. Для prod/stage приложение валидирует схему на старте, а миграции выполняются только через CI-джоб `db-migrate` с явным `FLYWAY_MODE=migrate-and-validate`; при pending миграциях старт приложения запрещён.
+
+# Runtime anti-spam / limiter wiring
+
+Для защиты hot-path приложение в `Application.module` ставит оба плагина при включённых флагах:
+
+- `RATE_LIMIT_ENABLED=true` → `RateLimitPlugin`.
+- `HOT_PATH_ENABLED=true` → `HotPathLimiter`.
+
+По умолчанию защищаются префиксы:
+
+- `/telegram/webhook`
+- `/api/host/checkin/`
+- `/api/clubs/` (включая `/nights` и `/tables/free` polling)
+- `/api/guest-lists/export`
+
+Переменные настройки:
+
+- RateLimit: `RL_IP_ENABLED`, `RL_IP_RPS`, `RL_IP_BURST`, `RL_SUBJECT_ENABLED`, `RL_SUBJECT_RPS`, `RL_SUBJECT_BURST`, `RL_SUBJECT_TTL_SECONDS`, `RL_RETRY_AFTER_SECONDS`, `RL_SUBJECT_PATH_PREFIXES`.
+- HotPathLimiter: `HOT_PATH_PREFIXES`, `HOT_PATH_MAX_CONCURRENT`, `HOT_PATH_RETRY_AFTER_SEC`.
+
+Fail-fast: в `APP_PROFILE=stage|prod` запуск останавливается, если лимитер включён, но не осталось ни одного правила (`RL_IP_ENABLED=false` и пустой `RL_SUBJECT_PATH_PREFIXES`, либо пустой `HOT_PATH_PREFIXES`).
