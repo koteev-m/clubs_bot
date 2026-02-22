@@ -2,6 +2,7 @@ package com.example.bot.data.repo
 
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.payments.PaymentsPreCheckoutRepository
+import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -11,7 +12,7 @@ class PaymentsPreCheckoutRepositoryImpl(
     private val db: Database,
 ) : PaymentsPreCheckoutRepository {
     override suspend fun findBookingSnapshot(bookingId: UUID): PaymentsPreCheckoutRepository.BookingSnapshot? =
-        newSuspendedTransaction(db = db) {
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             BookingsTable
                 .selectAll()
                 .where { BookingsTable.id eq bookingId }

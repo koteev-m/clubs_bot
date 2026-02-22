@@ -11,6 +11,10 @@ import com.pengrad.telegrambot.model.request.LabeledPrice
 import com.pengrad.telegrambot.request.AnswerPreCheckoutQuery
 import com.pengrad.telegrambot.request.SendInvoice
 import com.pengrad.telegrambot.response.SendResponse
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
 import java.util.UUID
@@ -52,14 +56,24 @@ class PaymentsHandlers(
 
     /** Ответ на pre-checkout: подтверждаем только после повторной серверной валидации. */
     suspend fun handlePreCheckout(query: PreCheckoutQuery) {
-        val validation = preCheckoutValidator.validate(query)
         val response =
-            if (validation is PreCheckoutValidation.Ok) {
-                AnswerPreCheckoutQuery(query.id())
-            } else {
+            try {
+                val validation = preCheckoutValidator.validate(query)
+                if (validation is PreCheckoutValidation.Ok) {
+                    AnswerPreCheckoutQuery(query.id())
+                } else {
+                    AnswerPreCheckoutQuery(query.id(), SAFE_PRECHECKOUT_ERROR)
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                logger.warn("precheckout validation failed: {}", e::class.simpleName)
                 AnswerPreCheckoutQuery(query.id(), SAFE_PRECHECKOUT_ERROR)
             }
-        bot.execute(response)
+
+        withContext(Dispatchers.IO) {
+            bot.execute(response)
+        }
     }
 
     /** Обработка успешного платежа: маппим payload → запись и помечаем CAPTURED. */
@@ -71,6 +85,7 @@ class PaymentsHandlers(
     }
 
     companion object {
+        private val logger = LoggerFactory.getLogger(PaymentsHandlers::class.java)
         private const val SAFE_PRECHECKOUT_ERROR = "Платеж недоступен, обновите бронь"
     }
 }

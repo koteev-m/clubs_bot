@@ -4,8 +4,11 @@ import com.example.bot.payments.PaymentsPreCheckoutRepository
 import com.example.bot.payments.PaymentsRepository
 import com.pengrad.telegrambot.model.PreCheckoutQuery
 import com.pengrad.telegrambot.model.User
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -82,6 +85,37 @@ class PreCheckoutValidatorTest {
         val result = validator.validate(query())
 
         assertEquals(PreCheckoutValidation.Ok, result)
+    }
+
+    @Test
+    fun `pre-checkout validator exception fails closed`() = runBlocking {
+        val bot = mockk<com.pengrad.telegrambot.TelegramBot>()
+        val config = com.example.bot.payments.PaymentConfig(providerToken = "token")
+        val paymentsRepository = FakePaymentsRepository(record = null)
+        val validator = mockk<PreCheckoutValidator>()
+        val query = mockk<PreCheckoutQuery>()
+        val requestSlot = slot<com.pengrad.telegrambot.request.AnswerPreCheckoutQuery>()
+
+        every { query.id() } returns "pcq-1"
+        coEvery { validator.validate(query) } throws IllegalStateException("boom")
+        every { bot.execute(capture(requestSlot)) } returns mockk(relaxed = true)
+
+        val handlers =
+            PaymentsHandlers(
+                bot = bot,
+                config = config,
+                paymentsRepo = paymentsRepository,
+                preCheckoutValidator = validator,
+            )
+
+        handlers.handlePreCheckout(query)
+
+        coVerify(exactly = 1) { validator.validate(query) }
+        coVerify(exactly = 1) { bot.execute(any<com.pengrad.telegrambot.request.AnswerPreCheckoutQuery>()) }
+
+        val parameters = requestSlot.captured.getParameters()
+        assertEquals(false, parameters["ok"])
+        assertEquals("Платеж недоступен, обновите бронь", parameters["error_message"])
     }
 
     private fun payment(
