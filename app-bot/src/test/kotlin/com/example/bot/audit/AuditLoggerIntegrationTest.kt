@@ -91,7 +91,6 @@ class AuditLoggerIntegrationTest {
                 createdAt = fixedClock.instant(),
                 updatedAt = fixedClock.instant(),
             )
-        val bookingId = UUID.randomUUID()
         val record =
             CheckinRecord(
                 id = 44,

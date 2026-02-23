@@ -17,7 +17,6 @@ import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
-import java.util.UUID
 
 /**
  * Telegram adapter for handling payment related callbacks.
@@ -78,15 +77,30 @@ class PaymentsHandlers(
 
     /** Обработка успешного платежа: маппим payload → запись и помечаем CAPTURED. */
     suspend fun handleSuccessfulPayment(message: Message) {
-        val payload = message.successfulPayment()?.invoicePayload ?: return
+        val successfulPayment = message.successfulPayment() ?: return
+        val payload = successfulPayment.invoicePayload ?: return
         val record = paymentsRepo.findByPayload(payload) ?: return
-        // В демо — генерим внешний id; в проде сюда кладём ID от платежного провайдера
-        paymentsRepo.markCaptured(record.id, UUID.randomUUID().toString())
+        if (record.status == CAPTURED_STATUS) {
+            logger.info("payment already captured")
+            return
+        }
+
+        val providerChargeId = successfulPayment.providerPaymentChargeId.orEmpty().ifBlank { null }
+        val telegramChargeId = successfulPayment.telegramPaymentChargeId.orEmpty().ifBlank { null }
+        val externalId =
+            when {
+                providerChargeId != null -> providerChargeId
+                telegramChargeId != null -> telegramChargeId
+                else -> null
+            }
+
+        paymentsRepo.markCaptured(record.id, externalId)
     }
 
     companion object {
         private val logger = LoggerFactory.getLogger(PaymentsHandlers::class.java)
         private const val SAFE_PRECHECKOUT_ERROR = "Платеж недоступен, обновите бронь"
+        private const val CAPTURED_STATUS = "CAPTURED"
     }
 }
 

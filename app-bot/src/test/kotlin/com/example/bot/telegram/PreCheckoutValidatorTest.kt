@@ -2,7 +2,10 @@ package com.example.bot.telegram
 
 import com.example.bot.payments.PaymentsPreCheckoutRepository
 import com.example.bot.payments.PaymentsRepository
+import com.pengrad.telegrambot.TelegramBot
+import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.PreCheckoutQuery
+import com.pengrad.telegrambot.model.SuccessfulPayment
 import com.pengrad.telegrambot.model.User
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -89,7 +92,7 @@ class PreCheckoutValidatorTest {
 
     @Test
     fun `pre-checkout validator exception fails closed`() = runBlocking {
-        val bot = mockk<com.pengrad.telegrambot.TelegramBot>()
+        val bot = mockk<TelegramBot>()
         val config = com.example.bot.payments.PaymentConfig(providerToken = "token")
         val paymentsRepository = FakePaymentsRepository(record = null)
         val validator = mockk<PreCheckoutValidator>()
@@ -116,6 +119,36 @@ class PreCheckoutValidatorTest {
         val parameters = requestSlot.captured.getParameters()
         assertEquals(false, parameters["ok"])
         assertEquals("Платеж недоступен, обновите бронь", parameters["error_message"])
+    }
+
+    @Test
+    fun `successful payment captures with provider external id`() = runBlocking {
+        val bot = mockk<TelegramBot>(relaxed = true)
+        val config = com.example.bot.payments.PaymentConfig(providerToken = "token")
+        val paymentsRepository = mockk<PaymentsRepository>()
+        val validator = mockk<PreCheckoutValidator>()
+        val message = mockk<Message>()
+        val successfulPayment = mockk<SuccessfulPayment>()
+        val record = payment(status = "PENDING")
+
+        every { message.successfulPayment() } returns successfulPayment
+        every { successfulPayment.invoicePayload } returns "payload-1"
+        every { successfulPayment.providerPaymentChargeId } returns "provider-charge-1"
+        every { successfulPayment.telegramPaymentChargeId } returns "telegram-charge-1"
+        coEvery { paymentsRepository.findByPayload("payload-1") } returns record
+        coEvery { paymentsRepository.markCaptured(any(), any()) } returns Unit
+
+        val handlers =
+            PaymentsHandlers(
+                bot = bot,
+                config = config,
+                paymentsRepo = paymentsRepository,
+                preCheckoutValidator = validator,
+            )
+
+        handlers.handleSuccessfulPayment(message)
+
+        coVerify(exactly = 1) { paymentsRepository.markCaptured(record.id, "provider-charge-1") }
     }
 
     private fun payment(
