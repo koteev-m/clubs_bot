@@ -7,6 +7,7 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -38,11 +39,9 @@ class TelegramWebhookIngressWorkerTest :
                 )
 
             worker.start()
-            repeat(30) {
-                if (processed.get() == 1) return@repeat
-                delay(20)
+            awaitUntilDone(worker) {
+                processed.get() == 1 && statusOf(database, 1) == TelegramWebhookUpdateStatus.DONE
             }
-            worker.shutdown()
 
             processed.get() shouldBe 1
             statusOf(database, 1) shouldBe TelegramWebhookUpdateStatus.DONE
@@ -64,11 +63,9 @@ class TelegramWebhookIngressWorkerTest :
                     idleDelay = Duration.ofMillis(20),
                 )
             firstWorker.start()
-            repeat(30) {
-                if (statusOf(database, 2) == TelegramWebhookUpdateStatus.FAILED) return@repeat
-                delay(20)
+            awaitUntilDone(firstWorker) {
+                statusOf(database, 2) == TelegramWebhookUpdateStatus.FAILED
             }
-            firstWorker.shutdown()
 
             transaction(database) {
                 TelegramWebhookUpdatesTable.update({ TelegramWebhookUpdatesTable.updateId eq 2L }) {
@@ -84,11 +81,9 @@ class TelegramWebhookIngressWorkerTest :
                     idleDelay = Duration.ofMillis(20),
                 )
             secondWorker.start()
-            repeat(30) {
-                if (processed.get() == 1) return@repeat
-                delay(20)
+            awaitUntilDone(secondWorker) {
+                processed.get() == 1 && statusOf(database, 2) == TelegramWebhookUpdateStatus.DONE
             }
-            secondWorker.shutdown()
 
             processed.get() shouldBe 1
             statusOf(database, 2) shouldBe TelegramWebhookUpdateStatus.DONE
@@ -121,11 +116,9 @@ class TelegramWebhookIngressWorkerTest :
                 )
 
             worker.start()
-            repeat(30) {
-                if (processed.get() == 1) return@repeat
-                delay(20)
+            awaitUntilDone(worker) {
+                processed.get() == 1 && statusOf(database, 3) == TelegramWebhookUpdateStatus.DONE
             }
-            worker.shutdown()
 
             processed.get() shouldBe 1
             statusOf(database, 3) shouldBe TelegramWebhookUpdateStatus.DONE
@@ -166,3 +159,18 @@ private fun payloadOf(
             .where { TelegramWebhookUpdatesTable.updateId eq updateId }
             .first()[TelegramWebhookUpdatesTable.payloadJson]
     }
+
+private suspend fun awaitUntilDone(
+    worker: TelegramWebhookIngressWorker,
+    condition: () -> Boolean,
+) {
+    try {
+        withTimeout(2_000) {
+            while (!condition()) {
+                delay(20)
+            }
+        }
+    } finally {
+        worker.shutdown()
+    }
+}
