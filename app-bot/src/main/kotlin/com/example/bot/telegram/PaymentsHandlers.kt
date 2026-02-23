@@ -66,7 +66,7 @@ class PaymentsHandlers(
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {
-                logger.warn("precheckout validation failed: {}", e::class.simpleName)
+                logger.warn("precheckout validation failed: {}", e.javaClass.simpleName)
                 AnswerPreCheckoutQuery(query.id(), SAFE_PRECHECKOUT_ERROR)
             }
 
@@ -81,12 +81,11 @@ class PaymentsHandlers(
         val payload = successfulPayment.invoicePayload ?: return
         val record = paymentsRepo.findByPayload(payload) ?: return
         if (record.status == CAPTURED_STATUS) {
-            logger.info("payment already captured")
             return
         }
 
-        val providerChargeId = successfulPayment.providerPaymentChargeId.orEmpty().ifBlank { null }
-        val telegramChargeId = successfulPayment.telegramPaymentChargeId.orEmpty().ifBlank { null }
+        val providerChargeId = successfulPayment.providerPaymentChargeId?.trim()?.takeIf { it.isNotEmpty() }
+        val telegramChargeId = successfulPayment.telegramPaymentChargeId?.trim()?.takeIf { it.isNotEmpty() }
         val externalId =
             when {
                 providerChargeId != null -> providerChargeId

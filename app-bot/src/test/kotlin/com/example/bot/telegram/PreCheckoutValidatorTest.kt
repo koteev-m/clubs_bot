@@ -12,6 +12,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -114,7 +115,7 @@ class PreCheckoutValidatorTest {
         handlers.handlePreCheckout(query)
 
         coVerify(exactly = 1) { validator.validate(query) }
-        coVerify(exactly = 1) { bot.execute(any<com.pengrad.telegrambot.request.AnswerPreCheckoutQuery>()) }
+        verify(exactly = 1) { bot.execute(any<com.pengrad.telegrambot.request.AnswerPreCheckoutQuery>()) }
 
         val parameters = requestSlot.captured.getParameters()
         assertEquals(false, parameters["ok"])
