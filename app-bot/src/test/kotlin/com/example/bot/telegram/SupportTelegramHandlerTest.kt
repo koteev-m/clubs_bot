@@ -20,6 +20,8 @@ import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.EditMessageReplyMarkup
 import com.pengrad.telegrambot.response.BaseResponse
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import java.time.Instant
@@ -134,6 +136,7 @@ class TelegramCallbackRouterTest {
                 supportHandler = { supportCalls++ },
                 invitationHandler = { invitationCalls++ },
                 guestFallbackHandler = { false },
+                paymentsHandler = mockk(relaxed = true),
             )
         val update = mockCallbackUpdate("support_rate:1:up")
 
@@ -150,6 +153,7 @@ class TelegramCallbackRouterTest {
                 supportHandler = { throw AssertionError("support should not be called") },
                 invitationHandler = {},
                 guestFallbackHandler = { false },
+                paymentsHandler = mockk(relaxed = true),
             )
         val updateConfirm = mockCallbackUpdate("inv_confirm:abc")
         val updateDecline = mockCallbackUpdate("inv_decline:xyz")
@@ -167,6 +171,7 @@ class TelegramCallbackRouterTest {
                 supportHandler = { supportCalls++ },
                 invitationHandler = { invitationCalls++ },
                 guestFallbackHandler = { false },
+                paymentsHandler = mockk(relaxed = true),
             )
         val update = mockCallbackUpdate("other:callback")
 
@@ -174,6 +179,28 @@ class TelegramCallbackRouterTest {
 
         assertEquals(0, supportCalls)
         assertEquals(0, invitationCalls)
+    }
+
+    @Test
+    fun `routes pre-checkout updates to payments handler`() = runBlocking {
+        val paymentsHandler = mockk<PaymentsHandlers>()
+        val router =
+            TelegramCallbackRouter(
+                supportHandler = { throw AssertionError("support should not be called") },
+                invitationHandler = { throw AssertionError("invitation should not be called") },
+                guestFallbackHandler = { throw AssertionError("fallback should not be called") },
+                paymentsHandler = paymentsHandler,
+            )
+        val update = mockk<Update>()
+        val query = mockk<com.pengrad.telegrambot.model.PreCheckoutQuery>()
+        every { update.preCheckoutQuery() } returns query
+        every { update.message() } returns null
+        coEvery { paymentsHandler.handlePreCheckout(query) } returns Unit
+
+        router.route(update)
+
+        coVerify(exactly = 1) { paymentsHandler.handlePreCheckout(query) }
+        coVerify(exactly = 0) { paymentsHandler.handleSuccessfulPayment(any()) }
     }
 
     @Test
@@ -188,8 +215,11 @@ class TelegramCallbackRouterTest {
                     fallbackCalls++
                     false
                 },
+                paymentsHandler = mockk(relaxed = true),
             )
         val update = mockk<Update>()
+        every { update.preCheckoutQuery() } returns null
+        every { update.message() } returns null
         every { update.callbackQuery() } returns null
 
         router.route(update)
@@ -210,8 +240,11 @@ class TelegramCallbackRouterTest {
                     fallbackCalls++
                     true
                 },
+                paymentsHandler = mockk(relaxed = true),
             )
         val update = mockk<Update>()
+        every { update.preCheckoutQuery() } returns null
+        every { update.message() } returns null
         every { update.callbackQuery() } returns null
 
         router.route(update)
@@ -231,6 +264,7 @@ class TelegramCallbackRouterTest {
                     fallbackCalls++
                     true
                 },
+                paymentsHandler = mockk(relaxed = true),
             )
         val update = mockCallbackUpdate("ask:club:10")
 
@@ -344,6 +378,8 @@ private fun mockCallbackUpdate(
     val update = mockk<Update>()
     val callbackQuery = mockk<CallbackQuery>()
     val from = mockk<com.pengrad.telegrambot.model.User>()
+    every { update.preCheckoutQuery() } returns null
+    every { update.message() } returns null
     every { update.callbackQuery() } returns callbackQuery
     every { callbackQuery.data() } returns data
     every { callbackQuery.id() } returns "callback-id"

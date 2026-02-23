@@ -279,6 +279,7 @@ fun Application.module() {
     val suspiciousIpRepository by inject<SuspiciousIpRepository>()
     val webhookUpdateDedupRepository by inject<WebhookUpdateDedupRepository>()
     val telegramWebhookIngressRepository by inject<TelegramWebhookIngressRepository>()
+    val paymentsHandlers by inject<com.example.bot.telegram.PaymentsHandlers>()
     val supportService by inject<SupportService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
@@ -333,6 +334,7 @@ fun Application.module() {
             supportHandler = supportTelegramHandler::handle,
             invitationHandler = invitationTelegramHandler::handle,
             guestFallbackHandler = telegramGuestFallbackHandler::handle,
+            paymentsHandler = paymentsHandlers,
         )
 
     val telegramWebhookIngressMetrics = TelegramWebhookIngressMetrics(registry)

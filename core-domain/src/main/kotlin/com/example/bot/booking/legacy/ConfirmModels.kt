@@ -2,6 +2,7 @@ package com.example.bot.booking.legacy
 
 import java.math.BigDecimal
 import java.time.Instant
+import java.util.UUID
 
 /**
  * Input parameters for starting booking confirmation.
@@ -13,6 +14,7 @@ data class ConfirmInput(
     val tableNumber: Int,
     val guestsCount: Int,
     val minDeposit: BigDecimal,
+    val bookingId: UUID? = null,
 )
 
 /**

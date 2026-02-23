@@ -5,16 +5,23 @@ import com.example.bot.notifications.TelegramOperationalNotificationService
 import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.plugins.ConfigProvider
 import com.example.bot.telegram.TelegramClient
+import com.pengrad.telegrambot.TelegramBot
 import org.koin.dsl.module
 
 val opsNotificationsModule =
     module {
         single { OpsNotificationServiceConfig.fromEnv() }
-        single {
+        single<TelegramBot> {
             val config = ConfigProvider.current()
+            TelegramBot
+                .Builder(config.bot.token)
+                .apply {
+                    config.localApi.baseUrl.takeIf { config.localApi.enabled }?.let { apiUrl(it) }
+                }.build()
+        }
+        single {
             TelegramClient(
-                token = config.bot.token,
-                apiUrl = config.localApi.baseUrl.takeIf { config.localApi.enabled },
+                bot = get(),
             )
         }
         single {
