@@ -6,6 +6,7 @@ import com.example.bot.payments.PaymentsRepository.PaymentRecord
 import com.example.bot.payments.PaymentsRepository.Result
 import com.example.bot.payments.PaymentsRepository.Result.Status
 import com.example.bot.payments.PaymentsRepository.SavedAction
+import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.Table
@@ -61,7 +62,7 @@ class PaymentsRepositoryImpl(
         payload: String,
         idempotencyKey: String,
     ): PaymentRecord =
-        newSuspendedTransaction(db = db) {
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             val row =
                 PaymentsTable
                     .insert {
@@ -101,7 +102,7 @@ class PaymentsRepositoryImpl(
     }
 
     override suspend fun findByPayload(payload: String): PaymentRecord? =
-        newSuspendedTransaction(db = db) {
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             PaymentsTable
                 .selectAll()
                 .where { PaymentsTable.payload eq payload }
@@ -110,7 +111,7 @@ class PaymentsRepositoryImpl(
         }
 
     override suspend fun findByIdempotencyKey(idempotencyKey: String): PaymentRecord? =
-        newSuspendedTransaction(db = db) {
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             PaymentsTable
                 .selectAll()
                 .where { PaymentsTable.idempotencyKey eq idempotencyKey }
@@ -124,7 +125,7 @@ class PaymentsRepositoryImpl(
         action: Action,
         result: Result,
     ): SavedAction =
-        newSuspendedTransaction(db = db) {
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             PaymentActionsTable
                 .insert {
                     it[PaymentActionsTable.bookingId] = bookingId
@@ -138,7 +139,7 @@ class PaymentsRepositoryImpl(
         }
 
     override suspend fun findActionByIdempotencyKey(key: String): SavedAction? =
-        newSuspendedTransaction(db = db) {
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             PaymentActionsTable
                 .selectAll()
                 .where { PaymentActionsTable.idempotencyKey eq key }
@@ -151,7 +152,7 @@ class PaymentsRepositoryImpl(
         id: UUID,
         status: String,
         externalId: String?,
-    ) = newSuspendedTransaction(db = db) {
+    ) = newSuspendedTransaction(context = Dispatchers.IO, db = db) {
         PaymentsTable.update({ PaymentsTable.id eq id }) {
             it[PaymentsTable.status] = status
             it[PaymentsTable.externalId] = externalId

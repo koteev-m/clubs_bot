@@ -83,9 +83,10 @@ class PaymentsService(
         input: ConfirmInput,
     ): ConfirmResult {
         val payload = UUID.randomUUID().toString()
+        val bookingId = requireNotNull(input.bookingId) { "bookingId is required for booking payment" }
         val record =
             paymentsRepo.createInitiated(
-                bookingId = null,
+                bookingId = bookingId,
                 provider = provider,
                 currency = currency,
                 amountMinor = amountMinor,

@@ -6,10 +6,12 @@ import com.example.bot.data.repo.PaymentsPreCheckoutRepositoryImpl
 import com.example.bot.data.repo.PaymentsRepositoryImpl
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.opschat.OpsNotificationPublisher
+import com.example.bot.payments.PaymentConfig
 import com.example.bot.payments.PaymentsPreCheckoutRepository
 import com.example.bot.payments.PaymentsRepository
 import com.example.bot.payments.finalize.DefaultPaymentsFinalizeService
 import com.example.bot.payments.finalize.PaymentsFinalizeService
+import com.example.bot.telegram.PaymentsHandlers
 import com.example.bot.telegram.PreCheckoutValidator
 import io.micrometer.tracing.Tracer
 import org.koin.dsl.module
@@ -19,9 +21,22 @@ val paymentsModule =
         single<PaymentsRepository> { PaymentsRepositoryImpl(get()) }
         single<PaymentsPreCheckoutRepository> { PaymentsPreCheckoutRepositoryImpl(get()) }
         single {
+            PaymentConfig(
+                providerToken = System.getenv("TELEGRAM_PAYMENT_PROVIDER_TOKEN").orEmpty(),
+            )
+        }
+        single {
             PreCheckoutValidator(
                 paymentsRepository = get<PaymentsRepository>(),
                 preCheckoutRepository = get<PaymentsPreCheckoutRepository>(),
+            )
+        }
+        single {
+            PaymentsHandlers(
+                bot = get(),
+                config = get(),
+                paymentsRepo = get(),
+                preCheckoutValidator = get(),
             )
         }
         single<PaymentsFinalizeService> {

@@ -91,6 +91,7 @@ class AuditLoggerIntegrationTest {
                 createdAt = fixedClock.instant(),
                 updatedAt = fixedClock.instant(),
             )
+        val bookingId = UUID.randomUUID()
         val record =
             CheckinRecord(
                 id = 44,
@@ -161,10 +162,11 @@ class AuditLoggerIntegrationTest {
         val auditLogger = AuditLogger(auditRepo)
         val bookingService = mockk<BookingService>(relaxed = true)
         val paymentsRepo = mockk<PaymentsRepository>()
+        val bookingId = UUID.randomUUID()
         val record =
             PaymentsRepository.PaymentRecord(
                 id = UUID.randomUUID(),
-                bookingId = null,
+                bookingId = bookingId,
                 provider = "PROVIDER",
                 currency = "RUB",
                 amountMinor = 10_000,
@@ -177,7 +179,7 @@ class AuditLoggerIntegrationTest {
             )
         coEvery {
             paymentsRepo.createInitiated(
-                bookingId = null,
+                bookingId = bookingId,
                 provider = "PROVIDER",
                 currency = "RUB",
                 amountMinor = 10_000,
@@ -195,6 +197,7 @@ class AuditLoggerIntegrationTest {
                 tableNumber = 7,
                 guestsCount = 2,
                 minDeposit = BigDecimal("50.00"),
+                bookingId = bookingId,
             )
         val policy = PaymentPolicy(mode = PaymentMode.PROVIDER_DEPOSIT, currency = "RUB")
 

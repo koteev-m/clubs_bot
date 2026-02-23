@@ -32,14 +32,15 @@ class PaymentsServiceUnitTest {
     @Test
     fun `should create pending payment for provider deposit`() =
         runTest {
-            val input = ConfirmInput(1, Instant.parse("2024-03-01T00:00:00Z"), 1, 1, 2, BigDecimal(100))
+            val bookingId = UUID.randomUUID()
+            val input = ConfirmInput(1, Instant.parse("2024-03-01T00:00:00Z"), 1, 1, 2, BigDecimal(100), bookingId)
             val policy = PaymentPolicy(mode = PaymentMode.PROVIDER_DEPOSIT, currency = "RUB")
             val res = service.startConfirmation(input, null, policy, "idem")
             assertTrue(res is Either.Right)
             val pending = (res as Either.Right).value as ConfirmResult.PendingPayment
             assertEquals(20000L, pending.invoice.totalMinor)
             assertTrue(pending.invoice.payload.isNotBlank())
-            coVerify { repo.createInitiated(null, "PROVIDER", "RUB", 20000L, pending.invoice.payload, "idem") }
+            coVerify { repo.createInitiated(bookingId, "PROVIDER", "RUB", 20000L, pending.invoice.payload, "idem") }
         }
 
     @Test
@@ -59,12 +60,13 @@ class PaymentsServiceUnitTest {
     @Test
     fun `stars mode uses XTR currency`() =
         runTest {
-            val input = ConfirmInput(1, Instant.now(), 1, 1, 3, BigDecimal(1))
+            val bookingId = UUID.randomUUID()
+            val input = ConfirmInput(1, Instant.now(), 1, 1, 3, BigDecimal(1), bookingId)
             val policy = PaymentPolicy(mode = PaymentMode.STARS_DIGITAL)
             val res = service.startConfirmation(input, null, policy, "idem3")
             assertTrue(res is Either.Right)
             val pending = (res as Either.Right).value as ConfirmResult.PendingPayment
             assertEquals("XTR", pending.invoice.currency)
-            coVerify { repo.createInitiated(null, "STARS", "XTR", 3L, pending.invoice.payload, "idem3") }
+            coVerify { repo.createInitiated(bookingId, "STARS", "XTR", 3L, pending.invoice.payload, "idem3") }
         }
 }
