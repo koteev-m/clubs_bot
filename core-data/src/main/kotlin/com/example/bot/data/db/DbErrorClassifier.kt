@@ -1,5 +1,6 @@
 package com.example.bot.data.db
 
+import org.jetbrains.exposed.exceptions.ExposedSQLException
 import org.postgresql.util.PSQLException
 import java.sql.SQLException
 import java.sql.SQLTransientConnectionException
@@ -7,6 +8,7 @@ import java.sql.SQLTransientException
 
 private const val SQL_STATE_DEADLOCK = "40P01"
 private const val SQL_STATE_SERIALIZATION = "40001"
+private const val SQL_STATE_UNIQUE_VIOLATION = "23505"
 private const val SQL_STATE_CONSTRAINT_PREFIX = "23"
 private const val SQL_STATE_CONNECTION_PREFIX = "08"
 
@@ -62,10 +64,22 @@ object DbErrorClassifier {
     }
 }
 
+/**
+ * Определяет конфликт уникального ограничения по SQLSTATE `23505`.
+ *
+ * Поддерживает цепочку причин из [ExposedSQLException], [PSQLException] и [SQLException].
+ * Единственный критерий — SQLSTATE `23505` в любом из поддержанных исключений,
+ * включая вложенные causes. Сообщение исключения не анализируется.
+ */
 fun Throwable.isUniqueViolation(): Boolean =
     generateSequence(this) { it.cause }
-        .filterIsInstance<SQLException>()
-        .any { it.sqlState == "23505" }
+        .any { throwable ->
+            when (throwable) {
+                is ExposedSQLException -> throwable.sqlState == SQL_STATE_UNIQUE_VIOLATION
+                is SQLException -> throwable.sqlState == SQL_STATE_UNIQUE_VIOLATION
+                else -> false
+            }
+        }
 
 fun Throwable.isRetryLimitExceeded(): Boolean {
     val state =
