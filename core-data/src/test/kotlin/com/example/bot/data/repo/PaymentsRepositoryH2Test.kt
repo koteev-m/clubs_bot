@@ -67,4 +67,50 @@ class PaymentsRepositoryH2Test {
         secondActual?.telegramPaymentChargeId shouldBe null
         secondActual?.providerPaymentChargeId shouldBe null
     }
+
+    @Test
+    fun `capture maps duplicate telegram charge id to charge conflict on h2`() = runBlocking {
+        val firstPayment =
+            repository.createInitiated(
+                bookingId = null,
+                provider = "TG",
+                currency = "RUB",
+                amountMinor = 10_000,
+                payload = "h2-telegram-payload-1",
+                idempotencyKey = "h2-telegram-idem-1",
+            )
+        val secondPayment =
+            repository.createInitiated(
+                bookingId = null,
+                provider = "TG",
+                currency = "RUB",
+                amountMinor = 20_000,
+                payload = "h2-telegram-payload-2",
+                idempotencyKey = "h2-telegram-idem-2",
+            )
+
+        repository.markCapturedByChargeIds(
+            id = firstPayment.id,
+            externalId = "provider-charge-1",
+            telegramPaymentChargeId = "tg-charge-1",
+            providerPaymentChargeId = "provider-charge-1",
+        ) shouldBe PaymentsRepository.CaptureResult.CAPTURED
+
+        val conflictResult =
+            repository.markCapturedByChargeIds(
+                id = secondPayment.id,
+                externalId = "provider-charge-2",
+                telegramPaymentChargeId = "tg-charge-1",
+                providerPaymentChargeId = "provider-charge-2",
+            )
+
+        val secondActual = repository.findByPayload("h2-telegram-payload-2")
+
+        conflictResult shouldBe PaymentsRepository.CaptureResult.CHARGE_CONFLICT
+        secondActual?.status shouldBe "INITIATED"
+        secondActual?.externalId shouldBe null
+        secondActual?.telegramPaymentChargeId shouldBe null
+        secondActual?.providerPaymentChargeId shouldBe null
+    }
+
 }

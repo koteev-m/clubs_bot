@@ -29,8 +29,7 @@ data class DbErrorClassification(
 
 object DbErrorClassifier {
     fun classify(error: Throwable): DbErrorClassification {
-        val sqlException = error.sqlException()
-        val sqlState = sqlException?.sqlState
+        val sqlState = error.sqlState()
 
         val reason = reasonFor(error, sqlState)
         val retryable = when (reason) {
@@ -90,7 +89,13 @@ fun Throwable.isRetryLimitExceeded(): Boolean {
     return state == "40001" || state == "40P01"
 }
 
-private fun Throwable.sqlException(): SQLException? =
+
+private fun Throwable.sqlState(): String? =
     generateSequence(this) { it.cause }
-        .filterIsInstance<SQLException>()
-        .firstOrNull()
+        .mapNotNull { throwable ->
+            when (throwable) {
+                is ExposedSQLException -> throwable.sqlState
+                is SQLException -> throwable.sqlState
+                else -> null
+            }
+        }.firstOrNull()
