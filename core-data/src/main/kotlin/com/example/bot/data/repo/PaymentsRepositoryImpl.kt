@@ -7,6 +7,7 @@ import com.example.bot.payments.PaymentsRepository.PaymentRecord
 import com.example.bot.payments.PaymentsRepository.Result
 import com.example.bot.payments.PaymentsRepository.Result.Status
 import com.example.bot.payments.PaymentsRepository.SavedAction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
@@ -130,7 +131,10 @@ class PaymentsRepositoryImpl(
                     PaymentsRepository.CaptureResult.CAPTURED
                 }
             }
-        } catch (ex: Throwable) {
+        } catch (ex: Exception) {
+            if (ex is CancellationException) {
+                throw ex
+            }
             if (ex.isUniqueViolation()) {
                 PaymentsRepository.CaptureResult.CHARGE_CONFLICT
             } else {
