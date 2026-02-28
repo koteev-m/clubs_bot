@@ -4,8 +4,11 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.equals.shouldBeEqual
+import io.mockk.every
+import io.mockk.mockk
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.delay
+import org.jetbrains.exposed.exceptions.ExposedSQLException
 import org.jetbrains.exposed.sql.Database
 import java.sql.SQLException
 import java.sql.SQLTransientConnectionException
@@ -126,6 +129,19 @@ class DbErrorClassifierTest :
             DbErrorClassifier.classify(sqlException("08006")).reason shouldBe DbErrorReason.CONNECTION
             DbErrorClassifier.classify(SQLTransientConnectionException("t", "08001")).retryable shouldBe true
             DbErrorClassifier.classify(RuntimeException("boom")).retryable shouldBe false
+        }
+
+        "classifies sqlState from exposed sql exception" {
+            val exposed = mockk<ExposedSQLException>()
+            every { exposed.sqlState } returns "23505"
+            every { exposed.cause } returns null
+
+            val direct = DbErrorClassifier.classify(exposed)
+            val wrapped = DbErrorClassifier.classify(RuntimeException(exposed))
+
+            direct.sqlState shouldBe "23505"
+            direct.reason shouldBe DbErrorReason.CONSTRAINT
+            wrapped.sqlState shouldBe "23505"
         }
 
         "detects unique violations only for 23505" {

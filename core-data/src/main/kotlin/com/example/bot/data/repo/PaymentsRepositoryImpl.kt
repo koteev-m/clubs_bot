@@ -132,15 +132,19 @@ class PaymentsRepositoryImpl(
                 }
             }
         } catch (ex: Exception) {
-            if (ex is CancellationException) {
-                throw ex
-            }
-            if (ex.isUniqueViolation()) {
-                PaymentsRepository.CaptureResult.CHARGE_CONFLICT
-            } else {
-                throw ex
-            }
+            mapCaptureException(ex) ?: throw ex
         }
+
+    internal fun mapCaptureException(ex: Exception): PaymentsRepository.CaptureResult? {
+        if (ex is CancellationException) {
+            throw ex
+        }
+        return if (ex.isUniqueViolation()) {
+            PaymentsRepository.CaptureResult.CHARGE_CONFLICT
+        } else {
+            null
+        }
+    }
 
     override suspend fun markDeclined(
         id: UUID,
