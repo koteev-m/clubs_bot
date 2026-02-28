@@ -137,7 +137,14 @@ class PreCheckoutValidatorTest {
         every { successfulPayment.providerPaymentChargeId } returns "provider-charge-1"
         every { successfulPayment.telegramPaymentChargeId } returns "telegram-charge-1"
         coEvery { paymentsRepository.findByPayload("payload-1") } returns record
-        coEvery { paymentsRepository.markCaptured(any(), any()) } returns Unit
+        coEvery {
+            paymentsRepository.markCapturedByChargeIds(
+                record.id,
+                "provider-charge-1",
+                "telegram-charge-1",
+                "provider-charge-1",
+            )
+        } returns PaymentsRepository.CaptureResult.CAPTURED
 
         val handlers =
             PaymentsHandlers(
@@ -149,7 +156,103 @@ class PreCheckoutValidatorTest {
 
         handlers.handleSuccessfulPayment(message)
 
-        coVerify(exactly = 1) { paymentsRepository.markCaptured(record.id, "provider-charge-1") }
+        coVerify(exactly = 1) {
+            paymentsRepository.markCapturedByChargeIds(
+                record.id,
+                "provider-charge-1",
+                "telegram-charge-1",
+                "provider-charge-1",
+            )
+        }
+    }
+
+
+    @Test
+    fun `successful payment duplicate update is a no-op`() = runBlocking {
+        val bot = mockk<TelegramBot>(relaxed = true)
+        val config = com.example.bot.payments.PaymentConfig(providerToken = "token")
+        val paymentsRepository = mockk<PaymentsRepository>()
+        val validator = mockk<PreCheckoutValidator>()
+        val message = mockk<Message>()
+        val successfulPayment = mockk<SuccessfulPayment>()
+        val record = payment(status = "CAPTURED")
+
+        every { message.successfulPayment() } returns successfulPayment
+        every { successfulPayment.invoicePayload } returns "payload-1"
+        every { successfulPayment.providerPaymentChargeId } returns "provider-charge-1"
+        every { successfulPayment.telegramPaymentChargeId } returns "telegram-charge-1"
+        coEvery { paymentsRepository.findByPayload("payload-1") } returns record
+        coEvery {
+            paymentsRepository.markCapturedByChargeIds(
+                record.id,
+                "provider-charge-1",
+                "telegram-charge-1",
+                "provider-charge-1",
+            )
+        } returns PaymentsRepository.CaptureResult.ALREADY_CAPTURED
+
+        val handlers =
+            PaymentsHandlers(
+                bot = bot,
+                config = config,
+                paymentsRepo = paymentsRepository,
+                preCheckoutValidator = validator,
+            )
+
+        handlers.handleSuccessfulPayment(message)
+
+        coVerify(exactly = 1) {
+            paymentsRepository.markCapturedByChargeIds(
+                record.id,
+                "provider-charge-1",
+                "telegram-charge-1",
+                "provider-charge-1",
+            )
+        }
+    }
+
+    @Test
+    fun `successful payment with conflicting charge id does not update state`() = runBlocking {
+        val bot = mockk<TelegramBot>(relaxed = true)
+        val config = com.example.bot.payments.PaymentConfig(providerToken = "token")
+        val paymentsRepository = mockk<PaymentsRepository>()
+        val validator = mockk<PreCheckoutValidator>()
+        val message = mockk<Message>()
+        val successfulPayment = mockk<SuccessfulPayment>()
+        val record = payment(status = "PENDING")
+
+        every { message.successfulPayment() } returns successfulPayment
+        every { successfulPayment.invoicePayload } returns "payload-1"
+        every { successfulPayment.providerPaymentChargeId } returns "provider-charge-1"
+        every { successfulPayment.telegramPaymentChargeId } returns "telegram-charge-1"
+        coEvery { paymentsRepository.findByPayload("payload-1") } returns record
+        coEvery {
+            paymentsRepository.markCapturedByChargeIds(
+                record.id,
+                "provider-charge-1",
+                "telegram-charge-1",
+                "provider-charge-1",
+            )
+        } returns PaymentsRepository.CaptureResult.CHARGE_CONFLICT
+
+        val handlers =
+            PaymentsHandlers(
+                bot = bot,
+                config = config,
+                paymentsRepo = paymentsRepository,
+                preCheckoutValidator = validator,
+            )
+
+        handlers.handleSuccessfulPayment(message)
+
+        coVerify(exactly = 1) {
+            paymentsRepository.markCapturedByChargeIds(
+                record.id,
+                "provider-charge-1",
+                "telegram-charge-1",
+                "provider-charge-1",
+            )
+        }
     }
 
     private fun payment(
@@ -166,6 +269,8 @@ class PreCheckoutValidatorTest {
             status = status,
             payload = "payload-1",
             externalId = null,
+            telegramPaymentChargeId = null,
+            providerPaymentChargeId = null,
             idempotencyKey = "idem-1",
             createdAt = createdAt,
             updatedAt = createdAt,

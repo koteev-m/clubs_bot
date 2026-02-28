@@ -172,6 +172,8 @@ class AuditLoggerIntegrationTest {
                 status = "INITIATED",
                 payload = "payload",
                 externalId = null,
+                telegramPaymentChargeId = null,
+                providerPaymentChargeId = null,
                 idempotencyKey = "idem",
                 createdAt = fixedClock.instant(),
                 updatedAt = fixedClock.instant(),

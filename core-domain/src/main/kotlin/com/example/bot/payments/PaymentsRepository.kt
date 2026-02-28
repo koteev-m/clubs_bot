@@ -17,10 +17,19 @@ interface PaymentsRepository {
         val status: String,
         val payload: String,
         val externalId: String?,
+        val telegramPaymentChargeId: String?,
+        val providerPaymentChargeId: String?,
         val idempotencyKey: String,
         val createdAt: Instant,
         val updatedAt: Instant,
     )
+
+    enum class CaptureResult {
+        CAPTURED,
+        ALREADY_CAPTURED,
+        CHARGE_CONFLICT,
+        PAYMENT_NOT_FOUND,
+    }
 
     enum class Action { CANCEL, REFUND }
 
@@ -62,6 +71,16 @@ interface PaymentsRepository {
         externalId: String?,
     )
 
+    suspend fun markCapturedByChargeIds(
+        id: UUID,
+        externalId: String?,
+        telegramPaymentChargeId: String?,
+        providerPaymentChargeId: String?,
+    ): CaptureResult =
+        CaptureResult.CAPTURED.also {
+            markCaptured(id, externalId)
+        }
+
     suspend fun markDeclined(
         id: UUID,
         reason: String,
@@ -75,6 +94,7 @@ interface PaymentsRepository {
     suspend fun findByPayload(payload: String): PaymentRecord?
 
     suspend fun findByIdempotencyKey(idempotencyKey: String): PaymentRecord?
+
 
     suspend fun recordAction(
         bookingId: UUID,
