@@ -56,6 +56,47 @@ class PaymentsRepositoryPostgresIntegrationTest : PostgresIntegrationTest() {
         actual?.providerPaymentChargeId shouldBe "provider-charge-1"
     }
 
+
+    @Test
+    fun `capture keeps prefilled external and charge ids`() = runBlocking {
+        val payment =
+            repository.createInitiated(
+                bookingId = null,
+                provider = "TG",
+                currency = "RUB",
+                amountMinor = 15_000,
+                payload = "payload-prefilled",
+                idempotencyKey = "idem-prefilled",
+            )
+
+        transaction(database) {
+            exec(
+                """
+                UPDATE payments
+                SET external_id = 'existing-external',
+                    telegram_payment_charge_id = 'existing-telegram-charge',
+                    provider_payment_charge_id = 'existing-provider-charge'
+                WHERE id = '${payment.id}'
+                """.trimIndent(),
+            )
+        }
+
+        val result =
+            repository.markCapturedByChargeIds(
+                id = payment.id,
+                externalId = "new-external",
+                telegramPaymentChargeId = "new-telegram-charge",
+                providerPaymentChargeId = "new-provider-charge",
+            )
+
+        val actual = repository.findByPayload("payload-prefilled")
+
+        result shouldBe PaymentsRepository.CaptureResult.CAPTURED
+        actual?.status shouldBe "CAPTURED"
+        actual?.externalId shouldBe "existing-external"
+        actual?.telegramPaymentChargeId shouldBe "existing-telegram-charge"
+        actual?.providerPaymentChargeId shouldBe "existing-provider-charge"
+    }
     @Test
     fun `capture rejects charge id that already belongs to other payment`() = runBlocking {
         val firstPayment =
