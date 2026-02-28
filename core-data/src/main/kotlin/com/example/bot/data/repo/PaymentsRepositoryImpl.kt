@@ -8,8 +8,13 @@ import com.example.bot.payments.PaymentsRepository.Result.Status
 import com.example.bot.payments.PaymentsRepository.SavedAction
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.Op
 import org.jetbrains.exposed.sql.ResultRow
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.timestamp
@@ -33,6 +38,8 @@ class PaymentsRepositoryImpl(
         val status = text("status")
         val payload = text("payload").uniqueIndex()
         val externalId = text("external_id").nullable()
+        val telegramPaymentChargeId = text("telegram_payment_charge_id").nullable().uniqueIndex()
+        val providerPaymentChargeId = text("provider_payment_charge_id").nullable().uniqueIndex()
         val idempotencyKey = text("idempotency_key").uniqueIndex()
         val createdAt = timestamp("created_at").defaultExpression(CurrentTimestamp())
         val updatedAt = timestamp("updated_at").defaultExpression(CurrentTimestamp())
@@ -87,6 +94,46 @@ class PaymentsRepositoryImpl(
         updateStatus(id, "CAPTURED", externalId)
     }
 
+    override suspend fun markCapturedByChargeIds(
+        id: UUID,
+        externalId: String?,
+        telegramPaymentChargeId: String?,
+        providerPaymentChargeId: String?,
+    ): PaymentsRepository.CaptureResult =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            val paymentRow =
+                PaymentsTable
+                    .selectAll()
+                    .where { PaymentsTable.id eq id }
+                    .firstOrNull()
+                    ?: return@newSuspendedTransaction PaymentsRepository.CaptureResult.PAYMENT_NOT_FOUND
+
+            val conflictClause = chargeConflictCondition(id, telegramPaymentChargeId, providerPaymentChargeId)
+            if (conflictClause != null) {
+                val conflictingChargeExists =
+                    PaymentsTable
+                        .selectAll()
+                        .where { conflictClause }
+                        .limit(1)
+                        .any()
+                if (conflictingChargeExists) {
+                    return@newSuspendedTransaction PaymentsRepository.CaptureResult.CHARGE_CONFLICT
+                }
+            }
+
+            if (paymentRow[PaymentsTable.status] == CAPTURED_STATUS) {
+                return@newSuspendedTransaction PaymentsRepository.CaptureResult.ALREADY_CAPTURED
+            }
+
+            PaymentsTable.update({ PaymentsTable.id eq id }) {
+                it[status] = CAPTURED_STATUS
+                it[PaymentsTable.externalId] = paymentRow[PaymentsTable.externalId] ?: externalId
+                it[PaymentsTable.telegramPaymentChargeId] = telegramPaymentChargeId ?: paymentRow[PaymentsTable.telegramPaymentChargeId]
+                it[PaymentsTable.providerPaymentChargeId] = providerPaymentChargeId ?: paymentRow[PaymentsTable.providerPaymentChargeId]
+            }
+            PaymentsRepository.CaptureResult.CAPTURED
+        }
+
     override suspend fun markDeclined(
         id: UUID,
         reason: String,
@@ -118,6 +165,7 @@ class PaymentsRepositoryImpl(
                 .firstOrNull()
                 ?.toRecord()
         }
+
 
     override suspend fun recordAction(
         bookingId: UUID,
@@ -170,10 +218,34 @@ class PaymentsRepositoryImpl(
             status = this[PaymentsTable.status],
             payload = this[PaymentsTable.payload],
             externalId = this[PaymentsTable.externalId],
+            telegramPaymentChargeId = this[PaymentsTable.telegramPaymentChargeId],
+            providerPaymentChargeId = this[PaymentsTable.providerPaymentChargeId],
             idempotencyKey = this[PaymentsTable.idempotencyKey],
             createdAt = this[PaymentsTable.createdAt],
             updatedAt = this[PaymentsTable.updatedAt],
         )
+
+    private fun chargeLookupCondition(
+        telegramPaymentChargeId: String?,
+        providerPaymentChargeId: String?,
+    ): Op<Boolean>? {
+        val telegramClause = telegramPaymentChargeId?.let { PaymentsTable.telegramPaymentChargeId eq it }
+        val providerClause = providerPaymentChargeId?.let { PaymentsTable.providerPaymentChargeId eq it }
+        return when {
+            telegramClause != null && providerClause != null -> telegramClause or providerClause
+            telegramClause != null -> telegramClause
+            else -> providerClause
+        }
+    }
+
+    private fun chargeConflictCondition(
+        paymentId: UUID,
+        telegramPaymentChargeId: String?,
+        providerPaymentChargeId: String?,
+    ): Op<Boolean>? {
+        val lookupClause = chargeLookupCondition(telegramPaymentChargeId, providerPaymentChargeId) ?: return null
+        return (PaymentsTable.id neq paymentId) and lookupClause
+    }
 
     private fun ResultRow.toSavedAction(): SavedAction =
         SavedAction(
@@ -188,4 +260,8 @@ class PaymentsRepositoryImpl(
                 ),
             createdAt = this[PaymentActionsTable.createdAt],
         )
+
+    private companion object {
+        private const val CAPTURED_STATUS = "CAPTURED"
+    }
 }

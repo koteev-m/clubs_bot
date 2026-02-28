@@ -79,13 +79,14 @@ class PaymentsHandlers(
     suspend fun handleSuccessfulPayment(message: Message) {
         val successfulPayment = message.successfulPayment() ?: return
         val payload = successfulPayment.invoicePayload ?: return
-        val record = paymentsRepo.findByPayload(payload) ?: return
-        if (record.status == CAPTURED_STATUS) {
+        val providerChargeId = successfulPayment.providerPaymentChargeId?.trim()?.takeIf { it.isNotEmpty() }
+        val telegramChargeId = successfulPayment.telegramPaymentChargeId?.trim()?.takeIf { it.isNotEmpty() }
+        val record = paymentsRepo.findByPayload(payload)
+
+        if (record == null) {
             return
         }
 
-        val providerChargeId = successfulPayment.providerPaymentChargeId?.trim()?.takeIf { it.isNotEmpty() }
-        val telegramChargeId = successfulPayment.telegramPaymentChargeId?.trim()?.takeIf { it.isNotEmpty() }
         val externalId =
             when {
                 providerChargeId != null -> providerChargeId
@@ -93,13 +94,23 @@ class PaymentsHandlers(
                 else -> null
             }
 
-        paymentsRepo.markCaptured(record.id, externalId)
+        when (paymentsRepo.markCapturedByChargeIds(record.id, externalId, telegramChargeId, providerChargeId)) {
+            PaymentsRepository.CaptureResult.CAPTURED,
+            PaymentsRepository.CaptureResult.ALREADY_CAPTURED,
+            -> return
+
+            PaymentsRepository.CaptureResult.CHARGE_CONFLICT -> {
+                logger.error("successful payment charge conflict for paymentId={}", record.id)
+                return
+            }
+
+            PaymentsRepository.CaptureResult.PAYMENT_NOT_FOUND -> return
+        }
     }
 
     companion object {
         private val logger = LoggerFactory.getLogger(PaymentsHandlers::class.java)
         private const val SAFE_PRECHECKOUT_ERROR = "Платеж недоступен, обновите бронь"
-        private const val CAPTURED_STATUS = "CAPTURED"
     }
 }
 
