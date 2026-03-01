@@ -11,10 +11,9 @@ import org.jetbrains.exposed.sql.Database
 import java.sql.SQLException
 
 class PaymentsRepositoryImplTest {
-    private val repository = PaymentsRepositoryImpl(mockk<Database>(relaxed = true))
-
     @Test
     fun `mapCaptureException rethrows cancellation exception`() {
+        val repository = repo()
         val cancellation = CancellationException("cancelled")
 
         shouldThrow<CancellationException> {
@@ -24,7 +23,10 @@ class PaymentsRepositoryImplTest {
 
     @Test
     fun `mapCaptureException maps unique violations and ignores others`() {
+        val repository = repo()
         repository.mapCaptureException(SQLException("dup", "23505")) shouldBe PaymentsRepository.CaptureResult.CHARGE_CONFLICT
         repository.mapCaptureException(SQLException("other", "23503")).shouldBeNull()
     }
+
+    private fun repo(): PaymentsRepositoryImpl = PaymentsRepositoryImpl(mockk<Database>(relaxed = true))
 }
