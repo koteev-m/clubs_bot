@@ -1,30 +1,17 @@
 package com.example.bot.data.repo
 
-import com.example.bot.data.TestDatabase
 import com.example.bot.payments.PaymentsRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.jetbrains.exposed.sql.Database
 import java.sql.SQLException
 
 class PaymentsRepositoryImplTest {
-    private lateinit var testDatabase: TestDatabase
-    private lateinit var repository: PaymentsRepositoryImpl
-
-    @BeforeEach
-    fun setUp() {
-        testDatabase = TestDatabase()
-        repository = PaymentsRepositoryImpl(testDatabase.database)
-    }
-
-    @AfterEach
-    fun tearDown() {
-        testDatabase.close()
-    }
+    private val repository = PaymentsRepositoryImpl(mockk<Database>(relaxed = true))
 
     @Test
     fun `mapCaptureException rethrows cancellation exception`() {

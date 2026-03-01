@@ -142,6 +142,7 @@ class DbErrorClassifierTest :
             direct.sqlState shouldBe "23505"
             direct.reason shouldBe DbErrorReason.CONSTRAINT
             wrapped.sqlState shouldBe "23505"
+            wrapped.reason shouldBe DbErrorReason.CONSTRAINT
         }
 
         "detects unique violations only for 23505" {
