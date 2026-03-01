@@ -16,6 +16,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.timestamp
 import org.jetbrains.exposed.sql.selectAll
@@ -178,7 +179,6 @@ class PaymentsRepositoryImpl(
                 ?.toRecord()
         }
 
-
     override suspend fun recordAction(
         bookingId: UUID,
         key: String,
@@ -186,16 +186,20 @@ class PaymentsRepositoryImpl(
         result: Result,
     ): SavedAction =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            PaymentActionsTable.insertIgnore {
+                it[PaymentActionsTable.bookingId] = bookingId
+                it[PaymentActionsTable.idempotencyKey] = key
+                it[PaymentActionsTable.action] = action.name
+                it[PaymentActionsTable.status] = result.status.name
+                it[PaymentActionsTable.reason] = result.reason
+            }
             PaymentActionsTable
-                .insert {
-                    it[PaymentActionsTable.bookingId] = bookingId
-                    it[PaymentActionsTable.idempotencyKey] = key
-                    it[PaymentActionsTable.action] = action.name
-                    it[PaymentActionsTable.status] = result.status.name
-                    it[PaymentActionsTable.reason] = result.reason
-                }.resultedValues!!
-                .first()
-                .toSavedAction()
+                .selectAll()
+                .where { PaymentActionsTable.idempotencyKey eq key }
+                .limit(1)
+                .firstOrNull()
+                ?.toSavedAction()
+                ?: error("Failed to load payment action by idempotency key")
         }
 
     override suspend fun findActionByIdempotencyKey(key: String): SavedAction? =
