@@ -148,12 +148,16 @@ class DefaultPaymentsService(
                 return@spanSuspending when (cancelResult) {
                     is BookingCancellationResult.Cancelled -> {
                         updateLedgerStatus(clubId, bookingId, BookingStatus.CANCELLED)
-                        paymentsRepository.recordAction(
+                        val savedAction =
+                            paymentsRepository.recordAction(
                             bookingId = bookingId,
                             key = idemKey,
                             action = Action.CANCEL,
                             result = Result(ActionStatus.OK, reason),
                         )
+                        if (savedAction.result.status != ActionStatus.OK || savedAction.result.reason != reason) {
+                            return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                        }
                         setResult(PaymentsMetrics.Result.Ok)
                         notifyBestEffort(
                             OpsDomainNotification(
@@ -172,12 +176,17 @@ class DefaultPaymentsService(
 
                     is BookingCancellationResult.AlreadyCancelled -> {
                         updateLedgerStatus(clubId, bookingId, BookingStatus.CANCELLED)
-                        paymentsRepository.recordAction(
+                        val conflictReason = reason ?: "already_cancelled"
+                        val savedAction =
+                            paymentsRepository.recordAction(
                             bookingId = bookingId,
                             key = idemKey,
                             action = Action.CANCEL,
-                            result = Result(ActionStatus.ALREADY, reason ?: "already_cancelled"),
+                            result = Result(ActionStatus.ALREADY, conflictReason),
                         )
+                        if (savedAction.result.status != ActionStatus.ALREADY || savedAction.result.reason != conflictReason) {
+                            return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                        }
                         setResult(PaymentsMetrics.Result.Ok)
                         PaymentsService.CancelResult(
                             bookingId = bookingId,
@@ -188,12 +197,16 @@ class DefaultPaymentsService(
 
                     is BookingCancellationResult.ConflictingStatus -> {
                         val message = "cannot cancel booking in status ${cancelResult.record.status}"
-                        paymentsRepository.recordAction(
+                        val savedAction =
+                            paymentsRepository.recordAction(
                             bookingId = bookingId,
                             key = idemKey,
                             action = Action.CANCEL,
                             result = Result(ActionStatus.CONFLICT, message),
                         )
+                        if (savedAction.result.status != ActionStatus.CONFLICT || savedAction.result.reason != message) {
+                            return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                        }
                         throw PaymentsService.ConflictException(message)
                     }
 
@@ -289,34 +302,47 @@ class DefaultPaymentsService(
                             maskBookingId(bookingId),
                             outcome.remainderAfter,
                         )
-                        paymentsRepository.recordAction(
+                        val amountAsText = outcome.amount.toString()
+                        val savedAction =
+                            paymentsRepository.recordAction(
                             bookingId = bookingId,
                             key = idemKey,
                             action = Action.REFUND,
-                            result = Result(ActionStatus.OK, outcome.amount.toString()),
+                            result = Result(ActionStatus.OK, amountAsText),
                         )
+                        if (savedAction.result.status != ActionStatus.OK || savedAction.result.reason != amountAsText) {
+                            return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                        }
                         setResult(PaymentsMetrics.Result.Ok)
                         setRefundAmount(outcome.amount)
                         PaymentsService.RefundResult(outcome.amount, idempotent = false)
                     }
 
                     is RefundOutcome.Conflict -> {
-                        paymentsRepository.recordAction(
+                        val savedAction =
+                            paymentsRepository.recordAction(
                             bookingId = bookingId,
                             key = idemKey,
                             action = Action.REFUND,
                             result = Result(ActionStatus.CONFLICT, outcome.reason),
                         )
+                        if (savedAction.result.status != ActionStatus.CONFLICT || savedAction.result.reason != outcome.reason) {
+                            return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                        }
                         throw PaymentsService.ConflictException(outcome.reason)
                     }
 
                     is RefundOutcome.Unprocessable -> {
-                        paymentsRepository.recordAction(
+                        val savedAction =
+                            paymentsRepository.recordAction(
                             bookingId = bookingId,
                             key = idemKey,
                             action = Action.REFUND,
                             result = Result(ActionStatus.ERROR, outcome.reason),
                         )
+                        if (savedAction.result.status != ActionStatus.ERROR || savedAction.result.reason != outcome.reason) {
+                            return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                        }
                         throw PaymentsService.UnprocessableException(outcome.reason)
                     }
 

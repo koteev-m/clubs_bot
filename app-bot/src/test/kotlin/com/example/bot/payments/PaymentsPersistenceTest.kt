@@ -13,6 +13,10 @@ import com.example.bot.di.DefaultPaymentsService
 import com.example.bot.di.PaymentsService
 import com.example.bot.payments.finalize.PaymentsFinalizeService
 import com.example.bot.testing.PostgresAppTest
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.count
@@ -77,6 +81,84 @@ class PaymentsPersistenceTest : PostgresAppTest() {
             assertEquals(PaymentsRepository.Result.Status.OK, saved!!.result.status)
 
             val actionsCount = transaction(database) { PaymentActionsTable.selectAll().count() }
+            assertEquals(1, actionsCount)
+        }
+
+
+    @Test
+    fun `cancel concurrent duplicate idempotency key does not fail with 500`() =
+        runBlocking {
+            val service = createService()
+            val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 5L, idemKey = "booking-5")
+
+            val results =
+                listOf(1, 2)
+                    .map {
+                        async(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                            service.service.cancel(
+                                clubId = booking.clubId,
+                                bookingId = booking.id,
+                                reason = "race",
+                                idemKey = "cancel-race",
+                                actorUserId = 99L,
+                            )
+                        }
+                    }
+                    .also { deferred -> deferred.forEach { it.start() } }
+                    .awaitAll()
+
+            assertEquals(2, results.size)
+            assertTrue(results.all { it.bookingId == booking.id })
+
+            val actionsCount =
+                transaction(database) {
+                    PaymentActionsTable
+                        .selectAll()
+                        .where { PaymentActionsTable.idempotencyKey eq "cancel-race" }
+                        .count()
+                }
+            assertEquals(1, actionsCount)
+        }
+
+    @Test
+    fun `refund concurrent duplicate idempotency key does not fail with 500`() =
+        runBlocking {
+            val service = createService()
+            val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 6L, idemKey = "booking-6")
+            service.service.seedLedger(
+                clubId = booking.clubId,
+                bookingId = booking.id,
+                status = BookingStatus.BOOKED.name,
+                capturedMinor = 500,
+                refundedMinor = 0,
+            )
+
+            val results =
+                listOf(1, 2)
+                    .map {
+                        async(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                            service.service.refund(
+                                clubId = booking.clubId,
+                                bookingId = booking.id,
+                                amountMinor = 300,
+                                idemKey = "refund-race",
+                                actorUserId = 100L,
+                            )
+                        }
+                    }
+                    .also { deferred -> deferred.forEach { it.start() } }
+                    .awaitAll()
+
+            assertEquals(2, results.size)
+            assertTrue(results.all { it.refundAmountMinor == 300L })
+
+            val actionsCount =
+                transaction(database) {
+                    PaymentActionsTable
+                        .selectAll()
+                        .where { PaymentActionsTable.idempotencyKey eq "refund-race" }
+                        .count()
+                }
             assertEquals(1, actionsCount)
         }
 
