@@ -139,8 +139,10 @@ class DefaultPaymentsService(
                     throw PaymentsService.ValidationException("reason too long")
                 }
 
-                val existing = paymentsRepository.findActionByIdempotencyKey(idemKey)
+                val hasIdempotencyKey = idemKey.isNotBlank()
+                val existing = if (hasIdempotencyKey) paymentsRepository.findActionByIdempotencyKey(idemKey) else null
                 if (existing != null) {
+                    validateIdempotencyBinding(existing, bookingId, Action.CANCEL)
                     return@spanSuspending handleExistingCancel(existing, clubId, bookingId)
                 }
 
@@ -148,15 +150,18 @@ class DefaultPaymentsService(
                 return@spanSuspending when (cancelResult) {
                     is BookingCancellationResult.Cancelled -> {
                         updateLedgerStatus(clubId, bookingId, BookingStatus.CANCELLED)
-                        val savedAction =
-                            paymentsRepository.recordAction(
-                            bookingId = bookingId,
-                            key = idemKey,
-                            action = Action.CANCEL,
-                            result = Result(ActionStatus.OK, reason),
-                        )
-                        if (savedAction.result.status != ActionStatus.OK || savedAction.result.reason != reason) {
-                            return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                        if (hasIdempotencyKey) {
+                            val savedAction =
+                                paymentsRepository.recordAction(
+                                    bookingId = bookingId,
+                                    key = idemKey,
+                                    action = Action.CANCEL,
+                                    result = Result(ActionStatus.OK, reason),
+                                )
+                            validateIdempotencyBinding(savedAction, bookingId, Action.CANCEL)
+                            if (savedAction.result.status != ActionStatus.OK || savedAction.result.reason != reason) {
+                                return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                            }
                         }
                         setResult(PaymentsMetrics.Result.Ok)
                         notifyBestEffort(
@@ -177,15 +182,18 @@ class DefaultPaymentsService(
                     is BookingCancellationResult.AlreadyCancelled -> {
                         updateLedgerStatus(clubId, bookingId, BookingStatus.CANCELLED)
                         val conflictReason = reason ?: "already_cancelled"
-                        val savedAction =
-                            paymentsRepository.recordAction(
-                            bookingId = bookingId,
-                            key = idemKey,
-                            action = Action.CANCEL,
-                            result = Result(ActionStatus.ALREADY, conflictReason),
-                        )
-                        if (savedAction.result.status != ActionStatus.ALREADY || savedAction.result.reason != conflictReason) {
-                            return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                        if (hasIdempotencyKey) {
+                            val savedAction =
+                                paymentsRepository.recordAction(
+                                    bookingId = bookingId,
+                                    key = idemKey,
+                                    action = Action.CANCEL,
+                                    result = Result(ActionStatus.ALREADY, conflictReason),
+                                )
+                            validateIdempotencyBinding(savedAction, bookingId, Action.CANCEL)
+                            if (savedAction.result.status != ActionStatus.ALREADY || savedAction.result.reason != conflictReason) {
+                                return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                            }
                         }
                         setResult(PaymentsMetrics.Result.Ok)
                         PaymentsService.CancelResult(
@@ -197,15 +205,18 @@ class DefaultPaymentsService(
 
                     is BookingCancellationResult.ConflictingStatus -> {
                         val message = "cannot cancel booking in status ${cancelResult.record.status}"
-                        val savedAction =
-                            paymentsRepository.recordAction(
-                            bookingId = bookingId,
-                            key = idemKey,
-                            action = Action.CANCEL,
-                            result = Result(ActionStatus.CONFLICT, message),
-                        )
-                        if (savedAction.result.status != ActionStatus.CONFLICT || savedAction.result.reason != message) {
-                            return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                        if (hasIdempotencyKey) {
+                            val savedAction =
+                                paymentsRepository.recordAction(
+                                    bookingId = bookingId,
+                                    key = idemKey,
+                                    action = Action.CANCEL,
+                                    result = Result(ActionStatus.CONFLICT, message),
+                                )
+                            validateIdempotencyBinding(savedAction, bookingId, Action.CANCEL)
+                            if (savedAction.result.status != ActionStatus.CONFLICT || savedAction.result.reason != message) {
+                                return@spanSuspending handleExistingCancel(savedAction, clubId, bookingId)
+                            }
                         }
                         throw PaymentsService.ConflictException(message)
                     }
@@ -265,8 +276,10 @@ class DefaultPaymentsService(
                     throw PaymentsService.ValidationException("amount must be non-negative")
                 }
 
-                val existing = paymentsRepository.findActionByIdempotencyKey(idemKey)
+                val hasIdempotencyKey = idemKey.isNotBlank()
+                val existing = if (hasIdempotencyKey) paymentsRepository.findActionByIdempotencyKey(idemKey) else null
                 if (existing != null) {
+                    validateIdempotencyBinding(existing, bookingId, Action.REFUND)
                     return@spanSuspending handleExistingRefund(existing, clubId, bookingId, amountMinor)
                 }
 
@@ -303,15 +316,18 @@ class DefaultPaymentsService(
                             outcome.remainderAfter,
                         )
                         val amountAsText = outcome.amount.toString()
-                        val savedAction =
-                            paymentsRepository.recordAction(
-                            bookingId = bookingId,
-                            key = idemKey,
-                            action = Action.REFUND,
-                            result = Result(ActionStatus.OK, amountAsText),
-                        )
-                        if (savedAction.result.status != ActionStatus.OK || savedAction.result.reason != amountAsText) {
-                            return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                        if (hasIdempotencyKey) {
+                            val savedAction =
+                                paymentsRepository.recordAction(
+                                    bookingId = bookingId,
+                                    key = idemKey,
+                                    action = Action.REFUND,
+                                    result = Result(ActionStatus.OK, amountAsText),
+                                )
+                            validateIdempotencyBinding(savedAction, bookingId, Action.REFUND)
+                            if (savedAction.result.status != ActionStatus.OK || savedAction.result.reason != amountAsText) {
+                                return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                            }
                         }
                         setResult(PaymentsMetrics.Result.Ok)
                         setRefundAmount(outcome.amount)
@@ -319,29 +335,35 @@ class DefaultPaymentsService(
                     }
 
                     is RefundOutcome.Conflict -> {
-                        val savedAction =
-                            paymentsRepository.recordAction(
-                            bookingId = bookingId,
-                            key = idemKey,
-                            action = Action.REFUND,
-                            result = Result(ActionStatus.CONFLICT, outcome.reason),
-                        )
-                        if (savedAction.result.status != ActionStatus.CONFLICT || savedAction.result.reason != outcome.reason) {
-                            return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                        if (hasIdempotencyKey) {
+                            val savedAction =
+                                paymentsRepository.recordAction(
+                                    bookingId = bookingId,
+                                    key = idemKey,
+                                    action = Action.REFUND,
+                                    result = Result(ActionStatus.CONFLICT, outcome.reason),
+                                )
+                            validateIdempotencyBinding(savedAction, bookingId, Action.REFUND)
+                            if (savedAction.result.status != ActionStatus.CONFLICT || savedAction.result.reason != outcome.reason) {
+                                return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                            }
                         }
                         throw PaymentsService.ConflictException(outcome.reason)
                     }
 
                     is RefundOutcome.Unprocessable -> {
-                        val savedAction =
-                            paymentsRepository.recordAction(
-                            bookingId = bookingId,
-                            key = idemKey,
-                            action = Action.REFUND,
-                            result = Result(ActionStatus.ERROR, outcome.reason),
-                        )
-                        if (savedAction.result.status != ActionStatus.ERROR || savedAction.result.reason != outcome.reason) {
-                            return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                        if (hasIdempotencyKey) {
+                            val savedAction =
+                                paymentsRepository.recordAction(
+                                    bookingId = bookingId,
+                                    key = idemKey,
+                                    action = Action.REFUND,
+                                    result = Result(ActionStatus.ERROR, outcome.reason),
+                                )
+                            validateIdempotencyBinding(savedAction, bookingId, Action.REFUND)
+                            if (savedAction.result.status != ActionStatus.ERROR || savedAction.result.reason != outcome.reason) {
+                                return@spanSuspending handleExistingRefund(savedAction, clubId, bookingId, amountMinor)
+                            }
                         }
                         throw PaymentsService.UnprocessableException(outcome.reason)
                     }
@@ -422,6 +444,16 @@ class DefaultPaymentsService(
 
     private fun notifyBestEffort(notification: OpsDomainNotification) {
         runCatching { opsPublisher.enqueue(notification) }
+    }
+
+    private fun validateIdempotencyBinding(
+        action: SavedAction,
+        bookingId: UUID,
+        expectedAction: Action,
+    ) {
+        if (action.bookingId != bookingId || action.action != expectedAction) {
+            throw PaymentsService.ValidationException("idempotency key already used for different operation")
+        }
     }
 
     private fun PaymentsSpanScope.handleExistingCancel(

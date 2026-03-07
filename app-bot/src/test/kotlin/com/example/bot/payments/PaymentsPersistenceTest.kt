@@ -84,6 +84,63 @@ class PaymentsPersistenceTest : PostgresAppTest() {
             assertEquals(1, actionsCount)
         }
 
+    @Test
+    fun `cancel with blank idemKey does not persist payment_action`() =
+        runBlocking {
+            val service = createService()
+            val booking = seedBooking(status = BookingStatus.BOOKED, clubId = 7L, idemKey = "booking-7")
+
+            val result =
+                service.service.cancel(
+                    clubId = booking.clubId,
+                    bookingId = booking.id,
+                    reason = "guest_request",
+                    idemKey = "   ",
+                    actorUserId = 101L,
+                )
+
+            assertEquals(false, result.idempotent)
+            assertEquals(false, result.alreadyCancelled)
+            assertEquals(BookingStatus.CANCELLED, currentBookingStatus(booking.id))
+
+            val blankKeyActions =
+                transaction(database) {
+                    PaymentActionsTable
+                        .selectAll()
+                        .where { PaymentActionsTable.idempotencyKey eq "" }
+                        .count()
+                }
+            assertEquals(0, blankKeyActions)
+        }
+
+    @Test
+    fun `cancel rejects idempotency key reused for different booking`() =
+        runBlocking {
+            val service = createService()
+            val booking1 = seedBooking(status = BookingStatus.BOOKED, clubId = 8L, idemKey = "booking-8-1")
+            val booking2 = seedBooking(status = BookingStatus.BOOKED, clubId = 9L, idemKey = "booking-8-2")
+
+            service.service.cancel(booking1.clubId, booking1.id, "first", "same-key", 201L)
+
+            try {
+                service.service.cancel(booking2.clubId, booking2.id, "second", "same-key", 202L)
+                fail("expected validation")
+            } catch (validation: PaymentsService.ValidationException) {
+                assertEquals("idempotency key already used for different operation", validation.message)
+            }
+
+            assertEquals(BookingStatus.BOOKED, currentBookingStatus(booking2.id))
+
+            val sameKeyActions =
+                transaction(database) {
+                    PaymentActionsTable
+                        .selectAll()
+                        .where { PaymentActionsTable.idempotencyKey eq "same-key" }
+                        .count()
+                }
+            assertEquals(1, sameKeyActions)
+        }
+
 
     @Test
     fun `cancel concurrent duplicate idempotency key does not fail with 500`() =
