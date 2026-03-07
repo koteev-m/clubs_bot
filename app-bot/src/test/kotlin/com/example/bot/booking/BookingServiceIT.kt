@@ -1,12 +1,12 @@
 package com.example.bot.booking
 
+import com.example.bot.audit.AuditLogger
+import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.BookingHoldsTable
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
-import com.example.bot.audit.AuditLogger
-import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.core.BookingHoldRepository
 import com.example.bot.data.booking.core.BookingOutboxTable
 import com.example.bot.data.booking.core.BookingRepository
@@ -27,6 +27,7 @@ import com.example.bot.testing.PostgresAppTest
 import com.example.bot.workers.OutboxWorker
 import com.example.bot.workers.SendOutcome
 import com.example.bot.workers.SendPort
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.CompletableDeferred
@@ -198,13 +199,26 @@ class BookingServiceIT : PostgresAppTest() {
                 ) as BookingCmdResult.HoldCreated
 
             val sameConfirmKey = "confirm-idem-concurrent"
+            val firstStarted = CompletableDeferred<Unit>()
+            val secondStarted = CompletableDeferred<Unit>()
+            val releaseGate = CompletableDeferred<Unit>()
             val outcomes =
-                listOf(1, 2)
-                    .map { async { service.confirm(hold.holdId, sameConfirmKey) } }
+                listOf(firstStarted, secondStarted)
+                    .map { startedSignal ->
+                        async(Dispatchers.IO) {
+                            startedSignal.complete(Unit)
+                            releaseGate.await()
+                            service.confirm(hold.holdId, sameConfirmKey)
+                        }
+                    }
+            awaitAll(firstStarted, secondStarted)
+            releaseGate.complete(Unit)
+            val resolvedOutcomes =
+                outcomes
                     .awaitAll()
 
-            val booked = outcomes.filterIsInstance<BookingCmdResult.Booked>()
-            val alreadyBooked = outcomes.filterIsInstance<BookingCmdResult.AlreadyBooked>()
+            val booked = resolvedOutcomes.filterIsInstance<BookingCmdResult.Booked>()
+            val alreadyBooked = resolvedOutcomes.filterIsInstance<BookingCmdResult.AlreadyBooked>()
 
             assertEquals(1, booked.size)
             assertEquals(1, alreadyBooked.size)
@@ -225,9 +239,9 @@ class BookingServiceIT : PostgresAppTest() {
                         .count()
                 }
             assertEquals(1, activeBookingsForSlot)
-            assertFalse(outcomes.any { it is BookingCmdResult.NotFound })
-            assertFalse(outcomes.any { it is BookingCmdResult.HoldExpired })
-            assertFalse(outcomes.any { it is BookingCmdResult.DuplicateActiveBooking })
+            assertFalse(resolvedOutcomes.any { it is BookingCmdResult.NotFound })
+            assertFalse(resolvedOutcomes.any { it is BookingCmdResult.HoldExpired })
+            assertFalse(resolvedOutcomes.any { it is BookingCmdResult.DuplicateActiveBooking })
         }
 
     @Test
@@ -555,7 +569,6 @@ class BookingServiceIT : PostgresAppTest() {
         val slotStart: Instant,
         val slotEnd: Instant,
     ) {
-
         fun holdRequest(guests: Int): HoldRequest =
             HoldRequest(
                 clubId = clubId,
