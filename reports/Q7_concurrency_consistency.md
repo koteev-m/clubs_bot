@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-- `HOLD -> CONFIRM` частично защищён идемпотентностью и уникальными индексами (`idempotency_key`, `uq_bookings_active_slot`), но в реализации есть TOCTOU-окна (pre-check `existsActiveFor` до `insert`) и отсутствие DB-ограничения «только один активный HOLD», что закрывается только приложением + ретраями. (`app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt:77-130`, `core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingRepository.kt:110-167`, `core-data/src/main/resources/db/migration/postgresql/V7__booking_core.sql:24-31`, `core-data/src/main/resources/db/migration/postgresql/V7__booking_core.sql:66-68`)
+- `HOLD -> CONFIRM` теперь сериализован по slot-lock в confirm critical section: чтение hold, consume, re-check инвариантов и `insert booking` выполняются в одном транзакционном пути. Это закрывает TOCTOU-окно между `consumeHold` и `createBooked`; остаётся архитектурный риск отсутствия DB-constraint «только один активный HOLD», который компенсируется advisory lock + app-level проверками. (`app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt`, `core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingRepository.kt`, `core-data/src/main/resources/db/migration/postgresql/V7__booking_core.sql:24-31`, `core-data/src/main/resources/db/migration/postgresql/V7__booking_core.sql:66-68`)
 - В CHECK-IN есть сильная антидубль-модель: `UNIQUE(subject_type, subject_id)` + перехват unique violation и возврат `already used`; для booking-checkin запись checkin и смена статуса брони выполняются в одной транзакции. (`core-data/src/main/resources/db/migration/postgresql/V017__guest_list_invites_checkins.sql:70-83`, `core-data/src/main/kotlin/com/example/bot/data/club/GuestListRepositories.kt:733-787`, `core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt:187-217`)
 - Денежные операции по столам сейчас не append-only: `table_deposits` обновляется in-place через `updateDeposit` (перезапись суммы + удаление/вставка allocations), что противоречит инварианту «только операциями». (`core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt:94-136`, `core-data/src/main/resources/db/migration/postgresql/V036__table_sessions_deposits.sql:25-40`)
 - Freeze после закрытия смены реализован для самого shift report (`updateDraft`/`close` под `FOR UPDATE` и проверкой `status=DRAFT`), но не подтверждён глобальный запрет на update deposit после close: route обновления депозита не проверяет `shift_reports.status`. (`core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt:17-47`, `core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt:588-633`, `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:429-497`)
@@ -11,7 +11,7 @@
 
 - Для `HOLD` и `CONFIRM` добавлена транзакционная сериализация слота через `pg_advisory_xact_lock` на детерминированном ключе `(table_id, slot_start, slot_end)`.
 - Лок берётся **внутри транзакции до pre-check и insert**, поэтому конкурентные запросы на один слот выстраиваются в очередь на уровне Postgres и больше не зависят только от app-level проверки.
-- В `CONFIRM` это закрывает TOCTOU между `existsActiveFor` и `insert` в `createBooked`: второй конкурент получает предсказуемый `DuplicateActiveBooking`, а не ложный успех.
+- В `CONFIRM` устранено окно между consume hold и созданием booking: конкурентный `HOLD` на тот же слот не может «вклиниться» между шагами, а конфликт даёт контролируемый бизнес-результат без 500.
 - Добавлен интеграционный race-тест на 20 параллельных `HOLD` в один слот: ожидается ровно один `HoldCreated` и 19 конфликтов.
 
 ## 1) Карта критичных write-операций
@@ -31,11 +31,8 @@
 1. HTTP: `/api/clubs/{clubId}/bookings/confirm` требует `Idempotency-Key`. (`app-bot/src/main/kotlin/com/example/bot/routes/SecuredBookingRoutes.kt:72-121`)
 2. Service: `BookingService.confirm(...)`:
    - idempotency check по booking;
-   - `consumeHold` (удаляет hold);
-   - повторная проверка active booking;
-   - `createBooked`.
-   (`app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt:164-301`)
-3. Repo: `createBooked` ловит unique violation и классифицирует в `DuplicateActiveBooking` / `IdempotencyConflict`. (`core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingRepository.kt:110-167`)
+   - единый вызов `confirmFromHold(...)`.
+3. Repo: `confirmFromHold` под slot-lock в одной транзакции делает read/validate hold -> consume -> re-check booking/hold конфликтов -> insert booking. (`core-data/src/main/kotlin/com/example/bot/data/booking/core/BookingRepository.kt`)
 
 ### 1.3 CHECK-IN (booking/guest list)
 
@@ -90,7 +87,7 @@
 | P0 | Депозит редактируется in-place (не append-only) | Потеря аудируемости и возможность «перезаписать историю денег» | `TableDepositRepository.updateDeposit` | 1) создать депозит; 2) выполнить `PUT /deposits/{id}` с другой суммой; 3) исходная сумма исчезает, остаётся только новое состояние |
 | P0 | После закрытия смены можно менять `table_deposits` | Нарушение freeze-инварианта закрытой смены | `AdminTableOpsRoutes.put(/deposits/{depositId})` + отсутствие проверки `shift_reports.status` | 1) закрыть shift report; 2) выполнить update депозита для той же ночи; 3) изменение проходит |
 | P1 | Нет DB-constraint «один активный HOLD на слот» | При гонках/ретраях возможны конкурирующие holds до confirm | комментарий в миграции + app-level check | 2 клиента одновременно вызывают HOLD на один стол/слот: уникальность зависит от timing и application checks |
-| P1 | TOCTOU между `existsActiveFor` и insert в hold/confirm | Повышенная конфликтность и зависимость от retry/exception path | `BookingService` + `BookingRepository.createBooked/createHold` | Два клиента проходят pre-check почти одновременно; один проигрывает на unique violation (или конфликте) |
+| P2 | Остаточная зависимость HOLD от app-level блокировки (без отдельного DB-constraint на «активный HOLD») | При ошибочной регрессии lock-path возможны конкурирующие holds | `BookingHoldRepository.createHold` + отсутствие partial unique по active hold | Два клиента одновременно вызывают HOLD; корректность сейчас обеспечивается advisory lock и проверками в транзакции |
 | P1 | `updateStatusInternal` у booking без проверки допустимых переходов | Риск нелегальных переходов, если метод будет вызван из нового пути | `BookingRepository.updateStatusInternal` | вызвать `setStatus` в несогласованный target (в текущем коде частично экранируется сервисом) |
 | P2 | payment idempotency в cancel/refund неатомарна (find then insert action) | При одновременных запросах часть операций получит 500 на unique race без graceful mapping | `DefaultPaymentsService` + `PaymentsRepositoryImpl.recordAction` | два запроса cancel/refund с одним idem-key одновременно: оба проходят `find==null`, один падает на unique вставке |
 

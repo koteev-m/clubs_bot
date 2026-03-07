@@ -14,9 +14,11 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
@@ -177,6 +179,114 @@ class BookingRepository(
             }
         }
     }
+
+    suspend fun confirmFromHold(
+        holdId: UUID,
+        idempotencyKey: String,
+        guestUserId: Long? = null,
+        promoterUserId: Long? = null,
+    ): BookingCoreResult<BookingRecord> =
+        try {
+            withTxRetry {
+                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                    val initialHold =
+                        BookingHoldsTable
+                            .selectAll()
+                            .where { BookingHoldsTable.id eq holdId }
+                            .limit(1)
+                            .firstOrNull()
+                            ?: return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+
+                    val tableId = initialHold[BookingHoldsTable.tableId]
+                    val slotStart = initialHold[BookingHoldsTable.slotStart]
+                    val slotEnd = initialHold[BookingHoldsTable.slotEnd]
+                    acquireHoldSlotLockIfPostgres(tableId, slotStart, slotEnd)
+
+                    val now = Instant.now(clock)
+                    val holdRow =
+                        BookingHoldsTable
+                            .selectAll()
+                            .where { BookingHoldsTable.id eq holdId }
+                            .limit(1)
+                            .firstOrNull()
+                            ?: return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+
+                    val expiresAt = holdRow[BookingHoldsTable.expiresAt].toInstant()
+                    BookingHoldsTable.deleteWhere { BookingHoldsTable.id eq holdId }
+                    if (expiresAt.isBefore(now)) {
+                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+                    }
+
+                    val existingByKey =
+                        BookingsTable
+                            .selectAll()
+                            .where { BookingsTable.idempotencyKey eq idempotencyKey }
+                            .limit(1)
+                            .firstOrNull()
+                    if (existingByKey != null) {
+                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.IdempotencyConflict)
+                    }
+
+                    val hasActiveBooking =
+                        BookingsTable
+                            .selectAll()
+                            .where {
+                                (BookingsTable.tableId eq tableId) and
+                                    (BookingsTable.slotStart eq slotStart) and
+                                    (BookingsTable.slotEnd eq slotEnd) and
+                                    (BookingsTable.status inList ACTIVE_STATUSES)
+                            }.empty()
+                            .not()
+                    if (hasActiveBooking) {
+                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
+                    }
+
+                    val hasActiveHold =
+                        BookingHoldsTable
+                            .selectAll()
+                            .where {
+                                (BookingHoldsTable.id neq holdId) and
+                                    (BookingHoldsTable.tableId eq tableId) and
+                                    (BookingHoldsTable.slotStart eq slotStart) and
+                                    (BookingHoldsTable.slotEnd eq slotEnd) and
+                                    (BookingHoldsTable.expiresAt greater now.toOffsetDateTime())
+                            }.empty()
+                            .not()
+                    if (hasActiveHold) {
+                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.ActiveHoldExists)
+                    }
+
+                    val tableRow =
+                        TablesTable
+                            .selectAll()
+                            .where { TablesTable.id eq tableId }
+                            .limit(1)
+                            .firstOrNull()
+                            ?: return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.TableNotFound)
+
+                    BookingCoreResult.Success(
+                        insertBooking(
+                            clubId = tableRow[TablesTable.clubId],
+                            tableId = tableId,
+                            slotStart = slotStart,
+                            slotEnd = slotEnd,
+                            guests = holdRow[BookingHoldsTable.guestsCount],
+                            minRate = holdRow[BookingHoldsTable.minDeposit],
+                            idempotencyKey = idempotencyKey,
+                            guestUserId = guestUserId,
+                            promoterUserId = promoterUserId,
+                        ),
+                    )
+                }
+            }
+        } catch (ex: Throwable) {
+            when {
+                ex.isUniqueViolation() ->
+                    BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
+                ex.isRetryLimitExceeded() -> BookingCoreResult.Failure(BookingCoreError.OptimisticRetryExceeded)
+                else -> throw ex
+            }
+        }
 
     suspend fun setStatus(
         id: UUID,
