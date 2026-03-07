@@ -225,8 +225,20 @@ class BookingService(
                                 }
 
                                 BookingCoreError.HoldNotFound -> {
-                                    log("booking.confirm", null, "hold_not_found", null, entityId = holdId.toString())
-                                    BookingCmdResult.NotFound to notification
+                                    val confirmedBooking = bookingRepository.findByIdempotencyKey(idempotencyKey)
+                                    if (confirmedBooking != null) {
+                                        log(
+                                            action = "booking.confirm",
+                                            clubId = confirmedBooking.clubId,
+                                            outcome = "idempotent",
+                                            meta = buildJsonObject { put("bookingId", confirmedBooking.id.toString()) },
+                                            entityId = confirmedBooking.id.toString(),
+                                        )
+                                        BookingCmdResult.AlreadyBooked(confirmedBooking.id) to notification
+                                    } else {
+                                        log("booking.confirm", null, "hold_not_found", null, entityId = holdId.toString())
+                                        BookingCmdResult.NotFound to notification
+                                    }
                                 }
 
                                 BookingCoreError.DuplicateActiveBooking -> {
