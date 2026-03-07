@@ -413,6 +413,7 @@ fun Application.module() {
         adminTablesRepository = adminTablesRepository,
         tableSessionRepository = tableSessionRepository,
         tableDepositRepository = tableDepositRepository,
+        shiftReportRepository = shiftReportRepository,
         visitRepository = visitRepository,
         nightOverrideRepository = nightOverrideRepository,
         gamificationSettingsRepository = gamificationSettingsRepository,

@@ -3,7 +3,10 @@ package com.example.bot.data.booking
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.toOffsetDateTimeUtc
 import com.example.bot.data.db.withRetriedTx
+import com.example.bot.data.finance.ShiftReportStatus
+import com.example.bot.data.finance.ShiftReportsTable
 import kotlinx.coroutines.Dispatchers
+import org.jetbrains.exposed.exceptions.ExposedSQLException
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.ResultRow
@@ -20,6 +23,12 @@ import org.jetbrains.exposed.sql.update
 import java.time.Instant
 import java.util.Locale
 import java.util.UUID
+
+class ShiftClosedForDepositMutationException(
+    val clubId: Long,
+    val nightStartUtc: Instant,
+    operation: String,
+) : IllegalStateException("Shift report is closed for clubId=$clubId nightStartUtc=$nightStartUtc operation=$operation")
 
 enum class TableSessionStatus {
     OPEN,
@@ -209,25 +218,27 @@ class TableDepositRepository(
         validateAllocations(amountMinor, normalizedAllocations)
         val nightStart = nightStartUtc.toOffsetDateTimeUtc()
         val nowUtc = now.toOffsetDateTimeUtc()
-        return withRetriedTx(name = "tableDeposit.create", database = db) {
-            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                val depositId =
-                    TableDepositsTable.insert {
-                        it[TableDepositsTable.clubId] = clubId
-                        it[TableDepositsTable.nightStartUtc] = nightStart
-                        it[TableDepositsTable.tableId] = tableId
-                        it[TableDepositsTable.tableSessionId] = sessionId
-                        it[TableDepositsTable.paymentId] = paymentId
-                        it[TableDepositsTable.bookingId] = bookingId
-                        it[TableDepositsTable.guestUserId] = guestUserId
-                        it[TableDepositsTable.amountMinor] = amountMinor
-                        it[TableDepositsTable.createdAt] = nowUtc
-                        it[TableDepositsTable.createdBy] = actorId
-                        it[TableDepositsTable.updatedAt] = nowUtc
-                        it[TableDepositsTable.updatedBy] = actorId
-                        it[TableDepositsTable.updateReason] = null
-                    }[TableDepositsTable.id]
-                val savedAllocations = insertAllocations(depositId, normalizedAllocations)
+        return try {
+            withRetriedTx(name = "tableDeposit.create", database = db) {
+                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                    ensureShiftOpenForDeposits(clubId = clubId, nightStartUtc = nightStartUtc, operation = "create")
+                    val depositId =
+                        TableDepositsTable.insert {
+                            it[TableDepositsTable.clubId] = clubId
+                            it[TableDepositsTable.nightStartUtc] = nightStart
+                            it[TableDepositsTable.tableId] = tableId
+                            it[TableDepositsTable.tableSessionId] = sessionId
+                            it[TableDepositsTable.paymentId] = paymentId
+                            it[TableDepositsTable.bookingId] = bookingId
+                            it[TableDepositsTable.guestUserId] = guestUserId
+                            it[TableDepositsTable.amountMinor] = amountMinor
+                            it[TableDepositsTable.createdAt] = nowUtc
+                            it[TableDepositsTable.createdBy] = actorId
+                            it[TableDepositsTable.updatedAt] = nowUtc
+                            it[TableDepositsTable.updatedBy] = actorId
+                            it[TableDepositsTable.updateReason] = null
+                        }[TableDepositsTable.id]
+                    val savedAllocations = insertAllocations(depositId, normalizedAllocations)
                 val row =
                     TableDepositsTable
                         .selectAll()
@@ -235,8 +246,14 @@ class TableDepositRepository(
                         .limit(1)
                         .firstOrNull()
                         ?: error("Failed to load inserted table deposit for clubId=$clubId sessionId=$sessionId")
-                row.toTableDeposit(savedAllocations)
+                    row.toTableDeposit(savedAllocations)
+                }
             }
+        } catch (ex: Throwable) {
+            if (ex.isShiftClosedViolation()) {
+                throw ShiftClosedForDepositMutationException(clubId, nightStartUtc, "create")
+            }
+            throw ex
         }
     }
 
@@ -253,9 +270,24 @@ class TableDepositRepository(
         val normalizedAllocations = normalizeAllocations(allocations)
         validateAllocations(amountMinor, normalizedAllocations)
         val nowUtc = now.toOffsetDateTimeUtc()
-        return withRetriedTx(name = "tableDeposit.update", database = db) {
-            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                val updated =
+        var existingNightStartUtc: Instant? = null
+        return try {
+            withRetriedTx(name = "tableDeposit.update", database = db) {
+                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                    existingNightStartUtc =
+                        TableDepositsTable
+                        .slice(TableDepositsTable.nightStartUtc)
+                        .selectAll()
+                        .where {
+                            (TableDepositsTable.id eq depositId) and
+                                (TableDepositsTable.clubId eq clubId)
+                        }.limit(1)
+                        .firstOrNull()
+                        ?.get(TableDepositsTable.nightStartUtc)
+                        ?.toInstant()
+                        ?: error("Table deposit not found for clubId=$clubId depositId=$depositId")
+                    ensureShiftOpenForDeposits(clubId = clubId, nightStartUtc = existingNightStartUtc, operation = "update")
+                    val updated =
                     TableDepositsTable.update({
                         (TableDepositsTable.id eq depositId) and
                             (TableDepositsTable.clubId eq clubId)
@@ -265,12 +297,12 @@ class TableDepositRepository(
                         it[TableDepositsTable.updatedBy] = actorId
                         it[TableDepositsTable.updateReason] = reason
                     }
-                if (updated == 0) {
-                    error("Table deposit not found for clubId=$clubId depositId=$depositId")
-                }
-                TableDepositAllocationsTable.deleteWhere { TableDepositAllocationsTable.depositId eq depositId }
-                val savedAllocations = insertAllocations(depositId, normalizedAllocations)
-                val row =
+                    if (updated == 0) {
+                        error("Table deposit not found for clubId=$clubId depositId=$depositId")
+                    }
+                    TableDepositAllocationsTable.deleteWhere { TableDepositAllocationsTable.depositId eq depositId }
+                    val savedAllocations = insertAllocations(depositId, normalizedAllocations)
+                    val row =
                     TableDepositsTable
                         .selectAll()
                         .where {
@@ -279,8 +311,14 @@ class TableDepositRepository(
                         }.limit(1)
                         .firstOrNull()
                         ?: error("Failed to load updated table deposit for clubId=$clubId depositId=$depositId")
-                row.toTableDeposit(savedAllocations)
+                    row.toTableDeposit(savedAllocations)
+                }
             }
+        } catch (ex: Throwable) {
+            if (ex.isShiftClosedViolation()) {
+                throw ShiftClosedForDepositMutationException(clubId, existingNightStartUtc ?: Instant.EPOCH, "update")
+            }
+            throw ex
         }
     }
 
@@ -444,6 +482,43 @@ class TableDepositRepository(
         }
         return result
     }
+
+    private fun ensureShiftOpenForDeposits(
+        clubId: Long,
+        nightStartUtc: Instant,
+        operation: String,
+    ) {
+        val closedShiftExists =
+            ShiftReportsTable
+                .selectAll()
+                .where {
+                    (ShiftReportsTable.clubId eq clubId) and
+                        (ShiftReportsTable.nightStartUtc eq nightStartUtc.toOffsetDateTimeUtc()) and
+                        (ShiftReportsTable.status eq ShiftReportStatus.CLOSED.name)
+                }.limit(1)
+                .any()
+        if (closedShiftExists) {
+            throw ShiftClosedForDepositMutationException(
+                clubId = clubId,
+                nightStartUtc = nightStartUtc,
+                operation = operation,
+            )
+        }
+    }
+}
+
+private fun Throwable.isShiftClosedViolation(): Boolean {
+    var current: Throwable? = this
+    while (current != null) {
+        if (current is ExposedSQLException && current.message?.contains("shift_report_closed", ignoreCase = true) == true) {
+            return true
+        }
+        if (current.message?.contains("shift_report_closed", ignoreCase = true) == true) {
+            return true
+        }
+        current = current.cause
+    }
+    return false
 }
 
 private fun ResultRow.toTableSession(): TableSession =

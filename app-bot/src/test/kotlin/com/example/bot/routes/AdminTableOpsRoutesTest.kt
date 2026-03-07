@@ -7,6 +7,9 @@ import com.example.bot.data.booking.TableDepositRepository
 import com.example.bot.data.booking.TableSession
 import com.example.bot.data.booking.TableSessionRepository
 import com.example.bot.data.booking.TableSessionStatus
+import com.example.bot.data.finance.ShiftReport
+import com.example.bot.data.finance.ShiftReportRepository
+import com.example.bot.data.finance.ShiftReportStatus
 import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
@@ -291,6 +294,37 @@ class AdminTableOpsRoutesTest {
         response.assertNoStoreHeaders()
     }
 
+
+    @Test
+    fun `update deposit rejected when shift is closed`() = withApp { deps ->
+        val existing = tableDeposit(id = 10, sessionId = 55, tableId = 10, guestUserId = 42)
+        coEvery { deps.tableDepositRepository.findById(1, 10) } returns existing
+        coEvery {
+            deps.shiftReportRepository.getByClubAndNight(1, Instant.parse("2024-06-01T20:00:00Z"))
+        } returns shiftReport(ShiftReportStatus.CLOSED)
+
+        val response =
+            client.put("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/deposits/10") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "amount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}],
+                    "reason":"manual fix"
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertEquals(ErrorCodes.shift_report_closed, response.errorCode())
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 0) {
+            deps.tableDepositRepository.updateDeposit(any(), any(), any(), any(), any(), any(), any())
+        }
+        coVerify(exactly = 1) { deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
     private fun withApp(
         roles: Set<Role> = setOf(Role.MANAGER),
         clubIds: Set<Long> = setOf(1),
@@ -310,6 +344,7 @@ class AdminTableOpsRoutesTest {
                     adminTablesRepository = deps.adminTablesRepository,
                     tableSessionRepository = deps.tableSessionRepository,
                     tableDepositRepository = deps.tableDepositRepository,
+                    shiftReportRepository = deps.shiftReportRepository,
                     visitRepository = deps.visitRepository,
                     nightOverrideRepository = deps.nightOverrideRepository,
                     gamificationSettingsRepository = deps.gamificationSettingsRepository,
@@ -349,6 +384,7 @@ class AdminTableOpsRoutesTest {
             gamificationSettingsRepository = mockk(relaxed = true),
             auditLogger = mockk(relaxed = true),
             guestQrResolver = mockk(),
+            shiftReportRepository = mockk(relaxed = true),
         )
     }
 
@@ -391,6 +427,23 @@ class AdminTableOpsRoutesTest {
             updatedBy = 1,
             updateReason = null,
             allocations = listOf(TableDepositAllocation(depositId = id, categoryCode = "BAR", amountMinor = 1000)),
+        )
+
+
+    private fun shiftReport(status: ShiftReportStatus): ShiftReport =
+        ShiftReport(
+            id = 1,
+            clubId = 1,
+            nightStartUtc = Instant.parse("2024-06-01T20:00:00Z"),
+            status = status,
+            peopleWomen = 0,
+            peopleMen = 0,
+            peopleRejected = 0,
+            comment = null,
+            closedAt = null,
+            closedBy = null,
+            createdAt = Instant.parse("2024-06-01T20:00:00Z"),
+            updatedAt = Instant.parse("2024-06-01T20:00:00Z"),
         )
 
     private fun visitResult(): VisitCheckInResult =
@@ -451,5 +504,6 @@ class AdminTableOpsRoutesTest {
         val gamificationSettingsRepository: GamificationSettingsRepository,
         val auditLogger: AuditLogger,
         val guestQrResolver: GuestQrResolver,
+        val shiftReportRepository: ShiftReportRepository,
     )
 }

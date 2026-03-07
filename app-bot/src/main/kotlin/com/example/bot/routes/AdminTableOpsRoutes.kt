@@ -6,6 +6,9 @@ import com.example.bot.data.booking.TableDeposit
 import com.example.bot.data.booking.TableDepositRepository
 import com.example.bot.data.booking.TableSession
 import com.example.bot.data.booking.TableSessionRepository
+import com.example.bot.data.booking.ShiftClosedForDepositMutationException
+import com.example.bot.data.finance.ShiftReportRepository
+import com.example.bot.data.finance.ShiftReportStatus
 import com.example.bot.data.security.Role
 import com.example.bot.data.visits.NightOverrideRepository
 import com.example.bot.data.visits.VisitCheckInInput
@@ -117,6 +120,7 @@ fun Application.adminTableOpsRoutes(
     adminTablesRepository: AdminTablesRepository,
     tableSessionRepository: TableSessionRepository,
     tableDepositRepository: TableDepositRepository,
+    shiftReportRepository: ShiftReportRepository,
     visitRepository: VisitRepository,
     nightOverrideRepository: NightOverrideRepository,
     gamificationSettingsRepository: com.example.bot.data.gamification.GamificationSettingsRepository,
@@ -449,6 +453,24 @@ fun Application.adminTableOpsRoutes(
                             return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         }
 
+                        val closedShift = shiftReportRepository.getByClubAndNight(clubId, nightStartUtc)
+                        if (closedShift?.status == ShiftReportStatus.CLOSED) {
+                            val actorId = call.rbacContext().user.id
+                            val actorRole = call.rbacContext().roles.firstOrNull()
+                            auditLogger.tableDepositUpdateRejectedByClosedShift(
+                                clubId = clubId,
+                                nightStartUtc = nightStartUtc,
+                                tableId = existing.tableId,
+                                sessionId = existing.tableSessionId,
+                                depositId = existing.id,
+                                guestUserId = existing.guestUserId,
+                                reason = payload.reason.trim(),
+                                actorUserId = actorId,
+                                actorRole = actorRole?.name,
+                            )
+                            return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+                        }
+
                         val now = Instant.now(clock)
                         val actorId = call.rbacContext().user.id
                         val actorRole = call.rbacContext().roles.firstOrNull()
@@ -466,6 +488,20 @@ fun Application.adminTableOpsRoutes(
                                     now = now,
                                 )
                             }.getOrElse { ex ->
+                                if (ex is ShiftClosedForDepositMutationException) {
+                                    auditLogger.tableDepositUpdateRejectedByClosedShift(
+                                        clubId = clubId,
+                                        nightStartUtc = existing.nightStartUtc,
+                                        tableId = existing.tableId,
+                                        sessionId = existing.tableSessionId,
+                                        depositId = existing.id,
+                                        guestUserId = existing.guestUserId,
+                                        reason = reason,
+                                        actorUserId = actorId,
+                                        actorRole = actorRole?.name,
+                                    )
+                                    return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+                                }
                                 if (ex is IllegalArgumentException) {
                                     return@put call.respondValidationErrors(mapDepositValidationError(ex))
                                 }

@@ -3,6 +3,7 @@ package com.example.bot.data.booking
 import com.example.bot.data.TestDatabase
 import com.example.bot.data.db.Clubs
 import com.example.bot.data.db.toOffsetDateTimeUtc
+import com.example.bot.data.finance.ShiftReportsTable
 import com.example.bot.data.security.UsersTable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -288,6 +289,85 @@ class TableSessionDepositRepositoryTest {
             }
         }
 
+
+    @Test
+    fun `createDeposit forbidden when shift is closed`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+            insertClosedShiftReport(clubId, nightStart, actorId, now)
+
+            try {
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = now,
+                )
+                fail("Expected createDeposit to throw ShiftClosedForDepositMutationException")
+            } catch (ex: ShiftClosedForDepositMutationException) {
+                assertEquals(clubId, ex.clubId)
+                assertEquals(nightStart, ex.nightStartUtc)
+            }
+        }
+
+    @Test
+    fun `updateDeposit forbidden when shift is closed`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+            val deposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = now,
+                )
+            insertClosedShiftReport(clubId, nightStart, actorId, now)
+
+            try {
+                repo.updateDeposit(
+                    clubId = clubId,
+                    depositId = deposit.id,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    reason = "fix",
+                    actorId = actorId,
+                    now = now,
+                )
+                fail("Expected updateDeposit to throw ShiftClosedForDepositMutationException")
+            } catch (ex: ShiftClosedForDepositMutationException) {
+                assertEquals(clubId, ex.clubId)
+                assertEquals(nightStart, ex.nightStartUtc)
+            }
+        }
+
     @Test
     fun `sumDepositsForNight returns total for club night`() =
         runBlocking {
@@ -447,6 +527,30 @@ class TableSessionDepositRepositoryTest {
             assertEquals(first.allocations, loadedById[first.id]?.allocations)
             assertEquals(second.allocations, loadedById[second.id]?.allocations)
         }
+
+
+    private suspend fun insertClosedShiftReport(
+        clubId: Long,
+        nightStart: Instant,
+        actorId: Long,
+        now: Instant,
+    ) {
+        newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+            ShiftReportsTable.insert {
+                it[ShiftReportsTable.clubId] = clubId
+                it[ShiftReportsTable.nightStartUtc] = nightStart.toOffsetDateTimeUtc()
+                it[ShiftReportsTable.status] = "CLOSED"
+                it[ShiftReportsTable.peopleWomen] = 0
+                it[ShiftReportsTable.peopleMen] = 0
+                it[ShiftReportsTable.peopleRejected] = 0
+                it[ShiftReportsTable.comment] = null
+                it[ShiftReportsTable.closedAt] = now.toOffsetDateTimeUtc()
+                it[ShiftReportsTable.closedBy] = actorId
+                it[ShiftReportsTable.createdAt] = now.toOffsetDateTimeUtc()
+                it[ShiftReportsTable.updatedAt] = now.toOffsetDateTimeUtc()
+            }
+        }
+    }
 
     private suspend fun insertClub(): Long =
         newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
