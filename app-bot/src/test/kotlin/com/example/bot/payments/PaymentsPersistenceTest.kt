@@ -19,6 +19,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.count
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
@@ -103,14 +104,18 @@ class PaymentsPersistenceTest : PostgresAppTest() {
             assertEquals(false, result.alreadyCancelled)
             assertEquals(BookingStatus.CANCELLED, currentBookingStatus(booking.id))
 
-            val blankKeyActions =
+            val cancelActionsForBooking =
                 transaction(database) {
                     PaymentActionsTable
                         .selectAll()
-                        .where { PaymentActionsTable.idempotencyKey eq "" }
+                        .where {
+                            (PaymentActionsTable.bookingId eq booking.id) and
+                                (PaymentActionsTable.action eq PaymentsRepository.Action.CANCEL.name)
+                        }
                         .count()
                 }
-            assertEquals(0, blankKeyActions)
+            assertEquals(0, cancelActionsForBooking)
+            assertEquals(null, service.paymentsRepo.findActionByIdempotencyKey("   "))
         }
 
     @Test
