@@ -180,6 +180,57 @@ class BookingServiceIT : PostgresAppTest() {
         }
 
     @Test
+    fun `parallel confirm with same idempotency key returns booked and already booked`() =
+        runBlocking {
+            val service = newService()
+            val seed = seedData()
+            val hold =
+                service.hold(
+                    HoldRequest(
+                        clubId = seed.clubId,
+                        tableId = seed.tableId,
+                        slotStart = seed.slotStart,
+                        slotEnd = seed.slotEnd,
+                        guestsCount = 3,
+                        ttl = Duration.ofMinutes(10),
+                    ),
+                    idempotencyKey = "hold-idem-concurrent",
+                ) as BookingCmdResult.HoldCreated
+
+            val sameConfirmKey = "confirm-idem-concurrent"
+            val outcomes =
+                listOf(1, 2)
+                    .map { async { service.confirm(hold.holdId, sameConfirmKey) } }
+                    .awaitAll()
+
+            val booked = outcomes.filterIsInstance<BookingCmdResult.Booked>()
+            val alreadyBooked = outcomes.filterIsInstance<BookingCmdResult.AlreadyBooked>()
+
+            assertEquals(1, booked.size)
+            assertEquals(1, alreadyBooked.size)
+            assertEquals(booked.single().bookingId, alreadyBooked.single().bookingId)
+
+            val activeBookingsForSlot =
+                transaction(database) {
+                    BookingsTable
+                        .selectAll()
+                        .andWhere { BookingsTable.tableId eq seed.tableId }
+                        .andWhere {
+                            BookingsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
+                        }
+                        .andWhere {
+                            BookingsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
+                        }
+                        .andWhere { BookingsTable.status eq BookingStatus.BOOKED.name }
+                        .count()
+                }
+            assertEquals(1, activeBookingsForSlot)
+            assertFalse(outcomes.any { it is BookingCmdResult.NotFound })
+            assertFalse(outcomes.any { it is BookingCmdResult.HoldExpired })
+            assertFalse(outcomes.any { it is BookingCmdResult.DuplicateActiveBooking })
+        }
+
+    @Test
     fun `confirm and concurrent hold keep slot invariants`() =
         runBlocking {
             val service = newService()
