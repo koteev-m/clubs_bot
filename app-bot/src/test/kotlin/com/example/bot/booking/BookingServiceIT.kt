@@ -29,14 +29,17 @@ import com.example.bot.workers.SendOutcome
 import com.example.bot.workers.SendPort
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -174,6 +177,89 @@ class BookingServiceIT : PostgresAppTest() {
                         .count()
                 }
             assertEquals(1, bookings)
+        }
+
+    @Test
+    fun `confirm and concurrent hold keep slot invariants`() =
+        runBlocking {
+            val service = newService()
+            val seed = seedData()
+            val initialHold =
+                service.hold(
+                    HoldRequest(
+                        clubId = seed.clubId,
+                        tableId = seed.tableId,
+                        slotStart = seed.slotStart,
+                        slotEnd = seed.slotEnd,
+                        guestsCount = 2,
+                        ttl = Duration.ofMinutes(15),
+                    ),
+                    idempotencyKey = "confirm-vs-hold-initial",
+                ) as BookingCmdResult.HoldCreated
+
+            val startGate = CompletableDeferred<Unit>()
+            val confirmDeferred =
+                async {
+                    startGate.await()
+                    service.confirm(initialHold.holdId, "confirm-vs-hold-confirm")
+                }
+            val holdDeferred =
+                async {
+                    startGate.await()
+                    service.hold(seed.holdRequest(guests = 3), "confirm-vs-hold-new")
+                }
+            startGate.complete(Unit)
+
+            val confirmOutcome = confirmDeferred.await()
+            val holdOutcome = holdDeferred.await()
+
+            val successfulConfirm = confirmOutcome is BookingCmdResult.Booked
+            val successfulNewHold = holdOutcome is BookingCmdResult.HoldCreated
+            assertTrue(successfulConfirm.xor(successfulNewHold))
+
+            assertTrue(
+                confirmOutcome is BookingCmdResult.Booked ||
+                    confirmOutcome is BookingCmdResult.DuplicateActiveBooking ||
+                    confirmOutcome is BookingCmdResult.NotFound ||
+                    confirmOutcome is BookingCmdResult.HoldExpired ||
+                    confirmOutcome is BookingCmdResult.IdempotencyConflict,
+            )
+            assertTrue(
+                holdOutcome is BookingCmdResult.HoldCreated ||
+                    holdOutcome is BookingCmdResult.DuplicateActiveBooking ||
+                    holdOutcome is BookingCmdResult.IdempotencyConflict,
+            )
+
+            val bookedCount =
+                transaction(database) {
+                    BookingsTable
+                        .selectAll()
+                        .andWhere { BookingsTable.tableId eq seed.tableId }
+                        .andWhere {
+                            BookingsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
+                        }
+                        .andWhere {
+                            BookingsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
+                        }
+                        .andWhere { BookingsTable.status eq BookingStatus.BOOKED.name }
+                        .count()
+                }
+            val activeHoldCount =
+                transaction(database) {
+                    BookingHoldsTable
+                        .selectAll()
+                        .andWhere { BookingHoldsTable.tableId eq seed.tableId }
+                        .andWhere {
+                            BookingHoldsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
+                        }
+                        .andWhere {
+                            BookingHoldsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
+                        }
+                        .andWhere { BookingHoldsTable.expiresAt greater fixedNow.atOffset(ZoneOffset.UTC) }
+                        .count()
+                }
+            assertTrue(bookedCount == 1L || activeHoldCount == 1L)
+            assertFalse(bookedCount == 1L && activeHoldCount == 1L)
         }
 
     @Test
