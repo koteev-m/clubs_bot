@@ -1,5 +1,6 @@
 package com.example.bot.booking
 
+import com.example.bot.data.booking.BookingHoldsTable
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
@@ -75,6 +76,39 @@ class BookingServiceIT : PostgresAppTest() {
             promoAttribution = promoAttribution,
         )
     }
+
+    @Test
+    fun `parallel hold on same slot allows only one success`() =
+        runBlocking {
+            val service = newService()
+            val seed = seedData()
+
+            val outcomes =
+                (1..20)
+                    .map { idx -> async { service.hold(seed.holdRequest(guests = 2), "hold-race-$idx") } }
+                    .awaitAll()
+
+            val holdCreated = outcomes.count { it is BookingCmdResult.HoldCreated }
+            val conflicts = outcomes.count { it is BookingCmdResult.DuplicateActiveBooking }
+
+            assertEquals(1, holdCreated)
+            assertEquals(19, conflicts)
+
+            val activeHolds =
+                transaction(database) {
+                    BookingHoldsTable
+                        .selectAll()
+                        .andWhere { BookingHoldsTable.tableId eq seed.tableId }
+                        .andWhere {
+                            BookingHoldsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
+                        }
+                        .andWhere {
+                            BookingHoldsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
+                        }
+                        .count()
+                }
+            assertEquals(1, activeHolds)
+        }
 
     @Test
     fun `parallel confirm produces single booking`() =
@@ -383,7 +417,18 @@ class BookingServiceIT : PostgresAppTest() {
         val tableId: Long,
         val slotStart: Instant,
         val slotEnd: Instant,
-    )
+    ) {
+
+        fun holdRequest(guests: Int): HoldRequest =
+            HoldRequest(
+                clubId = clubId,
+                tableId = tableId,
+                slotStart = slotStart,
+                slotEnd = slotEnd,
+                guestsCount = guests,
+                ttl = Duration.ofMinutes(15),
+            )
+    }
 }
 
 class PromoLinkTokenCodecTest {
