@@ -7,6 +7,13 @@
 - Денежные операции по столам сейчас не append-only: `table_deposits` обновляется in-place через `updateDeposit` (перезапись суммы + удаление/вставка allocations), что противоречит инварианту «только операциями». (`core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt:94-136`, `core-data/src/main/resources/db/migration/postgresql/V036__table_sessions_deposits.sql:25-40`)
 - Freeze после закрытия смены реализован для самого shift report (`updateDraft`/`close` под `FOR UPDATE` и проверкой `status=DRAFT`), но не подтверждён глобальный запрет на update deposit после close: route обновления депозита не проверяет `shift_reports.status`. (`core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt:17-47`, `core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt:588-633`, `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:429-497`)
 
+## Обновление (P0/P1): hardening HOLD/CONFIRM через DB advisory lock
+
+- Для `HOLD` и `CONFIRM` добавлена транзакционная сериализация слота через `pg_advisory_xact_lock` на детерминированном ключе `(table_id, slot_start, slot_end)`.
+- Лок берётся **внутри транзакции до pre-check и insert**, поэтому конкурентные запросы на один слот выстраиваются в очередь на уровне Postgres и больше не зависят только от app-level проверки.
+- В `CONFIRM` это закрывает TOCTOU между `existsActiveFor` и `insert` в `createBooked`: второй конкурент получает предсказуемый `DuplicateActiveBooking`, а не ложный успех.
+- Добавлен интеграционный race-тест на 20 параллельных `HOLD` в один слот: ожидается ровно один `HoldCreated` и 19 конфликтов.
+
 ## 1) Карта критичных write-операций
 
 ### 1.1 Booking HOLD

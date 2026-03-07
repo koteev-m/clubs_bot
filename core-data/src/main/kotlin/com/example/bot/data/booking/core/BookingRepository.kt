@@ -22,6 +22,7 @@ import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.lowerCase
 import java.math.BigDecimal
@@ -33,6 +34,7 @@ import java.util.Locale
 import java.util.UUID
 
 private val ACTIVE_STATUSES = listOf(BookingStatus.BOOKED.name, BookingStatus.SEATED.name)
+private const val HOLD_SLOT_LOCK_NAMESPACE = "booking_hold_slot"
 
 sealed interface BookingCancellationResult {
     data class Cancelled(
@@ -123,6 +125,7 @@ class BookingRepository(
         return try {
             withTxRetry {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                    acquireHoldSlotLockIfPostgres(tableId, start, end)
                     val existingByKey =
                         BookingsTable
                             .selectAll()
@@ -456,6 +459,7 @@ class BookingHoldRepository(
         return try {
             withTxRetry {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                    acquireHoldSlotLockIfPostgres(tableId, start, end)
                     val now = Instant.now(clock)
                     val existingByKey =
                         BookingHoldsTable
@@ -692,6 +696,26 @@ class BookingHoldRepository(
             BookingCoreResult.Success(row.toBookingHold())
         }
     }
+}
+
+private fun acquireHoldSlotLockIfPostgres(
+    tableId: Long,
+    slotStart: OffsetDateTime,
+    slotEnd: OffsetDateTime,
+) {
+    if (!isPostgresEngine()) {
+        return
+    }
+    val lockKey = "$tableId|${slotStart.toInstant().epochSecond}|${slotEnd.toInstant().epochSecond}"
+    TransactionManager.current().exec(
+        "SELECT pg_advisory_xact_lock(hashtext('$HOLD_SLOT_LOCK_NAMESPACE'), hashtext('$lockKey'))",
+    )
+}
+
+private fun isPostgresEngine(): Boolean {
+    val connection = TransactionManager.current().connection.connection as java.sql.Connection
+    val productName = connection.metaData.databaseProductName
+    return productName.contains("PostgreSQL", ignoreCase = true)
 }
 
 class OutboxRepository(
