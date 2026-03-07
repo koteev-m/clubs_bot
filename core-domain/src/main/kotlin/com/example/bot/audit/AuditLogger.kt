@@ -266,6 +266,37 @@ class AuditLogger(
         )
     }
 
+
+    suspend fun tableDepositUpdateRejectedByClosedShift(
+        clubId: Long,
+        nightStartUtc: Instant,
+        tableId: Long,
+        sessionId: Long,
+        depositId: Long,
+        guestUserId: Long?,
+        reason: String,
+        actorUserId: Long?,
+        actorRole: String?,
+    ) {
+        append(
+            clubId = clubId,
+            actorUserId = actorUserId,
+            actorRole = actorRole,
+            subjectUserId = guestUserId,
+            entityType = StandardAuditEntityType.TABLE_DEPOSIT,
+            action = CustomAuditAction("UPDATE_REJECTED_SHIFT_CLOSED"),
+            fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, "UPDATE_REJECTED_SHIFT_CLOSED", depositId.toString()),
+            entityId = depositId,
+            metadata =
+                buildJsonObject {
+                    put("nightStartUtc", nightStartUtc.toString())
+                    put("tableId", tableId)
+                    put("sessionId", sessionId)
+                    put("reason", reason)
+                },
+        )
+    }
+
     suspend fun badgeEarned(
         clubId: Long,
         userId: Long,

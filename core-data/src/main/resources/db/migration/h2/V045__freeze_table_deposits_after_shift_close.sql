@@ -1,0 +1,2 @@
+-- H2 test environment: freeze is enforced at route/repository layers.
+-- Production-grade DB enforcement is implemented in PostgreSQL migration V045.

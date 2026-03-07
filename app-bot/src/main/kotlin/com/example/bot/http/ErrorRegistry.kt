@@ -95,6 +95,7 @@ object ErrorRegistry {
         ErrorCodeInfo(ErrorCodes.table_number_conflict, HttpStatusCode.Conflict.value),
         ErrorCodeInfo(ErrorCodes.invalid_table_coords, HttpStatusCode.BadRequest.value),
         ErrorCodeInfo(ErrorCodes.invalid_capacity, HttpStatusCode.BadRequest.value),
+        ErrorCodeInfo(ErrorCodes.shift_report_closed, HttpStatusCode.Conflict.value),
     ).sortedBy { it.code }
 
     val codes: List<ErrorCodeInfo> = common + checkin + booking + guestLists + invitations + support + admin

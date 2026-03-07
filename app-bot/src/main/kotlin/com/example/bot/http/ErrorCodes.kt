@@ -63,4 +63,5 @@ object ErrorCodes {
     const val table_number_conflict: String = "table_number_conflict"
     const val invalid_table_coords: String = "invalid_table_coords"
     const val invalid_capacity: String = "invalid_capacity"
+    const val shift_report_closed: String = "shift_report_closed"
 }
