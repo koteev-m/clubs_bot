@@ -215,6 +215,60 @@ class AdminTableOpsRoutesTest {
                 actorRole = Role.MANAGER.name,
             )
         }
+        coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
+    }
+
+    @Test
+    fun `seat table after closed shift rejects before session mutation`() = withApp { deps ->
+        val nightStart = Instant.parse("2024-06-01T20:00:00Z")
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
+        coEvery { deps.shiftReportRepository.getByClubAndNight(1, nightStart) } returns shiftReport(ShiftReportStatus.CLOSED)
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertEquals(ErrorCodes.shift_report_closed, response.errorCode())
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 0) { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        }
+        coVerify(exactly = 1) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(
+                clubId = 1,
+                nightStartUtc = nightStart,
+                tableId = 10,
+                sessionId = -1,
+                depositId = -1,
+                guestUserId = null,
+                reason = "seat_create",
+                actorUserId = 1,
+                actorRole = Role.MANAGER.name,
+            )
+        }
     }
 
     @Test

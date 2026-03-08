@@ -220,6 +220,22 @@ fun Application.adminTableOpsRoutes(
                                 )
                             }
 
+                            if (
+                                call.rejectSeatCreateIfShiftClosed(
+                                    shiftReportRepository = shiftReportRepository,
+                                    auditLogger = auditLogger,
+                                    clubId = clubId,
+                                    nightStartUtc = nightStartUtc,
+                                    tableId = tableId,
+                                    sessionId = activeSession.id,
+                                    guestUserId = resolvedGuestUserId,
+                                    actorId = actorId,
+                                    actorRole = actorRole,
+                                )
+                            ) {
+                                return@post
+                            }
+
                             val deposit =
                                 runCatching {
                                     tableDepositRepository.createDeposit(
@@ -306,6 +322,22 @@ fun Application.adminTableOpsRoutes(
                             )
                         }
 
+                        if (
+                            call.rejectSeatCreateIfShiftClosed(
+                                shiftReportRepository = shiftReportRepository,
+                                auditLogger = auditLogger,
+                                clubId = clubId,
+                                nightStartUtc = nightStartUtc,
+                                tableId = tableId,
+                                sessionId = -1,
+                                guestUserId = resolvedGuestUserId,
+                                actorId = actorId,
+                                actorRole = actorRole,
+                            )
+                        ) {
+                            return@post
+                        }
+
                         val note = payload.note?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_NOTE_LENGTH)
                         val session =
                             tableSessionRepository.openSession(
@@ -333,6 +365,22 @@ fun Application.adminTableOpsRoutes(
                                 )
                             }.getOrElse { ex ->
                                 if (ex is ShiftClosedForDepositMutationException) {
+                                    runCatching {
+                                        tableSessionRepository.closeSession(
+                                            sessionId = session.id,
+                                            clubId = clubId,
+                                            actorId = actorId,
+                                            now = now,
+                                        )
+                                    }.getOrElse { closeEx ->
+                                        logger.warn(
+                                            "admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={}",
+                                            clubId,
+                                            tableId,
+                                            session.id,
+                                            closeEx,
+                                        )
+                                    }
                                     auditLogger.tableDepositUpdateRejectedByClosedShift(
                                         clubId = clubId,
                                         nightStartUtc = nightStartUtc,
@@ -563,6 +611,37 @@ fun Application.adminTableOpsRoutes(
             }
         }
     }
+}
+
+private suspend fun ApplicationCall.rejectSeatCreateIfShiftClosed(
+    shiftReportRepository: ShiftReportRepository,
+    auditLogger: AuditLogger,
+    clubId: Long,
+    nightStartUtc: Instant,
+    tableId: Long,
+    sessionId: Long,
+    guestUserId: Long?,
+    actorId: Long,
+    actorRole: Role?,
+): Boolean {
+    val closedShift = shiftReportRepository.getByClubAndNight(clubId, nightStartUtc)
+    if (closedShift?.status != ShiftReportStatus.CLOSED) {
+        return false
+    }
+
+    auditLogger.tableDepositUpdateRejectedByClosedShift(
+        clubId = clubId,
+        nightStartUtc = nightStartUtc,
+        tableId = tableId,
+        sessionId = sessionId,
+        depositId = -1,
+        guestUserId = guestUserId,
+        reason = "seat_create",
+        actorUserId = actorId,
+        actorRole = actorRole?.name,
+    )
+    respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+    return true
 }
 
 private fun Table.toNightResponse(
