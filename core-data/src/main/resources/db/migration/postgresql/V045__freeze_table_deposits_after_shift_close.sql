@@ -22,6 +22,11 @@ CREATE OR REPLACE FUNCTION trg_guard_table_deposits_shift_close()
 RETURNS TRIGGER AS
 $$
 BEGIN
+    IF TG_OP = 'DELETE' THEN
+        PERFORM prevent_table_deposit_mutation_after_shift_close(OLD.club_id, OLD.night_start_utc);
+        RETURN OLD;
+    END IF;
+
     PERFORM prevent_table_deposit_mutation_after_shift_close(NEW.club_id, NEW.night_start_utc);
     RETURN NEW;
 END;

@@ -8,12 +8,12 @@ import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
-import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class TableDepositShiftFreezeIT : PostgresClubIntegrationTest() {
     @Test
-    fun `db trigger blocks deposit update after shift close`() = runBlocking {
+    fun `db trigger blocks deposit and allocation mutations after shift close`() = runBlocking {
         val clubId = insertClub("Freeze Club")
         val tableId = insertTable(clubId, tableNumber = 1, capacity = 4, minDeposit = BigDecimal("100.00"))
         val actorId = insertUser(username = "actor", displayName = "Actor")
@@ -53,15 +53,30 @@ class TableDepositShiftFreezeIT : PostgresClubIntegrationTest() {
             }
         }
 
-        assertThrows(Exception::class.java) {
+        assertFreezeViolation {
             transaction(database) {
                 exec("UPDATE table_deposits SET amount_minor = 101 WHERE id = ${deposit.id}")
             }
         }
-        assertThrows(Exception::class.java) {
+        assertFreezeViolation {
             transaction(database) {
                 exec("INSERT INTO table_deposit_allocations (deposit_id, category_code, amount_minor) VALUES (${deposit.id}, 'VIP', 1)")
             }
         }
+        assertFreezeViolation {
+            transaction(database) {
+                exec("DELETE FROM table_deposits WHERE id = ${deposit.id}")
+            }
+        }
+    }
+
+    private fun assertFreezeViolation(block: () -> Unit) {
+        val ex = kotlin.runCatching(block).exceptionOrNull()
+        assertTrue(ex != null, "Expected freeze mutation to fail")
+        val hasFreezeSignal =
+            generateSequence(ex) { it.cause }
+                .mapNotNull { it.message }
+                .any { it.contains("shift_report_closed", ignoreCase = true) }
+        assertTrue(hasFreezeSignal, "Expected shift_report_closed freeze signal, got: ${ex?.message}")
     }
 }
