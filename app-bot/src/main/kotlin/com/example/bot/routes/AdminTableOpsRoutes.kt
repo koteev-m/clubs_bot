@@ -41,6 +41,8 @@ import java.time.Duration
 import java.time.Instant
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 
@@ -366,12 +368,14 @@ fun Application.adminTableOpsRoutes(
                                 )
                             }.getOrElse { ex ->
                                 runCatching {
-                                    tableSessionRepository.closeSession(
-                                        sessionId = session.id,
-                                        clubId = clubId,
-                                        actorId = actorId,
-                                        now = now,
-                                    )
+                                    withContext(NonCancellable) {
+                                        tableSessionRepository.closeSession(
+                                            sessionId = session.id,
+                                            clubId = clubId,
+                                            actorId = actorId,
+                                            now = now,
+                                        )
+                                    }
                                 }.getOrElse { closeEx ->
                                     logger.warn(
                                         "admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={}",
