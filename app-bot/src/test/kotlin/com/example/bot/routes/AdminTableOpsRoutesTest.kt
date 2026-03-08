@@ -3,6 +3,7 @@ package com.example.bot.routes
 import com.example.bot.audit.AuditLogger
 import com.example.bot.data.booking.TableDeposit
 import com.example.bot.data.booking.TableDepositAllocation
+import com.example.bot.data.booking.ShiftClosedForDepositMutationException
 import com.example.bot.data.booking.TableDepositRepository
 import com.example.bot.data.booking.TableSession
 import com.example.bot.data.booking.TableSessionRepository
@@ -160,6 +161,60 @@ class AdminTableOpsRoutesTest {
         response.assertNoStoreHeaders()
         coVerify(exactly = 0) { deps.visitRepository.tryCheckIn(any()) }
         coVerify(exactly = 0) { deps.visitRepository.markHasTable(any(), any(), any(), any()) }
+    }
+
+
+    @Test
+    fun `seat table create deposit rejected when shift is closed`() = withApp { deps ->
+        val nightStart = Instant.parse("2024-06-01T20:00:00Z")
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
+        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
+            tableSession(id = 100, tableId = 10)
+        coEvery {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } throws ShiftClosedForDepositMutationException(clubId = 1, nightStartUtc = nightStart, operation = "create")
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertEquals(ErrorCodes.shift_report_closed, response.errorCode())
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 1) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(
+                clubId = 1,
+                nightStartUtc = nightStart,
+                tableId = 10,
+                sessionId = 100,
+                depositId = -1,
+                guestUserId = null,
+                reason = "seat_create",
+                actorUserId = 1,
+                actorRole = Role.MANAGER.name,
+            )
+        }
     }
 
     @Test

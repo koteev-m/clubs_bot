@@ -236,6 +236,20 @@ fun Application.adminTableOpsRoutes(
                                         now = now,
                                     )
                                 }.getOrElse { ex ->
+                                    if (ex is ShiftClosedForDepositMutationException) {
+                                        auditLogger.tableDepositUpdateRejectedByClosedShift(
+                                            clubId = clubId,
+                                            nightStartUtc = nightStartUtc,
+                                            tableId = tableId,
+                                            sessionId = activeSession.id,
+                                            depositId = -1,
+                                            guestUserId = resolvedGuestUserId,
+                                            reason = "seat_create",
+                                            actorUserId = actorId,
+                                            actorRole = actorRole?.name,
+                                        )
+                                        return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+                                    }
                                     if (ex is IllegalArgumentException) {
                                         return@post call.respondValidationErrors(mapDepositValidationError(ex))
                                     }
@@ -318,6 +332,20 @@ fun Application.adminTableOpsRoutes(
                                     now = now,
                                 )
                             }.getOrElse { ex ->
+                                if (ex is ShiftClosedForDepositMutationException) {
+                                    auditLogger.tableDepositUpdateRejectedByClosedShift(
+                                        clubId = clubId,
+                                        nightStartUtc = nightStartUtc,
+                                        tableId = tableId,
+                                        sessionId = session.id,
+                                        depositId = -1,
+                                        guestUserId = resolvedGuestUserId,
+                                        reason = "seat_create",
+                                        actorUserId = actorId,
+                                        actorRole = actorRole?.name,
+                                    )
+                                    return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)
+                                }
                                 if (ex is IllegalArgumentException) {
                                     return@post call.respondValidationErrors(mapDepositValidationError(ex))
                                 }
