@@ -48,6 +48,8 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -242,6 +244,10 @@ class AdminTableOpsRoutesTest {
                 any(),
             )
         } throws CancellationException("cancelled")
+        coEvery { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) } coAnswers {
+            assertEquals(NonCancellable, coroutineContext[kotlinx.coroutines.Job])
+            true
+        }
 
         val response =
             client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
