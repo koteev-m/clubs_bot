@@ -219,6 +219,50 @@ class AdminTableOpsRoutesTest {
     }
 
     @Test
+    fun `seat table create deposit unexpected failure closes just-opened session`() = withApp { deps ->
+        val nightStart = Instant.parse("2024-06-01T20:00:00Z")
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
+        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
+            tableSession(id = 100, tableId = 10)
+        coEvery {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } throws IllegalStateException("boom")
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertEquals(ErrorCodes.internal_error, response.errorCode())
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
     fun `seat table after closed shift rejects before session mutation`() = withApp { deps ->
         val nightStart = Instant.parse("2024-06-01T20:00:00Z")
         coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
