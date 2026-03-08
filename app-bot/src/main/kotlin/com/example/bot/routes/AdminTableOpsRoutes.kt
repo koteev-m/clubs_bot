@@ -365,9 +365,6 @@ fun Application.adminTableOpsRoutes(
                                     now = now,
                                 )
                             }.getOrElse { ex ->
-                                if (ex is CancellationException) {
-                                    throw ex
-                                }
                                 runCatching {
                                     tableSessionRepository.closeSession(
                                         sessionId = session.id,
@@ -383,6 +380,9 @@ fun Application.adminTableOpsRoutes(
                                         session.id,
                                         closeEx,
                                     )
+                                }
+                                if (ex is CancellationException) {
+                                    throw ex
                                 }
                                 if (ex is ShiftClosedForDepositMutationException) {
                                     auditLogger.tableDepositUpdateRejectedByClosedShift(
