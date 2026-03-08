@@ -40,6 +40,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 
@@ -364,23 +365,26 @@ fun Application.adminTableOpsRoutes(
                                     now = now,
                                 )
                             }.getOrElse { ex ->
+                                if (ex is CancellationException) {
+                                    throw ex
+                                }
+                                runCatching {
+                                    tableSessionRepository.closeSession(
+                                        sessionId = session.id,
+                                        clubId = clubId,
+                                        actorId = actorId,
+                                        now = now,
+                                    )
+                                }.getOrElse { closeEx ->
+                                    logger.warn(
+                                        "admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={}",
+                                        clubId,
+                                        tableId,
+                                        session.id,
+                                        closeEx,
+                                    )
+                                }
                                 if (ex is ShiftClosedForDepositMutationException) {
-                                    runCatching {
-                                        tableSessionRepository.closeSession(
-                                            sessionId = session.id,
-                                            clubId = clubId,
-                                            actorId = actorId,
-                                            now = now,
-                                        )
-                                    }.getOrElse { closeEx ->
-                                        logger.warn(
-                                            "admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={}",
-                                            clubId,
-                                            tableId,
-                                            session.id,
-                                            closeEx,
-                                        )
-                                    }
                                     auditLogger.tableDepositUpdateRejectedByClosedShift(
                                         clubId = clubId,
                                         nightStartUtc = nightStartUtc,
