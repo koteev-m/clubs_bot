@@ -47,6 +47,7 @@ import io.ktor.server.testing.testApplication
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -58,6 +59,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class AdminTableOpsRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -216,6 +218,54 @@ class AdminTableOpsRoutesTest {
             )
         }
         coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
+    }
+
+
+    @Test
+    fun `seat table create deposit cancellation closes just-opened session and is not mapped to business errors`() = withApp { deps ->
+        val nightStart = Instant.parse("2024-06-01T20:00:00Z")
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
+        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
+            tableSession(id = 100, tableId = 10)
+        coEvery {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } throws CancellationException("cancelled")
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        val errorCode = response.errorCode()
+        assertTrue(errorCode != ErrorCodes.shift_report_closed)
+        assertTrue(errorCode != ErrorCodes.validation_error)
+        assertTrue(errorCode != ErrorCodes.internal_error)
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test
