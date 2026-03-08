@@ -367,22 +367,20 @@ fun Application.adminTableOpsRoutes(
                                     now = now,
                                 )
                             }.getOrElse { ex ->
-                                runCatching {
-                                    withContext(NonCancellable) {
-                                        tableSessionRepository.closeSession(
-                                            sessionId = session.id,
-                                            clubId = clubId,
-                                            actorId = actorId,
-                                            now = now,
-                                        )
-                                    }
-                                }.getOrElse { closeEx ->
-                                    logger.warn(
-                                        "admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={}",
-                                        clubId,
-                                        tableId,
-                                        session.id,
-                                        closeEx,
+                                val sessionCompensated =
+                                    closeOpenedSessionStrictly(
+                                        tableSessionRepository = tableSessionRepository,
+                                        logger = logger,
+                                        clubId = clubId,
+                                        tableId = tableId,
+                                        sessionId = session.id,
+                                        actorId = actorId,
+                                        now = now,
+                                    )
+                                if (!sessionCompensated) {
+                                    return@post call.respondError(
+                                        HttpStatusCode.InternalServerError,
+                                        ErrorCodes.internal_error,
                                     )
                                 }
                                 if (ex is CancellationException) {
@@ -830,6 +828,48 @@ private suspend fun markHasTableIfPossible(
             logger.warn("admin.tables.mark_has_table_failed clubId={} nightStartUtc={}", clubId, nightStartUtc, ex)
         }
 }
+
+private suspend fun closeOpenedSessionStrictly(
+    tableSessionRepository: TableSessionRepository,
+    logger: org.slf4j.Logger,
+    clubId: Long,
+    tableId: Long,
+    sessionId: Long,
+    actorId: Long,
+    now: Instant,
+): Boolean =
+    runCatching {
+        withContext(NonCancellable) {
+            tableSessionRepository.closeSession(
+                sessionId = sessionId,
+                clubId = clubId,
+                actorId = actorId,
+                now = now,
+            )
+        }
+    }.fold(
+        onSuccess = { closed ->
+            if (!closed) {
+                logger.warn(
+                    "admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={} reason=close_returned_false",
+                    clubId,
+                    tableId,
+                    sessionId,
+                )
+            }
+            closed
+        },
+        onFailure = { closeEx ->
+            logger.warn(
+                "admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={} reason=close_threw",
+                clubId,
+                tableId,
+                sessionId,
+                closeEx,
+            )
+            false
+        },
+    )
 
 private suspend fun ApplicationCall.requireClubIdPath(): Long? {
     val clubId = parameters["clubId"]?.toLongOrNull()

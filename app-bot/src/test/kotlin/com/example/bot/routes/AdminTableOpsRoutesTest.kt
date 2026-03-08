@@ -189,6 +189,7 @@ class AdminTableOpsRoutesTest {
                 any(),
             )
         } throws ShiftClosedForDepositMutationException(clubId = 1, nightStartUtc = nightStart, operation = "create")
+        coEvery { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) } returns true
 
         val response =
             client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
@@ -222,6 +223,97 @@ class AdminTableOpsRoutesTest {
         coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
     }
 
+
+
+    @Test
+    fun `seat table create deposit shift closed with failed compensation returns fail closed and skips rejection audit`() = withApp { deps ->
+        val nightStart = Instant.parse("2024-06-01T20:00:00Z")
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
+        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
+            tableSession(id = 100, tableId = 10)
+        coEvery {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } throws ShiftClosedForDepositMutationException(clubId = 1, nightStartUtc = nightStart, operation = "create")
+        coEvery { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) } returns false
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertEquals(ErrorCodes.internal_error, response.errorCode())
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `seat table create deposit shift closed with compensation exception returns fail closed and skips rejection audit`() = withApp { deps ->
+        val nightStart = Instant.parse("2024-06-01T20:00:00Z")
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
+        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
+            tableSession(id = 100, tableId = 10)
+        coEvery {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } throws ShiftClosedForDepositMutationException(clubId = 1, nightStartUtc = nightStart, operation = "create")
+        coEvery { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) } throws IllegalStateException("close boom")
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertEquals(ErrorCodes.internal_error, response.errorCode())
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
 
     @Test
     fun `seat table create deposit cancellation closes just-opened session and is not mapped to business errors`() = withApp { deps ->
@@ -266,7 +358,54 @@ class AdminTableOpsRoutesTest {
         val errorCode = response.errorCode()
         assertTrue(errorCode != ErrorCodes.shift_report_closed)
         assertTrue(errorCode != ErrorCodes.validation_error)
-        assertTrue(errorCode != ErrorCodes.internal_error)
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `seat table create deposit cancellation with failed compensation returns fail closed and skips business mapping`() = withApp { deps ->
+        val nightStart = Instant.parse("2024-06-01T20:00:00Z")
+        coEvery { deps.tableSessionRepository.findActiveSession(any(), any(), any()) } returns null
+        coEvery { deps.tableSessionRepository.openSession(any(), any(), any(), any(), any(), any()) } returns
+            tableSession(id = 100, tableId = 10)
+        coEvery {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } throws CancellationException("cancelled")
+        coEvery { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) } returns false
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        val errorCode = response.errorCode()
+        assertTrue(errorCode != ErrorCodes.shift_report_closed)
+        assertTrue(errorCode != ErrorCodes.validation_error)
+        assertEquals(ErrorCodes.internal_error, errorCode)
         response.assertNoStoreHeaders()
         coVerify(exactly = 1) { deps.tableSessionRepository.closeSession(100, 1, 1, nightStart) }
         coVerify(exactly = 0) {
