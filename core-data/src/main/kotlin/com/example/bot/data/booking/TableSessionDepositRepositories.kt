@@ -14,7 +14,6 @@ import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.sum
@@ -75,6 +74,14 @@ data class TableDepositAllocation(
 data class AllocationInput(
     val categoryCode: String,
     val amountMinor: Long,
+)
+
+private data class TableDepositOperationSnapshot(
+    val amountMinor: Long,
+    val allocations: List<TableDepositAllocation>,
+    val updatedAt: Instant,
+    val updatedBy: Long,
+    val reason: String?,
 )
 
 class TableSessionRepository(
@@ -238,15 +245,27 @@ class TableDepositRepository(
                             it[TableDepositsTable.updatedBy] = actorId
                             it[TableDepositsTable.updateReason] = null
                         }[TableDepositsTable.id]
-                    val savedAllocations = insertAllocations(depositId, normalizedAllocations)
-                val row =
-                    TableDepositsTable
-                        .selectAll()
-                        .where { TableDepositsTable.id eq depositId }
-                        .limit(1)
-                        .firstOrNull()
-                        ?: error("Failed to load inserted table deposit for clubId=$clubId sessionId=$sessionId")
-                    row.toTableDeposit(savedAllocations)
+                    appendOperation(
+                        depositId = depositId,
+                        sessionId = sessionId,
+                        clubId = clubId,
+                        nightStartUtc = nightStartUtc,
+                        type = TableDepositOperationType.INITIAL,
+                        amountMinor = amountMinor,
+                        allocations = normalizedAllocations,
+                        actorId = actorId,
+                        reason = null,
+                        paymentId = paymentId,
+                        createdAt = now,
+                    )
+                    val row =
+                        TableDepositsTable
+                            .selectAll()
+                            .where { TableDepositsTable.id eq depositId }
+                            .limit(1)
+                            .firstOrNull()
+                            ?: error("Failed to load inserted table deposit for clubId=$clubId sessionId=$sessionId")
+                    row.toTableDeposit(snapshotForDeposit(depositId))
                 }
             }
         } catch (ex: Throwable) {
@@ -269,49 +288,44 @@ class TableDepositRepository(
         require(reason.trim().isNotEmpty()) { "Update reason must be provided" }
         val normalizedAllocations = normalizeAllocations(allocations)
         validateAllocations(amountMinor, normalizedAllocations)
-        val nowUtc = now.toOffsetDateTimeUtc()
         var existingNightStartUtc: Instant? = null
         return try {
             withRetriedTx(name = "tableDeposit.update", database = db) {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    existingNightStartUtc =
+                    val existing =
                         TableDepositsTable
-                        .slice(TableDepositsTable.nightStartUtc)
-                        .selectAll()
-                        .where {
-                            (TableDepositsTable.id eq depositId) and
-                                (TableDepositsTable.clubId eq clubId)
-                        }.limit(1)
-                        .firstOrNull()
-                        ?.get(TableDepositsTable.nightStartUtc)
-                        ?.toInstant()
-                        ?: error("Table deposit not found for clubId=$clubId depositId=$depositId")
+                            .selectAll()
+                            .where {
+                                (TableDepositsTable.id eq depositId) and
+                                    (TableDepositsTable.clubId eq clubId)
+                            }.limit(1)
+                            .firstOrNull()
+                            ?: error("Table deposit not found for clubId=$clubId depositId=$depositId")
+                    existingNightStartUtc = existing[TableDepositsTable.nightStartUtc].toInstant()
                     ensureShiftOpenForDeposits(clubId = clubId, nightStartUtc = existingNightStartUtc, operation = "update")
-                    val updated =
-                    TableDepositsTable.update({
-                        (TableDepositsTable.id eq depositId) and
-                            (TableDepositsTable.clubId eq clubId)
-                    }) {
-                        it[TableDepositsTable.amountMinor] = amountMinor
-                        it[TableDepositsTable.updatedAt] = nowUtc
-                        it[TableDepositsTable.updatedBy] = actorId
-                        it[TableDepositsTable.updateReason] = reason
-                    }
-                    if (updated == 0) {
-                        error("Table deposit not found for clubId=$clubId depositId=$depositId")
-                    }
-                    TableDepositAllocationsTable.deleteWhere { TableDepositAllocationsTable.depositId eq depositId }
-                    val savedAllocations = insertAllocations(depositId, normalizedAllocations)
-                    val row =
-                    TableDepositsTable
-                        .selectAll()
-                        .where {
-                            (TableDepositsTable.id eq depositId) and
-                                (TableDepositsTable.clubId eq clubId)
-                        }.limit(1)
-                        .firstOrNull()
-                        ?: error("Failed to load updated table deposit for clubId=$clubId depositId=$depositId")
-                    row.toTableDeposit(savedAllocations)
+                    val currentSnapshot = snapshotForDeposit(depositId)
+                    val adjustmentAmount = amountMinor - currentSnapshot.amountMinor
+                    val adjustmentAllocations =
+                        allocationDeltas(
+                            depositId = depositId,
+                            current = currentSnapshot.allocations,
+                            target = normalizedAllocations,
+                        )
+                    appendOperation(
+                        depositId = depositId,
+                        sessionId = existing[TableDepositsTable.tableSessionId],
+                        clubId = clubId,
+                        nightStartUtc = existingNightStartUtc!!,
+                        type = TableDepositOperationType.ADJUSTMENT,
+                        amountMinor = adjustmentAmount,
+                        allocations = adjustmentAllocations,
+                        actorId = actorId,
+                        reason = reason,
+                        paymentId = null,
+                        createdAt = now,
+                    )
+                    val updatedSnapshot = snapshotForDeposit(depositId)
+                    existing.toTableDeposit(updatedSnapshot)
                 }
             }
         } catch (ex: Throwable) {
@@ -327,15 +341,15 @@ class TableDepositRepository(
         nightStartUtc: Instant,
     ): Long {
         val nightStart = nightStartUtc.toOffsetDateTimeUtc()
-        val amountSum = TableDepositsTable.amountMinor.sum()
+        val amountSum = TableDepositOperationsTable.amountMinor.sum()
         return withRetriedTx(name = "tableDeposit.sumNight", readOnly = true, database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                TableDepositsTable
+                TableDepositOperationsTable
                     .slice(amountSum)
                     .selectAll()
                     .where {
-                        (TableDepositsTable.clubId eq clubId) and
-                            (TableDepositsTable.nightStartUtc eq nightStart)
+                        (TableDepositOperationsTable.clubId eq clubId) and
+                            (TableDepositOperationsTable.nightStartUtc eq nightStart)
                     }.firstOrNull()
                     ?.get(amountSum)
                     ?: 0L
@@ -348,23 +362,25 @@ class TableDepositRepository(
         nightStartUtc: Instant,
     ): Map<String, Long> {
         val nightStart = nightStartUtc.toOffsetDateTimeUtc()
-        val sumAmount = TableDepositAllocationsTable.amountMinor.sum()
+        val sumAmount = TableDepositOperationAllocationsTable.amountMinor.sum()
         return withRetriedTx(name = "tableDeposit.summaryNight", readOnly = true, database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                TableDepositAllocationsTable
+                TableDepositOperationAllocationsTable
                     .join(
-                        TableDepositsTable,
+                        TableDepositOperationsTable,
                         JoinType.INNER,
-                        additionalConstraint = { TableDepositAllocationsTable.depositId eq TableDepositsTable.id },
-                    ).slice(TableDepositAllocationsTable.categoryCode, sumAmount)
+                        additionalConstraint = {
+                            TableDepositOperationAllocationsTable.operationId eq TableDepositOperationsTable.id
+                        },
+                    ).slice(TableDepositOperationAllocationsTable.categoryCode, sumAmount)
                     .selectAll()
                     .where {
-                        (TableDepositsTable.clubId eq clubId) and
-                            (TableDepositsTable.nightStartUtc eq nightStart)
-                    }.groupBy(TableDepositAllocationsTable.categoryCode)
+                        (TableDepositOperationsTable.clubId eq clubId) and
+                            (TableDepositOperationsTable.nightStartUtc eq nightStart)
+                    }.groupBy(TableDepositOperationAllocationsTable.categoryCode)
                     .associate {
-                        it[TableDepositAllocationsTable.categoryCode] to (it[sumAmount] ?: 0L)
-                    }
+                        it[TableDepositOperationAllocationsTable.categoryCode] to (it[sumAmount] ?: 0L)
+                    }.filterValues { it != 0L }
             }
         }
     }
@@ -382,11 +398,7 @@ class TableDepositRepository(
                             (TableDepositsTable.clubId eq clubId) and
                                 (TableDepositsTable.tableSessionId eq sessionId)
                         }.toList()
-                if (rows.isEmpty()) return@newSuspendedTransaction emptyList()
-                val allocations = loadAllocations(rows.map { it[TableDepositsTable.id] })
-                rows.map { row ->
-                    row.toTableDeposit(allocations[row[TableDepositsTable.id]].orEmpty())
-                }
+                rows.map { row -> row.toTableDeposit(snapshotForDeposit(row[TableDepositsTable.id])) }
             }
         }
 
@@ -405,10 +417,116 @@ class TableDepositRepository(
                         }.limit(1)
                         .firstOrNull()
                         ?: return@newSuspendedTransaction null
-                val allocations = loadAllocations(listOf(row[TableDepositsTable.id]))
-                row.toTableDeposit(allocations[row[TableDepositsTable.id]].orEmpty())
+                row.toTableDeposit(snapshotForDeposit(row[TableDepositsTable.id]))
             }
         }
+
+    private fun appendOperation(
+        depositId: Long,
+        sessionId: Long,
+        clubId: Long,
+        nightStartUtc: Instant,
+        type: TableDepositOperationType,
+        amountMinor: Long,
+        allocations: List<AllocationInput>,
+        actorId: Long,
+        reason: String?,
+        paymentId: UUID?,
+        createdAt: Instant,
+    ) {
+        val operationId =
+            TableDepositOperationsTable.insert {
+                it[TableDepositOperationsTable.depositId] = depositId
+                it[TableDepositOperationsTable.sessionId] = sessionId
+                it[TableDepositOperationsTable.clubId] = clubId
+                it[TableDepositOperationsTable.nightStartUtc] = nightStartUtc.toOffsetDateTimeUtc()
+                it[TableDepositOperationsTable.type] = type.name
+                it[TableDepositOperationsTable.amountMinor] = amountMinor
+                it[TableDepositOperationsTable.createdAt] = createdAt.toOffsetDateTimeUtc()
+                it[TableDepositOperationsTable.actorId] = actorId
+                it[TableDepositOperationsTable.reason] = reason?.trim()?.ifBlank { null }
+                it[TableDepositOperationsTable.paymentId] = paymentId
+            }[TableDepositOperationsTable.id]
+        allocations.forEach { allocation ->
+            TableDepositOperationAllocationsTable.insert {
+                it[TableDepositOperationAllocationsTable.operationId] = operationId
+                it[TableDepositOperationAllocationsTable.categoryCode] = allocation.categoryCode
+                it[TableDepositOperationAllocationsTable.amountMinor] = allocation.amountMinor
+            }
+        }
+    }
+
+    private fun snapshotForDeposit(depositId: Long): TableDepositOperationSnapshot {
+        val amountSum = TableDepositOperationsTable.amountMinor.sum()
+        val amountMinor =
+            TableDepositOperationsTable
+                .slice(amountSum)
+                .selectAll()
+                .where { TableDepositOperationsTable.depositId eq depositId }
+                .firstOrNull()
+                ?.get(amountSum)
+                ?: 0L
+        val allocations = allocationSnapshotForDeposit(depositId)
+        val lastOperation =
+            TableDepositOperationsTable
+                .selectAll()
+                .where { TableDepositOperationsTable.depositId eq depositId }
+                .orderBy(TableDepositOperationsTable.id to SortOrder.DESC)
+                .limit(1)
+                .firstOrNull()
+                ?: error("Table deposit ledger is empty for depositId=$depositId")
+        return TableDepositOperationSnapshot(
+            amountMinor = amountMinor,
+            allocations = allocations,
+            updatedAt = lastOperation[TableDepositOperationsTable.createdAt].toInstant(),
+            updatedBy = lastOperation[TableDepositOperationsTable.actorId],
+            reason = lastOperation[TableDepositOperationsTable.reason],
+        )
+    }
+
+    private fun allocationSnapshotForDeposit(depositId: Long): List<TableDepositAllocation> {
+        val sumAmount = TableDepositOperationAllocationsTable.amountMinor.sum()
+        val rows =
+            TableDepositOperationAllocationsTable
+                .join(
+                    TableDepositOperationsTable,
+                    JoinType.INNER,
+                    additionalConstraint = {
+                        TableDepositOperationAllocationsTable.operationId eq TableDepositOperationsTable.id
+                    },
+                ).slice(TableDepositOperationAllocationsTable.categoryCode, sumAmount)
+                .selectAll()
+                .where { TableDepositOperationsTable.depositId eq depositId }
+                .groupBy(TableDepositOperationAllocationsTable.categoryCode)
+                .toList()
+        return rows
+            .map {
+                TableDepositAllocation(
+                    depositId = depositId,
+                    categoryCode = it[TableDepositOperationAllocationsTable.categoryCode],
+                    amountMinor = it[sumAmount] ?: 0L,
+                )
+            }.filter { it.amountMinor != 0L }
+            .sortedBy { it.categoryCode }
+    }
+
+    private fun allocationDeltas(
+        depositId: Long,
+        current: List<TableDepositAllocation>,
+        target: List<AllocationInput>,
+    ): List<AllocationInput> {
+        val currentByCode = current.associate { it.categoryCode to it.amountMinor }
+        val targetByCode = target.associate { it.categoryCode to it.amountMinor }
+        val allCodes = (currentByCode.keys + targetByCode.keys).sorted()
+        return allCodes.mapNotNull { code ->
+            val delta = (targetByCode[code] ?: 0L) - (currentByCode[code] ?: 0L)
+            if (delta == 0L) {
+                null
+            } else {
+                AllocationInput(categoryCode = code, amountMinor = delta)
+            }
+        }
+    }
 
     private fun validateAllocations(
         amountMinor: Long,
@@ -441,46 +559,6 @@ class TableDepositRepository(
             "Duplicate allocation categoryCode: ${duplicates.sorted().joinToString()}"
         }
         return normalized
-    }
-
-    private fun insertAllocations(
-        depositId: Long,
-        allocations: List<AllocationInput>,
-    ): List<TableDepositAllocation> {
-        if (allocations.isEmpty()) return emptyList()
-        allocations.forEach { allocation ->
-            TableDepositAllocationsTable.insert {
-                it[TableDepositAllocationsTable.depositId] = depositId
-                it[TableDepositAllocationsTable.categoryCode] = allocation.categoryCode
-                it[TableDepositAllocationsTable.amountMinor] = allocation.amountMinor
-            }
-        }
-        return allocations.map {
-            TableDepositAllocation(
-                depositId = depositId,
-                categoryCode = it.categoryCode,
-                amountMinor = it.amountMinor,
-            )
-        }
-    }
-
-    private fun loadAllocations(depositIds: List<Long>): Map<Long, List<TableDepositAllocation>> {
-        if (depositIds.isEmpty()) return emptyMap()
-        val rows =
-            TableDepositAllocationsTable
-                .selectAll()
-                .where { TableDepositAllocationsTable.depositId inList depositIds }
-                .orderBy(
-                    TableDepositAllocationsTable.depositId to SortOrder.ASC,
-                    TableDepositAllocationsTable.id to SortOrder.ASC,
-                )
-        val result = LinkedHashMap<Long, MutableList<TableDepositAllocation>>()
-        for (row in rows) {
-            val depositId = row[TableDepositAllocationsTable.depositId]
-            val list = result.getOrPut(depositId) { mutableListOf() }
-            list += row.toAllocation()
-        }
-        return result
     }
 
     private fun ensureShiftOpenForDeposits(
@@ -535,7 +613,7 @@ private fun ResultRow.toTableSession(): TableSession =
         note = this[TableSessionsTable.note],
     )
 
-private fun ResultRow.toTableDeposit(allocations: List<TableDepositAllocation>): TableDeposit =
+private fun ResultRow.toTableDeposit(snapshot: TableDepositOperationSnapshot): TableDeposit =
     TableDeposit(
         id = this[TableDepositsTable.id],
         clubId = this[TableDepositsTable.clubId],
@@ -545,18 +623,11 @@ private fun ResultRow.toTableDeposit(allocations: List<TableDepositAllocation>):
         paymentId = this[TableDepositsTable.paymentId],
         bookingId = this[TableDepositsTable.bookingId],
         guestUserId = this[TableDepositsTable.guestUserId],
-        amountMinor = this[TableDepositsTable.amountMinor],
+        amountMinor = snapshot.amountMinor,
         createdAt = this[TableDepositsTable.createdAt].toInstant(),
         createdBy = this[TableDepositsTable.createdBy],
-        updatedAt = this[TableDepositsTable.updatedAt].toInstant(),
-        updatedBy = this[TableDepositsTable.updatedBy],
-        updateReason = this[TableDepositsTable.updateReason],
-        allocations = allocations,
-    )
-
-private fun ResultRow.toAllocation(): TableDepositAllocation =
-    TableDepositAllocation(
-        depositId = this[TableDepositAllocationsTable.depositId],
-        categoryCode = this[TableDepositAllocationsTable.categoryCode],
-        amountMinor = this[TableDepositAllocationsTable.amountMinor],
+        updatedAt = snapshot.updatedAt,
+        updatedBy = snapshot.updatedBy,
+        updateReason = snapshot.reason,
+        allocations = snapshot.allocations,
     )
