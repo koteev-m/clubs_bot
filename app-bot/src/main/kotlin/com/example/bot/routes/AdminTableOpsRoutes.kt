@@ -255,6 +255,9 @@ fun Application.adminTableOpsRoutes(
                                         now = now,
                                     )
                                 }.getOrElse { ex ->
+                                    if (ex is CancellationException) {
+                                        throw ex
+                                    }
                                     if (ex is ShiftClosedForDepositMutationException) {
                                         auditLogger.tableDepositUpdateRejectedByClosedShift(
                                             clubId = clubId,
@@ -570,6 +573,9 @@ fun Application.adminTableOpsRoutes(
                                     now = now,
                                 )
                             }.getOrElse { ex ->
+                                if (ex is CancellationException) {
+                                    throw ex
+                                }
                                 if (ex is ShiftClosedForDepositMutationException) {
                                     auditLogger.tableDepositUpdateRejectedByClosedShift(
                                         clubId = clubId,

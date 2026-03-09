@@ -598,6 +598,51 @@ class AdminTableOpsRoutesTest {
     }
 
     @Test
+    fun `seat with active session create deposit cancellation is not mapped to business errors and skips rejection audit`() = withApp { deps ->
+        val session = tableSession(id = 55, tableId = 10)
+        coEvery { deps.tableSessionRepository.findActiveSession(1, any(), 10) } returns session
+        coEvery { deps.tableDepositRepository.listDepositsForSession(1, 55) } returns emptyList()
+        coEvery {
+            deps.tableDepositRepository.createDeposit(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+            )
+        } throws CancellationException("cancelled")
+
+        val response =
+            client.post("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables/10/seat") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "mode":"NO_QR",
+                    "depositAmount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}]
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        val errorCode = response.errorCode()
+        assertTrue(errorCode != ErrorCodes.shift_report_closed)
+        assertTrue(errorCode != ErrorCodes.validation_error)
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 0) { deps.tableSessionRepository.closeSession(any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
     fun `seat with qr rejects guest user mismatch`() = withApp { deps ->
         coEvery { deps.guestQrResolver.resolveGuest(1, any(), any()) } returns
             GuestQrResolveResult.Success(guestUserId = 42, eventId = 999, listId = 1, entryId = 2)
@@ -671,6 +716,38 @@ class AdminTableOpsRoutesTest {
             deps.tableDepositRepository.updateDeposit(any(), any(), any(), any(), any(), any(), any())
         }
         coVerify(exactly = 1) { deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `update deposit cancellation is not mapped to business errors and skips update audit`() = withApp { deps ->
+        val existing = tableDeposit(id = 10, sessionId = 55, tableId = 10, guestUserId = 42)
+        coEvery { deps.tableDepositRepository.findById(1, 10) } returns existing
+        coEvery {
+            deps.tableDepositRepository.updateDeposit(any(), any(), any(), any(), any(), any(), any())
+        } throws CancellationException("cancelled")
+
+        val response =
+            client.put("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/deposits/10") {
+                header("X-Telegram-Init-Data", "init")
+                contentType(ContentType.Application.Json)
+                setBody(
+                    """{
+                    "amount":1000,
+                    "allocations":[{"categoryCode":"BAR","amount":1000}],
+                    "reason":"manual fix"
+                }""",
+                )
+            }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        val errorCode = response.errorCode()
+        assertTrue(errorCode != ErrorCodes.shift_report_closed)
+        assertTrue(errorCode != ErrorCodes.validation_error)
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 0) { deps.auditLogger.tableDepositUpdated(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            deps.auditLogger.tableDepositUpdateRejectedByClosedShift(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     private fun withApp(
