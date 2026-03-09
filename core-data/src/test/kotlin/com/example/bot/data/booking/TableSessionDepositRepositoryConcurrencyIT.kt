@@ -6,10 +6,10 @@ import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.selectAll
@@ -51,27 +51,26 @@ class TableSessionDepositRepositoryConcurrencyIT : PostgresClubIntegrationTest()
             val readyBarrier = CountDownLatch(2)
             val startGate = CompletableDeferred<Unit>()
             val updates =
-                coroutineScope {
-                    listOf(actorId, actor2Id).map { updateActorId ->
-                        async(Dispatchers.Default) {
-                            readyBarrier.countDown()
-                            assertTrue(
-                                readyBarrier.await(5, TimeUnit.SECONDS),
-                                "Timed out waiting for concurrent workers",
-                            )
-                            startGate.await()
-                            depositRepo.updateDeposit(
-                                clubId = clubId,
-                                depositId = deposit.id,
-                                amountMinor = 150,
-                                allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 150)),
-                                reason = "concurrent update",
-                                actorId = updateActorId,
-                                now = updateAt,
-                            )
-                        }
+                listOf(actorId, actor2Id).map { updateActorId ->
+                    async(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                        readyBarrier.countDown()
+                        assertTrue(
+                            readyBarrier.await(5, TimeUnit.SECONDS),
+                            "Timed out waiting for concurrent workers",
+                        )
+                        startGate.await()
+                        depositRepo.updateDeposit(
+                            clubId = clubId,
+                            depositId = deposit.id,
+                            amountMinor = 150,
+                            allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 150)),
+                            reason = "concurrent update",
+                            actorId = updateActorId,
+                            now = updateAt,
+                        )
                     }
                 }
+            updates.forEach { it.start() }
             assertTrue(readyBarrier.await(5, TimeUnit.SECONDS), "Workers did not reach start barrier")
             startGate.complete(Unit)
             updates.awaitAll()
