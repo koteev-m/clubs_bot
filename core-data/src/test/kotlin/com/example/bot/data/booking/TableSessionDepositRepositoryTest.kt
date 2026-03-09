@@ -6,10 +6,14 @@ import com.example.bot.data.db.toOffsetDateTimeUtc
 import com.example.bot.data.finance.ShiftReportsTable
 import com.example.bot.data.security.UsersTable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.sum
+import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -553,6 +557,110 @@ class TableSessionDepositRepositoryTest {
 
             assertEquals(mapOf("BAR" to 110L, "VIP" to 40L), summary)
         }
+
+    @Test
+    fun `concurrent updateDeposit keeps target balance stable`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val actor2Id = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val createdAt = Instant.parse("2024-03-01T20:05:00Z")
+            val updateAt = Instant.parse("2024-03-01T21:00:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, createdAt, note = null)
+            val deposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = createdAt,
+                )
+
+            coroutineScope {
+                listOf(actorId, actor2Id).map { updateActorId ->
+                    async(Dispatchers.IO) {
+                        repo.updateDeposit(
+                            clubId = clubId,
+                            depositId = deposit.id,
+                            amountMinor = 150,
+                            allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 150)),
+                            reason = "concurrent update",
+                            actorId = updateActorId,
+                            now = updateAt,
+                        )
+                    }
+                }.awaitAll()
+            }
+
+            val loaded = repo.findById(clubId, deposit.id) ?: fail("Deposit not found")
+            assertEquals(150, loaded.amountMinor)
+            assertEquals(mapOf("BAR" to 150L), loaded.allocations.associate { it.categoryCode to it.amountMinor })
+            val operations =
+                newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                    TableDepositOperationsTable
+                        .selectAll()
+                        .where { TableDepositOperationsTable.depositId eq deposit.id }
+                        .orderBy(TableDepositOperationsTable.id)
+                        .toList()
+                }
+            assertEquals(3, operations.size)
+            assertEquals(TableDepositOperationType.INITIAL.name, operations[0][TableDepositOperationsTable.type])
+            assertEquals(50, operations[1][TableDepositOperationsTable.amountMinor])
+            assertEquals(0, operations[2][TableDepositOperationsTable.amountMinor])
+        }
+
+    @Test
+    fun `findById uses legacy updated metadata when only backfilled initial exists`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val legacyUpdaterId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val createdAt = Instant.parse("2024-03-01T20:05:00Z")
+            val legacyUpdatedAt = Instant.parse("2024-03-01T22:00:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, createdAt, note = null)
+            val deposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = createdAt,
+                )
+
+            newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                TableDepositsTable.update({ TableDepositsTable.id eq deposit.id }) {
+                    it[updatedAt] = legacyUpdatedAt.toOffsetDateTimeUtc()
+                    it[updatedBy] = legacyUpdaterId
+                    it[updateReason] = "legacy correction"
+                }
+            }
+
+            val loaded = repo.findById(clubId, deposit.id) ?: fail("Deposit not found")
+            assertEquals(legacyUpdatedAt, loaded.updatedAt)
+            assertEquals(legacyUpdaterId, loaded.updatedBy)
+            assertEquals("legacy correction", loaded.updateReason)
+        }
+
 
     @Test
     fun `listDepositsForSession returns allocations`() =
