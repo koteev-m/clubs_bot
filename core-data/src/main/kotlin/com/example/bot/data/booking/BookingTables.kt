@@ -117,3 +117,33 @@ object TableDepositAllocationsTable : Table("table_deposit_allocations") {
     val amountMinor = long("amount_minor")
     override val primaryKey = PrimaryKey(id)
 }
+
+enum class TableDepositOperationType {
+    INITIAL,
+    TOPUP,
+    SECURITY,
+    ADJUSTMENT,
+}
+
+object TableDepositOperationsTable : Table("table_deposit_operations") {
+    val id = long("id").autoIncrement()
+    val depositId = long("deposit_id")
+    val sessionId = long("session_id")
+    val clubId = long("club_id")
+    val nightStartUtc = timestampWithTimeZone("night_start_utc")
+    val type = text("type")
+    val amountMinor = long("amount_minor")
+    val createdAt = timestampWithTimeZone("created_at")
+    val actorId = long("actor_id")
+    val reason = text("reason").nullable()
+    val paymentId = uuid("payment_id").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+object TableDepositOperationAllocationsTable : Table("table_deposit_operation_allocations") {
+    val id = long("id").autoIncrement()
+    val operationId = long("operation_id")
+    val categoryCode = text("category_code")
+    val amountMinor = long("amount_minor")
+    override val primaryKey = PrimaryKey(id)
+}

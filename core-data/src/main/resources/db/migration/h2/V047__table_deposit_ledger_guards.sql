@@ -1,0 +1,2 @@
+-- H2 test environment: ledger append-only guards are enforced in repository logic.
+-- PostgreSQL runtime guards are implemented in V047.

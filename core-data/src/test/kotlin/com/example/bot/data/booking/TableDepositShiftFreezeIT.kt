@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test
 
 class TableDepositShiftFreezeIT : PostgresClubIntegrationTest() {
     @Test
-    fun `db trigger blocks deposit and allocation mutations after shift close`() = runBlocking {
+    fun `db trigger blocks ledger appends after shift close`() = runBlocking {
         val clubId = insertClub("Freeze Club")
         val tableId = insertTable(clubId, tableNumber = 1, capacity = 4, minDeposit = BigDecimal("100.00"))
         val actorId = insertUser(username = "actor", displayName = "Actor")
@@ -55,17 +55,28 @@ class TableDepositShiftFreezeIT : PostgresClubIntegrationTest() {
 
         assertFreezeViolation {
             transaction(database) {
-                exec("UPDATE table_deposits SET amount_minor = 101 WHERE id = ${deposit.id}")
+                exec(
+                    """
+                    INSERT INTO table_deposit_operations
+                        (deposit_id, session_id, club_id, night_start_utc, type, amount_minor, created_at, actor_id, reason, payment_id)
+                    VALUES
+                        (${deposit.id}, ${session.id}, $clubId, TIMESTAMP WITH TIME ZONE '$nightStart', 'TOPUP', 1, TIMESTAMP WITH TIME ZONE '$now', $actorId, 'late topup', NULL)
+                    """.trimIndent(),
+                )
             }
         }
         assertFreezeViolation {
             transaction(database) {
-                exec("INSERT INTO table_deposit_allocations (deposit_id, category_code, amount_minor) VALUES (${deposit.id}, 'VIP', 1)")
-            }
-        }
-        assertFreezeViolation {
-            transaction(database) {
-                exec("DELETE FROM table_deposits WHERE id = ${deposit.id}")
+                exec(
+                    """
+                    INSERT INTO table_deposit_operation_allocations (operation_id, category_code, amount_minor)
+                    SELECT id, 'VIP', 1
+                    FROM table_deposit_operations
+                    WHERE deposit_id = ${deposit.id}
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """.trimIndent(),
+                )
             }
         }
     }

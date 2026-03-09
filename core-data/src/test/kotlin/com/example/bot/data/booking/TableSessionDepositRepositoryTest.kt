@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.sum
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -176,7 +177,7 @@ class TableSessionDepositRepositoryTest {
         }
 
     @Test
-    fun `updateDeposit updates fields and allocations`() =
+    fun `updateDeposit appends adjustment operation and keeps history`() =
         runBlocking {
             val clubId = insertClub()
             val tableId = insertTable(clubId)
@@ -222,6 +223,14 @@ class TableSessionDepositRepositoryTest {
             assertEquals("Fix allocation", updated.updateReason)
             assertEquals(1, updated.allocations.size)
             assertEquals(80, updated.allocations.first().amountMinor)
+            val operationCount =
+                newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                    TableDepositOperationsTable
+                        .selectAll()
+                        .where { TableDepositOperationsTable.depositId eq deposit.id }
+                        .count()
+                }
+            assertEquals(2, operationCount)
         }
 
     @Test
@@ -366,6 +375,75 @@ class TableSessionDepositRepositoryTest {
                 assertEquals(clubId, ex.clubId)
                 assertEquals(nightStart, ex.nightStartUtc)
             }
+        }
+
+
+    @Test
+    fun `multiple updates preserve ledger history and balance`() =
+        runBlocking {
+            val clubId = insertClub()
+            val tableId = insertTable(clubId)
+            val actorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val now = Instant.parse("2024-03-01T20:05:00Z")
+            val session = sessionRepo.openSession(clubId, nightStart, tableId, actorId, now, note = null)
+            val deposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = tableId,
+                    sessionId = session.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = now,
+                )
+
+            repo.updateDeposit(
+                clubId = clubId,
+                depositId = deposit.id,
+                amountMinor = 150,
+                allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 120), AllocationInput(categoryCode = "VIP", amountMinor = 30)),
+                reason = "topup",
+                actorId = actorId,
+                now = now.plusSeconds(600),
+            )
+            val second =
+                repo.updateDeposit(
+                    clubId = clubId,
+                    depositId = deposit.id,
+                    amountMinor = 90,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 90)),
+                    reason = "refund",
+                    actorId = actorId,
+                    now = now.plusSeconds(1200),
+                )
+
+            assertEquals(90, second.amountMinor)
+            assertEquals(mapOf("BAR" to 90L), second.allocations.associate { it.categoryCode to it.amountMinor })
+            val ledgerAmount =
+                newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                    val sumExpr = TableDepositOperationsTable.amountMinor.sum()
+                    TableDepositOperationsTable
+                        .slice(sumExpr)
+                        .selectAll()
+                        .where { TableDepositOperationsTable.depositId eq deposit.id }
+                        .first()[sumExpr] ?: 0L
+                }
+            assertEquals(90, ledgerAmount)
+            val operationCount =
+                newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                    TableDepositOperationsTable
+                        .selectAll()
+                        .where { TableDepositOperationsTable.depositId eq deposit.id }
+                        .count()
+                }
+            assertEquals(3, operationCount)
         }
 
     @Test
