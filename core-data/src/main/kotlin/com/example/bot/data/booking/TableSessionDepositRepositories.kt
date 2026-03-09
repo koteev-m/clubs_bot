@@ -265,7 +265,7 @@ class TableDepositRepository(
                             .limit(1)
                             .firstOrNull()
                             ?: error("Failed to load inserted table deposit for clubId=$clubId sessionId=$sessionId")
-                    row.toTableDeposit(snapshotForDeposit(depositId))
+                    row.toTableDeposit(snapshotForDeposit(row))
                 }
             }
         } catch (ex: Throwable) {
@@ -298,12 +298,13 @@ class TableDepositRepository(
                             .where {
                                 (TableDepositsTable.id eq depositId) and
                                     (TableDepositsTable.clubId eq clubId)
-                            }.limit(1)
+                            }.forUpdate()
+                            .limit(1)
                             .firstOrNull()
                             ?: error("Table deposit not found for clubId=$clubId depositId=$depositId")
                     existingNightStartUtc = existing[TableDepositsTable.nightStartUtc].toInstant()
                     ensureShiftOpenForDeposits(clubId = clubId, nightStartUtc = existingNightStartUtc, operation = "update")
-                    val currentSnapshot = snapshotForDeposit(depositId)
+                    val currentSnapshot = snapshotForDeposit(existing)
                     val adjustmentAmount = amountMinor - currentSnapshot.amountMinor
                     val adjustmentAllocations =
                         allocationDeltas(
@@ -324,7 +325,7 @@ class TableDepositRepository(
                         paymentId = null,
                         createdAt = now,
                     )
-                    val updatedSnapshot = snapshotForDeposit(depositId)
+                    val updatedSnapshot = snapshotForDeposit(existing)
                     existing.toTableDeposit(updatedSnapshot)
                 }
             }
@@ -398,7 +399,7 @@ class TableDepositRepository(
                             (TableDepositsTable.clubId eq clubId) and
                                 (TableDepositsTable.tableSessionId eq sessionId)
                         }.toList()
-                rows.map { row -> row.toTableDeposit(snapshotForDeposit(row[TableDepositsTable.id])) }
+                rows.map { row -> row.toTableDeposit(snapshotForDeposit(row)) }
             }
         }
 
@@ -417,7 +418,7 @@ class TableDepositRepository(
                         }.limit(1)
                         .firstOrNull()
                         ?: return@newSuspendedTransaction null
-                row.toTableDeposit(snapshotForDeposit(row[TableDepositsTable.id]))
+                row.toTableDeposit(snapshotForDeposit(row))
             }
         }
 
@@ -456,7 +457,8 @@ class TableDepositRepository(
         }
     }
 
-    private fun snapshotForDeposit(depositId: Long): TableDepositOperationSnapshot {
+    private fun snapshotForDeposit(depositRow: ResultRow): TableDepositOperationSnapshot {
+        val depositId = depositRow[TableDepositsTable.id]
         val amountSum = TableDepositOperationsTable.amountMinor.sum()
         val amountMinor =
             TableDepositOperationsTable
@@ -475,13 +477,42 @@ class TableDepositRepository(
                 .limit(1)
                 .firstOrNull()
                 ?: error("Table deposit ledger is empty for depositId=$depositId")
+        val snapshotMetadata = resolveSnapshotMetadata(depositRow = depositRow, lastOperation = lastOperation)
         return TableDepositOperationSnapshot(
             amountMinor = amountMinor,
             allocations = allocations,
-            updatedAt = lastOperation[TableDepositOperationsTable.createdAt].toInstant(),
-            updatedBy = lastOperation[TableDepositOperationsTable.actorId],
-            reason = lastOperation[TableDepositOperationsTable.reason],
+            updatedAt = snapshotMetadata.updatedAt,
+            updatedBy = snapshotMetadata.updatedBy,
+            reason = snapshotMetadata.reason,
         )
+    }
+
+    private fun resolveSnapshotMetadata(
+        depositRow: ResultRow,
+        lastOperation: ResultRow,
+    ): TableDepositOperationSnapshot {
+        val lastOperationUpdatedAt = lastOperation[TableDepositOperationsTable.createdAt].toInstant()
+        val legacyUpdatedAt = depositRow[TableDepositsTable.updatedAt].toInstant()
+        val useLegacyMetadata =
+            lastOperation[TableDepositOperationsTable.type] == TableDepositOperationType.INITIAL.name &&
+                legacyUpdatedAt.isAfter(lastOperationUpdatedAt)
+        return if (useLegacyMetadata) {
+            TableDepositOperationSnapshot(
+                amountMinor = 0,
+                allocations = emptyList(),
+                updatedAt = legacyUpdatedAt,
+                updatedBy = depositRow[TableDepositsTable.updatedBy],
+                reason = depositRow[TableDepositsTable.updateReason],
+            )
+        } else {
+            TableDepositOperationSnapshot(
+                amountMinor = 0,
+                allocations = emptyList(),
+                updatedAt = lastOperationUpdatedAt,
+                updatedBy = lastOperation[TableDepositOperationsTable.actorId],
+                reason = lastOperation[TableDepositOperationsTable.reason],
+            )
+        }
     }
 
     private fun allocationSnapshotForDeposit(depositId: Long): List<TableDepositAllocation> {
