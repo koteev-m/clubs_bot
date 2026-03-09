@@ -559,7 +559,7 @@ class TableSessionDepositRepositoryTest {
         }
 
     @Test
-    fun `concurrent updateDeposit keeps target balance stable`() =
+    fun `concurrent updateDeposit keeps target balance stable smoke`() =
         runBlocking {
             val clubId = insertClub()
             val tableId = insertTable(clubId)
