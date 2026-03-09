@@ -42,6 +42,8 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.response.respondText
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import java.time.Instant
@@ -598,7 +600,9 @@ class AdminTableOpsRoutesTest {
     }
 
     @Test
-    fun `seat with active session create deposit cancellation is not mapped to business errors and skips rejection audit`() = withApp { deps ->
+    fun `seat with active session create deposit cancellation rethrows CancellationException and skips rejection audit`() = withApp(
+        installCancellationRethrowMarker = true,
+    ) { deps ->
         val session = tableSession(id = 55, tableId = 10)
         coEvery { deps.tableSessionRepository.findActiveSession(1, any(), 10) } returns session
         coEvery { deps.tableDepositRepository.listDepositsForSession(1, 55) } returns emptyList()
@@ -631,10 +635,8 @@ class AdminTableOpsRoutesTest {
                 )
             }
 
-        assertEquals(HttpStatusCode.InternalServerError, response.status)
-        val errorCode = response.errorCode()
-        assertTrue(errorCode != ErrorCodes.shift_report_closed)
-        assertTrue(errorCode != ErrorCodes.validation_error)
+        assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
+        assertEquals("true", response.headers[CANCELLATION_RETHROW_HEADER])
         response.assertNoStoreHeaders()
         coVerify(exactly = 0) { deps.tableSessionRepository.closeSession(any(), any(), any(), any()) }
         coVerify(exactly = 0) {
@@ -719,7 +721,9 @@ class AdminTableOpsRoutesTest {
     }
 
     @Test
-    fun `update deposit cancellation is not mapped to business errors and skips update audit`() = withApp { deps ->
+    fun `update deposit cancellation rethrows CancellationException and skips update audit`() = withApp(
+        installCancellationRethrowMarker = true,
+    ) { deps ->
         val existing = tableDeposit(id = 10, sessionId = 55, tableId = 10, guestUserId = 42)
         coEvery { deps.tableDepositRepository.findById(1, 10) } returns existing
         coEvery {
@@ -739,10 +743,8 @@ class AdminTableOpsRoutesTest {
                 )
             }
 
-        assertEquals(HttpStatusCode.InternalServerError, response.status)
-        val errorCode = response.errorCode()
-        assertTrue(errorCode != ErrorCodes.shift_report_closed)
-        assertTrue(errorCode != ErrorCodes.validation_error)
+        assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
+        assertEquals("true", response.headers[CANCELLATION_RETHROW_HEADER])
         response.assertNoStoreHeaders()
         coVerify(exactly = 0) { deps.auditLogger.tableDepositUpdated(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) {
@@ -753,12 +755,21 @@ class AdminTableOpsRoutesTest {
     private fun withApp(
         roles: Set<Role> = setOf(Role.MANAGER),
         clubIds: Set<Long> = setOf(1),
+        installCancellationRethrowMarker: Boolean = false,
         block: suspend ApplicationTestBuilder.(Deps) -> Unit,
     ) {
         val deps = buildDeps()
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
+                if (installCancellationRethrowMarker) {
+                    install(StatusPages) {
+                        exception<CancellationException> { call, _ ->
+                            call.response.headers.append(CANCELLATION_RETHROW_HEADER, "true")
+                            call.respondText("cancellation_rethrow", status = HttpStatusCode.ServiceUnavailable)
+                        }
+                    }
+                }
                 install(RbacPlugin) {
                     userRepository = StubUserRepository()
                     userRoleRepository = StubUserRoleRepository(roles, clubIds)
@@ -918,6 +929,10 @@ class AdminTableOpsRoutesTest {
         override suspend fun listRoles(userId: Long): Set<Role> = roles
 
         override suspend fun listClubIdsFor(userId: Long): Set<Long> = clubs
+    }
+
+    companion object {
+        private const val CANCELLATION_RETHROW_HEADER = "X-Test-Cancellation-Rethrow"
     }
 
     private data class Deps(
