@@ -51,7 +51,7 @@ enum class AppEnvironment(val raw: String) {
 
 data class FlywayConfig(
     val enabled: Boolean = true,
-    val locations: List<String> = listOf("classpath:db/migration/postgresql"),
+    val locations: List<String> = listOf("classpath:db/migration/common", "classpath:db/migration/postgresql"),
     val schemas: List<String> = emptyList(),
     val baselineOnMigrate: Boolean = true,
     val mode: FlywayMode = FlywayMode.MIGRATE_AND_VALIDATE,
@@ -75,6 +75,7 @@ data class FlywayConfig(
 
     companion object {
         private const val DEFAULT_LOCATION = "classpath:db/migration"
+        private const val COMMON_LOCATION = "$DEFAULT_LOCATION/common"
         private const val POSTGRES_VENDOR = "postgresql"
         private const val H2_VENDOR = "h2"
 
@@ -174,35 +175,23 @@ data class FlywayConfig(
                     ?.filter { it.isNotEmpty() }
                     ?: emptyList()
             if (trimmedLocations.isEmpty()) {
-                return listOf("$DEFAULT_LOCATION/$vendor")
+                return listOf(COMMON_LOCATION, "$DEFAULT_LOCATION/$vendor")
             }
 
-            val prioritized = prioritizeVendorLocations(trimmedLocations, vendor)
             val normalized = LinkedHashSet<String>()
-            val hasRoot = prioritized.any { isRootLocation(it) }
-            val vendorLocations = prioritized.filter { isVendorLocation(it, vendor) }
+            val hasRoot = trimmedLocations.any { isRootLocation(it) }
+            val hasVendor = trimmedLocations.any { isVendorLocation(it, vendor) }
+            val hasCommon = trimmedLocations.any { isCommonLocation(it) }
 
-            if (vendorLocations.isNotEmpty()) {
-                normalized.addAll(vendorLocations)
-            } else if (hasRoot) {
+            if (!hasVendor && hasRoot) {
                 normalized.add("$DEFAULT_LOCATION/$vendor")
             }
 
-            prioritized.forEach { normalized.add(it) }
+            trimmedLocations.forEach { normalized.add(it) }
 
-            return normalized.toList()
-        }
-
-        private fun prioritizeVendorLocations(
-            parsed: List<String>,
-            vendor: String,
-        ): List<String> {
-            val normalized = LinkedHashSet<String>()
-            val vendorLocations = parsed.filter { isVendorLocation(it, vendor) }
-            if (vendorLocations.isNotEmpty()) {
-                normalized.addAll(vendorLocations)
+            if (!hasCommon) {
+                normalized.add(COMMON_LOCATION)
             }
-            parsed.forEach { normalized.add(it) }
 
             return normalized.toList()
         }
@@ -214,6 +203,9 @@ data class FlywayConfig(
 
         private fun isRootLocation(location: String): Boolean =
             location.endsWith("db/migration") || location.endsWith("db/migration/")
+
+        private fun isCommonLocation(location: String): Boolean =
+            location.endsWith("/common") || location.contains("/common/")
     }
 }
 
