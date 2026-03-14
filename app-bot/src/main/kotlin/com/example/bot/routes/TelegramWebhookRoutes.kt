@@ -17,7 +17,11 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CancellationException
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 import org.slf4j.LoggerFactory
+import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
 
 fun Application.telegramWebhookRoutes(
     expectedSecret: String?,
@@ -25,6 +29,8 @@ fun Application.telegramWebhookRoutes(
     dedupRepository: WebhookUpdateDedupRepository,
     ingressRepository: TelegramWebhookIngressRepository,
     suspiciousIpRepository: SuspiciousIpRepository,
+    metrics: TelegramWebhookIngressMetrics? = null,
+    clock: Clock = Clock.systemUTC(),
     security: WebhookSecurityConfig.() -> Unit = {},
 ) {
     val logger = LoggerFactory.getLogger("TelegramWebhookRoutes")
@@ -48,6 +54,7 @@ fun Application.telegramWebhookRoutes(
             }
 
             post {
+                val startedAt = Instant.now(clock)
                 val body = call.webhookRawBody().decodeToString()
                 val update = runCatching { BotUtils.parseUpdate(body) }.getOrNull()
                 if (update == null) {
@@ -64,6 +71,7 @@ fun Application.telegramWebhookRoutes(
                         )
                     ) {
                         is TelegramWebhookEnqueueResult.Duplicate -> {
+                            metrics?.recordWebhookDedup()
                             logger.debug("webhook: duplicate update_id={} already queued", update.updateId())
                         }
 
@@ -79,6 +87,8 @@ fun Application.telegramWebhookRoutes(
                     )
                     call.respond(HttpStatusCode.ServiceUnavailable)
                     return@post
+                } finally {
+                    metrics?.recordWebhookAck(Duration.between(startedAt, Instant.now(clock)))
                 }
 
                 call.respond(HttpStatusCode.OK, "OK")

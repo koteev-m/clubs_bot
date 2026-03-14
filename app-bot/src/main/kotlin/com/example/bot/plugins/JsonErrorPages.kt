@@ -9,10 +9,12 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.requestsize.RequestTooLargeException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
+import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 
 fun Application.installJsonErrorPages() {
@@ -39,6 +41,16 @@ fun Application.installJsonErrorPages() {
             }
             call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
+        }
+
+        exception<BadRequestException> { call, cause ->
+            if (!call.request.path().startsWith("/api/")) throw cause
+            call.ensureMiniAppNoStoreHeadersIfNeeded()
+            call.respondError(
+                HttpStatusCode.BadRequest,
+                ErrorCodes.validation_error,
+                message = cause.message,
+            )
         }
 
         status(HttpStatusCode.Unauthorized) { call, _ ->
@@ -86,6 +98,7 @@ fun Application.installJsonErrorPages() {
         }
 
         exception<Throwable> { call, cause ->
+            if (cause is CancellationException) throw cause
             if (!call.request.path().startsWith("/api/")) throw cause
             logger.error("unhandled exception for API path {}", call.request.path(), cause)
             call.ensureMiniAppNoStoreHeadersIfNeeded()

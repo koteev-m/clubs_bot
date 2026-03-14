@@ -2,6 +2,7 @@ package com.example.bot.notifications
 
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.text.maskSensitiveOutgoingText
 
 /**
  * Шаблоны сообщений для операционных уведомлений.
@@ -11,7 +12,7 @@ import com.example.bot.opschat.OpsNotificationEvent
 object OpsNotificationRenderer {
     fun render(notification: OpsDomainNotification): String {
         val subject = notification.subjectId?.let { " (ID: $it)" } ?: ""
-        return buildString {
+        val raw = buildString {
             append(eventLabel(notification.event))
             append(subject)
             append(". Клуб ")
@@ -19,6 +20,7 @@ object OpsNotificationRenderer {
             append(". Время ")
             append(notification.occurredAt)
         }
+        return maskSensitiveOutgoingText(raw)
     }
 
     private fun eventLabel(event: OpsNotificationEvent): String =

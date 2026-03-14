@@ -40,4 +40,19 @@ class SupportNotificationFormattingTest {
         assertFalse(message.contains("#"))
         assertFalse(message.contains("null"))
     }
+    @Test
+    fun `support reply message masks sensitive payload`() {
+        val message =
+            buildSupportReplyMessage(
+                "Клуб",
+                "Позвоните +7 999 1112233, initData=abc, qrSecret=qwerty, idempotency-key=idem-7",
+            )
+
+        assertFalse(message.contains("+7 999 1112233"))
+        assertFalse(message.contains("initData=abc"))
+        assertFalse(message.contains("qrSecret=qwerty"))
+        assertFalse(message.contains("idempotency-key=idem-7"))
+        assertTrue(message.contains("***"))
+    }
+
 }

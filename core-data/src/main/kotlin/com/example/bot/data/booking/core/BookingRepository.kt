@@ -828,6 +828,11 @@ private fun isPostgresEngine(): Boolean {
     return productName.contains("PostgreSQL", ignoreCase = true)
 }
 
+data class OutboxQueueStats(
+    val depth: Long,
+    val oldestCreatedAt: Instant?,
+)
+
 class OutboxRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
@@ -962,6 +967,29 @@ class OutboxRepository(
             when {
                 ex.isRetryLimitExceeded() -> BookingCoreResult.Failure(BookingCoreError.OptimisticRetryExceeded)
                 else -> throw ex
+            }
+        }
+    }
+
+
+    suspend fun queueStats(): OutboxQueueStats {
+        return withTxRetry {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val depth =
+                    BookingOutboxTable
+                        .selectAll()
+                        .where { BookingOutboxTable.status eq OutboxMessageStatus.NEW.name }
+                        .count()
+                val oldest =
+                    BookingOutboxTable
+                        .selectAll()
+                        .where { BookingOutboxTable.status eq OutboxMessageStatus.NEW.name }
+                        .orderBy(BookingOutboxTable.createdAt to SortOrder.ASC)
+                        .limit(1)
+                        .firstOrNull()
+                        ?.get(BookingOutboxTable.createdAt)
+                        ?.toInstant()
+                OutboxQueueStats(depth = depth, oldestCreatedAt = oldest)
             }
         }
     }

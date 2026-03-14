@@ -1,5 +1,7 @@
 package com.example.bot.support
 
+import com.example.bot.text.maskSensitiveOutgoingText
+
 internal const val MAX_CLUB_NAME_LEN = 80
 private val WS_REGEX = Regex("\\s+")
 
@@ -17,14 +19,17 @@ internal fun sanitizeClubName(raw: String?): String? =
 internal fun buildSupportReplyMessage(
     clubName: String?,
     replyText: String,
-): String =
-    buildString {
-        val safeName = sanitizeClubName(clubName)
-        if (safeName != null) {
-            appendLine("Ответ от клуба «$safeName»")
-        } else {
-            appendLine("Ответ от клуба")
+): String {
+    val raw =
+        buildString {
+            val safeName = sanitizeClubName(clubName)
+            if (safeName != null) {
+                appendLine("Ответ от клуба «$safeName»")
+            } else {
+                appendLine("Ответ от клуба")
+            }
+            appendLine()
+            append(replyText)
         }
-        appendLine()
-        append(replyText)
-    }
+    return maskSensitiveOutgoingText(raw)
+}

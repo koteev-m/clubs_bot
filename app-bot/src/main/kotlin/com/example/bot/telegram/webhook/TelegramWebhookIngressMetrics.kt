@@ -21,10 +21,15 @@ class TelegramWebhookIngressMetrics(
         Counter.builder("telegram.webhook.queue.worker.failures").register(registry)
     private val processingLatency: Timer =
         Timer.builder("telegram.webhook.queue.processing.latency").register(registry)
+    private val webhookAckLatency: Timer = Timer.builder("webhook_ack_latency").register(registry)
+    private val webhookProcessLatency: Timer = Timer.builder("webhook_process_latency").register(registry)
+    private val webhookDedupCount: Counter = Counter.builder("webhook_dedup_count").register(registry)
 
     init {
         Gauge.builder("telegram.webhook.queue.depth", queueDepth) { it.get().toDouble() }.register(registry)
         Gauge.builder("telegram.webhook.queue.oldest.age.seconds", oldestAgeSeconds) { it.get().toDouble() }.register(registry)
+        Gauge.builder("webhook_queue_depth", queueDepth) { it.get().toDouble() }.register(registry)
+        Gauge.builder("webhook_queue_oldest_age", oldestAgeSeconds) { it.get().toDouble() }.register(registry)
     }
 
     suspend fun refreshQueueStats(
@@ -47,6 +52,15 @@ class TelegramWebhookIngressMetrics(
         val finishedAt = Instant.now(clock)
         val endToEndDuration = Duration.between(receivedAt, finishedAt)
         processingLatency.record(endToEndDuration)
+        webhookProcessLatency.record(endToEndDuration)
+    }
+
+    fun recordWebhookAck(duration: Duration) {
+        webhookAckLatency.record(duration)
+    }
+
+    fun recordWebhookDedup() {
+        webhookDedupCount.increment()
     }
 
     fun recordProcessingFailure() {
