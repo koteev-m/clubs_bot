@@ -6,9 +6,11 @@ import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.db.Clubs
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.jetbrains.exposed.exceptions.ExposedSQLException
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.andWhere
@@ -26,6 +28,8 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class PostgresParityInvariantsIT : PostgresIntegrationTest() {
     private val now: Instant = Instant.parse("2025-03-01T19:00:00Z")
@@ -71,10 +75,15 @@ class PostgresParityInvariantsIT : PostgresIntegrationTest() {
             val seed = seedData(tableNumber = 22)
             val holdRepository = BookingHoldRepository(database, clock)
 
-            val outcomes =
+            val readyGate = CountDownLatch(2)
+            val startGate = CountDownLatch(1)
+
+            val jobs =
                 (1..2)
                     .map { idx ->
-                        async {
+                        async(Dispatchers.IO) {
+                            readyGate.countDown()
+                            check(startGate.await(5, TimeUnit.SECONDS)) { "concurrency start gate timed out" }
                             holdRepository.createHold(
                                 tableId = seed.tableId,
                                 slotStart = seed.slotStart,
@@ -84,7 +93,13 @@ class PostgresParityInvariantsIT : PostgresIntegrationTest() {
                                 idempotencyKey = "hold-lock-$idx",
                             )
                         }
-                    }.awaitAll()
+                    }
+
+            withTimeout(5_000) {
+                check(readyGate.await(5, TimeUnit.SECONDS)) { "concurrency readiness gate timed out" }
+            }
+            startGate.countDown()
+            val outcomes = jobs.awaitAll()
 
             val successCount = outcomes.count { it is BookingCoreResult.Success }
             val activeHoldExistsCount =

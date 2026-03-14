@@ -179,15 +179,15 @@ data class FlywayConfig(
             }
 
             val normalized = LinkedHashSet<String>()
-            val hasRoot = trimmedLocations.any { isRootLocation(it) }
-            val hasVendor = trimmedLocations.any { isVendorLocation(it, vendor) }
             val hasCommon = trimmedLocations.any { isCommonLocation(it) }
 
-            if (!hasVendor && hasRoot) {
-                normalized.add("$DEFAULT_LOCATION/$vendor")
+            trimmedLocations.forEach { location ->
+                if (isRootLocation(location)) {
+                    normalized.add("$DEFAULT_LOCATION/$vendor")
+                } else {
+                    normalized.add(location)
+                }
             }
-
-            trimmedLocations.forEach { normalized.add(it) }
 
             if (!hasCommon) {
                 normalized.add(COMMON_LOCATION)
@@ -195,11 +195,6 @@ data class FlywayConfig(
 
             return normalized.toList()
         }
-
-        private fun isVendorLocation(
-            location: String,
-            vendor: String,
-        ): Boolean = location.endsWith("/$vendor") || location.contains("/$vendor/")
 
         private fun isRootLocation(location: String): Boolean =
             location.endsWith("db/migration") || location.endsWith("db/migration/")
