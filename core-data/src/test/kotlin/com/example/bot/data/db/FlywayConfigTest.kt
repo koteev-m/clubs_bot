@@ -20,7 +20,13 @@ class FlywayConfigTest {
         assertEquals(FlywayMode.VALIDATE, cfg.mode)
         assertEquals(FlywayMode.VALIDATE, cfg.effectiveMode)
         assertFalse(cfg.outOfOrderEnabled)
-        assertEquals(listOf("classpath:db/migration/postgresql"), cfg.locations)
+        assertEquals(
+            listOf(
+                "classpath:db/migration/common",
+                "classpath:db/migration/postgresql",
+            ),
+            cfg.locations,
+        )
     }
 
     @Test
@@ -37,7 +43,13 @@ class FlywayConfigTest {
         assertEquals(FlywayMode.MIGRATE_AND_VALIDATE, cfg.mode)
         assertEquals(FlywayMode.MIGRATE_AND_VALIDATE, cfg.effectiveMode)
         assertTrue(cfg.outOfOrderEnabled)
-        assertEquals(listOf("classpath:db/migration/h2"), cfg.locations)
+        assertEquals(
+            listOf(
+                "classpath:db/migration/common",
+                "classpath:db/migration/h2",
+            ),
+            cfg.locations,
+        )
     }
 
     @Test
@@ -57,7 +69,7 @@ class FlywayConfigTest {
     }
 
     @Test
-    fun `root locations inject vendor path first`() {
+    fun `root locations inject vendor path and append common`() {
         val env =
             mapOf(
                 "APP_ENV" to "local",
@@ -71,6 +83,26 @@ class FlywayConfigTest {
             listOf(
                 "classpath:db/migration/h2",
                 "classpath:db/migration",
+                "classpath:db/migration/common",
+            ),
+            cfg.locations,
+        )
+    }
+
+    @Test
+    fun `vendor-only locations still append common for parity`() {
+        val env =
+            mapOf(
+                "APP_ENV" to "local",
+                "DATABASE_URL" to "jdbc:postgresql://localhost:5432/postgres",
+                "FLYWAY_LOCATIONS" to "classpath:db/migration/postgresql",
+            )
+
+        val cfg = FlywayConfig.fromEnv(envProvider = { env[it] }, propertyProvider = { null })
+
+        assertEquals(
+            listOf(
+                "classpath:db/migration/postgresql",
                 "classpath:db/migration/common",
             ),
             cfg.locations,
