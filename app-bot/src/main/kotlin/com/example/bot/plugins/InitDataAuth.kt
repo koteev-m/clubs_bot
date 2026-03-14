@@ -11,9 +11,6 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.DuplicatePluginException
 import io.ktor.server.application.createRouteScopedPlugin
-import io.ktor.server.application.install
-import io.ktor.server.application.pluginOrNull
-import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.contentType
 import io.ktor.server.request.header
 import io.ktor.server.request.receiveParameters
@@ -21,6 +18,7 @@ import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.util.AttributeKey
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.io.Serial
@@ -124,11 +122,7 @@ fun Route.withMiniAppAuth(
 }
 
 fun Application.installMiniAppAuthStatusPage() {
-    if (pluginOrNull(StatusPages) == null) {
-        install(StatusPages) {
-            exception<MiniAppAuthAbort> { _, _ -> }
-        }
-    }
+    // No-op: centralized handling is provided by installJsonErrorPages().
 }
 
 internal fun overrideMiniAppValidatorForTesting(override: (String, String) -> TelegramMiniUser?) {
@@ -194,6 +188,8 @@ private suspend fun extractInitDataFromBodyOrNull(
 
             else -> null
         }
+    } catch (ce: CancellationException) {
+        throw ce
     } catch (_: Throwable) {
         null
     }

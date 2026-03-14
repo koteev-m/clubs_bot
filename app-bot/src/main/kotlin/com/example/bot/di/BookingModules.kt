@@ -92,6 +92,7 @@ import com.example.bot.telegram.NotifyAdapterMetrics
 import com.example.bot.telegram.NotifySenderSendPort
 import com.example.bot.telegram.bookings.MyBookingsMetrics
 import com.example.bot.telegram.bookings.MyBookingsService
+import com.example.bot.workers.OutboxQueueMetrics
 import com.example.bot.workers.OutboxWorker
 import com.example.bot.workers.SendOutcome
 import com.example.bot.workers.SendPort
@@ -299,7 +300,9 @@ val bookingModule =
         }
         single {
             val tracer = runCatching { get<Tracer>() }.getOrNull()
-            OutboxWorker(get(), get(), tracer = tracer)
+            val meterRegistry = runCatching { get<MeterRegistry>() }.getOrNull()
+            val outboxQueueMetrics = meterRegistry?.let { OutboxQueueMetrics(it) }
+            OutboxWorker(get(), get(), tracer = tracer, queueMetrics = outboxQueueMetrics)
         }
     }
 

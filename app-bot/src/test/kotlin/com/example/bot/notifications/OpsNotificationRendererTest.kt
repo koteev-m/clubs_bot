@@ -86,4 +86,23 @@ class OpsNotificationRendererTest {
             assertTrue(text.contains(label), "Expected label '$label' in rendered text for $event")
         }
     }
+    @Test
+    fun `render masks sensitive values in subject id`() {
+        val notification =
+            OpsDomainNotification(
+                clubId = 7,
+                event = OpsNotificationEvent.SYSTEM_ALERT,
+                subjectId = "initData=abc qrSecret=q idempotency-key=i +79991112233",
+                occurredAt = occurredAt,
+            )
+
+        val text = OpsNotificationRenderer.render(notification)
+
+        assertTrue(text.contains("***"))
+        assertTrue(!text.contains("initData=abc"))
+        assertTrue(!text.contains("qrSecret=q"))
+        assertTrue(!text.contains("idempotency-key=i"))
+        assertTrue(!text.contains("+79991112233"))
+    }
+
 }

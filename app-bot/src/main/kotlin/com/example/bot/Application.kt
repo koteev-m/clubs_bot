@@ -509,6 +509,8 @@ fun Application.module() {
         dedupRepository = webhookUpdateDedupRepository,
         ingressRepository = telegramWebhookIngressRepository,
         suspiciousIpRepository = suspiciousIpRepository,
+        metrics = telegramWebhookIngressMetrics,
+        clock = appClock,
     )
     waitlistRoutes(
         repository = waitlistRepository,

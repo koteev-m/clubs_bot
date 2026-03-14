@@ -6,13 +6,13 @@ groups:
           sum(rate(payments_errors_total{path=~"finalize|cancel|refund",kind!="validation"}[10m]))
             /
           sum(rate({__name__=~"payments_(finalize|cancel|refund)_duration_seconds_count"}[10m]))
-            > TODO_ERROR_THRESHOLD
+            > 0.03
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: "Payments high non-validation error rate"
-          description: "TODO: adjust error rate threshold and include runbook link."
+          description: "Non-validation payment errors exceed 3% for 10 minutes. Investigate provider availability and DB write path."
 
       - alert: PaymentsLatencyP95High
         expr: |
@@ -24,7 +24,7 @@ groups:
           severity: warning
         annotations:
           summary: "Payments P95 latency elevated"
-          description: "TODO: tune 700ms warning and add critical threshold handling."
+          description: "P95 latency for finalize/cancel/refund exceeds 700ms for 5 minutes."
 
       - alert: PaymentsLatencyP95Critical
         expr: |
@@ -36,20 +36,20 @@ groups:
           severity: critical
         annotations:
           summary: "Payments P95 latency critical"
-          description: "TODO: review critical threshold and escalation policy."
+          description: "P95 latency for finalize/cancel/refund exceeds 1.5s for 5 minutes. Escalate to on-call."
 
       - alert: PaymentsIdemAnomaly
         expr: |
           sum(rate(payments_idempotent_hit_total[15m])) by (path)
             /
           sum(rate({__name__=~"payments_(finalize|cancel|refund)_duration_seconds_count"}[15m])) by (path)
-            > TODO_IDEMPOTENT_THRESHOLD
+            > 0.4
         for: 15m
         labels:
           severity: warning
         annotations:
           summary: "Payments idempotent hit rate anomaly"
-          description: "TODO: configure acceptable retry baseline and actions."
+          description: "Idempotent replay share is above 40%; check clients for aggressive retries or duplicated sends."
 
       - alert: RefundOutboxStuck
         expr: outbox_refund_backlog > 50

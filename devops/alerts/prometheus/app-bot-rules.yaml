@@ -77,3 +77,40 @@ groups:
           summary: "Пул БД почти исчерпан"
           description: "Активные соединения пула primary превышают 90% от максимума более 5 минут. Возможны ошибки подключения."
           runbook_url: "https://github.com/example/clubs_bot/blob/main/docs/observability.md#dbpoolexhausted"
+
+
+      - alert: WebhookLatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum(rate(webhook_ack_latency_seconds_bucket[5m])) by (le)) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: app-bot
+          component: webhook
+        annotations:
+          summary: "Высокая latency ack webhook"
+          description: "P95 webhook_ack_latency выше 500ms в течение 10 минут."
+
+      - alert: WebhookQueueLagHigh
+        expr: |
+          webhook_queue_oldest_age > 120
+        for: 10m
+        labels:
+          severity: critical
+          service: app-bot
+          component: webhook
+        annotations:
+          summary: "Webhook queue lag превышен"
+          description: "Старейшее сообщение в webhook очереди старше 120 секунд."
+
+      - alert: OutboxQueueLagHigh
+        expr: |
+          outbox_queue_oldest_age > 300
+        for: 15m
+        labels:
+          severity: warning
+          service: app-bot
+          component: outbox
+        annotations:
+          summary: "Outbox queue lag превышен"
+          description: "Старейшее сообщение в outbox очереди старше 5 минут."

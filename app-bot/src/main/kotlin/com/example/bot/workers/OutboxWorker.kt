@@ -44,11 +44,13 @@ class OutboxWorker(
     private val clock: Clock = Clock.systemUTC(),
     private val random: Random = Random.Default,
     private val tracer: Tracer? = null,
+    private val queueMetrics: OutboxQueueMetrics? = null,
 ) {
     private val logger = LoggerFactory.getLogger(OutboxWorker::class.java)
 
     suspend fun run() {
         while (currentCoroutineContext().isActive) {
+            refreshQueueMetrics()
             val batch = repository.pickBatchForSend(limit)
             when {
                 batch.isEmpty() -> delay(idleDelay.toMillis())
@@ -58,6 +60,7 @@ class OutboxWorker(
     }
 
     suspend fun runOnce(): Boolean {
+        refreshQueueMetrics()
         val batch = repository.pickBatchForSend(limit)
         if (batch.isEmpty()) {
             return false
@@ -66,6 +69,13 @@ class OutboxWorker(
         return true
     }
 
+
+    private suspend fun refreshQueueMetrics() {
+        val queueMetrics = queueMetrics ?: return
+        runCatching { repository.queueStats() }
+            .onSuccess { stats -> queueMetrics.record(stats, clock) }
+            .onFailure { logger.debug("Unable to refresh outbox queue metrics", it) }
+    }
     private suspend fun processMessage(message: OutboxMessage) {
         val tracer = tracer
         if (tracer == null) {
