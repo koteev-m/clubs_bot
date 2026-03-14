@@ -5,6 +5,7 @@ import com.example.bot.data.booking.core.BookingCoreResult
 import com.example.bot.data.booking.core.OutboxMessage
 import com.example.bot.data.booking.core.OutboxRepository
 import io.micrometer.tracing.Tracer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -72,9 +73,14 @@ class OutboxWorker(
 
     private suspend fun refreshQueueMetrics() {
         val queueMetrics = queueMetrics ?: return
-        runCatching { repository.queueStats() }
-            .onSuccess { stats -> queueMetrics.record(stats, clock) }
-            .onFailure { logger.debug("Unable to refresh outbox queue metrics", it) }
+        try {
+            val stats = repository.queueStats()
+            queueMetrics.record(stats, clock)
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (ex: Exception) {
+            logger.debug("Unable to refresh outbox queue metrics", ex)
+        }
     }
     private suspend fun processMessage(message: OutboxMessage) {
         val tracer = tracer
