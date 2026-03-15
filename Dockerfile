@@ -48,7 +48,7 @@ ENV TZ=UTC
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=20s --timeout=3s --retries=3 CMD curl -fsS http://localhost:8080/health || exit 1
+HEALTHCHECK --interval=20s --timeout=3s --retries=3 CMD curl -fsS http://localhost:8080/ready || exit 1
 
 # запускаем скрипт installDist
 ENTRYPOINT ["/opt/app/bin/app-bot"]

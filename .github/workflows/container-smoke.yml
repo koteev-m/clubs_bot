@@ -64,6 +64,16 @@ jobs:
             -e OWNER_TELEGRAM_ID="0" \
             app-bot:ci
 
+      - name: Probe /ready (gating)
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8080/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ready failed" && exit 1
+
       - name: Probe /health
         run: |
           for i in {1..60}; do
@@ -73,16 +83,6 @@ jobs:
             sleep 1
           done
           echo "health failed" && exit 1
-
-      - name: Probe /ready
-        run: |
-          for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:8080/ready >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "ready failed" && exit 1
 
       - name: Dump app logs on failure
         if: failure()
