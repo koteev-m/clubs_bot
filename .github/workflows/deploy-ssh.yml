@@ -85,17 +85,29 @@ jobs:
           ssh -p "${SSH_PORT}" "${SSH_USER}@${SSH_HOST}" bash -se <<'REMOTE'
           set -euo pipefail
 
-          wait_ready() {
+          wait_observability() {
             local url="$1"
             for i in {1..60}; do
               if curl -fsS "${url}/ready" >/dev/null 2>&1; then
                 echo "READY OK"
+                break
+              fi
+              sleep 1
+            done
+
+            for i in {1..60}; do
+              if curl -fsS "${url}/health" >/dev/null 2>&1; then
+                echo "HEALTH OK"
                 return 0
               fi
               sleep 1
             done
+
             return 1
           }
+
+          echo ">>> cd ${COMPOSE_PATH}"
+          cd "${COMPOSE_PATH}"
 
           previous_container="$(docker compose ps -q app 2>/dev/null || true)"
           previous_image_ref=""
@@ -111,18 +123,15 @@ jobs:
           echo ">>> docker login ghcr.io"
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
-          echo ">>> cd ${COMPOSE_PATH}"
-          cd "${COMPOSE_PATH}"
-
           echo ">>> Pull app image tag=${IMAGE_TAG}"
           IMAGE_TAG="${IMAGE_TAG}" docker compose pull app
 
           echo ">>> Up app"
           IMAGE_TAG="${IMAGE_TAG}" docker compose up -d --remove-orphans
 
-          echo ">>> Wait readiness: ${SERVICE_URL}/ready"
-          if ! wait_ready "${SERVICE_URL}"; then
-            echo "!!! Readiness failed after deploy tag=${IMAGE_TAG}"
+          echo ">>> Wait observability gates: ${SERVICE_URL}/ready + /health"
+          if ! wait_observability "${SERVICE_URL}"; then
+            echo "!!! Observability gates failed after deploy tag=${IMAGE_TAG}"
             docker compose ps
             docker compose logs --no-color app | tail -n 200 || true
 
@@ -130,11 +139,11 @@ jobs:
               echo ">>> Auto-rollback to previous tag=${previous_tag}"
               IMAGE_TAG="${previous_tag}" docker compose pull app || true
               IMAGE_TAG="${previous_tag}" docker compose up -d --remove-orphans
-              if wait_ready "${SERVICE_URL}"; then
+              if wait_observability "${SERVICE_URL}"; then
                 echo ">>> Rollback succeeded: ${previous_tag}"
                 exit 1
               fi
-              echo "!!! Rollback readiness failed"
+              echo "!!! Rollback observability gates failed"
               docker compose ps
               docker compose logs --no-color app | tail -n 200 || true
               exit 1
@@ -146,7 +155,7 @@ jobs:
 
           echo ">>> Prune unused images"
           docker image prune -f >/dev/null 2>&1 || true
-REMOTE
+          REMOTE
 
       - name: Done
         run: echo "Deploy OK → env=${{ steps.vars.outputs.env }} tag=${{ steps.vars.outputs.tag }}"
