@@ -244,6 +244,7 @@ fun Application.module() {
     val adminPrizeRepository by inject<com.example.bot.admin.AdminPrizeRepository>()
     val adminRewardLadderRepository by inject<com.example.bot.admin.AdminRewardLadderRepository>()
     val auditLogger by inject<AuditLogger>()
+    val auditLogRepository by inject<com.example.bot.audit.AuditLogRepository>()
     val shiftReportRepository by inject<com.example.bot.data.finance.ShiftReportRepository>()
     val shiftReportTemplateRepository by inject<com.example.bot.data.finance.ShiftReportTemplateRepository>()
     val tableSessionRepository by inject<TableSessionRepository>()
@@ -364,7 +365,7 @@ fun Application.module() {
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
     errorCodesRoutes()
     pingRoute()
-    guestListRoutes(repository = guestListRepository, parser = guestListCsvParser)
+    guestListRoutes(repository = guestListRepository, parser = guestListCsvParser, auditLogRepository = auditLogRepository)
     bookingA3Routes(
         bookingState = bookingState,
         meterRegistry = registry,
