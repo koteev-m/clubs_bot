@@ -446,12 +446,32 @@ private suspend fun ApplicationCall.extractSensitiveRequest(
     }
 
     val reason = request.queryParameters["reason"]?.trim().orEmpty()
+    val clubId = filter?.clubIds?.singleOrNull()
     if (reason.isBlank()) {
+        auditLogRepository?.append(
+            AuditLogEvent(
+                clubId = clubId,
+                nightId = null,
+                actorUserId = context.user.id,
+                actorRole = context.roles.joinToString(",") { it.name },
+                subjectUserId = null,
+                entityType = CustomAuditEntityType("GUEST_LIST"),
+                entityId = null,
+                action = CustomAuditAction("SENSITIVE_EXPORT_DENIED"),
+                fingerprint = fingerprintSensitiveRequest(context.user.id, "missing_reason", clubId),
+                metadata =
+                    buildJsonObject {
+                        put("includeSensitive", true)
+                        put("reason", reason)
+                        put("reasonMissing", true)
+                        put("access", "denied")
+                    },
+            ),
+        )
         throw BadRequestException("reason is required when includeSensitive=true")
     }
 
     val allowFullPhone = context.roles.any { it in HIGH_PRIVILEGE_PHONE_ROLES }
-    val clubId = filter?.clubIds?.singleOrNull()
     auditLogRepository?.append(
         AuditLogEvent(
             clubId = clubId,
