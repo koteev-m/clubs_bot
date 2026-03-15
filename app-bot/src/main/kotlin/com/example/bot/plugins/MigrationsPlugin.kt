@@ -24,6 +24,7 @@ object MigrationState {
  */
 fun Application.installMigrationsAndDatabase() {
     val log = LoggerFactory.getLogger("Migrations")
+    MigrationState.migrationsApplied = false
 
     // 1) Конфиг БД и пул соединений
     val dbCfg: DbConfig = DbConfig.fromEnv()

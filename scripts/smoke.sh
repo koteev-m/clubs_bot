@@ -102,11 +102,11 @@ docker run -d --name "${APP_NAME}" \
   -e OWNER_TELEGRAM_ID="${OWNER_TELEGRAM_ID}" \
   "${APP_IMAGE}" >/dev/null
 
-# ---------- Smoke-пробы /health и /ready ----------
-say "Probing /health and /ready on http://127.0.0.1:${APP_PORT_HOST}"
+# ---------- Smoke-проба /ready (health проверяется отдельно) ----------
+say "Probing /ready on http://127.0.0.1:${APP_PORT_HOST}"
 for i in {1..90}; do
-  if curl -fsS "http://127.0.0.1:${APP_PORT_HOST}/health" >/dev/null 2>&1; then
-    if curl -fsS "http://127.0.0.1:${APP_PORT_HOST}/ready"  >/dev/null 2>&1; then
+  if curl -fsS "http://127.0.0.1:${APP_PORT_HOST}/ready" >/dev/null 2>&1; then
+    if curl -fsS "http://127.0.0.1:${APP_PORT_HOST}/health" >/dev/null 2>&1; then
       say "Smoke OK"
       exit 0
     fi

@@ -116,6 +116,8 @@ import com.example.bot.routes.trackOfNightRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.invitationRoutes
 import com.example.bot.routes.telegramWebhookRoutes
+import com.example.bot.routes.healthRoute
+import com.example.bot.routes.readinessRoute
 import com.example.bot.tables.GuestQrResolver
 import com.example.bot.telegram.InvitationTelegramHandler
 import com.example.bot.telegram.SupportTelegramHandler
@@ -134,8 +136,6 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.Metrics
 import kotlinx.coroutines.runBlocking
@@ -531,7 +531,8 @@ fun Application.module() {
     // 9) Прочее
     routing {
         securedBookingRoutes(bookingService)
-        get("/health") { call.respondText("OK") }
+        healthRoute()
+        readinessRoute()
     }
 
     environment.monitor.subscribe(ApplicationStopped) {
