@@ -776,6 +776,72 @@ class GuestListRoutesTest :
                 events.any { it.action.value == "SENSITIVE_EXPORT_GRANTED" && it.metadata.toString().contains("incident") } shouldBe true
             }
 
+            "includeSensitive without reason returns 400 and writes denied audit" {
+                val club = createClub("Sensitive Audit Club")
+                val event = createEvent(club, "Sensitive Audit Event")
+                val owner = createDomainUser("manager")
+                val list =
+                    repository.createList(
+                        clubId = club,
+                        eventId = event,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = owner,
+                        title = "Sensitive Audit List",
+                        capacity = 40,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                repository.addEntry(list.id, "Guest Mask", "+79991112233", 1, null)
+                registerRbacUser(telegramId = 703L, roles = setOf(Role.MANAGER), clubs = setOf(club))
+                val auditRepository = mockk<AuditLogRepository>(relaxed = true)
+
+                testApplication {
+                    applicationDev { testModule(auditRepository = auditRepository) }
+                    val authedClient = authenticatedClient(telegramId = 703L)
+                    val response = authedClient.get("/api/guest-lists?includeSensitive=true")
+                    response.status shouldBe HttpStatusCode.BadRequest
+                }
+
+                val events = mutableListOf<com.example.bot.audit.AuditLogEvent>()
+                coVerify(atLeast = 1) { auditRepository.append(capture(events)) }
+                events.any {
+                    val metadata = it.metadata?.jsonObject
+                    it.action.value == "SENSITIVE_EXPORT_DENIED" &&
+                        metadata?.get("reasonMissing")?.jsonPrimitive?.content == "true"
+                } shouldBe true
+            }
+
+            "high role includeSensitive export returns full phone in csv" {
+                val club = createClub("Csv Sensitive Club")
+                val event = createEvent(club, "Csv Sensitive Event")
+                val owner = createDomainUser("head")
+                val list =
+                    repository.createList(
+                        clubId = club,
+                        eventId = event,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = owner,
+                        title = "Csv Sensitive List",
+                        capacity = 40,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                repository.addEntry(list.id, "Csv Full Guest", "+79991112233", 1, null)
+                registerRbacUser(telegramId = 704L, roles = setOf(Role.HEAD_MANAGER), clubs = emptySet())
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = 704L)
+                    val response = authedClient.get("/api/guest-lists/export?includeSensitive=true&reason=security_audit")
+                    response.status shouldBe HttpStatusCode.OK
+                    val body = response.bodyAsText()
+                    body.contains("+79991112233") shouldBe true
+                    body.contains("+******233") shouldBe false
+                }
+            }
+
             "export without includeSensitive does not contain full phone" {
                 val club = createClub("Csv Club")
                 val event = createEvent(club, "Csv Event")
