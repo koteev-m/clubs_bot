@@ -45,6 +45,7 @@ import java.time.Instant
 import java.time.ZonedDateTime
 import kotlin.math.max
 import java.util.Locale
+import java.util.UUID
 
 private const val EVENTS_LIMIT = 50
 private const val BOOKINGS_LIMIT = 20
@@ -475,11 +476,13 @@ fun Application.installBookingWebApp() {
                 val minDep: BigDecimal = table[Tables.minDeposit]
                 val total: BigDecimal = minDep.multiply(BigDecimal(req.guestsCount))
 
+                val bookingId = UUID.randomUUID()
                 val qrCodeSecret = randomHex()   // по умолчанию 32 байта
                 val idem = "tg-$tgUserId-${req.eventId}-${req.tableId}-${req.guestsCount}"
 
                 try {
                     Bookings.insert {
+                        it[id]             = bookingId
                         it[eventId]        = req.eventId
                         it[clubId]         = req.clubId
                         it[tableId]        = req.tableId
@@ -513,7 +516,8 @@ fun Application.installBookingWebApp() {
                         guestsCount  = req.guestsCount,
                         minDeposit   = minDep.toPlainString(),
                         totalDeposit = total.toPlainString(),
-                        qrSecret     = qrCodeSecret
+                        qrSecret     = qrCodeSecret,
+                        bookingRef   = bookingId.toString().take(8),
                     )
                 )
             }
@@ -639,9 +643,9 @@ private object Bookings : Table("bookings") {
     val clubId: Long, val eventId: Long, val tableId: Long, val guestsCount: Int,
     val guestName: String? = null, val phoneE164: String? = null, val arrivalBy: String? = null
 )
-@Serializable private data class BookingCreated(
+@Serializable internal data class BookingCreated(
     val clubId: Long, val eventId: Long, val tableId: Long, val tableNumber: Int,
-    val guestsCount: Int, val minDeposit: String, val totalDeposit: String, val qrSecret: String
+    val guestsCount: Int, val minDeposit: String, val totalDeposit: String, val qrSecret: String, val bookingRef: String
 )
 @Serializable private data class MyBookingDto(
     val id: String, val clubName: String, val eventTitle: String?, val eventStartAt: String,
@@ -692,7 +696,7 @@ private fun notifyHq(textHtml: String, parseMode: String = "HTML") {
     } catch (_: Throwable) { /* swallow */ }
 }
 
-private fun buildNotifyText(b: BookingCreated, tgUserId: Long, user: String?, display: String?): String = """
+internal fun buildNotifyText(b: BookingCreated, tgUserId: Long, user: String?, display: String?): String = """
 <b>Новая бронь</b>
 Стол: <b>#${b.tableNumber}</b>
 Гостей: <b>${b.guestsCount}</b>
@@ -700,7 +704,7 @@ private fun buildNotifyText(b: BookingCreated, tgUserId: Long, user: String?, di
 Итого депозит: <b>${b.totalDeposit}</b>
 
 TG: <code>$tgUserId</code> ${if (!display.isNullOrBlank()) "($display)" else ""} ${if (!user.isNullOrBlank()) "@$user" else ""}
-QR: <code>${b.qrSecret}</code>
+Ref: <code>${b.bookingRef}</code>
 """.trim()
 
 /* ===== TIMESTAMPTZ support без exposed-java-time ===== */

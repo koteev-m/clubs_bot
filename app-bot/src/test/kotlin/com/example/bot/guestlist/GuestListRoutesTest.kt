@@ -41,6 +41,7 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.header
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -96,7 +97,7 @@ class GuestListRoutesTest :
                 DataSourceHolder.dataSource = null
             }
 
-            fun Application.testModule() {
+            fun Application.testModule(auditRepository: AuditLogRepository = relaxedAuditRepository()) {
                 DataSourceHolder.dataSource = dataSource
                 install(ContentNegotiation) { json() }
 
@@ -106,7 +107,7 @@ class GuestListRoutesTest :
                         single<GuestListRepository> { repository }
                         single<UserRepository> { GLUserRepositoryStub(database) }
                         single<UserRoleRepository> { GLUserRoleRepositoryStub(database) }
-                        single<AuditLogRepository> { relaxedAuditRepository() }
+                        single<AuditLogRepository> { auditRepository }
                     }
 
                 install(Koin) { modules(testModule) }
@@ -136,6 +137,7 @@ class GuestListRoutesTest :
                 guestListRoutes(
                     repository = get(),
                     parser = parser,
+                    auditLogRepository = get(),
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
@@ -692,6 +694,115 @@ class GuestListRoutesTest :
                     response.status shouldBe HttpStatusCode.OK
                     response.headers[HttpHeaders.ContentType]!!.startsWith("text/csv") shouldBe true
                     response.bodyAsText().contains("Guest One") shouldBe true
+                }
+            }
+
+            "manager gets masked phone in guest list api" {
+                val club = createClub("Mask Club")
+                val event = createEvent(club, "Mask Event")
+                val owner = createDomainUser("manager")
+                val list =
+                    repository.createList(
+                        clubId = club,
+                        eventId = event,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = owner,
+                        title = "Mask List",
+                        capacity = 40,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                repository.addEntry(list.id, "Guest Mask", "+79991112233", 1, null)
+                registerRbacUser(telegramId = 700L, roles = setOf(Role.MANAGER), clubs = setOf(club))
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = 700L)
+                    val response = authedClient.get("/api/guest-lists")
+                    response.status shouldBe HttpStatusCode.OK
+                    val phone =
+                        Json
+                            .parseToJsonElement(response.bodyAsText())
+                            .jsonObject["items"]!!
+                            .jsonArray
+                            .first()
+                            .jsonObject["phone"]!!
+                            .jsonPrimitive
+                            .content
+                    phone shouldBe "+******233"
+                }
+            }
+
+            "high role includeSensitive with reason returns full phone and writes audit" {
+                val club = createClub("Sensitive Club")
+                val event = createEvent(club, "Sensitive Event")
+                val owner = createDomainUser("head")
+                val list =
+                    repository.createList(
+                        clubId = club,
+                        eventId = event,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = owner,
+                        title = "Sensitive List",
+                        capacity = 40,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                repository.addEntry(list.id, "Guest Full", "+79991112233", 1, null)
+                registerRbacUser(telegramId = 701L, roles = setOf(Role.HEAD_MANAGER), clubs = emptySet())
+                val auditRepository = mockk<AuditLogRepository>(relaxed = true)
+
+                testApplication {
+                    applicationDev { testModule(auditRepository = auditRepository) }
+                    val authedClient = authenticatedClient(telegramId = 701L)
+                    val response = authedClient.get("/api/guest-lists?includeSensitive=true&reason=incident")
+                    response.status shouldBe HttpStatusCode.OK
+                    val phone =
+                        Json
+                            .parseToJsonElement(response.bodyAsText())
+                            .jsonObject["items"]!!
+                            .jsonArray
+                            .first()
+                            .jsonObject["phone"]!!
+                            .jsonPrimitive
+                            .content
+                    phone shouldBe "+79991112233"
+                }
+
+                val events = mutableListOf<com.example.bot.audit.AuditLogEvent>()
+                coVerify(atLeast = 1) { auditRepository.append(capture(events)) }
+                events.any { it.action.value == "SENSITIVE_EXPORT_GRANTED" && it.metadata.toString().contains("incident") } shouldBe true
+            }
+
+            "export without includeSensitive does not contain full phone" {
+                val club = createClub("Csv Club")
+                val event = createEvent(club, "Csv Event")
+                val owner = createDomainUser("head")
+                val list =
+                    repository.createList(
+                        clubId = club,
+                        eventId = event,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = owner,
+                        title = "Csv List",
+                        capacity = 40,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                repository.addEntry(list.id, "Csv Guest", "+79991112233", 1, null)
+                registerRbacUser(telegramId = 702L, roles = setOf(Role.HEAD_MANAGER), clubs = emptySet())
+
+                testApplication {
+                    applicationDev { testModule() }
+                    val authedClient = authenticatedClient(telegramId = 702L)
+                    val response = authedClient.get("/api/guest-lists/export")
+                    response.status shouldBe HttpStatusCode.OK
+                    val body = response.bodyAsText()
+                    body.contains("+79991112233") shouldBe false
+                    body.contains("+******233") shouldBe true
                 }
             }
         },

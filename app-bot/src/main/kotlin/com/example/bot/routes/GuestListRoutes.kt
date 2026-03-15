@@ -7,6 +7,10 @@ import com.example.bot.club.GuestListEntryView
 import com.example.bot.club.GuestListOwnerType
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.RejectedRow
+import com.example.bot.audit.AuditLogEvent
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.CustomAuditAction
+import com.example.bot.audit.CustomAuditEntityType
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.security.Role
 import com.example.bot.metrics.UiCheckinMetrics
@@ -32,9 +36,12 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.util.getOrFail
 import io.ktor.util.AttributeKey
+import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -46,6 +53,7 @@ import kotlin.io.use
 fun Application.guestListRoutes(
     repository: GuestListRepository,
     parser: GuestListCsvParser,
+    auditLogRepository: AuditLogRepository? = null,
     botTokenProvider: () -> String = { miniAppBotTokenRequired() },
 ) {
     routing {
@@ -79,9 +87,11 @@ fun Application.guestListRoutes(
                     }
 
                     val result = repository.searchEntries(query.filter!!, page = query.page, size = query.size)
+                    val sensitiveRequest =
+                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
                     val response =
                         GuestListPageResponse(
-                            items = result.items.map { it.toResponse() },
+                            items = result.items.map { it.toResponse(sensitiveRequest.allowFullPhone) },
                             total = result.total,
                             page = query.page,
                             size = query.size,
@@ -105,8 +115,10 @@ fun Application.guestListRoutes(
                         } else {
                             repository.searchEntries(query.filter!!, page = query.page, size = query.size).items
                         }
+                    val sensitiveRequest =
+                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
 
-                    val csv = items.toExportCsv()
+                    val csv = items.toExportCsv(includeFullPhone = sensitiveRequest.allowFullPhone)
                     call.respondText(csv, ContentType.Text.CSV)
                 }
 
@@ -295,6 +307,10 @@ private data class SearchContext(
     val forbidden: Boolean,
 )
 
+private data class SensitiveAccessRequest(
+    val allowFullPhone: Boolean,
+)
+
 private fun ApplicationCall.extractSearch(context: RbacContext): SearchContext {
     val params = request.queryParameters
     val page = params["page"]?.toIntOrNull()?.let { if (it >= 0) it else null } ?: 0
@@ -362,7 +378,13 @@ private fun parseInstant(value: String?): Instant? =
         }
     }
 
-private fun GuestListEntryView.toResponse(): GuestListEntryResponse =
+private fun GuestListImportReport.toResponse(): ImportReportResponse =
+    ImportReportResponse(
+        accepted = accepted,
+        rejected = this.rejected.map { RejectedRowResponse(it.line, it.reason) },
+    )
+
+private fun GuestListEntryView.toResponse(includeFullPhone: Boolean): GuestListEntryResponse =
     GuestListEntryResponse(
         id = id,
         listId = listId,
@@ -371,20 +393,14 @@ private fun GuestListEntryView.toResponse(): GuestListEntryResponse =
         ownerType = ownerType.name,
         ownerUserId = ownerUserId,
         fullName = fullName,
-        phone = phone,
+        phone = if (includeFullPhone) phone else phone.maskForApi(),
         guestsCount = guestsCount,
         notes = notes,
         status = status.name,
         listCreatedAt = listCreatedAt.toString(),
     )
 
-private fun GuestListImportReport.toResponse(): ImportReportResponse =
-    ImportReportResponse(
-        accepted = accepted,
-        rejected = this.rejected.map { RejectedRowResponse(it.line, it.reason) },
-    )
-
-private fun List<GuestListEntryView>.toExportCsv(): String {
+private fun List<GuestListEntryView>.toExportCsv(includeFullPhone: Boolean): String {
     val b = StringBuilder()
     b.appendLine(
         listOf(
@@ -410,7 +426,7 @@ private fun List<GuestListEntryView>.toExportCsv(): String {
         b.append(item.ownerType.name).append(',')
         b.append(item.ownerUserId).append(',')
         b.append(escapeCsv(item.fullName)).append(',')
-        b.append(item.phone ?: "").append(',')
+        b.append(if (includeFullPhone) item.phone.orEmpty() else item.phone.maskForApi().orEmpty()).append(',')
         b.append(item.guestsCount).append(',')
         b.append(item.status.name).append(',')
         b.append(escapeCsv(item.notes)).append(',')
@@ -418,6 +434,62 @@ private fun List<GuestListEntryView>.toExportCsv(): String {
     }
     return b.toString()
 }
+
+private suspend fun ApplicationCall.extractSensitiveRequest(
+    context: RbacContext,
+    auditLogRepository: AuditLogRepository?,
+    filter: GuestListEntrySearch?,
+): SensitiveAccessRequest {
+    val includeSensitive = request.queryParameters["includeSensitive"].toBooleanStrictOrNull() ?: false
+    if (!includeSensitive) {
+        return SensitiveAccessRequest(allowFullPhone = false)
+    }
+
+    val reason = request.queryParameters["reason"]?.trim().orEmpty()
+    if (reason.isBlank()) {
+        throw BadRequestException("reason is required when includeSensitive=true")
+    }
+
+    val allowFullPhone = context.roles.any { it in HIGH_PRIVILEGE_PHONE_ROLES }
+    val clubId = filter?.clubIds?.singleOrNull()
+    auditLogRepository?.append(
+        AuditLogEvent(
+            clubId = clubId,
+            nightId = null,
+            actorUserId = context.user.id,
+            actorRole = context.roles.joinToString(",") { it.name },
+            subjectUserId = null,
+            entityType = CustomAuditEntityType("GUEST_LIST"),
+            entityId = null,
+            action = CustomAuditAction(if (allowFullPhone) "SENSITIVE_EXPORT_GRANTED" else "SENSITIVE_EXPORT_DENIED"),
+            fingerprint = fingerprintSensitiveRequest(context.user.id, reason, clubId),
+            metadata =
+                buildJsonObject {
+                    put("includeSensitive", true)
+                    put("reason", reason)
+                    put("access", if (allowFullPhone) "granted" else "denied")
+                },
+        ),
+    )
+    return SensitiveAccessRequest(allowFullPhone = allowFullPhone)
+}
+
+private fun String?.maskForApi(): String? {
+    if (this.isNullOrBlank()) return this
+    val digits = this.filter { it.isDigit() }
+    if (digits.length <= 3) return "***"
+    val suffix = digits.takeLast(3)
+    return "+${"*".repeat(6)}$suffix"
+}
+
+private fun fingerprintSensitiveRequest(actorUserId: Long, reason: String, clubId: Long?): String {
+    val input = "guestlist:sensitive:$actorUserId:$clubId:$reason:${Instant.now().epochSecond}"
+    val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(StandardCharsets.UTF_8))
+    val hex = digest.joinToString("") { "%02x".format(it) }
+    return "GUEST_LIST:SENSITIVE:$hex"
+}
+
+private val HIGH_PRIVILEGE_PHONE_ROLES = setOf(Role.OWNER, Role.GLOBAL_ADMIN, Role.HEAD_MANAGER)
 
 private fun escapeCsv(value: String?): String {
     if (value.isNullOrEmpty()) return ""
