@@ -90,19 +90,19 @@ jobs:
             for i in {1..60}; do
               if curl -fsS "${url}/ready" >/dev/null 2>&1; then
                 echo "READY OK"
-                break
+                for j in {1..60}; do
+                  if curl -fsS "${url}/health" >/dev/null 2>&1; then
+                    echo "HEALTH OK"
+                    return 0
+                  fi
+                  sleep 1
+                done
+                echo "HEALTH TIMEOUT"
+                return 1
               fi
               sleep 1
             done
-
-            for i in {1..60}; do
-              if curl -fsS "${url}/health" >/dev/null 2>&1; then
-                echo "HEALTH OK"
-                return 0
-              fi
-              sleep 1
-            done
-
+            echo "READY TIMEOUT"
             return 1
           }
 
