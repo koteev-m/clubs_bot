@@ -74,6 +74,11 @@ fun Application.guestListRoutes(
                 get {
                     val context = call.rbacContext()
                     val query = call.extractSearch(context)
+                    call.auditForbiddenSensitiveAttemptIfNeeded(
+                        context = context,
+                        auditLogRepository = auditLogRepository,
+                        filter = query.filter,
+                    )
 
                     if (query.forbidden) {
                         call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
@@ -103,6 +108,11 @@ fun Application.guestListRoutes(
                 get("export") {
                     val context = call.rbacContext()
                     val query = call.extractSearch(context)
+                    call.auditForbiddenSensitiveAttemptIfNeeded(
+                        context = context,
+                        auditLogRepository = auditLogRepository,
+                        filter = query.filter,
+                    )
 
                     if (query.forbidden) {
                         call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
@@ -492,6 +502,42 @@ private suspend fun ApplicationCall.extractSensitiveRequest(
         ),
     )
     return SensitiveAccessRequest(allowFullPhone = allowFullPhone)
+}
+
+private suspend fun ApplicationCall.auditForbiddenSensitiveAttemptIfNeeded(
+    context: RbacContext,
+    auditLogRepository: AuditLogRepository?,
+    filter: GuestListEntrySearch?,
+) {
+    val includeSensitive = request.queryParameters["includeSensitive"].toBooleanStrictOrNull() ?: false
+    if (!includeSensitive || filter != null) {
+        return
+    }
+
+    val reason = request.queryParameters["reason"]?.trim().orEmpty()
+    val clubId = request.queryParameters["club"]?.toLongOrNull()
+    val reasonFingerprint = if (reason.isBlank()) "missing_reason" else reason
+
+    auditLogRepository?.append(
+        AuditLogEvent(
+            clubId = clubId,
+            nightId = null,
+            actorUserId = context.user.id,
+            actorRole = context.roles.joinToString(",") { it.name },
+            subjectUserId = null,
+            entityType = CustomAuditEntityType("GUEST_LIST"),
+            entityId = null,
+            action = CustomAuditAction("SENSITIVE_EXPORT_DENIED"),
+            fingerprint = fingerprintSensitiveRequest(context.user.id, reasonFingerprint, clubId),
+            metadata =
+                buildJsonObject {
+                    put("includeSensitive", true)
+                    put("reason", reason)
+                    put("reasonMissing", reason.isBlank())
+                    put("access", "denied")
+                },
+        ),
+    )
 }
 
 private fun String?.maskForApi(): String? {
