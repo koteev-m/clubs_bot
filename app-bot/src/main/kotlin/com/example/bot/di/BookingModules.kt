@@ -19,6 +19,8 @@ import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListRepositoryImpl
+import com.example.bot.data.privacy.PrivacyConfig
+import com.example.bot.data.privacy.PrivacyService
 import com.example.bot.data.club.GuestListServiceImpl
 import com.example.bot.club.EventRepository
 import com.example.bot.data.club.EventRepositoryImpl
@@ -129,7 +131,9 @@ val bookingModule =
         single { ShiftReportTemplateRepository(get()) }
         single<GuestQrResolver> { DefaultGuestQrResolver(get(), get(), get()) }
 
-        single<GuestListRepository> { GuestListRepositoryImpl(get()) }
+        single { PrivacyConfig.fromEnv() }
+        single { get<PrivacyConfig>().phoneCipher }
+        single<GuestListRepository> { GuestListRepositoryImpl(get(), get()) }
         single<WaitlistRepository> { WaitlistRepositoryImpl(get()) }
         single { GuestListDbRepository(get()) }
         single { GuestListEntryDbRepository(get()) }
@@ -143,6 +147,7 @@ val bookingModule =
         single { VisitRepository(get()) }
         single { PostEventStoryRepository(get()) }
         single { GuestSegmentsRepository(get()) }
+        single { PrivacyService(get(), get(), get<PrivacyConfig>().retention, get()) }
 
         single { GamificationSettingsRepository(get()) }
         single { BadgeRepository(get()) }

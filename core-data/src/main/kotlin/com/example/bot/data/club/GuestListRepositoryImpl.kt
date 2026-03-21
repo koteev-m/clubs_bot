@@ -11,6 +11,7 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListStatus
 import com.example.bot.club.ParsedGuest
 import com.example.bot.data.db.withTxRetry
+import com.example.bot.data.privacy.PhoneCipher
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Op
 import org.jetbrains.exposed.sql.ResultRow
@@ -35,6 +36,7 @@ import java.time.ZoneOffset
 
 class GuestListRepositoryImpl(
     private val database: Database,
+    private val phoneCipher: PhoneCipher? = null,
     private val clock: Clock = Clock.systemUTC(),
 ) : GuestListRepository {
     override suspend fun createList(
@@ -135,7 +137,10 @@ class GuestListRepositoryImpl(
                             it[GuestListEntriesTable.guestListId] = listId
                             it[GuestListEntriesTable.displayName] = valid.name
                             it[GuestListEntriesTable.fullName] = valid.name
-                            it[GuestListEntriesTable.phone] = valid.phone
+                            val protectedPhone = valid.phone?.let { phone -> requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone) }
+                            it[GuestListEntriesTable.phone] = null
+                            it[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
+                            it[GuestListEntriesTable.phoneHash] = protectedPhone?.hash
                             it[GuestListEntriesTable.plusOnesAllowed] = valid.guestsCount - MIN_GUESTS_PER_ENTRY
                             it[GuestListEntriesTable.plusOnesUsed] = DEFAULT_PLUS_ONES_USED
                             it[GuestListEntriesTable.category] = DEFAULT_CATEGORY
@@ -288,7 +293,10 @@ class GuestListRepositoryImpl(
                         this[GuestListEntriesTable.guestListId] = listId
                         this[GuestListEntriesTable.displayName] = valid.name
                         this[GuestListEntriesTable.fullName] = valid.name
-                        this[GuestListEntriesTable.phone] = valid.phone
+                        val protectedPhone = valid.phone?.let { phone -> requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone) }
+                        this[GuestListEntriesTable.phone] = null
+                        this[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
+                        this[GuestListEntriesTable.phoneHash] = protectedPhone?.hash
                         this[GuestListEntriesTable.plusOnesAllowed] = valid.guestsCount - MIN_GUESTS_PER_ENTRY
                         this[GuestListEntriesTable.plusOnesUsed] = DEFAULT_PLUS_ONES_USED
                         this[GuestListEntriesTable.category] = DEFAULT_CATEGORY
@@ -345,8 +353,7 @@ class GuestListRepositoryImpl(
                 filter.phoneQuery?.trim()?.takeIf { it.isNotEmpty() }?.let { phone ->
                     val normalized = sanitizePhoneQuery(phone)
                     if (normalized.isNotEmpty()) {
-                        val like = "%${escapeLike(normalized)}%"
-                        condition = condition and (GuestListEntriesTable.phone like like)
+                        condition = condition and (GuestListEntriesTable.phoneHash eq requireNotNull(phoneCipher) { "PhoneCipher is required for phone search" }.hash(normalized))
                     }
                 }
 
@@ -395,13 +402,22 @@ class GuestListRepositoryImpl(
             id = this[GuestListEntriesTable.id],
             listId = this[GuestListEntriesTable.guestListId],
             fullName = this[GuestListEntriesTable.fullName],
-            phone = this[GuestListEntriesTable.phone],
+            phone = decryptPhone(this, GuestListEntriesTable.phone, GuestListEntriesTable.encryptedPhone),
             guestsCount = this[GuestListEntriesTable.plusOnesAllowed] + MIN_GUESTS_PER_ENTRY,
             notes = this[GuestListEntriesTable.comment],
             status = GuestListEntryStatus.valueOf(this[GuestListEntriesTable.status]),
             checkedInAt = this[GuestListEntriesTable.checkedInAt]?.toInstant(),
             checkedInBy = this[GuestListEntriesTable.checkedInBy],
         )
+
+    private fun decryptPhone(
+        row: ResultRow,
+        plaintextColumn: org.jetbrains.exposed.sql.Column<String?>,
+        encryptedColumn: org.jetbrains.exposed.sql.Column<String?>,
+    ): String? =
+        row[encryptedColumn]?.let { encrypted ->
+            requireNotNull(phoneCipher) { "PhoneCipher is required for encrypted phone reads" }.decrypt(encrypted)
+        } ?: row[plaintextColumn]
 
     private fun ResultRow.toEntryView(): GuestListEntryView =
         GuestListEntryView(
@@ -412,7 +428,7 @@ class GuestListRepositoryImpl(
             ownerType = GuestListOwnerType.valueOf(this[GuestListsTable.ownerType]),
             ownerUserId = this[GuestListsTable.ownerUserId],
             fullName = this[GuestListEntriesTable.fullName],
-            phone = this[GuestListEntriesTable.phone],
+            phone = decryptPhone(this, GuestListEntriesTable.phone, GuestListEntriesTable.encryptedPhone),
             guestsCount = this[GuestListEntriesTable.plusOnesAllowed] + MIN_GUESTS_PER_ENTRY,
             notes = this[GuestListEntriesTable.comment],
             status = GuestListEntryStatus.valueOf(this[GuestListEntriesTable.status]),
