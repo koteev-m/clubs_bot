@@ -74,6 +74,13 @@ fun Application.guestListRoutes(
                 get {
                     val context = call.rbacContext()
                     val query = call.extractSearch(context)
+                    val sensitiveRequest =
+                        call.extractSensitiveRequest(
+                            context = context,
+                            auditLogRepository = auditLogRepository,
+                            filter = query.filter,
+                            auditAccess = !query.forbidden,
+                        )
                     call.auditForbiddenSensitiveAttemptIfNeeded(
                         context = context,
                         auditLogRepository = auditLogRepository,
@@ -84,9 +91,6 @@ fun Application.guestListRoutes(
                         call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
                         return@get
                     }
-
-                    val sensitiveRequest =
-                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
                     if (query.empty) {
                         call.respond(
                             GuestListPageResponse(items = emptyList(), total = 0, page = query.page, size = query.size),
@@ -109,6 +113,13 @@ fun Application.guestListRoutes(
                 get("export") {
                     val context = call.rbacContext()
                     val query = call.extractSearch(context)
+                    val sensitiveRequest =
+                        call.extractSensitiveRequest(
+                            context = context,
+                            auditLogRepository = auditLogRepository,
+                            filter = query.filter,
+                            auditAccess = !query.forbidden,
+                        )
                     call.auditForbiddenSensitiveAttemptIfNeeded(
                         context = context,
                         auditLogRepository = auditLogRepository,
@@ -119,9 +130,6 @@ fun Application.guestListRoutes(
                         call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
                         return@get
                     }
-
-                    val sensitiveRequest =
-                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
                     val items =
                         if (query.empty) {
                             emptyList()
@@ -450,6 +458,7 @@ private suspend fun ApplicationCall.extractSensitiveRequest(
     context: RbacContext,
     auditLogRepository: AuditLogRepository?,
     filter: GuestListEntrySearch?,
+    auditAccess: Boolean = true,
 ): SensitiveAccessRequest {
     val includeSensitive = request.queryParameters["includeSensitive"].toBooleanStrictOrNull() ?: false
     if (!includeSensitive) {
@@ -483,6 +492,10 @@ private suspend fun ApplicationCall.extractSensitiveRequest(
     }
 
     val allowFullPhone = context.roles.any { it in HIGH_PRIVILEGE_PHONE_ROLES }
+    if (!auditAccess) {
+        return SensitiveAccessRequest(allowFullPhone = allowFullPhone)
+    }
+
     auditLogRepository?.append(
         AuditLogEvent(
             clubId = clubId,

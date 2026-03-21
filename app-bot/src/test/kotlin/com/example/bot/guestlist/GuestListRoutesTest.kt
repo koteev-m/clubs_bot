@@ -824,6 +824,56 @@ class GuestListRoutesTest :
                 } shouldBe true
             }
 
+            "forbidden includeSensitive without reason returns 400 and writes denied audit" {
+                val clubA = createClub("Allowed Club Missing Reason")
+                val clubB = createClub("Forbidden Club Missing Reason")
+                val eventA = createEvent(clubA, "Allowed Event Missing Reason")
+                val eventB = createEvent(clubB, "Forbidden Event Missing Reason")
+                val ownerA = createDomainUser("allowed-owner-missing-reason")
+                val ownerB = createDomainUser("forbidden-owner-missing-reason")
+                repository.createList(
+                    clubId = clubA,
+                    eventId = eventA,
+                    ownerType = GuestListOwnerType.MANAGER,
+                    ownerUserId = ownerA,
+                    title = "Allowed List Missing Reason",
+                    capacity = 20,
+                    arrivalWindowStart = null,
+                    arrivalWindowEnd = null,
+                    status = GuestListStatus.ACTIVE,
+                )
+                val forbiddenList =
+                    repository.createList(
+                        clubId = clubB,
+                        eventId = eventB,
+                        ownerType = GuestListOwnerType.MANAGER,
+                        ownerUserId = ownerB,
+                        title = "Forbidden List Missing Reason",
+                        capacity = 20,
+                        arrivalWindowStart = null,
+                        arrivalWindowEnd = null,
+                        status = GuestListStatus.ACTIVE,
+                    )
+                repository.addEntry(forbiddenList.id, "Forbidden Guest Missing Reason", "+79991112233", 1, null)
+                registerRbacUser(telegramId = 708L, roles = setOf(Role.MANAGER), clubs = setOf(clubA))
+                val auditRepository = mockk<AuditLogRepository>(relaxed = true)
+
+                testApplication {
+                    applicationDev { testModule(auditRepository = auditRepository) }
+                    val authedClient = authenticatedClient(telegramId = 708L)
+                    val response = authedClient.get("/api/guest-lists?club=$clubB&includeSensitive=true")
+                    response.status shouldBe HttpStatusCode.BadRequest
+                }
+
+                val events = mutableListOf<com.example.bot.audit.AuditLogEvent>()
+                coVerify(atLeast = 1) { auditRepository.append(capture(events)) }
+                events.any {
+                    val metadata = it.metadata?.jsonObject
+                    it.action.value == "SENSITIVE_EXPORT_DENIED" &&
+                        metadata?.get("reasonMissing")?.jsonPrimitive?.content == "true"
+                } shouldBe true
+            }
+
             "forbidden includeSensitive attempt returns 403 and writes denied audit" {
                 val clubA = createClub("Allowed Club")
                 val clubB = createClub("Forbidden Club")
