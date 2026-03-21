@@ -154,6 +154,7 @@ import java.util.jar.JarFile
 import java.time.Clock
 import java.time.ZoneId
 import com.example.bot.host.ShiftChecklistService
+import com.example.bot.data.privacy.PrivacyConfig
 import org.slf4j.LoggerFactory
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -184,9 +185,8 @@ fun Application.module() {
     // 2) БД и миграции
     installMigrationsAndDatabase()
 
-    // 3) UI и мини‑приложение
+    // 3) UI
     installWebUi()
-    installBookingWebApp()
 
     // 4) DI через Koin
     val isDev: Boolean =
@@ -208,6 +208,11 @@ fun Application.module() {
         modules(koinModules)
     }
     environment.log.info("Koin: loaded ${koinModules.size} module(s)")
+
+    val privacyConfig by inject<PrivacyConfig>()
+
+    // 5) Мини‑приложение бронирования использует общий privacy config из DI.
+    installBookingWebApp(privacyConfig)
 
     val coreDataSeeder by inject<CoreDataSeeder>()
     val coreDataSeed by inject<CoreDataSeed>()

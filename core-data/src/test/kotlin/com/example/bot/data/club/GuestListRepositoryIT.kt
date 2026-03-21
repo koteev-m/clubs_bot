@@ -6,11 +6,18 @@ import com.example.bot.club.GuestListOwnerType
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListStatus
 import com.example.bot.club.ParsedGuest
+import com.example.bot.data.privacy.PhoneCipher
+import com.example.bot.data.privacy.PrivacyRetentionConfig
+import com.example.bot.data.privacy.PrivacyService
+import com.example.bot.audit.AuditLogRepository
 import kotlinx.coroutines.runBlocking
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -20,11 +27,12 @@ import java.time.ZoneOffset
 
 class GuestListRepositoryIT : PostgresClubIntegrationTest() {
     private val fixedClock: Clock = Clock.fixed(Instant.parse("2024-05-01T10:15:30Z"), ZoneOffset.UTC)
+    private val phoneCipher = PhoneCipher("12345678901234567890123456789012")
     private lateinit var repository: GuestListRepository
 
     @BeforeEach
     fun initRepository() {
-        repository = GuestListRepositoryImpl(database, phoneCipher = null, clock = fixedClock)
+        repository = GuestListRepositoryImpl(database, phoneCipher = phoneCipher, clock = fixedClock)
     }
 
     @Test
@@ -367,4 +375,88 @@ class GuestListRepositoryIT : PostgresClubIntegrationTest() {
             assertEquals(1, dateFiltered.items.size)
             assertEquals(promoterList.id, dateFiltered.items.single().listId)
         }
+
+    @Test
+    fun `legacy plaintext row remains searchable before and after backfill`() =
+        runBlocking {
+            val clubId = insertClub(name = "Aurora")
+            val eventId =
+                insertEvent(
+                    clubId = clubId,
+                    title = "Legacy Night",
+                    startAt = Instant.parse("2024-07-01T18:00:00Z"),
+                    endAt = Instant.parse("2024-07-02T02:00:00Z"),
+                )
+            val ownerId = insertUser(username = "legacy-manager", displayName = "Legacy Manager")
+            val list =
+                repository.createList(
+                    clubId = clubId,
+                    eventId = eventId,
+                    ownerType = GuestListOwnerType.MANAGER,
+                    ownerUserId = ownerId,
+                    title = "Legacy",
+                    capacity = 20,
+                    arrivalWindowStart = null,
+                    arrivalWindowEnd = null,
+                    status = GuestListStatus.ACTIVE,
+                )
+
+            val entryId = transaction(database) {
+                GuestListEntriesTable
+                    .insert {
+                        it[guestListId] = list.id
+                        it[displayName] = "Legacy Guest"
+                        it[fullName] = "Legacy Guest"
+                        it[phone] = "+15551234567"
+                        it[encryptedPhone] = null
+                        it[phoneHash] = null
+                        it[telegramUserId] = null
+                        it[plusOnesAllowed] = 0
+                        it[plusOnesUsed] = 0
+                        it[category] = "DEFAULT"
+                        it[comment] = null
+                        it[status] = GuestListEntryStatus.PLANNED.name
+                        it[checkedInAt] = null
+                        it[checkedInBy] = null
+                        it[createdAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+                        it[updatedAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+                    }.resultedValues!!
+                    .single()[GuestListEntriesTable.id]
+            }
+
+            val beforeBackfill =
+                repository.searchEntries(
+                    GuestListEntrySearch(phoneQuery = "+15551234567"),
+                    page = 0,
+                    size = 10,
+                )
+            assertEquals(listOf(entryId), beforeBackfill.items.map { it.id })
+
+            val service = PrivacyService(database, phoneCipher, PrivacyRetentionConfig(java.time.Duration.ofDays(30)), NoopAuditLogRepository())
+            val updated = service.backfillPhoneProtection()
+            assertTrue(updated >= 1)
+
+            transaction(database) {
+                val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq entryId }.single()
+                assertNull(row[GuestListEntriesTable.phone])
+                assertEquals(phoneCipher.hash("+15551234567"), row[GuestListEntriesTable.phoneHash])
+                assertNotNull(row[GuestListEntriesTable.encryptedPhone])
+            }
+
+            val afterBackfill =
+                repository.searchEntries(
+                    GuestListEntrySearch(phoneQuery = "+15551234567"),
+                    page = 0,
+                    size = 10,
+                )
+            assertEquals(listOf(entryId), afterBackfill.items.map { it.id })
+        }
+}
+
+private class NoopAuditLogRepository : AuditLogRepository {
+    override suspend fun append(event: com.example.bot.audit.AuditLogEvent): Long = 1L
+
+    override suspend fun listForClub(clubId: Long, limit: Int, offset: Int): List<com.example.bot.audit.AuditLogRecord> = emptyList()
+
+    override suspend fun listForUser(userId: Long, limit: Int, offset: Int): List<com.example.bot.audit.AuditLogRecord> = emptyList()
 }

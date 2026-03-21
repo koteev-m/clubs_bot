@@ -50,7 +50,6 @@ import java.util.UUID
 
 private const val EVENTS_LIMIT = 50
 private const val BOOKINGS_LIMIT = 20
-private val privacyConfig by lazy { PrivacyConfig.fromEnv() }
 
 /* ==========================  HTML (UI) ========================== */
 private val CHECKIN_HTML = """
@@ -345,7 +344,7 @@ private val CHECKIN_HTML = """
 private val json = Json { ignoreUnknownKeys = true }
 
 /** Подключить все UI/REST маршруты мини‑приложения бронирования. */
-fun Application.installBookingWebApp() {
+fun Application.installBookingWebApp(privacyConfig: PrivacyConfig) {
     routing {
         get("/ui/checkin") { call.respondText(CHECKIN_HTML, ContentType.Text.Html) }
 
@@ -472,7 +471,7 @@ fun Application.installBookingWebApp() {
                     .any()
                 if (existsActive) return@transaction BookingError("ALREADY_BOOKED")
 
-                val userId: Long = ensureUser(tgUserId, tgUsername, tgDisplay, req.phoneE164)
+                val userId: Long = ensureUser(privacyConfig, tgUserId, tgUsername, tgDisplay, req.phoneE164)
                 val protectedPhone = req.phoneE164?.let { privacyConfig.phoneCipher.protect(it) }
                 val userIdNullable: Long? = userId
 
@@ -670,7 +669,11 @@ private data class BookingError(val code: String) : BookingResult
 /* ==========================  Вспомогательные ========================== */
 
 private fun ensureUser(
-    tgUserId: Long, tgUsername: String?, tgDisplay: String?, phone: String?
+    privacyConfig: PrivacyConfig,
+    tgUserId: Long,
+    tgUsername: String?,
+    tgDisplay: String?,
+    phone: String?,
 ): Long {
     val exists = Users.selectAll().where { Users.telegramUserId eq tgUserId }.firstOrNull()
     if (exists != null) return exists[Users.id]

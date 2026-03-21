@@ -7,6 +7,7 @@ import com.example.bot.data.booking.EventsTable
 import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListRepositoryImpl
+import com.example.bot.data.privacy.PhoneCipher
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
@@ -90,7 +91,7 @@ class GuestListRoutesTest :
                 val setup = prepareDatabase()
                 dataSource = setup.dataSource
                 database = setup.database
-                repository = GuestListRepositoryImpl(database)
+                repository = GuestListRepositoryImpl(database, phoneCipher = PhoneCipher("12345678901234567890123456789012"))
             }
 
             afterTest {

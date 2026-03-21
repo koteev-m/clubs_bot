@@ -4,16 +4,19 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.time.Clock
 import java.time.Duration
-import java.time.Instant
 import java.util.Base64
 import javax.crypto.Cipher
+import kotlinx.serialization.Serializable
+import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 private const val GCM_IV_LENGTH_BYTES = 12
 private const val GCM_TAG_LENGTH_BITS = 128
+private const val MIN_PHONE_ENCRYPTION_KEY_LENGTH = 32
+private const val DEV_PHONE_ENCRYPTION_KEY = "dev-phone-encryption-key-32-bytes!!"
+private val PROD_LIKE_ENVIRONMENTS = setOf("prod", "production", "stage", "staging")
 
 data class ProtectedPhone(
     val encrypted: String,
@@ -24,24 +27,28 @@ data class PrivacyRetentionConfig(
     val guestListPhoneRetention: Duration,
 )
 
+@Serializable
 data class PrivacyAdminActor(
     val userId: Long,
     val role: String,
 )
 
+@Serializable
 data class PrivacyAnonymizeResult(
     val usersUpdated: Int,
     val bookingsUpdated: Int,
     val guestListEntriesUpdated: Int,
 )
 
+@Serializable
 data class PrivacyRetentionResult(
     val guestListEntriesScrubbed: Int,
 )
 
 class PhoneCipher(secret: String) {
-    private val keyBytes = sha256(secret.toByteArray(StandardCharsets.UTF_8))
-    private val keySpec = SecretKeySpec(keyBytes, "AES")
+    private val secretBytes = secret.toByteArray(StandardCharsets.UTF_8)
+    private val keySpec = SecretKeySpec(sha256(secretBytes), "AES")
+    private val hmacKeySpec = SecretKeySpec(secretBytes, "HmacSHA256")
     private val random = SecureRandom()
 
     fun protect(phoneE164: String): ProtectedPhone {
@@ -69,10 +76,19 @@ class PhoneCipher(secret: String) {
         return cipher.doFinal(ciphertext).toString(StandardCharsets.UTF_8)
     }
 
-    fun hash(phoneE164: String): String =
-        sha256(("phone:" + phoneE164.trim()).toByteArray(StandardCharsets.UTF_8)).toHex()
+    fun hash(phoneE164: String): String {
+        val normalized = phoneE164.trim()
+        require(normalized.isNotEmpty()) { "phone must not be blank" }
+        return hmacSha256(("phone:" + normalized).toByteArray(StandardCharsets.UTF_8)).toHex()
+    }
 
     private fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
+
+    private fun hmacSha256(bytes: ByteArray): ByteArray =
+        Mac.getInstance("HmacSHA256").run {
+            init(hmacKeySpec)
+            doFinal(bytes)
+        }
 }
 
 class PrivacyConfig private constructor(
@@ -81,19 +97,45 @@ class PrivacyConfig private constructor(
 ) {
     companion object {
         fun fromEnv(env: Map<String, String> = System.getenv()): PrivacyConfig {
-            val profile = env["APP_PROFILE"]?.trim()?.lowercase().orEmpty()
-            val encryptionKey = env["PHONE_ENCRYPTION_KEY"]?.trim().orEmpty().ifBlank {
-                if (profile == "prod" || profile == "stage") {
-                    error("PHONE_ENCRYPTION_KEY must be set and at least 32 characters long")
+            val appMode = PrivacyAppMode.fromEnv(env)
+            val encryptionKey = env["PHONE_ENCRYPTION_KEY"]?.trim().orEmpty()
+            val resolvedEncryptionKey =
+                when {
+                    encryptionKey.isNotBlank() -> encryptionKey
+                    appMode.isProdLike -> error("PHONE_ENCRYPTION_KEY must be set and at least 32 characters long")
+                    else -> DEV_PHONE_ENCRYPTION_KEY
                 }
-                "dev-phone-encryption-key-32-bytes!!"
+            require(resolvedEncryptionKey.length >= MIN_PHONE_ENCRYPTION_KEY_LENGTH) {
+                "PHONE_ENCRYPTION_KEY must be set and at least 32 characters long"
             }
-            require(encryptionKey.length >= 32) { "PHONE_ENCRYPTION_KEY must be set and at least 32 characters long" }
+            require(!(appMode.isProdLike && resolvedEncryptionKey == DEV_PHONE_ENCRYPTION_KEY)) {
+                "PHONE_ENCRYPTION_KEY must not use the development default in ${appMode.value}"
+            }
             val retentionDays = env["RETENTION_GUEST_LIST_PHONE_DAYS"]?.toLongOrNull() ?: 30L
             require(retentionDays > 0) { "RETENTION_GUEST_LIST_PHONE_DAYS must be positive" }
             return PrivacyConfig(
-                phoneCipher = PhoneCipher(encryptionKey),
+                phoneCipher = PhoneCipher(resolvedEncryptionKey),
                 retention = PrivacyRetentionConfig(Duration.ofDays(retentionDays)),
+            )
+        }
+    }
+}
+
+private data class PrivacyAppMode(
+    val value: String,
+    val isProdLike: Boolean,
+) {
+    companion object {
+        fun fromEnv(env: Map<String, String>): PrivacyAppMode {
+            val rawValue =
+                listOf(env["APP_PROFILE"], env["APP_ENV"])
+                    .firstOrNull { !it.isNullOrBlank() }
+                    ?.trim()
+                    ?.lowercase()
+                    ?: "dev"
+            return PrivacyAppMode(
+                value = rawValue,
+                isProdLike = rawValue in PROD_LIKE_ENVIRONMENTS,
             )
         }
     }

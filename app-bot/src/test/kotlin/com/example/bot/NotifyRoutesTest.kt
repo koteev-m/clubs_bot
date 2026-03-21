@@ -155,7 +155,7 @@ private fun prepareSecurityData(): JdbcDataSource {
         .configure()
         .dataSource(dataSource)
         .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-        .target("33")
+        .target("48")
         .load()
         .migrate()
     val database = Database.connect(dataSource)
