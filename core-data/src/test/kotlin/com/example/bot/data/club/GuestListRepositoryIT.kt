@@ -24,7 +24,7 @@ class GuestListRepositoryIT : PostgresClubIntegrationTest() {
 
     @BeforeEach
     fun initRepository() {
-        repository = GuestListRepositoryImpl(database, fixedClock)
+        repository = GuestListRepositoryImpl(database, phoneCipher = null, clock = fixedClock)
     }
 
     @Test

@@ -81,6 +81,7 @@ import com.example.bot.routes.bookingA3Routes
 import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
 import com.example.bot.routes.guestListRoutes
+import com.example.bot.routes.adminPrivacyRoutes
 import com.example.bot.routes.hostEntranceRoutes
 import com.example.bot.routes.hostChecklistRoutes
 import com.example.bot.routes.hostCheckinRoutes
@@ -245,6 +246,7 @@ fun Application.module() {
     val adminRewardLadderRepository by inject<com.example.bot.admin.AdminRewardLadderRepository>()
     val auditLogger by inject<AuditLogger>()
     val auditLogRepository by inject<com.example.bot.audit.AuditLogRepository>()
+    val privacyService by inject<com.example.bot.data.privacy.PrivacyService>()
     val shiftReportRepository by inject<com.example.bot.data.finance.ShiftReportRepository>()
     val shiftReportTemplateRepository by inject<com.example.bot.data.finance.ShiftReportTemplateRepository>()
     val tableSessionRepository by inject<TableSessionRepository>()
@@ -366,6 +368,7 @@ fun Application.module() {
     errorCodesRoutes()
     pingRoute()
     guestListRoutes(repository = guestListRepository, parser = guestListCsvParser, auditLogRepository = auditLogRepository)
+    adminPrivacyRoutes(privacyService = privacyService)
     bookingA3Routes(
         bookingState = bookingState,
         meterRegistry = registry,

@@ -22,6 +22,7 @@
 
 package com.example.bot.web
 
+import com.example.bot.data.privacy.PrivacyConfig
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -49,6 +50,7 @@ import java.util.UUID
 
 private const val EVENTS_LIMIT = 50
 private const val BOOKINGS_LIMIT = 20
+private val privacyConfig by lazy { PrivacyConfig.fromEnv() }
 
 /* ==========================  HTML (UI) ========================== */
 private val CHECKIN_HTML = """
@@ -471,6 +473,7 @@ fun Application.installBookingWebApp() {
                 if (existsActive) return@transaction BookingError("ALREADY_BOOKED")
 
                 val userId: Long = ensureUser(tgUserId, tgUsername, tgDisplay, req.phoneE164)
+                val protectedPhone = req.phoneE164?.let { privacyConfig.phoneCipher.protect(it) }
                 val userIdNullable: Long? = userId
 
                 val minDep: BigDecimal = table[Tables.minDeposit]
@@ -489,7 +492,9 @@ fun Application.installBookingWebApp() {
                         it[tableNumber]    = table[Tables.tableNumber]
                         it[guestUserId]    = userIdNullable
                         it[guestName]      = req.guestName?.takeIf(String::isNotBlank) ?: tgDisplay ?: tgUsername
-                        it[phoneE164]      = req.phoneE164
+                        it[phoneE164]      = null
+                        it[encryptedPhone] = protectedPhone?.encrypted
+                        it[phoneHash]      = protectedPhone?.hash
                         it[promoterUserId] = null
                         it[guestsCount]    = req.guestsCount
                         it[minDeposit]     = minDep
@@ -604,6 +609,9 @@ private object Users : Table("users") {
     val username = text("username").nullable()
     val displayName = text("display_name").nullable()
     val phoneE164 = text("phone_e164").nullable()
+    val encryptedPhone = text("encrypted_phone").nullable()
+    val phoneHash = varchar("phone_hash", 64).nullable()
+    val anonymizedAt = timestamptz("anonymized_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -616,6 +624,9 @@ private object Bookings : Table("bookings") {
     val guestUserId = long("guest_user_id").nullable()
     val guestName = text("guest_name").nullable()
     val phoneE164 = text("phone_e164").nullable()
+    val encryptedPhone = text("encrypted_phone").nullable()
+    val phoneHash = varchar("phone_hash", 64).nullable()
+    val anonymizedAt = timestamptz("anonymized_at").nullable()
     val promoterUserId = long("promoter_user_id").nullable()
     val guestsCount = integer("guests_count")
     val minDeposit = decimal("min_deposit", 12, 2)
@@ -667,7 +678,10 @@ private fun ensureUser(
         it[telegramUserId] = tgUserId
         it[username] = tgUsername
         it[displayName] = tgDisplay ?: tgUsername
-        it[phoneE164] = phone
+        val protectedPhone = phone?.let { privacyConfig.phoneCipher.protect(it) }
+        it[phoneE164] = null
+        it[encryptedPhone] = protectedPhone?.encrypted
+        it[phoneHash] = protectedPhone?.hash
     }
     return stmt[Users.id]
 }
