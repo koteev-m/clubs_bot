@@ -776,6 +776,18 @@ class GuestListRoutesTest :
                 events.any { it.action.value == "SENSITIVE_EXPORT_GRANTED" && it.metadata.toString().contains("incident") } shouldBe true
             }
 
+            "empty json includeSensitive without reason returns 400" {
+                registerRbacUser(telegramId = 706L, roles = setOf(Role.MANAGER), clubs = emptySet())
+                val auditRepository = mockk<AuditLogRepository>(relaxed = true)
+
+                testApplication {
+                    applicationDev { testModule(auditRepository = auditRepository) }
+                    val authedClient = authenticatedClient(telegramId = 706L)
+                    val response = authedClient.get("/api/guest-lists?includeSensitive=true")
+                    response.status shouldBe HttpStatusCode.BadRequest
+                }
+            }
+
             "includeSensitive without reason returns 400 and writes denied audit" {
                 val club = createClub("Sensitive Audit Club")
                 val event = createEvent(club, "Sensitive Audit Event")
@@ -864,6 +876,28 @@ class GuestListRoutesTest :
                         metadata?.get("access")?.jsonPrimitive?.content == "denied" &&
                         metadata["reason"]?.jsonPrimitive?.content == "scope_check"
                 } shouldBe true
+            }
+
+            "empty export includeSensitive with reason writes single audit entry" {
+                registerRbacUser(telegramId = 707L, roles = setOf(Role.MANAGER), clubs = emptySet())
+                val auditRepository = mockk<AuditLogRepository>(relaxed = true)
+
+                testApplication {
+                    applicationDev { testModule(auditRepository = auditRepository) }
+                    val authedClient = authenticatedClient(telegramId = 707L)
+                    val response = authedClient.get("/api/guest-lists/export?includeSensitive=true&reason=empty_export")
+                    response.status shouldBe HttpStatusCode.OK
+                    response.bodyAsText().lines().shouldHaveSize(2)
+                }
+
+                val events = mutableListOf<com.example.bot.audit.AuditLogEvent>()
+                coVerify(atLeast = 1) { auditRepository.append(capture(events)) }
+                events.count {
+                    val metadata = it.metadata?.jsonObject
+                    it.action.value == "SENSITIVE_EXPORT_DENIED" &&
+                        metadata?.get("includeSensitive")?.jsonPrimitive?.content == "true" &&
+                        metadata["reason"]?.jsonPrimitive?.content == "empty_export"
+                } shouldBe 1
             }
 
             "high role includeSensitive export returns full phone in csv" {
