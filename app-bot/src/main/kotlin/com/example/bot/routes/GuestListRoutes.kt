@@ -77,13 +77,16 @@ fun Application.guestListRoutes(
                     call.auditForbiddenSensitiveAttemptIfNeeded(
                         context = context,
                         auditLogRepository = auditLogRepository,
-                        filter = query.filter,
+                        forbidden = query.forbidden,
                     )
 
                     if (query.forbidden) {
                         call.respond(HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
                         return@get
                     }
+
+                    val sensitiveRequest =
+                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
                     if (query.empty) {
                         call.respond(
                             GuestListPageResponse(items = emptyList(), total = 0, page = query.page, size = query.size),
@@ -92,8 +95,6 @@ fun Application.guestListRoutes(
                     }
 
                     val result = repository.searchEntries(query.filter!!, page = query.page, size = query.size)
-                    val sensitiveRequest =
-                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
                     val response =
                         GuestListPageResponse(
                             items = result.items.map { it.toResponse(sensitiveRequest.allowFullPhone) },
@@ -111,7 +112,7 @@ fun Application.guestListRoutes(
                     call.auditForbiddenSensitiveAttemptIfNeeded(
                         context = context,
                         auditLogRepository = auditLogRepository,
-                        filter = query.filter,
+                        forbidden = query.forbidden,
                     )
 
                     if (query.forbidden) {
@@ -119,14 +120,14 @@ fun Application.guestListRoutes(
                         return@get
                     }
 
+                    val sensitiveRequest =
+                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
                     val items =
                         if (query.empty) {
                             emptyList()
                         } else {
                             repository.searchEntries(query.filter!!, page = query.page, size = query.size).items
                         }
-                    val sensitiveRequest =
-                        call.extractSensitiveRequest(context = context, auditLogRepository = auditLogRepository, filter = query.filter)
 
                     val csv = items.toExportCsv(includeFullPhone = sensitiveRequest.allowFullPhone)
                     call.respondText(csv, ContentType.Text.CSV)
@@ -507,10 +508,10 @@ private suspend fun ApplicationCall.extractSensitiveRequest(
 private suspend fun ApplicationCall.auditForbiddenSensitiveAttemptIfNeeded(
     context: RbacContext,
     auditLogRepository: AuditLogRepository?,
-    filter: GuestListEntrySearch?,
+    forbidden: Boolean,
 ) {
     val includeSensitive = request.queryParameters["includeSensitive"].toBooleanStrictOrNull() ?: false
-    if (!includeSensitive || filter != null) {
+    if (!includeSensitive || !forbidden) {
         return
     }
 
