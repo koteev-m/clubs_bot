@@ -27,6 +27,7 @@ import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.innerJoin
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.lowerCase
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
@@ -353,7 +354,12 @@ class GuestListRepositoryImpl(
                 filter.phoneQuery?.trim()?.takeIf { it.isNotEmpty() }?.let { phone ->
                     val normalized = sanitizePhoneQuery(phone)
                     if (normalized.isNotEmpty()) {
-                        condition = condition and (GuestListEntriesTable.phoneHash eq requireNotNull(phoneCipher) { "PhoneCipher is required for phone search" }.hash(normalized))
+                        val cipher = requireNotNull(phoneCipher) { "PhoneCipher is required for phone search" }
+                        condition =
+                            condition and (
+                                (GuestListEntriesTable.phoneHash eq cipher.hash(normalized)) or
+                                    (GuestListEntriesTable.phone eq normalized)
+                            )
                     }
                 }
 

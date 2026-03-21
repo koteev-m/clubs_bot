@@ -52,6 +52,13 @@ class PrivacyService(
             withTxRetry {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                     val now = clock.instant().atOffset(ZoneOffset.UTC)
+                    val targetTelegramUserId =
+                        UsersTable
+                            .select(UsersTable.telegramUserId)
+                            .where { UsersTable.id eq userId }
+                            .limit(1)
+                            .firstOrNull()
+                            ?.get(UsersTable.telegramUserId)
                     val usersUpdated =
                         UsersTable.update({ UsersTable.id eq userId }) {
                             it[phoneE164] = null
@@ -67,12 +74,14 @@ class PrivacyService(
                             it[anonymizedAt] = now
                         }
                     val guestListEntriesUpdated =
-                        GuestListEntriesTable.update({ GuestListEntriesTable.telegramUserId eq userId }) {
-                            it[phone] = null
-                            it[encryptedPhone] = null
-                            it[phoneHash] = null
-                            it[anonymizedAt] = now
-                        }
+                        targetTelegramUserId?.let { telegramUserId ->
+                            GuestListEntriesTable.update({ GuestListEntriesTable.telegramUserId eq telegramUserId }) {
+                                it[phone] = null
+                                it[encryptedPhone] = null
+                                it[phoneHash] = null
+                                it[anonymizedAt] = now
+                            }
+                        } ?: 0
                     PrivacyAnonymizeResult(usersUpdated, bookingsUpdated, guestListEntriesUpdated)
                 }
             }
