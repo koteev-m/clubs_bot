@@ -15,11 +15,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -79,6 +81,7 @@ class PrivacyService(
                                 it[phone] = null
                                 it[encryptedPhone] = null
                                 it[phoneHash] = null
+                                it[phoneLastFour] = null
                                 it[anonymizedAt] = now
                             }
                         } ?: 0
@@ -108,18 +111,40 @@ class PrivacyService(
     }
 
     suspend fun runRetention(actor: PrivacyAdminActor? = null): PrivacyRetentionResult {
+        val startedAt = clock.instant().atOffset(ZoneOffset.UTC)
         val cutoff = clock.instant().minus(retentionConfig.guestListPhoneRetention).atOffset(ZoneOffset.UTC)
-        val scrubbed =
+        val result =
             withTxRetry {
                 newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    GuestListEntriesTable.update({
-                        (GuestListEntriesTable.createdAt less cutoff) and GuestListEntriesTable.phoneHash.isNotNull()
-                    }) {
-                        it[phone] = null
-                        it[encryptedPhone] = null
-                        it[phoneHash] = null
-                        it[anonymizedAt] = clock.instant().atOffset(ZoneOffset.UTC)
+                    val finishedAt = clock.instant().atOffset(ZoneOffset.UTC)
+                    val scrubbed =
+                        GuestListEntriesTable.update({
+                            (GuestListEntriesTable.createdAt less cutoff) and
+                                (
+                                    GuestListEntriesTable.phone.isNotNull() or
+                                        GuestListEntriesTable.encryptedPhone.isNotNull() or
+                                        GuestListEntriesTable.phoneHash.isNotNull()
+                                )
+                        }) {
+                            it[phone] = null
+                            it[encryptedPhone] = null
+                            it[phoneHash] = null
+                            it[phoneLastFour] = null
+                            it[anonymizedAt] = finishedAt
+                        }
+                    val details =
+                        buildJsonObject {
+                            put("guestListEntriesScrubbed", scrubbed)
+                            put("cutoff", cutoff.toInstant().toString())
+                        }
+                    PrivacyRetentionRunsTable.insert {
+                        it[PrivacyRetentionRunsTable.startedAt] = startedAt
+                        it[PrivacyRetentionRunsTable.finishedAt] = finishedAt
+                        it[PrivacyRetentionRunsTable.actorUserId] = actor?.userId
+                        it[mode] = if (actor == null) RETENTION_MODE_AUTOMATED else RETENTION_MODE_MANUAL
+                        it[detailsJson] = details.toString()
                     }
+                    PrivacyRetentionResult(scrubbed)
                 }
             }
         auditLogRepository.append(
@@ -132,14 +157,20 @@ class PrivacyService(
                 entityType = CustomAuditEntityType("PRIVACY_RETENTION"),
                 entityId = null,
                 action = CustomAuditAction("SCRUB"),
-                fingerprint = privacyFingerprint("retention", actor?.userId ?: 0L, scrubbed.toLong(), cutoff.toInstant().toString()),
+                fingerprint =
+                    privacyFingerprint(
+                        "retention",
+                        actor?.userId ?: 0L,
+                        result.guestListEntriesScrubbed.toLong(),
+                        cutoff.toInstant().toString(),
+                    ),
                 metadata = buildJsonObject {
-                    put("guestListEntriesScrubbed", scrubbed)
+                    put("guestListEntriesScrubbed", result.guestListEntriesScrubbed)
                     put("cutoff", cutoff.toInstant().toString())
                 },
             ),
         )
-        return PrivacyRetentionResult(scrubbed)
+        return result
     }
 
     private fun backfillUsers(): Int = backfillTable(
@@ -168,18 +199,32 @@ class PrivacyService(
         phoneExtractor = { it[BookingsTable.phoneE164]!! },
     )
 
-    private fun backfillGuestListEntries(): Int = backfillTable(
-        select = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.phone.isNotNull() and GuestListEntriesTable.encryptedPhone.isNull() },
-        apply = { rowId, protected ->
-            GuestListEntriesTable.update({ GuestListEntriesTable.id eq rowId }) {
-                it[encryptedPhone] = protected.encrypted
-                it[phoneHash] = protected.hash
-                it[phone] = null
+    private fun backfillGuestListEntries(): Int {
+        var count = 0
+        GuestListEntriesTable
+            .selectAll()
+            .where {
+                (GuestListEntriesTable.phone.isNotNull() and GuestListEntriesTable.encryptedPhone.isNull()) or
+                    (GuestListEntriesTable.encryptedPhone.isNotNull() and GuestListEntriesTable.phoneLastFour.isNull())
+            }.forEach { row ->
+                val plaintextPhone = row[GuestListEntriesTable.phone]
+                val protected =
+                    plaintextPhone?.let(phoneCipher::protect)
+                        ?: ProtectedPhone(
+                            encrypted = row[GuestListEntriesTable.encryptedPhone]!!,
+                            hash = row[GuestListEntriesTable.phoneHash] ?: phoneCipher.hash(phoneCipher.decrypt(row[GuestListEntriesTable.encryptedPhone]!!)),
+                            lastFour = phoneCipher.lastFour(phoneCipher.decrypt(row[GuestListEntriesTable.encryptedPhone]!!)),
+                        )
+                GuestListEntriesTable.update({ GuestListEntriesTable.id eq row[GuestListEntriesTable.id] }) {
+                    it[encryptedPhone] = protected.encrypted
+                    it[phoneHash] = protected.hash
+                    it[phoneLastFour] = protected.lastFour
+                    it[phone] = null
+                }
+                count += 1
             }
-        },
-        idExtractor = { it[GuestListEntriesTable.id] },
-        phoneExtractor = { it[GuestListEntriesTable.phone]!! },
-    )
+        return count
+    }
 
     private fun <ID> backfillTable(
         select: org.jetbrains.exposed.sql.Query,
@@ -200,5 +245,10 @@ class PrivacyService(
         val digest = MessageDigest.getInstance("SHA-256")
         values.forEach { digest.update(it.toString().toByteArray()) }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private companion object {
+        const val RETENTION_MODE_AUTOMATED = "automated"
+        const val RETENTION_MODE_MANUAL = "manual"
     }
 }

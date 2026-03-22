@@ -440,6 +440,7 @@ class GuestListRepositoryIT : PostgresClubIntegrationTest() {
                 val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq entryId }.single()
                 assertNull(row[GuestListEntriesTable.phone])
                 assertEquals(phoneCipher.hash("+15551234567"), row[GuestListEntriesTable.phoneHash])
+                assertEquals("4567", row[GuestListEntriesTable.phoneLastFour])
                 assertNotNull(row[GuestListEntriesTable.encryptedPhone])
             }
 
@@ -450,6 +451,94 @@ class GuestListRepositoryIT : PostgresClubIntegrationTest() {
                     size = 10,
                 )
             assertEquals(listOf(entryId), afterBackfill.items.map { it.id })
+        }
+
+    @Test
+    fun `phone search supports indexed last four digits for encrypted and legacy rows`() =
+        runBlocking {
+            val clubId = insertClub(name = "Suffix")
+            val eventId =
+                insertEvent(
+                    clubId = clubId,
+                    title = "Suffix Night",
+                    startAt = Instant.parse("2024-08-01T18:00:00Z"),
+                    endAt = Instant.parse("2024-08-02T02:00:00Z"),
+                )
+            val ownerId = insertUser(username = "suffix-manager", displayName = "Suffix Manager")
+            val list =
+                repository.createList(
+                    clubId = clubId,
+                    eventId = eventId,
+                    ownerType = GuestListOwnerType.MANAGER,
+                    ownerUserId = ownerId,
+                    title = "Phones",
+                    capacity = 20,
+                    arrivalWindowStart = null,
+                    arrivalWindowEnd = null,
+                    status = GuestListStatus.ACTIVE,
+                )
+
+            val encryptedEntry =
+                repository.addEntry(
+                    listId = list.id,
+                    fullName = "Encrypted Guest",
+                    phone = "+1 (555) 123-4567",
+                    guestsCount = 1,
+                    notes = null,
+                    status = GuestListEntryStatus.PLANNED,
+                )
+
+            val legacyEntryId = transaction(database) {
+                GuestListEntriesTable
+                    .insert {
+                        it[guestListId] = list.id
+                        it[displayName] = "Legacy Guest"
+                        it[fullName] = "Legacy Guest"
+                        it[phone] = "+1 555 999 4567"
+                        it[encryptedPhone] = null
+                        it[phoneHash] = null
+                        it[phoneLastFour] = "4567"
+                        it[telegramUserId] = null
+                        it[plusOnesAllowed] = 0
+                        it[plusOnesUsed] = 0
+                        it[category] = "DEFAULT"
+                        it[comment] = null
+                        it[status] = GuestListEntryStatus.PLANNED.name
+                        it[checkedInAt] = null
+                        it[checkedInBy] = null
+                        it[createdAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+                        it[updatedAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+                    }.resultedValues!!
+                    .single()[GuestListEntriesTable.id]
+            }
+
+            val suffixMatches =
+                repository.searchEntries(
+                    GuestListEntrySearch(phoneQuery = "4567"),
+                    page = 0,
+                    size = 10,
+                )
+
+            assertEquals(
+                listOf(encryptedEntry.id, legacyEntryId).sorted(),
+                suffixMatches.items.map { it.id }.sorted(),
+            )
+
+            val exactEncrypted =
+                repository.searchEntries(
+                    GuestListEntrySearch(phoneQuery = "+15551234567"),
+                    page = 0,
+                    size = 10,
+                )
+            assertEquals(listOf(encryptedEntry.id), exactEncrypted.items.map { it.id })
+
+            val exactLegacy =
+                repository.searchEntries(
+                    GuestListEntrySearch(phoneQuery = "+15559994567"),
+                    page = 0,
+                    size = 10,
+                )
+            assertEquals(listOf(legacyEntryId), exactLegacy.items.map { it.id })
         }
 }
 

@@ -142,6 +142,7 @@ class GuestListRepositoryImpl(
                             it[GuestListEntriesTable.phone] = null
                             it[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
                             it[GuestListEntriesTable.phoneHash] = protectedPhone?.hash
+                            it[GuestListEntriesTable.phoneLastFour] = protectedPhone?.lastFour
                             it[GuestListEntriesTable.plusOnesAllowed] = valid.guestsCount - MIN_GUESTS_PER_ENTRY
                             it[GuestListEntriesTable.plusOnesUsed] = DEFAULT_PLUS_ONES_USED
                             it[GuestListEntriesTable.category] = DEFAULT_CATEGORY
@@ -298,6 +299,7 @@ class GuestListRepositoryImpl(
                         this[GuestListEntriesTable.phone] = null
                         this[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
                         this[GuestListEntriesTable.phoneHash] = protectedPhone?.hash
+                        this[GuestListEntriesTable.phoneLastFour] = protectedPhone?.lastFour
                         this[GuestListEntriesTable.plusOnesAllowed] = valid.guestsCount - MIN_GUESTS_PER_ENTRY
                         this[GuestListEntriesTable.plusOnesUsed] = DEFAULT_PLUS_ONES_USED
                         this[GuestListEntriesTable.category] = DEFAULT_CATEGORY
@@ -353,12 +355,20 @@ class GuestListRepositoryImpl(
                 }
                 filter.phoneQuery?.trim()?.takeIf { it.isNotEmpty() }?.let { phone ->
                     val normalized = sanitizePhoneQuery(phone)
+                    val digits = normalized.filter(Char::isDigit)
                     if (normalized.isNotEmpty()) {
                         val cipher = requireNotNull(phoneCipher) { "PhoneCipher is required for phone search" }
                         condition =
                             condition and (
-                                (GuestListEntriesTable.phoneHash eq cipher.hash(normalized)) or
-                                    (GuestListEntriesTable.phone eq normalized)
+                                when {
+                                    digits.length == PHONE_SUFFIX_LENGTH ->
+                                        (GuestListEntriesTable.phoneLastFour eq digits) or
+                                            (GuestListEntriesTable.phone like "%$digits")
+
+                                    else ->
+                                        (GuestListEntriesTable.phoneHash eq cipher.hash(normalized)) or
+                                            (GuestListEntriesTable.phone eq normalized)
+                                }
                             )
                     }
                 }
@@ -448,3 +458,5 @@ private fun escapeLike(value: String): String =
         .replace("_", "\\_")
 
 private fun sanitizePhoneQuery(raw: String): String = raw.filter { it.isDigit() || it == '+' }
+
+private const val PHONE_SUFFIX_LENGTH = 4

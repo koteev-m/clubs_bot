@@ -21,6 +21,7 @@ private val PROD_LIKE_ENVIRONMENTS = setOf("prod", "production", "stage", "stagi
 data class ProtectedPhone(
     val encrypted: String,
     val hash: String,
+    val lastFour: String,
 )
 
 data class PrivacyRetentionConfig(
@@ -63,6 +64,7 @@ class PhoneCipher(secret: String) {
         return ProtectedPhone(
             encrypted = Base64.getEncoder().encodeToString(payload),
             hash = hash(normalized),
+            lastFour = lastFour(normalized),
         )
     }
 
@@ -80,6 +82,12 @@ class PhoneCipher(secret: String) {
         val normalized = phoneE164.trim()
         require(normalized.isNotEmpty()) { "phone must not be blank" }
         return hmacSha256(("phone:" + normalized).toByteArray(StandardCharsets.UTF_8)).toHex()
+    }
+
+    fun lastFour(phoneE164: String): String {
+        val digits = phoneE164.filter(Char::isDigit)
+        require(digits.length >= 4) { "phone must contain at least 4 digits" }
+        return digits.takeLast(4)
     }
 
     private fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
