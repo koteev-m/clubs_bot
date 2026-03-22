@@ -454,6 +454,58 @@ class GuestListRepositoryIT : PostgresClubIntegrationTest() {
         }
 
     @Test
+    fun `short phones persist without suffix and stay searchable by exact hash`() =
+        runBlocking {
+            val clubId = insertClub(name = "Short")
+            val eventId =
+                insertEvent(
+                    clubId = clubId,
+                    title = "Short Night",
+                    startAt = Instant.parse("2024-08-10T18:00:00Z"),
+                    endAt = Instant.parse("2024-08-11T02:00:00Z"),
+                )
+            val ownerId = insertUser(username = "short-manager", displayName = "Short Manager")
+            val list =
+                repository.createList(
+                    clubId = clubId,
+                    eventId = eventId,
+                    ownerType = GuestListOwnerType.MANAGER,
+                    ownerUserId = ownerId,
+                    title = "Short Phones",
+                    capacity = 20,
+                    arrivalWindowStart = null,
+                    arrivalWindowEnd = null,
+                    status = GuestListStatus.ACTIVE,
+                )
+
+            val entry = repository.addEntry(list.id, "Short Guest", "+500", 1, null)
+
+            transaction(database) {
+                val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq entry.id }.single()
+                assertNull(row[GuestListEntriesTable.phone])
+                assertEquals(phoneCipher.hash("+500"), row[GuestListEntriesTable.phoneHash])
+                assertNull(row[GuestListEntriesTable.phoneLastFour])
+                assertEquals("+500", phoneCipher.decrypt(row[GuestListEntriesTable.encryptedPhone]!!))
+            }
+
+            val exactMatches =
+                repository.searchEntries(
+                    GuestListEntrySearch(phoneQuery = "+500"),
+                    page = 0,
+                    size = 10,
+                )
+            assertEquals(listOf(entry.id), exactMatches.items.map { it.id })
+
+            val suffixMatches =
+                repository.searchEntries(
+                    GuestListEntrySearch(phoneQuery = "500"),
+                    page = 0,
+                    size = 10,
+                )
+            assertTrue(suffixMatches.items.isEmpty())
+        }
+
+    @Test
     fun `phone search supports indexed last four digits for encrypted and legacy rows`() =
         runBlocking {
             val clubId = insertClub(name = "Suffix")

@@ -143,7 +143,10 @@ class GuestListRepositoryImpl(
                             it[GuestListEntriesTable.guestListId] = listId
                             it[GuestListEntriesTable.displayName] = valid.name
                             it[GuestListEntriesTable.fullName] = valid.name
-                            val protectedPhone = valid.phone?.let { phone -> requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone) }
+                            val protectedPhone =
+                                valid.phone?.let { phone ->
+                                    requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone)
+                                }
                             it[GuestListEntriesTable.phone] = null
                             it[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
                             it[GuestListEntriesTable.phoneHash] = protectedPhone?.hash
@@ -300,7 +303,10 @@ class GuestListRepositoryImpl(
                         this[GuestListEntriesTable.guestListId] = listId
                         this[GuestListEntriesTable.displayName] = valid.name
                         this[GuestListEntriesTable.fullName] = valid.name
-                        val protectedPhone = valid.phone?.let { phone -> requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone) }
+                        val protectedPhone =
+                            valid.phone?.let { phone ->
+                                requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone)
+                            }
                         this[GuestListEntriesTable.phone] = null
                         this[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
                         this[GuestListEntriesTable.phoneHash] = protectedPhone?.hash
