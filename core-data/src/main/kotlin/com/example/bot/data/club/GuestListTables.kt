@@ -30,6 +30,7 @@ object GuestListEntriesTable : Table("guest_list_entries") {
     val phone = text("phone_e164").nullable()
     val encryptedPhone = text("encrypted_phone").nullable()
     val phoneHash = varchar("phone_hash", 64).nullable()
+    val phoneLastFour = varchar("phone_last_four", 4).nullable()
     val anonymizedAt = timestampWithTimeZone("anonymized_at").nullable()
     val telegramUserId = long("telegram_user_id").nullable()
     val plusOnesAllowed = integer("plus_ones_allowed")

@@ -15,6 +15,9 @@ import java.time.ZoneOffset
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -35,8 +38,8 @@ class PrivacyServiceTest {
 
     init {
         transaction(db) {
-            SchemaUtils.drop(BookingsTable, GuestListEntriesTable, GuestListsTable, UsersTable)
-            SchemaUtils.create(UsersTable, GuestListsTable, GuestListEntriesTable, BookingsTable)
+            SchemaUtils.drop(PrivacyRetentionRunsTable, BookingsTable, GuestListEntriesTable, GuestListsTable, UsersTable)
+            SchemaUtils.create(UsersTable, GuestListsTable, GuestListEntriesTable, BookingsTable, PrivacyRetentionRunsTable)
         }
     }
 
@@ -189,6 +192,137 @@ class PrivacyServiceTest {
         }
         assertEquals(1, audit.events.size)
         assertEquals("ANONYMIZE", audit.events.single().action.value)
+    }
+
+    @Test
+    fun `retention scrubs legacy plaintext guest list row and records run`() = runBlocking {
+        val audit = RecordingAuditLogRepository()
+        val service = PrivacyService(db, phoneCipher, PrivacyRetentionConfig(Duration.ofDays(30)), audit, fixedClock)
+        insertGuestList(listId = 50L)
+        transaction(db) {
+            GuestListEntriesTable.insert {
+                it[id] = 51L
+                it[guestListId] = 50L
+                it[displayName] = "Legacy Guest"
+                it[fullName] = "Legacy Guest"
+                it[tgUsername] = null
+                it[phone] = "+15551234567"
+                it[encryptedPhone] = null
+                it[phoneHash] = null
+                it[phoneLastFour] = null
+                it[anonymizedAt] = null
+                it[telegramUserId] = null
+                it[plusOnesAllowed] = 0
+                it[plusOnesUsed] = 0
+                it[category] = "DEFAULT"
+                it[comment] = null
+                it[status] = "PLANNED"
+                it[checkedInAt] = null
+                it[checkedInBy] = null
+                it[createdAt] = fixedClock.instant().minus(Duration.ofDays(31)).atOffset(ZoneOffset.UTC)
+                it[updatedAt] = fixedClock.instant().minus(Duration.ofDays(31)).atOffset(ZoneOffset.UTC)
+            }
+        }
+
+        val result = service.runRetention()
+
+        assertEquals(1, result.guestListEntriesScrubbed)
+        transaction(db) {
+            val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq 51L }.single()
+            assertNull(row[GuestListEntriesTable.phone])
+            assertNull(row[GuestListEntriesTable.encryptedPhone])
+            assertNull(row[GuestListEntriesTable.phoneHash])
+            assertNull(row[GuestListEntriesTable.phoneLastFour])
+            assertEquals(fixedClock.instant().atOffset(ZoneOffset.UTC), row[GuestListEntriesTable.anonymizedAt])
+        }
+        assertEquals(1, audit.events.last().metadata.jsonObject["guestListEntriesScrubbed"]?.jsonPrimitive?.content?.toInt())
+        assertRetentionRun(
+            expectedActorUserId = null,
+            expectedMode = "automated",
+            expectedScrubbed = 1,
+        )
+    }
+
+    @Test
+    fun `retention scrubs protected guest list row and records actor`() = runBlocking {
+        val audit = RecordingAuditLogRepository()
+        val service = PrivacyService(db, phoneCipher, PrivacyRetentionConfig(Duration.ofDays(30)), audit, fixedClock)
+        insertGuestList(listId = 60L)
+        val protected = phoneCipher.protect("+15557654321")
+        transaction(db) {
+            GuestListEntriesTable.insert {
+                it[id] = 61L
+                it[guestListId] = 60L
+                it[displayName] = "Protected Guest"
+                it[fullName] = "Protected Guest"
+                it[tgUsername] = null
+                it[phone] = null
+                it[encryptedPhone] = protected.encrypted
+                it[phoneHash] = protected.hash
+                it[phoneLastFour] = protected.lastFour
+                it[anonymizedAt] = null
+                it[telegramUserId] = null
+                it[plusOnesAllowed] = 0
+                it[plusOnesUsed] = 0
+                it[category] = "DEFAULT"
+                it[comment] = null
+                it[status] = "PLANNED"
+                it[checkedInAt] = null
+                it[checkedInBy] = null
+                it[createdAt] = fixedClock.instant().minus(Duration.ofDays(45)).atOffset(ZoneOffset.UTC)
+                it[updatedAt] = fixedClock.instant().minus(Duration.ofDays(45)).atOffset(ZoneOffset.UTC)
+            }
+        }
+
+        val result = service.runRetention(actor = PrivacyAdminActor(99L, "OWNER"))
+
+        assertEquals(1, result.guestListEntriesScrubbed)
+        transaction(db) {
+            val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq 61L }.single()
+            assertNull(row[GuestListEntriesTable.encryptedPhone])
+            assertNull(row[GuestListEntriesTable.phoneHash])
+            assertNull(row[GuestListEntriesTable.phoneLastFour])
+            assertEquals(fixedClock.instant().atOffset(ZoneOffset.UTC), row[GuestListEntriesTable.anonymizedAt])
+        }
+        assertEquals("SCRUB", audit.events.last().action.value)
+        assertRetentionRun(
+            expectedActorUserId = 99L,
+            expectedMode = "manual",
+            expectedScrubbed = 1,
+        )
+    }
+
+    private fun insertGuestList(listId: Long) {
+        transaction(db) {
+            GuestListsTable.insert {
+                it[id] = listId
+                it[clubId] = listId
+                it[eventId] = listId
+                it[promoterId] = null
+                it[ownerType] = "PROMOTER"
+                it[ownerUserId] = listId
+                it[title] = "List $listId"
+                it[capacity] = 10
+                it[arrivalWindowStart] = null
+                it[arrivalWindowEnd] = null
+                it[status] = "ACTIVE"
+                it[createdAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+                it[updatedAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+            }
+        }
+    }
+
+    private fun assertRetentionRun(expectedActorUserId: Long?, expectedMode: String, expectedScrubbed: Int) {
+        transaction(db) {
+            val row = PrivacyRetentionRunsTable.selectAll().orderBy(PrivacyRetentionRunsTable.id).last()
+            assertEquals(fixedClock.instant().atOffset(ZoneOffset.UTC), row[PrivacyRetentionRunsTable.startedAt])
+            assertEquals(fixedClock.instant().atOffset(ZoneOffset.UTC), row[PrivacyRetentionRunsTable.finishedAt])
+            assertEquals(expectedActorUserId, row[PrivacyRetentionRunsTable.actorUserId])
+            assertEquals(expectedMode, row[PrivacyRetentionRunsTable.mode])
+            val details = Json.parseToJsonElement(row[PrivacyRetentionRunsTable.detailsJson]).jsonObject
+            assertEquals(expectedScrubbed.toString(), details["guestListEntriesScrubbed"]?.jsonPrimitive?.content)
+            assertTrue(details["cutoff"]?.jsonPrimitive?.content?.isNotBlank() == true)
+        }
     }
 
     private fun expectedHmac(secret: String, phone: String): String {
