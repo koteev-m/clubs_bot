@@ -74,6 +74,39 @@ class PrivacyServiceTest {
     }
 
     @Test
+    fun `privacy config treats mixed prod like envs as fail closed`() {
+        listOf(
+            mapOf("APP_PROFILE" to "dev", "APP_ENV" to "prod"),
+            mapOf("APP_PROFILE" to "prod", "APP_ENV" to "dev"),
+            mapOf("APP_PROFILE" to "local", "APP_ENV" to "stage"),
+            mapOf("APP_PROFILE" to "staging", "APP_ENV" to "test"),
+        ).forEach { env ->
+            val error =
+                assertThrows(IllegalStateException::class.java) {
+                    PrivacyConfig.fromEnv(env)
+                }
+            assertTrue(error.message!!.contains("PHONE_ENCRYPTION_KEY"))
+        }
+    }
+
+    @Test
+    fun `privacy config allows explicit key in mixed prod like envs`() {
+        val config =
+            PrivacyConfig.fromEnv(
+                mapOf(
+                    "APP_PROFILE" to "dev",
+                    "APP_ENV" to "production",
+                    "PHONE_ENCRYPTION_KEY" to "abcdefghijklmnopqrstuvwxyz123456",
+                ),
+            )
+
+        assertEquals(
+            PhoneCipher("abcdefghijklmnopqrstuvwxyz123456").hash("+15551234567"),
+            config.phoneCipher.hash("+15551234567"),
+        )
+    }
+
+    @Test
     fun `privacy config uses app env aliases and rejects dev default in prod like`() {
         listOf("prod", "production", "stage", "staging").forEach { envName ->
             val missingKey =
@@ -235,7 +268,8 @@ class PrivacyServiceTest {
             assertNull(row[GuestListEntriesTable.phoneLastFour])
             assertEquals(fixedClock.instant().atOffset(ZoneOffset.UTC), row[GuestListEntriesTable.anonymizedAt])
         }
-        assertEquals(1, audit.events.last().metadata.jsonObject["guestListEntriesScrubbed"]?.jsonPrimitive?.content?.toInt())
+        val retentionMetadata = requireNotNull(audit.events.last().metadata)
+        assertEquals(1, retentionMetadata.jsonObject["guestListEntriesScrubbed"]!!.jsonPrimitive.content.toInt())
         assertRetentionRun(
             expectedActorUserId = null,
             expectedMode = "automated",

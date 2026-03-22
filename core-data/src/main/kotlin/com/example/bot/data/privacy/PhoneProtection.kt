@@ -135,17 +135,27 @@ private data class PrivacyAppMode(
 ) {
     companion object {
         fun fromEnv(env: Map<String, String>): PrivacyAppMode {
-            val rawValue =
-                listOf(env["APP_PROFILE"], env["APP_ENV"])
-                    .firstOrNull { !it.isNullOrBlank() }
-                    ?.trim()
-                    ?.lowercase()
-                    ?: "dev"
+            val profile = envValue(env, "APP_PROFILE")
+            val appEnv = envValue(env, "APP_ENV")
+            val prodLike = listOf(profile, appEnv).any { it in PROD_LIKE_ENVIRONMENTS }
+            val resolvedValue =
+                when {
+                    prodLike -> listOfNotNull(profile, appEnv).first { it in PROD_LIKE_ENVIRONMENTS }
+                    profile != null -> profile
+                    appEnv != null -> appEnv
+                    else -> "dev"
+                }
             return PrivacyAppMode(
-                value = rawValue,
-                isProdLike = rawValue in PROD_LIKE_ENVIRONMENTS,
+                value = resolvedValue,
+                isProdLike = prodLike,
             )
         }
+
+        private fun envValue(env: Map<String, String>, key: String): String? =
+            env[key]
+                ?.trim()
+                ?.lowercase()
+                ?.takeIf { it.isNotEmpty() }
     }
 }
 

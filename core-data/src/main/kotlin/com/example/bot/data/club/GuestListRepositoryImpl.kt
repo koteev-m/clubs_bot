@@ -13,9 +13,13 @@ import com.example.bot.club.ParsedGuest
 import com.example.bot.data.db.withTxRetry
 import com.example.bot.data.privacy.PhoneCipher
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.Expression
+import org.jetbrains.exposed.sql.Function
 import org.jetbrains.exposed.sql.Op
+import org.jetbrains.exposed.sql.QueryBuilder
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.TextColumnType
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
@@ -29,6 +33,7 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.lowerCase
 import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.stringLiteral
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import java.time.Clock
@@ -367,7 +372,10 @@ class GuestListRepositoryImpl(
 
                                     else ->
                                         (GuestListEntriesTable.phoneHash eq cipher.hash(normalized)) or
-                                            (GuestListEntriesTable.phone eq normalized)
+                                            (
+                                                normalizedLegacyPhoneExpression(GuestListEntriesTable.phone) eq
+                                                    stringLiteral(normalized)
+                                            )
                                 }
                             )
                     }
@@ -460,3 +468,16 @@ private fun escapeLike(value: String): String =
 private fun sanitizePhoneQuery(raw: String): String = raw.filter { it.isDigit() || it == '+' }
 
 private const val PHONE_SUFFIX_LENGTH = 4
+
+private fun normalizedLegacyPhoneExpression(column: org.jetbrains.exposed.sql.Column<String?>): Expression<String> =
+    LegacyPhoneNormalizationExpression(column)
+
+private class LegacyPhoneNormalizationExpression(
+    private val column: org.jetbrains.exposed.sql.Column<String?>,
+) : Function<String>(TextColumnType()) {
+    override fun toQueryBuilder(queryBuilder: QueryBuilder) {
+        queryBuilder.append("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(")
+        queryBuilder.append(column)
+        queryBuilder.append(", ' ', ''), '-', ''), '(', ''), ')', ''), '.', '')")
+    }
+}
