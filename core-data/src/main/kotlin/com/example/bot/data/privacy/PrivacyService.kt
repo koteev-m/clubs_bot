@@ -210,21 +210,38 @@ class PrivacyService(
         GuestListEntriesTable
             .selectAll()
             .where {
-                (GuestListEntriesTable.phone.isNotNull() and GuestListEntriesTable.encryptedPhone.isNull()) or
-                    (GuestListEntriesTable.encryptedPhone.isNotNull() and GuestListEntriesTable.phoneLastFour.isNull())
+                GuestListEntriesTable.phone.isNotNull() or
+                    (
+                        GuestListEntriesTable.encryptedPhone.isNotNull() and
+                            (
+                                GuestListEntriesTable.phoneHash.isNull() or
+                                    GuestListEntriesTable.phoneLastFour.isNull()
+                            )
+                    )
             }.forEach { row ->
-                val plaintextPhone = row[GuestListEntriesTable.phone]
+                val currentEncryptedPhone = row[GuestListEntriesTable.encryptedPhone]
+                val currentPhoneHash = row[GuestListEntriesTable.phoneHash]
+                val currentPhoneLastFour = row[GuestListEntriesTable.phoneLastFour]
+                val currentPlaintextPhone = row[GuestListEntriesTable.phone]
                 val protected =
-                    plaintextPhone?.let(phoneCipher::protect)
-                        ?: run {
-                            val encryptedPhone = row[GuestListEntriesTable.encryptedPhone]!!
+                    currentPlaintextPhone?.let(phoneCipher::protect)
+                        ?: currentEncryptedPhone?.let { encryptedPhone ->
                             val decryptedPhone = phoneCipher.decrypt(encryptedPhone)
                             ProtectedPhone(
                                 encrypted = encryptedPhone,
-                                hash = row[GuestListEntriesTable.phoneHash] ?: phoneCipher.hash(decryptedPhone),
-                                lastFour = phoneCipher.lastFour(decryptedPhone),
+                                hash = currentPhoneHash ?: phoneCipher.hash(decryptedPhone),
+                                lastFour = currentPhoneLastFour ?: phoneCipher.lastFour(decryptedPhone),
                             )
                         }
+                        ?: return@forEach
+                if (
+                    currentPlaintextPhone == null &&
+                    currentEncryptedPhone == protected.encrypted &&
+                    currentPhoneHash == protected.hash &&
+                    currentPhoneLastFour == protected.lastFour
+                ) {
+                    return@forEach
+                }
                 GuestListEntriesTable.update({ GuestListEntriesTable.id eq row[GuestListEntriesTable.id] }) {
                     it[encryptedPhone] = protected.encrypted
                     it[phoneHash] = protected.hash
