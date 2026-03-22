@@ -63,6 +63,16 @@ class PrivacyServiceTest {
     }
 
     @Test
+    fun `phone cipher keeps short phones searchable without fake suffix`() {
+        val protected = phoneCipher.protect("+500")
+
+        assertEquals("+500", phoneCipher.decrypt(protected.encrypted))
+        assertEquals(phoneCipher.hash("+500"), protected.hash)
+        assertNull(protected.lastFour)
+        assertNull(phoneCipher.lastFour("+500"))
+    }
+
+    @Test
     fun `privacy config fails closed for prod like envs without key`() {
         listOf("prod", "production", "stage", "staging").forEach { profile ->
             val error =
@@ -275,6 +285,48 @@ class PrivacyServiceTest {
             expectedMode = "automated",
             expectedScrubbed = 1,
         )
+    }
+
+    @Test
+    fun `backfill guest list keeps short encrypted phones without suffix`() = runBlocking {
+        val audit = RecordingAuditLogRepository()
+        val service = PrivacyService(db, phoneCipher, PrivacyRetentionConfig(Duration.ofDays(30)), audit, fixedClock)
+        insertGuestList(listId = 55L)
+        transaction(db) {
+            GuestListEntriesTable.insert {
+                it[id] = 56L
+                it[guestListId] = 55L
+                it[displayName] = "Short Phone Guest"
+                it[fullName] = "Short Phone Guest"
+                it[tgUsername] = null
+                it[phone] = "+500"
+                it[encryptedPhone] = null
+                it[phoneHash] = null
+                it[phoneLastFour] = null
+                it[anonymizedAt] = null
+                it[telegramUserId] = null
+                it[plusOnesAllowed] = 0
+                it[plusOnesUsed] = 0
+                it[category] = "DEFAULT"
+                it[comment] = null
+                it[status] = "PLANNED"
+                it[checkedInAt] = null
+                it[checkedInBy] = null
+                it[createdAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+                it[updatedAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+            }
+        }
+
+        val updated = service.backfillPhoneProtection()
+
+        assertEquals(1, updated)
+        transaction(db) {
+            val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq 56L }.single()
+            assertNull(row[GuestListEntriesTable.phone])
+            assertEquals(phoneCipher.hash("+500"), row[GuestListEntriesTable.phoneHash])
+            assertNull(row[GuestListEntriesTable.phoneLastFour])
+            assertEquals("+500", phoneCipher.decrypt(row[GuestListEntriesTable.encryptedPhone]!!))
+        }
     }
 
     @Test

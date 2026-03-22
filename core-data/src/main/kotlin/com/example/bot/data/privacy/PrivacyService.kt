@@ -174,7 +174,10 @@ class PrivacyService(
     }
 
     private fun backfillUsers(): Int = backfillTable(
-        select = UsersTable.selectAll().where { UsersTable.phoneE164.isNotNull() and UsersTable.encryptedPhone.isNull() },
+        select =
+            UsersTable.selectAll().where {
+                UsersTable.phoneE164.isNotNull() and UsersTable.encryptedPhone.isNull()
+            },
         apply = { rowId, protected ->
             UsersTable.update({ UsersTable.id eq rowId }) {
                 it[encryptedPhone] = protected.encrypted
@@ -187,7 +190,10 @@ class PrivacyService(
     )
 
     private fun backfillBookings(): Int = backfillTable(
-        select = BookingsTable.selectAll().where { BookingsTable.phoneE164.isNotNull() and BookingsTable.encryptedPhone.isNull() },
+        select =
+            BookingsTable.selectAll().where {
+                BookingsTable.phoneE164.isNotNull() and BookingsTable.encryptedPhone.isNull()
+            },
         apply = { rowId, protected ->
             BookingsTable.update({ BookingsTable.id eq rowId }) {
                 it[encryptedPhone] = protected.encrypted
@@ -210,11 +216,15 @@ class PrivacyService(
                 val plaintextPhone = row[GuestListEntriesTable.phone]
                 val protected =
                     plaintextPhone?.let(phoneCipher::protect)
-                        ?: ProtectedPhone(
-                            encrypted = row[GuestListEntriesTable.encryptedPhone]!!,
-                            hash = row[GuestListEntriesTable.phoneHash] ?: phoneCipher.hash(phoneCipher.decrypt(row[GuestListEntriesTable.encryptedPhone]!!)),
-                            lastFour = phoneCipher.lastFour(phoneCipher.decrypt(row[GuestListEntriesTable.encryptedPhone]!!)),
-                        )
+                        ?: run {
+                            val encryptedPhone = row[GuestListEntriesTable.encryptedPhone]!!
+                            val decryptedPhone = phoneCipher.decrypt(encryptedPhone)
+                            ProtectedPhone(
+                                encrypted = encryptedPhone,
+                                hash = row[GuestListEntriesTable.phoneHash] ?: phoneCipher.hash(decryptedPhone),
+                                lastFour = phoneCipher.lastFour(decryptedPhone),
+                            )
+                        }
                 GuestListEntriesTable.update({ GuestListEntriesTable.id eq row[GuestListEntriesTable.id] }) {
                     it[encryptedPhone] = protected.encrypted
                     it[phoneHash] = protected.hash

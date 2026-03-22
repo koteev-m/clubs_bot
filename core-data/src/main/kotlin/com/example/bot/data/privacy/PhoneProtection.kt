@@ -15,13 +15,14 @@ import javax.crypto.spec.SecretKeySpec
 private const val GCM_IV_LENGTH_BYTES = 12
 private const val GCM_TAG_LENGTH_BITS = 128
 private const val MIN_PHONE_ENCRYPTION_KEY_LENGTH = 32
+private const val PHONE_SUFFIX_LENGTH = 4
 private const val DEV_PHONE_ENCRYPTION_KEY = "dev-phone-encryption-key-32-bytes!!"
 private val PROD_LIKE_ENVIRONMENTS = setOf("prod", "production", "stage", "staging")
 
 data class ProtectedPhone(
     val encrypted: String,
     val hash: String,
-    val lastFour: String,
+    val lastFour: String?,
 )
 
 data class PrivacyRetentionConfig(
@@ -84,10 +85,9 @@ class PhoneCipher(secret: String) {
         return hmacSha256(("phone:" + normalized).toByteArray(StandardCharsets.UTF_8)).toHex()
     }
 
-    fun lastFour(phoneE164: String): String {
+    fun lastFour(phoneE164: String): String? {
         val digits = phoneE164.filter(Char::isDigit)
-        require(digits.length >= 4) { "phone must contain at least 4 digits" }
-        return digits.takeLast(4)
+        return digits.takeIf { it.length >= PHONE_SUFFIX_LENGTH }?.takeLast(PHONE_SUFFIX_LENGTH)
     }
 
     private fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
