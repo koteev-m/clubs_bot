@@ -317,15 +317,74 @@ class PrivacyServiceTest {
             }
         }
 
-        val updated = service.backfillPhoneProtection()
+        val firstUpdated = service.backfillPhoneProtection()
+        val afterFirstRun = transaction(db) {
+            GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq 56L }.single().let { row ->
+                Triple(
+                    row[GuestListEntriesTable.encryptedPhone],
+                    row[GuestListEntriesTable.phoneHash],
+                    row[GuestListEntriesTable.phoneLastFour],
+                )
+            }
+        }
+        val secondUpdated = service.backfillPhoneProtection()
 
-        assertEquals(1, updated)
+        assertEquals(1, firstUpdated)
+        assertEquals(0, secondUpdated)
         transaction(db) {
             val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq 56L }.single()
             assertNull(row[GuestListEntriesTable.phone])
             assertEquals(phoneCipher.hash("+500"), row[GuestListEntriesTable.phoneHash])
             assertNull(row[GuestListEntriesTable.phoneLastFour])
             assertEquals("+500", phoneCipher.decrypt(row[GuestListEntriesTable.encryptedPhone]!!))
+            assertEquals(afterFirstRun.first, row[GuestListEntriesTable.encryptedPhone])
+            assertEquals(afterFirstRun.second, row[GuestListEntriesTable.phoneHash])
+            assertEquals(afterFirstRun.third, row[GuestListEntriesTable.phoneLastFour])
+        }
+    }
+
+    @Test
+    fun `backfill guest list enriches encrypted long phones without suffix only once`() = runBlocking {
+        val audit = RecordingAuditLogRepository()
+        val service = PrivacyService(db, phoneCipher, PrivacyRetentionConfig(Duration.ofDays(30)), audit, fixedClock)
+        insertGuestList(listId = 57L)
+        val protected = phoneCipher.protect("+15551234567")
+        transaction(db) {
+            GuestListEntriesTable.insert {
+                it[id] = 58L
+                it[guestListId] = 57L
+                it[displayName] = "Encrypted Guest"
+                it[fullName] = "Encrypted Guest"
+                it[tgUsername] = null
+                it[phone] = null
+                it[encryptedPhone] = protected.encrypted
+                it[phoneHash] = protected.hash
+                it[phoneLastFour] = null
+                it[anonymizedAt] = null
+                it[telegramUserId] = null
+                it[plusOnesAllowed] = 0
+                it[plusOnesUsed] = 0
+                it[category] = "DEFAULT"
+                it[comment] = null
+                it[status] = "PLANNED"
+                it[checkedInAt] = null
+                it[checkedInBy] = null
+                it[createdAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+                it[updatedAt] = fixedClock.instant().atOffset(ZoneOffset.UTC)
+            }
+        }
+
+        val firstUpdated = service.backfillPhoneProtection()
+        val secondUpdated = service.backfillPhoneProtection()
+
+        assertEquals(1, firstUpdated)
+        assertEquals(0, secondUpdated)
+        transaction(db) {
+            val row = GuestListEntriesTable.selectAll().where { GuestListEntriesTable.id eq 58L }.single()
+            assertNull(row[GuestListEntriesTable.phone])
+            assertEquals(protected.encrypted, row[GuestListEntriesTable.encryptedPhone])
+            assertEquals(protected.hash, row[GuestListEntriesTable.phoneHash])
+            assertEquals("4567", row[GuestListEntriesTable.phoneLastFour])
         }
     }
 
