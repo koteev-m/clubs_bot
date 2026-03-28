@@ -403,6 +403,36 @@ class TableDepositRepository(
             }
         }
 
+    suspend fun latestDepositsBySession(
+        clubId: Long,
+        sessionIds: Set<Long>,
+    ): Map<Long, TableDeposit> {
+        if (sessionIds.isEmpty()) {
+            return emptyMap()
+        }
+        val safeSessionIds = sessionIds.toList()
+        return withRetriedTx(name = "tableDeposit.latestBySession", readOnly = true, database = db) {
+            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val latestRows =
+                    TableDepositsTable
+                        .selectAll()
+                        .where {
+                            (TableDepositsTable.clubId eq clubId) and
+                                (TableDepositsTable.tableSessionId inList safeSessionIds)
+                        }.orderBy(
+                            TableDepositsTable.tableSessionId to SortOrder.ASC,
+                            TableDepositsTable.createdAt to SortOrder.DESC,
+                            TableDepositsTable.id to SortOrder.DESC,
+                        ).toList()
+                        .distinctBy { it[TableDepositsTable.tableSessionId] }
+                latestRows.associate { row ->
+                    val sessionId = row[TableDepositsTable.tableSessionId]
+                    sessionId to row.toTableDeposit(snapshotForDeposit(row))
+                }
+            }
+        }
+    }
+
     suspend fun findById(
         clubId: Long,
         depositId: Long,

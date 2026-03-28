@@ -31,6 +31,7 @@ import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.tables.GuestQrResolveResult
 import com.example.bot.tables.GuestQrResolver
 import io.ktor.client.request.header
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
@@ -167,6 +168,47 @@ class AdminTableOpsRoutesTest {
         response.assertNoStoreHeaders()
         coVerify(exactly = 0) { deps.visitRepository.tryCheckIn(any()) }
         coVerify(exactly = 0) { deps.visitRepository.markHasTable(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `tables endpoint fetches latest deposits in one repository call`() = withApp { deps ->
+        val firstTable =
+            Table(
+                id = 10,
+                zoneId = "main",
+                label = "Table 10",
+                capacity = 4,
+                minimumTier = "standard",
+                status = TableStatus.FREE,
+                tableNumber = 10,
+            )
+        val firstSession = tableSession(id = 55, tableId = 10)
+        val secondSession = tableSession(id = 56, tableId = 11)
+        val secondTable =
+            Table(
+                id = 11,
+                zoneId = "main",
+                label = "Table 11",
+                capacity = 4,
+                minimumTier = "standard",
+                status = TableStatus.FREE,
+                tableNumber = 11,
+            )
+        coEvery { deps.adminTablesRepository.listForClub(1) } returns listOf(secondTable, firstTable)
+        coEvery { deps.tableSessionRepository.listActive(1, Instant.parse("2024-06-01T20:00:00Z")) } returns listOf(firstSession, secondSession)
+        coEvery { deps.tableDepositRepository.latestDepositsBySession(1, setOf(55L, 56L)) } returns mapOf(
+            55L to tableDeposit(id = 77, sessionId = 55, tableId = 10, guestUserId = 42),
+        )
+
+        val response =
+            client.get("/api/admin/clubs/1/nights/2024-06-01T20:00:00Z/tables") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        response.assertNoStoreHeaders()
+        coVerify(exactly = 1) { deps.tableDepositRepository.latestDepositsBySession(1, setOf(55L, 56L)) }
+        coVerify(exactly = 0) { deps.tableDepositRepository.listDepositsForSession(any(), any()) }
     }
 
 

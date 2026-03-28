@@ -11,6 +11,7 @@ import com.example.bot.data.db.withTxRetry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.JsonObject
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -556,6 +557,14 @@ class BookingHoldRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    private val holdsWithTables =
+        BookingHoldsTable.join(
+            TablesTable,
+            joinType = JoinType.INNER,
+            onColumn = BookingHoldsTable.tableId,
+            otherColumn = TablesTable.id,
+        )
+
     suspend fun createHold(
         tableId: Long,
         slotStart: Instant,
@@ -572,7 +581,7 @@ class BookingHoldRepository(
                     acquireHoldSlotLockIfPostgres(tableId, start, end)
                     val now = Instant.now(clock)
                     val existingByKey =
-                        BookingHoldsTable
+                        holdsWithTables
                             .selectAll()
                             .where { BookingHoldsTable.idempotencyKey eq idempotencyKey }
                             .limit(1)
@@ -666,7 +675,7 @@ class BookingHoldRepository(
     suspend fun findHoldByIdempotencyKey(idempotencyKey: String): BookingHold? =
         withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                BookingHoldsTable
+                holdsWithTables
                     .selectAll()
                     .where { BookingHoldsTable.idempotencyKey eq idempotencyKey }
                     .limit(1)
@@ -740,16 +749,9 @@ class BookingHoldRepository(
 
     private fun ResultRow.toBookingHold(): BookingHold {
         val tableId = this[BookingHoldsTable.tableId]
-        val tableRow =
-            TablesTable
-                .selectAll()
-                .where { TablesTable.id eq tableId }
-                .limit(1)
-                .firstOrNull()
-                ?: throw IllegalStateException("table $tableId not found")
         return BookingHold(
             id = this[BookingHoldsTable.id],
-            clubId = tableRow[TablesTable.clubId],
+            clubId = this[TablesTable.clubId],
             tableId = tableId,
             eventId = this[BookingHoldsTable.eventId],
             slotStart = this[BookingHoldsTable.slotStart].toInstant(),
@@ -766,7 +768,7 @@ class BookingHoldRepository(
         ttl: java.time.Duration,
     ): BookingCoreResult<BookingHold> {
         val row =
-            BookingHoldsTable
+            holdsWithTables
                 .selectAll()
                 .where { BookingHoldsTable.id eq id }
                 .limit(1)
@@ -791,7 +793,7 @@ class BookingHoldRepository(
 
     private fun consumeHoldInternal(id: UUID): BookingCoreResult<BookingHold> {
         val row =
-            BookingHoldsTable
+            holdsWithTables
                 .selectAll()
                 .where { BookingHoldsTable.id eq id }
                 .limit(1)

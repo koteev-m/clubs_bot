@@ -29,8 +29,7 @@ class HostSearchServiceTest {
         val guestListRepository = mockk<GuestListRepository>()
         val guestListDbRepository = mockk<GuestListDbRepository>()
         val listRecord = guestListRecord(id = 1, eventId = 10)
-        val otherList = guestListRecord(id = 2, eventId = 11)
-        coEvery { guestListDbRepository.listByClub(1) } returns listOf(listRecord, otherList)
+        coEvery { guestListDbRepository.listByClub(1, eventId = 10) } returns listOf(listRecord)
 
         val filterSlot = slot<GuestListEntrySearch>()
         val entryView =
@@ -72,6 +71,7 @@ class HostSearchServiceTest {
         assertTrue(results.any { it.kind == HostSearchKind.BOOKING && it.displayName == "Bob" })
         assertEquals(setOf(1L), filterSlot.captured.listIds)
         coVerify(exactly = 1) { bookingRepository.searchByGuestName(1, 10, "Al", 20) }
+        coVerify(exactly = 1) { guestListDbRepository.listByClub(1, eventId = 10) }
     }
 
     private fun guestListRecord(id: Long, eventId: Long): GuestListRecord =

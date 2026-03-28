@@ -151,14 +151,11 @@ fun Application.adminTableOpsRoutes(
                         val tables = adminTablesRepository.listForClub(clubId)
                         val sessions = tableSessionRepository.listActive(clubId, nightStartUtc)
                         val sessionsByTable = sessions.associateBy { it.tableId }
-                        val depositsBySession = mutableMapOf<Long, TableDeposit?>()
-                        for (session in sessions) {
-                            val deposits = tableDepositRepository.listDepositsForSession(clubId, session.id)
-                            depositsBySession[session.id] =
-                                deposits.maxWithOrNull(
-                                    compareBy<TableDeposit> { it.createdAt }.thenBy { it.id },
-                                )
-                        }
+                        val depositsBySession =
+                            tableDepositRepository.latestDepositsBySession(
+                                clubId = clubId,
+                                sessionIds = sessions.mapTo(linkedSetOf()) { it.id },
+                            )
                         val response =
                             tables.sortedBy { it.id }.map { table ->
                                 val session = sessionsByTable[table.id]
