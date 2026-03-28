@@ -44,7 +44,7 @@ class HostSearchService(
         val trimmed = query.trim()
         if (trimmed.isBlank()) return emptyList()
 
-        val lists = guestListDbRepository.listByClub(clubId).filter { it.eventId == eventId }
+        val lists = guestListDbRepository.listByClub(clubId, eventId = eventId)
         val listMap = lists.associateBy { it.id }
         val listIds = lists.mapTo(mutableSetOf()) { it.id }
 

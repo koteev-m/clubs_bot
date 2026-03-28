@@ -9,9 +9,70 @@ import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class TableDepositShiftFreezeIT : PostgresClubIntegrationTest() {
+    @Test
+    fun `latestDepositsBySession returns latest snapshot for multiple sessions`() = runBlocking {
+        val clubId = insertClub("Perf Club")
+        val firstTableId = insertTable(clubId, tableNumber = 1, capacity = 4, minDeposit = BigDecimal("100.00"))
+        val secondTableId = insertTable(clubId, tableNumber = 2, capacity = 4, minDeposit = BigDecimal("100.00"))
+        val actorId = insertUser(username = "actor", displayName = "Actor")
+        val nightStart = Instant.parse("2024-05-01T20:00:00Z")
+        val now = Instant.parse("2024-05-01T20:10:00Z")
+        val sessionRepo = TableSessionRepository(database)
+        val depositRepo = TableDepositRepository(database)
+        val firstSession = sessionRepo.openSession(clubId, nightStart, firstTableId, actorId, now, note = null)
+        val secondSession = sessionRepo.openSession(clubId, nightStart, secondTableId, actorId, now, note = null)
+
+        depositRepo.createDeposit(
+            clubId = clubId,
+            nightStartUtc = nightStart,
+            tableId = firstTableId,
+            sessionId = firstSession.id,
+            guestUserId = null,
+            bookingId = null,
+            paymentId = null,
+            amountMinor = 100,
+            allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+            actorId = actorId,
+            now = now,
+        )
+        val firstLatest = depositRepo.createDeposit(
+            clubId = clubId,
+            nightStartUtc = nightStart,
+            tableId = firstTableId,
+            sessionId = firstSession.id,
+            guestUserId = null,
+            bookingId = null,
+            paymentId = null,
+            amountMinor = 200,
+            allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 200)),
+            actorId = actorId,
+            now = now.plusSeconds(1),
+        )
+        val secondLatest = depositRepo.createDeposit(
+            clubId = clubId,
+            nightStartUtc = nightStart,
+            tableId = secondTableId,
+            sessionId = secondSession.id,
+            guestUserId = null,
+            bookingId = null,
+            paymentId = null,
+            amountMinor = 300,
+            allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 300)),
+            actorId = actorId,
+            now = now.plusSeconds(2),
+        )
+
+        val latestBySession = depositRepo.latestDepositsBySession(clubId, setOf(firstSession.id, secondSession.id))
+
+        assertEquals(2, latestBySession.size)
+        assertEquals(firstLatest.id, latestBySession[firstSession.id]?.id)
+        assertEquals(secondLatest.id, latestBySession[secondSession.id]?.id)
+    }
+
     @Test
     fun `db trigger blocks ledger appends after shift close`() = runBlocking {
         val clubId = insertClub("Freeze Club")
