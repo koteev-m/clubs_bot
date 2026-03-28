@@ -112,6 +112,7 @@ dependencies {
 
     // JSON
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.micrometer.core)
 
     // Тесты
     testImplementation(libs.junit.jupiter)

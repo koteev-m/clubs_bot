@@ -16,6 +16,7 @@ import com.example.bot.telemetry.maskBookingId
 import com.example.bot.telemetry.setRefundAmount
 import com.example.bot.telemetry.setResult
 import com.example.bot.telemetry.spanSuspending
+import com.example.bot.availability.AvailabilityCacheInvalidator
 import com.example.bot.opschat.NoopOpsNotificationPublisher
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationEvent
@@ -36,6 +37,7 @@ class DefaultPaymentsService(
     private val tracer: Tracer?,
     private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     private val clock: Clock = Clock.systemUTC(),
+    private val availabilityCacheInvalidator: AvailabilityCacheInvalidator = AvailabilityCacheInvalidator.Noop,
 ) : PaymentsService {
     private data class BookingLedger(
         var status: BookingStatus = BookingStatus.BOOKED,
@@ -150,6 +152,7 @@ class DefaultPaymentsService(
                 return@spanSuspending when (cancelResult) {
                     is BookingCancellationResult.Cancelled -> {
                         updateLedgerStatus(clubId, bookingId, BookingStatus.CANCELLED)
+                        availabilityCacheInvalidator.invalidateTables(cancelResult.record.clubId, cancelResult.record.slotStart)
                         if (hasIdempotencyKey) {
                             val savedAction =
                                 paymentsRepository.recordAction(
@@ -181,6 +184,7 @@ class DefaultPaymentsService(
 
                     is BookingCancellationResult.AlreadyCancelled -> {
                         updateLedgerStatus(clubId, bookingId, BookingStatus.CANCELLED)
+                        availabilityCacheInvalidator.invalidateTables(cancelResult.record.clubId, cancelResult.record.slotStart)
                         val conflictReason = reason ?: "already_cancelled"
                         if (hasIdempotencyKey) {
                             val savedAction =

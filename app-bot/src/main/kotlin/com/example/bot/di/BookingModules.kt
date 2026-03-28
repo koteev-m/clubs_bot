@@ -224,7 +224,7 @@ val bookingModule =
         single<UserRoleRepository> { ExposedUserRoleRepository(get()) }
 
         single { MyBookingsMetrics(runCatching { get<MeterRegistry>() }.getOrNull()) }
-        single { MyBookingsService(get(), get(), get(), get(), get(), get<OpsNotificationPublisher>()) }
+        single { MyBookingsService(get(), get(), get(), get(), get(), get<OpsNotificationPublisher>(), availabilityCacheInvalidator = get()) }
 
         single<PromoAttributionStore> { InMemoryPromoAttributionStore() }
 
@@ -301,6 +301,7 @@ val bookingModule =
                 get<OpsNotificationPublisher>(),
                 get(),
                 runCatching { get<MeterRegistry>() }.getOrNull(),
+                get(),
             )
         }
         single {

@@ -55,6 +55,7 @@ val paymentsModule =
                 metricsProvider = metricsProvider,
                 tracer = tracer,
                 opsPublisher = get<OpsNotificationPublisher>(),
+                availabilityCacheInvalidator = get(),
             )
         }
     }
