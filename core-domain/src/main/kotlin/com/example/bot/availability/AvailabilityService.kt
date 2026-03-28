@@ -99,9 +99,8 @@ open class AvailabilityService(
                         val eventId = repository.findEvent(clubId, slot.eventStartUtc)?.id
                         dto.copy(eventId = eventId)
                     }
-                    .take(limit)
             nightsCache.put(clubId, nights)
-            nights
+            nights.take(limit)
         }
     }
 
