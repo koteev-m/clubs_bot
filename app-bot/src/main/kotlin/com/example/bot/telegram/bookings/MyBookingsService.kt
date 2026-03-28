@@ -1,5 +1,6 @@
 package com.example.bot.telegram.bookings
 
+import com.example.bot.availability.AvailabilityCacheInvalidator
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
@@ -45,6 +46,7 @@ class MyBookingsService(
     private val metrics: MyBookingsMetrics,
     private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     private val clock: Clock = Clock.systemUTC(),
+    private val availabilityCacheInvalidator: AvailabilityCacheInvalidator = AvailabilityCacheInvalidator.Noop,
 ) {
     private val logger = LoggerFactory.getLogger(MyBookingsService::class.java)
 
@@ -146,6 +148,7 @@ class MyBookingsService(
                 occurredAt = Instant.now(clock),
             ),
         )
+        availabilityCacheInvalidator.invalidateTables(info.clubId, info.slotStart)
         metrics.incCancelOk(info.clubId)
         logger.info("mybookings.cancel: ok booking={} user={} clubId={}", info.id, user.id, info.clubId)
         return CancelResult.Ok(info.copy(status = BookingStatus.CANCELLED))

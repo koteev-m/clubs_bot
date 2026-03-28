@@ -2,6 +2,7 @@ package com.example.bot.booking
 
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.audit.AuditLogger
+import com.example.bot.availability.AvailabilityCacheInvalidator
 import com.example.bot.data.booking.core.BookingCoreError
 import com.example.bot.data.booking.core.BookingCoreResult
 import com.example.bot.data.booking.core.BookingHoldRepository
@@ -73,6 +74,7 @@ class BookingService(
     private val opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     private val promoAttribution: PromoAttributionCoordinator = PromoAttributionCoordinator.Noop,
     private val meterRegistry: MeterRegistry? = null,
+    private val availabilityCacheInvalidator: AvailabilityCacheInvalidator = AvailabilityCacheInvalidator.Noop,
 ) {
     suspend fun hold(
         req: HoldRequest,
@@ -137,6 +139,7 @@ class BookingService(
                         meta = buildJsonObject { put("holdId", result.value.id.toString()) },
                         entityId = result.value.id.toString(),
                     )
+                    availabilityCacheInvalidator.invalidateTables(req.clubId, req.slotStart)
                     BookingCmdResult.HoldCreated(result.value.id)
                 }
 
@@ -214,6 +217,7 @@ class BookingService(
                                     subjectId = record.id.toString(),
                                     occurredAt = record.createdAt,
                                 )
+                            availabilityCacheInvalidator.invalidateTables(record.clubId, record.slotStart)
                             BookingCmdResult.Booked(record.id) to notification
                         }
 
