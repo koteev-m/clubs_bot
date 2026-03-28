@@ -106,6 +106,32 @@ class AvailabilityServiceTest {
         }
 
     @Test
+    fun `list open nights cache stores full list and applies limit on response`() =
+        runTest {
+            val clock = MutableClock(Instant.parse("2024-03-28T12:00:00Z"), ZoneOffset.UTC)
+            val repo = FakeRepo()
+            val registry = SimpleMeterRegistry()
+            val service =
+                AvailabilityService(
+                    repository = repo,
+                    rulesResolver = OperatingRulesResolver(repo, clock),
+                    cutoffPolicy = CutoffPolicy(),
+                    clock = clock,
+                    nightsTtl = Duration.ofSeconds(10),
+                    meterRegistry = registry,
+                )
+
+            val first = service.listOpenNights(1, limit = 1)
+            val second = service.listOpenNights(1, limit = 2)
+
+            assertEquals(1, first.size)
+            assertEquals(2, second.size)
+            assertEquals(1.0, registry.get("availability.cache.miss").tag("operation", "nights").counter().count())
+            assertEquals(1.0, registry.get("availability.cache.hit").tag("operation", "nights").counter().count())
+            assertEquals(1L, registry.get("availability.load.latency").tag("operation", "nights").timer().count())
+        }
+
+    @Test
     fun `list free tables uses ttl cache and metrics`() =
         runTest {
             val clock = MutableClock(Instant.parse("2024-03-28T12:00:00Z"), ZoneOffset.UTC)
