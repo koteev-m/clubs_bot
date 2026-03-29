@@ -661,6 +661,91 @@ class TableSessionDepositRepositoryTest {
             assertEquals("legacy correction", loaded.updateReason)
         }
 
+    @Test
+    fun `latestDepositsBySession returns latest snapshot for multiple sessions`() =
+        runBlocking {
+            val clubId = insertClub()
+            val firstTableId = insertTable(clubId, tableNumber = 7)
+            val secondTableId = insertTable(clubId, tableNumber = 8)
+            val actorId = insertUser()
+            val secondActorId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-01T20:00:00Z")
+            val createdAt = Instant.parse("2024-03-01T20:05:00Z")
+            val firstSession = sessionRepo.openSession(clubId, nightStart, firstTableId, actorId, createdAt, note = null)
+            val secondSession = sessionRepo.openSession(clubId, nightStart, secondTableId, actorId, createdAt, note = null)
+            val firstDeposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = firstTableId,
+                    sessionId = firstSession.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = createdAt,
+                )
+            val secondDeposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = secondTableId,
+                    sessionId = secondSession.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 180,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100), AllocationInput(categoryCode = "VIP", amountMinor = 80)),
+                    actorId = actorId,
+                    now = createdAt.plusSeconds(1),
+                )
+            repo.updateDeposit(
+                clubId = clubId,
+                depositId = firstDeposit.id,
+                amountMinor = 150,
+                allocations = listOf(
+                    AllocationInput(categoryCode = "BAR", amountMinor = 90),
+                    AllocationInput(categoryCode = "VIP", amountMinor = 60),
+                ),
+                reason = "manual correction",
+                actorId = secondActorId,
+                now = createdAt.plusSeconds(2),
+            )
+            val legacyUpdatedAt = createdAt.plusSeconds(20)
+            newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                TableDepositsTable.update({ TableDepositsTable.id eq secondDeposit.id }) {
+                    it[updatedAt] = legacyUpdatedAt.toOffsetDateTimeUtc()
+                    it[updatedBy] = secondActorId
+                    it[updateReason] = "legacy sync"
+                }
+            }
+
+            val latest =
+                repo.latestDepositsBySession(
+                    clubId = clubId,
+                    sessionIds = setOf(firstSession.id, secondSession.id),
+                )
+
+            assertEquals(2, latest.size)
+            val firstLoaded = latest[firstSession.id] ?: fail("First session snapshot not found")
+            assertEquals(firstDeposit.id, firstLoaded.id)
+            assertEquals(150, firstLoaded.amountMinor)
+            assertEquals(secondActorId, firstLoaded.updatedBy)
+            assertEquals("manual correction", firstLoaded.updateReason)
+            assertEquals(mapOf("BAR" to 90L, "VIP" to 60L), firstLoaded.allocations.associate { it.categoryCode to it.amountMinor })
+            val secondLoaded = latest[secondSession.id] ?: fail("Second session snapshot not found")
+            assertEquals(secondDeposit.id, secondLoaded.id)
+            assertEquals(180, secondLoaded.amountMinor)
+            assertEquals(legacyUpdatedAt, secondLoaded.updatedAt)
+            assertEquals(secondActorId, secondLoaded.updatedBy)
+            assertEquals("legacy sync", secondLoaded.updateReason)
+            assertEquals(mapOf("BAR" to 100L, "VIP" to 80L), secondLoaded.allocations.associate { it.categoryCode to it.amountMinor })
+        }
+
 
     @Test
     fun `listDepositsForSession returns allocations`() =
@@ -754,12 +839,15 @@ class TableSessionDepositRepositoryTest {
             }[UsersTable.id]
         }
 
-    private suspend fun insertTable(clubId: Long): Long =
+    private suspend fun insertTable(
+        clubId: Long,
+        tableNumber: Int = 7,
+    ): Long =
         newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
             TablesTable.insert {
                 it[TablesTable.clubId] = clubId
                 it[TablesTable.zoneId] = null
-                it[TablesTable.tableNumber] = 7
+                it[TablesTable.tableNumber] = tableNumber
                 it[TablesTable.capacity] = 4
                 it[TablesTable.minDeposit] = BigDecimal("100.00")
                 it[TablesTable.active] = true

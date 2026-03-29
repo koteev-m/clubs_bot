@@ -425,9 +425,14 @@ class TableDepositRepository(
                             TableDepositsTable.id to SortOrder.DESC,
                         ).toList()
                         .distinctBy { it[TableDepositsTable.tableSessionId] }
+                val snapshotsByDepositId = snapshotsForDeposits(latestRows)
                 latestRows.associate { row ->
                     val sessionId = row[TableDepositsTable.tableSessionId]
-                    sessionId to row.toTableDeposit(snapshotForDeposit(row))
+                    val depositId = row[TableDepositsTable.id]
+                    val snapshot =
+                        snapshotsByDepositId[depositId]
+                            ?: error("Table deposit ledger is empty for depositId=$depositId")
+                    sessionId to row.toTableDeposit(snapshot)
                 }
             }
         }
@@ -489,32 +494,83 @@ class TableDepositRepository(
 
     private fun snapshotForDeposit(depositRow: ResultRow): TableDepositOperationSnapshot {
         val depositId = depositRow[TableDepositsTable.id]
+        return snapshotsForDeposits(listOf(depositRow))[depositId]
+            ?: error("Table deposit ledger is empty for depositId=$depositId")
+    }
+
+    private fun snapshotsForDeposits(depositRows: List<ResultRow>): Map<Long, TableDepositOperationSnapshot> {
+        if (depositRows.isEmpty()) {
+            return emptyMap()
+        }
+        val depositRowsById = depositRows.associateBy { it[TableDepositsTable.id] }
+        val depositIds = depositRowsById.keys.toList()
         val amountSum = TableDepositOperationsTable.amountMinor.sum()
-        val amountMinor =
+        val amountsByDepositId =
             TableDepositOperationsTable
-                .slice(amountSum)
+                .slice(TableDepositOperationsTable.depositId, amountSum)
                 .selectAll()
-                .where { TableDepositOperationsTable.depositId eq depositId }
-                .firstOrNull()
-                ?.get(amountSum)
-                ?: 0L
-        val allocations = allocationSnapshotForDeposit(depositId)
-        val lastOperation =
+                .where { TableDepositOperationsTable.depositId inList depositIds }
+                .groupBy(TableDepositOperationsTable.depositId)
+                .associate { row ->
+                    row[TableDepositOperationsTable.depositId] to (row[amountSum] ?: 0L)
+                }
+
+        val latestOperationByDepositId =
             TableDepositOperationsTable
                 .selectAll()
-                .where { TableDepositOperationsTable.depositId eq depositId }
-                .orderBy(TableDepositOperationsTable.id to SortOrder.DESC)
-                .limit(1)
-                .firstOrNull()
-                ?: error("Table deposit ledger is empty for depositId=$depositId")
-        val snapshotMetadata = resolveSnapshotMetadata(depositRow = depositRow, lastOperation = lastOperation)
-        return TableDepositOperationSnapshot(
-            amountMinor = amountMinor,
-            allocations = allocations,
-            updatedAt = snapshotMetadata.updatedAt,
-            updatedBy = snapshotMetadata.updatedBy,
-            reason = snapshotMetadata.reason,
-        )
+                .where { TableDepositOperationsTable.depositId inList depositIds }
+                .orderBy(
+                    TableDepositOperationsTable.depositId to SortOrder.ASC,
+                    TableDepositOperationsTable.id to SortOrder.DESC,
+                ).toList()
+                .distinctBy { it[TableDepositOperationsTable.depositId] }
+                .associateBy { it[TableDepositOperationsTable.depositId] }
+
+        val allocationSum = TableDepositOperationAllocationsTable.amountMinor.sum()
+        val allocationRows =
+            TableDepositOperationAllocationsTable
+                .join(
+                    TableDepositOperationsTable,
+                    JoinType.INNER,
+                    additionalConstraint = {
+                        TableDepositOperationAllocationsTable.operationId eq TableDepositOperationsTable.id
+                    },
+                ).slice(
+                    TableDepositOperationsTable.depositId,
+                    TableDepositOperationAllocationsTable.categoryCode,
+                    allocationSum,
+                )
+                .selectAll()
+                .where { TableDepositOperationsTable.depositId inList depositIds }
+                .groupBy(TableDepositOperationsTable.depositId, TableDepositOperationAllocationsTable.categoryCode)
+                .toList()
+
+        val allocationsByDepositId =
+            allocationRows
+                .map {
+                    val depositId = it[TableDepositOperationsTable.depositId]
+                    TableDepositAllocation(
+                        depositId = depositId,
+                        categoryCode = it[TableDepositOperationAllocationsTable.categoryCode],
+                        amountMinor = it[allocationSum] ?: 0L,
+                    )
+                }.filter { it.amountMinor != 0L }
+                .groupBy { it.depositId }
+                .mapValues { (_, allocations) -> allocations.sortedBy { it.categoryCode } }
+
+        return depositRowsById.mapValues { (depositId, depositRow) ->
+            val lastOperation =
+                latestOperationByDepositId[depositId]
+                    ?: error("Table deposit ledger is empty for depositId=$depositId")
+            val snapshotMetadata = resolveSnapshotMetadata(depositRow = depositRow, lastOperation = lastOperation)
+            TableDepositOperationSnapshot(
+                amountMinor = amountsByDepositId[depositId] ?: 0L,
+                allocations = allocationsByDepositId[depositId].orEmpty(),
+                updatedAt = snapshotMetadata.updatedAt,
+                updatedBy = snapshotMetadata.updatedBy,
+                reason = snapshotMetadata.reason,
+            )
+        }
     }
 
     private fun resolveSnapshotMetadata(
@@ -543,32 +599,6 @@ class TableDepositRepository(
                 reason = lastOperation[TableDepositOperationsTable.reason],
             )
         }
-    }
-
-    private fun allocationSnapshotForDeposit(depositId: Long): List<TableDepositAllocation> {
-        val sumAmount = TableDepositOperationAllocationsTable.amountMinor.sum()
-        val rows =
-            TableDepositOperationAllocationsTable
-                .join(
-                    TableDepositOperationsTable,
-                    JoinType.INNER,
-                    additionalConstraint = {
-                        TableDepositOperationAllocationsTable.operationId eq TableDepositOperationsTable.id
-                    },
-                ).slice(TableDepositOperationAllocationsTable.categoryCode, sumAmount)
-                .selectAll()
-                .where { TableDepositOperationsTable.depositId eq depositId }
-                .groupBy(TableDepositOperationAllocationsTable.categoryCode)
-                .toList()
-        return rows
-            .map {
-                TableDepositAllocation(
-                    depositId = depositId,
-                    categoryCode = it[TableDepositOperationAllocationsTable.categoryCode],
-                    amountMinor = it[sumAmount] ?: 0L,
-                )
-            }.filter { it.amountMinor != 0L }
-            .sortedBy { it.categoryCode }
     }
 
     private fun allocationDeltas(
