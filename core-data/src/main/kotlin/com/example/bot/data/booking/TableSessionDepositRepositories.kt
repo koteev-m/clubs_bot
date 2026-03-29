@@ -12,9 +12,12 @@ import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.alias
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.sum
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -413,18 +416,31 @@ class TableDepositRepository(
         val safeSessionIds = sessionIds.toList()
         return withRetriedTx(name = "tableDeposit.latestBySession", readOnly = true, database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                val newerDeposits = TableDepositsTable.alias("newer_deposits")
                 val latestRows =
                     TableDepositsTable
-                        .selectAll()
+                        .join(
+                            newerDeposits,
+                            JoinType.LEFT,
+                            additionalConstraint = {
+                                (newerDeposits[TableDepositsTable.clubId] eq TableDepositsTable.clubId) and
+                                    (newerDeposits[TableDepositsTable.tableSessionId] eq
+                                        TableDepositsTable.tableSessionId) and
+                                    (
+                                        (newerDeposits[TableDepositsTable.createdAt] greater TableDepositsTable.createdAt) or
+                                            (
+                                                (newerDeposits[TableDepositsTable.createdAt] eq TableDepositsTable.createdAt) and
+                                                    (newerDeposits[TableDepositsTable.id] greater TableDepositsTable.id)
+                                            )
+                                    )
+                            },
+                        ).selectAll()
                         .where {
                             (TableDepositsTable.clubId eq clubId) and
-                                (TableDepositsTable.tableSessionId inList safeSessionIds)
-                        }.orderBy(
-                            TableDepositsTable.tableSessionId to SortOrder.ASC,
-                            TableDepositsTable.createdAt to SortOrder.DESC,
-                            TableDepositsTable.id to SortOrder.DESC,
-                        ).toList()
-                        .distinctBy { it[TableDepositsTable.tableSessionId] }
+                                (TableDepositsTable.tableSessionId inList safeSessionIds) and
+                                newerDeposits[TableDepositsTable.id].isNull()
+                        }.orderBy(TableDepositsTable.tableSessionId to SortOrder.ASC)
+                        .toList()
                 val snapshotsByDepositId = snapshotsForDeposits(latestRows)
                 latestRows.associate { row ->
                     val sessionId = row[TableDepositsTable.tableSessionId]

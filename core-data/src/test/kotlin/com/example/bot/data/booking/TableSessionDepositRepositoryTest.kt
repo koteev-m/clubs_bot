@@ -746,6 +746,123 @@ class TableSessionDepositRepositoryTest {
             assertEquals(mapOf("BAR" to 100L, "VIP" to 80L), secondLoaded.allocations.associate { it.categoryCode to it.amountMinor })
         }
 
+    @Test
+    fun `latestDepositsBySession keeps tie break and legacy metadata fallback semantics`() =
+        runBlocking {
+            val clubId = insertClub()
+            val firstTableId = insertTable(clubId, tableNumber = 21)
+            val secondTableId = insertTable(clubId, tableNumber = 22)
+            val actorId = insertUser()
+            val updaterId = insertUser()
+            val legacyUpdaterId = insertUser()
+            val repo = TableDepositRepository(testDb.database)
+            val sessionRepo = TableSessionRepository(testDb.database)
+            val nightStart = Instant.parse("2024-03-10T20:00:00Z")
+            val createdAt = Instant.parse("2024-03-10T20:05:00Z")
+            val firstSession = sessionRepo.openSession(clubId, nightStart, firstTableId, actorId, createdAt, note = null)
+            val secondSession = sessionRepo.openSession(clubId, nightStart, secondTableId, actorId, createdAt, note = null)
+
+            val earlierDeposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = firstTableId,
+                    sessionId = firstSession.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 100,
+                    allocations = listOf(AllocationInput(categoryCode = "BAR", amountMinor = 100)),
+                    actorId = actorId,
+                    now = createdAt,
+                )
+            val latestDeposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = firstTableId,
+                    sessionId = firstSession.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 120,
+                    allocations = listOf(
+                        AllocationInput(categoryCode = "BAR", amountMinor = 70),
+                        AllocationInput(categoryCode = "VIP", amountMinor = 50),
+                    ),
+                    actorId = actorId,
+                    now = createdAt,
+                )
+            check(latestDeposit.id > earlierDeposit.id)
+            val firstSessionUpdatedAt = createdAt.plusSeconds(10)
+            repo.updateDeposit(
+                clubId = clubId,
+                depositId = latestDeposit.id,
+                amountMinor = 110,
+                allocations = listOf(
+                    AllocationInput(categoryCode = "BAR", amountMinor = 60),
+                    AllocationInput(categoryCode = "VIP", amountMinor = 50),
+                ),
+                reason = "tie break update",
+                actorId = updaterId,
+                now = firstSessionUpdatedAt,
+            )
+
+            val secondSessionDeposit =
+                repo.createDeposit(
+                    clubId = clubId,
+                    nightStartUtc = nightStart,
+                    tableId = secondTableId,
+                    sessionId = secondSession.id,
+                    guestUserId = null,
+                    bookingId = null,
+                    paymentId = null,
+                    amountMinor = 200,
+                    allocations = listOf(
+                        AllocationInput(categoryCode = "BAR", amountMinor = 120),
+                        AllocationInput(categoryCode = "FOOD", amountMinor = 80),
+                    ),
+                    actorId = actorId,
+                    now = createdAt.plusSeconds(1),
+                )
+            val legacyUpdatedAt = createdAt.plusSeconds(30)
+            newSuspendedTransaction(context = Dispatchers.IO, db = testDb.database) {
+                TableDepositsTable.update({ TableDepositsTable.id eq secondSessionDeposit.id }) {
+                    it[updatedAt] = legacyUpdatedAt.toOffsetDateTimeUtc()
+                    it[updatedBy] = legacyUpdaterId
+                    it[updateReason] = "legacy metadata from table_deposits"
+                }
+            }
+
+            val latestBySession =
+                repo.latestDepositsBySession(
+                    clubId = clubId,
+                    sessionIds = setOf(firstSession.id, secondSession.id),
+                )
+
+            assertEquals(2, latestBySession.size)
+            val firstLoaded = latestBySession[firstSession.id] ?: fail("Expected first session latest deposit")
+            assertEquals(latestDeposit.id, firstLoaded.id)
+            assertEquals(110, firstLoaded.amountMinor)
+            assertEquals(updaterId, firstLoaded.updatedBy)
+            assertEquals("tie break update", firstLoaded.updateReason)
+            assertEquals(
+                mapOf("BAR" to 60L, "VIP" to 50L),
+                firstLoaded.allocations.associate { it.categoryCode to it.amountMinor },
+            )
+
+            val secondLoaded = latestBySession[secondSession.id] ?: fail("Expected second session latest deposit")
+            assertEquals(secondSessionDeposit.id, secondLoaded.id)
+            assertEquals(200, secondLoaded.amountMinor)
+            assertEquals(legacyUpdatedAt, secondLoaded.updatedAt)
+            assertEquals(legacyUpdaterId, secondLoaded.updatedBy)
+            assertEquals("legacy metadata from table_deposits", secondLoaded.updateReason)
+            assertEquals(
+                mapOf("BAR" to 120L, "FOOD" to 80L),
+                secondLoaded.allocations.associate { it.categoryCode to it.amountMinor },
+            )
+        }
+
 
     @Test
     fun `listDepositsForSession returns allocations`() =
