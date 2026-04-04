@@ -17,9 +17,12 @@ object BookingOutboxTable : Table("booking_outbox") {
     val lastError = text("last_error").nullable()
     val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
     val updatedAt = timestampWithTimeZone("updated_at").defaultExpression(CurrentTimestamp())
+    val leaseUntil = timestampWithTimeZone("lease_until").nullable()
+    val leaseOwner = text("lease_owner").nullable()
     override val primaryKey = PrimaryKey(id)
 
     init {
         index("idx_booking_outbox_status_attempt", false, status, nextAttemptAt)
+        index("idx_booking_outbox_lease_until", false, leaseUntil)
     }
 }

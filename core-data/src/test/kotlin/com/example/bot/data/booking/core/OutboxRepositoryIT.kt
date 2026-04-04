@@ -2,6 +2,9 @@ package com.example.bot.data.booking.core
 
 import com.example.bot.config.BotLimits
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.exposed.sql.selectAll
@@ -14,6 +17,7 @@ import testing.RequiresDocker
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlin.time.Duration.Companion.seconds
 
 @RequiresDocker
 @Tag("it")
@@ -55,5 +59,27 @@ class OutboxRepositoryIT : PostgresIntegrationTest() {
             assertEquals("NEW", stored[BookingOutboxTable.status])
             assertEquals(1, stored[BookingOutboxTable.attempts])
             assertEquals(expectedNext, stored[BookingOutboxTable.nextAttemptAt].toInstant())
+        }
+
+    @Test
+    fun `claimBatchWithLease uses skip locked across concurrent workers`() =
+        runBlocking {
+            val fixedNow = Instant.parse("2025-03-01T12:00:00Z")
+            val repo = OutboxRepository(database, Clock.fixed(fixedNow, ZoneOffset.UTC))
+            repeat(8) {
+                repo.enqueue("booking.created", buildJsonObject { put("n", it) })
+            }
+            val claimed =
+                coroutineScope {
+                    listOf("worker-a", "worker-b")
+                        .map { owner ->
+                            async {
+                                repo.claimBatchWithLease(limit = 4, leaseOwner = owner, leaseTtl = 30.seconds).map { it.id }.toSet()
+                            }
+                        }.awaitAll()
+                }
+            assertEquals(4, claimed[0].size)
+            assertEquals(4, claimed[1].size)
+            assertTrue(claimed[0].intersect(claimed[1]).isEmpty(), "claimed sets must not overlap")
         }
 }

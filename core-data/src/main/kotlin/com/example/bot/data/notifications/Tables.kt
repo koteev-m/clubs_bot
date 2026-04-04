@@ -19,6 +19,7 @@ object NotifySegments : Table("notify_segments") {
 object NotifyCampaigns : Table("notify_campaigns") {
     val id = long("id").autoIncrement()
     val title = text("title")
+    val text = text("text").default("")
     val status = text("status")
     val kind = text("kind")
     val clubId = long("club_id").nullable()
@@ -29,6 +30,17 @@ object NotifyCampaigns : Table("notify_campaigns") {
     val createdBy = long("created_by")
     val createdAt = timestampWithTimeZone("created_at")
     val updatedAt = timestampWithTimeZone("updated_at")
+    val version = long("version").default(0)
+    override val primaryKey = PrimaryKey(id)
+}
+
+object NotifyCampaignAudit : Table("notify_campaign_audit") {
+    val id = long("id").autoIncrement()
+    val campaignId = long("campaign_id").references(NotifyCampaigns.id)
+    val auditAction = text("audit_action")
+    val actor = text("actor")
+    val reason = text("reason").nullable()
+    val createdAt = timestampWithTimeZone("created_at").defaultExpression(CurrentTimestamp())
     override val primaryKey = PrimaryKey(id)
 }
 
