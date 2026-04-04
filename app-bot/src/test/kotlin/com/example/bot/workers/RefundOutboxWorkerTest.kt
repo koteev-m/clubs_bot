@@ -127,6 +127,26 @@ class RefundOutboxWorkerTest {
         }
 
     @Test
+    fun `permanent failure does not increment retry metric`() =
+        runTest {
+            val outbox = mockk<OutboxRepository>()
+            val metrics = MetricsProvider(MetricsProvider.simpleRegistry())
+            val message = sampleMessage()
+            coEvery { outbox.countPending(any()) } returns 1
+            coEvery { outbox.pickBatchForTopics(any(), any()) } returns listOf(message)
+            coEvery { outbox.markFailedPermanently(message.id, any()) } returns BookingCoreResult.Success(Unit)
+            val worker =
+                worker(outbox, metrics) {
+                    ProviderRefundResult.Failure(status = 422, body = "unprocessable")
+                }
+
+            worker.runOnce()
+
+            val retryCounter = metrics.registry.find("provider.refund.retry").counter()
+            assertEquals(null, retryCounter)
+        }
+
+    @Test
     fun `idempotency key uses outbox id`() =
         runTest {
             val outbox = mockk<OutboxRepository>()

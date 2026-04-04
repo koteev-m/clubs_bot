@@ -897,20 +897,27 @@ class OutboxRepository(
             return emptyList()
         }
         val now = Instant.now(clock).toOffsetDateTime()
+        val leaseUntil = Instant.now(clock).plusMillis(defaultLeaseTtl.inWholeMilliseconds).toOffsetDateTime()
         val topicList = topics.toList()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                BookingOutboxTable
-                    .selectAll()
-                    .where {
-                        (BookingOutboxTable.status eq OutboxMessageStatus.NEW.name) and
-                            (BookingOutboxTable.nextAttemptAt lessEq now) and
-                            (BookingOutboxTable.topic inList topicList)
-                    }.orderBy(
-                        BookingOutboxTable.nextAttemptAt to SortOrder.ASC,
-                        BookingOutboxTable.id to SortOrder.ASC,
-                    ).limit(limit)
-                    .map { it.toOutboxMessage() }
+                if (this.db.dialect.name.lowercase().contains("postgres")) {
+                    claimPostgresTopicBatch(
+                        limit = limit,
+                        now = now,
+                        leaseUntil = leaseUntil,
+                        leaseOwner = "topic-worker",
+                        topics = topicList,
+                    )
+                } else {
+                    claimFallbackTopicBatch(
+                        limit = limit,
+                        now = now,
+                        leaseUntil = leaseUntil,
+                        leaseOwner = "topic-worker",
+                        topics = topicList,
+                    )
+                }
             }
         }
     }
@@ -1096,6 +1103,107 @@ class OutboxRepository(
         )
 }
 
+
+private fun Transaction.claimPostgresTopicBatch(
+    limit: Int,
+    now: OffsetDateTime,
+    leaseUntil: OffsetDateTime,
+    leaseOwner: String,
+    topics: List<String>,
+): List<OutboxMessage> {
+    val topicPlaceholders = topics.joinToString(",") { "?" }
+    val sql =
+        """
+        WITH claimed AS (
+            SELECT id
+            FROM booking_outbox
+            WHERE status = 'NEW'
+              AND next_attempt_at <= ?
+              AND topic IN ($topicPlaceholders)
+              AND (lease_until IS NULL OR lease_until <= ?)
+            ORDER BY next_attempt_at ASC, id ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT ?
+        )
+        UPDATE booking_outbox outbox
+        SET lease_owner = ?, lease_until = ?, updated_at = ?
+        FROM claimed
+        WHERE outbox.id = claimed.id
+        RETURNING outbox.id, outbox.topic, outbox.payload, outbox.status, outbox.attempts, outbox.next_attempt_at, outbox.last_error
+        """.trimIndent()
+    val claimed = mutableListOf<OutboxMessage>()
+    val statement = connection.prepareStatement(sql, false)
+    try {
+        statement[1] = now
+        var index = 2
+        topics.forEach { topic ->
+            statement[index++] = topic
+        }
+        statement[index++] = now
+        statement[index++] = limit
+        statement[index++] = leaseOwner
+        statement[index++] = leaseUntil
+        statement[index] = now
+        statement.executeQuery().use { rs ->
+            while (rs.next()) {
+                claimed +=
+                    OutboxMessage(
+                        id = rs.getLong("id"),
+                        topic = rs.getString("topic"),
+                        payload = Json.parseToJsonElement(rs.getString("payload")) as JsonObject,
+                        status = OutboxMessageStatus.valueOf(rs.getString("status")),
+                        attempts = rs.getInt("attempts"),
+                        nextAttemptAt = rs.getObject("next_attempt_at", OffsetDateTime::class.java).toInstant(),
+                        lastError = rs.getString("last_error"),
+                    )
+            }
+        }
+    } finally {
+        statement.closeIfPossible()
+    }
+    return claimed
+}
+
+private fun Transaction.claimFallbackTopicBatch(
+    limit: Int,
+    now: OffsetDateTime,
+    leaseUntil: OffsetDateTime,
+    leaseOwner: String,
+    topics: List<String>,
+): List<OutboxMessage> {
+    val rows =
+        BookingOutboxTable
+            .selectAll()
+            .where {
+                (BookingOutboxTable.status eq OutboxMessageStatus.NEW.name) and
+                    (BookingOutboxTable.nextAttemptAt lessEq now) and
+                    (BookingOutboxTable.topic inList topics) and
+                    ((BookingOutboxTable.leaseUntil.isNull()) or (BookingOutboxTable.leaseUntil lessEq now))
+            }.orderBy(
+                BookingOutboxTable.nextAttemptAt to SortOrder.ASC,
+                BookingOutboxTable.id to SortOrder.ASC,
+            ).limit(limit)
+            .forUpdate()
+            .toList()
+    rows.forEach { row ->
+        BookingOutboxTable.update({ BookingOutboxTable.id eq row[BookingOutboxTable.id] }) {
+            it[BookingOutboxTable.leaseOwner] = leaseOwner
+            it[BookingOutboxTable.leaseUntil] = leaseUntil
+            it[BookingOutboxTable.updatedAt] = now
+        }
+    }
+    return rows.map {
+        OutboxMessage(
+            id = it[BookingOutboxTable.id],
+            topic = it[BookingOutboxTable.topic],
+            payload = it[BookingOutboxTable.payload],
+            status = OutboxMessageStatus.valueOf(it[BookingOutboxTable.status]),
+            attempts = it[BookingOutboxTable.attempts],
+            nextAttemptAt = it[BookingOutboxTable.nextAttemptAt].toInstant(),
+            lastError = it[BookingOutboxTable.lastError],
+        )
+    }
+}
 private fun Transaction.claimPostgresBatch(
     limit: Int,
     now: OffsetDateTime,
