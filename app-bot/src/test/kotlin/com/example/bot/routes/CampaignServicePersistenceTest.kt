@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
 import org.jetbrains.exposed.sql.Database
@@ -111,7 +112,7 @@ class CampaignServicePersistenceTest : StringSpec({
         val pool = Executors.newFixedThreadPool(2)
 
         try {
-            val first = pool.submit<CampaignDto?> {
+            val first = pool.submit<CampaignMutationResult> {
                 startGate.await()
                 runBlocking {
                     service.update(
@@ -121,7 +122,7 @@ class CampaignServicePersistenceTest : StringSpec({
                     )
                 }
             }
-            val second = pool.submit<CampaignDto?> {
+            val second = pool.submit<CampaignMutationResult> {
                 startGate.await()
                 runBlocking {
                     service.setStatus(created.id, CampaignStatus.PAUSED, actorId = actorId)
@@ -131,7 +132,8 @@ class CampaignServicePersistenceTest : StringSpec({
             startGate.countDown()
             val firstResult = first.get()
             val secondResult = second.get()
-            listOf(firstResult, secondResult).count { it != null } shouldBe 1
+            listOf(firstResult, secondResult).count { it is CampaignMutationResult.Success } shouldBe 1
+            listOf(firstResult, secondResult).count { it is CampaignMutationResult.Conflict } shouldBe 1
 
             val restored = service.find(created.id)!!
             restored.version shouldBe 1
@@ -146,6 +148,62 @@ class CampaignServicePersistenceTest : StringSpec({
                 audits.size shouldBe 2
                 audits.first() shouldBe "CREATE"
             }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    "conflict result is not mapped as not found for campaign mutate operations" {
+        val ds =
+            JdbcDataSource().apply {
+                setURL("jdbc:h2:mem:campaign_conflict_mapping;MODE=PostgreSQL;DB_CLOSE_DELAY=-1")
+                user = "sa"
+                password = ""
+            }
+        Flyway
+            .configure()
+            .dataSource(ds)
+            .locations("classpath:db/migration/common", "classpath:db/migration/h2")
+            .load()
+            .migrate()
+        val database = Database.connect(ds)
+
+        val actorId =
+            transaction(database) {
+                UsersTable.insert {
+                    it[telegramUserId] = 3001L
+                    it[username] = "mutator-2"
+                }[UsersTable.id]
+            }
+
+        val gate = CountDownLatch(2)
+        val release = CountDownLatch(1)
+        val hookInvocation = AtomicInteger(0)
+        val service =
+            DbCampaignService(
+                database,
+                beforeOptimisticMutation = {
+                    if (hookInvocation.incrementAndGet() <= 2) {
+                        gate.countDown()
+                        release.await()
+                    }
+                },
+            )
+        val created = service.create(CampaignCreateRequest(title = "t", text = "base"), actorId = actorId)
+        val pool = Executors.newFixedThreadPool(2)
+
+        try {
+            val first = pool.submit<CampaignMutationResult> { runBlocking { service.update(created.id, CampaignUpdateRequest(text = "one"), actorId) } }
+            val second = pool.submit<CampaignMutationResult> { runBlocking { service.update(created.id, CampaignUpdateRequest(text = "two"), actorId) } }
+
+            gate.await()
+            release.countDown()
+
+            val firstResult = first.get()
+            val secondResult = second.get()
+            listOf(firstResult, secondResult).count { it is CampaignMutationResult.Success } shouldBe 1
+            listOf(firstResult, secondResult).count { it is CampaignMutationResult.Conflict } shouldBe 1
+            listOf(firstResult, secondResult).count { it is CampaignMutationResult.NotFound } shouldBe 0
         } finally {
             pool.shutdownNow()
         }

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
@@ -106,6 +107,25 @@ class OutboxRepositoryIT : PostgresIntegrationTest() {
             assertEquals(5, claimed[1].size)
             assertTrue(claimed[0].intersect(claimed[1]).isEmpty(), "topic claimed sets must not overlap")
             assertTrue(repo.pickBatchForTopics(limit = 1, topics = setOf("payment.refunded")).isEmpty())
+        }
+
+    @Test
+    fun `topic claim supporting index exists`() =
+        runBlocking {
+            val indexExists =
+                newSuspendedTransaction(db = database) {
+                    val query =
+                        """
+                        SELECT 1
+                        FROM pg_indexes
+                        WHERE schemaname = current_schema()
+                          AND tablename = 'booking_outbox'
+                          AND indexname = 'idx_booking_outbox_topic_claim'
+                        LIMIT 1
+                        """.trimIndent()
+                    exec(query) { rs -> rs.next() } ?: false
+                }
+            assertTrue(indexExists)
         }
 
 }
