@@ -531,16 +531,21 @@ class TableDepositRepository(
                     row[TableDepositOperationsTable.depositId] to (row[amountSum] ?: 0L)
                 }
 
+        val newerOperations = TableDepositOperationsTable.alias("newer_deposit_operations")
         val latestOperationByDepositId =
             TableDepositOperationsTable
-                .selectAll()
-                .where { TableDepositOperationsTable.depositId inList depositIds }
-                .orderBy(
-                    TableDepositOperationsTable.depositId to SortOrder.ASC,
-                    TableDepositOperationsTable.id to SortOrder.DESC,
-                ).toList()
-                .distinctBy { it[TableDepositOperationsTable.depositId] }
-                .associateBy { it[TableDepositOperationsTable.depositId] }
+                .join(
+                    newerOperations,
+                    JoinType.LEFT,
+                    additionalConstraint = {
+                        (newerOperations[TableDepositOperationsTable.depositId] eq TableDepositOperationsTable.depositId) and
+                            (newerOperations[TableDepositOperationsTable.id] greater TableDepositOperationsTable.id)
+                    },
+                ).selectAll()
+                .where {
+                    (TableDepositOperationsTable.depositId inList depositIds) and
+                        newerOperations[TableDepositOperationsTable.id].isNull()
+                }.associateBy { it[TableDepositOperationsTable.depositId] }
 
         val allocationSum = TableDepositOperationAllocationsTable.amountMinor.sum()
         val allocationRows =

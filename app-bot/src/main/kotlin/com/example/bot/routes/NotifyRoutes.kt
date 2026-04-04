@@ -7,6 +7,7 @@ import com.example.bot.notifications.NotifyMessage
 import com.example.bot.notifications.ParseMode
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.security.rbac.authorize
+import com.example.bot.security.rbac.rbacContext
 import com.example.bot.telegram.NotifyDispatchHealth
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -76,7 +77,10 @@ open class CampaignService {
     private val campaigns = ConcurrentHashMap<Long, CampaignDto>()
     private var seq = 0L
 
-    open suspend fun create(req: CampaignCreateRequest): CampaignDto {
+    open suspend fun create(
+        req: CampaignCreateRequest,
+        actorId: Long,
+    ): CampaignDto {
         val text = sanitize(req.text, req.parseMode)
         val id = ++seq
         val dto = CampaignDto(id = id, title = req.title, text = text)
@@ -87,6 +91,7 @@ open class CampaignService {
     open suspend fun update(
         id: Long,
         req: CampaignUpdateRequest,
+        actorId: Long,
     ): CampaignDto? {
         val dto = campaigns[id] ?: return null
         val updated =
@@ -106,6 +111,7 @@ open class CampaignService {
     open suspend fun schedule(
         id: Long,
         req: ScheduleRequest,
+        actorId: Long,
     ): CampaignDto? {
         val dto = campaigns[id] ?: return null
         val updated = dto.copy(cron = req.cron, startsAt = req.startsAt, status = CampaignStatus.SCHEDULED, version = dto.version + 1)
@@ -116,6 +122,7 @@ open class CampaignService {
     open suspend fun setStatus(
         id: Long,
         status: CampaignStatus,
+        actorId: Long,
     ): CampaignDto? {
         val dto = campaigns[id] ?: return null
         val updated = dto.copy(status = status, version = dto.version + 1)
@@ -128,7 +135,10 @@ class DbCampaignService(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) : CampaignService() {
-    override suspend fun create(req: CampaignCreateRequest): CampaignDto =
+    override suspend fun create(
+        req: CampaignCreateRequest,
+        actorId: Long,
+    ): CampaignDto =
         newSuspendedTransaction(db = db) {
             val now = Instant.now(clock).atOffset(ZoneOffset.UTC)
             val text = sanitize(req.text, req.parseMode)
@@ -138,16 +148,20 @@ class DbCampaignService(
                     it[NotifyCampaigns.text] = text
                     it[status] = CampaignStatus.DRAFT.name
                     it[kind] = "MANUAL"
-                    it[createdBy] = 1
+                    it[createdBy] = actorId
                     it[createdAt] = now
                     it[updatedAt] = now
                     it[version] = 0
                 }[NotifyCampaigns.id]
-            appendAudit(id, action = "CREATE", reason = null)
+            appendAudit(id, action = "CREATE", reason = null, actorId = actorId)
             rowToDto(NotifyCampaigns.selectAll().where { NotifyCampaigns.id eq id }.first())
         }
 
-    override suspend fun update(id: Long, req: CampaignUpdateRequest): CampaignDto? =
+    override suspend fun update(
+        id: Long,
+        req: CampaignUpdateRequest,
+        actorId: Long,
+    ): CampaignDto? =
         newSuspendedTransaction(db = db) {
             val current = readCampaign(id) ?: return@newSuspendedTransaction null
             val nextTitle = req.title ?: current[NotifyCampaigns.title]
@@ -162,7 +176,7 @@ class DbCampaignService(
                     it[updatedAt] = now
                 }
             if (updatedRows == 0) return@newSuspendedTransaction null
-            appendAudit(id, action = "UPDATE", reason = null)
+            appendAudit(id, action = "UPDATE", reason = null, actorId = actorId)
             rowToDto(readCampaign(id)!!)
         }
 
@@ -174,11 +188,19 @@ class DbCampaignService(
             NotifyCampaigns.selectAll().orderBy(NotifyCampaigns.id to SortOrder.ASC).map { rowToDto(it) }
         }
 
-    override suspend fun schedule(id: Long, req: ScheduleRequest): CampaignDto? =
-        updateState(id = id, status = CampaignStatus.SCHEDULED, cron = req.cron, startsAt = req.startsAt, reason = "SCHEDULE")
+    override suspend fun schedule(
+        id: Long,
+        req: ScheduleRequest,
+        actorId: Long,
+    ): CampaignDto? =
+        updateState(id = id, status = CampaignStatus.SCHEDULED, cron = req.cron, startsAt = req.startsAt, reason = "SCHEDULE", actorId = actorId)
 
-    override suspend fun setStatus(id: Long, status: CampaignStatus): CampaignDto? =
-        updateState(id = id, status = status, cron = null, startsAt = null, reason = status.name)
+    override suspend fun setStatus(
+        id: Long,
+        status: CampaignStatus,
+        actorId: Long,
+    ): CampaignDto? =
+        updateState(id = id, status = status, cron = null, startsAt = null, reason = status.name, actorId = actorId)
 
     private fun readCampaign(id: Long): ResultRow? =
         NotifyCampaigns.selectAll().where { NotifyCampaigns.id eq id }.limit(1).firstOrNull()
@@ -194,11 +216,16 @@ class DbCampaignService(
             version = row[NotifyCampaigns.version],
         )
 
-    private fun appendAudit(id: Long, action: String, reason: String?) {
+    private fun appendAudit(
+        id: Long,
+        action: String,
+        reason: String?,
+        actorId: Long,
+    ) {
         NotifyCampaignAudit.insert {
             it[campaignId] = id
             it[auditAction] = action
-            it[actor] = "system"
+            it[actor] = actorId.toString()
             it[NotifyCampaignAudit.reason] = reason
         }
     }
@@ -209,6 +236,7 @@ class DbCampaignService(
         cron: String?,
         startsAt: String?,
         reason: String,
+        actorId: Long,
     ): CampaignDto? =
         newSuspendedTransaction(db = db) {
             val current = readCampaign(id) ?: return@newSuspendedTransaction null
@@ -227,7 +255,7 @@ class DbCampaignService(
                     it[updatedAt] = now
                 }
             if (updatedRows == 0) return@newSuspendedTransaction null
-            appendAudit(id, action = "STATUS", reason = reason)
+            appendAudit(id, action = "STATUS", reason = reason, actorId = actorId)
             rowToDto(readCampaign(id)!!)
         }
 }
@@ -297,7 +325,7 @@ private fun Route.campaignRoutes(campaigns: CampaignService) {
     route("/campaigns") {
         post {
             val req = call.receive<CampaignCreateRequest>()
-            val dto = campaigns.create(req)
+            val dto = campaigns.create(req, actorId = call.rbacContext().user.id)
             call.respond(dto)
         }
 
@@ -315,7 +343,7 @@ private fun Route.campaignRoutes(campaigns: CampaignService) {
             put {
                 val id = call.parameters.getOrFail("id").toLong()
                 val req = call.receive<CampaignUpdateRequest>()
-                val dto = campaigns.update(id, req) ?: throw BadRequestException("not found")
+                val dto = campaigns.update(id, req, actorId = call.rbacContext().user.id) ?: throw BadRequestException("not found")
                 call.respond(dto)
             }
 
@@ -331,25 +359,25 @@ private fun Route.campaignRoutes(campaigns: CampaignService) {
             post(":schedule") {
                 val id = call.parameters.getOrFail("id").toLong()
                 val req = call.receive<ScheduleRequest>()
-                val dto = campaigns.schedule(id, req) ?: throw BadRequestException("not found")
+                val dto = campaigns.schedule(id, req, actorId = call.rbacContext().user.id) ?: throw BadRequestException("not found")
                 call.respond(dto)
             }
 
             post(":send-now") {
                 val id = call.parameters.getOrFail("id").toLong()
-                val dto = campaigns.setStatus(id, CampaignStatus.SENDING) ?: throw BadRequestException("not found")
+                val dto = campaigns.setStatus(id, CampaignStatus.SENDING, actorId = call.rbacContext().user.id) ?: throw BadRequestException("not found")
                 call.respond(dto)
             }
 
             post(":pause") {
                 val id = call.parameters.getOrFail("id").toLong()
-                val dto = campaigns.setStatus(id, CampaignStatus.PAUSED) ?: throw BadRequestException("not found")
+                val dto = campaigns.setStatus(id, CampaignStatus.PAUSED, actorId = call.rbacContext().user.id) ?: throw BadRequestException("not found")
                 call.respond(dto)
             }
 
             post(":resume") {
                 val id = call.parameters.getOrFail("id").toLong()
-                val dto = campaigns.setStatus(id, CampaignStatus.SENDING) ?: throw BadRequestException("not found")
+                val dto = campaigns.setStatus(id, CampaignStatus.SENDING, actorId = call.rbacContext().user.id) ?: throw BadRequestException("not found")
                 call.respond(dto)
             }
         }

@@ -56,6 +56,12 @@ class OutboxWorker(
     private val queueMetrics: OutboxQueueMetrics? = null,
     private val parallelism: Int = 4,
 ) {
+    private enum class ProcessResult {
+        SENT,
+        RETRYABLE,
+        FATAL,
+    }
+
     private val logger = LoggerFactory.getLogger(OutboxWorker::class.java)
 
     suspend fun run() {
@@ -90,10 +96,10 @@ class OutboxWorker(
                 async {
                     semaphore.withPermit {
                         val result = processMessage(message)
-                        if (result) {
-                            sent.incrementAndGet()
-                        } else {
-                            retried.incrementAndGet()
+                        when (result) {
+                            ProcessResult.SENT -> sent.incrementAndGet()
+                            ProcessResult.RETRYABLE -> retried.incrementAndGet()
+                            ProcessResult.FATAL -> Unit
                         }
                     }
                 }
@@ -115,7 +121,7 @@ class OutboxWorker(
             logger.debug("Unable to refresh outbox queue metrics", ex)
         }
     }
-    private suspend fun processMessage(message: OutboxMessage): Boolean {
+    private suspend fun processMessage(message: OutboxMessage): ProcessResult {
         val tracer = tracer
         if (tracer == null) {
             return processMessageInternal(message)
@@ -134,7 +140,7 @@ class OutboxWorker(
         }
     }
 
-    private suspend fun processMessageInternal(message: OutboxMessage): Boolean {
+    private suspend fun processMessageInternal(message: OutboxMessage): ProcessResult {
         val outcome =
             try {
                 sendPort.send(message.topic, message.payload)
@@ -146,12 +152,17 @@ class OutboxWorker(
         when (outcome) {
             SendOutcome.Ok -> {
                 handleSuccess(message)
-                return true
+                return ProcessResult.SENT
             }
-            is SendOutcome.RetryableError -> handleRetryable(message, outcome.cause)
-            is SendOutcome.FatalError -> handleFatal(message, outcome.cause)
+            is SendOutcome.RetryableError -> {
+                handleRetryable(message, outcome.cause)
+                return ProcessResult.RETRYABLE
+            }
+            is SendOutcome.FatalError -> {
+                handleFatal(message, outcome.cause)
+                return ProcessResult.FATAL
+            }
         }
-        return false
     }
 
     private suspend fun handleSuccess(message: OutboxMessage) {
