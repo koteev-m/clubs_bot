@@ -1,5 +1,7 @@
 package com.example.bot.routes
 
+import com.example.bot.data.notifications.NotifyCampaignAudit
+import com.example.bot.data.notifications.NotifyCampaigns
 import com.example.bot.data.security.Role
 import com.example.bot.notifications.NotifyMessage
 import com.example.bot.notifications.ParseMode
@@ -22,26 +24,32 @@ import io.ktor.server.routing.routing
 import io.ktor.server.util.getOrFail
 import io.ktor.util.AttributeKey
 import kotlinx.serialization.Serializable
+import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.ResultRow
+import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Status of campaign lifecycle.
- */
 @Serializable
 enum class CampaignStatus { DRAFT, SCHEDULED, SENDING, PAUSED }
 
-/**
- * Representation of a notification campaign.
- */
 @Serializable
 data class CampaignDto(
     val id: Long,
-    var title: String,
-    var text: String,
-    var status: CampaignStatus = CampaignStatus.DRAFT,
-    var cron: String? = null,
-    var startsAt: String? = null,
+    val title: String,
+    val text: String,
+    val status: CampaignStatus = CampaignStatus.DRAFT,
+    val cron: String? = null,
+    val startsAt: String? = null,
+    val version: Long = 0,
 )
 
 @Serializable
@@ -64,55 +72,166 @@ data class ScheduleRequest(
     val startsAt: String? = null,
 )
 
-/** Simple in-memory campaign service used by routes. */
-class CampaignService {
+open class CampaignService {
     private val campaigns = ConcurrentHashMap<Long, CampaignDto>()
     private var seq = 0L
 
-    fun create(req: CampaignCreateRequest): CampaignDto {
+    open suspend fun create(req: CampaignCreateRequest): CampaignDto {
         val text = sanitize(req.text, req.parseMode)
         val id = ++seq
-        val dto = CampaignDto(id, req.title, text)
+        val dto = CampaignDto(id = id, title = req.title, text = text)
         campaigns[id] = dto
         return dto
     }
 
-    fun update(
+    open suspend fun update(
         id: Long,
         req: CampaignUpdateRequest,
     ): CampaignDto? {
         val dto = campaigns[id] ?: return null
-        req.title?.let { dto.title = it }
-        req.text?.let { dto.text = sanitize(it, req.parseMode) }
-        return dto
+        val updated =
+            dto.copy(
+                title = req.title ?: dto.title,
+                text = req.text?.let { sanitize(it, req.parseMode) } ?: dto.text,
+                version = dto.version + 1,
+            )
+        campaigns[id] = updated
+        return updated
     }
 
-    fun find(id: Long): CampaignDto? = campaigns[id]
+    open suspend fun find(id: Long): CampaignDto? = campaigns[id]
 
-    fun list(): List<CampaignDto> = campaigns.values.sortedBy { it.id }
+    open suspend fun list(): List<CampaignDto> = campaigns.values.sortedBy { it.id }
 
-    fun schedule(
+    open suspend fun schedule(
         id: Long,
         req: ScheduleRequest,
     ): CampaignDto? {
         val dto = campaigns[id] ?: return null
-        dto.cron = req.cron
-        dto.startsAt = req.startsAt
-        dto.status = CampaignStatus.SCHEDULED
-        return dto
+        val updated = dto.copy(cron = req.cron, startsAt = req.startsAt, status = CampaignStatus.SCHEDULED, version = dto.version + 1)
+        campaigns[id] = updated
+        return updated
     }
 
-    fun setStatus(
+    open suspend fun setStatus(
         id: Long,
         status: CampaignStatus,
     ): CampaignDto? {
         val dto = campaigns[id] ?: return null
-        dto.status = status
-        return dto
+        val updated = dto.copy(status = status, version = dto.version + 1)
+        campaigns[id] = updated
+        return updated
     }
 }
 
-/** Queue for transactional notifications. */
+class DbCampaignService(
+    private val db: Database,
+    private val clock: Clock = Clock.systemUTC(),
+) : CampaignService() {
+    override suspend fun create(req: CampaignCreateRequest): CampaignDto =
+        newSuspendedTransaction(db = db) {
+            val now = Instant.now(clock).atOffset(ZoneOffset.UTC)
+            val text = sanitize(req.text, req.parseMode)
+            val id =
+                NotifyCampaigns.insert {
+                    it[title] = req.title
+                    it[NotifyCampaigns.text] = text
+                    it[status] = CampaignStatus.DRAFT.name
+                    it[kind] = "MANUAL"
+                    it[createdBy] = 1
+                    it[createdAt] = now
+                    it[updatedAt] = now
+                    it[version] = 0
+                }[NotifyCampaigns.id]
+            appendAudit(id, action = "CREATE", reason = null)
+            rowToDto(NotifyCampaigns.selectAll().where { NotifyCampaigns.id eq id }.first())
+        }
+
+    override suspend fun update(id: Long, req: CampaignUpdateRequest): CampaignDto? =
+        newSuspendedTransaction(db = db) {
+            val current = readCampaign(id) ?: return@newSuspendedTransaction null
+            val nextTitle = req.title ?: current[NotifyCampaigns.title]
+            val nextText = req.text?.let { sanitize(it, req.parseMode) } ?: current[NotifyCampaigns.text]
+            val now = Instant.now(clock).atOffset(ZoneOffset.UTC)
+            val version = current[NotifyCampaigns.version]
+            val updatedRows =
+                NotifyCampaigns.update({ (NotifyCampaigns.id eq id) and (NotifyCampaigns.version eq version) }) {
+                    it[title] = nextTitle
+                    it[text] = nextText
+                    it[NotifyCampaigns.version] = version + 1
+                    it[updatedAt] = now
+                }
+            if (updatedRows == 0) return@newSuspendedTransaction null
+            appendAudit(id, action = "UPDATE", reason = null)
+            rowToDto(readCampaign(id)!!)
+        }
+
+    override suspend fun find(id: Long): CampaignDto? =
+        newSuspendedTransaction(db = db) { readCampaign(id)?.let { rowToDto(it) } }
+
+    override suspend fun list(): List<CampaignDto> =
+        newSuspendedTransaction(db = db) {
+            NotifyCampaigns.selectAll().orderBy(NotifyCampaigns.id to SortOrder.ASC).map { rowToDto(it) }
+        }
+
+    override suspend fun schedule(id: Long, req: ScheduleRequest): CampaignDto? =
+        updateState(id = id, status = CampaignStatus.SCHEDULED, cron = req.cron, startsAt = req.startsAt, reason = "SCHEDULE")
+
+    override suspend fun setStatus(id: Long, status: CampaignStatus): CampaignDto? =
+        updateState(id = id, status = status, cron = null, startsAt = null, reason = status.name)
+
+    private fun readCampaign(id: Long): ResultRow? =
+        NotifyCampaigns.selectAll().where { NotifyCampaigns.id eq id }.limit(1).firstOrNull()
+
+    private fun rowToDto(row: ResultRow): CampaignDto =
+        CampaignDto(
+            id = row[NotifyCampaigns.id],
+            title = row[NotifyCampaigns.title],
+            text = row[NotifyCampaigns.text],
+            status = CampaignStatus.valueOf(row[NotifyCampaigns.status]),
+            cron = row[NotifyCampaigns.scheduleCron],
+            startsAt = row[NotifyCampaigns.startsAt]?.toString(),
+            version = row[NotifyCampaigns.version],
+        )
+
+    private fun appendAudit(id: Long, action: String, reason: String?) {
+        NotifyCampaignAudit.insert {
+            it[campaignId] = id
+            it[auditAction] = action
+            it[actor] = "system"
+            it[NotifyCampaignAudit.reason] = reason
+        }
+    }
+
+    private suspend fun updateState(
+        id: Long,
+        status: CampaignStatus,
+        cron: String?,
+        startsAt: String?,
+        reason: String,
+    ): CampaignDto? =
+        newSuspendedTransaction(db = db) {
+            val current = readCampaign(id) ?: return@newSuspendedTransaction null
+            val version = current[NotifyCampaigns.version]
+            val now = Instant.now(clock).atOffset(ZoneOffset.UTC)
+            val updatedRows =
+                NotifyCampaigns.update({ (NotifyCampaigns.id eq id) and (NotifyCampaigns.version eq version) }) {
+                    it[NotifyCampaigns.status] = status.name
+                    it[NotifyCampaigns.version] = version + 1
+                    if (cron != null) {
+                        it[scheduleCron] = cron
+                    }
+                    if (startsAt != null) {
+                        it[NotifyCampaigns.startsAt] = Instant.parse(startsAt).atOffset(ZoneOffset.UTC)
+                    }
+                    it[updatedAt] = now
+                }
+            if (updatedRows == 0) return@newSuspendedTransaction null
+            appendAudit(id, action = "STATUS", reason = reason)
+            rowToDto(readCampaign(id)!!)
+        }
+}
+
 class TxNotifyService {
     private val messages = mutableListOf<NotifyMessage>()
 
@@ -123,17 +242,13 @@ class TxNotifyService {
     fun size(): Int = messages.size
 }
 
-/** Escapes text for HTML or MarkdownV2. */
 private fun sanitize(
     text: String,
     mode: ParseMode?,
 ): String =
     when (mode) {
         ParseMode.HTML -> text.replace("<", "&lt;").replace(">", "&gt;")
-        ParseMode.MARKDOWNV2 ->
-            text
-                .replace("_", "\\_")
-                .replace("*", "\\*")
+        ParseMode.MARKDOWNV2 -> text.replace("_", "\\_").replace("*", "\\*")
         else -> text
     }
 
@@ -143,9 +258,6 @@ fun Route.notifyHealthRoute(healthProvider: () -> NotifyDispatchHealth) {
     }
 }
 
-/**
- * Registers notification and campaign routes.
- */
 @Suppress("LongMethod", "ThrowsCount")
 fun Application.notifyRoutes(
     tx: TxNotifyService,
@@ -178,7 +290,6 @@ fun Application.notifyRoutes(
 }
 
 private val notifyRoutesInstalledKey = AttributeKey<Unit>("notifyRoutesInstalled")
-
 private val notifyRoutesLogger = LoggerFactory.getLogger("NotifyRoutes")
 
 @Suppress("ThrowsCount")

@@ -5,15 +5,23 @@ import com.example.bot.data.booking.core.BookingCoreResult
 import com.example.bot.data.booking.core.OutboxMessage
 import com.example.bot.data.booking.core.OutboxRepository
 import io.micrometer.tracing.Tracer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
@@ -46,6 +54,7 @@ class OutboxWorker(
     private val random: Random = Random.Default,
     private val tracer: Tracer? = null,
     private val queueMetrics: OutboxQueueMetrics? = null,
+    private val parallelism: Int = 4,
 ) {
     private val logger = LoggerFactory.getLogger(OutboxWorker::class.java)
 
@@ -55,7 +64,7 @@ class OutboxWorker(
             val batch = repository.pickBatchForSend(limit)
             when {
                 batch.isEmpty() -> delay(idleDelay.toMillis())
-                else -> batch.forEach { message -> processMessage(message) }
+                else -> processBatch(batch)
             }
         }
     }
@@ -66,10 +75,34 @@ class OutboxWorker(
         if (batch.isEmpty()) {
             return false
         }
-        batch.forEach { message -> processMessage(message) }
+        processBatch(batch)
         return true
     }
 
+    private suspend fun processBatch(batch: List<OutboxMessage>) {
+        val permits = parallelism.coerceAtLeast(1)
+        val semaphore = Semaphore(permits)
+        val startedAt = Instant.now(clock)
+        val sent = AtomicInteger(0)
+        val retried = AtomicInteger(0)
+        withContext(Dispatchers.IO.limitedParallelism(permits)) {
+            batch.map { message ->
+                async {
+                    semaphore.withPermit {
+                        val result = processMessage(message)
+                        if (result) {
+                            sent.incrementAndGet()
+                        } else {
+                            retried.incrementAndGet()
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+        val elapsedMinutes = Duration.between(startedAt, Instant.now(clock)).seconds.coerceAtLeast(1) / 60.0
+        queueMetrics?.recordSendRate((sent.get() / elapsedMinutes).toInt())
+        queueMetrics?.recordRetryRate((retried.get() / elapsedMinutes).toInt())
+    }
 
     private suspend fun refreshQueueMetrics() {
         val queueMetrics = queueMetrics ?: return
@@ -82,11 +115,10 @@ class OutboxWorker(
             logger.debug("Unable to refresh outbox queue metrics", ex)
         }
     }
-    private suspend fun processMessage(message: OutboxMessage) {
+    private suspend fun processMessage(message: OutboxMessage): Boolean {
         val tracer = tracer
         if (tracer == null) {
-            processMessageInternal(message)
-            return
+            return processMessageInternal(message)
         }
         val span = tracer.nextSpan().name("outbox.process").start()
         span.tag("outbox.topic", message.topic)
@@ -95,25 +127,31 @@ class OutboxWorker(
         currentRequestId()?.let { span.tag("request.id", it) }
         val scope = tracer.withSpan(span)
         try {
-            processMessageInternal(message)
+            return processMessageInternal(message)
         } finally {
             scope.close()
             span.end()
         }
     }
 
-    private suspend fun processMessageInternal(message: OutboxMessage) {
+    private suspend fun processMessageInternal(message: OutboxMessage): Boolean {
         val outcome =
             try {
                 sendPort.send(message.topic, message.payload)
+            } catch (ex: CancellationException) {
+                throw ex
             } catch (ex: Throwable) {
                 SendOutcome.RetryableError(ex)
             }
         when (outcome) {
-            SendOutcome.Ok -> handleSuccess(message)
+            SendOutcome.Ok -> {
+                handleSuccess(message)
+                return true
+            }
             is SendOutcome.RetryableError -> handleRetryable(message, outcome.cause)
             is SendOutcome.FatalError -> handleFatal(message, outcome.cause)
         }
+        return false
     }
 
     private suspend fun handleSuccess(message: OutboxMessage) {

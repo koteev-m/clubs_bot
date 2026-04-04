@@ -3,9 +3,11 @@ package com.example.bot.di
 import com.example.bot.notifications.DefaultRatePolicy
 import com.example.bot.notifications.RatePolicy
 import com.example.bot.routes.CampaignService
+import com.example.bot.routes.DbCampaignService
 import com.example.bot.routes.TxNotifyService
 import com.example.bot.telegram.NotifySender
 import com.pengrad.telegrambot.TelegramBot
+import org.jetbrains.exposed.sql.Database
 import org.koin.dsl.module
 
 /**
@@ -16,7 +18,11 @@ import org.koin.dsl.module
 val notifyModule =
     module {
         single { TxNotifyService() }
-        single { CampaignService() }
+        single<CampaignService> {
+            runCatching { get<Database>() }
+                .map { DbCampaignService(it) as CampaignService }
+                .getOrElse { CampaignService() }
+        }
 
         single<RatePolicy> { DefaultRatePolicy() }
         single { NotifySender(get<TelegramBot>(), get<RatePolicy>()) }

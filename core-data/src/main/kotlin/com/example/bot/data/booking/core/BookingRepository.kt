@@ -9,15 +9,18 @@ import com.example.bot.data.db.isRetryLimitExceeded
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.withTxRetry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
@@ -28,6 +31,7 @@ import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransacti
 import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.lowerCase
+import org.jetbrains.exposed.sql.or
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -35,6 +39,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.Locale
 import java.util.UUID
+import kotlin.time.Duration.Companion.seconds
 
 private val ACTIVE_STATUSES = listOf(BookingStatus.BOOKED.name, BookingStatus.SEATED.name)
 private const val HOLD_SLOT_LOCK_NAMESPACE = "booking_hold_slot"
@@ -839,6 +844,8 @@ class OutboxRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    private val defaultLeaseTtl = 30.seconds
+
     suspend fun enqueue(
         topic: String,
         payload: JsonObject,
@@ -861,19 +868,23 @@ class OutboxRepository(
     }
 
     suspend fun pickBatchForSend(limit: Int): List<OutboxMessage> {
+        return claimBatchWithLease(limit = limit, leaseOwner = "worker", leaseTtl = defaultLeaseTtl)
+    }
+
+    suspend fun claimBatchWithLease(
+        limit: Int,
+        leaseOwner: String,
+        leaseTtl: kotlin.time.Duration,
+    ): List<OutboxMessage> {
         val now = Instant.now(clock).toOffsetDateTime()
+        val leaseUntil = Instant.now(clock).plusMillis(leaseTtl.inWholeMilliseconds).toOffsetDateTime()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                BookingOutboxTable
-                    .selectAll()
-                    .where {
-                        (BookingOutboxTable.status eq OutboxMessageStatus.NEW.name) and
-                            (BookingOutboxTable.nextAttemptAt lessEq now)
-                    }.orderBy(
-                        BookingOutboxTable.nextAttemptAt to SortOrder.ASC,
-                        BookingOutboxTable.id to SortOrder.ASC,
-                    ).limit(limit)
-                    .map { it.toOutboxMessage() }
+                if (this.db.dialect.name.lowercase().contains("postgres")) {
+                    claimPostgresBatch(limit = limit, now = now, leaseUntil = leaseUntil, leaseOwner = leaseOwner)
+                } else {
+                    claimFallbackBatch(limit = limit, now = now, leaseUntil = leaseUntil, leaseOwner = leaseOwner)
+                }
             }
         }
     }
@@ -925,6 +936,8 @@ class OutboxRepository(
                         it[BookingOutboxTable.nextAttemptAt] = now
                         it[BookingOutboxTable.lastError] = null
                         it[BookingOutboxTable.updatedAt] = now
+                        it[BookingOutboxTable.leaseOwner] = null
+                        it[BookingOutboxTable.leaseUntil] = null
                     }
                     BookingCoreResult.Success(Unit)
                 }
@@ -961,6 +974,8 @@ class OutboxRepository(
                         it[BookingOutboxTable.nextAttemptAt] = now
                         it[BookingOutboxTable.lastError] = reason
                         it[BookingOutboxTable.updatedAt] = now
+                        it[BookingOutboxTable.leaseOwner] = null
+                        it[BookingOutboxTable.leaseUntil] = null
                     }
                     BookingCoreResult.Success(Unit)
                 }
@@ -1020,6 +1035,8 @@ class OutboxRepository(
                             it[BookingOutboxTable.nextAttemptAt] = nextAttemptAt.toOffsetDateTime()
                             it[BookingOutboxTable.lastError] = reason
                             it[BookingOutboxTable.updatedAt] = nowTs
+                            it[BookingOutboxTable.leaseOwner] = null
+                            it[BookingOutboxTable.leaseUntil] = null
                         }
                         row.toOutboxMessage(attempts, nextAttemptAt, reason)
                     }
@@ -1077,6 +1094,98 @@ class OutboxRepository(
             nextAttemptAt = nextAttempt,
             lastError = reason,
         )
+}
+
+private fun Transaction.claimPostgresBatch(
+    limit: Int,
+    now: OffsetDateTime,
+    leaseUntil: OffsetDateTime,
+    leaseOwner: String,
+): List<OutboxMessage> {
+    val sql =
+        """
+        WITH claimed AS (
+            SELECT id
+            FROM booking_outbox
+            WHERE status = 'NEW'
+              AND next_attempt_at <= ?
+              AND (lease_until IS NULL OR lease_until <= ?)
+            ORDER BY next_attempt_at ASC, id ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT ?
+        )
+        UPDATE booking_outbox outbox
+        SET lease_owner = ?, lease_until = ?, updated_at = ?
+        FROM claimed
+        WHERE outbox.id = claimed.id
+        RETURNING outbox.id, outbox.topic, outbox.payload, outbox.status, outbox.attempts, outbox.next_attempt_at, outbox.last_error
+        """.trimIndent()
+    val claimed = mutableListOf<OutboxMessage>()
+    val statement = connection.prepareStatement(sql, false)
+    try {
+        statement[1] = now
+        statement[2] = now
+        statement[3] = limit
+        statement[4] = leaseOwner
+        statement[5] = leaseUntil
+        statement[6] = now
+        statement.executeQuery().use { rs ->
+            while (rs.next()) {
+                claimed +=
+                    OutboxMessage(
+                        id = rs.getLong("id"),
+                        topic = rs.getString("topic"),
+                        payload = Json.parseToJsonElement(rs.getString("payload")) as JsonObject,
+                        status = OutboxMessageStatus.valueOf(rs.getString("status")),
+                        attempts = rs.getInt("attempts"),
+                        nextAttemptAt = rs.getObject("next_attempt_at", OffsetDateTime::class.java).toInstant(),
+                        lastError = rs.getString("last_error"),
+                    )
+            }
+        }
+    } finally {
+        statement.closeIfPossible()
+    }
+    return claimed
+}
+
+private fun Transaction.claimFallbackBatch(
+    limit: Int,
+    now: OffsetDateTime,
+    leaseUntil: OffsetDateTime,
+    leaseOwner: String,
+): List<OutboxMessage> {
+    val rows =
+        BookingOutboxTable
+            .selectAll()
+            .where {
+                (BookingOutboxTable.status eq OutboxMessageStatus.NEW.name) and
+                    (BookingOutboxTable.nextAttemptAt lessEq now) and
+                    ((BookingOutboxTable.leaseUntil.isNull()) or (BookingOutboxTable.leaseUntil lessEq now))
+            }.orderBy(
+                BookingOutboxTable.nextAttemptAt to SortOrder.ASC,
+                BookingOutboxTable.id to SortOrder.ASC,
+            ).limit(limit)
+            .forUpdate()
+            .toList()
+    rows.forEach { row ->
+        BookingOutboxTable.update({ BookingOutboxTable.id eq row[BookingOutboxTable.id] }) {
+            it[BookingOutboxTable.leaseOwner] = leaseOwner
+            it[BookingOutboxTable.leaseUntil] = leaseUntil
+            it[BookingOutboxTable.updatedAt] = now
+        }
+    }
+    return rows.map {
+        OutboxMessage(
+            id = it[BookingOutboxTable.id],
+            topic = it[BookingOutboxTable.topic],
+            payload = it[BookingOutboxTable.payload],
+            status = OutboxMessageStatus.valueOf(it[BookingOutboxTable.status]),
+            attempts = it[BookingOutboxTable.attempts],
+            nextAttemptAt = it[BookingOutboxTable.nextAttemptAt].toInstant(),
+            lastError = it[BookingOutboxTable.lastError],
+        )
+    }
 }
 
 private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)
