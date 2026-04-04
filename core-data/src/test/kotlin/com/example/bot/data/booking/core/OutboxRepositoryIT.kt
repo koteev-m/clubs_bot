@@ -82,4 +82,30 @@ class OutboxRepositoryIT : PostgresIntegrationTest() {
             assertEquals(4, claimed[1].size)
             assertTrue(claimed[0].intersect(claimed[1]).isEmpty(), "claimed sets must not overlap")
         }
+
+    @Test
+    fun `pickBatchForTopics claims without overlap across concurrent workers`() =
+        runBlocking {
+            val fixedNow = Instant.parse("2025-03-01T12:00:00Z")
+            val repo = OutboxRepository(database, Clock.fixed(fixedNow, ZoneOffset.UTC))
+            repeat(10) {
+                repo.enqueue("payment.refunded", buildJsonObject { put("n", it) })
+            }
+
+            val claimed =
+                coroutineScope {
+                    listOf("worker-a", "worker-b")
+                        .map {
+                            async {
+                                repo.pickBatchForTopics(limit = 5, topics = setOf("payment.refunded")).map { msg -> msg.id }.toSet()
+                            }
+                        }.awaitAll()
+                }
+
+            assertEquals(5, claimed[0].size)
+            assertEquals(5, claimed[1].size)
+            assertTrue(claimed[0].intersect(claimed[1]).isEmpty(), "topic claimed sets must not overlap")
+            assertTrue(repo.pickBatchForTopics(limit = 1, topics = setOf("payment.refunded")).isEmpty())
+        }
+
 }

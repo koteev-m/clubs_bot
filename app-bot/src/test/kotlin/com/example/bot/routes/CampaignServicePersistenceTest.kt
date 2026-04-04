@@ -4,6 +4,9 @@ import com.example.bot.data.notifications.NotifyCampaignAudit
 import com.example.bot.data.notifications.NotifyCampaigns
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.runBlocking
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
 import org.jetbrains.exposed.sql.Database
@@ -78,4 +81,74 @@ class CampaignServicePersistenceTest : StringSpec({
             auditActors shouldBe listOf(creatorId.toString(), updaterId.toString())
         }
     }
+
+    "concurrent campaign mutations keep optimistic version semantics" {
+        val ds =
+            JdbcDataSource().apply {
+                setURL("jdbc:h2:mem:campaign_concurrent;MODE=PostgreSQL;DB_CLOSE_DELAY=-1")
+                user = "sa"
+                password = ""
+            }
+        Flyway
+            .configure()
+            .dataSource(ds)
+            .locations("classpath:db/migration/common", "classpath:db/migration/h2")
+            .load()
+            .migrate()
+        val database = Database.connect(ds)
+
+        val actorId =
+            transaction(database) {
+                UsersTable.insert {
+                    it[telegramUserId] = 2001L
+                    it[username] = "mutator"
+                }[UsersTable.id]
+            }
+
+        val service = DbCampaignService(database)
+        val created = service.create(CampaignCreateRequest(title = "t", text = "base"), actorId = actorId)
+        val startGate = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+
+        try {
+            val first = pool.submit<CampaignDto?> {
+                startGate.await()
+                runBlocking {
+                    service.update(
+                        created.id,
+                        CampaignUpdateRequest(text = "from-first"),
+                        actorId = actorId,
+                    )
+                }
+            }
+            val second = pool.submit<CampaignDto?> {
+                startGate.await()
+                runBlocking {
+                    service.setStatus(created.id, CampaignStatus.PAUSED, actorId = actorId)
+                }
+            }
+
+            startGate.countDown()
+            val firstResult = first.get()
+            val secondResult = second.get()
+            listOf(firstResult, secondResult).count { it != null } shouldBe 1
+
+            val restored = service.find(created.id)!!
+            restored.version shouldBe 1
+
+            transaction(database) {
+                val audits =
+                    NotifyCampaignAudit
+                        .selectAll()
+                        .where { NotifyCampaignAudit.campaignId eq created.id }
+                        .orderBy(NotifyCampaignAudit.id to SortOrder.ASC)
+                        .map { it[NotifyCampaignAudit.auditAction] }
+                audits.size shouldBe 2
+                audits.first() shouldBe "CREATE"
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
 })
