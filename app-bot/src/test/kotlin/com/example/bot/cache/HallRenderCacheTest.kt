@@ -1,10 +1,12 @@
 package com.example.bot.cache
 
 import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertContentEquals
 import kotlin.test.assertTrue
 
 class HallRenderCacheTest {
@@ -44,6 +46,90 @@ class HallRenderCacheTest {
     }
 
     @Test
+    fun `shared hit warms local cache and avoids repeated disk reads`() {
+        runBlocking {
+            val dir = Files.createTempDirectory("hall-cache-test-")
+            try {
+                val previous = System.getProperty("HALL_CACHE_SHARED_DIR")
+                System.setProperty("HALL_CACHE_SHARED_DIR", dir.toString())
+                try {
+                    val writer = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    val reader = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    var renders = 0
+
+                    writer.getOrRender("club-2|night-1", null) {
+                        "shared-payload".encodeToByteArray()
+                    }
+
+                    val firstRead =
+                        reader.getOrRender("club-2|night-1", null) {
+                            renders += 1
+                            "unexpected-render".encodeToByteArray()
+                        }
+                    assertTrue(firstRead is HallRenderCache.Result.Ok)
+                    assertEquals(0, renders)
+
+                    val cacheFile = singleCacheFile(dir)
+                    Files.deleteIfExists(cacheFile)
+
+                    val secondRead =
+                        reader.getOrRender("club-2|night-1", null) {
+                            renders += 1
+                            "unexpected-render-2".encodeToByteArray()
+                        }
+                    assertTrue(secondRead is HallRenderCache.Result.Ok)
+                    assertEquals(0, renders)
+                } finally {
+                    if (previous == null) {
+                        System.clearProperty("HALL_CACHE_SHARED_DIR")
+                    } else {
+                        System.setProperty("HALL_CACHE_SHARED_DIR", previous)
+                    }
+                }
+            } finally {
+                dir.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `corrupt shared file is deleted and treated as miss`() {
+        runBlocking {
+            val dir = Files.createTempDirectory("hall-cache-test-")
+            try {
+                val previous = System.getProperty("HALL_CACHE_SHARED_DIR")
+                System.setProperty("HALL_CACHE_SHARED_DIR", dir.toString())
+                try {
+                    val writer = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    writer.getOrRender("club-3|night-1", null) { "payload".encodeToByteArray() }
+
+                    val cacheFile = singleCacheFile(dir)
+                    Files.write(cacheFile, byteArrayOf(1, 2, 3, 4))
+
+                    val reader = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    var renders = 0
+                    val result =
+                        reader.getOrRender("club-3|night-1", null) {
+                            renders += 1
+                            "fresh".encodeToByteArray()
+                        }
+                    assertTrue(result is HallRenderCache.Result.Ok)
+                    assertEquals(1, renders)
+                    assertContentEquals("fresh".encodeToByteArray(), Files.readAllBytes(cacheFile).takeLast(5).toByteArray())
+                } finally {
+                    if (previous == null) {
+                        System.clearProperty("HALL_CACHE_SHARED_DIR")
+                    } else {
+                        System.setProperty("HALL_CACHE_SHARED_DIR", previous)
+                    }
+                }
+            } finally {
+                dir.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
     fun `etag match returns not modified`() {
         runBlocking {
             val cache = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
@@ -53,6 +139,12 @@ class HallRenderCacheTest {
             val result2 = cache.getOrRender("same-key", etag) { error("supplier should not be called") }
             assertTrue(result2 is HallRenderCache.Result.NotModified)
             assertEquals(etag, (result2 as HallRenderCache.Result.NotModified).etag)
+        }
+    }
+
+    private fun singleCacheFile(dir: Path): Path {
+        Files.newDirectoryStream(dir, "*.bin").use { stream ->
+            return stream.first()
         }
     }
 }
