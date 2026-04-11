@@ -45,6 +45,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -305,6 +306,47 @@ class AdminMusicRoutesTest {
         assertEquals(MusicSource.FILE, stored.source)
     }
 
+    @Test
+    fun `upload uses streaming asset api`() = withApp { itemsRepo, assetsRepo ->
+        val item =
+            itemsRepo.create(
+                MusicItemCreate(
+                    clubId = 1,
+                    title = "Track",
+                    dj = null,
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.FILE,
+                    sourceUrl = null,
+                    durationSec = null,
+                    coverUrl = null,
+                    tags = null,
+                    publishedAt = null,
+                ),
+                actor = 1,
+            )
+        val response =
+            client.put("/api/admin/music/items/${item.id}/audio") {
+                header("X-Telegram-Init-Data", "init")
+                setBody(
+                    MultiPartFormDataContent(
+                        formData {
+                            append(
+                                "file",
+                                ByteArray(1024) { 7 },
+                                Headers.build {
+                                    append(HttpHeaders.ContentType, ContentType.Audio.MPEG.toString())
+                                    append(HttpHeaders.ContentDisposition, "filename=\"track.mp3\"")
+                                },
+                            )
+                        },
+                    ),
+                )
+            }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(1, assetsRepo.streamCreateCalls.get())
+    }
+
     private fun withApp(
         roles: Set<Role> = setOf(Role.CLUB_ADMIN),
         clubIds: Set<Long> = setOf(1),
@@ -455,6 +497,7 @@ class AdminMusicRoutesTest {
     private class FakeMusicAssetRepository(private val clock: Clock) : MusicAssetRepository {
         private val idSeq = AtomicLong(0)
         private val assets = mutableMapOf<Long, MusicAsset>()
+        val streamCreateCalls = AtomicInteger(0)
 
         override suspend fun createAsset(
             kind: MusicAssetKind,
@@ -493,5 +536,17 @@ class AdminMusicRoutesTest {
                     updatedAt = it.updatedAt,
                 )
             }
+
+        override suspend fun createAssetStream(
+            kind: MusicAssetKind,
+            contentType: String,
+            sha256: String,
+            sizeBytes: Long,
+            openStream: () -> java.io.InputStream,
+        ): MusicAsset {
+            streamCreateCalls.incrementAndGet()
+            val bytes = openStream().use { it.readBytes() }
+            return createAsset(kind, bytes, contentType, sha256, sizeBytes)
+        }
     }
 }

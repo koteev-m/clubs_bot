@@ -423,13 +423,13 @@ class MusicRoutesTest {
                     sizeBytes = 4,
                     updatedAt = updatedAt,
                 )
-            var getAssetCalled = false
+            var streamAssetCalled = false
             val assetsRepo =
                 FakeMusicAssetsRepository(
                     metas = mapOf(20L to assetMeta),
-                    onGetAsset = {
-                        getAssetCalled = true
-                        error("getAsset should not be called when If-None-Match matches")
+                    onStreamAsset = {
+                        streamAssetCalled = true
+                        error("streamAssetTo should not be called when If-None-Match matches")
                     },
                 )
             val localService =
@@ -454,7 +454,7 @@ class MusicRoutesTest {
             assertEquals(HttpStatusCode.NotModified, response.status)
             assertEquals("abc", response.headers[HttpHeaders.ETag])
             assertEquals("private, max-age=3600, must-revalidate", response.headers[HttpHeaders.CacheControl])
-            assertEquals(false, getAssetCalled)
+            assertEquals(false, streamAssetCalled)
         }
 
     private fun createInitData(): String {
@@ -589,6 +589,7 @@ class MusicRoutesTest {
         private val assets: Map<Long, MusicAsset> = emptyMap(),
         private val metas: Map<Long, MusicAssetMeta> = emptyMap(),
         private val onGetAsset: ((Long) -> Unit)? = null,
+        private val onStreamAsset: ((Long) -> Unit)? = null,
     ) : com.example.bot.music.MusicAssetRepository {
         override suspend fun createAsset(
             kind: com.example.bot.music.MusicAssetKind,
@@ -606,6 +607,13 @@ class MusicRoutesTest {
         }
 
         override suspend fun getAssetMeta(id: Long): com.example.bot.music.MusicAssetMeta? = metas[id]
+
+        override suspend fun streamAssetTo(id: Long, output: java.io.OutputStream): MusicAssetMeta? {
+            onStreamAsset?.invoke(id)
+            val asset = assets[id] ?: return null
+            output.write(asset.bytes)
+            return metas[id]
+        }
     }
 
 

@@ -10,9 +10,13 @@ import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import java.io.InputStream
+import java.io.OutputStream
 import java.time.Instant
 import java.time.ZoneOffset
+import java.time.OffsetDateTime
 
 class MusicAssetRepositoryImpl(
     private val db: Database,
@@ -57,6 +61,86 @@ class MusicAssetRepositoryImpl(
                 .where { MusicAssetsTable.id eq id }
                 .firstOrNull()
                 ?.toAssetMeta()
+        }
+
+    override suspend fun createAssetStream(
+        kind: MusicAssetKind,
+        contentType: String,
+        sha256: String,
+        sizeBytes: Long,
+        openStream: () -> InputStream,
+    ): MusicAsset =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val now = OffsetDateTime.now(ZoneOffset.UTC)
+            val connection = TransactionManager.current().connection.connection as java.sql.Connection
+            val sql =
+                """
+                INSERT INTO music_assets(kind, bytes, content_type, sha256, size_bytes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
+            connection.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS).use { stmt ->
+                stmt.setString(1, kind.name)
+                openStream().use { input ->
+                    stmt.setBinaryStream(2, input, sizeBytes)
+                    stmt.setString(3, contentType)
+                    stmt.setString(4, sha256)
+                    stmt.setLong(5, sizeBytes)
+                    stmt.setObject(6, now)
+                    stmt.setObject(7, now)
+                    stmt.executeUpdate()
+                }
+                val id =
+                    stmt.generatedKeys.use { keys ->
+                        if (!keys.next()) error("Failed to read generated id for music asset")
+                        keys.getLong(1)
+                    }
+                MusicAsset(
+                    id = id,
+                    kind = kind,
+                    bytes = byteArrayOf(),
+                    contentType = contentType,
+                    sha256 = sha256,
+                    sizeBytes = sizeBytes,
+                    createdAt = now.toInstant(),
+                    updatedAt = now.toInstant(),
+                )
+            }
+        }
+
+    override suspend fun streamAssetTo(
+        id: Long,
+        output: OutputStream,
+    ): MusicAssetMeta? =
+        newSuspendedTransaction(Dispatchers.IO, db) {
+            val connection = TransactionManager.current().connection.connection as java.sql.Connection
+            val sql =
+                """
+                SELECT kind, bytes, content_type, sha256, size_bytes, updated_at
+                FROM music_assets
+                WHERE id = ?
+                """.trimIndent()
+            connection.prepareStatement(sql).use { stmt ->
+                stmt.setLong(1, id)
+                stmt.executeQuery().use { rs ->
+                    if (!rs.next()) return@newSuspendedTransaction null
+                    rs.getBinaryStream("bytes").use { input ->
+                        val buffer = ByteArray(16 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                    MusicAssetMeta(
+                        id = id,
+                        kind = MusicAssetKind.valueOf(rs.getString("kind")),
+                        contentType = rs.getString("content_type"),
+                        sha256 = rs.getString("sha256"),
+                        sizeBytes = rs.getLong("size_bytes"),
+                        updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java).toInstant(),
+                    )
+                }
+            }
         }
 
     private fun ResultRow.toAsset(): MusicAsset =

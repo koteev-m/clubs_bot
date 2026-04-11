@@ -36,7 +36,8 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
-import java.io.ByteArrayOutputStream
+import java.nio.file.Files
+import java.nio.file.Path
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -371,13 +372,17 @@ fun Application.adminMusicRoutes(
                                 }
                             }
                         val asset =
-                            assetsRepository.createAsset(
-                                kind = MusicAssetKind.AUDIO,
-                                bytes = upload.bytes,
-                                contentType = upload.contentType.toString(),
-                                sha256 = upload.sha256,
-                                sizeBytes = upload.sizeBytes,
-                            )
+                            try {
+                                assetsRepository.createAssetStream(
+                                    kind = MusicAssetKind.AUDIO,
+                                    contentType = upload.contentType.toString(),
+                                    sha256 = upload.sha256,
+                                    sizeBytes = upload.sizeBytes,
+                                    openStream = { Files.newInputStream(upload.tempFile) },
+                                )
+                            } finally {
+                                Files.deleteIfExists(upload.tempFile)
+                            }
                         val updated =
                             itemsRepository.attachAudioAsset(
                                 id = id,
@@ -434,13 +439,17 @@ fun Application.adminMusicRoutes(
                                 }
                             }
                         val asset =
-                            assetsRepository.createAsset(
-                                kind = MusicAssetKind.COVER,
-                                bytes = upload.bytes,
-                                contentType = upload.contentType.toString(),
-                                sha256 = upload.sha256,
-                                sizeBytes = upload.sizeBytes,
-                            )
+                            try {
+                                assetsRepository.createAssetStream(
+                                    kind = MusicAssetKind.COVER,
+                                    contentType = upload.contentType.toString(),
+                                    sha256 = upload.sha256,
+                                    sizeBytes = upload.sizeBytes,
+                                    openStream = { Files.newInputStream(upload.tempFile) },
+                                )
+                            } finally {
+                                Files.deleteIfExists(upload.tempFile)
+                            }
                         val updated =
                             itemsRepository.attachCoverAsset(
                                 id = id,
@@ -476,7 +485,7 @@ fun Application.adminMusicRoutes(
 
 private sealed class MusicUploadResult {
     data class Ok(
-        val bytes: ByteArray,
+        val tempFile: Path,
         val contentType: ContentType,
         val sizeBytes: Long,
         val sha256: String,
@@ -512,13 +521,13 @@ private suspend fun ApplicationCall.receiveUpload(
                     } else {
                         val result =
                             runCatching {
-                                readLimitedWithSha(part.provider, maxBytes)
+                                readLimitedWithShaToTempFile(part.provider, maxBytes)
                             }.getOrElse {
                                 error = MusicUploadResult.Error(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
                                 part.dispose()
                                 return@forEachPart
                             }
-                        if (result.bytes.isEmpty()) {
+                        if (result.sizeBytes == 0L) {
                             error =
                                 MusicUploadResult.Error(
                                     HttpStatusCode.BadRequest,
@@ -528,7 +537,7 @@ private suspend fun ApplicationCall.receiveUpload(
                             part.dispose()
                             return@forEachPart
                         }
-                        upload = MusicUploadResult.Ok(result.bytes, contentType, result.sizeBytes, result.sha256)
+                        upload = MusicUploadResult.Ok(result.tempFile, contentType, result.sizeBytes, result.sha256)
                     }
                 }
             }
@@ -549,30 +558,39 @@ private suspend fun ApplicationCall.receiveUpload(
 }
 
 private data class ReadWithShaResult(
-    val bytes: ByteArray,
+    val tempFile: Path,
     val sizeBytes: Long,
     val sha256: String,
 )
 
-private suspend fun readLimitedWithSha(channelProvider: () -> ByteReadChannel, maxBytes: Long): ReadWithShaResult {
+private suspend fun readLimitedWithShaToTempFile(
+    channelProvider: () -> ByteReadChannel,
+    maxBytes: Long,
+): ReadWithShaResult {
     val channel = channelProvider()
-    val output = ByteArrayOutputStream()
+    val tempFile = Files.createTempFile("music-upload-", ".bin")
     val digest = MessageDigest.getInstance("SHA-256")
     val buffer = ByteArray(8_192)
     var total = 0L
-    while (true) {
-        val read = channel.readAvailable(buffer)
-        if (read <= 0) break
-        total += read
-        if (total > maxBytes) {
-            throw MusicPayloadTooLargeException()
+    runCatching {
+        Files.newOutputStream(tempFile).use { output ->
+            while (true) {
+                val read = channel.readAvailable(buffer)
+                if (read <= 0) break
+                total += read
+                if (total > maxBytes) {
+                    throw MusicPayloadTooLargeException()
+                }
+                digest.update(buffer, 0, read)
+                output.write(buffer, 0, read)
+            }
         }
-        digest.update(buffer, 0, read)
-        output.write(buffer, 0, read)
+    }.onFailure {
+        Files.deleteIfExists(tempFile)
+        throw it
     }
-    val bytes = output.toByteArray()
     val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
-    return ReadWithShaResult(bytes, bytes.size.toLong(), sha256)
+    return ReadWithShaResult(tempFile, total, sha256)
 }
 
 private class MusicPayloadTooLargeException : RuntimeException()

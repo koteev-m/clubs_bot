@@ -20,7 +20,7 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -65,15 +65,7 @@ fun Application.musicRoutes(
                     call.respond(HttpStatusCode.NotModified)
                     return@get
                 }
-                val asset = assetsRepository.getAsset(assetId)
-                    ?: return@get call.respond(HttpStatusCode.NotFound, "Audio not found")
-                call.response.header(HttpHeaders.ETag, etag)
-                call.response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
-                call.respondBytes(
-                    bytes = asset.bytes,
-                    contentType = io.ktor.http.ContentType.parse(meta.contentType),
-                    status = HttpStatusCode.OK,
-                )
+                call.respondMusicAsset(assetId, meta, assetsRepository)
             }
 
             get("/{id}/cover") {
@@ -99,15 +91,7 @@ fun Application.musicRoutes(
                     call.respond(HttpStatusCode.NotModified)
                     return@get
                 }
-                val asset = assetsRepository.getAsset(assetId)
-                    ?: return@get call.respond(HttpStatusCode.NotFound, "Cover not found")
-                call.response.header(HttpHeaders.ETag, etag)
-                call.response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
-                call.respondBytes(
-                    bytes = asset.bytes,
-                    contentType = io.ktor.http.ContentType.parse(meta.contentType),
-                    status = HttpStatusCode.OK,
-                )
+                call.respondMusicAsset(assetId, meta, assetsRepository)
             }
         }
 
@@ -236,6 +220,21 @@ fun Application.musicRoutes(
                 }
             }
         }
+    }
+}
+
+private suspend fun ApplicationCall.respondMusicAsset(
+    assetId: Long,
+    meta: com.example.bot.music.MusicAssetMeta,
+    assetsRepository: MusicAssetRepository,
+){
+    response.header(HttpHeaders.ETag, meta.sha256)
+    response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
+    respondOutputStream(
+        contentType = io.ktor.http.ContentType.parse(meta.contentType),
+        status = HttpStatusCode.OK,
+    ) {
+        assetsRepository.streamAssetTo(assetId, this)
     }
 }
 

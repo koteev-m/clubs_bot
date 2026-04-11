@@ -1,6 +1,8 @@
 package com.example.bot.cache
 
 import com.example.bot.config.BotLimits
+import java.nio.file.Files
+import java.nio.file.Path
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
@@ -83,6 +85,13 @@ class HallRenderCache(
 ) {
     private val ttlDuration = ttl
     private val cache = TtlLruCache<String, CacheEntry>(maxEntries, ttlDuration)
+    private val sharedDir: Path? =
+        (
+            System.getenv("HALL_CACHE_SHARED_DIR")
+                ?: System.getProperty("HALL_CACHE_SHARED_DIR")
+            )?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let(Path::of)
 
     sealed interface Result {
         data class NotModified(
@@ -104,7 +113,7 @@ class HallRenderCache(
         ifNoneMatch: String?,
         supplier: suspend () -> ByteArray,
     ): Result {
-        val cached = cache.get(key)
+        val cached = cache.get(key) ?: sharedDir?.readEntry(key)
         val notModified: Boolean
         val etag: String
         val bytes: ByteArray
@@ -121,6 +130,7 @@ class HallRenderCache(
             HallCacheMetrics.rendersMs.addAndGet(took.toMillis())
             etag = computeEtag(freshBytes)
             cache.put(key, CacheEntry(etag, freshBytes, Instant.now().plus(ttlDuration)))
+            sharedDir?.writeEntry(key, CacheEntry(etag, freshBytes, Instant.now().plus(ttlDuration)))
             notModified = ifNoneMatch != null && equalsWeakEtag(ifNoneMatch, etag)
             bytes = freshBytes
         }
@@ -145,4 +155,56 @@ class HallRenderCache(
             return normA == normB
         }
     }
+}
+
+private fun Path.readEntry(key: String): CacheEntry? {
+    runCatching { Files.createDirectories(this) }
+    val file = resolve(key.toCacheFileName())
+    if (!Files.exists(file)) return null
+    return runCatching {
+        Files.newInputStream(file).use { input ->
+            val header = ByteArray(16)
+            if (input.read(header) != header.size) return null
+            val expiresAtEpochSec = java.nio.ByteBuffer.wrap(header, 0, 8).long
+            val etagSize = java.nio.ByteBuffer.wrap(header, 8, 4).int
+            val bytesSize = java.nio.ByteBuffer.wrap(header, 12, 4).int
+            if (etagSize <= 0 || bytesSize < 0) return null
+            val etagBytes = ByteArray(etagSize)
+            val imageBytes = ByteArray(bytesSize)
+            if (input.read(etagBytes) != etagSize || input.read(imageBytes) != bytesSize) return null
+            val entry =
+                CacheEntry(
+                    etag = String(etagBytes, Charsets.UTF_8),
+                    bytes = imageBytes,
+                    expiresAt = Instant.ofEpochSecond(expiresAtEpochSec),
+                )
+            if (Instant.now().isAfter(entry.expiresAt)) {
+                Files.deleteIfExists(file)
+                return null
+            }
+            entry
+        }
+    }.getOrNull()
+}
+
+private fun Path.writeEntry(key: String, entry: CacheEntry) {
+    runCatching {
+        Files.createDirectories(this)
+        val file = resolve(key.toCacheFileName())
+        Files.newOutputStream(file).use { output ->
+            val etagBytes = entry.etag.toByteArray(Charsets.UTF_8)
+            val header = java.nio.ByteBuffer.allocate(16)
+            header.putLong(entry.expiresAt.epochSecond)
+            header.putInt(etagBytes.size)
+            header.putInt(entry.bytes.size)
+            output.write(header.array())
+            output.write(etagBytes)
+            output.write(entry.bytes)
+        }
+    }
+}
+
+private fun String.toCacheFileName(): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(toByteArray(Charsets.UTF_8))
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(digest) + ".bin"
 }
