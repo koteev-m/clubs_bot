@@ -36,6 +36,7 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
@@ -522,12 +523,19 @@ private suspend fun ApplicationCall.receiveUpload(
                         val result =
                             runCatching {
                                 readLimitedWithShaToTempFile(part.provider, maxBytes)
-                            }.getOrElse {
-                                error = MusicUploadResult.Error(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
+                            }.getOrElse { throwable ->
+                                error =
+                                    when (throwable) {
+                                        is MusicPayloadTooLargeException ->
+                                            MusicUploadResult.Error(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
+                                        else ->
+                                            MusicUploadResult.Error(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
+                                    }
                                 part.dispose()
                                 return@forEachPart
                             }
                         if (result.sizeBytes == 0L) {
+                            Files.deleteIfExists(result.tempFile)
                             error =
                                 MusicUploadResult.Error(
                                     HttpStatusCode.BadRequest,
@@ -567,12 +575,12 @@ private suspend fun readLimitedWithShaToTempFile(
     channelProvider: () -> ByteReadChannel,
     maxBytes: Long,
 ): ReadWithShaResult {
-    val channel = channelProvider()
     val tempFile = Files.createTempFile("music-upload-", ".bin")
-    val digest = MessageDigest.getInstance("SHA-256")
-    val buffer = ByteArray(8_192)
-    var total = 0L
-    runCatching {
+    return runCatching {
+        val channel = channelProvider()
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(8_192)
+        var total = 0L
         Files.newOutputStream(tempFile).use { output ->
             while (true) {
                 val read = channel.readAvailable(buffer)
@@ -585,15 +593,15 @@ private suspend fun readLimitedWithShaToTempFile(
                 output.write(buffer, 0, read)
             }
         }
+        val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+        ReadWithShaResult(tempFile, total, sha256)
     }.onFailure {
         Files.deleteIfExists(tempFile)
         throw it
-    }
-    val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
-    return ReadWithShaResult(tempFile, total, sha256)
+    }.getOrThrow()
 }
 
-private class MusicPayloadTooLargeException : RuntimeException()
+private class MusicPayloadTooLargeException : IOException()
 
 private suspend fun ApplicationCall.isAllowedForClub(clubId: Long?): Boolean {
     return if (clubId == null) {

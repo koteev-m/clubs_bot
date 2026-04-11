@@ -41,6 +41,9 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -347,13 +350,106 @@ class AdminMusicRoutesTest {
         assertEquals(1, assetsRepo.streamCreateCalls.get())
     }
 
+    @Test
+    fun `zero byte upload cleans up temp file`() = withApp { itemsRepo, _ ->
+        val item =
+            itemsRepo.create(
+                MusicItemCreate(
+                    clubId = 1,
+                    title = "Track",
+                    dj = null,
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.FILE,
+                    sourceUrl = null,
+                    durationSec = null,
+                    coverUrl = null,
+                    tags = null,
+                    publishedAt = null,
+                ),
+                actor = 1,
+            )
+
+        val before = musicUploadTempFiles()
+        val response =
+            client.put("/api/admin/music/items/${item.id}/audio") {
+                header("X-Telegram-Init-Data", "init")
+                setBody(
+                    MultiPartFormDataContent(
+                        formData {
+                            append(
+                                "file",
+                                ByteArray(0),
+                                Headers.build {
+                                    append(HttpHeaders.ContentType, ContentType.Audio.MPEG.toString())
+                                    append(HttpHeaders.ContentDisposition, "filename=\"track.mp3\"")
+                                },
+                            )
+                        },
+                    ),
+                )
+            }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertTrue(response.bodyAsText().contains(ErrorCodes.validation_error))
+        val after = musicUploadTempFiles()
+        assertEquals(before, after)
+    }
+
+    @Test
+    fun `read path runtime exception returns internal error not payload too large`() =
+        withApp(assetsRepo = ThrowingMusicAssetRepository()) { itemsRepo, _ ->
+            val item =
+                itemsRepo.create(
+                    MusicItemCreate(
+                        clubId = 1,
+                        title = "Track",
+                        dj = null,
+                        description = null,
+                        itemType = MusicItemType.TRACK,
+                        source = MusicSource.FILE,
+                        sourceUrl = null,
+                        durationSec = null,
+                        coverUrl = null,
+                        tags = null,
+                        publishedAt = null,
+                    ),
+                    actor = 1,
+                )
+
+            val response =
+                client.put("/api/admin/music/items/${item.id}/audio") {
+                    header("X-Telegram-Init-Data", "init")
+                    setBody(
+                        MultiPartFormDataContent(
+                            formData {
+                                append(
+                                    "file",
+                                    ByteArray(1024) { 3 },
+                                    Headers.build {
+                                        append(HttpHeaders.ContentType, ContentType.Audio.MPEG.toString())
+                                        append(HttpHeaders.ContentDisposition, "filename=\"track.mp3\"")
+                                    },
+                                )
+                            },
+                        ),
+                    )
+                }
+
+            assertEquals(HttpStatusCode.InternalServerError, response.status)
+            assertTrue(response.bodyAsText().contains(ErrorCodes.internal_error))
+            assertTrue(!response.bodyAsText().contains(ErrorCodes.payload_too_large))
+        }
+
     private fun withApp(
         roles: Set<Role> = setOf(Role.CLUB_ADMIN),
         clubIds: Set<Long> = setOf(1),
+        assetsRepo: MusicAssetRepository? = null,
         block: suspend ApplicationTestBuilder.(FakeMusicItemRepository, FakeMusicAssetRepository) -> Unit,
     ) {
         val itemsRepo = FakeMusicItemRepository(clock)
-        val assetsRepo = FakeMusicAssetRepository(clock)
+        val fallbackAssetsRepo = FakeMusicAssetRepository(clock)
+        val effectiveAssetsRepo = assetsRepo ?: fallbackAssetsRepo
         testApplication {
             application {
                 install(ContentNegotiation) { json() }
@@ -364,10 +460,18 @@ class AdminMusicRoutesTest {
                     auditLogRepository = io.mockk.mockk(relaxed = true)
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
-                adminMusicRoutes(itemsRepo, assetsRepo, clock = clock, botTokenProvider = { "test" })
+                adminMusicRoutes(itemsRepo, effectiveAssetsRepo, clock = clock, botTokenProvider = { "test" })
             }
 
-            block(this, itemsRepo, assetsRepo)
+            block(this, itemsRepo, fallbackAssetsRepo)
+        }
+    }
+
+    private fun musicUploadTempFiles(): Set<String> {
+        val tmpDir = Path.of(System.getProperty("java.io.tmpdir"))
+        Files.createDirectories(tmpDir)
+        Files.newDirectoryStream(tmpDir, "music-upload-*.bin").use { stream ->
+            return stream.map { it.fileName.toString() }.toSet()
         }
     }
 
@@ -547,6 +651,32 @@ class AdminMusicRoutesTest {
             streamCreateCalls.incrementAndGet()
             val bytes = openStream().use { it.readBytes() }
             return createAsset(kind, bytes, contentType, sha256, sizeBytes)
+        }
+    }
+
+    private class ThrowingMusicAssetRepository : MusicAssetRepository {
+        override suspend fun createAsset(
+            kind: MusicAssetKind,
+            bytes: ByteArray,
+            contentType: String,
+            sha256: String,
+            sizeBytes: Long,
+        ): MusicAsset {
+            throw UnsupportedOperationException("not used")
+        }
+
+        override suspend fun getAsset(id: Long): MusicAsset? = null
+
+        override suspend fun getAssetMeta(id: Long): MusicAssetMeta? = null
+
+        override suspend fun createAssetStream(
+            kind: MusicAssetKind,
+            contentType: String,
+            sha256: String,
+            sizeBytes: Long,
+            openStream: () -> java.io.InputStream,
+        ): MusicAsset {
+            throw IOException("forced read failure")
         }
     }
 }

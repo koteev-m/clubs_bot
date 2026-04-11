@@ -3,6 +3,7 @@ package com.example.bot.cache
 import com.example.bot.config.BotLimits
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
@@ -113,7 +114,10 @@ class HallRenderCache(
         ifNoneMatch: String?,
         supplier: suspend () -> ByteArray,
     ): Result {
-        val cached = cache.get(key) ?: sharedDir?.readEntry(key)
+        val cached =
+            cache.get(key) ?: sharedDir?.readEntry(key)?.also {
+                cache.put(key, it)
+            }
         val notModified: Boolean
         val etag: String
         val bytes: ByteArray
@@ -164,14 +168,14 @@ private fun Path.readEntry(key: String): CacheEntry? {
     return runCatching {
         Files.newInputStream(file).use { input ->
             val header = ByteArray(16)
-            if (input.read(header) != header.size) return null
+            if (!input.readFully(header)) return@runCatching null
             val expiresAtEpochSec = java.nio.ByteBuffer.wrap(header, 0, 8).long
             val etagSize = java.nio.ByteBuffer.wrap(header, 8, 4).int
             val bytesSize = java.nio.ByteBuffer.wrap(header, 12, 4).int
             if (etagSize <= 0 || bytesSize < 0) return null
             val etagBytes = ByteArray(etagSize)
             val imageBytes = ByteArray(bytesSize)
-            if (input.read(etagBytes) != etagSize || input.read(imageBytes) != bytesSize) return null
+            if (!input.readFully(etagBytes) || !input.readFully(imageBytes)) return@runCatching null
             val entry =
                 CacheEntry(
                     etag = String(etagBytes, Charsets.UTF_8),
@@ -184,14 +188,21 @@ private fun Path.readEntry(key: String): CacheEntry? {
             }
             entry
         }
-    }.getOrNull()
+    }.getOrElse {
+        null
+    } ?: run {
+        runCatching { Files.deleteIfExists(file) }
+        null
+    }
 }
 
 private fun Path.writeEntry(key: String, entry: CacheEntry) {
+    var tempFile: Path? = null
     runCatching {
         Files.createDirectories(this)
         val file = resolve(key.toCacheFileName())
-        Files.newOutputStream(file).use { output ->
+        tempFile = Files.createTempFile(this, ".${file.fileName}", ".tmp")
+        Files.newOutputStream(tempFile!!).use { output ->
             val etagBytes = entry.etag.toByteArray(Charsets.UTF_8)
             val header = java.nio.ByteBuffer.allocate(16)
             header.putLong(entry.expiresAt.epochSecond)
@@ -201,7 +212,25 @@ private fun Path.writeEntry(key: String, entry: CacheEntry) {
             output.write(etagBytes)
             output.write(entry.bytes)
         }
+        Files.move(
+            tempFile!!,
+            file,
+            StandardCopyOption.REPLACE_EXISTING,
+            StandardCopyOption.ATOMIC_MOVE,
+        )
+    }.onFailure {
+        tempFile?.let { path -> runCatching { Files.deleteIfExists(path) } }
     }
+}
+
+private fun java.io.InputStream.readFully(buffer: ByteArray): Boolean {
+    var offset = 0
+    while (offset < buffer.size) {
+        val read = read(buffer, offset, buffer.size - offset)
+        if (read < 0) return false
+        offset += read
+    }
+    return true
 }
 
 private fun String.toCacheFileName(): String {
