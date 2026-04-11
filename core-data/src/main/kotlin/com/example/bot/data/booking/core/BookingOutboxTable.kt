@@ -24,5 +24,6 @@ object BookingOutboxTable : Table("booking_outbox") {
     init {
         index("idx_booking_outbox_status_attempt", false, status, nextAttemptAt)
         index("idx_booking_outbox_lease_until", false, leaseUntil)
+        index("idx_booking_outbox_topic_claim", false, status, topic, nextAttemptAt, leaseUntil)
     }
 }
