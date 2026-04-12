@@ -426,10 +426,24 @@ class MusicRoutesTest {
             var streamAssetCalled = false
             val assetsRepo =
                 FakeMusicAssetsRepository(
+                    assets =
+                        mapOf(
+                            20L to
+                                MusicAsset(
+                                    id = 20,
+                                    kind = MusicAssetKind.AUDIO,
+                                    bytes = byteArrayOf(1, 2, 3, 4),
+                                    contentType = "audio/mpeg",
+                                    sha256 = "abc",
+                                    sizeBytes = 4,
+                                    createdAt = updatedAt,
+                                    updatedAt = updatedAt,
+                                ),
+                        ),
                     metas = mapOf(20L to assetMeta),
-                    onStreamAsset = {
+                    onOpenAssetStream = {
                         streamAssetCalled = true
-                        error("streamAssetTo should not be called when If-None-Match matches")
+                        error("asset stream should not be read when If-None-Match matches")
                     },
                 )
             val localService =
@@ -455,6 +469,62 @@ class MusicRoutesTest {
             assertEquals("abc", response.headers[HttpHeaders.ETag])
             assertEquals("private, max-age=3600, must-revalidate", response.headers[HttpHeaders.CacheControl])
             assertEquals(false, streamAssetCalled)
+        }
+
+    @Test
+    fun `asset endpoint returns 404 when source cannot be opened after metadata lookup`() =
+        testApplication {
+            val publishedItem =
+                MusicItemView(
+                    id = 210,
+                    clubId = null,
+                    title = "Published Track",
+                    dj = "DJ",
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.SPOTIFY,
+                    sourceUrl = null,
+                    audioAssetId = 21,
+                    telegramFileId = null,
+                    durationSec = 180,
+                    coverUrl = null,
+                    coverAssetId = null,
+                    tags = emptyList(),
+                    publishedAt = updatedAt,
+                )
+            val repo = FakeMusicItemRepository(listOf(publishedItem), updatedAt)
+            val assetsRepo =
+                FakeMusicAssetsRepository(
+                    metas =
+                        mapOf(
+                            21L to
+                                MusicAssetMeta(
+                                    id = 21,
+                                    kind = MusicAssetKind.AUDIO,
+                                    contentType = "audio/mpeg",
+                                    sha256 = "missing",
+                                    sizeBytes = 4,
+                                    updatedAt = updatedAt,
+                                ),
+                        ),
+                )
+            val localService =
+                MusicService(
+                    itemsRepo = repo,
+                    playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
+                    likesRepository = likesRepository,
+                    clock = fixedClock,
+                    trackOfNightRepository = EmptyTrackOfNightRepository(),
+                )
+            val localMixtapeService = com.example.bot.music.MixtapeService(likesRepository, localService, fixedClock)
+
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                musicRoutes(localService, repo, likesRepository, assetsRepo, localMixtapeService)
+            }
+
+            val response = client.get("/api/music/items/210/audio")
+            assertEquals(HttpStatusCode.NotFound, response.status)
         }
 
     private fun createInitData(): String {
@@ -589,7 +659,7 @@ class MusicRoutesTest {
         private val assets: Map<Long, MusicAsset> = emptyMap(),
         private val metas: Map<Long, MusicAssetMeta> = emptyMap(),
         private val onGetAsset: ((Long) -> Unit)? = null,
-        private val onStreamAsset: ((Long) -> Unit)? = null,
+        private val onOpenAssetStream: ((Long) -> Unit)? = null,
     ) : com.example.bot.music.MusicAssetRepository {
         override suspend fun createAsset(
             kind: com.example.bot.music.MusicAssetKind,
@@ -608,11 +678,24 @@ class MusicRoutesTest {
 
         override suspend fun getAssetMeta(id: Long): com.example.bot.music.MusicAssetMeta? = metas[id]
 
-        override suspend fun streamAssetTo(id: Long, output: java.io.OutputStream): MusicAssetMeta? {
-            onStreamAsset?.invoke(id)
+        override suspend fun openAssetSource(id: Long): com.example.bot.music.MusicAssetSource? {
             val asset = assets[id] ?: return null
-            output.write(asset.bytes)
-            return metas[id]
+            val meta = metas[id]
+                ?: MusicAssetMeta(
+                    id = asset.id,
+                    kind = asset.kind,
+                    contentType = asset.contentType,
+                    sha256 = asset.sha256,
+                    sizeBytes = asset.sizeBytes,
+                    updatedAt = asset.updatedAt,
+                )
+            return com.example.bot.music.MusicAssetSource(
+                meta = meta,
+                openStream = {
+                    onOpenAssetStream?.invoke(id)
+                    asset.bytes.inputStream()
+                },
+            )
         }
     }
 

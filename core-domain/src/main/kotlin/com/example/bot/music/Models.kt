@@ -1,5 +1,6 @@
 package com.example.bot.music
 
+import java.io.InputStream
 import java.time.Instant
 
 /** Source type of a music item. */
@@ -77,6 +78,14 @@ data class MusicAssetMeta(
     val sizeBytes: Long,
     val updatedAt: Instant,
 )
+
+data class MusicAssetSource(
+    val meta: MusicAssetMeta,
+    val openStream: () -> InputStream,
+    val close: () -> Unit = {},
+) : AutoCloseable {
+    override fun close() = close.invoke()
+}
 
 /** Asset kind (audio or cover). */
 enum class MusicAssetKind { AUDIO, COVER }

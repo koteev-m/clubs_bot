@@ -1,6 +1,8 @@
 package com.example.bot.cache
 
 import com.example.bot.config.BotLimits
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.CopyOption
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -87,6 +89,7 @@ class HallRenderCache(
     ttl: Duration =
         System.getenv("HALL_CACHE_TTL_SECONDS")?.toLongOrNull()?.let(Duration::ofSeconds)
             ?: BotLimits.Cache.DEFAULT_TTL,
+    private val sharedMoveOps: SharedCacheMoveOps = DefaultSharedCacheMoveOps,
 ) {
     private val ttlDuration = ttl
     private val cache = TtlLruCache<String, CacheEntry>(maxEntries, ttlDuration)
@@ -138,7 +141,7 @@ class HallRenderCache(
             HallCacheMetrics.rendersMs.addAndGet(took.toMillis())
             etag = computeEtag(freshBytes)
             cache.put(key, CacheEntry(etag, freshBytes, Instant.now().plus(ttlDuration)))
-            sharedDir?.writeEntry(key, CacheEntry(etag, freshBytes, Instant.now().plus(ttlDuration)))
+            sharedDir?.writeEntry(key, CacheEntry(etag, freshBytes, Instant.now().plus(ttlDuration)), sharedMoveOps)
             notModified = ifNoneMatch != null && equalsWeakEtag(ifNoneMatch, etag)
             bytes = freshBytes
         }
@@ -162,6 +165,24 @@ class HallRenderCache(
             val normB = etag.trim()
             return normA == normB
         }
+    }
+}
+
+interface SharedCacheMoveOps {
+    fun move(
+        source: Path,
+        target: Path,
+        vararg options: CopyOption,
+    )
+}
+
+private object DefaultSharedCacheMoveOps : SharedCacheMoveOps {
+    override fun move(
+        source: Path,
+        target: Path,
+        vararg options: CopyOption,
+    ) {
+        Files.move(source, target, *options)
     }
 }
 
@@ -211,7 +232,11 @@ private fun isValidSharedEntryHeader(
     return fileSize == expectedSize
 }
 
-private fun Path.writeEntry(key: String, entry: CacheEntry) {
+private fun Path.writeEntry(
+    key: String,
+    entry: CacheEntry,
+    moveOps: SharedCacheMoveOps,
+) {
     var tempFile: Path? = null
     runCatching {
         Files.createDirectories(this)
@@ -227,12 +252,20 @@ private fun Path.writeEntry(key: String, entry: CacheEntry) {
             output.write(etagBytes)
             output.write(entry.bytes)
         }
-        Files.move(
-            tempFile!!,
-            file,
-            StandardCopyOption.REPLACE_EXISTING,
-            StandardCopyOption.ATOMIC_MOVE,
-        )
+        try {
+            moveOps.move(
+                tempFile!!,
+                file,
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            moveOps.move(
+                tempFile!!,
+                file,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
     }.onFailure {
         tempFile?.let { path -> runCatching { Files.deleteIfExists(path) } }
     }
