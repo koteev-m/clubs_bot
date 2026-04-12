@@ -49,6 +49,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -57,6 +58,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -440,6 +442,18 @@ class AdminMusicRoutesTest {
             assertTrue(response.bodyAsText().contains(ErrorCodes.internal_error))
             assertTrue(!response.bodyAsText().contains(ErrorCodes.payload_too_large))
         }
+
+    @Test
+    fun `readLimitedWithShaToTempFile rethrows cancellation exception`() {
+        assertFailsWith<CancellationException> {
+            kotlinx.coroutines.runBlocking {
+                readLimitedWithShaToTempFile(
+                    channelProvider = { throw CancellationException("cancelled") },
+                    maxBytes = 1024,
+                )
+            }
+        }
+    }
 
     private fun withApp(
         roles: Set<Role> = setOf(Role.CLUB_ADMIN),
