@@ -3,6 +3,8 @@ package com.example.bot.cache
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.time.Instant
+import java.nio.ByteBuffer
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -116,6 +118,57 @@ class HallRenderCacheTest {
                     assertTrue(result is HallRenderCache.Result.Ok)
                     assertEquals(1, renders)
                     assertContentEquals("fresh".encodeToByteArray(), Files.readAllBytes(cacheFile).takeLast(5).toByteArray())
+                } finally {
+                    if (previous == null) {
+                        System.clearProperty("HALL_CACHE_SHARED_DIR")
+                    } else {
+                        System.setProperty("HALL_CACHE_SHARED_DIR", previous)
+                    }
+                }
+            } finally {
+                dir.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `malformed shared header with oversized dimensions is treated as miss and rewritten`() {
+        runBlocking {
+            val dir = Files.createTempDirectory("hall-cache-test-")
+            try {
+                val previous = System.getProperty("HALL_CACHE_SHARED_DIR")
+                System.setProperty("HALL_CACHE_SHARED_DIR", dir.toString())
+                try {
+                    val writer = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    writer.getOrRender("club-4|night-1", null) { "payload".encodeToByteArray() }
+                    val cacheFile = singleCacheFile(dir)
+                    Files.write(
+                        cacheFile,
+                        ByteBuffer.allocate(16)
+                            .putLong(Instant.now().plusSeconds(60).epochSecond)
+                            .putInt(128)
+                            .putInt(Int.MAX_VALUE)
+                            .array(),
+                    )
+
+                    val reader = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    var renders = 0
+                    val result =
+                        reader.getOrRender("club-4|night-1", null) {
+                            renders += 1
+                            "fresh-rebuilt".encodeToByteArray()
+                        }
+
+                    assertTrue(result is HallRenderCache.Result.Ok)
+                    assertEquals(1, renders)
+
+                    val warmedResult =
+                        reader.getOrRender("club-4|night-1", null) {
+                            renders += 1
+                            "should-not-render".encodeToByteArray()
+                        }
+                    assertTrue(warmedResult is HallRenderCache.Result.Ok)
+                    assertEquals(1, renders)
                 } finally {
                     if (previous == null) {
                         System.clearProperty("HALL_CACHE_SHARED_DIR")

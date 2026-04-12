@@ -34,6 +34,7 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.io.IOException
@@ -524,6 +525,9 @@ private suspend fun ApplicationCall.receiveUpload(
                             runCatching {
                                 readLimitedWithShaToTempFile(part.provider, maxBytes)
                             }.getOrElse { throwable ->
+                                if (throwable is CancellationException) {
+                                    throw throwable
+                                }
                                 error =
                                     when (throwable) {
                                         is MusicPayloadTooLargeException ->
@@ -565,18 +569,18 @@ private suspend fun ApplicationCall.receiveUpload(
     )
 }
 
-private data class ReadWithShaResult(
+internal data class ReadWithShaResult(
     val tempFile: Path,
     val sizeBytes: Long,
     val sha256: String,
 )
 
-private suspend fun readLimitedWithShaToTempFile(
+internal suspend fun readLimitedWithShaToTempFile(
     channelProvider: () -> ByteReadChannel,
     maxBytes: Long,
 ): ReadWithShaResult {
     val tempFile = Files.createTempFile("music-upload-", ".bin")
-    return runCatching {
+    return try {
         val channel = channelProvider()
         val digest = MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(8_192)
@@ -595,10 +599,13 @@ private suspend fun readLimitedWithShaToTempFile(
         }
         val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
         ReadWithShaResult(tempFile, total, sha256)
-    }.onFailure {
+    } catch (ex: CancellationException) {
         Files.deleteIfExists(tempFile)
-        throw it
-    }.getOrThrow()
+        throw ex
+    } catch (ex: Throwable) {
+        Files.deleteIfExists(tempFile)
+        throw ex
+    }
 }
 
 private class MusicPayloadTooLargeException : IOException()

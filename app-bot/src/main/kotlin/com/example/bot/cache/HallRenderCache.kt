@@ -12,6 +12,10 @@ import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.LongAdder
 
+private const val SHARED_ENTRY_HEADER_SIZE_BYTES = 16L
+private const val MAX_SHARED_ETAG_SIZE_BYTES = 512
+private const val MAX_SHARED_IMAGE_SIZE_BYTES = 64 * 1024 * 1024
+
 data class CacheEntry(
     val etag: String,
     val bytes: ByteArray,
@@ -172,7 +176,7 @@ private fun Path.readEntry(key: String): CacheEntry? {
             val expiresAtEpochSec = java.nio.ByteBuffer.wrap(header, 0, 8).long
             val etagSize = java.nio.ByteBuffer.wrap(header, 8, 4).int
             val bytesSize = java.nio.ByteBuffer.wrap(header, 12, 4).int
-            if (etagSize <= 0 || bytesSize < 0) return null
+            if (!isValidSharedEntryHeader(etagSize, bytesSize, Files.size(file))) return@runCatching null
             val etagBytes = ByteArray(etagSize)
             val imageBytes = ByteArray(bytesSize)
             if (!input.readFully(etagBytes) || !input.readFully(imageBytes)) return@runCatching null
@@ -194,6 +198,17 @@ private fun Path.readEntry(key: String): CacheEntry? {
         runCatching { Files.deleteIfExists(file) }
         null
     }
+}
+
+private fun isValidSharedEntryHeader(
+    etagSize: Int,
+    bytesSize: Int,
+    fileSize: Long,
+): Boolean {
+    if (etagSize <= 0 || etagSize > MAX_SHARED_ETAG_SIZE_BYTES) return false
+    if (bytesSize < 0 || bytesSize > MAX_SHARED_IMAGE_SIZE_BYTES) return false
+    val expectedSize = SHARED_ENTRY_HEADER_SIZE_BYTES + etagSize.toLong() + bytesSize.toLong()
+    return fileSize == expectedSize
 }
 
 private fun Path.writeEntry(key: String, entry: CacheEntry) {
