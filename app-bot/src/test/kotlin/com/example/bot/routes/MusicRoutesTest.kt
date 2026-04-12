@@ -423,7 +423,7 @@ class MusicRoutesTest {
                     sizeBytes = 4,
                     updatedAt = updatedAt,
                 )
-            var streamAssetCalled = false
+            var openAssetSourceCalled = false
             val assetsRepo =
                 FakeMusicAssetsRepository(
                     assets =
@@ -441,8 +441,11 @@ class MusicRoutesTest {
                                 ),
                         ),
                     metas = mapOf(20L to assetMeta),
+                    onOpenAssetSource = {
+                        openAssetSourceCalled = true
+                        error("asset source should not be opened when If-None-Match matches")
+                    },
                     onOpenAssetStream = {
-                        streamAssetCalled = true
                         error("asset stream should not be read when If-None-Match matches")
                     },
                 )
@@ -468,7 +471,7 @@ class MusicRoutesTest {
             assertEquals(HttpStatusCode.NotModified, response.status)
             assertEquals("abc", response.headers[HttpHeaders.ETag])
             assertEquals("private, max-age=3600, must-revalidate", response.headers[HttpHeaders.CacheControl])
-            assertEquals(false, streamAssetCalled)
+            assertEquals(false, openAssetSourceCalled)
         }
 
     @Test
@@ -659,6 +662,7 @@ class MusicRoutesTest {
         private val assets: Map<Long, MusicAsset> = emptyMap(),
         private val metas: Map<Long, MusicAssetMeta> = emptyMap(),
         private val onGetAsset: ((Long) -> Unit)? = null,
+        private val onOpenAssetSource: ((Long) -> Unit)? = null,
         private val onOpenAssetStream: ((Long) -> Unit)? = null,
     ) : com.example.bot.music.MusicAssetRepository {
         override suspend fun createAsset(
@@ -679,6 +683,7 @@ class MusicRoutesTest {
         override suspend fun getAssetMeta(id: Long): com.example.bot.music.MusicAssetMeta? = metas[id]
 
         override suspend fun openAssetSource(id: Long): com.example.bot.music.MusicAssetSource? {
+            onOpenAssetSource?.invoke(id)
             val asset = assets[id] ?: return null
             val meta = metas[id]
                 ?: MusicAssetMeta(

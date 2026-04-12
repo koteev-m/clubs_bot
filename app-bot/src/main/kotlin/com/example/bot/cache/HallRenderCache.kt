@@ -67,6 +67,15 @@ class TtlLruCache<K, V>(
     }
 
     @Synchronized
+    fun putWithExpiresAt(
+        key: K,
+        value: V,
+        expiresAt: Instant,
+    ) {
+        map[key] = Timed(value, expiresAt)
+    }
+
+    @Synchronized
     fun size(): Int = map.size
 }
 
@@ -123,7 +132,7 @@ class HallRenderCache(
     ): Result {
         val cached =
             cache.get(key) ?: sharedDir?.readEntry(key)?.also {
-                cache.put(key, it)
+                cache.putWithExpiresAt(key, it, it.expiresAt)
             }
         val notModified: Boolean
         val etag: String
