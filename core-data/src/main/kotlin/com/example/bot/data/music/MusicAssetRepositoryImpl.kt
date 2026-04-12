@@ -4,6 +4,7 @@ import com.example.bot.music.MusicAsset
 import com.example.bot.music.MusicAssetKind
 import com.example.bot.music.MusicAssetMeta
 import com.example.bot.music.MusicAssetRepository
+import com.example.bot.music.MusicAssetSource
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
@@ -13,7 +14,7 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.io.InputStream
-import java.io.OutputStream
+import java.nio.file.Files
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.OffsetDateTime
@@ -107,10 +108,7 @@ class MusicAssetRepositoryImpl(
             }
         }
 
-    override suspend fun streamAssetTo(
-        id: Long,
-        output: OutputStream,
-    ): MusicAssetMeta? =
+    override suspend fun openAssetSource(id: Long): MusicAssetSource? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val connection = TransactionManager.current().connection.connection as java.sql.Connection
             val sql =
@@ -123,21 +121,30 @@ class MusicAssetRepositoryImpl(
                 stmt.setLong(1, id)
                 stmt.executeQuery().use { rs ->
                     if (!rs.next()) return@newSuspendedTransaction null
-                    rs.getBinaryStream("bytes").use { input ->
-                        val buffer = ByteArray(16 * 1024)
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            output.write(buffer, 0, read)
+                    val tempFile = Files.createTempFile("music-asset-$id-", ".bin")
+                    try {
+                        rs.getBinaryStream("bytes").use { input ->
+                            Files.newOutputStream(tempFile).use { output ->
+                                input.copyTo(output)
+                            }
                         }
+                    } catch (t: Throwable) {
+                        runCatching { Files.deleteIfExists(tempFile) }
+                        throw t
                     }
-                    MusicAssetMeta(
-                        id = id,
-                        kind = MusicAssetKind.valueOf(rs.getString("kind")),
-                        contentType = rs.getString("content_type"),
-                        sha256 = rs.getString("sha256"),
-                        sizeBytes = rs.getLong("size_bytes"),
-                        updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java).toInstant(),
+                    val meta =
+                        MusicAssetMeta(
+                            id = id,
+                            kind = MusicAssetKind.valueOf(rs.getString("kind")),
+                            contentType = rs.getString("content_type"),
+                            sha256 = rs.getString("sha256"),
+                            sizeBytes = rs.getLong("size_bytes"),
+                            updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java).toInstant(),
+                        )
+                    MusicAssetSource(
+                        meta = meta,
+                        openStream = { Files.newInputStream(tempFile) },
+                        close = { runCatching { Files.deleteIfExists(tempFile) } },
                     )
                 }
             }

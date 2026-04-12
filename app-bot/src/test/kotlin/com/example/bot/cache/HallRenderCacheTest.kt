@@ -1,5 +1,7 @@
 package com.example.bot.cache
 
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.CopyOption
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -195,9 +197,67 @@ class HallRenderCacheTest {
         }
     }
 
+    @Test
+    fun `shared write falls back when atomic move is not supported`() {
+        runBlocking {
+            val dir = Files.createTempDirectory("hall-cache-test-")
+            try {
+                val previous = System.getProperty("HALL_CACHE_SHARED_DIR")
+                System.setProperty("HALL_CACHE_SHARED_DIR", dir.toString())
+                try {
+                    val moveOps = RecordingFallbackMoveOps()
+                    val writer = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1), sharedMoveOps = moveOps)
+                    val reader = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    var renders = 0
+
+                    writer.getOrRender("club-5|night-1", null) {
+                        renders += 1
+                        "payload".encodeToByteArray()
+                    }
+
+                    val result =
+                        reader.getOrRender("club-5|night-1", null) {
+                            renders += 1
+                            "unexpected-render".encodeToByteArray()
+                        }
+                    assertTrue(result is HallRenderCache.Result.Ok)
+                    assertEquals(1, renders)
+                    assertEquals(1, moveOps.atomicAttempts)
+                    assertEquals(1, moveOps.fallbackAttempts)
+                } finally {
+                    if (previous == null) {
+                        System.clearProperty("HALL_CACHE_SHARED_DIR")
+                    } else {
+                        System.setProperty("HALL_CACHE_SHARED_DIR", previous)
+                    }
+                }
+            } finally {
+                dir.toFile().deleteRecursively()
+            }
+        }
+    }
+
     private fun singleCacheFile(dir: Path): Path {
         Files.newDirectoryStream(dir, "*.bin").use { stream ->
             return stream.first()
+        }
+    }
+
+    private class RecordingFallbackMoveOps : SharedCacheMoveOps {
+        var atomicAttempts: Int = 0
+        var fallbackAttempts: Int = 0
+
+        override fun move(
+            source: Path,
+            target: Path,
+            vararg options: CopyOption,
+        ) {
+            if (options.contains(java.nio.file.StandardCopyOption.ATOMIC_MOVE)) {
+                atomicAttempts += 1
+                throw AtomicMoveNotSupportedException(source.toString(), target.toString(), "unsupported in test")
+            }
+            fallbackAttempts += 1
+            Files.move(source, target, *options)
         }
     }
 }

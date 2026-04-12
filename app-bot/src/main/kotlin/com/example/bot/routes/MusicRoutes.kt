@@ -55,17 +55,18 @@ fun Application.musicRoutes(
                 }
                 val assetId = item.audioAssetId
                     ?: return@get call.respond(HttpStatusCode.NotFound, "Audio not found")
-                val meta = assetsRepository.getAssetMeta(assetId)
+                val source = assetsRepository.openAssetSource(assetId)
                     ?: return@get call.respond(HttpStatusCode.NotFound, "Audio not found")
-                val etag = meta.sha256
+                val etag = source.meta.sha256
                 val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
                 if (matchesEtag(ifNoneMatch, etag)) {
                     call.response.header(HttpHeaders.ETag, etag)
                     call.response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
+                    source.close()
                     call.respond(HttpStatusCode.NotModified)
                     return@get
                 }
-                call.respondMusicAsset(assetId, meta, assetsRepository)
+                call.respondMusicAsset(source)
             }
 
             get("/{id}/cover") {
@@ -81,17 +82,18 @@ fun Application.musicRoutes(
                 }
                 val assetId = item.coverAssetId
                     ?: return@get call.respond(HttpStatusCode.NotFound, "Cover not found")
-                val meta = assetsRepository.getAssetMeta(assetId)
+                val source = assetsRepository.openAssetSource(assetId)
                     ?: return@get call.respond(HttpStatusCode.NotFound, "Cover not found")
-                val etag = meta.sha256
+                val etag = source.meta.sha256
                 val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
                 if (matchesEtag(ifNoneMatch, etag)) {
                     call.response.header(HttpHeaders.ETag, etag)
                     call.response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
+                    source.close()
                     call.respond(HttpStatusCode.NotModified)
                     return@get
                 }
-                call.respondMusicAsset(assetId, meta, assetsRepository)
+                call.respondMusicAsset(source)
             }
         }
 
@@ -224,17 +226,17 @@ fun Application.musicRoutes(
 }
 
 private suspend fun ApplicationCall.respondMusicAsset(
-    assetId: Long,
-    meta: com.example.bot.music.MusicAssetMeta,
-    assetsRepository: MusicAssetRepository,
+    source: com.example.bot.music.MusicAssetSource,
 ){
-    response.header(HttpHeaders.ETag, meta.sha256)
+    response.header(HttpHeaders.ETag, source.meta.sha256)
     response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
-    respondOutputStream(
-        contentType = io.ktor.http.ContentType.parse(meta.contentType),
-        status = HttpStatusCode.OK,
-    ) {
-        assetsRepository.streamAssetTo(assetId, this)
+    source.use { openedSource ->
+        respondOutputStream(
+            contentType = io.ktor.http.ContentType.parse(openedSource.meta.contentType),
+            status = HttpStatusCode.OK,
+        ) {
+            openedSource.openStream().use { input -> input.copyTo(this) }
+        }
     }
 }
 

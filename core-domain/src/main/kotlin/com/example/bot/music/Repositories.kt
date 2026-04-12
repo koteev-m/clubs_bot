@@ -1,7 +1,6 @@
 package com.example.bot.music
 
 import java.io.InputStream
-import java.io.OutputStream
 import java.time.Instant
 
 /** Repository for music items. */
@@ -163,6 +162,23 @@ interface MusicAssetRepository {
 
     suspend fun getAssetMeta(id: Long): MusicAssetMeta?
 
+    suspend fun openAssetSource(id: Long): MusicAssetSource? {
+        val asset = getAsset(id) ?: return null
+        val bytes = asset.bytes
+        return MusicAssetSource(
+            meta =
+                MusicAssetMeta(
+                    id = asset.id,
+                    kind = asset.kind,
+                    contentType = asset.contentType,
+                    sha256 = asset.sha256,
+                    sizeBytes = asset.sizeBytes,
+                    updatedAt = asset.updatedAt,
+                ),
+            openStream = { bytes.inputStream() },
+        )
+    }
+
     suspend fun createAssetStream(
         kind: MusicAssetKind,
         contentType: String,
@@ -178,21 +194,6 @@ interface MusicAssetRepository {
             sizeBytes = sizeBytes,
         )
 
-    suspend fun streamAssetTo(
-        id: Long,
-        output: OutputStream,
-    ): MusicAssetMeta? {
-        val asset = getAsset(id) ?: return null
-        output.write(asset.bytes)
-        return MusicAssetMeta(
-            id = asset.id,
-            kind = asset.kind,
-            contentType = asset.contentType,
-            sha256 = asset.sha256,
-            sizeBytes = asset.sizeBytes,
-            updatedAt = asset.updatedAt,
-        )
-    }
 }
 
 interface MusicBattleRepository {
