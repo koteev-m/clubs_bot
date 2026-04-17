@@ -24,6 +24,7 @@ import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 
 private const val DEFAULT_LIMIT = 100
@@ -55,18 +56,11 @@ fun Application.musicRoutes(
                 }
                 val assetId = item.audioAssetId
                     ?: return@get call.respond(HttpStatusCode.NotFound, "Audio not found")
-                val source = assetsRepository.openAssetSource(assetId)
-                    ?: return@get call.respond(HttpStatusCode.NotFound, "Audio not found")
-                val etag = source.meta.sha256
-                val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
-                if (matchesEtag(ifNoneMatch, etag)) {
-                    call.response.header(HttpHeaders.ETag, etag)
-                    call.response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
-                    source.close()
-                    call.respond(HttpStatusCode.NotModified)
-                    return@get
-                }
-                call.respondMusicAsset(source)
+                call.respondPublishedAsset(
+                    assetsRepository = assetsRepository,
+                    assetId = assetId,
+                    notFoundMessage = "Audio not found",
+                )
             }
 
             get("/{id}/cover") {
@@ -82,18 +76,11 @@ fun Application.musicRoutes(
                 }
                 val assetId = item.coverAssetId
                     ?: return@get call.respond(HttpStatusCode.NotFound, "Cover not found")
-                val source = assetsRepository.openAssetSource(assetId)
-                    ?: return@get call.respond(HttpStatusCode.NotFound, "Cover not found")
-                val etag = source.meta.sha256
-                val ifNoneMatch = call.request.headers[HttpHeaders.IfNoneMatch]
-                if (matchesEtag(ifNoneMatch, etag)) {
-                    call.response.header(HttpHeaders.ETag, etag)
-                    call.response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
-                    source.close()
-                    call.respond(HttpStatusCode.NotModified)
-                    return@get
-                }
-                call.respondMusicAsset(source)
+                call.respondPublishedAsset(
+                    assetsRepository = assetsRepository,
+                    assetId = assetId,
+                    notFoundMessage = "Cover not found",
+                )
             }
         }
 
@@ -225,17 +212,46 @@ fun Application.musicRoutes(
     }
 }
 
+private suspend fun ApplicationCall.respondPublishedAsset(
+    assetsRepository: MusicAssetRepository,
+    assetId: Long,
+    notFoundMessage: String,
+) {
+    val meta = assetsRepository.getAssetMeta(assetId)
+        ?: return respond(HttpStatusCode.NotFound, notFoundMessage)
+    val etag = meta.sha256
+    val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
+    if (matchesEtag(ifNoneMatch, etag)) {
+        response.header(HttpHeaders.ETag, etag)
+        response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
+        respond(HttpStatusCode.NotModified)
+        return
+    }
+    val source = assetsRepository.openAssetSource(assetId)
+        ?: return respond(HttpStatusCode.NotFound, notFoundMessage)
+    respondMusicAsset(source)
+}
+
 private suspend fun ApplicationCall.respondMusicAsset(
     source: com.example.bot.music.MusicAssetSource,
-){
-    response.header(HttpHeaders.ETag, source.meta.sha256)
-    response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
+) {
     source.use { openedSource ->
+        val input =
+            try {
+                openedSource.openStream()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                respond(HttpStatusCode.NotFound, "Asset stream unavailable")
+                return
+            }
+        response.header(HttpHeaders.ETag, openedSource.meta.sha256)
+        response.header(HttpHeaders.CacheControl, MUSIC_ASSET_CACHE_CONTROL)
         respondOutputStream(
             contentType = io.ktor.http.ContentType.parse(openedSource.meta.contentType),
             status = HttpStatusCode.OK,
         ) {
-            openedSource.openStream().use { input -> input.copyTo(this) }
+            input.use { it.copyTo(this) }
         }
     }
 }

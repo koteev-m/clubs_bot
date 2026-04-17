@@ -1,12 +1,12 @@
 package com.example.bot.cache
 
+import java.nio.ByteBuffer
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.CopyOption
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
-import java.nio.ByteBuffer
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -83,6 +83,52 @@ class HallRenderCacheTest {
                         }
                     assertTrue(secondRead is HallRenderCache.Result.Ok)
                     assertEquals(0, renders)
+                } finally {
+                    if (previous == null) {
+                        System.clearProperty("HALL_CACHE_SHARED_DIR")
+                    } else {
+                        System.setProperty("HALL_CACHE_SHARED_DIR", previous)
+                    }
+                }
+            } finally {
+                dir.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `shared warm-up preserves original expiresAt`() {
+        runBlocking {
+            val dir = Files.createTempDirectory("hall-cache-test-")
+            try {
+                val previous = System.getProperty("HALL_CACHE_SHARED_DIR")
+                System.setProperty("HALL_CACHE_SHARED_DIR", dir.toString())
+                try {
+                    val writer = HallRenderCache(maxEntries = 16, ttl = Duration.ofSeconds(2))
+                    val reader = HallRenderCache(maxEntries = 16, ttl = Duration.ofMinutes(1))
+                    var renders = 0
+
+                    writer.getOrRender("club-ttl|night-1", null) { "payload".encodeToByteArray() }
+
+                    val warmed =
+                        reader.getOrRender("club-ttl|night-1", null) {
+                            renders += 1
+                            "unexpected-render".encodeToByteArray()
+                        }
+                    assertTrue(warmed is HallRenderCache.Result.Ok)
+                    assertEquals(0, renders)
+
+                    val cacheFile = singleCacheFile(dir)
+                    Files.deleteIfExists(cacheFile)
+                    Thread.sleep(2_200)
+
+                    val afterOriginalExpiry =
+                        reader.getOrRender("club-ttl|night-1", null) {
+                            renders += 1
+                            "render-after-expiry".encodeToByteArray()
+                        }
+                    assertTrue(afterOriginalExpiry is HallRenderCache.Result.Ok)
+                    assertEquals(1, renders)
                 } finally {
                     if (previous == null) {
                         System.clearProperty("HALL_CACHE_SHARED_DIR")

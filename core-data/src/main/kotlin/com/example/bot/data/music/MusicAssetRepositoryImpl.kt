@@ -58,6 +58,14 @@ class MusicAssetRepositoryImpl(
     override suspend fun getAssetMeta(id: Long): MusicAssetMeta? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicAssetsTable
+                .slice(
+                    MusicAssetsTable.id,
+                    MusicAssetsTable.kind,
+                    MusicAssetsTable.contentType,
+                    MusicAssetsTable.sha256,
+                    MusicAssetsTable.sizeBytes,
+                    MusicAssetsTable.updatedAt,
+                )
                 .selectAll()
                 .where { MusicAssetsTable.id eq id }
                 .firstOrNull()
