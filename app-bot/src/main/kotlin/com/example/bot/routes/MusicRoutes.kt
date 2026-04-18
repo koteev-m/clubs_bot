@@ -3,6 +3,7 @@ package com.example.bot.routes
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.matchesEtag
+import com.example.bot.http.respondError
 import com.example.bot.music.MixtapeService
 import com.example.bot.music.MusicAssetRepository
 import com.example.bot.music.MusicItemRepository
@@ -59,6 +60,8 @@ fun Application.musicRoutes(
                 call.respondPublishedAsset(
                     assetsRepository = assetsRepository,
                     assetId = assetId,
+                    endpointType = "audio",
+                    logger = logger,
                     notFoundMessage = "Audio not found",
                 )
             }
@@ -79,6 +82,8 @@ fun Application.musicRoutes(
                 call.respondPublishedAsset(
                     assetsRepository = assetsRepository,
                     assetId = assetId,
+                    endpointType = "cover",
+                    logger = logger,
                     notFoundMessage = "Cover not found",
                 )
             }
@@ -215,6 +220,8 @@ fun Application.musicRoutes(
 private suspend fun ApplicationCall.respondPublishedAsset(
     assetsRepository: MusicAssetRepository,
     assetId: Long,
+    endpointType: String,
+    logger: org.slf4j.Logger,
     notFoundMessage: String,
 ) {
     val meta = assetsRepository.getAssetMeta(assetId)
@@ -227,13 +234,30 @@ private suspend fun ApplicationCall.respondPublishedAsset(
         respond(HttpStatusCode.NotModified)
         return
     }
-    val source = assetsRepository.openAssetSource(assetId)
-        ?: return respond(HttpStatusCode.NotFound, notFoundMessage)
-    respondMusicAsset(source)
+    val source =
+        try {
+            assetsRepository.openAssetSource(assetId)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            logger.error(
+                "music.asset.open_source_failed assetId={} endpointType={} exceptionClass={}",
+                assetId,
+                endpointType,
+                e::class.java.name,
+                e,
+            )
+            respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
+            return
+        } ?: return respond(HttpStatusCode.NotFound, notFoundMessage)
+    respondMusicAsset(source = source, assetId = assetId, endpointType = endpointType, logger = logger)
 }
 
 private suspend fun ApplicationCall.respondMusicAsset(
     source: com.example.bot.music.MusicAssetSource,
+    assetId: Long,
+    endpointType: String,
+    logger: org.slf4j.Logger,
 ) {
     source.use { openedSource ->
         val input =
@@ -241,8 +265,15 @@ private suspend fun ApplicationCall.respondMusicAsset(
                 openedSource.openStream()
             } catch (ce: CancellationException) {
                 throw ce
-            } catch (_: Exception) {
-                respond(HttpStatusCode.InternalServerError, "Asset stream unavailable")
+            } catch (e: Exception) {
+                logger.error(
+                    "music.asset.open_stream_failed assetId={} endpointType={} exceptionClass={}",
+                    assetId,
+                    endpointType,
+                    e::class.java.name,
+                    e,
+                )
+                respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
                 return
             }
         response.header(HttpHeaders.ETag, openedSource.meta.sha256)
