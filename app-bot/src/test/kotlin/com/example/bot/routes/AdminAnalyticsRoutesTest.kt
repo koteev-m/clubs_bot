@@ -92,6 +92,23 @@ class AdminAnalyticsRoutesTest {
             }
 
         assertEquals(HttpStatusCode.Accepted, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals("recompute_scheduled", body["status"]!!.jsonPrimitive.content)
+        coVerify(exactly = 1) { deps.refreshWorker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+    }
+
+    @Test
+    fun `analytics returns accepted and schedules refresh when snapshot is stale too old`() = withApp { deps ->
+        coEvery { deps.snapshotService.fetchLatest(1, any(), 30) } returns snapshotView(state = SnapshotState.STALE_TOO_OLD)
+
+        val response =
+            client.get("/api/admin/clubs/1/analytics?nightStartUtc=2024-06-01T20:00:00Z&windowDays=30") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.Accepted, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals("recompute_scheduled", body["status"]!!.jsonPrimitive.content)
         coVerify(exactly = 1) { deps.refreshWorker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
     }
 

@@ -22,10 +22,12 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -119,7 +121,7 @@ class AdminAnalyticsSnapshotService(
 
         val attendance =
             runCatching { ownerHealthService.attendanceForNight(clubId, nightStartUtc) }
-                .getOrElse {
+                .getOrElseNonCancellation {
                     recordCaveat("attendance_unavailable")
                     null
                 }
@@ -137,7 +139,7 @@ class AdminAnalyticsSnapshotService(
                     earlyVisits = visitRepository.countNightEarlyVisits(clubId, nightStartUtc),
                     tableNights = visitRepository.countNightTableNights(clubId, nightStartUtc),
                 )
-            }.getOrElse {
+            }.getOrElseNonCancellation {
                 recordCaveat("visits_unavailable")
                 VisitSummary(uniqueVisitors = 0, earlyVisits = 0, tableNights = 0)
             }
@@ -148,7 +150,7 @@ class AdminAnalyticsSnapshotService(
                     totalMinor = tableDepositRepository.sumDepositsForNight(clubId, nightStartUtc),
                     allocationSummary = tableDepositRepository.allocationSummaryForNight(clubId, nightStartUtc),
                 )
-            }.getOrElse {
+            }.getOrElseNonCancellation {
                 recordCaveat("deposits_unavailable")
                 DepositSummary(totalMinor = 0, allocationSummary = emptyMap())
             }
@@ -166,7 +168,7 @@ class AdminAnalyticsSnapshotService(
                     peopleRejected = report.peopleRejected,
                     revenueTotalMinor = totalRevenue(details.revenueEntries),
                 )
-            }.getOrElse {
+            }.getOrElseNonCancellation {
                 recordCaveat("shift_report_unavailable")
                 null
             }
@@ -175,7 +177,7 @@ class AdminAnalyticsSnapshotService(
             runCatching {
                 val result = guestSegmentsRepository.computeSegments(clubId, windowDays, generatedAt)
                 SegmentSummary(counts = result.counts.mapKeys { it.key.name.lowercase() })
-            }.getOrElse {
+            }.getOrElseNonCancellation {
                 recordCaveat("segments_unavailable")
                 SegmentSummary(
                     counts = SegmentType.entries.associate { it.name.lowercase() to 0 },
@@ -225,6 +227,9 @@ class AdminAnalyticsSnapshotService(
                 now = generatedAt,
             )
         }.onFailure {
+            if (it is CancellationException) {
+                throw it
+            }
             logger.warn("Post-event story upsert failed for clubId={} nightStartUtc={}", clubId, nightStartUtc, it)
         }
 
@@ -241,6 +246,14 @@ class AdminAnalyticsSnapshotService(
         val view: AnalyticsSnapshotView,
         val cachedUntil: Instant,
     )
+
+    private inline fun <T> Result<T>.getOrElseNonCancellation(onFailure: (Throwable) -> T): T =
+        getOrElse { throwable ->
+            if (throwable is CancellationException) {
+                throw throwable
+            }
+            onFailure(throwable)
+        }
 }
 
 class AdminAnalyticsRefreshWorker(
@@ -249,8 +262,18 @@ class AdminAnalyticsRefreshWorker(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val inFlight = ConcurrentHashMap<WorkerKey, Boolean>()
+    private val isShutdown = AtomicBoolean(false)
 
     fun schedule(clubId: Long, nightStartUtc: Instant, windowDays: Int) {
+        if (isShutdown.get()) {
+            logger.debug(
+                "Ignoring analytics recompute schedule after shutdown for clubId={} nightStartUtc={} windowDays={}",
+                clubId,
+                nightStartUtc,
+                windowDays,
+            )
+            return
+        }
         val key = WorkerKey(clubId, nightStartUtc, windowDays)
         if (inFlight.putIfAbsent(key, true) != null) {
             return
@@ -268,6 +291,15 @@ class AdminAnalyticsRefreshWorker(
             }
         }
     }
+
+    fun shutdown() {
+        if (isShutdown.compareAndSet(false, true)) {
+            scope.cancel(CancellationException("AdminAnalyticsRefreshWorker shutdown"))
+            inFlight.clear()
+        }
+    }
+
+    fun close() = shutdown()
 
     private data class WorkerKey(
         val clubId: Long,
