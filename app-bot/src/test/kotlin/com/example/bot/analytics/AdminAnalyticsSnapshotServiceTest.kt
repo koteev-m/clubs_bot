@@ -25,13 +25,16 @@ import io.mockk.mockk
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -119,19 +122,7 @@ class AdminAnalyticsSnapshotServiceTest {
     fun `fetchLatest marks stale snapshot within allowed max age`() {
         val snapshotRepository = mockk<AnalyticsSnapshotRepository>()
         coEvery { snapshotRepository.getByKey(1, any(), 30, 1) } returns
-            AnalyticsSnapshot(
-                id = 1,
-                clubId = 1,
-                nightStartUtc = Instant.parse("2024-06-01T20:00:00Z"),
-                windowDays = 30,
-                schemaVersion = 1,
-                status = PostEventStoryStatus.READY,
-                payloadJson =
-                    """{"schemaVersion":1,"clubId":1,"nightStartUtc":"2024-06-01T20:00:00Z","generatedAt":"2024-06-01T23:50:00Z","meta":{"hasIncompleteData":false,"caveats":[]},"attendance":null,"visits":{"uniqueVisitors":1,"earlyVisits":0,"tableNights":0},"deposits":{"totalMinor":0,"allocationSummary":{}},"shift":null,"segments":{"counts":{"new":0,"frequent":0,"sleeping":0}}}""",
-                errorCode = null,
-                generatedAt = Instant.parse("2024-06-01T23:50:00Z"),
-                updatedAt = Instant.parse("2024-06-01T23:50:00Z"),
-            )
+            snapshot(generatedAt = Instant.parse("2024-06-01T23:50:00Z"))
 
         val service =
             AdminAnalyticsSnapshotService(
@@ -149,6 +140,79 @@ class AdminAnalyticsSnapshotServiceTest {
         val view = runBlocking { service.fetchLatest(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
         assertNotNull(view)
         assertEquals(SnapshotState.STALE_ALLOWED, view.state)
+    }
+
+    @Test
+    fun `fetchLatest recalculates freshness on cache hit after fresh ttl`() {
+        val mutableClock = MutableClock(now)
+        val snapshotRepository = mockk<AnalyticsSnapshotRepository>()
+        coEvery { snapshotRepository.getByKey(1, any(), 30, 1) } returns snapshot(generatedAt = now)
+
+        val service =
+            AdminAnalyticsSnapshotService(
+                ownerHealthService = mockk(),
+                visitRepository = mockk(),
+                tableDepositRepository = mockk(),
+                shiftReportRepository = mockk(),
+                storyRepository = mockk(),
+                guestSegmentsRepository = mockk(),
+                snapshotRepository = snapshotRepository,
+                clock = mutableClock,
+                runtimeConfig =
+                    AnalyticsSnapshotRuntimeConfig(
+                        freshTtl = Duration.ofMinutes(5),
+                        staleMaxAge = Duration.ofHours(2),
+                        cacheTtl = Duration.ofMinutes(30),
+                    ),
+            )
+
+        val first = runBlocking { service.fetchLatest(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+        assertNotNull(first)
+        assertEquals(SnapshotState.FRESH, first.state)
+
+        mutableClock.advance(Duration.ofMinutes(6))
+
+        val second = runBlocking { service.fetchLatest(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+        assertNotNull(second)
+        assertEquals(SnapshotState.STALE_ALLOWED, second.state)
+        coVerify(exactly = 1) { snapshotRepository.getByKey(1, Instant.parse("2024-06-01T20:00:00Z"), 30, 1) }
+    }
+
+    @Test
+    fun `fetchLatest recalculates stale too old on cache hit after stale max age`() {
+        val generatedAt = Instant.parse("2024-06-01T23:50:00Z")
+        val mutableClock = MutableClock(Instant.parse("2024-06-02T00:00:00Z"))
+        val snapshotRepository = mockk<AnalyticsSnapshotRepository>()
+        coEvery { snapshotRepository.getByKey(1, any(), 30, 1) } returns snapshot(generatedAt = generatedAt)
+
+        val service =
+            AdminAnalyticsSnapshotService(
+                ownerHealthService = mockk(),
+                visitRepository = mockk(),
+                tableDepositRepository = mockk(),
+                shiftReportRepository = mockk(),
+                storyRepository = mockk(),
+                guestSegmentsRepository = mockk(),
+                snapshotRepository = snapshotRepository,
+                clock = mutableClock,
+                runtimeConfig =
+                    AnalyticsSnapshotRuntimeConfig(
+                        freshTtl = Duration.ofMinutes(5),
+                        staleMaxAge = Duration.ofHours(2),
+                        cacheTtl = Duration.ofHours(4),
+                    ),
+            )
+
+        val first = runBlocking { service.fetchLatest(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+        assertNotNull(first)
+        assertEquals(SnapshotState.STALE_ALLOWED, first.state)
+
+        mutableClock.advance(Duration.ofHours(2))
+
+        val second = runBlocking { service.fetchLatest(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+        assertNotNull(second)
+        assertEquals(SnapshotState.STALE_TOO_OLD, second.state)
+        coVerify(exactly = 1) { snapshotRepository.getByKey(1, Instant.parse("2024-06-01T20:00:00Z"), 30, 1) }
     }
 
     @Test
@@ -177,6 +241,44 @@ class AdminAnalyticsSnapshotServiceTest {
         coVerify(exactly = 0) { snapshotRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { storyRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
+
+    @Test
+    fun `refresh worker ignores schedule after shutdown`() {
+        val service = mockk<AdminAnalyticsSnapshotService>()
+        val started = CompletableDeferred<Unit>()
+        val unblock = CompletableDeferred<Unit>()
+        coEvery { service.recompute(1, any(), 30) } coAnswers {
+            started.complete(Unit)
+            unblock.await()
+            snapshot(generatedAt = now)
+        }
+
+        runBlocking {
+            val worker = AdminAnalyticsRefreshWorker(service)
+            worker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30)
+            withTimeout(2_000) { started.await() }
+            worker.shutdown()
+            worker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30)
+            unblock.complete(Unit)
+        }
+
+        coVerify(exactly = 1) { service.recompute(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+    }
+
+    private fun snapshot(generatedAt: Instant): AnalyticsSnapshot =
+        AnalyticsSnapshot(
+            id = 1,
+            clubId = 1,
+            nightStartUtc = Instant.parse("2024-06-01T20:00:00Z"),
+            windowDays = 30,
+            schemaVersion = 1,
+            status = PostEventStoryStatus.READY,
+            payloadJson =
+                """{"schemaVersion":1,"clubId":1,"nightStartUtc":"2024-06-01T20:00:00Z","generatedAt":"${generatedAt}","meta":{"hasIncompleteData":false,"caveats":[]},"attendance":null,"visits":{"uniqueVisitors":1,"earlyVisits":0,"tableNights":0},"deposits":{"totalMinor":0,"allocationSummary":{}},"shift":null,"segments":{"counts":{"new":0,"frequent":0,"sleeping":0}}}""",
+            errorCode = null,
+            generatedAt = generatedAt,
+            updatedAt = generatedAt,
+        )
 
     private fun attendanceHealth(): AttendanceHealth {
         val bookings = AttendanceChannel(plannedGuests = 10, arrivedGuests = 5, noShowGuests = 5, noShowRate = 0.5)
@@ -241,4 +343,21 @@ class AdminAnalyticsSnapshotServiceTest {
             generatedAt = now,
             updatedAt = now,
         )
+
+    private class MutableClock(
+        initial: Instant,
+        private val zone: ZoneId = ZoneOffset.UTC,
+    ) : Clock() {
+        private var current: Instant = initial
+
+        override fun getZone(): ZoneId = zone
+
+        override fun withZone(zone: ZoneId): Clock = MutableClock(current, zone)
+
+        override fun instant(): Instant = current
+
+        fun advance(duration: Duration) {
+            current = current.plus(duration)
+        }
+    }
 }
