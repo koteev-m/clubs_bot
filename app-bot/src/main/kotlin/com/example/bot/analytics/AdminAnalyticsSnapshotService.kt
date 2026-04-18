@@ -68,6 +68,11 @@ data class AnalyticsSnapshotView(
     val state: SnapshotState,
 )
 
+private data class CachedSnapshotPayload(
+    val response: AnalyticsResponse,
+    val snapshot: AnalyticsSnapshot,
+)
+
 class AdminAnalyticsSnapshotService(
     private val ownerHealthService: OwnerHealthService,
     private val visitRepository: VisitRepository,
@@ -88,21 +93,15 @@ class AdminAnalyticsSnapshotService(
         val now = Instant.now(clock)
         val cached = cache[key]
         if (cached != null && now.isBefore(cached.cachedUntil)) {
-            return cached.view
+            return cached.payload.toView(now)
         }
 
         val snapshot = snapshotRepository.getByKey(clubId, nightStartUtc, windowDays, STORY_SCHEMA_VERSION) ?: return null
         val response = json.decodeFromString<AnalyticsResponse>(snapshot.payloadJson)
-        val age = Duration.between(snapshot.generatedAt, now)
-        val state =
-            when {
-                age <= runtimeConfig.freshTtl -> SnapshotState.FRESH
-                age <= runtimeConfig.staleMaxAge -> SnapshotState.STALE_ALLOWED
-                else -> SnapshotState.STALE_TOO_OLD
-            }
-        val view = AnalyticsSnapshotView(response = response, snapshot = snapshot, state = state)
+        val payload = CachedSnapshotPayload(response = response, snapshot = snapshot)
+        val view = payload.toView(now)
         if (!runtimeConfig.cacheTtl.isZero && !runtimeConfig.cacheTtl.isNegative) {
-            cache[key] = CacheValue(view = view, cachedUntil = now.plus(runtimeConfig.cacheTtl))
+            cache[key] = CacheValue(payload = payload, cachedUntil = now.plus(runtimeConfig.cacheTtl))
         }
         return view
     }
@@ -212,7 +211,7 @@ class AdminAnalyticsSnapshotService(
             )
         cache[SnapshotKey(clubId, nightStartUtc, windowDays)] =
             CacheValue(
-                view = AnalyticsSnapshotView(response = response, snapshot = snapshot, state = SnapshotState.FRESH),
+                payload = CachedSnapshotPayload(response = response, snapshot = snapshot),
                 cachedUntil = generatedAt.plus(runtimeConfig.cacheTtl),
             )
 
@@ -243,9 +242,25 @@ class AdminAnalyticsSnapshotService(
     )
 
     private data class CacheValue(
-        val view: AnalyticsSnapshotView,
+        val payload: CachedSnapshotPayload,
         val cachedUntil: Instant,
     )
+
+    private fun CachedSnapshotPayload.toView(now: Instant): AnalyticsSnapshotView =
+        AnalyticsSnapshotView(
+            response = response,
+            snapshot = snapshot,
+            state = stateFor(snapshot.generatedAt, now),
+        )
+
+    private fun stateFor(generatedAt: Instant, now: Instant): SnapshotState {
+        val age = Duration.between(generatedAt, now)
+        return when {
+            age <= runtimeConfig.freshTtl -> SnapshotState.FRESH
+            age <= runtimeConfig.staleMaxAge -> SnapshotState.STALE_ALLOWED
+            else -> SnapshotState.STALE_TOO_OLD
+        }
+    }
 
     private inline fun <T> Result<T>.getOrElseNonCancellation(onFailure: (Throwable) -> T): T =
         getOrElse { throwable ->
