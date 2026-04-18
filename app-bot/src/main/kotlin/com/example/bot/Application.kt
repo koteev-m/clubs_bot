@@ -24,6 +24,8 @@ import com.example.bot.data.visits.NightOverrideRepository
 import com.example.bot.data.visits.VisitRepository
 import com.example.bot.data.stories.GuestSegmentsRepository
 import com.example.bot.data.stories.PostEventStoryRepository
+import com.example.bot.analytics.AdminAnalyticsRefreshWorker
+import com.example.bot.analytics.AdminAnalyticsSnapshotService
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.EventsRepository
@@ -260,6 +262,8 @@ fun Application.module() {
     val nightOverrideRepository by inject<NightOverrideRepository>()
     val postEventStoryRepository by inject<PostEventStoryRepository>()
     val guestSegmentsRepository by inject<GuestSegmentsRepository>()
+    val analyticsSnapshotService by inject<AdminAnalyticsSnapshotService>()
+    val analyticsRefreshWorker by inject<AdminAnalyticsRefreshWorker>()
     val gamificationSettingsRepository by inject<GamificationSettingsRepository>()
     val guestQrResolver by inject<GuestQrResolver>()
     val hallPlansRepository by inject<HallPlansRepository>()
@@ -438,13 +442,9 @@ fun Application.module() {
     )
     adminFinanceTemplateRoutes(templateRepository = shiftReportTemplateRepository)
     adminAnalyticsRoutes(
-        ownerHealthService = ownerHealthService,
-        visitRepository = visitRepository,
-        tableDepositRepository = tableDepositRepository,
-        shiftReportRepository = shiftReportRepository,
+        snapshotService = analyticsSnapshotService,
+        refreshWorker = analyticsRefreshWorker,
         storyRepository = postEventStoryRepository,
-        guestSegmentsRepository = guestSegmentsRepository,
-        clock = appClock,
     )
     adminGamificationRoutes(
         settingsRepository = adminGamificationSettingsRepository,

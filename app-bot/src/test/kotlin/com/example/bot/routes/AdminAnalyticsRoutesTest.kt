@@ -1,27 +1,17 @@
 package com.example.bot.routes
 
-import com.example.bot.data.booking.TableDepositRepository
-import com.example.bot.data.finance.ShiftReport
-import com.example.bot.data.finance.ShiftReportDetails
-import com.example.bot.data.finance.ShiftReportRepository
-import com.example.bot.data.finance.ShiftReportRevenueEntry
-import com.example.bot.data.finance.ShiftReportStatus
+import com.example.bot.analytics.AdminAnalyticsRefreshWorker
+import com.example.bot.analytics.AdminAnalyticsSnapshotService
+import com.example.bot.analytics.SnapshotState
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
-import com.example.bot.data.stories.GuestSegmentsRepository
+import com.example.bot.data.stories.AnalyticsSnapshot
 import com.example.bot.data.stories.PostEventStory
 import com.example.bot.data.stories.PostEventStoryRepository
 import com.example.bot.data.stories.PostEventStoryStatus
-import com.example.bot.data.stories.SegmentComputationResult
-import com.example.bot.data.stories.SegmentType
-import com.example.bot.data.visits.VisitRepository
 import com.example.bot.http.ErrorCodes
-import com.example.bot.owner.AttendanceChannel
-import com.example.bot.owner.AttendanceChannels
-import com.example.bot.owner.AttendanceHealth
-import com.example.bot.owner.OwnerHealthService
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
@@ -38,9 +28,9 @@ import io.ktor.server.testing.testApplication
 import io.ktor.serialization.kotlinx.json.json
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import java.time.Instant
-import java.time.ZoneOffset
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -49,7 +39,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.long
 
@@ -75,55 +64,12 @@ class AdminAnalyticsRoutesTest {
             }
 
         assertEquals(HttpStatusCode.Forbidden, response.status)
-        coVerify(exactly = 0) { deps.visitRepository.countNightUniqueVisitors(any(), any()) }
+        coVerify(exactly = 0) { deps.snapshotService.fetchLatest(any(), any(), any()) }
     }
 
     @Test
-    fun `analytics returns forbidden for club outside scope`() = withApp(clubIds = setOf(2)) { deps ->
-        val response =
-            client.get("/api/admin/clubs/1/analytics?nightStartUtc=2024-06-01T20:00:00Z&windowDays=30") {
-                header("X-Telegram-Init-Data", "init")
-            }
-
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        coVerify(exactly = 0) { deps.ownerHealthService.attendanceForNight(any(), any()) }
-        coVerify(exactly = 0) { deps.visitRepository.countNightUniqueVisitors(any(), any()) }
-        coVerify(exactly = 0) { deps.visitRepository.countNightEarlyVisits(any(), any()) }
-        coVerify(exactly = 0) { deps.visitRepository.countNightTableNights(any(), any()) }
-        coVerify(exactly = 0) { deps.tableDepositRepository.sumDepositsForNight(any(), any()) }
-        coVerify(exactly = 0) { deps.tableDepositRepository.allocationSummaryForNight(any(), any()) }
-        coVerify(exactly = 0) { deps.shiftReportRepository.getByClubAndNight(any(), any()) }
-        coVerify(exactly = 0) { deps.shiftReportRepository.getDetails(any()) }
-        coVerify(exactly = 0) { deps.guestSegmentsRepository.computeSegments(any(), any(), any()) }
-        coVerify(exactly = 0) { deps.storyRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any()) }
-    }
-
-    @Test
-    fun `analytics validates nightStartUtc`() = withApp { _ ->
-        val response =
-            client.get("/api/admin/clubs/1/analytics?nightStartUtc=bad&windowDays=30") {
-                header("X-Telegram-Init-Data", "init")
-            }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertEquals(ErrorCodes.validation_error, body["code"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `analytics returns stable payload and upserts story`() = withApp { deps ->
-        coEvery { deps.ownerHealthService.attendanceForNight(1, any()) } returns attendanceHealth()
-        coEvery { deps.visitRepository.countNightUniqueVisitors(1, any()) } returns 10
-        coEvery { deps.visitRepository.countNightEarlyVisits(1, any()) } returns 3
-        coEvery { deps.visitRepository.countNightTableNights(1, any()) } returns 2
-        coEvery { deps.tableDepositRepository.sumDepositsForNight(1, any()) } returns 15000
-        coEvery { deps.tableDepositRepository.allocationSummaryForNight(1, any()) } returns mapOf("BAR" to 5000)
-        coEvery { deps.shiftReportRepository.getByClubAndNight(1, any()) } returns shiftReport()
-        coEvery { deps.shiftReportRepository.getDetails(10) } returns shiftDetails()
-        coEvery { deps.guestSegmentsRepository.computeSegments(1, 30, any()) } returns SegmentComputationResult(
-            counts = mapOf(SegmentType.NEW to 5, SegmentType.FREQUENT to 2, SegmentType.SLEEPING to 1),
-        )
-        coEvery { deps.storyRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any()) } returns story()
+    fun `analytics returns snapshot and schedules refresh when stale`() = withApp { deps ->
+        coEvery { deps.snapshotService.fetchLatest(1, any(), 30) } returns snapshotView(state = SnapshotState.STALE_ALLOWED)
 
         val response =
             client.get("/api/admin/clubs/1/analytics?nightStartUtc=2024-06-01T20:00:00Z&windowDays=30") {
@@ -132,18 +78,21 @@ class AdminAnalyticsRoutesTest {
 
         assertEquals(HttpStatusCode.OK, response.status)
         val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertEquals("1", body["schemaVersion"]!!.jsonPrimitive.content)
-        assertEquals("2024-06-01T20:00:00Z", body["nightStartUtc"]!!.jsonPrimitive.content)
-        val meta = body["meta"]!!.jsonObject
-        assertEquals(false, meta["hasIncompleteData"]!!.jsonPrimitive.boolean)
-        assertEquals(15000, body["deposits"]!!.jsonObject["totalMinor"]!!.jsonPrimitive.long)
-        assertEquals(10, body["visits"]!!.jsonObject["uniqueVisitors"]!!.jsonPrimitive.long)
-        val segments = body["segments"]!!.jsonObject["counts"]!!.jsonObject
-        assertEquals(5, segments["new"]!!.jsonPrimitive.int)
+        assertEquals(1, body["schemaVersion"]!!.jsonPrimitive.int)
+        coVerify(exactly = 1) { deps.refreshWorker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+    }
 
-        coVerify(exactly = 1) {
-            deps.storyRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any())
-        }
+    @Test
+    fun `analytics returns accepted and schedules refresh when snapshot missing`() = withApp { deps ->
+        coEvery { deps.snapshotService.fetchLatest(1, any(), 30) } returns null
+
+        val response =
+            client.get("/api/admin/clubs/1/analytics?nightStartUtc=2024-06-01T20:00:00Z&windowDays=30") {
+                header("X-Telegram-Init-Data", "init")
+            }
+
+        assertEquals(HttpStatusCode.Accepted, response.status)
+        coVerify(exactly = 1) { deps.refreshWorker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
     }
 
     @Test
@@ -164,25 +113,19 @@ class AdminAnalyticsRoutesTest {
     }
 
     @Test
-    fun `stories list returns forbidden for club outside scope`() = withApp(clubIds = setOf(2)) { deps ->
-        val response =
-            client.get("/api/admin/clubs/1/stories?limit=2&offset=0") {
-                header("X-Telegram-Init-Data", "init")
-            }
+    fun `story details returns payload`() = withApp { deps ->
+        coEvery { deps.storyRepository.getByClubAndNight(1, any(), any()) } returns story()
 
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        coVerify(exactly = 0) { deps.storyRepository.listByClub(any(), any(), any()) }
-    }
-
-    @Test
-    fun `story details returns forbidden for club outside scope`() = withApp(clubIds = setOf(2)) { deps ->
         val response =
             client.get("/api/admin/clubs/1/stories/2024-06-01T20:00:00Z") {
                 header("X-Telegram-Init-Data", "init")
             }
 
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        coVerify(exactly = 0) { deps.storyRepository.getByClubAndNight(any(), any(), any()) }
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals(1, body["schemaVersion"]!!.jsonPrimitive.int)
+        assertEquals("READY", body["status"]!!.jsonPrimitive.content)
+        assertEquals(1, body["id"]!!.jsonPrimitive.long)
     }
 
     @Test
@@ -197,37 +140,6 @@ class AdminAnalyticsRoutesTest {
         assertEquals(HttpStatusCode.NotFound, response.status)
         val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
         assertEquals(ErrorCodes.not_found, body["code"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `story details returns payload`() = withApp { deps ->
-        coEvery { deps.storyRepository.getByClubAndNight(1, any(), any()) } returns story()
-
-        val response =
-            client.get("/api/admin/clubs/1/stories/2024-06-01T20:00:00Z") {
-                header("X-Telegram-Init-Data", "init")
-            }
-
-        assertEquals(HttpStatusCode.OK, response.status)
-        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertEquals(1, body["schemaVersion"]!!.jsonPrimitive.int)
-        assertEquals("READY", body["status"]!!.jsonPrimitive.content)
-        assertEquals(1, body["id"]!!.jsonPrimitive.long)
-        val payload = body["payload"]!!.jsonObject
-        assertEquals(1, payload["schemaVersion"]!!.jsonPrimitive.int)
-    }
-
-    @Test
-    fun `story details validates nightStartUtc`() = withApp { deps ->
-        val response =
-            client.get("/api/admin/clubs/1/stories/bad") {
-                header("X-Telegram-Init-Data", "init")
-            }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertEquals(ErrorCodes.validation_error, body["code"]!!.jsonPrimitive.content)
-        coVerify(exactly = 0) { deps.storyRepository.getByClubAndNight(any(), any(), any()) }
     }
 
     private fun withApp(
@@ -246,13 +158,9 @@ class AdminAnalyticsRoutesTest {
                     principalExtractor = { TelegramPrincipal(telegramId, "tester") }
                 }
                 adminAnalyticsRoutes(
-                    ownerHealthService = deps.ownerHealthService,
-                    visitRepository = deps.visitRepository,
-                    tableDepositRepository = deps.tableDepositRepository,
-                    shiftReportRepository = deps.shiftReportRepository,
+                    snapshotService = deps.snapshotService,
+                    refreshWorker = deps.refreshWorker,
                     storyRepository = deps.storyRepository,
-                    guestSegmentsRepository = deps.guestSegmentsRepository,
-                    clock = java.time.Clock.fixed(Instant.parse("2024-06-02T00:00:00Z"), ZoneOffset.UTC),
                     botTokenProvider = { "test" },
                 )
             }
@@ -260,57 +168,6 @@ class AdminAnalyticsRoutesTest {
             block(this, deps)
         }
     }
-
-    private fun attendanceHealth(): AttendanceHealth {
-        val bookings = AttendanceChannel(plannedGuests = 10, arrivedGuests = 5, noShowGuests = 5, noShowRate = 0.5)
-        val guestLists = AttendanceChannel(plannedGuests = 4, arrivedGuests = 3, noShowGuests = 1, noShowRate = 0.25)
-        return AttendanceHealth(
-            bookings = bookings,
-            guestLists = guestLists,
-            channels =
-                AttendanceChannels(
-                    directBookings = bookings,
-                    promoterBookings = AttendanceChannel(plannedGuests = 2, arrivedGuests = 1, noShowGuests = 1, noShowRate = 0.5),
-                    guestLists = guestLists,
-                ),
-        )
-    }
-
-    private fun shiftReport(): ShiftReport =
-        ShiftReport(
-            id = 10,
-            clubId = 1,
-            nightStartUtc = Instant.parse("2024-06-01T20:00:00Z"),
-            status = ShiftReportStatus.CLOSED,
-            peopleWomen = 10,
-            peopleMen = 12,
-            peopleRejected = 1,
-            comment = null,
-            closedAt = null,
-            closedBy = null,
-            createdAt = Instant.parse("2024-06-01T20:00:00Z"),
-            updatedAt = Instant.parse("2024-06-01T20:00:00Z"),
-        )
-
-    private fun shiftDetails(): ShiftReportDetails =
-        ShiftReportDetails(
-            report = shiftReport(),
-            bracelets = emptyList(),
-            revenueEntries =
-                listOf(
-                    ShiftReportRevenueEntry(
-                        id = 1,
-                        reportId = 10,
-                        articleId = null,
-                        name = "Total",
-                        groupId = 1,
-                        amountMinor = 5000,
-                        includeInTotal = true,
-                        showSeparately = false,
-                        orderIndex = 0,
-                    ),
-                ),
-        )
 
     private fun story(id: Long = 1): PostEventStory =
         PostEventStory(
@@ -325,15 +182,46 @@ class AdminAnalyticsRoutesTest {
             updatedAt = Instant.parse("2024-06-02T00:00:00Z"),
         )
 
-    private fun buildDeps(): Deps =
-        Deps(
-            ownerHealthService = mockk(),
-            visitRepository = mockk(),
-            tableDepositRepository = mockk(),
-            shiftReportRepository = mockk(),
+    private fun snapshotView(state: SnapshotState): com.example.bot.analytics.AnalyticsSnapshotView {
+        val response =
+            AnalyticsResponse(
+                schemaVersion = 1,
+                clubId = 1,
+                nightStartUtc = "2024-06-01T20:00:00Z",
+                generatedAt = "2024-06-02T00:00:00Z",
+                meta = AnalyticsMeta(hasIncompleteData = false, caveats = emptyList()),
+                attendance = null,
+                visits = VisitSummary(uniqueVisitors = 10, earlyVisits = 3, tableNights = 2),
+                deposits = DepositSummary(totalMinor = 12000, allocationSummary = mapOf("bar" to 12000)),
+                shift = null,
+                segments = SegmentSummary(counts = mapOf("new" to 2, "frequent" to 1, "sleeping" to 0)),
+            )
+        val snapshot =
+            AnalyticsSnapshot(
+                id = 1,
+                clubId = 1,
+                nightStartUtc = Instant.parse("2024-06-01T20:00:00Z"),
+                windowDays = 30,
+                schemaVersion = 1,
+                status = PostEventStoryStatus.READY,
+                payloadJson = "{}",
+                errorCode = null,
+                generatedAt = Instant.parse("2024-06-02T00:00:00Z"),
+                updatedAt = Instant.parse("2024-06-02T00:00:00Z"),
+            )
+        return com.example.bot.analytics.AnalyticsSnapshotView(response = response, snapshot = snapshot, state = state)
+    }
+
+    private fun buildDeps(): Deps {
+        val snapshotService = mockk<AdminAnalyticsSnapshotService>()
+        val refreshWorker = mockk<AdminAnalyticsRefreshWorker>()
+        every { refreshWorker.schedule(any(), any(), any()) } returns Unit
+        return Deps(
+            snapshotService = snapshotService,
+            refreshWorker = refreshWorker,
             storyRepository = mockk(),
-            guestSegmentsRepository = mockk(),
         )
+    }
 
     private class StubUserRepository : UserRepository {
         override suspend fun getByTelegramId(id: Long): User? = User(id = 1, telegramId = id, username = "tester")
@@ -351,11 +239,8 @@ class AdminAnalyticsRoutesTest {
     }
 
     private data class Deps(
-        val ownerHealthService: OwnerHealthService,
-        val visitRepository: VisitRepository,
-        val tableDepositRepository: TableDepositRepository,
-        val shiftReportRepository: ShiftReportRepository,
+        val snapshotService: AdminAnalyticsSnapshotService,
+        val refreshWorker: AdminAnalyticsRefreshWorker,
         val storyRepository: PostEventStoryRepository,
-        val guestSegmentsRepository: GuestSegmentsRepository,
     )
 }

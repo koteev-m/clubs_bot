@@ -7,6 +7,8 @@ import com.example.bot.club.GuestListService
 import com.example.bot.club.InvitationService
 import com.example.bot.club.WaitlistRepository
 import com.example.bot.audit.AuditLogger
+import com.example.bot.analytics.AdminAnalyticsRefreshWorker
+import com.example.bot.analytics.AdminAnalyticsSnapshotService
 import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.TableDepositRepository
@@ -100,6 +102,7 @@ import com.example.bot.workers.SendOutcome
 import com.example.bot.workers.SendPort
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.data.stories.GuestSegmentsRepository
+import com.example.bot.data.stories.AnalyticsSnapshotRepository
 import com.example.bot.data.stories.PostEventStoryRepository
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.tracing.Tracer
@@ -146,7 +149,20 @@ val bookingModule =
         single { NightOverrideRepository(get()) }
         single { VisitRepository(get()) }
         single { PostEventStoryRepository(get()) }
+        single { AnalyticsSnapshotRepository(get()) }
         single { GuestSegmentsRepository(get()) }
+        single {
+            AdminAnalyticsSnapshotService(
+                ownerHealthService = get(),
+                visitRepository = get(),
+                tableDepositRepository = get(),
+                shiftReportRepository = get(),
+                storyRepository = get(),
+                guestSegmentsRepository = get(),
+                snapshotRepository = get(),
+            )
+        }
+        single { AdminAnalyticsRefreshWorker(get()) }
         single { PrivacyService(get(), get(), get<PrivacyConfig>().retention, get()) }
 
         single { GamificationSettingsRepository(get()) }
