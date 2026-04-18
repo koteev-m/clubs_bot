@@ -26,8 +26,10 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -147,6 +149,33 @@ class AdminAnalyticsSnapshotServiceTest {
         val view = runBlocking { service.fetchLatest(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
         assertNotNull(view)
         assertEquals(SnapshotState.STALE_ALLOWED, view.state)
+    }
+
+    @Test
+    fun `recompute rethrows cancellation exception without fallback`() {
+        val ownerHealthService = mockk<OwnerHealthService>()
+        val snapshotRepository = mockk<AnalyticsSnapshotRepository>()
+        val storyRepository = mockk<PostEventStoryRepository>()
+        coEvery { ownerHealthService.attendanceForNight(1, any()) } throws CancellationException("cancelled")
+
+        val service =
+            AdminAnalyticsSnapshotService(
+                ownerHealthService = ownerHealthService,
+                visitRepository = mockk(),
+                tableDepositRepository = mockk(),
+                shiftReportRepository = mockk(),
+                storyRepository = storyRepository,
+                guestSegmentsRepository = mockk(),
+                snapshotRepository = snapshotRepository,
+                clock = clock,
+                runtimeConfig = AnalyticsSnapshotRuntimeConfig(cacheTtl = Duration.ZERO),
+            )
+
+        assertFailsWith<CancellationException> {
+            runBlocking { service.recompute(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+        }
+        coVerify(exactly = 0) { snapshotRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { storyRepository.upsert(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     private fun attendanceHealth(): AttendanceHealth {

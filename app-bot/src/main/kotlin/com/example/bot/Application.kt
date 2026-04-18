@@ -365,6 +365,8 @@ fun Application.module() {
 
     environment.monitor.subscribe(ApplicationStopping) {
         runBlocking {
+            runCatching { analyticsRefreshWorker.shutdown() }
+                .onFailure { opsNotificationLogger.warn("AdminAnalyticsRefreshWorker stop failed", it) }
             runCatching { telegramWebhookIngressWorker.shutdown() }
                 .onFailure { opsNotificationLogger.warn("TelegramWebhookIngressWorker stop failed", it) }
             runCatching { opsNotificationService.shutdown() }

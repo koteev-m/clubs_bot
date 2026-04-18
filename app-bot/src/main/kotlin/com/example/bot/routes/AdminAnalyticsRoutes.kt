@@ -136,10 +136,17 @@ fun Application.adminAnalyticsRoutes(
                             return@get call.respond(HttpStatusCode.Accepted, mapOf("status" to "recompute_scheduled"))
                         }
 
-                        if (snapshot.state != SnapshotState.FRESH) {
-                            refreshWorker.schedule(clubId, nightStartUtc, windowDays)
+                        when (snapshot.state) {
+                            SnapshotState.FRESH -> call.respond(HttpStatusCode.OK, snapshot.response)
+                            SnapshotState.STALE_ALLOWED -> {
+                                refreshWorker.schedule(clubId, nightStartUtc, windowDays)
+                                call.respond(HttpStatusCode.OK, snapshot.response)
+                            }
+                            SnapshotState.STALE_TOO_OLD -> {
+                                refreshWorker.schedule(clubId, nightStartUtc, windowDays)
+                                call.respond(HttpStatusCode.Accepted, mapOf("status" to "recompute_scheduled"))
+                            }
                         }
-                        call.respond(HttpStatusCode.OK, snapshot.response)
                     }
 
                     get("/stories") {
