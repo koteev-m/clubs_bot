@@ -31,6 +31,7 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.io.IOException
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
@@ -528,6 +530,149 @@ class MusicRoutesTest {
 
             val response = client.get("/api/music/items/210/audio")
             assertEquals(HttpStatusCode.NotFound, response.status)
+        }
+
+    @Test
+    fun `asset endpoint returns 500 when stream open fails`() =
+        testApplication {
+            val publishedItem =
+                MusicItemView(
+                    id = 220,
+                    clubId = null,
+                    title = "Published Track",
+                    dj = "DJ",
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.SPOTIFY,
+                    sourceUrl = null,
+                    audioAssetId = 22,
+                    telegramFileId = null,
+                    durationSec = 180,
+                    coverUrl = null,
+                    coverAssetId = null,
+                    tags = emptyList(),
+                    publishedAt = updatedAt,
+                )
+            val repo = FakeMusicItemRepository(listOf(publishedItem), updatedAt)
+            val assetsRepo =
+                FakeMusicAssetsRepository(
+                    assets =
+                        mapOf(
+                            22L to
+                                MusicAsset(
+                                    id = 22,
+                                    kind = MusicAssetKind.AUDIO,
+                                    bytes = byteArrayOf(1, 2, 3, 4),
+                                    contentType = "audio/mpeg",
+                                    sha256 = "stream-fail",
+                                    sizeBytes = 4,
+                                    createdAt = updatedAt,
+                                    updatedAt = updatedAt,
+                                ),
+                        ),
+                    metas =
+                        mapOf(
+                            22L to
+                                MusicAssetMeta(
+                                    id = 22,
+                                    kind = MusicAssetKind.AUDIO,
+                                    contentType = "audio/mpeg",
+                                    sha256 = "stream-fail",
+                                    sizeBytes = 4,
+                                    updatedAt = updatedAt,
+                                ),
+                        ),
+                    onOpenAssetStream = { throw IOException("disk read failed") },
+                )
+            val localService =
+                MusicService(
+                    itemsRepo = repo,
+                    playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
+                    likesRepository = likesRepository,
+                    clock = fixedClock,
+                    trackOfNightRepository = EmptyTrackOfNightRepository(),
+                )
+            val localMixtapeService = com.example.bot.music.MixtapeService(likesRepository, localService, fixedClock)
+
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                musicRoutes(localService, repo, likesRepository, assetsRepo, localMixtapeService)
+            }
+
+            val response = client.get("/api/music/items/220/audio")
+            assertEquals(HttpStatusCode.InternalServerError, response.status)
+        }
+
+    @Test
+    fun `asset endpoint does not map cancellation from stream open to business response`() =
+        testApplication {
+            val publishedItem =
+                MusicItemView(
+                    id = 230,
+                    clubId = null,
+                    title = "Published Track",
+                    dj = "DJ",
+                    description = null,
+                    itemType = MusicItemType.TRACK,
+                    source = MusicSource.SPOTIFY,
+                    sourceUrl = null,
+                    audioAssetId = 23,
+                    telegramFileId = null,
+                    durationSec = 180,
+                    coverUrl = null,
+                    coverAssetId = null,
+                    tags = emptyList(),
+                    publishedAt = updatedAt,
+                )
+            val repo = FakeMusicItemRepository(listOf(publishedItem), updatedAt)
+            val assetsRepo =
+                FakeMusicAssetsRepository(
+                    assets =
+                        mapOf(
+                            23L to
+                                MusicAsset(
+                                    id = 23,
+                                    kind = MusicAssetKind.AUDIO,
+                                    bytes = byteArrayOf(1, 2, 3, 4),
+                                    contentType = "audio/mpeg",
+                                    sha256 = "cancel-stream",
+                                    sizeBytes = 4,
+                                    createdAt = updatedAt,
+                                    updatedAt = updatedAt,
+                                ),
+                        ),
+                    metas =
+                        mapOf(
+                            23L to
+                                MusicAssetMeta(
+                                    id = 23,
+                                    kind = MusicAssetKind.AUDIO,
+                                    contentType = "audio/mpeg",
+                                    sha256 = "cancel-stream",
+                                    sizeBytes = 4,
+                                    updatedAt = updatedAt,
+                                ),
+                        ),
+                    onOpenAssetStream = { throw CancellationException("cancelled") },
+                )
+            val localService =
+                MusicService(
+                    itemsRepo = repo,
+                    playlistsRepo = FakeMusicPlaylistRepository(playlists, playlistItems, updatedAt),
+                    likesRepository = likesRepository,
+                    clock = fixedClock,
+                    trackOfNightRepository = EmptyTrackOfNightRepository(),
+                )
+            val localMixtapeService = com.example.bot.music.MixtapeService(likesRepository, localService, fixedClock)
+
+            applicationDev {
+                install(ContentNegotiation) { json() }
+                musicRoutes(localService, repo, likesRepository, assetsRepo, localMixtapeService)
+            }
+
+            val response = client.get("/api/music/items/230/audio")
+            assertEquals(HttpStatusCode.InternalServerError, response.status)
+            assertEquals(false, response.bodyAsText().contains("Asset stream unavailable"))
         }
 
     private fun createInitData(): String {
