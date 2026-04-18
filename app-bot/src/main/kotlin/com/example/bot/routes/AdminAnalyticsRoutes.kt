@@ -1,19 +1,14 @@
 package com.example.bot.routes
 
-import com.example.bot.data.booking.TableDepositRepository
-import com.example.bot.data.finance.ShiftReportRepository
-import com.example.bot.data.finance.totalRevenue
+import com.example.bot.analytics.AdminAnalyticsRefreshWorker
+import com.example.bot.analytics.AdminAnalyticsSnapshotService
+import com.example.bot.analytics.SnapshotState
 import com.example.bot.data.security.Role
-import com.example.bot.data.stories.GuestSegmentsRepository
 import com.example.bot.data.stories.PostEventStoryRepository
-import com.example.bot.data.stories.PostEventStoryStatus
-import com.example.bot.data.stories.SegmentType
-import com.example.bot.data.visits.VisitRepository
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
 import com.example.bot.owner.AttendanceHealth
-import com.example.bot.owner.OwnerHealthService
 import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
@@ -26,10 +21,8 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import java.time.Clock
 import java.time.Instant
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
@@ -116,15 +109,11 @@ data class StoryDetailsResponse(
 )
 
 fun Application.adminAnalyticsRoutes(
-    ownerHealthService: OwnerHealthService,
-    visitRepository: VisitRepository,
-    tableDepositRepository: TableDepositRepository,
-    shiftReportRepository: ShiftReportRepository,
+    snapshotService: AdminAnalyticsSnapshotService,
+    refreshWorker: AdminAnalyticsRefreshWorker,
     storyRepository: PostEventStoryRepository,
-    guestSegmentsRepository: GuestSegmentsRepository,
-    clock: Clock = Clock.systemUTC(),
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
-    json: Json = Json { encodeDefaults = true; explicitNulls = false },
+    json: Json = Json { ignoreUnknownKeys = true },
 ) {
     routing {
         route("/api/admin") {
@@ -141,119 +130,16 @@ fun Application.adminAnalyticsRoutes(
 
                         val nightStartUtc = call.requireNightStartUtcQuery() ?: return@get
                         val windowDays = call.requireWindowDays() ?: return@get
-                        val generatedAt = Instant.now(clock)
-
-                        val caveats = mutableListOf<String>()
-                        var hasIncomplete = false
-
-                        fun recordCaveat(code: String) {
-                            if (code !in caveats) {
-                                caveats += code
-                            }
-                            hasIncomplete = true
+                        val snapshot = snapshotService.fetchLatest(clubId, nightStartUtc, windowDays)
+                        if (snapshot == null) {
+                            refreshWorker.schedule(clubId, nightStartUtc, windowDays)
+                            return@get call.respond(HttpStatusCode.Accepted, mapOf("status" to "recompute_scheduled"))
                         }
 
-                        val attendance =
-                            runCatching { ownerHealthService.attendanceForNight(clubId, nightStartUtc) }
-                                .getOrElse {
-                                    recordCaveat("attendance_unavailable")
-                                    null
-                                }
-
-                        if (attendance == null) {
-                            recordCaveat("attendance_unavailable")
-                        } else if (attendance.channels.promoterBookings.plannedGuests > 0 && attendance.channels.promoterBookings.arrivedGuests == 0) {
-                            recordCaveat("promoter_arrived_unavailable")
+                        if (snapshot.state != SnapshotState.FRESH) {
+                            refreshWorker.schedule(clubId, nightStartUtc, windowDays)
                         }
-
-                        val visits =
-                            runCatching {
-                                VisitSummary(
-                                    uniqueVisitors = visitRepository.countNightUniqueVisitors(clubId, nightStartUtc),
-                                    earlyVisits = visitRepository.countNightEarlyVisits(clubId, nightStartUtc),
-                                    tableNights = visitRepository.countNightTableNights(clubId, nightStartUtc),
-                                )
-                            }.getOrElse {
-                                recordCaveat("visits_unavailable")
-                                VisitSummary(uniqueVisitors = 0, earlyVisits = 0, tableNights = 0)
-                            }
-
-                        val deposits =
-                            runCatching {
-                                DepositSummary(
-                                    totalMinor = tableDepositRepository.sumDepositsForNight(clubId, nightStartUtc),
-                                    allocationSummary = tableDepositRepository.allocationSummaryForNight(clubId, nightStartUtc),
-                                )
-                            }.getOrElse {
-                                recordCaveat("deposits_unavailable")
-                                DepositSummary(totalMinor = 0, allocationSummary = emptyMap())
-                            }
-
-                        val shift =
-                            runCatching {
-                                val report = shiftReportRepository.getByClubAndNight(clubId, nightStartUtc)
-                                    ?: return@runCatching null.also { recordCaveat("shift_report_missing") }
-                                val details = shiftReportRepository.getDetails(report.id)
-                                    ?: return@runCatching null.also { recordCaveat("shift_report_unavailable") }
-                                ShiftSummary(
-                                    status = report.status.name,
-                                    peopleWomen = report.peopleWomen,
-                                    peopleMen = report.peopleMen,
-                                    peopleRejected = report.peopleRejected,
-                                    revenueTotalMinor = totalRevenue(details.revenueEntries),
-                                )
-                            }.getOrElse {
-                                recordCaveat("shift_report_unavailable")
-                                null
-                            }
-
-                        val segments =
-                            runCatching {
-                                val result = guestSegmentsRepository.computeSegments(clubId, windowDays, generatedAt)
-                                SegmentSummary(counts = result.counts.mapKeys { it.key.name.lowercase() })
-                            }.getOrElse {
-                                recordCaveat("segments_unavailable")
-                                SegmentSummary(
-                                    counts = SegmentType.entries.associate { it.name.lowercase() to 0 },
-                                )
-                            }
-
-                        val response =
-                            AnalyticsResponse(
-                                schemaVersion = STORY_SCHEMA_VERSION,
-                                clubId = clubId,
-                                nightStartUtc = nightStartUtc.toString(),
-                                generatedAt = generatedAt.toString(),
-                                meta = AnalyticsMeta(hasIncompleteData = hasIncomplete, caveats = caveats),
-                                attendance = attendance,
-                                visits = visits,
-                                deposits = deposits,
-                                shift = shift,
-                                segments = segments,
-                            )
-
-                        val payloadJson = json.encodeToString(response)
-                        runCatching {
-                            storyRepository.upsert(
-                                clubId = clubId,
-                                nightStartUtc = nightStartUtc,
-                                schemaVersion = STORY_SCHEMA_VERSION,
-                                status = PostEventStoryStatus.READY,
-                                payloadJson = payloadJson,
-                                generatedAt = generatedAt,
-                                now = generatedAt,
-                            )
-                        }.onFailure {
-                            recordCaveat("story_upsert_failed")
-                        }
-
-                        val finalResponse =
-                            if (response.meta.hasIncompleteData == hasIncomplete && response.meta.caveats == caveats) {
-                                response
-                            } else {
-                                response.copy(meta = AnalyticsMeta(hasIncompleteData = hasIncomplete, caveats = caveats))
-                            }
-                        call.respond(HttpStatusCode.OK, finalResponse)
+                        call.respond(HttpStatusCode.OK, snapshot.response)
                     }
 
                     get("/stories") {
