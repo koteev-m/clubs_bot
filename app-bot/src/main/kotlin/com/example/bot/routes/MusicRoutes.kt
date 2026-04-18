@@ -242,7 +242,7 @@ private suspend fun ApplicationCall.respondMusicAsset(
             } catch (ce: CancellationException) {
                 throw ce
             } catch (_: Exception) {
-                respond(HttpStatusCode.NotFound, "Asset stream unavailable")
+                respond(HttpStatusCode.InternalServerError, "Asset stream unavailable")
                 return
             }
         response.header(HttpHeaders.ETag, openedSource.meta.sha256)
