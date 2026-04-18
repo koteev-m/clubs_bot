@@ -601,6 +601,9 @@ class MusicRoutesTest {
 
             val response = client.get("/api/music/items/220/audio")
             assertEquals(HttpStatusCode.InternalServerError, response.status)
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals("internal_error", payload["code"]?.jsonPrimitive?.content)
+            assertEquals(500, payload["status"]?.jsonPrimitive?.content?.toInt())
         }
 
     @Test
@@ -672,7 +675,9 @@ class MusicRoutesTest {
 
             val response = client.get("/api/music/items/230/audio")
             assertEquals(HttpStatusCode.InternalServerError, response.status)
-            assertEquals(false, response.bodyAsText().contains("Asset stream unavailable"))
+            val body = response.bodyAsText()
+            assertEquals(false, body.contains("Asset stream unavailable"))
+            assertEquals(false, body.contains("\"code\":\"internal_error\""))
         }
 
     private fun createInitData(): String {
