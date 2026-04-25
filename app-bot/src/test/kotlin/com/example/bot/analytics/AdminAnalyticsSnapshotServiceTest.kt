@@ -265,6 +265,29 @@ class AdminAnalyticsSnapshotServiceTest {
         coVerify(exactly = 1) { service.recompute(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
     }
 
+    @Test
+    fun `refresh worker ignores schedule after close`() {
+        val service = mockk<AdminAnalyticsSnapshotService>()
+        val started = CompletableDeferred<Unit>()
+        val unblock = CompletableDeferred<Unit>()
+        coEvery { service.recompute(1, any(), 30) } coAnswers {
+            started.complete(Unit)
+            unblock.await()
+            snapshot(generatedAt = now)
+        }
+
+        runBlocking {
+            val worker = AdminAnalyticsRefreshWorker(service)
+            worker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30)
+            withTimeout(2_000) { started.await() }
+            worker.close()
+            worker.schedule(1, Instant.parse("2024-06-01T20:00:00Z"), 30)
+            unblock.complete(Unit)
+        }
+
+        coVerify(exactly = 1) { service.recompute(1, Instant.parse("2024-06-01T20:00:00Z"), 30) }
+    }
+
     private fun snapshot(generatedAt: Instant): AnalyticsSnapshot =
         AnalyticsSnapshot(
             id = 1,
