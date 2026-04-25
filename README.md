@@ -35,18 +35,20 @@ scripts/verify.sh ci
 Task order by mode:
 
 - `full` mode: `formatAll` → `staticCheck` → `test` → `test -PrunIT=true`.
-- `ci` mode: `clean staticCheck test` → `test -PrunIT=true`.
+- `ci` mode: `clean detektGate test coverageGate scaCheck` → `test -PrunIT=true`.
+- `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
 
 ## PR quality gates (blocking)
 
 Every PR is blocked until all gates are green:
 
-- **Lint gate** (`.github/workflows/lint.yml`) runs `./gradlew :app-bot:detekt` (baseline-aware) and `ktlint` only for changed Kotlin files.
+- **Lint gate** (`.github/workflows/lint.yml`) runs `./gradlew detektGate` (baseline-aware для всех Kotlin модулей) и `ktlint` только для изменённых Kotlin-файлов.
   Historical debt is fixed via baseline/gradual-rollout, while new PR violations fail CI.
-- **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate`.
+- **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate` (и верификация, и генерация `jacocoTestReport` для upload артефактов).
   Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments classes are at least **60%**.
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
+  Для стабилизации по времени/сети используется локальный data-dir cache (`.gradle/dependency-check-data`); при наличии `NVD_API_KEY` скорость и предсказуемость выше, но локальный запуск без ключа остаётся поддержан.
 
 ### Waiver process for SCA findings
 
@@ -57,6 +59,29 @@ Temporary waivers must be declared in `config/dependency-check/suppressions.xml`
 3. an expiry date and cleanup owner.
 
 Waivers are temporary by policy: remove suppression entries as soon as the dependency is upgraded.
+
+### False positives для secret scan (gitleaks)
+
+Gate не отключаем. Для подтверждённого ложного срабатывания:
+
+1. зафиксировать fingerprint из отчёта в `.gitleaksignore` (минимально точечно, без wildcard-ослаблений);
+2. сослаться на задачу/инцидент и объяснить причину в PR;
+3. после изменения секрета/данных удалить исключение.
+
+### Локальное воспроизведение security gates
+
+```bash
+# lint contract как в CI (detekt по всем модулям + changed-files ktlint)
+scripts/verify.sh lint
+
+# SCA gate (CVSS >= 7.0 блокирует)
+./gradlew scaCheck --console=plain
+
+# secret scan (локально, если установлен docker)
+docker run --rm -v "$PWD:/repo" -w /repo \
+  ghcr.io/gitleaks/gitleaks@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854 \
+  detect --source . --redact --verbose
+```
 
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 

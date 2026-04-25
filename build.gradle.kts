@@ -44,6 +44,8 @@ val slf4jVersionProperty = providers
 val slf4jVersion = slf4jVersionProperty.get()
 
 allprojects {
+    apply(plugin = "org.owasp.dependencycheck")
+
     // Глобальная стратегия: схлопываем legacy stdlib и выравниваем SLF4J
     configurations.configureEach {
         resolutionStrategy.eachDependency {
@@ -163,22 +165,35 @@ tasks.register<DependencyGuard>("dependencyGuard") {
 }
 
 
-configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-    failBuildOnCVSS = 7.0F
-    suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
-    formats = listOf("HTML", "JSON")
-    analyzers.assemblyEnabled = false
+allprojects {
+    configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
+        failBuildOnCVSS = 7.0F
+        suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
+        formats = listOf("HTML", "JSON")
+        analyzers.assemblyEnabled = false
+        data.directory = "${rootProject.projectDir}/.gradle/dependency-check-data"
+        nvd.apiKey = providers.environmentVariable("NVD_API_KEY").orNull
+    }
 }
 
 tasks.named("dependencyCheckAnalyze") {
     group = "verification"
     description = "SCA gate: OWASP Dependency-Check (fails on HIGH/CRITICAL CVEs)"
+    notCompatibleWithConfigurationCache("dependency-check tasks are not configuration-cache safe on Gradle 9")
+}
+
+allprojects {
+    tasks.matching { it.name == "dependencyCheckAnalyze" }.configureEach {
+        notCompatibleWithConfigurationCache("dependency-check tasks are not configuration-cache safe on Gradle 9")
+    }
 }
 
 tasks.register("scaCheck") {
     group = "verification"
     description = "Run JVM SCA policy gate (OWASP Dependency-Check)"
-    dependsOn("dependencyCheckAnalyze")
+    dependsOn(
+        allprojects.mapNotNull { it.tasks.findByName("dependencyCheckAnalyze") }
+    )
 }
 
 // -------------------------
@@ -277,6 +292,20 @@ tasks.register("staticCheck") {
     )
 }
 
+tasks.register("detektGate") {
+    group = "verification"
+    description = "Run detekt across all Kotlin subprojects with baseline-aware strategy"
+    dependsOn(
+        subprojects.flatMap { sp ->
+            listOfNotNull(
+                sp.tasks.findByName("detekt"),
+                sp.tasks.findByName("detektMain"),
+                sp.tasks.findByName("detektTest"),
+            )
+        }
+    )
+}
+
 tasks.register("formatAll") {
     group = "formatting"
     description = "Run ktlint format (plugin task) for all Kotlin modules"
@@ -294,6 +323,6 @@ tasks.register("flywayMigrate") {
 
 tasks.register("coverageGate") {
     group = "verification"
-    description = "Run coverage verification gate"
-    dependsOn(":app-bot:jacocoTestCoverageVerification")
+    description = "Run coverage report generation + verification gate"
+    dependsOn(":app-bot:jacocoTestReport", ":app-bot:jacocoTestCoverageVerification")
 }
