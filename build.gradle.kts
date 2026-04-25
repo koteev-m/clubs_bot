@@ -23,6 +23,7 @@ plugins {
     kotlin("plugin.serialization") version "2.2.20" apply false
     id("io.gitlab.arturbosch.detekt") version "1.23.8" apply false
     id("org.jlleitschuh.gradle.ktlint") version "12.1.0" apply false
+    id("org.owasp.dependencycheck") version "12.1.8"
     alias(libs.plugins.versionsPlugin)
 }
 
@@ -161,6 +162,25 @@ tasks.register<DependencyGuard>("dependencyGuard") {
     description = "Fail build if dependency rules are violated"
 }
 
+
+configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
+    failBuildOnCVSS = 7.0F
+    suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
+    formats = listOf("HTML", "JSON")
+    analyzers.assemblyEnabled = false
+}
+
+tasks.named("dependencyCheckAnalyze") {
+    group = "verification"
+    description = "SCA gate: OWASP Dependency-Check (fails on HIGH/CRITICAL CVEs)"
+}
+
+tasks.register("scaCheck") {
+    group = "verification"
+    description = "Run JVM SCA policy gate (OWASP Dependency-Check)"
+    dependsOn("dependencyCheckAnalyze")
+}
+
 // -------------------------
 // Настройки подмодулей
 // -------------------------
@@ -269,4 +289,11 @@ tasks.register("flywayMigrate") {
     group = "database"
     description = "Run Flyway migrations via :core-data module"
     dependsOn(":core-data:flywayMigrate")
+}
+
+
+tasks.register("coverageGate") {
+    group = "verification"
+    description = "Run coverage verification gate"
+    dependsOn(":app-bot:jacocoTestCoverageVerification")
 }

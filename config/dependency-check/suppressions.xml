@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!--
+      Waiver process:
+      1) add a suppression with expiry date (until), ticket id and justification;
+      2) link to compensating controls in docs/supply-chain.md;
+      3) remove suppression once dependency is upgraded.
+    -->
+</suppressions>

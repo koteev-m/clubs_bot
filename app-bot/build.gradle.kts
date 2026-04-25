@@ -11,6 +11,7 @@ plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
     application
+    jacoco
 }
 
 java {
@@ -254,4 +255,48 @@ tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
 // Включаем гейт в фазу проверки модуля
 tasks.named("check") {
     dependsOn("checkLogsPolicy")
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+}
+
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+
+    violationRules {
+        rule {
+            element = "BUNDLE"
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.40".toBigDecimal()
+            }
+        }
+
+        rule {
+            element = "CLASS"
+            includes =
+                listOf(
+                "com.example.bot.booking.*",
+                "com.example.bot.routes.CheckinRoutes*",
+                "com.example.bot.payments.*",
+            )
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.60".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }
