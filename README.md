@@ -37,6 +37,27 @@ Task order by mode:
 - `full` mode: `formatAll` → `staticCheck` → `test` → `test -PrunIT=true`.
 - `ci` mode: `clean staticCheck test` → `test -PrunIT=true`.
 
+## PR quality gates (blocking)
+
+Every PR is blocked until all gates are green:
+
+- **Lint gate** (`.github/workflows/lint.yml`) runs `./gradlew :app-bot:detekt` (baseline-aware) and `ktlint` only for changed Kotlin files.
+  Historical debt is fixed via baseline/gradual-rollout, while new PR violations fail CI.
+- **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate`.
+  Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments classes are at least **60%**.
+- **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
+- **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
+
+### Waiver process for SCA findings
+
+Temporary waivers must be declared in `config/dependency-check/suppressions.xml` with:
+
+1. a ticket/incident reference;
+2. explicit business justification and compensating controls;
+3. an expiry date and cleanup owner.
+
+Waivers are temporary by policy: remove suppression entries as soon as the dependency is upgraded.
+
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 
 `GET /api/clubs?city=&q=&tag=&genre=&date=&page=&size=` accepts optional filters:

@@ -2,39 +2,92 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>ComplexCondition:AdminTablesRoutes.kt$label == null &amp;&amp; minDeposit == null &amp;&amp; capacity == null &amp;&amp; zone == null &amp;&amp; arrivalWindow == null &amp;&amp; mysteryEligible == null &amp;&amp; tableNumber == null &amp;&amp; x == null &amp;&amp; y == null</ID>
+    <ID>ComplexCondition:BookingState.kt$BookingState$cur.status != BookingStatus.BOOKED || cur.plusOneUsed || (deadline != null &amp;&amp; now.isAfter(deadline))</ID>
+    <ID>ComplexCondition:BookingState.kt$BookingState$removedLocks &gt; 0 || removedIdempotency &gt; 0 || removedBookings &gt; 0 || removedWatermarks &gt; 0</ID>
+    <ID>ComplexCondition:HallPlanRoutes.kt$clubId == null || hallId == null || clubId &lt;= 0 || hallId &lt;= 0</ID>
+    <ID>ComplexCondition:HostCheckinRoutes.kt$clubId == null || clubId &lt;= 0 || eventId == null || eventId &lt;= 0</ID>
+    <ID>ComplexCondition:HostChecklistRoutes.kt$clubId == null || clubId &lt;= 0 || eventId == null || eventId &lt;= 0</ID>
+    <ID>ComplexCondition:HostEntranceRoutes.kt$clubId == null || clubId &lt;= 0 || eventId == null || eventId &lt;= 0</ID>
+    <ID>ComplexCondition:HostWaitlistRoutes.kt$clubId == null || clubId &lt;= 0 || eventId == null || eventId &lt;= 0</ID>
+    <ID>ComplexCondition:PromoterGuestListRoutes.kt$payload.arrivalWindowStart != null &amp;&amp; arrivalWindowStart == null || payload.arrivalWindowEnd != null &amp;&amp; arrivalWindowEnd == null</ID>
+    <ID>ComplexCondition:PromoterGuestListRoutes.kt$payload.guestListEntryId &lt;= 0 || payload.tableId &lt;= 0 || payload.eventId &lt;= 0 || payload.hallId &lt;= 0</ID>
     <ID>ComplexCondition:StartParamGuestListCodec.kt$StartParamGuestListCodec$secret.isBlank() || ttl.isZero || ttl.isNegative || maxClockSkew.isNegative</ID>
-    <ID>DoubleMutabilityForCollection:Keyboards.kt$Keyboards$var row = mutableListOf&lt;InlineKeyboardButton&gt;()</ID>
-    <ID>ExceptionRaisedInUnexpectedLocation:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$override suspend fun finalize( clubId: Long, bookingId: UUID, paymentToken: String?, idemKey: String, actorUserId: Long, ): PaymentsFinalizeService.FinalizeResult</ID>
-    <ID>ExceptionRaisedInUnexpectedLocation:DefaultPaymentsService.kt$DefaultPaymentsService$override suspend fun finalize( clubId: Long, bookingId: UUID, paymentToken: String?, idemKey: String, actorUserId: Long, ): PaymentsService.FinalizeResult</ID>
-    <ID>InjectDispatcher:AvailabilityApiRoutes.kt$IO</ID>
-    <ID>InjectDispatcher:CheckinRoutes.kt$IO</ID>
-    <ID>InjectDispatcher:ClubsRoutes.kt$IO</ID>
-    <ID>InjectDispatcher:HallRenderer.kt$DefaultHallRenderer$Default</ID>
-    <ID>InjectDispatcher:HallRoutes.kt$IO</ID>
-    <ID>InjectDispatcher:MenuCallbacksHandler.kt$MenuCallbacksHandler$IO</ID>
-    <ID>InjectDispatcher:MigrationsPlugin.kt$IO</ID>
-    <ID>InjectDispatcher:MyBookingsService.kt$MyBookingsService$IO</ID>
-    <ID>InjectDispatcher:ObservabilityRoutes.kt$IO</ID>
-    <ID>InjectDispatcher:SchedulerModule.kt$Default</ID>
-    <ID>InjectDispatcher:SecuredBookingRoutes.kt$IO</ID>
-    <ID>InjectDispatcher:TelegramClient.kt$TelegramClient$IO</ID>
+    <ID>ComplexCondition:SupportRoutes.kt$clubId == null || clubId &lt;= 0 || topic == null || text == null</ID>
+    <ID>ForbiddenComment:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$// TODO: Booking check-in semantics are not available; arrived guests per booking are assumed to be zero.</ID>
+    <ID>ForbiddenComment:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$// TODO: when booking check-ins become available, also increment arrived here</ID>
     <ID>InstanceOfCheckForException:DefaultPaymentsService.kt$DefaultPaymentsService$unexpected !is PaymentsService.UnprocessableException</ID>
-    <ID>InvalidPackageDeclaration:GuestListInviteRoutes.kt$package com.example.bot.routes</ID>
-    <ID>MagicNumber:Application.kt$0xff</ID>
-    <ID>MagicNumber:Application.kt$16</ID>
+    <ID>InstanceOfCheckForException:TelegramWebhookIngressWorker.kt$TelegramWebhookIngressWorker$markDoneError is CancellationException</ID>
+    <ID>LargeClass:AdminTableOpsRoutesTest.kt$AdminTableOpsRoutesTest</ID>
+    <ID>LargeClass:GuestListRoutesTest.kt$GuestListRoutesTest : StringSpec</ID>
+    <ID>LargeClass:MusicRoutesTest.kt$MusicRoutesTest</ID>
+    <ID>LargeClass:PromoterGuestListRoutesTest.kt$PromoterGuestListRoutesTest</ID>
+    <ID>LoopWithTooManyJumpStatements:GuestGamificationService.kt$GuestGamificationService$for</ID>
+    <ID>LoopWithTooManyJumpStatements:TelegramWebhookIngressWorker.kt$TelegramWebhookIngressWorker$while</ID>
+    <ID>MagicNumber:AdminAnalyticsSnapshotService.kt$AnalyticsSnapshotRuntimeConfig$30</ID>
+    <ID>MagicNumber:AdminAnalyticsSnapshotService.kt$AnalyticsSnapshotRuntimeConfig$5</ID>
+    <ID>MagicNumber:AdminAnalyticsSnapshotService.kt$AnalyticsSnapshotRuntimeConfig.Companion$30</ID>
+    <ID>MagicNumber:AdminAnalyticsSnapshotService.kt$AnalyticsSnapshotRuntimeConfig.Companion$5</ID>
+    <ID>MagicNumber:AdminMusicRoutes.kt$8_192</ID>
+    <ID>MagicNumber:AdminTablesRoutes.kt$200</ID>
+    <ID>MagicNumber:AdminTablesRoutes.kt$50</ID>
+    <ID>MagicNumber:BookingState.kt$BookingState$15</ID>
+    <ID>MagicNumber:BookingState.kt$BookingState$200</ID>
+    <ID>MagicNumber:BookingState.kt$BookingState$30</ID>
+    <ID>MagicNumber:BookingState.kt$BookingState$45</ID>
+    <ID>MagicNumber:BookingState.kt$BookingState$48</ID>
+    <ID>MagicNumber:BookingState.kt$BookingState$7</ID>
+    <ID>MagicNumber:BookingWebAppRoutes.kt$8</ID>
+    <ID>MagicNumber:CoreDataSeedDefaults.kt$22</ID>
+    <ID>MagicNumber:CoreDataSeedDefaults.kt$23</ID>
+    <ID>MagicNumber:CorsPlugin.kt$600L</ID>
+    <ID>MagicNumber:CorsPlugin.kt$86_400</ID>
     <ID>MagicNumber:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$4</ID>
     <ID>MagicNumber:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$8</ID>
     <ID>MagicNumber:GuestListInviteRoutes.kt$12</ID>
+    <ID>MagicNumber:GuestListRoutes.kt$3</ID>
     <ID>MagicNumber:GuestListRoutes.kt$50</ID>
-    <ID>MagicNumber:LoggingPlugin.kt$0xff</ID>
-    <ID>MagicNumber:LoggingPlugin.kt$16</ID>
+    <ID>MagicNumber:GuestListRoutes.kt$6</ID>
+    <ID>MagicNumber:GuestQrResolver.kt$DefaultGuestQrResolver$12</ID>
+    <ID>MagicNumber:HallPlanRoutes.kt$12</ID>
+    <ID>MagicNumber:HallRenderCache.kt$12</ID>
+    <ID>MagicNumber:HallRenderCache.kt$16</ID>
+    <ID>MagicNumber:HallRenderCache.kt$4</ID>
+    <ID>MagicNumber:HallRenderCache.kt$8</ID>
+    <ID>MagicNumber:HostCheckinRoutes.kt$20</ID>
+    <ID>MagicNumber:HostSearchService.kt$HostSearchService$50</ID>
+    <ID>MagicNumber:LayoutModule.kt$15</ID>
+    <ID>MagicNumber:LayoutModule.kt$30</ID>
+    <ID>MagicNumber:LayoutModule.kt$45</ID>
+    <ID>MagicNumber:LayoutModule.kt$48</ID>
+    <ID>MagicNumber:LayoutModule.kt$7</ID>
+    <ID>MagicNumber:Masking.kt$6</ID>
+    <ID>MagicNumber:MeBookingsRoutes.kt$50</ID>
     <ID>MagicNumber:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$3</ID>
     <ID>MagicNumber:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$4</ID>
     <ID>MagicNumber:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$9</ID>
+    <ID>MagicNumber:MusicBattleRoutes.kt$30</ID>
+    <ID>MagicNumber:MusicBattleRoutes.kt$365</ID>
+    <ID>MagicNumber:MusicBattleService.kt$MusicBattleService$0.50</ID>
+    <ID>MagicNumber:MusicBattleService.kt$MusicBattleService$0.90</ID>
+    <ID>MagicNumber:MusicBattleService.kt$MusicBattleService$0.99</ID>
+    <ID>MagicNumber:MusicBattleService.kt$MusicBattleService$24L</ID>
+    <ID>MagicNumber:MusicBattleService.kt$MusicBattleService$3600L</ID>
     <ID>MagicNumber:OutboxAdminRoutes.kt$10_000</ID>
     <ID>MagicNumber:OutboxAdminRoutes.kt$50</ID>
     <ID>MagicNumber:OutboxAdminRoutes.kt$500</ID>
+    <ID>MagicNumber:OwnerHealthRoutes.kt$30</ID>
+    <ID>MagicNumber:OwnerHealthRoutes.kt$7</ID>
+    <ID>MagicNumber:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$30</ID>
+    <ID>MagicNumber:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$36</ID>
+    <ID>MagicNumber:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$5</ID>
+    <ID>MagicNumber:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$7</ID>
     <ID>MagicNumber:PromoAttributionService.kt$InMemoryPromoAttributionStore$24</ID>
+    <ID>MagicNumber:PromoterInviteQrCodec.kt$PromoterInviteQrCodec$0xFF</ID>
+    <ID>MagicNumber:PromoterInviteQrCodec.kt$PromoterInviteQrCodec$16</ID>
+    <ID>MagicNumber:PromoterInviteQrCodec.kt$PromoterInviteQrCodec$3</ID>
+    <ID>MagicNumber:PromoterInviteQrCodec.kt$PromoterInviteQrCodec$4</ID>
+    <ID>MagicNumber:PromoterRatingRoutes.kt$20</ID>
     <ID>MagicNumber:ProviderRefundClient.kt$HttpProviderRefundClient$200</ID>
     <ID>MagicNumber:ProviderRefundClient.kt$HttpProviderRefundClient$299</ID>
     <ID>MagicNumber:ProviderRefundClient.kt$HttpProviderRefundClient$429</ID>
@@ -50,6 +103,11 @@
     <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$4</ID>
     <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$5</ID>
     <ID>MagicNumber:StartParamGuestListCodec.kt$StartParamGuestListCodec$64</ID>
+    <ID>MagicNumber:SupportRoutes.kt$2000</ID>
+    <ID>MagicNumber:TelegramOperationalNotificationService.kt$OpsNotificationServiceConfig$200</ID>
+    <ID>MagicNumber:TelegramOperationalNotificationService.kt$OpsNotificationServiceConfig$3</ID>
+    <ID>MagicNumber:TelegramOperationalNotificationService.kt$TelegramOperationalNotificationService$12</ID>
+    <ID>MagicNumber:TelegramWebhookIngressWorker.kt$TelegramWebhookIngressWorker$300</ID>
     <ID>MagicNumber:TracingExt.kt$8</ID>
     <ID>MagicNumber:UiCheckinMetrics.kt$UiCheckinMetrics$0.5</ID>
     <ID>MagicNumber:UiCheckinMetrics.kt$UiCheckinMetrics$0.95</ID>
@@ -57,86 +115,282 @@
     <ID>MagicNumber:WaitlistRoutes.kt$120</ID>
     <ID>MagicNumber:WaitlistRoutes.kt$15</ID>
     <ID>MagicNumber:WaitlistRoutes.kt$5</ID>
-    <ID>MaxLineLength:CheckinRoutes.kt$"checkin.scan error=entry_list_mismatch clubId={} listId={} entryListId={} entryId={}"</ID>
-    <ID>MaxLineLength:CheckinRoutes.kt$logger.info("checkin.scan status=arrived clubId={} listId={} entryId={}", clubId, list.id, entry.id)</ID>
-    <ID>MaxLineLength:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$BookingCmdResult.DuplicateActiveBooking -&gt; throw PaymentsFinalizeService.ConflictException("booking duplicate active")</ID>
-    <ID>MaxLineLength:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$BookingCmdResult.IdempotencyConflict -&gt; throw PaymentsFinalizeService.ConflictException("booking idempotency conflict")</ID>
-    <ID>MaxLineLength:DefaultPaymentsFinalizeService.kt$DefaultPaymentsFinalizeService$paymentsRepository.findByIdempotencyKey(idemKey) ?: created.copy(status = paymentStatus, externalId = tokenDigest)</ID>
-    <ID>MaxLineLength:GuestListRoutes.kt$return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "outside_arrival_window"))</ID>
-    <ID>MaxLineLength:Keyboards.kt$Keyboards$val back = InlineKeyboardButton(texts.myBookingsBack(lang)).callbackData("bk:list:${originatingPage.coerceAtLeast(1)}")</ID>
-    <ID>MaxLineLength:OutboxAdminRoutes.kt$"Outbox replay completed actor=$actor topic=${result.topic ?: adminFilter?.topic ?: "MULTI"} "</ID>
-    <ID>MaxLineLength:OutboxAdminRoutes.kt$"Outbox replay request actor=$actor dryRun=$dryRun maxRows=$clamp ids=${ids.size} filter={$filterSignature}"</ID>
-    <ID>MaxLineLength:OutboxAdminRoutes.kt$"topic=${it.topic ?: "ANY"},status=${it.status ?: "ANY"},createdAfter=${it.createdAfter ?: "NONE"}"</ID>
-    <ID>MaxLineLength:OutboxAdminRoutes.kt$val timer = resolvedMetrics?.timer("outbox.admin.list.timer", "topic", topicTag, "status", statusTag)</ID>
-    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] cancel result=ok club=$clubId booking=$bookingLabel requestId=$callId idempotent=${result.idempotent}"</ID>
-    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] cancel result=validation club=$clubId booking=$bookingLabel requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] refund result=ok club=$clubId booking=$bookingLabel requestId=$callId idempotent=${result.idempotent}"</ID>
-    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] refund result=unprocessable club=$clubId booking=$bookingLabel requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$"[payments] refund result=validation club=$clubId booking=$bookingLabel requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$logger.warn { "[payments] cancel result=validation club=$clubId booking=${maskBookingId(bookingId)} requestId=$callId" }</ID>
-    <ID>MaxLineLength:PaymentsCancelRefundRoutes.kt$logger.warn { "[payments] refund result=validation club=$clubId booking=${maskBookingId(bookingId)} requestId=$callId" }</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize promo-attach-failed club=$clubId booking=$bookingLabel requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=conflict club=$clubId booking=$bookingLabel requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=ok club=$clubId booking=$bookingLabel requestId=$callId status=${result.paymentStatus}"</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=unexpected club=$clubId booking=$bookingLabel requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=validation club=$clubId booking=$bookingLabel requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$"[payments] finalize result=validation club=$clubId booking=unknown requestId=$callId"</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$logger.warn { "[payments] finalize result=validation club=$clubId booking=unknown requestId=$callId" }</ID>
-    <ID>MaxLineLength:PaymentsFinalizeRoutes.kt$logger.warn { "[payments] finalize result=validation club=unknown booking=unknown requestId=$callId" }</ID>
-    <ID>MaxLineLength:RefundOutboxWorker.kt$RefundOutboxWorker$"Provider refund request failed for message {} attempt {}"</ID>
-    <ID>MaxLineLength:SecuredBookingRoutes.kt$val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.confirm(holdId, idempotencyKey) }</ID>
-    <ID>MaxLineLength:SecuredBookingRoutes.kt$val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.hold(command, idempotencyKey) }</ID>
-    <ID>MaxLineLength:SecuredBookingRoutes.kt$val result = withContext(Dispatchers.IO + MDCContext()) { bookingService.markNoShow(clubId, bookingId) }</ID>
-    <ID>MaxLineLength:StartInviteArriveHandler.kt$StartInviteArriveHandler$val decoded = StartParamGuestListCodec.verify(payload, now, ttl, secret) ?: return Result.ExpiredOrSignatureError</ID>
-    <ID>MaxLineLength:WaitlistRoutes.kt$?:</ID>
+    <ID>MagicNumber:WebAppEtagPlugin.kt$31_536_000L</ID>
+    <ID>MagicNumber:WebAppStaticCachePlugin.kt$200</ID>
+    <ID>MagicNumber:WebAppStaticCachePlugin.kt$299</ID>
+    <ID>MagicNumber:WebAppStaticCachePlugin.kt$304</ID>
+    <ID>MagicNumber:WebAppStaticCachePlugin.kt$31_536_000L</ID>
+    <ID>MaxLineLength:AdminAnalyticsSnapshotService.kt$AdminAnalyticsRefreshWorker$logger.warn("Analytics snapshot recompute failed for clubId={} nightStartUtc={} windowDays={}", clubId, nightStartUtc, windowDays, t)</ID>
+    <ID>MaxLineLength:AdminAnalyticsSnapshotService.kt$AdminAnalyticsSnapshotService$val snapshot = snapshotRepository.getByKey(clubId, nightStartUtc, windowDays, STORY_SCHEMA_VERSION) ?: return null</ID>
+    <ID>MaxLineLength:AdminAnalyticsSnapshotService.kt$AdminAnalyticsSnapshotService$}</ID>
+    <ID>MaxLineLength:AdminClubsRoutes.kt$city?.let { if (it.trim().isEmpty() || it.trim().length &gt; MAX_CITY_LENGTH) errors["city"] = "length_1_$MAX_CITY_LENGTH" }</ID>
+    <ID>MaxLineLength:AdminClubsRoutes.kt$name?.let { if (it.trim().isEmpty() || it.trim().length &gt; MAX_CLUB_NAME_LENGTH) errors["name"] = "length_1_$MAX_CLUB_NAME_LENGTH" }</ID>
+    <ID>MaxLineLength:AdminClubsRoutes.kt$return@patch call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error, details = errors)</ID>
+    <ID>MaxLineLength:AdminClubsRoutes.kt$return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error, details = errors)</ID>
+    <ID>MaxLineLength:AdminFinanceShiftRoutes.kt$bracelets = bracelets.map { com.example.bot.data.finance.ShiftReportBraceletInput(it.braceletTypeId, it.count) }</ID>
+    <ID>MaxLineLength:AdminFinanceShiftRoutes.kt$val depositHints = shiftReportRepository.getDepositHints(clubId, details.report.nightStartUtc)</ID>
+    <ID>MaxLineLength:AdminFinanceShiftRoutes.kt$val mismatchThresholdMinor = envLong("SHIFT_REPORT_DEPOSIT_MISMATCH_THRESHOLD_MINOR", DEFAULT_DEPOSIT_MISMATCH_THRESHOLD_MINOR)</ID>
+    <ID>MaxLineLength:AdminFinanceShiftRoutes.kt$val totals = buildTotalsResponse(refreshed.revenueEntries, templateRepository.getTemplateData(clubId))</ID>
+    <ID>MaxLineLength:AdminFinanceTemplateRoutes.kt$return@post call.respondValidationErrors(mapOf("groupId" to (ex.message ?: "invalid")))</ID>
+    <ID>MaxLineLength:AdminFinanceTemplateRoutes.kt$return@put call.respondValidationErrors(mapOf("groupId" to (ex.message ?: "invalid")))</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.badges.create club_id={} badge_id={} by={}", clubId, created.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.badges.delete club_id={} badge_id={} by={}", clubId, payload.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.badges.update club_id={} badge_id={} by={}", clubId, updated.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.ladder.create club_id={} level_id={} by={}", clubId, created.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.ladder.delete club_id={} level_id={} by={}", clubId, payload.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.ladder.update club_id={} level_id={} by={}", clubId, updated.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.prizes.create club_id={} prize_id={} by={}", clubId, created.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.prizes.delete club_id={} prize_id={} by={}", clubId, payload.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminGamificationRoutes.kt$logger.info("admin.gamification.prizes.update club_id={} prize_id={} by={}", clubId, updated.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$if</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$logger.info("admin.halls.create club_id={} hall_id={} by={}", clubId, created.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$logger.info("admin.halls.delete club_id={} hall_id={} by={}", hall.clubId, hallId, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$logger.info("admin.halls.make_active club_id={} hall_id={} by={}", hall.clubId, hallId, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$logger.info("admin.halls.update club_id={} hall_id={} by={}", hall.clubId, hallId, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$name?.let { if (it.trim().isEmpty() || it.trim().length &gt; MAX_HALL_NAME_LENGTH) errors["name"] = "length_1_$MAX_HALL_NAME_LENGTH" }</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$return@patch call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error, details = errors)</ID>
+    <ID>MaxLineLength:AdminHallsRoutes.kt$return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error, details = errors)</ID>
+    <ID>MaxLineLength:AdminMusicRoutes.kt$MusicUploadResult.Error(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)</ID>
+    <ID>MaxLineLength:AdminMusicRoutes.kt$MusicUploadResult.Error(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)</ID>
+    <ID>MaxLineLength:AdminTableOpsRoutes.kt$"admin.tables.seat.session_compensation_failed clubId={} tableId={} sessionId={} reason=close_returned_false"</ID>
+    <ID>MaxLineLength:AdminTableOpsRoutes.kt$return@post call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)</ID>
+    <ID>MaxLineLength:AdminTableOpsRoutes.kt$return@put call.respondError(HttpStatusCode.Conflict, ErrorCodes.shift_report_closed)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$if</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$logger.info("admin.halls.tables.create hall_id={} table_id={} by={}", hallId, created.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$logger.info("admin.halls.tables.update hall_id={} table_id={} by={}", hallId, updated.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$logger.info("admin.tables.create club_id={} table_id={} by={}", clubId, created.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$logger.info("admin.tables.update club_id={} table_id={} by={}", clubId, updated.id, call.rbacContext().user.id)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$return@patch call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_capacity, details = validationErrors)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$return@patch call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_table_coords, details = validationErrors)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$return@patch call.respondError(HttpStatusCode.Conflict, ErrorCodes.table_number_conflict)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_capacity, details = validationErrors)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_table_coords, details = validationErrors)</ID>
+    <ID>MaxLineLength:AdminTablesRoutes.kt$val sorted = tables.sortedWith(compareBy&lt;com.example.bot.layout.Table&gt; { it.zoneId }.thenBy { it.id })</ID>
+    <ID>MaxLineLength:Application.kt$guestListRoutes(repository = guestListRepository, parser = guestListCsvParser, auditLogRepository = auditLogRepository)</ID>
+    <ID>MaxLineLength:BookingA3Routes.kt$"booking.audit source=miniapp user_id={} club_id={} booking_id={} table_id={} event_id={} status={} guests={}"</ID>
+    <ID>MaxLineLength:BookingA3Routes.kt$"booking.audit source=miniapp user_id={} club_id={} booking_id={} table_id={} event_id={} status={}-&gt;{}"</ID>
+    <ID>MaxLineLength:BookingA3Routes.kt$private</ID>
+    <ID>MaxLineLength:BookingA3Routes.kt$private val holdRateLimit = rateLimitConfig("BOOKING_RATE_LIMIT_HOLD_CAPACITY", "BOOKING_RATE_LIMIT_HOLD_REFILL", 5.0, 0.5)</ID>
+    <ID>MaxLineLength:BookingModules.kt$single { MyBookingsService(get(), get(), get(), get(), get(), get&lt;OpsNotificationPublisher&gt;(), availabilityCacheInvalidator = get()) }</ID>
+    <ID>MaxLineLength:BookingService.kt$BookingService$log("booking.confirm", null, "active_hold_exists", null, entityId = holdId.toString())</ID>
+    <ID>MaxLineLength:BookingService.kt$BookingService$log("booking.confirm", null, "hold_not_found", null, entityId = holdId.toString())</ID>
+    <ID>MaxLineLength:BookingService.kt$BookingService$log(action, clubId, "retry_exceeded", metaFor(bookingId, refreshed.status), entityId = bookingId.toString())</ID>
+    <ID>MaxLineLength:BookingService.kt$BookingService$log(action, clubId, "unexpected", metaFor(bookingId, current.status), entityId = bookingId.toString())</ID>
+    <ID>MaxLineLength:BookingState.kt$BookingState$booking.latePlusOneAllowedUntil?.let(now::isAfter) == true -&gt; PlusOneResult.Error(BookingError.LATE_PLUS_ONE_EXPIRED)</ID>
+    <ID>MaxLineLength:BookingState.kt$BookingState$return ConfirmResult.Success(stored.snapshot.toBooking(), stored.snapshot, stored.bodyJson, cached = true)</ID>
+    <ID>MaxLineLength:BookingState.kt$BookingState$return PlusOneResult.Success(stored.snapshot.toBooking(), stored.snapshot, stored.bodyJson, cached = true)</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$"checkin.scan promoter_invite status=arrived clubId={} inviteId={} eventId={}"</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$call.respondError(HttpStatusCode.NotFound, ErrorCodes.list_not_found)</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$primaryVerification is QrVerificationResult.Valid -&gt; primaryVerification.decoded</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$val marked = promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false</ID>
+    <ID>MaxLineLength:CheckinRoutes.kt$val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)</ID>
+    <ID>MaxLineLength:ClubsRoutes.kt$val etag = etagFor(eventsRepository.lastUpdatedAt(), events.size, "events|$clubId|$city|$from|$to|$page|$size")</ID>
+    <ID>MaxLineLength:DefaultPaymentsService.kt$DefaultPaymentsService$availabilityCacheInvalidator.invalidateTables(cancelResult.record.clubId, cancelResult.record.slotStart)</ID>
+    <ID>MaxLineLength:DefaultPaymentsService.kt$DefaultPaymentsService$if</ID>
+    <ID>MaxLineLength:GuestGamificationService.kt$GuestGamificationService$earlyInWindow = metricCount(MetricType.EARLY_VISITS, maxWindowDays(rewardLevels, MetricType.EARLY_VISITS))</ID>
+    <ID>MaxLineLength:GuestGamificationService.kt$GuestGamificationService$tableNightsInWindow = metricCount(MetricType.TABLE_NIGHTS, maxWindowDays(rewardLevels, MetricType.TABLE_NIGHTS))</ID>
+    <ID>MaxLineLength:HallPlanRoutes.kt$"admin.halls.plan.upload hall_id={} club_id={} content_type={} size_bytes={} sha256_prefix={} by={}"</ID>
+    <ID>MaxLineLength:HostChecklistRoutes.kt$logger.info("host.checklist.get club_id={} event_id={} items={}", clubId, eventId, response.items.size)</ID>
+    <ID>MaxLineLength:HostChecklistRoutes.kt$logger.warn("host.checklist validation_error club_id={} event_id={} item_id={} blank", clubId, eventId, body.itemId)</ID>
+    <ID>MaxLineLength:HostChecklistRoutes.kt$logger.warn("host.checklist validation_error club_id={} event_id={} item_id={}", clubId, eventId, body.itemId)</ID>
+    <ID>MaxLineLength:HostChecklistRoutes.kt$return@post call.respondChecklistError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)</ID>
+    <ID>MaxLineLength:HostEntranceService.kt$HostEntranceService$*</ID>
+    <ID>MaxLineLength:HostWaitlistRoutes.kt$logger.info("host.waitlist invite disabled id={} club_id={} event_id={}", id, body.clubId, body.eventId)</ID>
+    <ID>MaxLineLength:HostWaitlistRoutes.kt$logger.warn("host.waitlist invite not_found id={} club_id={} event_id={}", id, body.clubId, body.eventId)</ID>
+    <ID>MaxLineLength:HostWaitlistRoutes.kt$logger.warn("host.waitlist invite validation_error club_id={} event_id={}", body.clubId, body.eventId)</ID>
+    <ID>MaxLineLength:HostWaitlistRoutes.kt$return@post call.respondWaitlistError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)</ID>
+    <ID>MaxLineLength:LayoutRoutes.kt$"layout|$clubId|$eventId|${layout.assets.fingerprint}|zones=${layout.zones.size}|tables=${layout.tables.size}"</ID>
+    <ID>MaxLineLength:MeBookingsRoutes.kt$(booking.status == BookingStatus.BOOKED || booking.status == BookingStatus.CANCELED) &amp;&amp; end.isBefore(now)</ID>
+    <ID>MaxLineLength:MeBookingsRoutes.kt$?.</ID>
+    <ID>MaxLineLength:MigrationsPlugin.kt$*</ID>
+    <ID>MaxLineLength:MusicBattleRoutes.kt$battleService.vote(battleId = battleId, userId = userId, chosenItemId = chosenItemId).details</ID>
+    <ID>MaxLineLength:MusicBattleRoutes.kt$private fun ApplicationCall.queryLong(name: String): Long?</ID>
+    <ID>MaxLineLength:MusicBattleRoutes.kt$val battleId = call.pathLong("battleId") ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)</ID>
+    <ID>MaxLineLength:MusicBattleRoutes.kt$val battleId = call.pathLong("battleId") ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)</ID>
+    <ID>MaxLineLength:MusicBattleRoutes.kt$val clubId = call.queryLong("clubId") ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)</ID>
+    <ID>MaxLineLength:MusicBattleRoutes.kt$val itemId = call.pathLong("itemId") ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)</ID>
+    <ID>MaxLineLength:MusicBattleService.kt$MusicBattleService$if (e.message?.contains("Battle ") == true &amp;&amp; e.message?.contains(" not found") == true) throw BattleNotFoundException()</ID>
+    <ID>MaxLineLength:MusicBattleService.kt$MusicBattleService$private suspend</ID>
+    <ID>MaxLineLength:MusicLikesRoutes.kt$audioUrl = it.audioAssetId?.let { _ -&gt; "/api/music/items/${it.id}/audio" } ?: it.sourceUrl</ID>
+    <ID>MaxLineLength:MusicLikesRoutes.kt$coverUrl = it.coverAssetId?.let { _ -&gt; "/api/music/items/${it.id}/cover" } ?: it.coverUrl</ID>
+    <ID>MaxLineLength:MusicRoutes.kt$audioUrl = it.audioAssetId?.let { _ -&gt; "/api/music/items/${it.id}/audio" } ?: it.sourceUrl</ID>
+    <ID>MaxLineLength:MusicRoutes.kt$coverUrl = it.coverAssetId?.let { _ -&gt; "/api/music/items/${it.id}/cover" } ?: it.coverUrl</ID>
+    <ID>MaxLineLength:MusicRoutes.kt$val (etag, items) = service.listSets(limit = limit, offset = offset, tag = tag, q = q, userId = userId)</ID>
+    <ID>MaxLineLength:MusicService.kt$MusicService$updatedAt = listOfNotNull(itemsRepo.lastUpdatedAt(), trackOfNightRepository.lastUpdatedAt()).maxOrNull()</ID>
+    <ID>MaxLineLength:MusicService.kt$MusicService$updatedAt = listOfNotNull(playlistsRepo.lastUpdatedAt(), trackOfNightRepository.lastUpdatedAt()).maxOrNull()</ID>
+    <ID>MaxLineLength:NotificationService.kt$NotificationService$*</ID>
+    <ID>MaxLineLength:NotifyRoutes.kt$CampaignService$val updated = dto.copy(cron = req.cron, startsAt = req.startsAt, status = CampaignStatus.SCHEDULED, version = dto.version + 1)</ID>
+    <ID>MaxLineLength:NotifyRoutes.kt$DbCampaignService$updateState(id = id, status = CampaignStatus.SCHEDULED, cron = req.cron, startsAt = req.startsAt, reason = "SCHEDULE", actorId = actorId)</ID>
+    <ID>MaxLineLength:NotifyRoutes.kt$call.respondMutationResult(campaigns.setStatus(id, CampaignStatus.PAUSED, actorId = call.rbacContext().user.id))</ID>
+    <ID>MaxLineLength:NotifyRoutes.kt$call.respondMutationResult(campaigns.setStatus(id, CampaignStatus.SENDING, actorId = call.rbacContext().user.id))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$.</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$alerts = alerts.copy(lowOccupancyEvents = alerts.lowOccupancyEvents.take(1), highNoShowEvents = alerts.highNoShowEvents.take(1), weakPromoters = alerts.weakPromoters.take(1))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$attendance = AttendanceHealth(bookings = zeroChannel, guestLists = zeroChannel, channels = AttendanceChannels(directBookings = zeroChannel, promoterBookings = zeroChannel, guestLists = zeroChannel))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$attendance = AttendanceTrend(noShowRateBookings = rateDelta(0.0, 0.0), noShowRateGuestLists = rateDelta(0.0, 0.0))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$meta = OwnerHealthMeta(generatedAt = Instant.now(clock).toString(), granularity = request.granularity.name.lowercase(), eventsCount = 0, hasIncompleteData = false)</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$noShowRateBookings = rateDelta(attendance.bookings.noShowRate, safeRate(prevBookingsNoShow, prevBookingsPlanned))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$noShowRateGuestLists = rateDelta(attendance.guestLists.noShowRate, safeRate(prevGuestNoShow, prevGuestPlanned))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$period = OwnerHealthPeriodWindow(type = request.period.name.lowercase(), from = from.toString(), to = to.toString())</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$private suspend</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$promoters = PromotersHealth(totals = PromoterTotals(0, 0, 0, 0.0), byPromoter = emptyList(), top = PromoterTop(emptyList(), emptyList()))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$promoters = promoters.copy(byPromoter = emptyList(), top = PromoterTop(byArrivedGuests = emptyList(), byInvitedGuests = emptyList()))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$return AttendanceChannel(plannedGuests = planned, arrivedGuests = arrived, noShowGuests = noShow, noShowRate = safeRate(noShow, planned))</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$return OwnerHealthAlerts(lowOccupancyEvents = lowOccupancy, highNoShowEvents = highNoShow, weakPromoters = weakPromoters)</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$tables = TablesHealth(eventsCount = 0, totalTableCapacity = 0, bookedSeats = 0, occupancyRate = 0.0, byZone = emptyList(), byEvent = emptyList())</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$tablesPrevBooked += bookingsByEvent[event.id].orEmpty().filter { it.status == BookingStatus.BOOKED }.sumOf { it.guestCount }</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$val arrivedGuestsEvent = guestEntries.filter { it.status == GuestListEntryStatus.CHECKED_IN }.sumOf { it.guestsCount }</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$val bookingsByEvent = previousEvents.associate { event -&gt; event.id to bookingState.findBookingsForEvent(request.clubId, event.id) }</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$val events = eventsRepository.list(clubId = request.clubId, city = null, from = fromInclusive, to = toExclusive, offset = 0, limit = 200)</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$val guestLists = runCatching { loadGuestEntries(request.clubId, previousEvents.map { it.id }) }.getOrElse { emptyMap() }</ID>
+    <ID>MaxLineLength:OwnerHealthServiceImpl.kt$private fun safeRate(numerator: Int, denominator: Int): Double</ID>
+    <ID>MaxLineLength:OwnerModule.kt$single&lt;OwnerHealthService&gt; { OwnerHealthServiceImpl(get(), get(), get(), get(), getOrNull() ?: Clock.systemUTC()) }</ID>
+    <ID>MaxLineLength:PaymentsHandlers.kt$PreCheckoutValidator$val booking = preCheckoutRepository.findBookingSnapshot(bookingId) ?: return PreCheckoutValidation.Reject("booking not found")</ID>
+    <ID>MaxLineLength:PaymentsHandlers.kt$PreCheckoutValidator$val payment = paymentsRepository.findByPayload(payload) ?: return PreCheckoutValidation.Reject("payment not found")</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$PromoterBookingAssignmentsRepository.isFinalizedBookingId(currentBookingId)</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$PromoterBookingAssignmentsRepository.toAssignmentBookingId(confirm.booking.id)</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$clubsRepository.list(city = null, query = null, tag = null, genre = null, offset = 0, limit = 200)</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$if</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$val events = eventsRepository.list(clubId = clubId, city = null, from = from, to = to, offset = 0, limit = 200)</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$val finalized = promoterAssignments.finalizeAssignment(entry.id, assignmentBookingId)</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$val holdHash = hashRequestCanonical(mapOf("tableId" to payload.tableId, "eventId" to payload.eventId, "guests" to 1))</ID>
+    <ID>MaxLineLength:PromoterGuestListRoutes.kt$val sorted = tables.sortedWith(compareBy&lt;com.example.bot.layout.Table&gt; { it.zoneId }.thenBy { it.id })</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$logger.info("promoter.invite.export ok promoter_id={} event_id={} rows={}", user.id, eventId, csv.lineSequence().count() - 1)</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$logger.info("promoter.invite.issue ok promoter_id={} invite_id={} event_id={} club_id={}", user.id, invite.id, invite.eventId, invite.clubId)</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$logger.info("promoter.invite.list ok promoter_id={} event_id={} count={}", user.id, eventId, invites.size)</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$logger.warn("promoter.invite.issue error={} promoter_id={} event={} club={}", validationError, user.id, request.eventId, request.clubId)</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$logger.warn("promoter.invite.revoke error={} invite_id={} promoter_id={}", ErrorCodes.forbidden, id, user.id)</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$logger.warn("promoter.invite.revoke error={} invite_id={} promoter_id={}", ErrorCodes.invalid_state, id, user.id)</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$logger.warn("promoter.invite.revoke error={} invite_id={} promoter_id={}", ErrorCodes.not_found, id, user.id)</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$meterRegistry?.counter("promoter.invite.issue.failed", "error_code", ErrorCodes.internal_error)?.increment()</ID>
+    <ID>MaxLineLength:PromoterInvitesRoutes.kt$meterRegistry?.counter("promoter.invite.issue.success", "event_id", request.eventId.toString())?.increment()</ID>
+    <ID>MaxLineLength:RateLimitPlugin.kt$"RateLimitPlugin включен, но не настроено ни одного правила (RL_IP_ENABLED=false и RL_SUBJECT_PATH_PREFIXES пуст)."</ID>
+    <ID>MaxLineLength:ShiftChecklistService.kt$ShiftChecklistService$fun</ID>
+    <ID>MaxLineLength:SupportRoutes.kt$?:</ID>
+    <ID>MaxLineLength:SupportRoutes.kt$logger.info("support.ticket.reply ticket_id={} club_id={}", ticketId, reply.ticket.clubId)</ID>
+    <ID>MaxLineLength:SupportRoutes.kt$logger.warn("support.ticket.list validation_error club_id={}", call.request.queryParameters["clubId"])</ID>
+    <ID>MaxLineLength:SupportRoutes.kt$when</ID>
+    <ID>MaxLineLength:SupportTelegramHandler.kt$SupportTelegramHandler$when</ID>
+    <ID>MaxLineLength:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$appendLine("Окно прибытия: ${dateFormatter.format(booking.arrivalWindow.first)} — ${dateFormatter.format(booking.arrivalWindow.second)}")</ID>
+    <ID>MaxLineLength:TelegramWebhookIngressMetrics.kt$TelegramWebhookIngressMetrics$Gauge.builder("telegram.webhook.queue.oldest.age.seconds", oldestAgeSeconds) { it.get().toDouble() }.register(registry)</ID>
+    <ID>MaxLineLength:TelegramWebhookIngressWorker.kt$TelegramWebhookIngressWorker$logger.warn("webhook worker: markDone failed update_id={}", queued.updateId, markDoneError)</ID>
+    <ID>MaxLineLength:TelegramWebhookIngressWorker.kt$TelegramWebhookIngressWorker$logger.warn("webhook worker: markFailed failed update_id={}", queued.updateId, markError)</ID>
+    <ID>MaxLineLength:TrackOfNightRoutes.kt$val hasGlobalAccess = context.roles.contains(Role.GLOBAL_ADMIN) || context.roles.contains(Role.OWNER)</ID>
+    <ID>MaxLineLength:WaitlistRoutes.kt$WaitlistEntryResponse$*</ID>
+    <ID>MaxLineLength:WebAppEtagPlugin.kt$call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=$cacheSeconds, immutable")</ID>
+    <ID>MaxLineLength:WebAppEtagPlugin.kt$if</ID>
+    <ID>MaxLineLength:WebAppEtagPlugin.kt$val prefix = (envProvider("WEBAPP_CSP_PATH_PREFIX")?.takeIf { it.isNotBlank() } ?: "/webapp/entry").removeSuffix("/")</ID>
+    <ID>NestedBlockDepth:AdminMusicRoutes.kt$internal suspend fun readLimitedWithShaToTempFile( channelProvider: () -&gt; ByteReadChannel, maxBytes: Long, ): ReadWithShaResult</ID>
+    <ID>NestedBlockDepth:BookingState.kt$BookingState$private fun cleanupExpired(now: Instant)</ID>
     <ID>NestedBlockDepth:BookingTemplateService.kt$BookingTemplateService$suspend fun listTemplates( actor: TemplateActor, clubId: Long? = null, onlyActive: Boolean = true, ): List&lt;BookingTemplate&gt;</ID>
-    <ID>NoNameShadowing:GuestListImportBotHandler.kt$GuestListImportBotHandler$document</ID>
-    <ID>RedundantSuspendModifier:NotifySender.kt$NotifySender$suspend</ID>
+    <ID>NestedBlockDepth:SupportTelegramHandler.kt$SupportTelegramHandler$suspend fun handle(update: Update)</ID>
+    <ID>ReturnCount:AdminAnalyticsRoutes.kt$private suspend fun ApplicationCall.requireStoriesLimit(): Int?</ID>
+    <ID>ReturnCount:AdminAnalyticsRoutes.kt$private suspend fun ApplicationCall.requireStoriesOffset(): Long?</ID>
+    <ID>ReturnCount:AdminAnalyticsRoutes.kt$private suspend fun ApplicationCall.requireWindowDays(): Int?</ID>
+    <ID>ReturnCount:AdminAnalyticsSnapshotService.kt$AdminAnalyticsSnapshotService$suspend fun fetchLatest(clubId: Long, nightStartUtc: Instant, windowDays: Int): AnalyticsSnapshotView?</ID>
+    <ID>ReturnCount:AdminAnalyticsSnapshotService.kt$AnalyticsSnapshotRuntimeConfig.Companion$private fun envDuration(key: String, fallback: Duration): Duration</ID>
+    <ID>ReturnCount:AdminFinanceTemplateRoutes.kt$private fun validateReorder(payload: ReorderRequest): Map&lt;String, String&gt;</ID>
+    <ID>ReturnCount:AdminGamificationRoutesTest.kt$AdminGamificationRoutesTest.InMemoryBadgeRepository$override suspend fun update(clubId: Long, request: AdminBadgeUpdate): AdminBadge?</ID>
+    <ID>ReturnCount:AdminGamificationRoutesTest.kt$AdminGamificationRoutesTest.InMemoryPrizeRepository$override suspend fun update(clubId: Long, request: AdminPrizeUpdate): AdminPrize?</ID>
+    <ID>ReturnCount:AdminGamificationRoutesTest.kt$AdminGamificationRoutesTest.InMemoryRewardLadderRepository$override suspend fun update( clubId: Long, request: AdminRewardLadderLevelUpdate, ): AdminRewardLadderLevel?</ID>
+    <ID>ReturnCount:AdminMusicRoutes.kt$private suspend fun ApplicationCall.receiveUpload( maxBytes: Long, allowedContentTypes: Set&lt;ContentType&gt;, ): MusicUploadResult</ID>
+    <ID>ReturnCount:AdminOpsChatsRoutes.kt$private fun OpsChatConfigPayload.toUpsertOrNull(): ClubOpsChatConfigUpsert?</ID>
+    <ID>ReturnCount:AdminTableOpsRoutes.kt$private suspend fun resolveGuestUserId( payload: AdminSeatTableRequest, guestQrResolver: GuestQrResolver, clubId: Long, now: Instant, call: ApplicationCall, ): Pair&lt;Long?, Long?&gt;?</ID>
+    <ID>ReturnCount:AdminTablesRoutes.kt$private fun validateCoords(x: Double?, y: Double?, errors: MutableMap&lt;String, String&gt;): Boolean</ID>
+    <ID>ReturnCount:AdminTablesRoutes.kt$private suspend fun ApplicationCall.requirePageOrNull(): Int?</ID>
+    <ID>ReturnCount:AdminTablesRoutes.kt$private suspend fun ApplicationCall.requireSizeOrNull(): Int?</ID>
+    <ID>ReturnCount:AdminTablesRoutesTest.kt$AdminTablesRoutesTest.FakeTablesRepository$override suspend fun delete(clubId: Long, id: Long): Boolean</ID>
+    <ID>ReturnCount:AdminTablesRoutesTest.kt$AdminTablesRoutesTest.FakeTablesRepository$override suspend fun update(request: AdminTableUpdate): Table?</ID>
     <ID>ReturnCount:AppEnvFilter.kt$AppEnvFilter$override fun decide(event: ILoggingEvent?): FilterReply</ID>
     <ID>ReturnCount:BookingService.kt$BookingService$private suspend fun updateStatus( clubId: Long, bookingId: UUID, targetStatus: BookingStatus, action: String, metricName: String, outboxTopic: String, ): BookingStatusUpdateResult</ID>
+    <ID>ReturnCount:BookingState.kt$BookingState$suspend fun confirm( userId: Long, clubId: Long, bookingId: Long, idempotencyKey: String, requestHash: String, ): ConfirmResult</ID>
+    <ID>ReturnCount:BookingState.kt$BookingState$suspend fun hold( userId: Long, clubId: Long, tableId: Long, eventId: Long, guestCount: Int, idempotencyKey: String, requestHash: String, promoterId: Long? = null, ): HoldResult</ID>
+    <ID>ReturnCount:BookingState.kt$BookingState$suspend fun plusOne( userId: Long, bookingId: Long, idempotencyKey: String, requestHash: String, ): PlusOneResult</ID>
+    <ID>ReturnCount:EntryManagerCheckInSmokeTest.kt$EMGuestListRepository$override suspend fun findEntry(id: Long): GuestListEntry?</ID>
+    <ID>ReturnCount:EntryManagerCheckInSmokeTest.kt$EMGuestListRepository$override suspend fun setEntryStatus( entryId: Long, status: GuestListEntryStatus, checkedInBy: Long?, at: Instant?, ): GuestListEntry?</ID>
+    <ID>ReturnCount:Etag.kt$fun matchesEtag(ifNoneMatch: String?, etag: String): Boolean</ID>
     <ID>ReturnCount:GuestListImportBotHandler.kt$GuestListImportBotHandler$suspend fun handle(update: Update)</ID>
-    <ID>ReturnCount:GuestListInviteRoutes.kt$private fun canIssueForList(context: RbacContext, list: GuestList): Boolean</ID>
-    <ID>ReturnCount:InitDataAuth.kt$private suspend fun extractInitData(call: ApplicationCall): String?</ID>
+    <ID>ReturnCount:GuestListRoutes.kt$private fun String?.maskForApi(): String?</ID>
+    <ID>ReturnCount:GuestListRoutes.kt$private suspend fun ApplicationCall.extractSensitiveRequest( context: RbacContext, auditLogRepository: AuditLogRepository?, filter: GuestListEntrySearch?, auditAccess: Boolean = true, ): SensitiveAccessRequest</ID>
+    <ID>ReturnCount:GuestQrResolver.kt$DefaultGuestQrResolver$override suspend fun resolveGuest( clubId: Long, qrPayload: String, now: Instant, ): GuestQrResolveResult</ID>
+    <ID>ReturnCount:HallPlanRoutes.kt$private suspend fun ApplicationCall.handleHallPlanGet( hallPlansRepository: HallPlansRepository, logger: org.slf4j.Logger, )</ID>
+    <ID>ReturnCount:HallPlanRoutes.kt$private suspend fun ApplicationCall.receivePlanUpload(maxBytes: Long): UploadResult</ID>
+    <ID>ReturnCount:HallPlanRoutesTest.kt$HallPlanRoutesTest.InMemoryHallPlansRepository$override suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan?</ID>
+    <ID>ReturnCount:HallPlanRoutesTest.kt$HallPlanRoutesTest.InMemoryHallPlansRepository$override suspend fun getPlanMetaForClub(clubId: Long, hallId: Long): HallPlanMeta?</ID>
+    <ID>ReturnCount:HallRenderCache.kt$private fun Path.readEntry(key: String): CacheEntry?</ID>
+    <ID>ReturnCount:HallRenderCache.kt$private fun isValidSharedEntryHeader( etagSize: Int, bytesSize: Int, fileSize: Long, ): Boolean</ID>
+    <ID>ReturnCount:InitDataAuth.kt$private suspend fun extractInitData( call: ApplicationCall, allowInitDataFromBody: Boolean, maxInitDataBodyBytes: Long, ): String?</ID>
+    <ID>ReturnCount:InitDataAuth.kt$private suspend fun extractInitDataFromBodyOrNull( call: ApplicationCall, maxInitDataBodyBytes: Long, ): String?</ID>
+    <ID>ReturnCount:InvitationTelegramHandler.kt$InvitationTelegramHandler$private suspend fun handleCallback(update: Update)</ID>
+    <ID>ReturnCount:InvitationTelegramHandler.kt$InvitationTelegramHandler$private suspend fun handleStartInvite(update: Update)</ID>
+    <ID>ReturnCount:InvitationTelegramHandler.kt$InvitationTelegramHandler.Companion$fun parseStartToken(text: String): String?</ID>
+    <ID>ReturnCount:LayoutRoutes.kt$private suspend fun ApplicationCall.handleLayout( layoutRepository: LayoutRepository, logger: Logger, respondBody: Boolean, )</ID>
+    <ID>ReturnCount:Masking.kt$fun maskQrToken(raw: String?): String</ID>
     <ID>ReturnCount:MenuCallbacksHandler.kt$MenuCallbacksHandler$private fun parsePageAndId( data: String, prefix: String, ): Pair&lt;Int, UUID&gt;?</ID>
     <ID>ReturnCount:MessageMaskingConverter.kt$MessageMaskingConverter.Companion$private fun maskNameValue(value: String): String</ID>
+    <ID>ReturnCount:MusicBattleRoutes.kt$private fun ApplicationCall.queryInt(name: String, defaultValue: Int, min: Int, max: Int): Int?</ID>
+    <ID>ReturnCount:MusicBattleService.kt$MusicBattleService$private suspend fun loadVisibleBattleItems(battle: MusicBattle): Pair&lt;MusicItemView, MusicItemView&gt;?</ID>
+    <ID>ReturnCount:MusicRoutes.kt$private suspend fun ApplicationCall.respondPublishedAsset( assetsRepository: MusicAssetRepository, assetId: Long, endpointType: String, logger: org.slf4j.Logger, notFoundMessage: String, )</ID>
     <ID>ReturnCount:MyBookingsService.kt$MyBookingsService$suspend fun cancel( telegramUserId: Long, bookingId: UUID, texts: BotTexts, lang: String?, ): CancelResult</ID>
     <ID>ReturnCount:MyBookingsService.kt$MyBookingsService$suspend fun list( telegramUserId: Long, page: Int, pageSize: Int, ): BookingPage</ID>
     <ID>ReturnCount:MyBookingsService.kt$MyBookingsService$suspend fun loadBooking( telegramUserId: Long, bookingId: UUID, ): BookingInfo?</ID>
-    <ID>ReturnCount:NotifySenderSendPort.kt$NotifySenderSendPort$override suspend fun send(topic: String, payload: JsonObject): SendOutcome</ID>
+    <ID>ReturnCount:OutboxWorker.kt$OutboxWorker$private suspend fun processMessageInternal(message: OutboxMessage): ProcessResult</ID>
+    <ID>ReturnCount:PaymentsHandlers.kt$PaymentsHandlers$suspend fun handleSuccessfulPayment(message: Message)</ID>
+    <ID>ReturnCount:PaymentsHandlers.kt$PreCheckoutValidator$suspend fun validate(query: PreCheckoutQuery): PreCheckoutValidation</ID>
     <ID>ReturnCount:PromoAttributionService.kt$PromoAttributionService$private fun extractTokenFromDeepLink(value: String): PromoLinkToken?</ID>
     <ID>ReturnCount:PromoAttributionService.kt$PromoAttributionService$suspend fun attachDeepLink( bookingId: UUID, deepLink: String, ): Boolean</ID>
     <ID>ReturnCount:PromoAttributionService.kt$PromoLinkTokenCodec$fun decode(value: String): PromoLinkToken?</ID>
+    <ID>ReturnCount:PromoterGuestListRoutes.kt$private fun ApplicationCall.hasInvalidDateRange(from: LocalDate?, to: LocalDate?): Boolean</ID>
+    <ID>ReturnCount:PromoterGuestListRoutes.kt$private suspend fun ApplicationCall.requireAccessibleGuestList( repo: GuestListRepository, listId: Long, ): GuestList?</ID>
+    <ID>ReturnCount:PromoterInviteQrCodec.kt$PromoterInviteQrCodec$fun tryDecode(token: String, secret: String): Decoded?</ID>
+    <ID>ReturnCount:PromoterInviteQrCodec.kt$PromoterInviteQrCodec$private fun decodeHex(value: String): ByteArray?</ID>
+    <ID>ReturnCount:PromoterInviteQrCodec.kt$PromoterInviteQrCodec$private fun parse(token: String): ParsedToken?</ID>
+    <ID>ReturnCount:PromoterInviteService.kt$PromoterInviteService$fun markArrivedById(inviteId: Long, now: Instant = Instant.now(clock)): Boolean</ID>
+    <ID>ReturnCount:PromoterInviteService.kt$PromoterInviteService$fun revokeInvite( promoterId: Long, inviteId: Long, now: Instant = Instant.now(clock), ): RevokeResult</ID>
+    <ID>ReturnCount:PromoterInvitesRoutes.kt$private fun ApplicationCall.requireEventIdOrValidationError(): Long?</ID>
+    <ID>ReturnCount:PromoterQuotasAdminRoutes.kt$private fun PromoterQuotaPayload.toQuotaOrNull(): PromoterQuota?</ID>
     <ID>ReturnCount:ProviderRefundClient.kt$HttpProviderRefundClient$private fun parseRetryAfter(response: HttpResponse): Duration?</ID>
+    <ID>ReturnCount:QrValidation.kt$internal fun quickValidateQr(qrRaw: String?): String?</ID>
     <ID>ReturnCount:RefundOutboxWorker.kt$RefundOutboxWorker$suspend fun runOnce(): Boolean</ID>
     <ID>ReturnCount:StartInviteArriveHandler.kt$StartInviteArriveHandler$suspend fun handleStartPayload(startPayload: String): Result</ID>
     <ID>ReturnCount:StartParamGuestListCodec.kt$StartParamGuestListCodec$fun verify( token: String, now: Instant, ttl: Duration, secret: String, maxClockSkew: Duration = Duration.ofMinutes(2), ): Decoded?</ID>
-    <ID>SpreadOperator:MigrateMain.kt$(*locations)</ID>
-    <ID>SpreadOperator:MigrationsPlugin.kt$(*locations)</ID>
+    <ID>ReturnCount:SupportCallbacks.kt$SupportCallbacks$fun parseRate(data: String): ParsedRate?</ID>
+    <ID>ReturnCount:SupportRoutes.kt$private fun normalizeText(text: String?): String?</ID>
+    <ID>ReturnCount:SupportTelegramHandler.kt$SupportTelegramHandler$suspend fun handle(update: Update)</ID>
+    <ID>ReturnCount:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$private fun isCommand( text: String, vararg commands: String, ): Boolean</ID>
+    <ID>ReturnCount:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$private suspend fun handleAskCallback(callbackQuery: CallbackQuery?): Boolean</ID>
+    <ID>ReturnCount:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$private suspend fun handleAskReply(message: Message): Boolean</ID>
+    <ID>ReturnCount:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$private suspend fun handleAskStart(message: Message)</ID>
+    <ID>ReturnCount:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$private suspend fun handleQr(message: Message)</ID>
+    <ID>ReturnCount:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$suspend fun handle(update: Update): Boolean</ID>
+    <ID>ReturnCount:TelegramOperationalNotificationService.kt$OpsNotificationServiceConfig.Companion$private fun readInt( env: (String) -&gt; String?, name: String, default: Int, min: Int, max: Int, ): Int</ID>
+    <ID>ReturnCount:TelegramOperationalNotificationService.kt$OpsNotificationServiceConfig.Companion$private fun readLong( env: (String) -&gt; String?, name: String, default: Long, min: Long, max: Long, ): Long</ID>
+    <ID>ReturnCount:TelegramOperationalNotificationService.kt$TelegramOperationalNotificationService$fun start()</ID>
     <ID>SpreadOperator:PaymentsMetrics.kt$PaymentsMetrics$("payments.idempotent.hit", *tags)</ID>
     <ID>SpreadOperator:PaymentsMetrics.kt$PaymentsMetrics$("payments.refund.remainder", holderSupplier(holder), *tags)</ID>
     <ID>SpreadOperator:PaymentsMetrics.kt$PaymentsMetrics.TimerSample.Real$(*tagArray)</ID>
+    <ID>SpreadOperator:SupportRoutes.kt$( *supportAdminRoles.toTypedArray(), forbiddenHandler = { call -&gt; call.respondError(HttpStatusCode.Forbidden, ErrorCodes.support_ticket_forbidden) }, block = block, )</ID>
+    <ID>SpreadOperator:TelegramGuestFallbackHandler.kt$TelegramGuestFallbackHandler$(*rows)</ID>
     <ID>SpreadOperator:TemplatesHandler.kt$BookingTemplateBotHandler$(*rows.toTypedArray())</ID>
+    <ID>SwallowedException:AdminOpsChatsRoutes.kt$error: Exception</ID>
+    <ID>SwallowedException:SupportRoutes.kt$e: Throwable</ID>
+    <ID>ThrowsCount:AdminLayoutRoutesTest.kt$AdminLayoutRoutesTest.InMemoryAdminHallsRepository$private fun JsonObject.zoneField(field: String): String</ID>
+    <ID>ThrowsCount:AdminLayoutRoutesTest.kt$AdminLayoutRoutesTest.InMemoryAdminHallsRepository$private fun validateGeometry(geometryJson: String)</ID>
+    <ID>ThrowsCount:AdminMusicRoutes.kt$internal suspend fun readLimitedWithShaToTempFile( channelProvider: () -&gt; ByteReadChannel, maxBytes: Long, ): ReadWithShaResult</ID>
+    <ID>ThrowsCount:AdminTableOpsRoutes.kt$fun Application.adminTableOpsRoutes( adminTablesRepository: AdminTablesRepository, tableSessionRepository: TableSessionRepository, tableDepositRepository: TableDepositRepository, shiftReportRepository: ShiftReportRepository, visitRepository: VisitRepository, nightOverrideRepository: NightOverrideRepository, gamificationSettingsRepository: com.example.bot.data.gamification.GamificationSettingsRepository, auditLogger: AuditLogger, guestQrResolver: GuestQrResolver, botTokenProvider: () -&gt; String = miniAppBotTokenProvider(), clock: Clock = Clock.systemUTC(), )</ID>
     <ID>ThrowsCount:BookingTemplateService.kt$BookingTemplateService$suspend fun applyTemplate( actor: TemplateActor, templateId: Long, request: TemplateBookingRequest, ): BookingCmdResult</ID>
     <ID>ThrowsCount:DefaultPaymentsService.kt$DefaultPaymentsService$private fun PaymentsSpanScope.handleExistingCancel( existing: SavedAction, clubId: Long, bookingId: UUID, ): PaymentsService.CancelResult</ID>
     <ID>ThrowsCount:DefaultPaymentsService.kt$DefaultPaymentsService$private fun PaymentsSpanScope.handleExistingRefund( existing: SavedAction, clubId: Long, bookingId: UUID, requestedAmount: Long?, ): PaymentsService.RefundResult</ID>
+    <ID>ThrowsCount:JsonErrorPages.kt$fun Application.installJsonErrorPages()</ID>
+    <ID>ThrowsCount:MusicBattleService.kt$MusicBattleService$suspend fun vote(battleId: Long, userId: Long, chosenItemId: Long): VoteResult</ID>
     <ID>ThrowsCount:OutboxAdminRoutes.kt$fun Application.outboxAdminRoutes( repository: OutboxAdminRepository, metricsProvider: MetricsProvider? = null, tracer: Tracer? = null, )</ID>
-    <ID>TooManyFunctions:BookingTemplateService.kt$BookingTemplateService</ID>
-    <ID>TooManyFunctions:GuestListRoutes.kt$com.example.bot.routes.GuestListRoutes.kt</ID>
-    <ID>TooManyFunctions:KotlinLogging.kt$KLogger</ID>
-    <ID>TooManyFunctions:MyBookingsService.kt$MyBookingsService</ID>
-    <ID>TooManyFunctions:PaymentsMetrics.kt$PaymentsMetrics</ID>
-    <ID>UnnecessarySafeCall:OutboxAdminRoutes.kt$resolvedMetrics?.registry</ID>
-    <ID>UnreachableCode:WebhookRoutes.kt$val update = try { json.decodeFromString(UpdateDto.serializer(), payload) } catch (ex: SerializationException) { logger.warn("Failed to decode update {}: {}", call.webhookUpdateId(), ex.message) call.respond(HttpStatusCode.BadRequest) return@post }</ID>
-    <ID>UnreachableCode:WebhookRoutes.kt$when (val reply = handler(update)) { null -&gt; call.respond(HttpStatusCode.OK) is WebhookReply.Inline -&gt; call.respond(reply.payload) is WebhookReply.Async -&gt; { call.application.launch(MDCContext()) { client.send(reply.request) } call.respond(HttpStatusCode.OK) } }</ID>
-    <ID>UnsafeCallOnNullableType:BookingRoutes.kt$call.parameters["id"]!!</ID>
-    <ID>UnsafeCallOnNullableType:GuestListRoutes.kt$query.filter!!</ID>
-    <ID>UnsafeCallOnNullableType:NotifySender.kt$NotifySender$retryAfterSec!!</ID>
-    <ID>UnsafeCallOnNullableType:TokenBucket.kt$SubjectBucketStore$map.compute(subjectKey) { _, old -&gt; val e = if (old == null) { Entry(TokenBucket(capacity, refillPerSec), now).also { sizeCounter.incrementAndGet() } } else { old.lastSeen = now old } e }!!</ID>
+    <ID>ThrowsCount:TelegramWebhookIngressWorker.kt$TelegramWebhookIngressWorker$fun start()</ID>
+    <ID>TooGenericExceptionThrown:SupportTelegramHandlerTest.kt$FailingTelegramSender$throw RuntimeException("send failed")</ID>
+    <ID>TooManyFunctions:UiCheckinMetrics.kt$UiCheckinMetrics</ID>
+    <ID>UnusedPrivateMember:AdminPrivacyRoutesTest.kt$AdminPrivacyRoutesTest$private suspend fun io.ktor.client.statement.HttpResponse.errorCode(): String</ID>
+    <ID>UnusedPrivateProperty:PromoterGuestListRoutes.kt$val lockResult = promoterAssignments.acquireLock(entry.id)</ID>
     <ID>UnusedPrivateProperty:RefundOutboxWorker.kt$RefundOutboxWorker$private val backlogGauge = metrics?.gauge("outbox.refund.backlog", Supplier&lt;Number&gt; { backlogGaugeValue.get() })</ID>
-    <ID>UseOrEmpty:BookingRoutes.kt$call.request.headers["Idempotency-Key"] ?: ""</ID>
-    <ID>UseOrEmpty:GuestListRoutes.kt$item.phone ?: ""</ID>
-    <ID>UseOrEmpty:MessageMaskingConverter.kt$MessageMaskingConverter$event.formattedMessage ?: ""</ID>
-    <ID>UseOrEmpty:MigrationsPlugin.kt$System.getenv("DATABASE_URL")?.lowercase() ?: ""</ID>
-    <ID>UseOrEmpty:WebAppRoutes.kt$envString("BOT_TOKEN") ?: ""</ID>
+    <ID>UseRequire:ShiftChecklistService.kt$ShiftChecklistService$throw IllegalArgumentException("Unknown checklist item: $itemId")</ID>
   </CurrentIssues>
 </SmellBaseline>
