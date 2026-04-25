@@ -40,11 +40,16 @@ jobs:
             ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
 
       - name: Run detekt gate (blocking, baseline-aware)
-        run: ./gradlew :app-bot:detekt --console=plain --stacktrace
+        run: ./gradlew detektGate --console=plain --stacktrace
 
       - name: Install ktlint CLI
+        env:
+          KTLINT_VERSION: 1.3.1
+          KTLINT_SHA256: a9f923be58fbd32670a17f0b729b1df804af882fa57402165741cb26e5440ca1
         run: |
-          curl -fsSL -o /usr/local/bin/ktlint https://github.com/pinterest/ktlint/releases/download/1.3.1/ktlint
+          set -euo pipefail
+          curl -fsSL -o /usr/local/bin/ktlint "https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint"
+          echo "${KTLINT_SHA256}  /usr/local/bin/ktlint" | sha256sum -c -
           chmod +x /usr/local/bin/ktlint
 
       - name: Run ktlint gate (changed files only)
@@ -53,13 +58,43 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          is_zero_sha() {
+            [ "${1:-}" = "0000000000000000000000000000000000000000" ]
+          }
+
+          sha_exists() {
+            local sha="$1"
+            [ -n "$sha" ] && git cat-file -e "${sha}^{commit}" >/dev/null 2>&1
+          }
+
+          default_range() {
+            local base
+            base="$(git rev-parse HEAD^ 2>/dev/null || true)"
+            if sha_exists "$base"; then
+              printf '%s...%s' "$base" "${{ github.sha }}"
+            else
+              printf '%s' "${{ github.sha }}"
+            fi
+          }
+
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            range="$BASE_SHA...${{ github.sha }}"
+            if sha_exists "$BASE_SHA"; then
+              range="$BASE_SHA...${{ github.sha }}"
+            else
+              range="$(default_range)"
+            fi
           else
-            range="$BEFORE_SHA...${{ github.sha }}"
+            if [ -n "${BEFORE_SHA:-}" ] && ! is_zero_sha "$BEFORE_SHA" && sha_exists "$BEFORE_SHA"; then
+              range="$BEFORE_SHA...${{ github.sha }}"
+            else
+              range="$(default_range)"
+            fi
           fi
 
-          mapfile -t files < <(git diff --name-only "$range" -- '*.kt' '*.kts' | sed '/^$/d')
+          mapfile -t files < <(
+            git diff --name-only --diff-filter=ACMR "$range" -- '*.kt' '*.kts' \
+              | sed '/^$/d'
+          )
           if [ ${#files[@]} -eq 0 ]; then
             echo "No changed Kotlin files — ktlint gate skipped"
             exit 0
