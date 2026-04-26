@@ -1,0 +1,100 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:EnvParsing.kt$min != null &amp;&amp; parsed &lt; min || max != null &amp;&amp; parsed &gt; max</ID>
+    <ID>ComplexCondition:PrivacyService.kt$PrivacyService$currentPlaintextPhone == null &amp;&amp; currentEncryptedPhone == protected.encrypted &amp;&amp; currentPhoneHash == protected.hash &amp;&amp; currentPhoneLastFour == protected.lastFour</ID>
+    <ID>InstanceOfCheckForException:DbTransactions.kt$ex is CancellationException</ID>
+    <ID>InstanceOfCheckForException:DbTransactions.kt$ex is DatabaseUnavailableException</ID>
+    <ID>LargeClass:CheckinServiceImpl.kt$CheckinServiceImpl : CheckinService</ID>
+    <ID>LargeClass:TableSessionDepositRepositoryTest.kt$TableSessionDepositRepositoryTest</ID>
+    <ID>LoopWithTooManyJumpStatements:GuestListBulkParser.kt$GuestListBulkParser$for</ID>
+    <ID>MagicNumber:BookingRepository.kt$3</ID>
+    <ID>MagicNumber:BookingRepository.kt$4</ID>
+    <ID>MagicNumber:BookingRepository.kt$5</ID>
+    <ID>MagicNumber:BookingRepository.kt$6</ID>
+    <ID>MagicNumber:BookingRepository.kt$BookingRepository$50</ID>
+    <ID>MagicNumber:CheckinServiceImpl.kt$CheckinServiceImpl$4</ID>
+    <ID>MagicNumber:DbTransactions.kt$20</ID>
+    <ID>MagicNumber:DefaultAvailabilityService.kt$DefaultAvailabilityService$15</ID>
+    <ID>MagicNumber:InvitationServiceImpl.kt$InvitationServiceImpl$32</ID>
+    <ID>MagicNumber:LayoutDbRepository.kt$LayoutDbRepository$0.5</ID>
+    <ID>MagicNumber:LayoutDbRepository.kt$LayoutDbRepository$1_000_000_000L</ID>
+    <ID>MagicNumber:MusicAssetRepositoryImpl.kt$MusicAssetRepositoryImpl$3</ID>
+    <ID>MagicNumber:MusicAssetRepositoryImpl.kt$MusicAssetRepositoryImpl$4</ID>
+    <ID>MagicNumber:MusicAssetRepositoryImpl.kt$MusicAssetRepositoryImpl$5</ID>
+    <ID>MagicNumber:MusicAssetRepositoryImpl.kt$MusicAssetRepositoryImpl$6</ID>
+    <ID>MagicNumber:MusicAssetRepositoryImpl.kt$MusicAssetRepositoryImpl$7</ID>
+    <ID>MagicNumber:PhoneProtection.kt$PrivacyConfig.Companion$30L</ID>
+    <ID>MagicNumber:PostEventStoryRepositories.kt$GuestSegmentsRepository$24L</ID>
+    <ID>MagicNumber:PostEventStoryRepositories.kt$GuestSegmentsRepository$3</ID>
+    <ID>MagicNumber:PostEventStoryRepositories.kt$GuestSegmentsRepository$4</ID>
+    <ID>MagicNumber:PostEventStoryRepositories.kt$GuestSegmentsRepository$5</ID>
+    <ID>MagicNumber:TelegramWebhookIngressRepository.kt$TelegramWebhookIngressRepository$3</ID>
+    <ID>MagicNumber:TelegramWebhookIngressRepository.kt$TelegramWebhookIngressRepository$6</ID>
+    <ID>MaxLineLength:BookingRepository.kt$BookingRepository$return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)</ID>
+    <ID>MaxLineLength:CheckinModels.kt$CheckinConfig$require(lateGraceMinutes &gt;= 0) { "$ENV_CHECKIN_LATE_GRACE_MINUTES must be non-negative (was $lateGraceMinutes)" }</ID>
+    <ID>MaxLineLength:CheckinServiceImpl.kt$CheckinServiceImpl$logger.warn("visit.gamification.early_cutoff_failed clubId={} eventId={}", record.clubId, record.eventId, ex)</ID>
+    <ID>MaxLineLength:CheckinServiceImpl.kt$CheckinServiceImpl$logger.warn("visit.gamification.event_lookup_failed clubId={} eventId={}", record.clubId, record.eventId, ex)</ID>
+    <ID>MaxLineLength:CheckinServiceImpl.kt$CheckinServiceImpl$logger.warn("visit.gamification.mark_table_failed clubId={} eventId={}", record.clubId, record.eventId, ex)</ID>
+    <ID>MaxLineLength:CheckinServiceImpl.kt$CheckinServiceImpl$logger.warn("visit.gamification.visit_create_failed clubId={} eventId={}", record.clubId, record.eventId, ex)</ID>
+    <ID>MaxLineLength:DbConfig.kt$FlywayConfig.Companion$val rawLocations = locationsOverride ?: propertyProvider("FLYWAY_LOCATIONS") ?: envProvider("FLYWAY_LOCATIONS")</ID>
+    <ID>MaxLineLength:DbTransactions.kt$"DbTx config: maxRetries={} baseBackoffMs={} maxBackoffMs={} jitterMs={} slowQueryMs={} breaker(threshold={}, windowSec={}, openSec={})"</ID>
+    <ID>MaxLineLength:EnvParsing.kt$log.warn("Invalid int value for {}='{}', expected range [{}; {}], using default {}", name, raw, min ?: "-", max ?: "-", default)</ID>
+    <ID>MaxLineLength:EnvParsing.kt$log.warn("Invalid long value for {}='{}', expected range [{}; {}], using default {}", name, raw, min ?: "-", max ?: "-", default)</ID>
+    <ID>MaxLineLength:GuestListRepositories.kt$GuestListEntryDbRepository$"$INSERT_MANY_LOG_PREFIX rowCountMismatch guestListId=$listId expectedRows=${entries.size} actualRows=${rows.size} shouldReturnGeneratedValues=true"</ID>
+    <ID>MaxLineLength:GuestListRepositories.kt$GuestListEntryDbRepository$"guestListId=$listId entryIndex=$index id=$id displayName=\"$escapedDisplayName\" telegramUserId=$telegramUserId status=$status"</ID>
+    <ID>MaxLineLength:GuestListRepositoryImpl.kt$GuestListRepositoryImpl$requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone)</ID>
+    <ID>MaxLineLength:GuestListServiceImpl.kt$GuestListServiceImpl$val list = guestListRepo.findById(listId) ?: return GuestListServiceResult.Failure(GuestListServiceError.GuestListNotFound)</ID>
+    <ID>MaxLineLength:MigrationRunner.kt$MigrationRunner$"Flyway start: mode={} effectiveMode={} appEnv={} outOfOrder={} version={} url={} locations={} schemas={} schema={} catalog={}"</ID>
+    <ID>MaxLineLength:MigrationRunner.kt$MigrationRunner$"Flyway summary: mode=migrate-and-validate env={} effectiveMode={} applied={} pending={} locations={} schemas={}"</ID>
+    <ID>MaxLineLength:MigrationRunner.kt$MigrationRunner$log.error("Flyway pending migrations detected ({}), failing startup: {}", pendingMigrations.size, pendingList)</ID>
+    <ID>MaxLineLength:MusicBattleVoteRepositoryImpl.kt$MusicBattleVoteRepositoryImpl$((MusicBattleVotesTable.chosenItemId eq itemAId) or (MusicBattleVotesTable.chosenItemId eq itemBId))</ID>
+    <ID>MaxLineLength:MusicBattleVoteRepositoryImpl.kt$MusicBattleVoteRepositoryImpl$.</ID>
+    <ID>MaxLineLength:MusicBattleVoteRepositoryImpl.kt$MusicBattleVoteRepositoryImpl$MusicBattleVotesTable</ID>
+    <ID>MaxLineLength:PromoterAdminRepositoryImpl.kt$PromoterAdminRepositoryImpl$where = { (PromoterClubAccessTable.clubId eq clubId) and (PromoterClubAccessTable.promoterUserId eq promoterId) }</ID>
+    <ID>MaxLineLength:ShiftReportRepositories.kt$ShiftReportRepository$.</ID>
+    <ID>MaxLineLength:ShiftReportRepositories.kt$ShiftReportRepository$throw lastConflict ?: error("Failed to get or create shift report for clubId=$clubId nightStart=$nightStartUtc")</ID>
+    <ID>MaxLineLength:TableSessionDepositRepositories.kt$TableDepositRepository$(newerDeposits[TableDepositsTable.createdAt] eq TableDepositsTable.createdAt)</ID>
+    <ID>MaxLineLength:TableSessionDepositRepositories.kt$TableDepositRepository$(newerDeposits[TableDepositsTable.createdAt] greater TableDepositsTable.createdAt)</ID>
+    <ID>MaxLineLength:TableSessionDepositRepositories.kt$TableDepositRepository$(newerOperations[TableDepositOperationsTable.depositId] eq TableDepositOperationsTable.depositId)</ID>
+    <ID>MaxLineLength:TableSessionDepositRepositories.kt$TableDepositRepository$ensureShiftOpenForDeposits(clubId = clubId, nightStartUtc = existingNightStartUtc, operation = "update")</ID>
+    <ID>MaxLineLength:TableSessionDepositRepositories.kt$if</ID>
+    <ID>NestedBlockDepth:GuestListBulkParser.kt$GuestListBulkParser$private fun tokenize(input: String): List&lt;String&gt;</ID>
+    <ID>NestedBlockDepth:PromoterAdminRepositoryImpl.kt$PromoterAdminRepositoryImpl$private fun syncUserRole( clubId: Long, promoterId: Long, enabled: Boolean, )</ID>
+    <ID>ReturnCount:BookingSubjectCanonicalizer.kt$internal fun canonicalizeBookingSubject(input: String): CanonicalBookingSubject?</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$override suspend fun hostCheckin( request: HostCheckinRequest, actor: AuthContext, ): CheckinServiceResult&lt;HostCheckinOutcome&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$override suspend fun hostScan( payload: String, clubId: Long, eventId: Long, actor: AuthContext, ): CheckinServiceResult&lt;HostCheckinOutcome&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$override suspend fun scanQr( payload: String, actor: AuthContext, ): CheckinServiceResult&lt;CheckinResult&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun attemptVisitGamification( record: com.example.bot.data.club.CheckinRecord, subjectUserId: Long?, subjectTelegramUserId: Long?, actor: AuthContext, )</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun handleBookingCheckin( clubId: Long, eventId: Long, bookingId: String, method: CheckinMethod, action: HostCheckinAction, denyReason: String?, actor: AuthContext, ): CheckinServiceResult&lt;HostCheckinOutcome&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun handleBookingScan( decoded: QrBookingCodec.Decoded, actor: AuthContext, ): CheckinServiceResult&lt;CheckinResult&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun handleEntryCheckin( clubId: Long, eventId: Long, entryId: Long, action: HostCheckinAction, denyReason: String?, actor: AuthContext, ): CheckinServiceResult&lt;HostCheckinOutcome&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun handleInvitationCheckin( clubId: Long, eventId: Long, token: String, actor: AuthContext, ): CheckinServiceResult&lt;HostCheckinOutcome&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun manualBookingCheckin( subjectId: String, status: CheckinResultStatus, denyReason: String?, actor: AuthContext, ): CheckinServiceResult&lt;CheckinResult&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun manualGuestListCheckin( subjectId: String, status: CheckinResultStatus, denyReason: String?, actor: AuthContext, ): CheckinServiceResult&lt;CheckinResult&gt;</ID>
+    <ID>ReturnCount:CheckinServiceImpl.kt$CheckinServiceImpl$private suspend fun resolveBookingSubjectUserId( booking: com.example.bot.data.booking.core.BookingRecord, ): Long?</ID>
+    <ID>ReturnCount:DatabaseCircuitBreaker.kt$DatabaseCircuitBreaker$fun isOpen(nowMillis: Long = clock.millis()): Boolean</ID>
+    <ID>ReturnCount:DatabaseCircuitBreaker.kt$DatabaseCircuitBreaker$fun onConnectionFailure(nowMillis: Long = clock.millis()): Boolean</ID>
+    <ID>ReturnCount:DbErrorClassifier.kt$DbErrorClassifier$private fun reasonFor(error: Throwable, sqlState: String?): DbErrorReason</ID>
+    <ID>ReturnCount:EnvParsing.kt$internal fun envInt( name: String, default: Int, min: Int? = null, max: Int? = null, envProvider: (String) -&gt; String?, log: Logger, ): Int</ID>
+    <ID>ReturnCount:EnvParsing.kt$internal fun envLong( name: String, default: Long, min: Long? = null, max: Long? = null, envProvider: (String) -&gt; String?, log: Logger, ): Long</ID>
+    <ID>ReturnCount:GuestListServiceImpl.kt$GuestListServiceImpl$override suspend fun addEntriesBulk(listId: Long, rawText: String): GuestListServiceResult&lt;GuestListBulkAddResult&gt;</ID>
+    <ID>ReturnCount:GuestListServiceImpl.kt$GuestListServiceImpl$override suspend fun addEntrySingle( listId: Long, displayName: String, ): GuestListServiceResult&lt;GuestListEntryInfo&gt;</ID>
+    <ID>ReturnCount:GuestListServiceImpl.kt$GuestListServiceImpl$override suspend fun createGuestList( promoterId: Long?, clubId: Long, eventId: Long, ownerType: GuestListOwnerType, ownerUserId: Long, arrivalWindowStart: Instant?, arrivalWindowEnd: Instant?, limit: Int, title: String?, ): GuestListServiceResult&lt;GuestListInfo&gt;</ID>
+    <ID>ReturnCount:InvitationServiceImpl.kt$InvitationServiceImpl$private suspend fun resolveInternal(rawToken: String): InvitationServiceResult&lt;ResolvedInvitation&gt;</ID>
+    <ID>ReturnCount:LayoutDbRepository.kt$LayoutDbRepository$private fun updateTableForHall(hallId: Long, request: AdminTableUpdate): Table?</ID>
+    <ID>ReturnCount:MigrationRunner.kt$MigrationRunner$@Suppress("SpreadOperator") fun run(): Result?</ID>
+    <ID>ReturnCount:PromoterBookingAssignmentsRepository.kt$PromoterBookingAssignmentsRepository$suspend fun acquireLock( entryId: Long, now: OffsetDateTime = now(), staleAfter: Duration = DEFAULT_LOCK_STALE_AFTER, ): AcquireLockResult</ID>
+    <ID>ReturnCount:SupportRepository.kt$SupportRepository$private fun loadLastMessages(ticketIds: List&lt;Long&gt;): Map&lt;Long, LastMessage&gt;</ID>
+    <ID>ReturnCount:TableSessionDepositRepositories.kt$private fun Throwable.isShiftClosedViolation(): Boolean</ID>
+    <ID>SwallowedException:TableSessionDepositRepositoryTest.kt$TableSessionDepositRepositoryTest$ex: IllegalArgumentException</ID>
+    <ID>ThrowsCount:AdminHallsDbRepository.kt$AdminHallsDbRepository$private fun JsonObject.zoneField(field: String): String</ID>
+    <ID>ThrowsCount:AdminHallsDbRepository.kt$AdminHallsDbRepository$private fun parseZones(geometryJson: String): List&lt;HallZoneSpec&gt;</ID>
+    <ID>ThrowsCount:DbTransactions.kt$suspend fun &lt;T&gt; withRetriedTx( name: String? = null, readOnly: Boolean = false, database: Database? = null, manageTransaction: Boolean = true, block: suspend () -&gt; T, ): T</ID>
+    <ID>ThrowsCount:MigrationRunner.kt$MigrationRunner$private fun migrateAndValidate(flyway: Flyway): Result.Migrated</ID>
+    <ID>ThrowsCount:MigrationRunner.kt$MigrationRunner$private fun validateOnly(flyway: Flyway): Result.Validated</ID>
+    <ID>TooManyFunctions:LayoutDbRepository.kt$LayoutDbRepository : LayoutRepositoryAdminTablesRepositoryLayoutAssetsRepositoryHallPlansRepository</ID>
+    <ID>UseRequire:ShiftReportRepositories.kt$ShiftReportRepository$throw IllegalArgumentException("revenue_article_group_mismatch")</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -2,8 +2,47 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>RedundantSuspendModifier:Fakes.kt$FakeNotifySender$suspend</ID>
-    <ID>SleepInsteadOfDelay:GuestFlowStartTest.kt$GuestFlowStartTest$sleep(10)</ID>
-    <ID>UnnecessaryAbstractClass:PgContainer.kt$PgContainer$PgContainer</ID>
+    <ID>InjectDispatcher:BookingServiceIT.kt$BookingServiceIT$IO</ID>
+    <ID>InjectDispatcher:CampaignSchedulerWiringTest.kt$CampaignSchedulerWiringTest$Default</ID>
+    <ID>InjectDispatcher:PaymentsPersistenceTest.kt$PaymentsPersistenceTest$Default</ID>
+    <ID>LargeClass:AdminTableOpsRoutesTest.kt$AdminTableOpsRoutesTest</ID>
+    <ID>LargeClass:GuestListRoutesTest.kt$GuestListRoutesTest : StringSpec</ID>
+    <ID>LargeClass:MusicRoutesTest.kt$MusicRoutesTest</ID>
+    <ID>LargeClass:PromoterGuestListRoutesTest.kt$PromoterGuestListRoutesTest</ID>
+    <ID>NoNameShadowing:TestRequestExtensions.kt${ it.isNotEmpty() }</ID>
+    <ID>ObjectLiteralToLambda:RefundOutboxWorkerTest.kt$RefundOutboxWorkerTest$object : ProviderRefundClient { override suspend fun send(command: ProviderRefundCommand): ProviderRefundResult = sender(command) }</ID>
+    <ID>RedundantSuspendModifier:SupportAdminRoutesTest.kt$SupportAdminRoutesTest.RecordingTelegramSender$suspend</ID>
+    <ID>RedundantSuspendModifier:SupportGuestRoutesTest.kt$SupportGuestRoutesTest.RecordingTelegramSender$suspend</ID>
+    <ID>RedundantSuspendModifier:SupportTelegramHandlerTest.kt$FailingTelegramSender$suspend</ID>
+    <ID>RedundantSuspendModifier:SupportTelegramHandlerTest.kt$RecordingTelegramSender$suspend</ID>
+    <ID>RedundantSuspendModifier:TelegramGuestFallbackHandlerTest.kt$FallbackRecordingTelegramSender$suspend</ID>
+    <ID>ReturnCount:AdminGamificationRoutesTest.kt$AdminGamificationRoutesTest.InMemoryBadgeRepository$override suspend fun update(clubId: Long, request: AdminBadgeUpdate): AdminBadge?</ID>
+    <ID>ReturnCount:AdminGamificationRoutesTest.kt$AdminGamificationRoutesTest.InMemoryPrizeRepository$override suspend fun update(clubId: Long, request: AdminPrizeUpdate): AdminPrize?</ID>
+    <ID>ReturnCount:AdminGamificationRoutesTest.kt$AdminGamificationRoutesTest.InMemoryRewardLadderRepository$override suspend fun update( clubId: Long, request: AdminRewardLadderLevelUpdate, ): AdminRewardLadderLevel?</ID>
+    <ID>ReturnCount:AdminTablesRoutesTest.kt$AdminTablesRoutesTest.FakeTablesRepository$override suspend fun delete(clubId: Long, id: Long): Boolean</ID>
+    <ID>ReturnCount:AdminTablesRoutesTest.kt$AdminTablesRoutesTest.FakeTablesRepository$override suspend fun update(request: AdminTableUpdate): Table?</ID>
+    <ID>ReturnCount:EntryManagerCheckInSmokeTest.kt$EMGuestListRepository$override suspend fun findEntry(id: Long): GuestListEntry?</ID>
+    <ID>ReturnCount:EntryManagerCheckInSmokeTest.kt$EMGuestListRepository$override suspend fun setEntryStatus( entryId: Long, status: GuestListEntryStatus, checkedInBy: Long?, at: Instant?, ): GuestListEntry?</ID>
+    <ID>ReturnCount:HallPlanRoutesTest.kt$HallPlanRoutesTest.InMemoryHallPlansRepository$override suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan?</ID>
+    <ID>ReturnCount:HallPlanRoutesTest.kt$HallPlanRoutesTest.InMemoryHallPlansRepository$override suspend fun getPlanMetaForClub(clubId: Long, hallId: Long): HallPlanMeta?</ID>
+    <ID>SleepInsteadOfDelay:HallRenderCacheTest.kt$HallRenderCacheTest$sleep(2_200)</ID>
+    <ID>ThrowsCount:AdminLayoutRoutesTest.kt$AdminLayoutRoutesTest.InMemoryAdminHallsRepository$private fun JsonObject.zoneField(field: String): String</ID>
+    <ID>ThrowsCount:AdminLayoutRoutesTest.kt$AdminLayoutRoutesTest.InMemoryAdminHallsRepository$private fun validateGeometry(geometryJson: String)</ID>
+    <ID>TooGenericExceptionThrown:SupportTelegramHandlerTest.kt$FailingTelegramSender$throw RuntimeException("send failed")</ID>
+    <ID>UnnecessaryAbstractClass:PostgresAppTest.kt$PostgresAppTest$PostgresAppTest</ID>
+    <ID>UnnecessaryNotNullOperator:HallPlanRoutesTest.kt$HallPlanRoutesTest$etag!!</ID>
+    <ID>UnnecessaryNotNullOperator:KtorMdcTest.kt$KtorMdcTest$generatedId!!</ID>
+    <ID>UnnecessaryNotNullOperator:MusicLikesRoutesTest.kt$MusicLikesRoutesTest$etag!!</ID>
+    <ID>UnnecessaryNotNullOperator:QrGuestListCodecTest.kt$QrGuestListCodecTest$decoded!!</ID>
+    <ID>UnusedPrivateMember:AdminPrivacyRoutesTest.kt$AdminPrivacyRoutesTest$private suspend fun io.ktor.client.statement.HttpResponse.errorCode(): String</ID>
+    <ID>UseOrEmpty:AdminMusicRoutesTest.kt$AdminMusicRoutesTest.FakeMusicItemRepository$it.tags ?: emptyList()</ID>
+    <ID>UseOrEmpty:AdminTablesRoutesTest.kt$AdminTablesRoutesTest.FakeTablesRepository$tablesByClub[clubId]?.sortedBy { it.id } ?: emptyList()</ID>
+    <ID>UseOrEmpty:AdminTablesRoutesTest.kt$AdminTablesRoutesTest.FakeTablesRepository$zonesByClub[clubId] ?: emptyList()</ID>
+    <ID>UseOrEmpty:EntryManagerCheckInSmokeTest.kt$(registry as? PrometheusMeterRegistry)?.scrape() ?: ""</ID>
+    <ID>UseOrEmpty:MusicBattleRoutesTest.kt$MusicBattleRoutesTest$response.headers["Content-Type"] ?: ""</ID>
+    <ID>UseOrEmpty:PromoAttributionServiceTest.kt$StaticUserRoleRepository$clubIds[userId] ?: emptySet()</ID>
+    <ID>UseOrEmpty:PromoAttributionServiceTest.kt$StaticUserRoleRepository$roles[userId] ?: emptySet()</ID>
+    <ID>UseOrEmpty:RbacFeatureFlagTest.kt$RbacFeatureFlagTest.InMemoryUserRoleRepository$clubs[userId] ?: emptySet()</ID>
+    <ID>UseOrEmpty:RbacFeatureFlagTest.kt$RbacFeatureFlagTest.InMemoryUserRoleRepository$roles[userId] ?: emptySet()</ID>
   </CurrentIssues>
 </SmellBaseline>

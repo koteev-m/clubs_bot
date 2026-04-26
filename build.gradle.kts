@@ -30,17 +30,19 @@ plugins {
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
 // Управляемые через -PkotlinVersion / env KOTLIN_VERSION
-val kotlinVersionProperty = providers
-    .gradleProperty("kotlinVersion")
-    .orElse(providers.environmentVariable("KOTLIN_VERSION"))
-    .orElse("2.2.20")
+val kotlinVersionProperty =
+    providers
+        .gradleProperty("kotlinVersion")
+        .orElse(providers.environmentVariable("KOTLIN_VERSION"))
+        .orElse("2.2.20")
 val kotlinVersion = kotlinVersionProperty.get()
 
 // Управляемые через -Pslf4jVersion / env SLF4J_VERSION
-val slf4jVersionProperty = providers
-    .gradleProperty("slf4jVersion")
-    .orElse(providers.environmentVariable("SLF4J_VERSION"))
-    .orElse("2.0.17")
+val slf4jVersionProperty =
+    providers
+        .gradleProperty("slf4jVersion")
+        .orElse(providers.environmentVariable("SLF4J_VERSION"))
+        .orElse("2.0.17")
 val slf4jVersion = slf4jVersionProperty.get()
 
 allprojects {
@@ -58,7 +60,9 @@ allprojects {
                 (requestedName == "kotlin-stdlib-jdk7" || requestedName == "kotlin-stdlib-jdk8")
             ) {
                 useTarget("org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion")
-                because("kotlin-stdlib-jdk7/8 объединены в kotlin-stdlib в Kotlin 1.8+; используем единый stdlib $kotlinVersion")
+                because(
+                    "kotlin-stdlib-jdk7/8 объединены в kotlin-stdlib в Kotlin 1.8+; используем единый stdlib $kotlinVersion",
+                )
             }
 
             // Выравниваем слои логирования
@@ -74,7 +78,6 @@ allprojects {
 // Кастомная проверка зависимостей
 // -------------------------
 abstract class DependencyGuard : DefaultTask() {
-
     @get:Inject
     protected abstract val configurationContainer: ConfigurationContainer
 
@@ -85,29 +88,33 @@ abstract class DependencyGuard : DefaultTask() {
     protected abstract val objects: ObjectFactory
 
     @get:Input
-    val configurationNames: ListProperty<String> = objects.listProperty<String>().convention(
-        listOf(
-            "compileClasspath",
-            "runtimeClasspath",
-            "testCompileClasspath",
-            "testRuntimeClasspath",
+    val configurationNames: ListProperty<String> =
+        objects.listProperty<String>().convention(
+            listOf(
+                "compileClasspath",
+                "runtimeClasspath",
+                "testCompileClasspath",
+                "testRuntimeClasspath",
+            ),
         )
-    )
 
     @get:Input
-    val bannedArtifacts: ListProperty<String> = objects.listProperty<String>().convention(
-        listOf(
-            "org.jetbrains.kotlin:kotlin-stdlib-jdk7",
-            "org.jetbrains.kotlin:kotlin-stdlib-jdk8",
+    val bannedArtifacts: ListProperty<String> =
+        objects.listProperty<String>().convention(
+            listOf(
+                "org.jetbrains.kotlin:kotlin-stdlib-jdk7",
+                "org.jetbrains.kotlin:kotlin-stdlib-jdk8",
+            ),
         )
-    )
 
     @get:Input
-    val enforcedKtorVersion: Property<String> = objects.property<String>().convention(
-        providerFactory.gradleProperty("ktorEnforcedVersion")
-            .orElse(providerFactory.environmentVariable("KTOR_VERSION"))
-            .orElse("3.3.1")
-    )
+    val enforcedKtorVersion: Property<String> =
+        objects.property<String>().convention(
+            providerFactory
+                .gradleProperty("ktorEnforcedVersion")
+                .orElse(providerFactory.environmentVariable("KTOR_VERSION"))
+                .orElse("3.3.1"),
+        )
 
     @TaskAction
     fun run() {
@@ -115,21 +122,25 @@ abstract class DependencyGuard : DefaultTask() {
         the@ run {
             val enforcedKtor = enforcedKtorVersion.get()
 
-            val configs = configurationNames.get()
-                .mapNotNull { name -> configurationContainer.findByName(name) }
+            val configs =
+                configurationNames
+                    .get()
+                    .mapNotNull { name -> configurationContainer.findByName(name) }
 
-            val allArtifacts: Set<String> = configs.flatMap { cfg ->
-                cfg.resolvedConfiguration.lenientConfiguration.allModuleDependencies.flatMap { dep ->
-                    sequenceOf("${dep.moduleGroup}:${dep.moduleName}:${dep.moduleVersion}") +
-                        dep.children.map { "${it.moduleGroup}:${it.moduleName}:${it.moduleVersion}" }
-                }
-            }.toSet()
+            val allArtifacts: Set<String> =
+                configs
+                    .flatMap { cfg ->
+                        cfg.resolvedConfiguration.lenientConfiguration.allModuleDependencies.flatMap { dep ->
+                            sequenceOf("${dep.moduleGroup}:${dep.moduleName}:${dep.moduleVersion}") +
+                                dep.children.map { "${it.moduleGroup}:${it.moduleName}:${it.moduleVersion}" }
+                        }
+                    }.toSet()
 
             val legacyStdlib = allArtifacts.filter { line -> banned.any { line.startsWith(it) } }
             if (legacyStdlib.isNotEmpty()) {
                 error(
                     "DependencyGuard: legacy Kotlin stdlib артефакты обнаружены:\n" +
-                        legacyStdlib.joinToString("\n")
+                        legacyStdlib.joinToString("\n"),
                 )
             }
 
@@ -138,19 +149,20 @@ abstract class DependencyGuard : DefaultTask() {
             if (mismatchedKtor.isNotEmpty()) {
                 error(
                     "DependencyGuard: несовпадение версий Ktor (ожидается $enforcedKtor):\n" +
-                        mismatchedKtor.joinToString("\n")
+                        mismatchedKtor.joinToString("\n"),
                 )
             }
 
-            val dynamic = allArtifacts.filter {
-                it.endsWith(":latest.release") ||
-                    it.endsWith(":latest.integration") ||
-                    it.contains("SNAPSHOT")
-            }
+            val dynamic =
+                allArtifacts.filter {
+                    it.endsWith(":latest.release") ||
+                        it.endsWith(":latest.integration") ||
+                        it.contains("SNAPSHOT")
+                }
             if (dynamic.isNotEmpty()) {
                 error(
                     "DependencyGuard: обнаружены динамические/SNAPSHOT зависимости:\n" +
-                        dynamic.joinToString("\n")
+                        dynamic.joinToString("\n"),
                 )
             }
 
@@ -163,7 +175,6 @@ tasks.register<DependencyGuard>("dependencyGuard") {
     group = "verification"
     description = "Fail build if dependency rules are violated"
 }
-
 
 allprojects {
     configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
@@ -192,7 +203,7 @@ tasks.register("scaCheck") {
     group = "verification"
     description = "Run JVM SCA policy gate (OWASP Dependency-Check)"
     dependsOn(
-        allprojects.mapNotNull { it.tasks.findByName("dependencyCheckAnalyze") }
+        allprojects.mapNotNull { it.tasks.findByName("dependencyCheckAnalyze") },
     )
 }
 
@@ -203,6 +214,13 @@ subprojects {
     // Линтеры
     apply(plugin = "io.gitlab.arturbosch.detekt")
     apply(plugin = "org.jlleitschuh.gradle.ktlint")
+
+    val moduleBaselinePrefix = "config/detekt/baseline-${project.path.removePrefix(":").replace(':', '-')}"
+    val moduleDetektBaseline = rootProject.file("$moduleBaselinePrefix.xml")
+    val moduleDetektMainBaseline = rootProject.file("$moduleBaselinePrefix-main.xml")
+    val moduleDetektTestBaseline = rootProject.file("$moduleBaselinePrefix-test.xml")
+    val appBotMainBaseline = rootProject.file("config/detekt/baseline-main.xml")
+    val appBotTestBaseline = rootProject.file("config/detekt/baseline-test.xml")
 
     configure<KtlintExtension> {
         ignoreFailures.set(false)
@@ -218,13 +236,22 @@ subprojects {
         buildUponDefaultConfig = true
         allRules = false
         config.setFrom(files(rootProject.file("detekt.yml")))
-        baseline = when (project.path) {
-            ":app-bot" -> rootProject.file("config/detekt/baseline-main.xml")
-            else -> rootProject.file("config/detekt/baseline.xml")
-        }
+        baseline =
+            when (project.path) {
+                ":app-bot" -> appBotMainBaseline
+                else -> moduleDetektBaseline
+            }
     }
 
     tasks.withType<Detekt>().configureEach {
+        baseline =
+            when {
+                project.path == ":app-bot" && name == "detektTest" -> appBotTestBaseline
+                project.path == ":app-bot" -> appBotMainBaseline
+                name == "detektMain" -> moduleDetektMainBaseline
+                name == "detektTest" -> moduleDetektTestBaseline
+                else -> moduleDetektBaseline
+            }
         reports {
             html.required.set(true)
             sarif.required.set(true)
@@ -238,17 +265,6 @@ subprojects {
         }
     }
 
-    if (project.path == ":app-bot") {
-        tasks.matching { it.name == "detekt" }.configureEach {
-            this as Detekt
-            baseline = rootProject.file("config/detekt/baseline-main.xml")
-        }
-        tasks.matching { it.name == "detektTest" }.configureEach {
-            this as Detekt
-            baseline = rootProject.file("config/detekt/baseline-test.xml")
-        }
-    }
-
     // CLI-обёртки (если есть соответствующие файлы в репо)
     pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
         apply(from = rootProject.file("gradle/detekt-cli.gradle.kts"))
@@ -256,10 +272,11 @@ subprojects {
     }
 
     // ВАЖНО: CLI-таски не совместимы с конфигурационным кэшем — помечаем это явно
-    tasks.matching { it.name in listOf("ktlintCheckCli", "ktlintFormatCli", "detektCli") }
+    tasks
+        .matching { it.name in listOf("ktlintCheckCli", "ktlintFormatCli", "detektCli") }
         .configureEach {
             notCompatibleWithConfigurationCache(
-                "CLI wrappers capture Project/Provider; use plugin tasks instead"
+                "CLI wrappers capture Project/Provider; use plugin tasks instead",
             )
         }
 
@@ -288,7 +305,7 @@ tasks.register("staticCheck") {
                 sp.tasks.findByName("detektTest"),
                 sp.tasks.findByName("ktlintCheck"),
             )
-        }
+        },
     )
 }
 
@@ -296,13 +313,18 @@ tasks.register("detektGate") {
     group = "verification"
     description = "Run detekt across all Kotlin subprojects with baseline-aware strategy"
     dependsOn(
-        subprojects.flatMap { sp ->
-            listOfNotNull(
-                sp.tasks.findByName("detekt"),
-                sp.tasks.findByName("detektMain"),
-                sp.tasks.findByName("detektTest"),
-            )
-        }
+        subprojects.flatMap { project ->
+            val baselineAwareTasks =
+                listOfNotNull(
+                    project.tasks.findByName("detektMain"),
+                    project.tasks.findByName("detektTest"),
+                )
+            if (baselineAwareTasks.isNotEmpty()) {
+                baselineAwareTasks
+            } else {
+                listOfNotNull(project.tasks.findByName("detekt"))
+            }
+        },
     )
 }
 
@@ -310,7 +332,7 @@ tasks.register("formatAll") {
     group = "formatting"
     description = "Run ktlint format (plugin task) for all Kotlin modules"
     dependsOn(
-        subprojects.mapNotNull { it.tasks.findByName("ktlintFormat") }
+        subprojects.mapNotNull { it.tasks.findByName("ktlintFormat") },
     )
 }
 
@@ -319,7 +341,6 @@ tasks.register("flywayMigrate") {
     description = "Run Flyway migrations via :core-data module"
     dependsOn(":core-data:flywayMigrate")
 }
-
 
 tasks.register("coverageGate") {
     group = "verification"

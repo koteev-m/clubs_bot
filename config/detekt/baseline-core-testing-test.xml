@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>RedundantSuspendModifier:Fakes.kt$FakeNotifySender$suspend</ID>
+    <ID>SleepInsteadOfDelay:GuestFlowStartTest.kt$GuestFlowStartTest$sleep(10)</ID>
+    <ID>UnnecessaryAbstractClass:PgContainer.kt$PgContainer$PgContainer</ID>
+  </CurrentIssues>
+</SmellBaseline>
