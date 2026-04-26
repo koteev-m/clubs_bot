@@ -45,77 +45,12 @@ jobs:
       - name: Load quality gate tool versions
         run: cat scripts/quality-gates.env >> "$GITHUB_ENV"
 
-      - name: Install ktlint CLI
-        run: |
-          set -euo pipefail
-          curl -fsSL -o /usr/local/bin/ktlint "https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint"
-          echo "${KTLINT_SHA256}  /usr/local/bin/ktlint" | sha256sum -c -
-          chmod +x /usr/local/bin/ktlint
-
       - name: Run ktlint gate (changed files only)
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          is_zero_sha() {
-            [ "${1:-}" = "0000000000000000000000000000000000000000" ]
-          }
-
-          sha_exists() {
-            local sha="$1"
-            [ -n "$sha" ] && git cat-file -e "${sha}^{commit}" >/dev/null 2>&1
-          }
-
-          default_range() {
-            local base
-            base="$(git rev-parse HEAD^ 2>/dev/null || true)"
-            if sha_exists "$base"; then
-              printf '%s...%s' "$base" "${{ github.sha }}"
-            else
-              printf ''
-            fi
-          }
-
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if sha_exists "$BASE_SHA"; then
-              range="$BASE_SHA...${{ github.sha }}"
-            else
-              range="$(default_range)"
-            fi
-          else
-            if [ -n "${BEFORE_SHA:-}" ] && ! is_zero_sha "$BEFORE_SHA" && sha_exists "$BEFORE_SHA"; then
-              range="$BEFORE_SHA...${{ github.sha }}"
-            else
-              range="$(default_range)"
-            fi
-          fi
-
-          if [ -n "$range" ]; then
-            mapfile -t files < <(
-              git diff --name-only --diff-filter=ACMR "$range" -- '*.kt' '*.kts' \
-                | sed '/^$/d'
-            )
-          else
-            mapfile -t files < <(
-              git diff-tree --no-commit-id --name-only -r --diff-filter=ACMR "${{ github.sha }}" -- '*.kt' '*.kts' \
-                | sed '/^$/d'
-            )
-          fi
-
-          existing=()
-          for file in "${files[@]}"; do
-            [ -f "$file" ] && existing+=("$file")
-          done
-          files=("${existing[@]}")
-
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No changed Kotlin files — ktlint gate skipped"
-            exit 0
-          fi
-
-          printf 'Running ktlint for %s files\n' "${#files[@]}"
-          ktlint "${files[@]}"
+          VERIFY_TO_SHA: ${{ github.sha }}
+          VERIFY_FROM_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          KTLINT_BIN: /usr/local/bin/ktlint
+        run: ./scripts/ktlint-changed.sh
 
       - name: Upload lint reports
         if: always()

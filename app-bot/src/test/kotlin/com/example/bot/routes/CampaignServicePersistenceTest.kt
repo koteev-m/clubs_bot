@@ -106,14 +106,24 @@ class CampaignServicePersistenceTest : StringSpec({
                 }[UsersTable.id]
             }
 
-        val service = DbCampaignService(database)
+        val gate = CountDownLatch(2)
+        val release = CountDownLatch(1)
+        val hookInvocation = AtomicInteger(0)
+        val service =
+            DbCampaignService(
+                database,
+                beforeOptimisticMutation = {
+                    if (hookInvocation.incrementAndGet() <= 2) {
+                        gate.countDown()
+                        release.await()
+                    }
+                },
+            )
         val created = service.create(CampaignCreateRequest(title = "t", text = "base"), actorId = actorId)
-        val startGate = CountDownLatch(1)
         val pool = Executors.newFixedThreadPool(2)
 
         try {
             val first = pool.submit<CampaignMutationResult> {
-                startGate.await()
                 runBlocking {
                     service.update(
                         created.id,
@@ -123,13 +133,13 @@ class CampaignServicePersistenceTest : StringSpec({
                 }
             }
             val second = pool.submit<CampaignMutationResult> {
-                startGate.await()
                 runBlocking {
                     service.setStatus(created.id, CampaignStatus.PAUSED, actorId = actorId)
                 }
             }
 
-            startGate.countDown()
+            gate.await()
+            release.countDown()
             val firstResult = first.get()
             val secondResult = second.get()
             listOf(firstResult, secondResult).count { it is CampaignMutationResult.Success } shouldBe 1

@@ -471,6 +471,9 @@ private object MyBookingsUsersTable : LongIdTable("users") {
     val username = text("username").nullable()
     val displayName = text("display_name").nullable()
     val phoneE164 = text("phone_e164").nullable()
+    val encryptedPhone = text("encrypted_phone").nullable()
+    val phoneHash = text("phone_hash").nullable()
+    val anonymizedAt = text("anonymized_at").nullable()
 }
 
 private object MyBookingsClubsTable : org.jetbrains.exposed.sql.Table("clubs") {
