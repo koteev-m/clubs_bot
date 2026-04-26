@@ -1,0 +1,48 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>InjectDispatcher:BookingService.kt$BookingService$IO</ID>
+    <ID>LoopWithTooManyJumpStatements:GamificationEngine.kt$GamificationEngine$for</ID>
+    <ID>MagicNumber:PromoterRatingService.kt$PromoterPeriod.MONTH$30</ID>
+    <ID>MagicNumber:PromoterRatingService.kt$PromoterPeriod.WEEK$7</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$0xFF</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$16</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$3</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$4</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.BOOKING.value, StandardAuditAction.CANCEL.value, bookingId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.BOOKING.value, StandardAuditAction.CREATE.value, bookingId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, "UPDATE_REJECTED_SHIFT_CLOSED", depositId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, StandardAuditAction.CREATE.value, depositId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, StandardAuditAction.UPDATE.value, depositId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_SESSION.value, StandardAuditAction.CREATE.value, sessionId.toString())</ID>
+    <ID>MaxLineLength:PromoterRatingService.kt$PromoterRatingService$.</ID>
+    <ID>MaxLineLength:QrBookingCodec.kt$QrBookingCodec$if (bookingId &lt; MIN_IDENTIFIER_VALUE || eventId &lt; MIN_IDENTIFIER_VALUE || ts &lt; MIN_TIMESTAMP_SECONDS) return null</ID>
+    <ID>NestedBlockDepth:GamificationEngine.kt$GamificationEngine$suspend fun onVisitCreated( visit: ClubVisit, now: Instant, ): GamificationDelta</ID>
+    <ID>RedundantSuspendModifier:PaymentsService.kt$PaymentsService$suspend</ID>
+    <ID>ReturnCount:ArrivalWindowFormat.kt$fun parseArrivalWindowOrNull(raw: String): ArrivalWindow?</ID>
+    <ID>ReturnCount:InMemoryLayoutRepository.kt$InMemoryLayoutRepository$override suspend fun delete(clubId: Long, id: Long): Boolean</ID>
+    <ID>ReturnCount:InMemoryLayoutRepository.kt$InMemoryLayoutRepository$override suspend fun update(request: AdminTableUpdate): Table?</ID>
+    <ID>ReturnCount:PromoterQuotaService.kt$PromoterQuotaService$fun checkAndReserveHold( clubId: Long, promoterId: Long, tableId: Long, now: Instant = Instant.now(clock), ): HoldQuotaResult</ID>
+    <ID>ReturnCount:PromoterQuotaService.kt$PromoterQuotaService$fun releaseHoldIfTracked( clubId: Long, promoterId: Long, tableId: Long, now: Instant = Instant.now(clock), )</ID>
+    <ID>ReturnCount:QrBookingCodec.kt$QrBookingCodec$fun verify(token: String, now: Instant, ttl: Duration, secret: String): Decoded?</ID>
+    <ID>ReturnCount:QrBookingCodec.kt$QrBookingCodec$private fun decodeHex(value: String): ByteArray?</ID>
+    <ID>ReturnCount:QrBookingCodec.kt$QrBookingCodec$private fun parse(token: String): ParsedToken?</ID>
+    <ID>TooManyFunctions:AdminTablesRepository.kt$AdminTablesRepository</ID>
+    <ID>TooManyFunctions:AuditLogger.kt$AuditLogger</ID>
+    <ID>TooManyFunctions:InMemoryLayoutRepository.kt$InMemoryLayoutRepository : LayoutRepositoryAdminTablesRepository</ID>
+    <ID>TooManyFunctions:PaymentsRepository.kt$PaymentsRepository</ID>
+    <ID>UnsafeCallOnNullableType:MusicCatalogService.kt$MusicCatalogService$playlists.getFull(playlist.id)!!</ID>
+    <ID>UnsafeCallOnNullableType:OperatingRulesResolver.kt$OperatingRulesResolver$last!!</ID>
+    <ID>UnsafeCallOnNullableType:QrCodec.kt$QrCodec$clubId!!</ID>
+    <ID>UnsafeCallOnNullableType:QrCodec.kt$QrCodec$entryId!!</ID>
+    <ID>UnsafeCallOnNullableType:QrCodec.kt$QrCodec$eventId!!</ID>
+    <ID>UnsafeCallOnNullableType:RatePolicy.kt$DefaultRatePolicy$chats.compute(chatId) { _, existing -&gt; if (existing == null) { Holder(TokenBucket(chatRps, chatRps, timeSource), AtomicLong(now)) } else { existing.lastUsed.set(now) existing } }!!</ID>
+    <ID>UseOrEmpty:AvailabilityService.kt$AvailabilityService$eventId?.let { repository.listActiveBookingTableIds(it) } ?: emptySet()</ID>
+    <ID>UseOrEmpty:AvailabilityService.kt$AvailabilityService$eventId?.let { repository.listActiveHoldTableIds(it, Instant.now(clock)) } ?: emptySet()</ID>
+    <ID>UseOrEmpty:AvailabilityService.kt$AvailabilityService$repository.findClub(clubId)?.let { club -&gt; val zone = java.time.ZoneId.of(club.timezone) val event = repository.findEvent(clubId, eventStartUtc) event?.let { NightSlot( clubId = clubId, eventStartUtc = it.startUtc, eventEndUtc = it.endUtc, isSpecial = it.isSpecial, source = com.example.bot.time.NightSource.EVENT_MATERIALIZED, openLocal = it.startUtc.atZone(zone).toLocalDateTime(), closeLocal = it.endUtc.atZone(zone).toLocalDateTime(), zone = zone, ) } ?: rulesResolver .resolve( clubId, eventStartUtc.minus(Duration.ofDays(1)), eventStartUtc.plus(Duration.ofDays(1)), ).find { eventStartUtc == it.eventStartUtc } ?: return@recordLoad emptyList() val eventId = event?.id val tables = repository.listTables(clubId).filter { it.active } val holds = eventId?.let { repository.listActiveHoldTableIds(it, Instant.now(clock)) } ?: emptySet() val bookings = eventId?.let { repository.listActiveBookingTableIds(it) } ?: emptySet() tables .filter { t -&gt; t.id !in holds &amp;&amp; t.id !in bookings } .map { t -&gt; TableAvailabilityDto( tableId = t.id, tableNumber = t.number, zone = t.zone, capacity = t.capacity, minDeposit = t.minDeposit, status = TableStatus.FREE, ) } } ?: emptyList()</ID>
+    <ID>UseOrEmpty:InMemoryLayoutRepository.kt$InMemoryLayoutRepository$layoutsByClub[clubId]?.tables?.sortedBy { it.id } ?: emptyList()</ID>
+    <ID>UseOrEmpty:InMemoryLayoutRepository.kt$InMemoryLayoutRepository$layoutsByClub[clubId]?.zones ?: emptyList()</ID>
+    <ID>UseOrEmpty:PromoterAdminService.kt$PromoterAdminService$it.displayName?.lowercase(Locale.ROOT) ?: it.username?.lowercase(Locale.ROOT) ?: ""</ID>
+  </CurrentIssues>
+</SmellBaseline>

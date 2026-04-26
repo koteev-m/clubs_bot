@@ -35,15 +35,17 @@ scripts/verify.sh ci
 Task order by mode:
 
 - `full` mode: `formatAll` → `staticCheck` → `test` → `test -PrunIT=true`.
-- `ci` mode: `clean detektGate test coverageGate scaCheck` → `test -PrunIT=true`.
+- `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate scaCheck` → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
+- `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
 
 ## PR quality gates (blocking)
 
 Every PR is blocked until all gates are green:
 
 - **Lint gate** (`.github/workflows/lint.yml`) runs `./gradlew detektGate` (baseline-aware для всех Kotlin модулей) и `ktlint` только для изменённых Kotlin-файлов.
-  Historical debt is fixed via baseline/gradual-rollout, while new PR violations fail CI.
+  Baseline wiring: `app-bot` uses `config/detekt/baseline-main.xml` + `config/detekt/baseline-test.xml`; остальные модули используют `config/detekt/baseline-<module>.xml`.
+  Historical debt фиксируется baseline-файлами, новые нарушения в PR блокируют CI.
 - **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate` (и верификация, и генерация `jacocoTestReport` для upload артефактов).
   Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments classes are at least **60%**.
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
@@ -79,9 +81,11 @@ scripts/verify.sh lint
 
 # secret scan (локально, если установлен docker)
 docker run --rm -v "$PWD:/repo" -w /repo \
-  ghcr.io/gitleaks/gitleaks@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854 \
+  "$(awk -F= '/^GITLEAKS_IMAGE=/{print $2}' scripts/quality-gates.env)" \
   detect --source . --redact --verbose
 ```
+
+Итоговый blocking-эффект в GitHub зависит от двух условий одновременно: workflow должен завершиться ошибкой и соответствующий check должен быть добавлен в branch protection как Required.
 
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 

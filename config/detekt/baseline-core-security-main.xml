@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:InitDataValidator.kt$InitDataValidator$16</ID>
+    <ID>MagicNumber:InitDataValidator.kt$InitDataValidator$4</ID>
+    <ID>ReturnCount:InitDataValidator.kt$InitDataValidator$fun validate( initData: String, botToken: String, clock: Clock = Clock.systemUTC(), maxAge: Duration = defaultMaxAge, maxFutureSkew: Duration = defaultMaxFutureSkew, ): TelegramUser?</ID>
+    <ID>ReturnCount:InitDataValidator.kt$InitDataValidator$private fun String.decodeHexOrNull(): ByteArray?</ID>
+  </CurrentIssues>
+</SmellBaseline>

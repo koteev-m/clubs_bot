@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ReturnCount:InitDataValidatorTest.kt$InitDataValidatorTest$private fun String.withInvalidHexHash(): String</ID>
+    <ID>ReturnCount:InitDataValidatorTest.kt$InitDataValidatorTest$private fun String.withOddLengthHash(): String</ID>
+    <ID>UseOrEmpty:RbacPluginTest.kt$RbacPluginTest.InMemoryUserRoleRepository$clubs[userId] ?: emptySet()</ID>
+    <ID>UseOrEmpty:RbacPluginTest.kt$RbacPluginTest.InMemoryUserRoleRepository$roles[userId] ?: emptySet()</ID>
+  </CurrentIssues>
+</SmellBaseline>

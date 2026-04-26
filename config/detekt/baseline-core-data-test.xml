@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>HasPlatformType:MusicBattleAndStemsRepositoriesTest.kt$MusicBattleAndStemsRepositoriesTest$@Test fun `vote upsert is idempotent updates in active and rejects changes in closed`()</ID>
+    <ID>InjectDispatcher:GamificationEngineIntegrationTest.kt$GamificationEngineIntegrationTest$IO</ID>
+    <ID>InjectDispatcher:GamificationRepositoriesTest.kt$GamificationRepositoriesTest$IO</ID>
+    <ID>InjectDispatcher:MusicBattleAndStemsRepositoriesTest.kt$MusicBattleAndStemsRepositoriesTest$IO</ID>
+    <ID>InjectDispatcher:PostEventStoryAndGuestSegmentsRepositoryTest.kt$PostEventStoryAndGuestSegmentsRepositoryTest$IO</ID>
+    <ID>InjectDispatcher:PostgresParityInvariantsIT.kt$PostgresParityInvariantsIT$IO</ID>
+    <ID>InjectDispatcher:ShiftReportRepositoryTest.kt$ShiftReportRepositoryTest$IO</ID>
+    <ID>InjectDispatcher:TableSessionDepositRepositoryConcurrencyIT.kt$TableSessionDepositRepositoryConcurrencyIT$Default</ID>
+    <ID>InjectDispatcher:TableSessionDepositRepositoryTest.kt$TableSessionDepositRepositoryTest$IO</ID>
+    <ID>InjectDispatcher:VisitRepositoryTest.kt$VisitRepositoryTest$IO</ID>
+    <ID>LargeClass:TableSessionDepositRepositoryTest.kt$TableSessionDepositRepositoryTest</ID>
+    <ID>NoNameShadowing:DbTransactionsTest.kt$DbTransactionsTest${ delay(it) }</ID>
+    <ID>SwallowedException:TableSessionDepositRepositoryTest.kt$TableSessionDepositRepositoryTest$ex: IllegalArgumentException</ID>
+    <ID>UnnecessaryAbstractClass:PostgresClubIntegrationTest.kt$PostgresClubIntegrationTest$PostgresClubIntegrationTest</ID>
+    <ID>UnnecessaryAbstractClass:PostgresIntegrationTest.kt$PostgresIntegrationTest$PostgresIntegrationTest</ID>
+    <ID>UnnecessarySafeCall:InvitationDbRepositoryIT.kt$InvitationDbRepositoryIT$it?.cause</ID>
+  </CurrentIssues>
+</SmellBaseline>

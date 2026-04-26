@@ -1,0 +1,34 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LoopWithTooManyJumpStatements:GamificationEngine.kt$GamificationEngine$for</ID>
+    <ID>MagicNumber:PromoterRatingService.kt$PromoterPeriod.MONTH$30</ID>
+    <ID>MagicNumber:PromoterRatingService.kt$PromoterPeriod.WEEK$7</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$0xFF</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$16</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$3</ID>
+    <ID>MagicNumber:QrBookingCodec.kt$QrBookingCodec$4</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.BOOKING.value, StandardAuditAction.CANCEL.value, bookingId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.BOOKING.value, StandardAuditAction.CREATE.value, bookingId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, "UPDATE_REJECTED_SHIFT_CLOSED", depositId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, StandardAuditAction.CREATE.value, depositId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_DEPOSIT.value, StandardAuditAction.UPDATE.value, depositId.toString())</ID>
+    <ID>MaxLineLength:AuditLogger.kt$AuditLogger$fingerprint = fingerprint(StandardAuditEntityType.TABLE_SESSION.value, StandardAuditAction.CREATE.value, sessionId.toString())</ID>
+    <ID>MaxLineLength:PromoterRatingService.kt$PromoterRatingService$.</ID>
+    <ID>MaxLineLength:QrBookingCodec.kt$QrBookingCodec$if (bookingId &lt; MIN_IDENTIFIER_VALUE || eventId &lt; MIN_IDENTIFIER_VALUE || ts &lt; MIN_TIMESTAMP_SECONDS) return null</ID>
+    <ID>NestedBlockDepth:GamificationEngine.kt$GamificationEngine$suspend fun onVisitCreated( visit: ClubVisit, now: Instant, ): GamificationDelta</ID>
+    <ID>ReturnCount:ArrivalWindowFormat.kt$fun parseArrivalWindowOrNull(raw: String): ArrivalWindow?</ID>
+    <ID>ReturnCount:InMemoryLayoutRepository.kt$InMemoryLayoutRepository$override suspend fun delete(clubId: Long, id: Long): Boolean</ID>
+    <ID>ReturnCount:InMemoryLayoutRepository.kt$InMemoryLayoutRepository$override suspend fun update(request: AdminTableUpdate): Table?</ID>
+    <ID>ReturnCount:PromoterQuotaService.kt$PromoterQuotaService$fun checkAndReserveHold( clubId: Long, promoterId: Long, tableId: Long, now: Instant = Instant.now(clock), ): HoldQuotaResult</ID>
+    <ID>ReturnCount:PromoterQuotaService.kt$PromoterQuotaService$fun releaseHoldIfTracked( clubId: Long, promoterId: Long, tableId: Long, now: Instant = Instant.now(clock), )</ID>
+    <ID>ReturnCount:QrBookingCodec.kt$QrBookingCodec$fun verify(token: String, now: Instant, ttl: Duration, secret: String): Decoded?</ID>
+    <ID>ReturnCount:QrBookingCodec.kt$QrBookingCodec$private fun decodeHex(value: String): ByteArray?</ID>
+    <ID>ReturnCount:QrBookingCodec.kt$QrBookingCodec$private fun parse(token: String): ParsedToken?</ID>
+    <ID>TooManyFunctions:AdminTablesRepository.kt$AdminTablesRepository</ID>
+    <ID>TooManyFunctions:AuditLogger.kt$AuditLogger</ID>
+    <ID>TooManyFunctions:InMemoryLayoutRepository.kt$InMemoryLayoutRepository : LayoutRepositoryAdminTablesRepository</ID>
+    <ID>TooManyFunctions:PaymentsRepository.kt$PaymentsRepository</ID>
+  </CurrentIssues>
+</SmellBaseline>
