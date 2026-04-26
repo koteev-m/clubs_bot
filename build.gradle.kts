@@ -176,46 +176,64 @@ tasks.register<DependencyGuard>("dependencyGuard") {
     description = "Fail build if dependency rules are violated"
 }
 
+val dependencyCheckDataDir = File("${rootProject.projectDir}/.gradle/dependency-check-data")
+
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     failBuildOnCVSS = 7.0F
     suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
     formats = listOf("HTML", "JSON")
     analyzers.assemblyEnabled = false
-    data.directory = "${rootProject.projectDir}/.gradle/dependency-check-data"
+    data.directory = dependencyCheckDataDir.path
     val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
     nvd.apiKey = nvdApiKey
     autoUpdate = !nvdApiKey.isNullOrBlank()
 }
 
-tasks.named("dependencyCheckAnalyze") {
+tasks.named("dependencyCheckAggregate") {
     group = "verification"
-    description = "SCA gate: OWASP Dependency-Check (fails on HIGH/CRITICAL CVEs)"
+    description = "SCA gate: OWASP Dependency-Check aggregate scan (fails on HIGH/CRITICAL CVEs)"
     dependsOn("scaPreflight")
     notCompatibleWithConfigurationCache("dependency-check tasks are not configuration-cache safe on Gradle 9")
 }
 
 tasks.register("scaCheck") {
     group = "verification"
-    description = "Run JVM SCA policy gate (OWASP Dependency-Check)"
-    dependsOn("dependencyCheckAnalyze")
+    description = "Run aggregate JVM SCA policy gate (OWASP Dependency-Check)"
+    dependsOn("dependencyCheckAggregate")
 }
 
 tasks.register("scaPreflight") {
     group = "verification"
-    description = "Validate SCA prerequisites (NVD API key or warmed local cache)"
+    description = "Validate SCA prerequisites (NVD API key or warmed/fresh local cache)"
     notCompatibleWithConfigurationCache("sca preflight reads runtime environment and local cache state")
     doLast {
         val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
         val hasApiKey = !nvdApiKey.isNullOrBlank()
-        val dataDir = File("${rootProject.projectDir}/.gradle/dependency-check-data")
-        val hasWarmCache =
-            dataDir.exists() &&
-                dataDir.walkTopDown().any { file -> file.isFile && file.name.endsWith(".mv.db") }
 
-        if (!hasApiKey && !hasWarmCache) {
+        val cacheMarkers =
+            listOf(
+                dependencyCheckDataDir.resolve("odc.mv.db"),
+                dependencyCheckDataDir.resolve("cache/odc.mv.db"),
+                dependencyCheckDataDir.resolve("cache/odc.script"),
+            )
+        val dbMarker = cacheMarkers.firstOrNull { it.exists() }
+        val warmMarker = dependencyCheckDataDir.resolve("odc.update.lock")
+
+        val hasWarmCache = dbMarker != null && warmMarker.exists()
+        val cacheFreshEnough =
+            if (hasWarmCache) {
+                val newestEpochMillis = maxOf(dbMarker.lastModified(), warmMarker.lastModified())
+                val ageDays = (System.currentTimeMillis() - newestEpochMillis) / (24 * 60 * 60 * 1000)
+                ageDays <= 14
+            } else {
+                false
+            }
+
+        if (!hasApiKey && !cacheFreshEnough) {
             throw GradleException(
-                "scaCheck requires NVD_API_KEY or a warmed Dependency-Check cache at ${dataDir.path}. " +
-                    "In CI provide NVD_API_KEY and cache ${dataDir.path}.",
+                "scaCheck requires NVD_API_KEY or a warmed Dependency-Check cache " +
+                    "updated within 14 days at ${dependencyCheckDataDir.path}. " +
+                    "Refresh cache via ./gradlew dependencyCheckUpdate with NVD_API_KEY, then re-run scaCheck.",
             )
         }
     }

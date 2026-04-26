@@ -52,7 +52,7 @@ Every PR is blocked until all gates are green:
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
   Для стабилизации по времени/сети используется локальный data-dir cache (`.gradle/dependency-check-data`), а основной CI-path предполагает `NVD_API_KEY`.
-  `scaCheck` запускает aggregate scan и перед анализом валидирует prerequisites: нужен `NVD_API_KEY` или прогретый локальный cache.
+  `scaCheck` запускает `dependencyCheckAggregate` и перед анализом валидирует prerequisites: нужен `NVD_API_KEY` или прогретый cache Dependency-Check не старше 14 дней.
 
 ### Waiver process for SCA findings
 
@@ -82,7 +82,7 @@ scripts/verify.sh lint
 ./gradlew scaCheck --console=plain
 
 # refresh dependency verification metadata (например после изменения tooling/deps)
-scripts/refresh-verification-metadata.sh scaCheck
+scripts/refresh-verification-metadata.sh dependencyCheckAggregate
 
 # secret scan (локально, если установлен docker)
 docker run --rm -v "$PWD:/repo" -w /repo \
