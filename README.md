@@ -38,6 +38,7 @@ Task order by mode:
 - `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate scaCheck` → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
+- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, deterministic secret-scan failure без Docker).
 
 ## PR quality gates (blocking)
 
@@ -50,7 +51,8 @@ Every PR is blocked until all gates are green:
   Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments classes are at least **60%**.
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
-  Для стабилизации по времени/сети используется локальный data-dir cache (`.gradle/dependency-check-data`); при наличии `NVD_API_KEY` скорость и предсказуемость выше, но локальный запуск без ключа остаётся поддержан.
+  Для стабилизации по времени/сети используется локальный data-dir cache (`.gradle/dependency-check-data`), а основной CI-path предполагает `NVD_API_KEY`.
+  `scaCheck` запускает aggregate scan и перед анализом валидирует prerequisites: нужен `NVD_API_KEY` или прогретый локальный cache.
 
 ### Waiver process for SCA findings
 
@@ -78,6 +80,9 @@ scripts/verify.sh lint
 
 # SCA gate (CVSS >= 7.0 блокирует)
 ./gradlew scaCheck --console=plain
+
+# refresh dependency verification metadata (например после изменения tooling/deps)
+scripts/refresh-verification-metadata.sh scaCheck
 
 # secret scan (локально, если установлен docker)
 docker run --rm -v "$PWD:/repo" -w /repo \

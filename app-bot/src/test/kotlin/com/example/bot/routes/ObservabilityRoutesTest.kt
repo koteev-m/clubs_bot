@@ -19,8 +19,9 @@ class ObservabilityRoutesTest :
     StringSpec({
         "health returns 200 when db probe passes" {
             val statement = mockk<PreparedStatement>(relaxed = true) { every { execute() } returns true }
-            val connection = mockk<Connection>(relaxed = true) { every { prepareStatement("SELECT 1") } returns statement }
-            val dataSource = mockk<DataSource> { every { connection } returns connection }
+            val dbConnection =
+                mockk<Connection>(relaxed = true) { every { prepareStatement("SELECT 1") } returns statement }
+            val dataSource = mockk<DataSource> { every { connection } returns dbConnection }
 
             val previousDataSource = DataSourceHolder.dataSource
             try {

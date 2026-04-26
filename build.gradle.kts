@@ -1,6 +1,7 @@
 import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.model.ObjectFactory
@@ -16,6 +17,7 @@ import org.gradle.kotlin.dsl.property
 import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.withType
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
+import java.io.File
 import javax.inject.Inject
 
 plugins {
@@ -46,8 +48,6 @@ val slf4jVersionProperty =
 val slf4jVersion = slf4jVersionProperty.get()
 
 allprojects {
-    apply(plugin = "org.owasp.dependencycheck")
-
     // Глобальная стратегия: схлопываем legacy stdlib и выравниваем SLF4J
     configurations.configureEach {
         resolutionStrategy.eachDependency {
@@ -176,35 +176,49 @@ tasks.register<DependencyGuard>("dependencyGuard") {
     description = "Fail build if dependency rules are violated"
 }
 
-allprojects {
-    configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-        failBuildOnCVSS = 7.0F
-        suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
-        formats = listOf("HTML", "JSON")
-        analyzers.assemblyEnabled = false
-        data.directory = "${rootProject.projectDir}/.gradle/dependency-check-data"
-        nvd.apiKey = providers.environmentVariable("NVD_API_KEY").orNull
-    }
+configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
+    failBuildOnCVSS = 7.0F
+    suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
+    formats = listOf("HTML", "JSON")
+    analyzers.assemblyEnabled = false
+    data.directory = "${rootProject.projectDir}/.gradle/dependency-check-data"
+    val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
+    nvd.apiKey = nvdApiKey
+    autoUpdate = !nvdApiKey.isNullOrBlank()
 }
 
 tasks.named("dependencyCheckAnalyze") {
     group = "verification"
     description = "SCA gate: OWASP Dependency-Check (fails on HIGH/CRITICAL CVEs)"
+    dependsOn("scaPreflight")
     notCompatibleWithConfigurationCache("dependency-check tasks are not configuration-cache safe on Gradle 9")
-}
-
-allprojects {
-    tasks.matching { it.name == "dependencyCheckAnalyze" }.configureEach {
-        notCompatibleWithConfigurationCache("dependency-check tasks are not configuration-cache safe on Gradle 9")
-    }
 }
 
 tasks.register("scaCheck") {
     group = "verification"
     description = "Run JVM SCA policy gate (OWASP Dependency-Check)"
-    dependsOn(
-        allprojects.mapNotNull { it.tasks.findByName("dependencyCheckAnalyze") },
-    )
+    dependsOn("dependencyCheckAnalyze")
+}
+
+tasks.register("scaPreflight") {
+    group = "verification"
+    description = "Validate SCA prerequisites (NVD API key or warmed local cache)"
+    notCompatibleWithConfigurationCache("sca preflight reads runtime environment and local cache state")
+    doLast {
+        val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
+        val hasApiKey = !nvdApiKey.isNullOrBlank()
+        val dataDir = File("${rootProject.projectDir}/.gradle/dependency-check-data")
+        val hasWarmCache =
+            dataDir.exists() &&
+                dataDir.walkTopDown().any { file -> file.isFile && file.name.endsWith(".mv.db") }
+
+        if (!hasApiKey && !hasWarmCache) {
+            throw GradleException(
+                "scaCheck requires NVD_API_KEY or a warmed Dependency-Check cache at ${dataDir.path}. " +
+                    "In CI provide NVD_API_KEY and cache ${dataDir.path}.",
+            )
+        }
+    }
 }
 
 // -------------------------

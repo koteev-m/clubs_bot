@@ -48,7 +48,7 @@ jobs:
       - name: Run OWASP Dependency-Check (blocking)
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: ./gradlew scaCheck --console=plain --stacktrace
+        run: ./gradlew --no-configuration-cache scaCheck --console=plain --stacktrace
 
       - name: Upload SCA reports
         if: always()
