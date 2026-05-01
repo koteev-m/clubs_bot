@@ -48,11 +48,12 @@ Every PR is blocked until all gates are green:
   Baseline wiring: `app-bot` uses `config/detekt/baseline-main.xml` + `config/detekt/baseline-test.xml`; остальные модули используют `config/detekt/baseline-<module>.xml`.
   Historical debt фиксируется baseline-файлами, новые нарушения в PR блокируют CI.
 - **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate` (и верификация, и генерация `jacocoTestReport` для upload артефактов).
-  Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments classes are at least **60%**.
+  Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments contour is at least **60%** (booking/check-in/payment routes + core booking/payment services).
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
-  Для стабилизации по времени/сети используется локальный data-dir cache (`.gradle/dependency-check-data`), а основной CI-path предполагает `NVD_API_KEY`.
-  `scaCheck` запускает `dependencyCheckAggregate` и перед анализом валидирует prerequisites: нужен `NVD_API_KEY` или прогретый cache Dependency-Check не старше 14 дней.
+  CI green-path: `NVD_API_KEY` в secrets и запуск `./gradlew --no-configuration-cache scaCheck`.
+  Local green-path: либо `NVD_API_KEY`, либо явно прогретый cache через `./gradlew dependencyCheckUpdate scaWarmCacheMark` (маркер `.gradle/dependency-check-data/cache-warm.marker`).
+  Local без key и без warm-cache — deterministic fail в `scaPreflight` с инструкцией как прогреть cache.
 
 ### Waiver process for SCA findings
 
@@ -79,10 +80,16 @@ Gate не отключаем. Для подтверждённого ложног
 scripts/verify.sh lint
 
 # SCA gate (CVSS >= 7.0 блокирует)
-./gradlew scaCheck --console=plain
+./gradlew --no-configuration-cache scaCheck --console=plain
+
+# прогреть локальный cache для SCA без постоянного NVD_API_KEY
+./gradlew dependencyCheckUpdate scaWarmCacheMark --console=plain
 
 # refresh dependency verification metadata (например после изменения tooling/deps)
-scripts/refresh-verification-metadata.sh dependencyCheckAggregate
+scripts/refresh-verification-metadata.sh
+
+# если нужно обновить metadata именно для SCA артефактов
+scripts/refresh-verification-metadata.sh sca
 
 # secret scan (локально, если установлен docker)
 docker run --rm -v "$PWD:/repo" -w /repo \

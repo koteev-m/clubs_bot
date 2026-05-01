@@ -70,4 +70,10 @@ else
   assert_eq "$status" "2"
 fi
 
+usage_out="$("$ROOT_DIR/scripts/refresh-verification-metadata.sh" unknown 2>&1 || true)"
+assert_contains "$usage_out" "Usage: scripts/refresh-verification-metadata.sh [default|sca]"
+
+verify_usage_out="$("$ROOT_DIR/scripts/verify.sh" unknown 2>&1 || true)"
+assert_contains "$verify_usage_out" "Usage: scripts/verify.sh [full|ci|lint|secret-scan|sca-warm-cache]"
+
 echo "selfcheck: OK"
