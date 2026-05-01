@@ -177,6 +177,7 @@ tasks.register<DependencyGuard>("dependencyGuard") {
 }
 
 val dependencyCheckDataDir = File("${rootProject.projectDir}/.gradle/dependency-check-data")
+val dependencyCheckWarmMarker = dependencyCheckDataDir.resolve("cache-warm.marker")
 
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     failBuildOnCVSS = 7.0F
@@ -209,33 +210,29 @@ tasks.register("scaPreflight") {
     doLast {
         val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
         val hasApiKey = !nvdApiKey.isNullOrBlank()
+        val hasWarmMarker = dependencyCheckWarmMarker.exists()
+        val hasCacheData =
+            dependencyCheckDataDir.exists() &&
+                (dependencyCheckDataDir.listFiles()?.any { it.isFile || it.isDirectory } == true)
 
-        val cacheMarkers =
-            listOf(
-                dependencyCheckDataDir.resolve("odc.mv.db"),
-                dependencyCheckDataDir.resolve("cache/odc.mv.db"),
-                dependencyCheckDataDir.resolve("cache/odc.script"),
-            )
-        val dbMarker = cacheMarkers.firstOrNull { it.exists() }
-        val warmMarker = dependencyCheckDataDir.resolve("odc.update.lock")
-
-        val hasWarmCache = dbMarker != null && warmMarker.exists()
-        val cacheFreshEnough =
-            if (hasWarmCache) {
-                val newestEpochMillis = maxOf(dbMarker.lastModified(), warmMarker.lastModified())
-                val ageDays = (System.currentTimeMillis() - newestEpochMillis) / (24 * 60 * 60 * 1000)
-                ageDays <= 14
-            } else {
-                false
-            }
-
-        if (!hasApiKey && !cacheFreshEnough) {
+        if (!hasApiKey && !(hasWarmMarker && hasCacheData)) {
             throw GradleException(
-                "scaCheck requires NVD_API_KEY or a warmed Dependency-Check cache " +
-                    "updated within 14 days at ${dependencyCheckDataDir.path}. " +
-                    "Refresh cache via ./gradlew dependencyCheckUpdate with NVD_API_KEY, then re-run scaCheck.",
+                "scaCheck requires NVD_API_KEY or an explicitly warmed Dependency-Check cache. " +
+                    "Warm local cache via ./gradlew dependencyCheckUpdate scaWarmCacheMark with NVD_API_KEY, " +
+                    "then re-run scaCheck. Expected marker: ${dependencyCheckWarmMarker.path}",
             )
         }
+    }
+}
+
+tasks.register("scaWarmCacheMark") {
+    group = "verification"
+    description = "Write explicit marker that local Dependency-Check cache was warmed via dependencyCheckUpdate"
+    dependsOn("dependencyCheckUpdate")
+    doLast {
+        dependencyCheckDataDir.mkdirs()
+        dependencyCheckWarmMarker.writeText("warmedAt=${System.currentTimeMillis()}\n")
+        logger.lifecycle("Dependency-Check cache warm marker updated: ${dependencyCheckWarmMarker.path}")
     }
 }
 

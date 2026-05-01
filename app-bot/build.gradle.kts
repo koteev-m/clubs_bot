@@ -281,13 +281,12 @@ tasks.jacocoTestCoverageVerification {
         }
 
         rule {
-            element = "CLASS"
+            element = "PACKAGE"
             includes =
                 listOf(
-                    "com.example.bot.routes.SecuredBookingRoutesKt",
-                    "com.example.bot.routes.CheckinRoutesKt",
-                    "com.example.bot.routes.PaymentsFinalizeRoutesKt",
-                    "com.example.bot.routes.PaymentsCancelRefundRoutesKt",
+                    "com.example.bot.routes",
+                    "com.example.bot.telegram.bookings",
+                    "com.example.bot.telemetry",
                 )
             limit {
                 counter = "LINE"

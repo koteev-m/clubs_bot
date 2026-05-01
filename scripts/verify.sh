@@ -34,6 +34,10 @@ run_ci() {
   run_secret_scan
 }
 
+run_sca_warm_cache() {
+  run_cmd ./gradlew --no-daemon --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark
+}
+
 
 run_lint() {
   run_cmd ./gradlew --no-daemon detektGate
@@ -66,8 +70,11 @@ case "$mode" in
   secret-scan)
     run_secret_scan
     ;;
+  sca-warm-cache)
+    run_sca_warm_cache
+    ;;
   *)
-    printf 'Usage: scripts/verify.sh [full|ci|lint|secret-scan]\n' >&2
+    printf 'Usage: scripts/verify.sh [full|ci|lint|secret-scan|sca-warm-cache]\n' >&2
     exit 2
     ;;
 esac
