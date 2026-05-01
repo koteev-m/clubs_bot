@@ -3,14 +3,14 @@
 
 package com.example.bot.telegram
 
+import com.example.bot.audit.AuditLogRepository
+import com.example.bot.audit.AuditLogger
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.booking.core.BookingOutboxTable
 import com.example.bot.data.booking.core.OutboxRepository
-import com.example.bot.audit.AuditLogRepository
-import com.example.bot.audit.AuditLogger
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.telegram.bookings.MyBookingsMetrics
 import com.example.bot.telegram.bookings.MyBookingsService

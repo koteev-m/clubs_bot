@@ -25,28 +25,42 @@ assert_eq() {
   fi
 }
 
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  if [[ "$haystack" != *"$needle"* ]]; then
+    fail "expected output to contain '$needle', got: $haystack"
+  fi
+}
+
 (
   cd "$TMP_DIR"
   git init -q
   git config user.email "selfcheck@example.com"
   git config user.name "selfcheck"
 
-  echo "a" > README.md
-  git add README.md
-  git commit -q -m "init"
-
-  empty_out="$(VERIFY_FROM_SHA=HEAD VERIFY_TO_SHA=HEAD "$ROOT_DIR/scripts/changed-kotlin-files.sh")"
-  assert_empty "$empty_out"
-
   mkdir -p src
   cat > src/App.kt <<'KOT'
 fun main() = println("ok")
 KOT
   git add src/App.kt
-  git commit -q -m "kotlin"
+  git commit -q -m "root"
 
-  single_commit_out="$($ROOT_DIR/scripts/changed-kotlin-files.sh)"
-  assert_eq "$single_commit_out" "src/App.kt"
+  root_out="$($ROOT_DIR/scripts/changed-kotlin-files.sh)"
+  assert_eq "$root_out" "src/App.kt"
+
+  empty_out="$(VERIFY_FROM_SHA=HEAD VERIFY_TO_SHA=HEAD "$ROOT_DIR/scripts/changed-kotlin-files.sh")"
+  assert_empty "$empty_out"
+
+  ktlint_skip_out="$(VERIFY_FROM_SHA=HEAD VERIFY_TO_SHA=HEAD KTLINT_BIN=__missing_ktlint__ "$ROOT_DIR/scripts/ktlint-changed.sh")"
+  assert_contains "$ktlint_skip_out" "No changed Kotlin files"
+
+  echo "note" > README.md
+  git add README.md
+  git commit -q -m "non-kotlin"
+
+  no_kotlin_out="$($ROOT_DIR/scripts/changed-kotlin-files.sh)"
+  assert_empty "$no_kotlin_out"
 )
 
 if DOCKER_BIN=__missing_docker__ "$ROOT_DIR/scripts/verify.sh" secret-scan; then

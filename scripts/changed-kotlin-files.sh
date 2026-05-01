@@ -15,32 +15,30 @@ resolve_diff_range() {
   local to="${VERIFY_TO_SHA:-HEAD}"
 
   if [ -n "$from" ] && ! is_zero_sha "$from" && sha_exists "$from"; then
-    printf '%s...%s\n' "$from" "$to"
+    printf '%s..%s\n' "$from" "$to"
     return
   fi
 
   local parent
   parent="$(git rev-parse "${to}^" 2>/dev/null || true)"
   if sha_exists "$parent"; then
-    printf '%s...%s\n' "$parent" "$to"
+    printf '%s..%s\n' "$parent" "$to"
+    return
   fi
+
+  local empty_tree
+  empty_tree="$(git hash-object -t tree /dev/null)"
+  printf '%s..%s\n' "$empty_tree" "$to"
 }
 
 collect_changed_kotlin_files() {
-  local to="${VERIFY_TO_SHA:-HEAD}"
   local range
   range="$(resolve_diff_range)"
 
   local files=()
-  if [ -n "$range" ]; then
-    mapfile -t files < <(
-      git diff --name-only --diff-filter=ACMR "$range" -- '*.kt' '*.kts' | sed '/^$/d'
-    )
-  else
-    mapfile -t files < <(
-      git diff-tree --no-commit-id --name-only -r --diff-filter=ACMR "$to" -- '*.kt' '*.kts' | sed '/^$/d'
-    )
-  fi
+  mapfile -t files < <(
+    git diff --name-only --diff-filter=ACMR "$range" -- '*.kt' '*.kts' | sed '/^$/d'
+  )
 
   local existing=()
   local file

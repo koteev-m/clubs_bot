@@ -284,8 +284,10 @@ tasks.jacocoTestCoverageVerification {
             element = "CLASS"
             includes =
                 listOf(
-                    "com.example.bot.booking.a3.BookingA3Routes*",
-                    "com.example.bot.routes.CheckinRoutes*",
+                    "com.example.bot.routes.SecuredBookingRoutesKt",
+                    "com.example.bot.routes.CheckinRoutesKt",
+                    "com.example.bot.routes.PaymentsFinalizeRoutesKt",
+                    "com.example.bot.routes.PaymentsCancelRefundRoutesKt",
                 )
             limit {
                 counter = "LINE"
