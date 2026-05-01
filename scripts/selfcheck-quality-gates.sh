@@ -3,7 +3,24 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+SCA_CACHE_DIR="$ROOT_DIR/.gradle/dependency-check-data"
+SCA_MARKER="$SCA_CACHE_DIR/cache-warm.marker"
+SCA_MARKER_ONLY_LOG="$TMP_DIR/sca-marker-only.log"
+SCA_STALE_LOG="$TMP_DIR/sca-stale.log"
+SCA_BACKUP_DIR=""
+
+restore_sca_cache() {
+  rm -rf "$SCA_CACHE_DIR"
+  if [ -n "$SCA_BACKUP_DIR" ] && [ -d "$SCA_BACKUP_DIR" ]; then
+    mv "$SCA_BACKUP_DIR" "$SCA_CACHE_DIR"
+  fi
+}
+
+cleanup() {
+  restore_sca_cache
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
 fail() {
   echo "selfcheck: $1" >&2
@@ -32,6 +49,26 @@ assert_contains() {
     fail "expected output to contain '$needle', got: $haystack"
   fi
 }
+
+if [ -d "$SCA_CACHE_DIR" ]; then
+  SCA_BACKUP_DIR="$TMP_DIR/sca-cache-backup"
+  mv "$SCA_CACHE_DIR" "$SCA_BACKUP_DIR"
+fi
+
+mkdir -p "$SCA_CACHE_DIR"
+printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(date +%s%3N)" > "$SCA_MARKER"
+if NVD_API_KEY= ./gradlew --no-configuration-cache scaPreflight --console=plain >"$SCA_MARKER_ONLY_LOG" 2>&1; then
+  fail "expected scaPreflight to fail on marker-only cache"
+fi
+assert_contains "$(cat "$SCA_MARKER_ONLY_LOG")" "marker exists but Dependency-Check cache payload is empty/marker-only"
+
+mkdir -p "$SCA_CACHE_DIR/data/cache"
+printf 'payload' > "$SCA_CACHE_DIR/data/cache/nvd.json"
+printf 'warmedAt=1\nmaxAgeHours=168\n' > "$SCA_MARKER"
+if NVD_API_KEY= ./gradlew --no-configuration-cache scaPreflight --console=plain >"$SCA_STALE_LOG" 2>&1; then
+  fail "expected scaPreflight to fail on stale cache marker"
+fi
+assert_contains "$(cat "$SCA_STALE_LOG")" "local cache is stale"
 
 (
   cd "$TMP_DIR"
@@ -62,6 +99,8 @@ KOT
   no_kotlin_out="$($ROOT_DIR/scripts/changed-kotlin-files.sh)"
   assert_empty "$no_kotlin_out"
 
+  source_branch="$(git branch --show-current)"
+
   git checkout -q -b feature/merge-base
   cat > src/Feature.kt <<'KOT'
 fun feature() = 1
@@ -70,7 +109,7 @@ KOT
   git commit -q -m "feature adds kotlin"
   feature_head="$(git rev-parse HEAD)"
 
-  git checkout -q master
+  git checkout -q "$source_branch"
   cat > src/Mainline.kt <<'KOT'
 fun mainline() = 2
 KOT

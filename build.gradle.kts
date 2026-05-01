@@ -237,15 +237,15 @@ tasks.register("scaPreflight") {
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
             )
 
-        val cacheEntries =
+        val hasNonMarkerPayload =
             dependencyCheckDataDir
-                .listFiles()
-                ?.filterNot { it.name == dependencyCheckWarmMarker.name }
-                .orEmpty()
+                .walkTopDown()
+                .filter { it.isFile }
+                .any { it.name != dependencyCheckWarmMarker.name && it.length() > 0L }
 
-        if (cacheEntries.isEmpty()) {
+        if (!hasNonMarkerPayload) {
             throw GradleException(
-                "scaCheck warm marker exists but Dependency-Check cache payload is empty. " +
+                "scaCheck warm marker exists but Dependency-Check cache payload is empty/marker-only. " +
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
             )
         }
