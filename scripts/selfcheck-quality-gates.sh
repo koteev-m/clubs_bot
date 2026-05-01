@@ -61,6 +61,30 @@ KOT
 
   no_kotlin_out="$($ROOT_DIR/scripts/changed-kotlin-files.sh)"
   assert_empty "$no_kotlin_out"
+
+  git checkout -q -b feature/merge-base
+  cat > src/Feature.kt <<'KOT'
+fun feature() = 1
+KOT
+  git add src/Feature.kt
+  git commit -q -m "feature adds kotlin"
+  feature_head="$(git rev-parse HEAD)"
+
+  git checkout -q master
+  cat > src/Mainline.kt <<'KOT'
+fun mainline() = 2
+KOT
+  git add src/Mainline.kt
+  git commit -q -m "mainline kotlin"
+
+  merge_base_out="$(VERIFY_FROM_SHA="$feature_head" VERIFY_TO_SHA=HEAD "$ROOT_DIR/scripts/changed-kotlin-files.sh")"
+  assert_eq "$merge_base_out" "src/Mainline.kt"
+
+  rm src/Mainline.kt
+  git add -A
+  git commit -q -m "delete kotlin"
+  deleted_out="$(VERIFY_FROM_SHA=HEAD~1 VERIFY_TO_SHA=HEAD "$ROOT_DIR/scripts/changed-kotlin-files.sh")"
+  assert_empty "$deleted_out"
 )
 
 if DOCKER_BIN=__missing_docker__ "$ROOT_DIR/scripts/verify.sh" secret-scan; then

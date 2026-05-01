@@ -178,6 +178,7 @@ tasks.register<DependencyGuard>("dependencyGuard") {
 
 val dependencyCheckDataDir = File("${rootProject.projectDir}/.gradle/dependency-check-data")
 val dependencyCheckWarmMarker = dependencyCheckDataDir.resolve("cache-warm.marker")
+val scaCacheMaxAgeHours = 168L
 
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     failBuildOnCVSS = 7.0F
@@ -210,16 +211,51 @@ tasks.register("scaPreflight") {
     doLast {
         val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
         val hasApiKey = !nvdApiKey.isNullOrBlank()
-        val hasWarmMarker = dependencyCheckWarmMarker.exists()
-        val hasCacheData =
-            dependencyCheckDataDir.exists() &&
-                (dependencyCheckDataDir.listFiles()?.any { it.isFile || it.isDirectory } == true)
 
-        if (!hasApiKey && !(hasWarmMarker && hasCacheData)) {
+        if (hasApiKey) return@doLast
+
+        if (!dependencyCheckWarmMarker.exists()) {
             throw GradleException(
-                "scaCheck requires NVD_API_KEY or an explicitly warmed Dependency-Check cache. " +
-                    "Warm local cache via ./gradlew dependencyCheckUpdate scaWarmCacheMark with NVD_API_KEY, " +
-                    "then re-run scaCheck. Expected marker: ${dependencyCheckWarmMarker.path}",
+                "scaCheck requires NVD_API_KEY or warmed local cache. " +
+                    "No warm marker found at ${dependencyCheckWarmMarker.path}. " +
+                    "Run ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark with NVD_API_KEY.",
+            )
+        }
+
+        val markerFields =
+            dependencyCheckWarmMarker
+                .readLines()
+                .mapNotNull { line ->
+                    val idx = line.indexOf('=')
+                    if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
+                }.toMap()
+
+        val warmedAt =
+            markerFields["warmedAt"]?.toLongOrNull()
+                ?: throw GradleException(
+                "scaCheck warm marker is invalid (missing warmedAt). " +
+                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+            )
+
+        val cacheEntries =
+            dependencyCheckDataDir
+                .listFiles()
+                ?.filterNot { it.name == dependencyCheckWarmMarker.name }
+                .orEmpty()
+
+        if (cacheEntries.isEmpty()) {
+            throw GradleException(
+                "scaCheck warm marker exists but Dependency-Check cache payload is empty. " +
+                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+            )
+        }
+
+        val nowMillis = System.currentTimeMillis()
+        val maxAgeMillis = scaCacheMaxAgeHours * 60L * 60L * 1000L
+        if (nowMillis - warmedAt > maxAgeMillis) {
+            throw GradleException(
+                "scaCheck local cache is stale (older than ${scaCacheMaxAgeHours}h). " +
+                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
             )
         }
     }
@@ -231,7 +267,10 @@ tasks.register("scaWarmCacheMark") {
     dependsOn("dependencyCheckUpdate")
     doLast {
         dependencyCheckDataDir.mkdirs()
-        dependencyCheckWarmMarker.writeText("warmedAt=${System.currentTimeMillis()}\n")
+        dependencyCheckWarmMarker.writeText(
+            "warmedAt=${System.currentTimeMillis()}\n" +
+                "maxAgeHours=$scaCacheMaxAgeHours\n",
+        )
         logger.lifecycle("Dependency-Check cache warm marker updated: ${dependencyCheckWarmMarker.path}")
     }
 }

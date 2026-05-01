@@ -15,8 +15,12 @@ resolve_diff_range() {
   local to="${VERIFY_TO_SHA:-HEAD}"
 
   if [ -n "$from" ] && ! is_zero_sha "$from" && sha_exists "$from"; then
-    printf '%s..%s\n' "$from" "$to"
-    return
+    local merge_base
+    merge_base="$(git merge-base "$from" "$to" 2>/dev/null || true)"
+    if sha_exists "$merge_base"; then
+      printf '%s..%s\n' "$merge_base" "$to"
+      return
+    fi
   fi
 
   local parent

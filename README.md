@@ -52,8 +52,9 @@ Every PR is blocked until all gates are green:
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
   CI green-path: `NVD_API_KEY` в secrets и запуск `./gradlew --no-configuration-cache scaCheck`.
-  Local green-path: либо `NVD_API_KEY`, либо явно прогретый cache через `./gradlew dependencyCheckUpdate scaWarmCacheMark` (маркер `.gradle/dependency-check-data/cache-warm.marker`).
-  Local без key и без warm-cache — deterministic fail в `scaPreflight` с инструкцией как прогреть cache.
+  Local green-path: либо `NVD_API_KEY`, либо явно прогретый и свежий cache через `./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark` (маркер `.gradle/dependency-check-data/cache-warm.marker`).
+  `scaPreflight` не считает marker cache-данными: marker-only state всегда fail.
+  Local без key, без warm-cache или со stale marker (>168h) — deterministic fail в `scaPreflight` с инструкцией как прогреть cache.
 
 ### Waiver process for SCA findings
 
@@ -83,12 +84,15 @@ scripts/verify.sh lint
 ./gradlew --no-configuration-cache scaCheck --console=plain
 
 # прогреть локальный cache для SCA без постоянного NVD_API_KEY
-./gradlew dependencyCheckUpdate scaWarmCacheMark --console=plain
+./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark --console=plain
 
-# refresh dependency verification metadata (например после изменения tooling/deps)
+# no-key/no-cache (или stale cache) path: scaPreflight завершится ошибкой
+./gradlew --no-configuration-cache scaCheck --console=plain
+
+# refresh dependency verification metadata (tooling only, не реальный SCA scan)
 scripts/refresh-verification-metadata.sh
 
-# если нужно обновить metadata именно для SCA артефактов
+# если нужно обновить metadata именно для SCA toolchain артефактов
 scripts/refresh-verification-metadata.sh sca
 
 # secret scan (локально, если установлен docker)
