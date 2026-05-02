@@ -285,7 +285,9 @@ tasks.jacocoTestCoverageVerification {
             includes =
                 listOf(
                     "com.example.bot.routes.BookingA3RoutesKt",
+                    "com.example.bot.routes.SecuredBookingRoutesKt",
                     "com.example.bot.routes.CheckinRoutesKt",
+                    "com.example.bot.routes.CheckinCompatRoutesKt",
                     "com.example.bot.routes.HostCheckinRoutesKt",
                     "com.example.bot.routes.PaymentsCancelRefundRoutesKt",
                     "com.example.bot.routes.PaymentsFinalizeRoutesKt",

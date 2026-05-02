@@ -38,7 +38,7 @@ Task order by mode:
 - `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate scaCheck` → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
-- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, deterministic secret-scan failure без Docker, marker-only/stale SCA cache preflight).
+- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, deterministic secret-scan failure без Docker, valid/marker-only/junk/stale SCA cache preflight).
 
 ## PR quality gates (blocking)
 
@@ -48,12 +48,13 @@ Every PR is blocked until all gates are green:
   Baseline wiring: `app-bot` uses `config/detekt/baseline-main.xml` + `config/detekt/baseline-test.xml`; остальные модули используют `config/detekt/baseline-<module>.xml`.
   Historical debt фиксируется baseline-файлами, новые нарушения в PR блокируют CI.
 - **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate` (и верификация, и генерация `jacocoTestReport` для upload артефактов).
-  Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments contour is at least **60%** (booking/check-in/payment routes + core booking/payment services).
+  Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments contour is at least **60%**.
+  Critical contour classes: `BookingA3RoutesKt`, `SecuredBookingRoutesKt`, `CheckinRoutesKt`, `CheckinCompatRoutesKt`, `HostCheckinRoutesKt`, `PaymentsCancelRefundRoutesKt`, `PaymentsFinalizeRoutesKt`.
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
   CI green-path: `NVD_API_KEY` в secrets и запуск `./gradlew --no-configuration-cache scaCheck`.
-  Local green-path: либо `NVD_API_KEY`, либо явно прогретый и свежий cache через `./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark` (маркер `.gradle/dependency-check-data/cache-warm.marker`).
-  `scaPreflight` не считает marker cache-данными: marker-only state всегда fail.
+  Local green-path: либо `NVD_API_KEY`, либо явно прогретый и свежий cache через `./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark` (пишутся `.gradle/dependency-check-data/cache-warm.marker` и `.gradle/dependency-check-data/cache-warm.manifest`).
+  `scaPreflight` валидирует manifest-based contract (количество/вес/digest payload-файлов) и не считает marker-only/junk cache корректными данными.
   Local без key, без warm-cache или со stale marker (>168h) — deterministic fail в `scaPreflight` с инструкцией как прогреть cache.
 
 ### Waiver process for SCA findings

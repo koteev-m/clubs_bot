@@ -3,21 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
-SCA_CACHE_DIR="$ROOT_DIR/.gradle/dependency-check-data"
+SCA_CACHE_DIR="$TMP_DIR/sca-cache"
 SCA_MARKER="$SCA_CACHE_DIR/cache-warm.marker"
+SCA_MANIFEST="$SCA_CACHE_DIR/cache-warm.manifest"
+SCA_VALID_LOG="$TMP_DIR/sca-valid.log"
 SCA_MARKER_ONLY_LOG="$TMP_DIR/sca-marker-only.log"
+SCA_JUNK_LOG="$TMP_DIR/sca-junk.log"
 SCA_STALE_LOG="$TMP_DIR/sca-stale.log"
-SCA_BACKUP_DIR=""
-
-restore_sca_cache() {
-  rm -rf "$SCA_CACHE_DIR"
-  if [ -n "$SCA_BACKUP_DIR" ] && [ -d "$SCA_BACKUP_DIR" ]; then
-    mv "$SCA_BACKUP_DIR" "$SCA_CACHE_DIR"
-  fi
-}
 
 cleanup() {
-  restore_sca_cache
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -50,22 +44,30 @@ assert_contains() {
   fi
 }
 
-if [ -d "$SCA_CACHE_DIR" ]; then
-  SCA_BACKUP_DIR="$TMP_DIR/sca-cache-backup"
-  mv "$SCA_CACHE_DIR" "$SCA_BACKUP_DIR"
-fi
-
 mkdir -p "$SCA_CACHE_DIR"
 printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(date +%s%3N)" > "$SCA_MARKER"
-if NVD_API_KEY= ./gradlew --no-configuration-cache scaPreflight --console=plain >"$SCA_MARKER_ONLY_LOG" 2>&1; then
+if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_MARKER_ONLY_LOG" 2>&1; then
   fail "expected scaPreflight to fail on marker-only cache"
 fi
-assert_contains "$(cat "$SCA_MARKER_ONLY_LOG")" "marker exists but Dependency-Check cache payload is empty/marker-only"
+assert_contains "$(cat "$SCA_MARKER_ONLY_LOG")" "Warm marker/manifest not found"
 
 mkdir -p "$SCA_CACHE_DIR/data/cache"
 printf 'payload' > "$SCA_CACHE_DIR/data/cache/nvd.json"
+payload_size="$(wc -c < "$SCA_CACHE_DIR/data/cache/nvd.json" | tr -d ' ')"
+printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=data/cache/nvd.json:%s\n' "$payload_size" "$payload_size" > "$SCA_MANIFEST"
+if ! NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_VALID_LOG" 2>&1; then
+  fail "expected scaPreflight to pass with valid cache manifest"
+fi
+
+printf 'payloadFileCount=1\npayloadTotalBytes=9999\npayloadDigest=junk\n' > "$SCA_MANIFEST"
+if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_JUNK_LOG" 2>&1; then
+  fail "expected scaPreflight to fail on junk payload manifest"
+fi
+assert_contains "$(cat "$SCA_JUNK_LOG")" "warm manifest does not match cache payload"
+
+printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=data/cache/nvd.json:%s\n' "$payload_size" "$payload_size" > "$SCA_MANIFEST"
 printf 'warmedAt=1\nmaxAgeHours=168\n' > "$SCA_MARKER"
-if NVD_API_KEY= ./gradlew --no-configuration-cache scaPreflight --console=plain >"$SCA_STALE_LOG" 2>&1; then
+if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_STALE_LOG" 2>&1; then
   fail "expected scaPreflight to fail on stale cache marker"
 fi
 assert_contains "$(cat "$SCA_STALE_LOG")" "local cache is stale"

@@ -176,8 +176,14 @@ tasks.register<DependencyGuard>("dependencyGuard") {
     description = "Fail build if dependency rules are violated"
 }
 
-val dependencyCheckDataDir = File("${rootProject.projectDir}/.gradle/dependency-check-data")
+val dependencyCheckDataDirPath =
+    providers
+        .gradleProperty("dependencyCheckDataDir")
+        .orElse(providers.environmentVariable("DEPENDENCY_CHECK_DATA_DIR"))
+        .orElse("${rootProject.projectDir}/.gradle/dependency-check-data")
+val dependencyCheckDataDir = File(dependencyCheckDataDirPath.get())
 val dependencyCheckWarmMarker = dependencyCheckDataDir.resolve("cache-warm.marker")
+val dependencyCheckWarmManifest = dependencyCheckDataDir.resolve("cache-warm.manifest")
 val scaCacheMaxAgeHours = 168L
 
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
@@ -214,10 +220,10 @@ tasks.register("scaPreflight") {
 
         if (hasApiKey) return@doLast
 
-        if (!dependencyCheckWarmMarker.exists()) {
+        if (!dependencyCheckWarmMarker.exists() || !dependencyCheckWarmManifest.exists()) {
             throw GradleException(
                 "scaCheck requires NVD_API_KEY or warmed local cache. " +
-                    "No warm marker found at ${dependencyCheckWarmMarker.path}. " +
+                    "Warm marker/manifest not found at ${dependencyCheckWarmMarker.path} and ${dependencyCheckWarmManifest.path}. " +
                     "Run ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark with NVD_API_KEY.",
             )
         }
@@ -237,15 +243,60 @@ tasks.register("scaPreflight") {
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
             )
 
-        val hasNonMarkerPayload =
+        val manifestFields =
+            dependencyCheckWarmManifest
+                .readLines()
+                .mapNotNull { line ->
+                    val idx = line.indexOf('=')
+                    if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
+                }.toMap()
+
+        val payloadFileCount =
+            manifestFields["payloadFileCount"]?.toLongOrNull()
+                ?: throw GradleException(
+                    "scaCheck warm manifest is invalid (missing payloadFileCount). " +
+                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+                )
+        val payloadTotalBytes =
+            manifestFields["payloadTotalBytes"]?.toLongOrNull()
+                ?: throw GradleException(
+                    "scaCheck warm manifest is invalid (missing payloadTotalBytes). " +
+                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+                )
+        val payloadDigest =
+            manifestFields["payloadDigest"]?.takeIf { it.isNotBlank() }
+                ?: throw GradleException(
+                    "scaCheck warm manifest is invalid (missing payloadDigest). " +
+                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+                )
+
+        val payloadFiles =
             dependencyCheckDataDir
                 .walkTopDown()
                 .filter { it.isFile }
-                .any { it.name != dependencyCheckWarmMarker.name && it.length() > 0L }
+                .filterNot { it == dependencyCheckWarmMarker || it == dependencyCheckWarmManifest }
+                .toList()
 
-        if (!hasNonMarkerPayload) {
+        val actualPayloadFileCount = payloadFiles.size.toLong()
+        val actualPayloadTotalBytes = payloadFiles.sumOf { it.length() }
+        val actualPayloadDigest =
+            payloadFiles
+                .asSequence()
+                .map { file ->
+                    val relativePath = file.relativeTo(dependencyCheckDataDir).invariantSeparatorsPath
+                    "$relativePath:${file.length()}"
+                }.sorted()
+                .joinToString(separator = "|")
+
+        if (payloadFileCount <= 0L || payloadTotalBytes <= 0L) {
             throw GradleException(
-                "scaCheck warm marker exists but Dependency-Check cache payload is empty/marker-only. " +
+                "scaCheck warm manifest reports empty payload (marker-only/junk state). " +
+                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+            )
+        }
+        if (payloadFileCount != actualPayloadFileCount || payloadTotalBytes != actualPayloadTotalBytes || payloadDigest != actualPayloadDigest) {
+            throw GradleException(
+                "scaCheck warm manifest does not match cache payload. " +
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
             )
         }
@@ -267,9 +318,30 @@ tasks.register("scaWarmCacheMark") {
     dependsOn("dependencyCheckUpdate")
     doLast {
         dependencyCheckDataDir.mkdirs()
+        val payloadFiles =
+            dependencyCheckDataDir
+                .walkTopDown()
+                .filter { it.isFile }
+                .filterNot { it == dependencyCheckWarmMarker || it == dependencyCheckWarmManifest }
+                .toList()
+        val payloadFileCount = payloadFiles.size
+        val payloadTotalBytes = payloadFiles.sumOf { it.length() }
+        val payloadDigest =
+            payloadFiles
+                .asSequence()
+                .map { file ->
+                    val relativePath = file.relativeTo(dependencyCheckDataDir).invariantSeparatorsPath
+                    "$relativePath:${file.length()}"
+                }.sorted()
+                .joinToString(separator = "|")
         dependencyCheckWarmMarker.writeText(
             "warmedAt=${System.currentTimeMillis()}\n" +
                 "maxAgeHours=$scaCacheMaxAgeHours\n",
+        )
+        dependencyCheckWarmManifest.writeText(
+            "payloadFileCount=$payloadFileCount\n" +
+                "payloadTotalBytes=$payloadTotalBytes\n" +
+                "payloadDigest=$payloadDigest\n",
         )
         logger.lifecycle("Dependency-Check cache warm marker updated: ${dependencyCheckWarmMarker.path}")
     }
