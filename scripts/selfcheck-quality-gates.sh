@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/sha256-portable.sh"
 TMP_DIR="$(mktemp -d)"
 SCA_CACHE_DIR="$TMP_DIR/sca-cache"
 SCA_MARKER="$SCA_CACHE_DIR/cache-warm.marker"
@@ -63,30 +65,6 @@ assert_contains() {
   fi
 }
 
-sha256_file() {
-  local file="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-    return 0
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$file" | awk '{print $1}'
-    return 0
-  fi
-  fail "neither sha256sum nor shasum -a 256 is available"
-}
-
-sha256_stdin() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{print $1}'
-    return 0
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 | awk '{print $1}'
-    return 0
-  fi
-  fail "neither sha256sum nor shasum -a 256 is available"
-}
 
 mkdir -p "$SCA_CACHE_DIR"
 printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
@@ -122,6 +100,13 @@ printf 'payloadFileCount=2\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/ca
 if ! NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_VALID_LOG" 2>&1; then
   fail "expected scaPreflight to pass with valid multi-file cache manifest"
 fi
+
+printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\n' \
+  "$payload_size" "$payload_digest" "$payload_size" "$payload_sha" > "$SCA_MANIFEST"
+if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_JUNK_LOG" 2>&1; then
+  fail "expected scaPreflight to fail on file-set mismatch (missing entry)"
+fi
+assert_contains "$(cat "$SCA_JUNK_LOG")" "warm manifest does not match cache payload"
 
 printf 'payloadFileCount=1\npayloadTotalBytes=9999\npayloadDigest=junk\nfile=data/cache/nvd.json|%s|junk\n' "$payload_size" > "$SCA_MANIFEST"
 if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_JUNK_LOG" 2>&1; then
