@@ -21,8 +21,30 @@ install_ktlint_cli() {
     chmod +x "$ktlint_bin"
   fi
 
-  echo "${ktlint_sha256}  ${ktlint_bin}" | sha256sum -c - >/dev/null
+  verify_sha256 "$ktlint_bin" "$ktlint_sha256"
   printf '%s\n' "$ktlint_bin"
+}
+
+sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+    return 0
+  fi
+  echo "Neither sha256sum nor shasum -a 256 is available" >&2
+  return 1
+}
+
+verify_sha256() {
+  local file="$1"
+  local expected="$2"
+  local actual
+  actual="$(sha256_file "$file")"
+  [ "$actual" = "$expected" ]
 }
 
 main() {

@@ -206,6 +206,19 @@ fun sha256Hex(bytes: ByteArray): String =
         .digest(bytes)
         .joinToString("") { "%02x".format(it) }
 
+fun File.sha256HexStreaming(): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    inputStream().buffered().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
+
 fun collectScaPayloadEntries(
     dataDir: File,
     marker: File,
@@ -220,7 +233,7 @@ fun collectScaPayloadEntries(
             ScaPayloadEntry(
                 path = relativePath,
                 size = file.length(),
-                sha256 = sha256Hex(file.readBytes()),
+                sha256 = file.sha256HexStreaming(),
             )
         }.sortedBy { it.path }
         .toList()
@@ -254,8 +267,9 @@ fun parseScaPayloadManifest(file: File): ScaPayloadManifest {
             entries +=
                 ScaPayloadEntry(
                     path = parts[0],
-                    size = parts[1].toLongOrNull()
-                        ?: throw GradleException("scaCheck warm manifest is invalid (malformed file size)"),
+                    size =
+                        parts[1].toLongOrNull()
+                            ?: throw GradleException("scaCheck warm manifest is invalid (malformed file size)"),
                     sha256 = parts[2],
                 )
         } else {
@@ -314,9 +328,11 @@ tasks.register("scaPreflight") {
         if (hasApiKey) return@doLast
 
         if (!dependencyCheckWarmMarker.exists() || !dependencyCheckWarmManifest.exists()) {
+            val markerPath = dependencyCheckWarmMarker.path
+            val manifestPath = dependencyCheckWarmManifest.path
             throw GradleException(
                 "scaCheck requires NVD_API_KEY or warmed local cache. " +
-                    "Warm marker/manifest not found at ${dependencyCheckWarmMarker.path} and ${dependencyCheckWarmManifest.path}. " +
+                    "Warm marker/manifest not found at $markerPath and $manifestPath. " +
                     "Run ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark with NVD_API_KEY.",
             )
         }
@@ -332,17 +348,20 @@ tasks.register("scaPreflight") {
         val warmedAt =
             markerFields["warmedAt"]?.toLongOrNull()
                 ?: throw GradleException(
-                "scaCheck warm marker is invalid (missing warmedAt). " +
-                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-            )
+                    "scaCheck warm marker is invalid (missing warmedAt). " +
+                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+                )
 
         val manifest =
             try {
                 parseScaPayloadManifest(dependencyCheckWarmManifest)
             } catch (e: GradleException) {
-                throw GradleException("${e.message}. Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark")
+                throw GradleException(
+                    "${e.message}. Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+                )
             }
-        val actualEntries = collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
+        val actualEntries =
+            collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
         val actualPayloadFileCount = actualEntries.size.toLong()
         val actualPayloadTotalBytes = actualEntries.sumOf { it.size }
         val actualPayloadDigest = aggregateScaPayloadDigest(actualEntries)
@@ -382,7 +401,8 @@ tasks.register("scaWarmCacheMark") {
     dependsOn("dependencyCheckUpdate")
     doLast {
         dependencyCheckDataDir.mkdirs()
-        val payloadEntries = collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
+        val payloadEntries =
+            collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
         dependencyCheckWarmMarker.writeText(
             "warmedAt=${System.currentTimeMillis()}\n" +
                 "maxAgeHours=$scaCacheMaxAgeHours\n",
