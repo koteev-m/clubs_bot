@@ -54,7 +54,7 @@ Every PR is blocked until all gates are green:
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
   CI green-path: `NVD_API_KEY` в secrets и запуск `./gradlew --no-configuration-cache scaCheck`.
   Local green-path: либо `NVD_API_KEY`, либо явно прогретый и свежий cache через `./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark` (пишутся `.gradle/dependency-check-data/cache-warm.marker` и `.gradle/dependency-check-data/cache-warm.manifest`).
-  `scaPreflight` валидирует manifest-based contract (количество/вес/digest payload-файлов) и не считает marker-only/junk cache корректными данными.
+  `scaPreflight` валидирует manifest-based contract (exact file set + SHA-256 каждого payload-файла + aggregate digest) и не считает marker-only/junk cache корректными данными.
   Local без key, без warm-cache или со stale marker (>168h) — deterministic fail в `scaPreflight` с инструкцией как прогреть cache.
 
 ### Waiver process for SCA findings
@@ -93,7 +93,7 @@ scripts/verify.sh lint
 # refresh dependency verification metadata (tooling only, не реальный SCA scan)
 scripts/refresh-verification-metadata.sh
 
-# если нужно обновить metadata именно для SCA toolchain артефактов
+# heavy-path metadata refresh для SCA task graph (scaPreflight + dependencyCheckAggregate), не "лёгкий" режим
 scripts/refresh-verification-metadata.sh sca
 
 # secret scan (локально, если установлен docker)

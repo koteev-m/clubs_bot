@@ -10,11 +10,11 @@ Usage: scripts/refresh-verification-metadata.sh [default|sca]
 
 Modes:
   default  Refresh metadata for lightweight Gradle task graph (help).
-  sca      Refresh metadata including SCA tooling path (dependencyCheckAggregate).
+  sca      Heavy metadata refresh for SCA path (scaPreflight + dependencyCheckAggregate graph).
 
 Notes:
   - This script updates Gradle dependency verification metadata only.
-  - It does not execute a full SCA vulnerability scan policy gate.
+  - Mode "sca" traverses aggregate SCA task graph and preflight contract; it is not a lightweight toolchain-only action.
   - For real SCA gate run: ./gradlew --no-configuration-cache scaCheck --console=plain
 USAGE
 }

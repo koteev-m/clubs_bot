@@ -291,6 +291,9 @@ tasks.jacocoTestCoverageVerification {
                     "com.example.bot.routes.HostCheckinRoutesKt",
                     "com.example.bot.routes.PaymentsCancelRefundRoutesKt",
                     "com.example.bot.routes.PaymentsFinalizeRoutesKt",
+                    "com.example.bot.booking.a3.BookingState",
+                    "com.example.bot.telemetry.PaymentsObservability",
+                    "com.example.bot.metrics.UiCheckinMetrics",
                 )
             limit {
                 counter = "LINE"

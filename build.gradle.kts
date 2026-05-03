@@ -18,6 +18,7 @@ import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.withType
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 
 plugins {
@@ -186,6 +187,98 @@ val dependencyCheckWarmMarker = dependencyCheckDataDir.resolve("cache-warm.marke
 val dependencyCheckWarmManifest = dependencyCheckDataDir.resolve("cache-warm.manifest")
 val scaCacheMaxAgeHours = 168L
 
+data class ScaPayloadEntry(
+    val path: String,
+    val size: Long,
+    val sha256: String,
+)
+
+data class ScaPayloadManifest(
+    val payloadFileCount: Long,
+    val payloadTotalBytes: Long,
+    val payloadDigest: String,
+    val entries: List<ScaPayloadEntry>,
+)
+
+fun sha256Hex(bytes: ByteArray): String =
+    MessageDigest
+        .getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { "%02x".format(it) }
+
+fun collectScaPayloadEntries(
+    dataDir: File,
+    marker: File,
+    manifest: File,
+): List<ScaPayloadEntry> =
+    dataDir
+        .walkTopDown()
+        .filter { it.isFile }
+        .filterNot { it == marker || it == manifest }
+        .map { file ->
+            val relativePath = file.relativeTo(dataDir).invariantSeparatorsPath
+            ScaPayloadEntry(
+                path = relativePath,
+                size = file.length(),
+                sha256 = sha256Hex(file.readBytes()),
+            )
+        }.sortedBy { it.path }
+        .toList()
+
+fun aggregateScaPayloadDigest(entries: List<ScaPayloadEntry>): String =
+    sha256Hex(entries.joinToString("\n") { "${it.path}:${it.size}:${it.sha256}" }.toByteArray())
+
+fun serializeScaPayloadManifest(entries: List<ScaPayloadEntry>): String {
+    val totalBytes = entries.sumOf { it.size }
+    val aggregateDigest = aggregateScaPayloadDigest(entries)
+    val payloadLines = entries.joinToString(separator = "\n") { "file=${it.path}|${it.size}|${it.sha256}" }
+    return buildString {
+        append("payloadFileCount=${entries.size}\n")
+        append("payloadTotalBytes=$totalBytes\n")
+        append("payloadDigest=$aggregateDigest\n")
+        if (payloadLines.isNotEmpty()) {
+            append(payloadLines)
+            append('\n')
+        }
+    }
+}
+
+fun parseScaPayloadManifest(file: File): ScaPayloadManifest {
+    val fields = mutableMapOf<String, String>()
+    val entries = mutableListOf<ScaPayloadEntry>()
+    file.readLines().forEach { line ->
+        if (line.startsWith("file=")) {
+            val payload = line.removePrefix("file=")
+            val parts = payload.split('|', limit = 3)
+            if (parts.size != 3) throw GradleException("scaCheck warm manifest is invalid (malformed file entry)")
+            entries +=
+                ScaPayloadEntry(
+                    path = parts[0],
+                    size = parts[1].toLongOrNull()
+                        ?: throw GradleException("scaCheck warm manifest is invalid (malformed file size)"),
+                    sha256 = parts[2],
+                )
+        } else {
+            val idx = line.indexOf('=')
+            if (idx > 0) {
+                fields[line.substring(0, idx)] = line.substring(idx + 1)
+            }
+        }
+    }
+    return ScaPayloadManifest(
+        payloadFileCount =
+            fields["payloadFileCount"]?.toLongOrNull()
+                ?: throw GradleException("scaCheck warm manifest is invalid (missing payloadFileCount)"),
+        payloadTotalBytes =
+            fields["payloadTotalBytes"]?.toLongOrNull()
+                ?: throw GradleException("scaCheck warm manifest is invalid (missing payloadTotalBytes)"),
+        payloadDigest =
+            fields["payloadDigest"]?.takeIf { it.isNotBlank() }
+                ?: throw GradleException("scaCheck warm manifest is invalid (missing payloadDigest)"),
+        entries = entries.sortedBy { it.path },
+    )
+}
+
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     failBuildOnCVSS = 7.0F
     suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
@@ -243,58 +336,29 @@ tasks.register("scaPreflight") {
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
             )
 
-        val manifestFields =
-            dependencyCheckWarmManifest
-                .readLines()
-                .mapNotNull { line ->
-                    val idx = line.indexOf('=')
-                    if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
-                }.toMap()
+        val manifest =
+            try {
+                parseScaPayloadManifest(dependencyCheckWarmManifest)
+            } catch (e: GradleException) {
+                throw GradleException("${e.message}. Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark")
+            }
+        val actualEntries = collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
+        val actualPayloadFileCount = actualEntries.size.toLong()
+        val actualPayloadTotalBytes = actualEntries.sumOf { it.size }
+        val actualPayloadDigest = aggregateScaPayloadDigest(actualEntries)
 
-        val payloadFileCount =
-            manifestFields["payloadFileCount"]?.toLongOrNull()
-                ?: throw GradleException(
-                    "scaCheck warm manifest is invalid (missing payloadFileCount). " +
-                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-                )
-        val payloadTotalBytes =
-            manifestFields["payloadTotalBytes"]?.toLongOrNull()
-                ?: throw GradleException(
-                    "scaCheck warm manifest is invalid (missing payloadTotalBytes). " +
-                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-                )
-        val payloadDigest =
-            manifestFields["payloadDigest"]?.takeIf { it.isNotBlank() }
-                ?: throw GradleException(
-                    "scaCheck warm manifest is invalid (missing payloadDigest). " +
-                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-                )
-
-        val payloadFiles =
-            dependencyCheckDataDir
-                .walkTopDown()
-                .filter { it.isFile }
-                .filterNot { it == dependencyCheckWarmMarker || it == dependencyCheckWarmManifest }
-                .toList()
-
-        val actualPayloadFileCount = payloadFiles.size.toLong()
-        val actualPayloadTotalBytes = payloadFiles.sumOf { it.length() }
-        val actualPayloadDigest =
-            payloadFiles
-                .asSequence()
-                .map { file ->
-                    val relativePath = file.relativeTo(dependencyCheckDataDir).invariantSeparatorsPath
-                    "$relativePath:${file.length()}"
-                }.sorted()
-                .joinToString(separator = "|")
-
-        if (payloadFileCount <= 0L || payloadTotalBytes <= 0L) {
+        if (manifest.payloadFileCount <= 0L || manifest.payloadTotalBytes <= 0L || manifest.entries.isEmpty()) {
             throw GradleException(
                 "scaCheck warm manifest reports empty payload (marker-only/junk state). " +
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
             )
         }
-        if (payloadFileCount != actualPayloadFileCount || payloadTotalBytes != actualPayloadTotalBytes || payloadDigest != actualPayloadDigest) {
+        if (
+            manifest.payloadFileCount != actualPayloadFileCount ||
+            manifest.payloadTotalBytes != actualPayloadTotalBytes ||
+            manifest.payloadDigest != actualPayloadDigest ||
+            manifest.entries != actualEntries
+        ) {
             throw GradleException(
                 "scaCheck warm manifest does not match cache payload. " +
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
@@ -318,31 +382,12 @@ tasks.register("scaWarmCacheMark") {
     dependsOn("dependencyCheckUpdate")
     doLast {
         dependencyCheckDataDir.mkdirs()
-        val payloadFiles =
-            dependencyCheckDataDir
-                .walkTopDown()
-                .filter { it.isFile }
-                .filterNot { it == dependencyCheckWarmMarker || it == dependencyCheckWarmManifest }
-                .toList()
-        val payloadFileCount = payloadFiles.size
-        val payloadTotalBytes = payloadFiles.sumOf { it.length() }
-        val payloadDigest =
-            payloadFiles
-                .asSequence()
-                .map { file ->
-                    val relativePath = file.relativeTo(dependencyCheckDataDir).invariantSeparatorsPath
-                    "$relativePath:${file.length()}"
-                }.sorted()
-                .joinToString(separator = "|")
+        val payloadEntries = collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
         dependencyCheckWarmMarker.writeText(
             "warmedAt=${System.currentTimeMillis()}\n" +
                 "maxAgeHours=$scaCacheMaxAgeHours\n",
         )
-        dependencyCheckWarmManifest.writeText(
-            "payloadFileCount=$payloadFileCount\n" +
-                "payloadTotalBytes=$payloadTotalBytes\n" +
-                "payloadDigest=$payloadDigest\n",
-        )
+        dependencyCheckWarmManifest.writeText(serializeScaPayloadManifest(payloadEntries))
         logger.lifecycle("Dependency-Check cache warm marker updated: ${dependencyCheckWarmMarker.path}")
     }
 }
