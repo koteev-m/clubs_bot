@@ -24,22 +24,8 @@ install_ktlint_cli() {
     chmod +x "$ktlint_bin"
   fi
 
-  verify_sha256 "$ktlint_bin" "$ktlint_sha256"
+  verify_sha256 "$ktlint_bin" "$ktlint_sha256" || return 1
   printf '%s\n' "$ktlint_bin"
-}
-
-verify_sha256() {
-  local file="$1"
-  local expected="$2"
-  local actual
-  actual="$(sha256_file "$file")"
-  if [ "$actual" != "$expected" ]; then
-    echo "Checksum mismatch for $file" >&2
-    echo "Expected: $expected" >&2
-    echo "Actual:   $actual" >&2
-    return 1
-  fi
-
 }
 
 main() {
