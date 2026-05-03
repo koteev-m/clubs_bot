@@ -10,6 +10,9 @@ if [ -f "$QUALITY_GATES_ENV" ]; then
   source "$QUALITY_GATES_ENV"
 fi
 
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/sha256-portable.sh"
+
 install_ktlint_cli() {
   local ktlint_bin="${KTLINT_BIN:-$ROOT_DIR/.tools/ktlint}"
   local ktlint_version="${KTLINT_VERSION:-1.3.1}"
@@ -25,26 +28,18 @@ install_ktlint_cli() {
   printf '%s\n' "$ktlint_bin"
 }
 
-sha256_file() {
-  local file="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-    return 0
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$file" | awk '{print $1}'
-    return 0
-  fi
-  echo "Neither sha256sum nor shasum -a 256 is available" >&2
-  return 1
-}
-
 verify_sha256() {
   local file="$1"
   local expected="$2"
   local actual
   actual="$(sha256_file "$file")"
-  [ "$actual" = "$expected" ]
+  if [ "$actual" != "$expected" ]; then
+    echo "Checksum mismatch for $file" >&2
+    echo "Expected: $expected" >&2
+    echo "Actual:   $actual" >&2
+    return 1
+  fi
+
 }
 
 main() {

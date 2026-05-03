@@ -38,7 +38,7 @@ Task order by mode:
 - `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate scaCheck` → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
-- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, deterministic secret-scan failure без Docker, valid single-file/multi-file SCA cache manifest, negative marker-only/junk/stale/same-size-different-content cases).
+- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, deterministic secret-scan failure без Docker, valid single-file/multi-file SCA cache manifest, negative marker-only/junk/stale/same-size-different-content/file-set-mismatch cases).
 
 ## PR quality gates (blocking)
 
@@ -54,7 +54,7 @@ Every PR is blocked until all gates are green:
 - **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
   CI green-path: `NVD_API_KEY` в secrets и запуск `./gradlew --no-configuration-cache scaCheck`.
   Local green-path: либо `NVD_API_KEY`, либо явно прогретый и свежий cache через `./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark` (пишутся `.gradle/dependency-check-data/cache-warm.marker` и `.gradle/dependency-check-data/cache-warm.manifest`).
-  `scaPreflight` валидирует manifest-based contract (exact file set + SHA-256 каждого payload-файла + aggregate digest) и не считает marker-only/junk cache корректными данными.
+  `scaPreflight` валидирует manifest-based contract (exact file set (включая лишние/отсутствующие файлы) + SHA-256 каждого payload-файла + aggregate digest) и не считает marker-only/junk cache корректными данными.
   Local без key, без warm-cache или со stale marker (>168h) — deterministic fail в `scaPreflight` с инструкцией как прогреть cache.
 
 ### Waiver process for SCA findings

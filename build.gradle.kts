@@ -403,11 +403,46 @@ tasks.register("scaWarmCacheMark") {
         dependencyCheckDataDir.mkdirs()
         val payloadEntries =
             collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
+
+        if (payloadEntries.isEmpty()) {
+            throw GradleException(
+                "scaWarmCacheMark failed: dependencyCheckUpdate produced empty/invalid payload. " +
+                    "Warm marker/manifest will not be updated.",
+            )
+        }
+
+        val manifestText = serializeScaPayloadManifest(payloadEntries)
+        val tempManifest =
+            kotlin.io.path
+                .createTempFile("sca-warm-manifest", ".tmp")
+                .toFile()
+        val parsedManifest =
+            try {
+                tempManifest.writeText(manifestText)
+                parseScaPayloadManifest(tempManifest)
+            } finally {
+                tempManifest.delete()
+            }
+
+        val totalBytes = payloadEntries.sumOf { it.size }
+        val digest = aggregateScaPayloadDigest(payloadEntries)
+        if (
+            parsedManifest.payloadFileCount != payloadEntries.size.toLong() ||
+            parsedManifest.payloadTotalBytes != totalBytes ||
+            parsedManifest.payloadDigest != digest ||
+            parsedManifest.entries != payloadEntries
+        ) {
+            throw GradleException(
+                "scaWarmCacheMark failed: generated warm manifest contract is invalid. " +
+                    "Warm marker/manifest will not be updated.",
+            )
+        }
+
         dependencyCheckWarmMarker.writeText(
             "warmedAt=${System.currentTimeMillis()}\n" +
                 "maxAgeHours=$scaCacheMaxAgeHours\n",
         )
-        dependencyCheckWarmManifest.writeText(serializeScaPayloadManifest(payloadEntries))
+        dependencyCheckWarmManifest.writeText(manifestText)
         logger.lifecycle("Dependency-Check cache warm marker updated: ${dependencyCheckWarmMarker.path}")
     }
 }
