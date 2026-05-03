@@ -63,6 +63,31 @@ assert_contains() {
   fi
 }
 
+sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+    return 0
+  fi
+  fail "neither sha256sum nor shasum -a 256 is available"
+}
+
+sha256_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+    return 0
+  fi
+  fail "neither sha256sum nor shasum -a 256 is available"
+}
+
 mkdir -p "$SCA_CACHE_DIR"
 printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
 if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_MARKER_ONLY_LOG" 2>&1; then
@@ -74,12 +99,28 @@ printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
 mkdir -p "$SCA_CACHE_DIR/data/cache"
 printf 'payload' > "$SCA_CACHE_DIR/data/cache/nvd.json"
 payload_size="$(wc -c < "$SCA_CACHE_DIR/data/cache/nvd.json" | tr -d ' ')"
-payload_sha="$(sha256sum "$SCA_CACHE_DIR/data/cache/nvd.json" | awk '{print $1}')"
-payload_digest="$(printf 'data/cache/nvd.json:%s:%s' "$payload_size" "$payload_sha" | sha256sum | awk '{print $1}')"
+payload_sha="$(sha256_file "$SCA_CACHE_DIR/data/cache/nvd.json")"
+payload_digest="$(printf 'data/cache/nvd.json:%s:%s' "$payload_size" "$payload_sha" | sha256_stdin)"
 printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\n' \
   "$payload_size" "$payload_digest" "$payload_size" "$payload_sha" > "$SCA_MANIFEST"
 if ! NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_VALID_LOG" 2>&1; then
   fail "expected scaPreflight to pass with valid cache manifest"
+fi
+
+printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
+printf 'payload-2' > "$SCA_CACHE_DIR/data/cache/nvd2.json"
+payload2_size="$(wc -c < "$SCA_CACHE_DIR/data/cache/nvd2.json" | tr -d ' ')"
+payload2_sha="$(sha256_file "$SCA_CACHE_DIR/data/cache/nvd2.json")"
+payload_multidigest="$(
+  {
+    printf 'data/cache/nvd.json:%s:%s\n' "$payload_size" "$payload_sha"
+    printf 'data/cache/nvd2.json:%s:%s' "$payload2_size" "$payload2_sha"
+  } | sha256_stdin
+)"
+printf 'payloadFileCount=2\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\nfile=data/cache/nvd2.json|%s|%s\n' \
+  "$((payload_size + payload2_size))" "$payload_multidigest" "$payload_size" "$payload_sha" "$payload2_size" "$payload2_sha" > "$SCA_MANIFEST"
+if ! NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_VALID_LOG" 2>&1; then
+  fail "expected scaPreflight to pass with valid multi-file cache manifest"
 fi
 
 printf 'payloadFileCount=1\npayloadTotalBytes=9999\npayloadDigest=junk\nfile=data/cache/nvd.json|%s|junk\n' "$payload_size" > "$SCA_MANIFEST"
@@ -90,6 +131,7 @@ assert_contains "$(cat "$SCA_JUNK_LOG")" "warm manifest does not match cache pay
 
 printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\n' \
   "$payload_size" "$payload_digest" "$payload_size" "$payload_sha" > "$SCA_MANIFEST"
+rm -f "$SCA_CACHE_DIR/data/cache/nvd2.json"
 printf 'warmedAt=1\nmaxAgeHours=168\n' > "$SCA_MARKER"
 if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_STALE_LOG" 2>&1; then
   fail "expected scaPreflight to fail on stale cache marker"
