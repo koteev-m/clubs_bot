@@ -2,7 +2,7 @@ package com.example.bot.plugins
 
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
-import io.ktor.server.plugins.requesttimeout.RequestTimeout
+import com.example.bot.ktor.plugins.RequestTimeout
 
 internal const val DEFAULT_CHECKIN_MAX_BYTES: Long = 4_096L // 4 KB
 internal const val MIN_CHECKIN_MAX_BYTES: Long = 512L
