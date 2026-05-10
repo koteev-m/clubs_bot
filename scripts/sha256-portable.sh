@@ -27,3 +27,23 @@ sha256_stdin() {
   echo "Neither sha256sum nor shasum -a 256 is available" >&2
   return 1
 }
+
+print_checksum_mismatch() {
+  local file="$1"
+  local expected="$2"
+  local actual="$3"
+  echo "Checksum mismatch for $file" >&2
+  echo "Expected: $expected" >&2
+  echo "Actual:   $actual" >&2
+}
+
+verify_sha256() {
+  local file="$1"
+  local expected="$2"
+  local actual
+  actual="$(sha256_file "$file")"
+  if [ "$actual" != "$expected" ]; then
+    print_checksum_mismatch "$file" "$expected" "$actual"
+    return 1
+  fi
+}

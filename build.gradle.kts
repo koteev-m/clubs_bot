@@ -200,6 +200,13 @@ data class ScaPayloadManifest(
     val entries: List<ScaPayloadEntry>,
 )
 
+data class ScaPayloadActual(
+    val entries: List<ScaPayloadEntry>,
+    val payloadFileCount: Long,
+    val payloadTotalBytes: Long,
+    val payloadDigest: String,
+)
+
 fun sha256Hex(bytes: ByteArray): String =
     MessageDigest
         .getInstance("SHA-256")
@@ -293,6 +300,39 @@ fun parseScaPayloadManifest(file: File): ScaPayloadManifest {
     )
 }
 
+fun collectScaPayloadActual(
+    dataDir: File,
+    marker: File,
+    manifest: File,
+): ScaPayloadActual {
+    val entries = collectScaPayloadEntries(dataDir, marker, manifest)
+    return ScaPayloadActual(
+        entries = entries,
+        payloadFileCount = entries.size.toLong(),
+        payloadTotalBytes = entries.sumOf { it.size },
+        payloadDigest = aggregateScaPayloadDigest(entries),
+    )
+}
+
+fun validateWarmManifestContractOrThrow(
+    expected: ScaPayloadManifest,
+    actual: ScaPayloadActual,
+    errorMessage: String,
+    emptyPayloadErrorMessage: String = errorMessage,
+) {
+    if (expected.payloadFileCount <= 0L || expected.payloadTotalBytes <= 0L || expected.entries.isEmpty()) {
+        throw GradleException(emptyPayloadErrorMessage)
+    }
+    if (
+        expected.payloadFileCount != actual.payloadFileCount ||
+        expected.payloadTotalBytes != actual.payloadTotalBytes ||
+        expected.payloadDigest != actual.payloadDigest ||
+        expected.entries != actual.entries
+    ) {
+        throw GradleException(errorMessage)
+    }
+}
+
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     failBuildOnCVSS = 7.0F
     suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
@@ -360,29 +400,18 @@ tasks.register("scaPreflight") {
                     "${e.message}. Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
                 )
             }
-        val actualEntries =
-            collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
-        val actualPayloadFileCount = actualEntries.size.toLong()
-        val actualPayloadTotalBytes = actualEntries.sumOf { it.size }
-        val actualPayloadDigest = aggregateScaPayloadDigest(actualEntries)
-
-        if (manifest.payloadFileCount <= 0L || manifest.payloadTotalBytes <= 0L || manifest.entries.isEmpty()) {
-            throw GradleException(
-                "scaCheck warm manifest reports empty payload (marker-only/junk state). " +
-                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-            )
-        }
-        if (
-            manifest.payloadFileCount != actualPayloadFileCount ||
-            manifest.payloadTotalBytes != actualPayloadTotalBytes ||
-            manifest.payloadDigest != actualPayloadDigest ||
-            manifest.entries != actualEntries
-        ) {
-            throw GradleException(
+        val actualPayload =
+            collectScaPayloadActual(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
+        validateWarmManifestContractOrThrow(
+            expected = manifest,
+            actual = actualPayload,
+            errorMessage =
                 "scaCheck warm manifest does not match cache payload. " +
                     "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-            )
-        }
+            emptyPayloadErrorMessage =
+                "scaCheck warm manifest reports empty payload (marker-only/junk state). " +
+                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+        )
 
         val nowMillis = System.currentTimeMillis()
         val maxAgeMillis = scaCacheMaxAgeHours * 60L * 60L * 1000L
@@ -424,19 +453,19 @@ tasks.register("scaWarmCacheMark") {
                 tempManifest.delete()
             }
 
-        val totalBytes = payloadEntries.sumOf { it.size }
-        val digest = aggregateScaPayloadDigest(payloadEntries)
-        if (
-            parsedManifest.payloadFileCount != payloadEntries.size.toLong() ||
-            parsedManifest.payloadTotalBytes != totalBytes ||
-            parsedManifest.payloadDigest != digest ||
-            parsedManifest.entries != payloadEntries
-        ) {
-            throw GradleException(
+        validateWarmManifestContractOrThrow(
+            expected = parsedManifest,
+            actual =
+                ScaPayloadActual(
+                    entries = payloadEntries,
+                    payloadFileCount = payloadEntries.size.toLong(),
+                    payloadTotalBytes = payloadEntries.sumOf { it.size },
+                    payloadDigest = aggregateScaPayloadDigest(payloadEntries),
+                ),
+            errorMessage =
                 "scaWarmCacheMark failed: generated warm manifest contract is invalid. " +
                     "Warm marker/manifest will not be updated.",
-            )
-        }
+        )
 
         dependencyCheckWarmMarker.writeText(
             "warmedAt=${System.currentTimeMillis()}\n" +

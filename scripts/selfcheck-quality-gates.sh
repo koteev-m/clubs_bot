@@ -152,6 +152,27 @@ KOT
   ktlint_skip_out="$(VERIFY_FROM_SHA=HEAD VERIFY_TO_SHA=HEAD KTLINT_BIN=__missing_ktlint__ "$ROOT_DIR/scripts/ktlint-changed.sh")"
   assert_contains "$ktlint_skip_out" "No changed Kotlin files"
 
+  fake_ktlint="$TMP_DIR/fake-ktlint"
+  cat > "$fake_ktlint" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$fake_ktlint"
+  cat > src/App.kt <<'KOT'
+fun main() = println("updated")
+KOT
+  git add src/App.kt
+  git commit -q -m "kotlin update"
+  mismatch_log="$TMP_DIR/ktlint-checksum-mismatch.log"
+  if VERIFY_FROM_SHA=HEAD~1 VERIFY_TO_SHA=HEAD KTLINT_BIN="$fake_ktlint" KTLINT_SHA256=deadbeef \
+    "$ROOT_DIR/scripts/ktlint-changed.sh" >"$mismatch_log" 2>&1; then
+    fail "expected ktlint-changed.sh to fail on checksum mismatch"
+  fi
+  mismatch_output="$(cat "$mismatch_log")"
+  assert_contains "$mismatch_output" "Checksum mismatch for $fake_ktlint"
+  assert_contains "$mismatch_output" "Expected:"
+  assert_contains "$mismatch_output" "Actual:"
+
   echo "note" > README.md
   git add README.md
   git commit -q -m "non-kotlin"
