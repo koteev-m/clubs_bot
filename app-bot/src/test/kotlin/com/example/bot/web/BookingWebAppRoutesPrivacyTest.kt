@@ -1,4 +1,4 @@
-package com.example.bot.web
+package com.example.bot.deprecated.legacy.web
 
 import kotlin.test.Test
 import kotlin.test.assertFalse

@@ -20,7 +20,7 @@
     "ktlint:standard:spacing-between-declarations-with-annotations",
 )
 
-package com.example.bot.web
+package com.example.bot.deprecated.legacy.web
 
 import com.example.bot.data.privacy.PrivacyConfig
 import io.ktor.http.ContentType
@@ -32,6 +32,10 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import io.ktor.server.routing.route
+import com.example.bot.plugins.withMiniAppAuth
+import io.ktor.server.application.call
+import io.ktor.server.application.ApplicationCallPipeline
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
@@ -344,8 +348,12 @@ private val CHECKIN_HTML = """
 private val json = Json { ignoreUnknownKeys = true }
 
 /** Подключить все UI/REST маршруты мини‑приложения бронирования. */
-fun Application.installBookingWebApp(privacyConfig: PrivacyConfig) {
+@Deprecated("Legacy booking web app route")
+fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyHqNotifier: LegacyHqNotifier = NoopLegacyHqNotifier) {
     routing {
+        route("/api") {
+            withMiniAppAuth { System.getenv("BOT_TOKEN") ?: "" }
+        }
         get("/ui/checkin") { call.respondText(CHECKIN_HTML, ContentType.Text.Html) }
 
         // === REST: справочники ===
@@ -431,13 +439,10 @@ fun Application.installBookingWebApp(privacyConfig: PrivacyConfig) {
                 return@post call.respond(HttpStatusCode.BadRequest, "invalid json")
             }
 
-            val tgUserId = call.request.headers["X-TG-User-Id"]?.toLongOrNull()
-            val tgUsername = call.request.headers["X-TG-Username"]
-            val tgDisplay = call.request.headers["X-TG-Display"]
-            if (tgUserId == null) {
-                return@post call.respond(HttpStatusCode.BadRequest, "X-TG-User-Id header required")
-            }
-
+            val tgUserId = call.attributes[com.example.bot.plugins.MiniAppUserKey].id
+            val tgUsername = null
+            val tgDisplay = null
+            
             val result: BookingResult = transaction {
                 val event = Events
                     .selectAll()
@@ -528,7 +533,7 @@ fun Application.installBookingWebApp(privacyConfig: PrivacyConfig) {
 
             when (result) {
                 is BookingOk   -> {
-                    notifyHq(buildNotifyText(result.data, tgUserId, tgUsername, tgDisplay))
+                    legacyHqNotifier.notify(buildNotifyText(result.data, tgUserId, tgUsername, tgDisplay))
                     call.respondText(json.encodeToString(result.data), ContentType.Application.Json)
                 }
                 is BookingError -> call.respond(HttpStatusCode.Conflict, result.code)
@@ -695,22 +700,6 @@ private fun randomHex(bytes: Int = 32): String {
     val sb = StringBuilder(bytes * 2)
     for (b in buf) sb.append(String.format(Locale.ROOT, "%02x", b))
     return sb.toString()
-}
-
-private fun notifyHq(textHtml: String, parseMode: String = "HTML") {
-    val token = System.getenv("TELEGRAM_BOT_TOKEN") ?: return
-    val chatId = System.getenv("HQ_CHAT_ID") ?: return
-    try {
-        val url = buildString {
-            append("https://api.telegram.org/bot").append(token)
-            append("/sendMessage?chat_id=").append(URLEncoder.encode(chatId, "UTF-8"))
-            append("&parse_mode=").append(parseMode)
-            append("&disable_web_page_preview=true&text=").append(URLEncoder.encode(textHtml, "UTF-8"))
-        }
-        // Избегаем устаревшего URL(String)
-        val input = java.net.URI.create(url).toURL().openStream()
-        input.use { it.readBytes() }
-    } catch (_: Throwable) { /* swallow */ }
 }
 
 internal fun buildNotifyText(b: BookingCreated, tgUserId: Long, user: String?, display: String?): String = """

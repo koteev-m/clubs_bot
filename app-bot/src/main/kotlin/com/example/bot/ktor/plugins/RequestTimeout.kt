@@ -1,4 +1,4 @@
-package io.ktor.server.plugins.requesttimeout
+package com.example.bot.ktor.plugins
 
 import com.example.bot.http.ApiError
 import com.example.bot.http.ErrorCodes

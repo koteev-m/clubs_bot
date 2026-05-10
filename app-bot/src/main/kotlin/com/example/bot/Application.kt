@@ -129,7 +129,8 @@ import com.example.bot.telegram.TelegramCallbackRouter
 import com.example.bot.telegram.TelegramGuestFallbackHandler
 import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
 import com.example.bot.telegram.webhook.TelegramWebhookIngressWorker
-import com.example.bot.web.installBookingWebApp
+import com.example.bot.deprecated.legacy.web.installLegacyBookingWebApp
+import com.example.bot.di.appModules
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStarted
@@ -143,16 +144,10 @@ import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.Metrics
 import kotlinx.coroutines.runBlocking
 import org.koin.core.logger.Level
-import org.koin.core.module.Module
 import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
-import java.io.File
-import java.lang.reflect.Modifier
-import java.net.JarURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
-import java.util.jar.JarFile
 import java.time.Clock
 import java.time.ZoneId
 import com.example.bot.host.ShiftChecklistService
@@ -162,59 +157,18 @@ import kotlin.coroutines.cancellation.CancellationException
 
 @Suppress("unused")
 fun Application.module() {
-    // 1) Базовые плагины
-    configureLoggingAndRequestId()
-    installAppConfig()
-    install(AutoHeadResponse)
-    installWebAppEtagForFingerprints()
-    install(ConditionalHeaders)
-    installMetrics()
-    install(ActorMdcPlugin)
-    installCorsFromEnv()
-    installHttpSecurityFromEnv()
-    install(ContentNegotiation) { json() }
-    installRequestGuardsFromEnv()
-    if (resolveFlag("RATE_LIMIT_ENABLED", default = true)) {
-        installRateLimitPluginDefaults()
-    }
-    if (resolveFlag("HOT_PATH_ENABLED", default = true)) {
-        installHotPathLimiterDefaults()
-    }
-    installJsonErrorPages()
-    installWebAppCspFromEnv()
-    installWebAppImmutableCacheFromEnv()
-
-    // 2) БД и миграции
-    installMigrationsAndDatabase()
-
-    // 3) UI
-    installWebUi()
-
-    // 4) DI через Koin
     val isDev: Boolean =
         environment.config.propertyOrNull("ktor.deployment.development")
             ?.getString()?.toBooleanStrictOrNull()
             ?: System.getProperty("io.ktor.development")?.toBoolean() ?: false
-
-    val koinModules = loadKoinModulesReflectively()
-    if (koinModules.isEmpty()) {
-        error(
-            "Koin modules aggregator not found. " +
-                "Добавьте функцию/свойство, возвращающее List<Module>, в пакет com.example.bot.di " +
-                "и подключите её явно: install(Koin) { modules(<ВАША_ФУНКЦИЯ_ИЛИ_val>()) }.",
-        )
-    }
-
-    install(Koin) {
-        slf4jLogger(if (isDev) Level.DEBUG else Level.INFO)
-        modules(koinModules)
-    }
-    environment.log.info("Koin: loaded ${koinModules.size} module(s)")
+    bootstrapPlatformPlugins()
+    bootstrapPersistence()
+    bootstrapSecurity()
+    bootstrapKoin()
 
     val privacyConfig by inject<PrivacyConfig>()
 
-    // 5) Мини‑приложение бронирования использует общий privacy config из DI.
-    installBookingWebApp(privacyConfig)
+    bootstrapRoutes(privacyConfig)
 
     val coreDataSeeder by inject<CoreDataSeeder>()
     val coreDataSeed by inject<CoreDataSeed>()
@@ -226,9 +180,6 @@ fun Application.module() {
         installDiagTime()
     }
 
-    // 5) Security
-    configureSecurity()
-    enforceRbacStartupGuard()
 
     // 6) Инжект сервисов
     val guestListRepository by inject<GuestListRepository>()
@@ -553,92 +504,11 @@ fun Application.module() {
 
 private val opsNotificationLogger = LoggerFactory.getLogger("OpsNotificationService")
 
-// Сканер Koin‑модулей в пакете com.example.bot.di
-@Suppress("NestedBlockDepth")
-private fun loadKoinModulesReflectively(): List<Module> {
-    val result = mutableListOf<Module>()
-    val cl = Thread.currentThread().contextClassLoader
-    val pkgPath = "com/example/bot/di"
 
-    val classNames = mutableSetOf<String>()
-    val resources = cl.getResources(pkgPath)
-    val seenJars = mutableSetOf<String>()
-    while (resources.hasMoreElements()) {
-        val url: URL = resources.nextElement()
-        when (url.protocol) {
-            "jar" -> {
-                val conn = (url.openConnection() as? JarURLConnection) ?: continue
-                val jar: JarFile = conn.jarFile
-                if (seenJars.add(jar.name)) {
-                    val entries = jar.entries()
-                    while (entries.hasMoreElements()) {
-                        val e = entries.nextElement()
-                        if (!e.isDirectory && e.name.startsWith("$pkgPath/") && e.name.endsWith("Kt.class")) {
-                            val cn = e.name.removeSuffix(".class").replace('/', '.')
-                            classNames += cn
-                        }
-                    }
-                }
-            }
-            "file" -> {
-                val dir = File(url.toURI())
-                if (dir.exists()) {
-                    dir.walkTopDown()
-                        .filter { it.isFile && it.name.endsWith("Kt.class") }
-                        .forEach { file ->
-                            val abs = file.absolutePath.replace(File.separatorChar, '/')
-                            val idx = abs.indexOf(pkgPath)
-                            if (idx >= 0) {
-                                val cn = abs.substring(idx).removeSuffix(".class").replace('/', '.')
-                                classNames += cn
-                            }
-                        }
-                }
-            }
-        }
-    }
-
-    fun collectFrom(any: Any?) {
-        when (any) {
-            is Module -> result += any
-            is Collection<*> -> any.filterIsInstance<Module>().forEach { result += it }
-        }
-    }
-
-    for (cn in classNames) {
-        val kls = runCatching { Class.forName(cn) }.getOrNull() ?: continue
-
-        // public static методы без параметров
-        kls.methods
-            .filter { Modifier.isStatic(it.modifiers) && it.parameterCount == 0 }
-            .forEach { m ->
-                val returnsModuleLike =
-                    Module::class.java.isAssignableFrom(m.returnType) ||
-                        List::class.java.isAssignableFrom(m.returnType)
-                val looksLikeModuleName =
-                    m.name.contains("module", ignoreCase = true) ||
-                        m.name.contains("modules", ignoreCase = true) ||
-                        m.name.startsWith("get")
-                if (returnsModuleLike || looksLikeModuleName) {
-                    collectFrom(runCatching { m.invoke(null) }.getOrNull())
-                }
-            }
-
-        // статические поля (если кто-то сделал @JvmField val …)
-        kls.fields
-            .filter { Modifier.isStatic(it.modifiers) }
-            .forEach { f ->
-                val typeOk =
-                    Module::class.java.isAssignableFrom(f.type) ||
-                        List::class.java.isAssignableFrom(f.type)
-                val nameOk =
-                    f.name.contains("module", ignoreCase = true) ||
-                        f.name.contains("modules", ignoreCase = true)
-                if (typeOk || nameOk) {
-                    collectFrom(runCatching { f.get(null) }.getOrNull())
-                }
-            }
-    }
-
-    return result.distinct()
+private fun Application.bootstrapPlatformPlugins() {
+    configureLoggingAndRequestId(); installAppConfig(); install(AutoHeadResponse); installWebAppEtagForFingerprints(); install(ConditionalHeaders); installMetrics(); install(ActorMdcPlugin); installCorsFromEnv(); installHttpSecurityFromEnv(); install(ContentNegotiation){ json() }; installRequestGuardsFromEnv(); if (resolveFlag("RATE_LIMIT_ENABLED", true)) installRateLimitPluginDefaults(); if (resolveFlag("HOT_PATH_ENABLED", true)) installHotPathLimiterDefaults(); installJsonErrorPages(); installWebAppCspFromEnv(); installWebAppImmutableCacheFromEnv(); installWebUi()
 }
+private fun Application.bootstrapPersistence(){ installMigrationsAndDatabase() }
+private fun Application.bootstrapSecurity(){ configureSecurity(); enforceRbacStartupGuard() }
+private fun Application.bootstrapKoin(){ val isDev=(environment.config.propertyOrNull("ktor.deployment.development")?.getString()?.toBooleanStrictOrNull())?:System.getProperty("io.ktor.development")?.toBoolean()?:false; val modules=appModules(); install(Koin){ slf4jLogger(if(isDev) Level.DEBUG else Level.INFO); modules(modules)}; environment.log.info("Koin: loaded ${modules.size} module(s)") }
+private fun Application.bootstrapRoutes(privacyConfig: PrivacyConfig){ val enableLegacy=resolveFlag("LEGACY_BOOKING_WEBAPP_ENABLED", default=false); if(enableLegacy){ installLegacyBookingWebApp(privacyConfig) } }
