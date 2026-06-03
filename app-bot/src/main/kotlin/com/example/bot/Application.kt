@@ -129,6 +129,9 @@ import com.example.bot.telegram.TelegramCallbackRouter
 import com.example.bot.telegram.TelegramGuestFallbackHandler
 import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
 import com.example.bot.telegram.webhook.TelegramWebhookIngressWorker
+import com.example.bot.deprecated.legacy.web.LegacyHqNotifier
+import com.example.bot.deprecated.legacy.web.NoopLegacyHqNotifier
+import com.example.bot.deprecated.legacy.web.TelegramLegacyHqNotifier
 import com.example.bot.deprecated.legacy.web.installLegacyBookingWebApp
 import com.example.bot.di.appModules
 import io.ktor.serialization.kotlinx.json.json
@@ -506,9 +509,68 @@ private val opsNotificationLogger = LoggerFactory.getLogger("OpsNotificationServ
 
 
 private fun Application.bootstrapPlatformPlugins() {
-    configureLoggingAndRequestId(); installAppConfig(); install(AutoHeadResponse); installWebAppEtagForFingerprints(); install(ConditionalHeaders); installMetrics(); install(ActorMdcPlugin); installCorsFromEnv(); installHttpSecurityFromEnv(); install(ContentNegotiation){ json() }; installRequestGuardsFromEnv(); if (resolveFlag("RATE_LIMIT_ENABLED", true)) installRateLimitPluginDefaults(); if (resolveFlag("HOT_PATH_ENABLED", true)) installHotPathLimiterDefaults(); installJsonErrorPages(); installWebAppCspFromEnv(); installWebAppImmutableCacheFromEnv(); installWebUi()
+    configureLoggingAndRequestId()
+    installAppConfig()
+    install(AutoHeadResponse)
+    installWebAppEtagForFingerprints()
+    install(ConditionalHeaders)
+    installMetrics()
+    install(ActorMdcPlugin)
+    installCorsFromEnv()
+    installHttpSecurityFromEnv()
+    install(ContentNegotiation) { json() }
+    installRequestGuardsFromEnv()
+    if (resolveFlag("RATE_LIMIT_ENABLED", true)) {
+        installRateLimitPluginDefaults()
+    }
+    if (resolveFlag("HOT_PATH_ENABLED", true)) {
+        installHotPathLimiterDefaults()
+    }
+    installJsonErrorPages()
+    installWebAppCspFromEnv()
+    installWebAppImmutableCacheFromEnv()
+    installWebUi()
 }
-private fun Application.bootstrapPersistence(){ installMigrationsAndDatabase() }
-private fun Application.bootstrapSecurity(){ configureSecurity(); enforceRbacStartupGuard() }
-private fun Application.bootstrapKoin(){ val isDev=(environment.config.propertyOrNull("ktor.deployment.development")?.getString()?.toBooleanStrictOrNull())?:System.getProperty("io.ktor.development")?.toBoolean()?:false; val modules=appModules(); install(Koin){ slf4jLogger(if(isDev) Level.DEBUG else Level.INFO); modules(modules)}; environment.log.info("Koin: loaded ${modules.size} module(s)") }
-private fun Application.bootstrapRoutes(privacyConfig: PrivacyConfig){ val enableLegacy=resolveFlag("LEGACY_BOOKING_WEBAPP_ENABLED", default=false); if(enableLegacy){ installLegacyBookingWebApp(privacyConfig) } }
+
+private fun Application.bootstrapPersistence() {
+    installMigrationsAndDatabase()
+}
+
+private fun Application.bootstrapSecurity() {
+    configureSecurity()
+    enforceRbacStartupGuard()
+}
+
+private fun Application.bootstrapKoin() {
+    val isDev =
+        (environment.config.propertyOrNull("ktor.deployment.development")?.getString()?.toBooleanStrictOrNull())
+            ?: System.getProperty("io.ktor.development")?.toBoolean() ?: false
+    val modules = appModules()
+    install(Koin) {
+        slf4jLogger(if (isDev) Level.DEBUG else Level.INFO)
+        modules(modules)
+    }
+    environment.log.info("Koin: loaded ${modules.size} module(s)")
+}
+
+private fun Application.bootstrapRoutes(privacyConfig: PrivacyConfig) {
+    if (!isLegacyBookingEnabled()) {
+        return
+    }
+    installLegacyBookingWebApp(
+        privacyConfig = privacyConfig,
+        legacyHqNotifier = buildLegacyHqNotifier(),
+    )
+}
+
+internal fun Application.isLegacyBookingEnabled(): Boolean = resolveFlag("LEGACY_BOOKING_WEBAPP_ENABLED", default = false)
+
+private fun Application.buildLegacyHqNotifier(): LegacyHqNotifier {
+    val token = System.getenv("TELEGRAM_BOT_TOKEN").orEmpty().ifBlank { System.getenv("BOT_TOKEN").orEmpty() }
+    val chatId = System.getenv("LEGACY_HQ_CHAT_ID").orEmpty()
+    if (token.isBlank() || chatId.isBlank()) {
+        environment.log.warn("Legacy HQ notifier is disabled: required env is missing")
+        return NoopLegacyHqNotifier
+    }
+    return TelegramLegacyHqNotifier(token = token, chatId = chatId)
+}
