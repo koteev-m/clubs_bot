@@ -243,7 +243,7 @@ private val CHECKIN_HTML = """
     async function loadMyBookings(){
       if (!state.tgUser) return;
       try{
-        state.myBookings = await apiGet("/api/bookings/my?tgUserId=" + state.tgUser.id);
+        state.myBookings = await apiGet("/api/bookings/my");
         const list = $("my-list");
         list.innerHTML = "";
         state.myBookings.forEach(b=>{
@@ -351,13 +351,13 @@ private val json = Json { ignoreUnknownKeys = true }
 @Deprecated("Legacy booking web app route")
 fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyHqNotifier: LegacyHqNotifier = NoopLegacyHqNotifier) {
     routing {
-        route("/api") {
-            withMiniAppAuth { System.getenv("BOT_TOKEN") ?: "" }
-        }
         get("/ui/checkin") { call.respondText(CHECKIN_HTML, ContentType.Text.Html) }
 
+        route("/api") {
+            withMiniAppAuth { System.getenv("BOT_TOKEN") ?: "" }
+
         // === REST: справочники ===
-        get("/api/clubs") {
+        get("/clubs") {
             val clubs: List<ClubDto> = transaction {
                 Clubs
                     .selectAll()
@@ -367,7 +367,7 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
             call.respondText(json.encodeToString(clubs), ContentType.Application.Json)
         }
 
-        get("/api/events") {
+        get("/events") {
             val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest, "clubId is required")
 
@@ -392,7 +392,7 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
             call.respondText(json.encodeToString(events), ContentType.Application.Json)
         }
 
-        get("/api/tables/free") {
+        get("/tables/free") {
             val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest, "clubId is required")
             val eventId = call.request.queryParameters["eventId"]?.toLongOrNull()
@@ -431,7 +431,7 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
         }
 
         // === REST: бронирование ===
-        post("/api/bookings") {
+        post("/bookings") {
             val raw = call.receiveText()
             val req = try {
                 json.decodeFromString<BookingRequest>(raw)
@@ -541,9 +541,8 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
         }
 
         // «Мои бронирования» по telegram_user_id
-        get("/api/bookings/my") {
-            val tgUserId = call.request.queryParameters["tgUserId"]?.toLongOrNull()
-                ?: return@get call.respond(HttpStatusCode.BadRequest, "tgUserId is required")
+        get("/bookings/my") {
+            val tgUserId = call.attributes[com.example.bot.plugins.MiniAppUserKey].id
 
             val list: List<MyBookingDto> = transaction {
                 val user = Users
@@ -573,6 +572,7 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
                     }
             }
             call.respondText(json.encodeToString(list), ContentType.Application.Json)
+        }
         }
     }
 }
