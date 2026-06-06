@@ -22,6 +22,8 @@
 
 package com.example.bot.deprecated.legacy.web
 
+import com.example.bot.data.db.DbErrorClassifier
+import com.example.bot.data.db.DbErrorReason
 import com.example.bot.data.privacy.PrivacyConfig
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -35,6 +37,7 @@ import io.ktor.server.routing.routing
 import io.ktor.server.routing.route
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.server.application.call
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
@@ -515,8 +518,11 @@ fun Application.installLegacyBookingWebApp(
                         it[updatedAt]      = Instant.now()
                     }
                 } catch (e: Throwable) {
+                    if (!isLegacyBookingInsertConflict(e)) {
+                        throw e
+                    }
                     legacyRouteLogger.warn(
-                        "Legacy booking insert failed: failure={} cause={}",
+                        "Legacy booking insert conflict: failure={} cause={}",
                         e.javaClass.simpleName,
                         e.cause?.javaClass?.simpleName ?: "none",
                     )
@@ -679,6 +685,11 @@ private data class BookingOk(val data: BookingCreated) : BookingResult
 private data class BookingError(val code: String) : BookingResult
 
 /* ==========================  Вспомогательные ========================== */
+
+internal fun isLegacyBookingInsertConflict(error: Throwable): Boolean {
+    if (error is CancellationException) throw error
+    return DbErrorClassifier.classify(error).reason == DbErrorReason.CONSTRAINT
+}
 
 private fun ensureUser(
     privacyConfig: PrivacyConfig,
