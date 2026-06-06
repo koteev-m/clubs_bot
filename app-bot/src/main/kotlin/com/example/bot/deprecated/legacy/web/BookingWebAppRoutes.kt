@@ -35,18 +35,18 @@ import io.ktor.server.routing.routing
 import io.ktor.server.routing.route
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.server.application.call
-import io.ktor.server.application.ApplicationCallPipeline
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
+import org.slf4j.LoggerFactory
 import org.jetbrains.exposed.sql.JoinType.INNER
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
-import java.net.URLEncoder
 import java.security.SecureRandom
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZonedDateTime
 import kotlin.math.max
 import java.util.Locale
@@ -54,6 +54,7 @@ import java.util.UUID
 
 private const val EVENTS_LIMIT = 50
 private const val BOOKINGS_LIMIT = 20
+private val activeBookingStatuses = listOf("BOOKED", "CONFIRMED", "SEATED")
 
 /* ==========================  HTML (UI) ========================== */
 private val CHECKIN_HTML = """
@@ -106,9 +107,7 @@ private val CHECKIN_HTML = """
     async function apiGet(url){
       const headers = {};
       if (state.tgUser){
-        headers["X-TG-User-Id"] = String(state.tgUser.id);
-        headers["X-TG-Username"] = state.tgUser.username || "";
-        headers["X-TG-Display"] = [(state.tgUser.first_name||""), (state.tgUser.last_name||"")].filter(Boolean).join(" ");
+        if (tg?.initData) headers["X-Telegram-Init-Data"] = tg.initData;
       }
       const r = await fetch(url,{headers});
       if (!r.ok) throw new Error(await r.text());
@@ -117,9 +116,7 @@ private val CHECKIN_HTML = """
     async function apiPost(url, body){
       const headers = {"Content-Type":"application/json"};
       if (state.tgUser){
-        headers["X-TG-User-Id"] = String(state.tgUser.id);
-        headers["X-TG-Username"] = state.tgUser.username || ""
-        headers["X-TG-Display"] = [(state.tgUser.first_name||""), (state.tgUser.last_name||"")].filter(Boolean).join(" ");
+        if (tg?.initData) headers["X-Telegram-Init-Data"] = tg.initData;
       }
       const r = await fetch(url,{method:"POST",headers,body:JSON.stringify(body)});
       if (!r.ok) throw new Error(await r.text());
@@ -346,15 +343,20 @@ private val CHECKIN_HTML = """
 """.trimIndent()
 
 private val json = Json { ignoreUnknownKeys = true }
+private val legacyRouteLogger = LoggerFactory.getLogger("LegacyBookingWebAppRoutes")
 
 /** Подключить все UI/REST маршруты мини‑приложения бронирования. */
 @Deprecated("Legacy booking web app route")
-fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyHqNotifier: LegacyHqNotifier = NoopLegacyHqNotifier) {
+fun Application.installLegacyBookingWebApp(
+    privacyConfig: PrivacyConfig,
+    legacyHqNotifier: LegacyHqNotifier = NoopLegacyHqNotifier,
+    legacyBotTokenProvider: () -> String = { LegacyBookingConfig.readLegacyBotToken() },
+) {
     routing {
         get("/ui/checkin") { call.respondText(CHECKIN_HTML, ContentType.Text.Html) }
 
         route("/api") {
-            withMiniAppAuth { System.getenv("BOT_TOKEN") ?: "" }
+            withMiniAppAuth(botTokenProvider = legacyBotTokenProvider)
 
         // === REST: справочники ===
         get("/clubs") {
@@ -402,7 +404,7 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
             val free: List<TableDto> = transaction {
                 val busyTableIds: Set<Long> = Bookings
                     .selectAll()
-                    .where { (Bookings.eventId eq eventId) and (Bookings.status inList listOf("CONFIRMED", "SEATED")) }
+                    .where { (Bookings.eventId eq eventId) and (Bookings.status inList activeBookingStatuses) }
                     .map { it[Bookings.tableId] }
                     .toSet()
 
@@ -442,7 +444,7 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
             val tgUserId = call.attributes[com.example.bot.plugins.MiniAppUserKey].id
             val tgUsername = null
             val tgDisplay = null
-            
+
             val result: BookingResult = transaction {
                 val event = Events
                     .selectAll()
@@ -471,7 +473,7 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
                     .where {
                         (Bookings.eventId eq req.eventId) and
                             (Bookings.tableId eq req.tableId) and
-                            (Bookings.status inList listOf("CONFIRMED", "SEATED"))
+                            (Bookings.status inList activeBookingStatuses)
                     }
                     .any()
                 if (existsActive) return@transaction BookingError("ALREADY_BOOKED")
@@ -506,13 +508,18 @@ fun Application.installLegacyBookingWebApp(privacyConfig: PrivacyConfig, legacyH
                         it[slotStart]      = event[Events.startAt]
                         it[slotEnd]        = event[Events.endAt]
                         it[arrivalBy]      = req.arrivalBy?.let(Instant::parse)
-                        it[status]         = "CONFIRMED"
+                        it[status]         = "BOOKED"
                         it[Bookings.qrSecret] = qrCodeSecret
                         it[idempotencyKey] = idem
                         it[createdAt]      = Instant.now()
                         it[updatedAt]      = Instant.now()
                     }
-                } catch (_: Throwable) {
+                } catch (e: Throwable) {
+                    legacyRouteLogger.warn(
+                        "Legacy booking insert failed: failure={} cause={}",
+                        e.javaClass.simpleName,
+                        e.cause?.javaClass?.simpleName ?: "none",
+                    )
                     return@transaction BookingError("CONFLICT")
                 }
 
@@ -720,6 +727,7 @@ private class InstantTzColumnType : ColumnType() {
     override fun valueFromDB(value: Any): Any = when (value) {
         is Instant       -> value
         is Timestamp     -> value.toInstant()
+        is OffsetDateTime -> value.toInstant()
         is ZonedDateTime -> value.toInstant()
         is String        -> Instant.parse(value)
         else -> error("Unexpected value for TIMESTAMPTZ: $value (${value::class})")
