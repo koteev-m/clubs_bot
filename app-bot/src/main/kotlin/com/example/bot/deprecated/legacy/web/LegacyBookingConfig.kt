@@ -19,9 +19,14 @@ internal data class LegacyBookingConfig(
                 "TELEGRAM_BOT_TOKEN or BOT_TOKEN is required when LEGACY_BOOKING_WEBAPP_ENABLED=true"
             }
 
+            val hqChatId = envProvider("LEGACY_HQ_CHAT_ID")?.trim()?.takeIf { it.isNotBlank() }
+            require(!hqChatId.isNullOrBlank()) {
+                "LEGACY_HQ_CHAT_ID is required when LEGACY_BOOKING_WEBAPP_ENABLED=true"
+            }
+
             return LegacyBookingConfig(
                 botToken = token,
-                hqChatId = envProvider("LEGACY_HQ_CHAT_ID")?.trim()?.takeIf { it.isNotBlank() },
+                hqChatId = hqChatId,
             )
         }
 
