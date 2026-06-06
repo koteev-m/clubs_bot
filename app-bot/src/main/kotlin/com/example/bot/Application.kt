@@ -129,9 +129,7 @@ import com.example.bot.telegram.TelegramCallbackRouter
 import com.example.bot.telegram.TelegramGuestFallbackHandler
 import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
 import com.example.bot.telegram.webhook.TelegramWebhookIngressWorker
-import com.example.bot.deprecated.legacy.web.LegacyHqNotifier
-import com.example.bot.deprecated.legacy.web.NoopLegacyHqNotifier
-import com.example.bot.deprecated.legacy.web.TelegramLegacyHqNotifier
+import com.example.bot.deprecated.legacy.web.LegacyBookingConfig
 import com.example.bot.deprecated.legacy.web.installLegacyBookingWebApp
 import com.example.bot.di.appModules
 import io.ktor.serialization.kotlinx.json.json
@@ -557,20 +555,13 @@ private fun Application.bootstrapRoutes(privacyConfig: PrivacyConfig) {
     if (!isLegacyBookingEnabled()) {
         return
     }
+    val legacyConfig = LegacyBookingConfig.fromEnvForEnabled()
     installLegacyBookingWebApp(
         privacyConfig = privacyConfig,
-        legacyHqNotifier = buildLegacyHqNotifier(),
+        legacyHqNotifier = legacyConfig.buildHqNotifier(),
+        legacyBotTokenProvider = legacyConfig::botTokenProvider,
     )
 }
 
-internal fun Application.isLegacyBookingEnabled(): Boolean = resolveFlag("LEGACY_BOOKING_WEBAPP_ENABLED", default = false)
-
-private fun Application.buildLegacyHqNotifier(): LegacyHqNotifier {
-    val token = System.getenv("TELEGRAM_BOT_TOKEN").orEmpty().ifBlank { System.getenv("BOT_TOKEN").orEmpty() }
-    val chatId = System.getenv("LEGACY_HQ_CHAT_ID").orEmpty()
-    if (token.isBlank() || chatId.isBlank()) {
-        environment.log.warn("Legacy HQ notifier is disabled: required env is missing")
-        return NoopLegacyHqNotifier
-    }
-    return TelegramLegacyHqNotifier(token = token, chatId = chatId)
-}
+internal fun Application.isLegacyBookingEnabled(): Boolean =
+    resolveFlag("LEGACY_BOOKING_WEBAPP_ENABLED", default = false)
