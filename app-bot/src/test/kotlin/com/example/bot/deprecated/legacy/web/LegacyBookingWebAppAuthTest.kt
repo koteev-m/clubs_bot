@@ -6,6 +6,7 @@ import com.example.bot.isLegacyBookingEnabled
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
+import com.example.bot.webapp.WebAppInitDataTestHelper
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.HttpRequestBuilder
@@ -86,6 +87,35 @@ class LegacyBookingWebAppAuthTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals(1, bookings.size)
         assertEquals("7", bookings.single().jsonObject["tableNumber"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `post booking persists authenticated user when client identity is spoofed`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+
+        val response = client.post("/api/bookings?tgUserId=$SPOOFED_USER_ID") {
+            validInitData()
+            header("X-TG-User-Id", SPOOFED_USER_ID.toString())
+            header("X-TG-Username", "spoofed")
+            header("X-TG-Display", "Spoofed User")
+            contentType(ContentType.Application.Json)
+            setBody(
+                """
+                {
+                  "clubId": 1001,
+                  "eventId": 1001,
+                  "tableId": 1008,
+                  "guestsCount": 2,
+                  "guestName": "Spoof Attempt",
+                  "tgUserId": $SPOOFED_USER_ID
+                }
+                """.trimIndent(),
+            )
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        assertEquals(AUTH_USER_ID, guestTelegramUserIdForTable(tableId = 1008))
+        assertFalse(isBookingPersistedForTelegramUser(tableId = 1008, telegramUserId = SPOOFED_USER_ID))
     }
 
     @Test
@@ -202,6 +232,34 @@ class LegacyBookingWebAppAuthTest {
         assertFailsWith<IllegalArgumentException> {
             client.get("/api/clubs")
         }
+    }
+
+    @Test
+    fun `legacy bootstrap uses bot token fallback when telegram bot token is absent`() = testApplication {
+        val dataSource = schemaDataSource()
+        Database.connect(dataSource)
+        seedLegacyBookingData()
+        val initData = fallbackInitData()
+        environment {
+            config = MapApplicationConfig().apply {
+                put("app.flags.LEGACY_BOOKING_WEBAPP_ENABLED", "true")
+                put("app.env.TELEGRAM_BOT_TOKEN", " ")
+                put("app.env.BOT_TOKEN", FALLBACK_BOT_TOKEN)
+                put("app.env.LEGACY_HQ_CHAT_ID", "1000")
+            }
+        }
+
+        application {
+            install(ContentNegotiation) { json() }
+            bootstrapLegacyBookingWebApp(privacyConfig())
+        }
+
+        val response = client.get("/api/bookings/my") {
+            header("X-Telegram-Init-Data", initData)
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        assertTrue(response.bodyAsText().contains("\"tableNumber\":7"), response.bodyAsText())
     }
 
     @Test
@@ -391,6 +449,15 @@ class LegacyBookingWebAppAuthTest {
         }
     }
 
+    private fun fallbackInitData(): String =
+        WebAppInitDataTestHelper.createInitData(
+            FALLBACK_BOT_TOKEN,
+            mapOf(
+                "auth_date" to Instant.now().epochSecond.toString(),
+                "user" to WebAppInitDataTestHelper.encodeUser(id = AUTH_USER_ID),
+            ),
+        )
+
     private fun HttpRequestBuilder.validInitData() {
         header("X-Telegram-Init-Data", VALID_INIT_DATA)
     }
@@ -460,6 +527,37 @@ class LegacyBookingWebAppAuthTest {
         }
         """.trimIndent()
 
+    private fun guestTelegramUserIdForTable(tableId: Long): Long? =
+        transaction {
+            org.jetbrains.exposed.sql.transactions.TransactionManager.current()
+                .exec(
+                    """
+                    SELECT u.telegram_user_id
+                    FROM bookings b
+                    JOIN users u ON u.id = b.guest_user_id
+                    WHERE b.table_id = $tableId
+                    """.trimIndent(),
+                ) { rs ->
+                    if (rs.next()) rs.getLong(1) else null
+                }
+        }
+
+    private fun isBookingPersistedForTelegramUser(tableId: Long, telegramUserId: Long): Boolean =
+        transaction {
+            org.jetbrains.exposed.sql.transactions.TransactionManager.current()
+                .exec(
+                    """
+                    SELECT COUNT(*)
+                    FROM bookings b
+                    JOIN users u ON u.id = b.guest_user_id
+                    WHERE b.table_id = $tableId AND u.telegram_user_id = $telegramUserId
+                    """.trimIndent(),
+                ) { rs ->
+                    rs.next()
+                    rs.getLong(1) > 0
+                } ?: false
+        }
+
     private fun countBookingsForTable(tableId: Long): Long =
         transaction {
             org.jetbrains.exposed.sql.transactions.TransactionManager.current()
@@ -498,6 +596,7 @@ class LegacyBookingWebAppAuthTest {
         private const val AUTH_USER_ID = 1000L
         private const val SPOOFED_USER_ID = 2000L
         private const val LEGACY_BOT_TOKEN = "111111:LEGACY_TOKEN"
+        private const val FALLBACK_BOT_TOKEN = "222222:FALLBACK_TOKEN"
         private const val VALID_INIT_DATA = "valid-init-data"
         private const val INVALID_INIT_DATA = "invalid-init-data"
     }
