@@ -13,6 +13,13 @@ enum class BookingStatus {
     CANCELLED,
 }
 
+object BookingStatusNames {
+    const val CONFIRMED: String = "CONFIRMED"
+
+    val ACTIVE_FOR_TABLE_OCCUPANCY: List<String> =
+        listOf(BookingStatus.BOOKED.name, CONFIRMED, BookingStatus.SEATED.name)
+}
+
 /** Events available for booking. */
 object EventsTable : Table("events") {
     val id = long("id").autoIncrement()

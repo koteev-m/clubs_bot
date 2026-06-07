@@ -1,6 +1,7 @@
 package com.example.bot.deprecated.legacy.web
 
 import com.example.bot.data.privacy.PrivacyConfig
+import com.example.bot.bootstrapLegacyBookingWebApp
 import com.example.bot.isLegacyBookingEnabled
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
@@ -20,7 +21,11 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
+import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -34,6 +39,7 @@ import javax.sql.DataSource
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -105,8 +111,97 @@ class LegacyBookingWebAppAuthTest {
         }
 
         assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        val message = withTimeout(1_000) { notifier.nextMessage.await() }
         assertEquals(1, notifier.messages.size)
-        assertTrue(notifier.messages.single().contains("Новая бронь"))
+        assertTrue(message.contains("Новая бронь"))
+    }
+
+    @Test
+    fun `slow notifier does not block successful legacy booking response after commit`() = testApplication {
+        val notifier = SlowLegacyHqNotifier()
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID, legacyHqNotifier = notifier)
+
+        val response = client.post("/api/bookings") {
+            validInitData()
+            contentType(ContentType.Application.Json)
+            setBody(newBookingRequest(tableId = 1008, guestName = "Slow Notifier"))
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        assertEquals(1, countBookingsForTable(tableId = 1008))
+        withTimeout(1_000) { notifier.started.await() }
+    }
+
+    @Test
+    fun `failing notifier does not break successful legacy booking response after commit`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID, legacyHqNotifier = FailingLegacyHqNotifier())
+
+        val response = client.post("/api/bookings") {
+            validInitData()
+            contentType(ContentType.Application.Json)
+            setBody(newBookingRequest(tableId = 1008, guestName = "Failing Notifier"))
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        assertEquals(1, countBookingsForTable(tableId = 1008))
+    }
+
+    @Test
+    fun `legacy api endpoints are fail-closed when auth missing`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+
+        legacyEndpointRequests().forEach { request ->
+            val response = request.sendWithoutAuth(this)
+            assertEquals(HttpStatusCode.Unauthorized, response.status, request.name)
+        }
+    }
+
+    @Test
+    fun `legacy api endpoints reject invalid init data`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+
+        legacyEndpointRequests().forEach { request ->
+            val response = request.sendWithInvalidAuth(this)
+            assertEquals(HttpStatusCode.Unauthorized, response.status, request.name)
+        }
+    }
+
+    @Test
+    fun `valid mini app auth allows all legacy api endpoint contracts`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+
+        assertEquals(HttpStatusCode.OK, client.get("/api/clubs") { validInitData() }.status)
+        assertEquals(HttpStatusCode.OK, client.get("/api/events?clubId=1001") { validInitData() }.status)
+        assertEquals(
+            HttpStatusCode.OK,
+            client.get("/api/tables/free?clubId=1001&eventId=1001&guests=2") { validInitData() }.status,
+        )
+        assertEquals(HttpStatusCode.OK, client.get("/api/bookings/my") { validInitData() }.status)
+        assertEquals(
+            HttpStatusCode.OK,
+            client.post("/api/bookings") {
+                validInitData()
+                contentType(ContentType.Application.Json)
+                setBody(newBookingRequest(tableId = 1008, guestName = "Valid Coverage"))
+            }.status,
+        )
+    }
+
+    @Test
+    fun `legacy bootstrap fails fast when enabled with incomplete config`() = testApplication {
+        environment {
+            config = MapApplicationConfig().apply {
+                put("app.flags.LEGACY_BOOKING_WEBAPP_ENABLED", "true")
+            }
+        }
+
+        application {
+            bootstrapLegacyBookingWebApp(privacyConfig())
+        }
+
+        assertFailsWith<IllegalArgumentException> {
+            client.get("/api/clubs")
+        }
     }
 
     @Test
@@ -303,11 +398,99 @@ class LegacyBookingWebAppAuthTest {
     private fun privacyConfig(): PrivacyConfig =
         PrivacyConfig.fromEnv(mapOf("PHONE_ENCRYPTION_KEY" to "0123456789abcdef0123456789abcdef"))
 
+
+    private fun legacyEndpointRequests(): List<LegacyEndpointRequest> =
+        listOf(
+            LegacyEndpointRequest.Get("GET /api/clubs", "/api/clubs"),
+            LegacyEndpointRequest.Get("GET /api/events", "/api/events?clubId=1001"),
+            LegacyEndpointRequest.Get(
+                "GET /api/tables/free",
+                "/api/tables/free?clubId=1001&eventId=1001&guests=2",
+            ),
+            LegacyEndpointRequest.Post(
+                "POST /api/bookings",
+                "/api/bookings",
+                newBookingRequest(tableId = 1008, guestName = "Auth Coverage"),
+            ),
+            LegacyEndpointRequest.Get("GET /api/bookings/my", "/api/bookings/my"),
+        )
+
+    private sealed class LegacyEndpointRequest(val name: String) {
+        abstract suspend fun sendWithoutAuth(builder: ApplicationTestBuilder): io.ktor.client.statement.HttpResponse
+
+        abstract suspend fun sendWithInvalidAuth(builder: ApplicationTestBuilder): io.ktor.client.statement.HttpResponse
+
+        class Get(name: String, private val path: String) : LegacyEndpointRequest(name) {
+            override suspend fun sendWithoutAuth(builder: ApplicationTestBuilder): io.ktor.client.statement.HttpResponse =
+                builder.client.get(path)
+
+            override suspend fun sendWithInvalidAuth(builder: ApplicationTestBuilder): io.ktor.client.statement.HttpResponse =
+                builder.client.get(path) { header("X-Telegram-Init-Data", INVALID_INIT_DATA) }
+        }
+
+        class Post(
+            name: String,
+            private val path: String,
+            private val body: String,
+        ) : LegacyEndpointRequest(name) {
+            override suspend fun sendWithoutAuth(builder: ApplicationTestBuilder): io.ktor.client.statement.HttpResponse =
+                builder.client.post(path) {
+                    contentType(ContentType.Application.Json)
+                    setBody(body)
+                }
+
+            override suspend fun sendWithInvalidAuth(builder: ApplicationTestBuilder): io.ktor.client.statement.HttpResponse =
+                builder.client.post(path) {
+                    header("X-Telegram-Init-Data", INVALID_INIT_DATA)
+                    contentType(ContentType.Application.Json)
+                    setBody(body)
+                }
+        }
+    }
+
+    private fun newBookingRequest(tableId: Long, guestName: String): String =
+        """
+        {
+          "clubId": 1001,
+          "eventId": 1001,
+          "tableId": $tableId,
+          "guestsCount": 2,
+          "guestName": "$guestName",
+          "tgUserId": $SPOOFED_USER_ID
+        }
+        """.trimIndent()
+
+    private fun countBookingsForTable(tableId: Long): Long =
+        transaction {
+            org.jetbrains.exposed.sql.transactions.TransactionManager.current()
+                .exec("SELECT COUNT(*) FROM bookings WHERE table_id = $tableId") { rs ->
+                    rs.next()
+                    rs.getLong(1)
+                } ?: 0L
+        }
+
     private class RecordingLegacyHqNotifier : LegacyHqNotifier {
         val messages = mutableListOf<String>()
+        val nextMessage = CompletableDeferred<String>()
 
         override suspend fun notify(textHtml: String) {
             messages += textHtml
+            nextMessage.complete(textHtml)
+        }
+    }
+
+    private class SlowLegacyHqNotifier : LegacyHqNotifier {
+        val started = CompletableDeferred<Unit>()
+
+        override suspend fun notify(textHtml: String) {
+            started.complete(Unit)
+            delay(60_000)
+        }
+    }
+
+    private class FailingLegacyHqNotifier : LegacyHqNotifier {
+        override suspend fun notify(textHtml: String) {
+            error("boom")
         }
     }
 
@@ -316,5 +499,6 @@ class LegacyBookingWebAppAuthTest {
         private const val SPOOFED_USER_ID = 2000L
         private const val LEGACY_BOT_TOKEN = "111111:LEGACY_TOKEN"
         private const val VALID_INIT_DATA = "valid-init-data"
+        private const val INVALID_INIT_DATA = "invalid-init-data"
     }
 }
