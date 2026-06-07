@@ -53,6 +53,7 @@ import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installHttpSecurityFromEnv
 import com.example.bot.plugins.installHotPathLimiterDefaults
 import com.example.bot.plugins.installRateLimitPluginDefaults
+import com.example.bot.plugins.resolveEnv
 import com.example.bot.plugins.resolveFlag
 import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.installMetrics
@@ -552,10 +553,14 @@ private fun Application.bootstrapKoin() {
 }
 
 private fun Application.bootstrapRoutes(privacyConfig: PrivacyConfig) {
+    bootstrapLegacyBookingWebApp(privacyConfig)
+}
+
+internal fun Application.bootstrapLegacyBookingWebApp(privacyConfig: PrivacyConfig) {
     if (!isLegacyBookingEnabled()) {
         return
     }
-    val legacyConfig = LegacyBookingConfig.fromEnvForEnabled()
+    val legacyConfig = LegacyBookingConfig.fromEnvForEnabled(::resolveEnv)
     installLegacyBookingWebApp(
         privacyConfig = privacyConfig,
         legacyHqNotifier = legacyConfig.buildHqNotifier(),

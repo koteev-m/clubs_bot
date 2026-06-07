@@ -22,12 +22,15 @@
 
 package com.example.bot.deprecated.legacy.web
 
+import com.example.bot.data.booking.BookingStatus
+import com.example.bot.data.booking.BookingStatusNames
 import com.example.bot.data.db.DbErrorClassifier
 import com.example.bot.data.db.DbErrorReason
 import com.example.bot.data.privacy.PrivacyConfig
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
@@ -38,6 +41,14 @@ import io.ktor.server.routing.route
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.server.application.call
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
@@ -57,7 +68,8 @@ import java.util.UUID
 
 private const val EVENTS_LIMIT = 50
 private const val BOOKINGS_LIMIT = 20
-private val activeBookingStatuses = listOf("BOOKED", "CONFIRMED", "SEATED")
+private val activeBookingStatuses = BookingStatusNames.ACTIVE_FOR_TABLE_OCCUPANCY
+private val newLegacyBookingStatus = BookingStatus.BOOKED.name
 
 /* ==========================  HTML (UI) ========================== */
 private val CHECKIN_HTML = """
@@ -348,6 +360,47 @@ private val CHECKIN_HTML = """
 private val json = Json { ignoreUnknownKeys = true }
 private val legacyRouteLogger = LoggerFactory.getLogger("LegacyBookingWebAppRoutes")
 
+private fun LegacyHqNotifier.managedDispatcher(): LegacyHqNotificationDispatcher {
+    val scope =
+        CoroutineScope(
+            SupervisorJob() +
+                Dispatchers.Default +
+                CoroutineName("legacy-hq-notifier"),
+        )
+    return LegacyHqNotificationDispatcher(this, scope)
+}
+
+private class LegacyHqNotificationDispatcher(
+    private val notifier: LegacyHqNotifier,
+    private val scope: CoroutineScope,
+) {
+    fun dispatch(textHtml: String) {
+        scope.launch {
+            try {
+                withTimeout(LEGACY_HQ_NOTIFY_TIMEOUT_MS) {
+                    notifier.notify(textHtml)
+                }
+            } catch (_: TimeoutCancellationException) {
+                legacyRouteLogger.warn("Legacy HQ notification timed out")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                legacyRouteLogger.warn(
+                    "Legacy HQ notification failed: failure={} cause={}",
+                    e.javaClass.simpleName,
+                    e.cause?.javaClass?.simpleName ?: "none",
+                )
+            }
+        }
+    }
+
+    fun cancel() {
+        scope.cancel()
+    }
+}
+
+private const val LEGACY_HQ_NOTIFY_TIMEOUT_MS: Long = 10_000
+
 /** Подключить все UI/REST маршруты мини‑приложения бронирования. */
 @Deprecated("Legacy booking web app route")
 fun Application.installLegacyBookingWebApp(
@@ -355,6 +408,11 @@ fun Application.installLegacyBookingWebApp(
     legacyHqNotifier: LegacyHqNotifier = NoopLegacyHqNotifier,
     legacyBotTokenProvider: () -> String = { LegacyBookingConfig.readLegacyBotToken() },
 ) {
+    val hqNotificationDispatcher = legacyHqNotifier.managedDispatcher()
+    monitor.subscribe(ApplicationStopped) {
+        hqNotificationDispatcher.cancel()
+    }
+
     routing {
         get("/ui/checkin") { call.respondText(CHECKIN_HTML, ContentType.Text.Html) }
 
@@ -511,7 +569,7 @@ fun Application.installLegacyBookingWebApp(
                         it[slotStart]      = event[Events.startAt]
                         it[slotEnd]        = event[Events.endAt]
                         it[arrivalBy]      = req.arrivalBy?.let(Instant::parse)
-                        it[status]         = "BOOKED"
+                        it[status]         = newLegacyBookingStatus
                         it[Bookings.qrSecret] = qrCodeSecret
                         it[idempotencyKey] = idem
                         it[createdAt]      = Instant.now()
@@ -546,7 +604,7 @@ fun Application.installLegacyBookingWebApp(
 
             when (result) {
                 is BookingOk   -> {
-                    legacyHqNotifier.notify(buildNotifyText(result.data, tgUserId, tgUsername, tgDisplay))
+                    hqNotificationDispatcher.dispatch(buildNotifyText(result.data, tgUserId, tgUsername, tgDisplay))
                     call.respondText(json.encodeToString(result.data), ContentType.Application.Json)
                 }
                 is BookingError -> call.respond(HttpStatusCode.Conflict, result.code)
