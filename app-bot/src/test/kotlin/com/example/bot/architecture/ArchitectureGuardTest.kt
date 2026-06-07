@@ -22,17 +22,44 @@ class ArchitectureGuardTest {
 
     @Test fun `legacy route isolated and no client provided identity trust`() {
         val legacy = Files.readString(root.resolve("com/example/bot/deprecated/legacy/web/BookingWebAppRoutes.kt"))
-        val forbiddenPatterns =
-            listOf(
-                Regex("header\\(\\s*\"X-TG-User-Id\""),
-                Regex("headers\\s*\\[\\s*\"X-TG-User-Id\"\\s*]"),
-                Regex("queryParameters\\s*\\[\\s*\"tgUserId\"\\s*]"),
-                Regex("@Serializable\\s+[^\\n]*(?:data\\s+)?class\\s+\\w+[^\\n]*\\btgUserId\\b"),
-                Regex("decodeFromString<[^>]+>\\([^)]*\\)\\s*\\.\\s*tgUserId"),
-            )
-        val violations = forbiddenPatterns.filter { it.containsMatchIn(legacy) }
+        val violations = clientProvidedTelegramIdentityPatterns().filter { it.containsMatchIn(legacy) }
 
         assertTrue(violations.isEmpty(), "Legacy route must not trust client-provided Telegram identity: $violations")
         assertTrue(legacy.contains("com.example.bot.deprecated.legacy"))
     }
+
+    @Test fun `legacy identity guard detects common spoofing accessors`() {
+        val snippets =
+            listOf(
+                "call.request.header(\"X-TG-User-Id\")",
+                "call.request.headers[\"X-TG-User-Id\"]",
+                "call.request.queryParameters[\"tgUserId\"]",
+                "call.receiveParameters()[\"tgUserId\"]",
+                "formParameters[\"tgUserId\"]",
+                "formParameters.get(\"tgUserId\")",
+                "formParameters.getAll(\"tgUserId\")",
+                "jsonObject[\"tgUserId\"]",
+                "@Serializable private data class Request(val tgUserId: Long)",
+                "json.decodeFromString<Request>(raw).tgUserId",
+            )
+
+        snippets.forEach { snippet ->
+            assertTrue(
+                clientProvidedTelegramIdentityPatterns().any { it.containsMatchIn(snippet) },
+                "Legacy identity guard did not catch spoofing accessor: $snippet",
+            )
+        }
+    }
+
+    private fun clientProvidedTelegramIdentityPatterns(): List<Regex> =
+        listOf(
+            Regex("\\bheader\\s*\\(\\s*\"X-TG-User-Id\""),
+            Regex("\\bheaders\\s*\\[\\s*\"X-TG-User-Id\"\\s*]"),
+            Regex("\\bqueryParameters\\s*\\[\\s*\"tgUserId\"\\s*]"),
+            Regex("\\b(?:queryParameters|parameters|formParameters|receiveParameters\\s*\\([^)]*\\))\\s*\\[\\s*\"tgUserId\"\\s*]"),
+            Regex("\\b(?:queryParameters|parameters|formParameters|receiveParameters\\s*\\([^)]*\\))\\s*\\.\\s*(?:get|getAll)\\s*\\(\\s*\"tgUserId\""),
+            Regex("\\bjsonObject\\s*\\[\\s*\"tgUserId\"\\s*]"),
+            Regex("@Serializable\\s+[^\\n]*(?:data\\s+)?class\\s+\\w+[^\\n]*\\btgUserId\\b"),
+            Regex("decodeFromString<[^>]+>\\([^)]*\\)\\s*\\.\\s*tgUserId"),
+        )
 }
