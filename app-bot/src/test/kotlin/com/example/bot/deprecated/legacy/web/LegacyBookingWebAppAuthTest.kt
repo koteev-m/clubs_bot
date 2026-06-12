@@ -196,6 +196,81 @@ class LegacyBookingWebAppAuthTest {
     }
 
     @Test
+    fun `post booking rejects invalid json with shared error envelope`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+
+        val response = client.post("/api/bookings") {
+            validInitData()
+            contentType(ContentType.Application.Json)
+            setBody("{not-json")
+        }
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.BadRequest, response.status, body)
+        assertErrorCode(body, "invalid_json")
+        assertEquals(0, countBookingsForTable(tableId = 1008))
+    }
+
+    @Test
+    fun `post booking maps legacy booking errors to explicit error envelope statuses`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+
+        val cases = listOf(
+            LegacyBookingErrorCase(
+                name = "event not found",
+                request = newBookingRequest(
+                    eventId = 9999,
+                    tableId = 1008,
+                    guestName = "Missing Event",
+                ),
+                expectedStatus = HttpStatusCode.NotFound,
+                expectedCode = "EVENT_NOT_FOUND",
+            ),
+            LegacyBookingErrorCase(
+                name = "table not found",
+                request = newBookingRequest(tableId = 9999, guestName = "Missing Table"),
+                expectedStatus = HttpStatusCode.NotFound,
+                expectedCode = "TABLE_NOT_FOUND",
+            ),
+            LegacyBookingErrorCase(
+                name = "table inactive",
+                request = newBookingRequest(tableId = 1010, guestName = "Inactive Table"),
+                expectedStatus = HttpStatusCode.BadRequest,
+                expectedCode = "TABLE_INACTIVE",
+            ),
+            LegacyBookingErrorCase(
+                name = "capacity exceeded",
+                request = newBookingRequest(
+                    tableId = 1008,
+                    guestName = "Too Many Guests",
+                    guestsCount = 5,
+                ),
+                expectedStatus = HttpStatusCode.BadRequest,
+                expectedCode = "CAPACITY_EXCEEDED",
+            ),
+            LegacyBookingErrorCase(
+                name = "already booked",
+                request = newBookingRequest(tableId = 1007, guestName = "Already Booked"),
+                expectedStatus = HttpStatusCode.Conflict,
+                expectedCode = "ALREADY_BOOKED",
+            ),
+        )
+
+        cases.forEach { case ->
+            val response = client.post("/api/bookings") {
+                validInitData()
+                contentType(ContentType.Application.Json)
+                setBody(case.request)
+            }
+            val body = response.bodyAsText()
+
+            assertEquals(case.expectedStatus, response.status, "${case.name}: $body")
+            assertErrorCode(body, case.expectedCode)
+            assertTrue(body.contains("\"status\":${case.expectedStatus.value}"), body)
+        }
+    }
+
+    @Test
     fun `post booking unexpected non constraint failure is internal error not conflict`() = testApplication {
         installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
         restrictBookingGuestNameLength()
@@ -224,8 +299,11 @@ class LegacyBookingWebAppAuthTest {
             setBody(newBookingRequest(tableId = 1008, guestName = "Constraint Conflict"))
         }
 
-        assertEquals(HttpStatusCode.Conflict, response.status, response.bodyAsText())
-        assertEquals("CONFLICT", response.bodyAsText())
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.Conflict, response.status, body)
+        assertErrorCode(body, "CONFLICT")
+        assertTrue(body.contains("\"status\":409"), body)
         assertEquals(1, countBookingsForTable(tableId = 1008))
     }
 
@@ -481,7 +559,10 @@ class LegacyBookingWebAppAuthTest {
             exec(
                 """
                 INSERT INTO tables (id, club_id, zone_id, table_number, capacity, min_deposit, active)
-                VALUES (1007, 1001, NULL, 7, 4, 1000.00, TRUE), (1008, 1001, NULL, 8, 4, 1000.00, TRUE), (1009, 1001, NULL, 9, 4, 1000.00, TRUE)
+                VALUES (1007, 1001, NULL, 7, 4, 1000.00, TRUE),
+                    (1008, 1001, NULL, 8, 4, 1000.00, TRUE),
+                    (1009, 1001, NULL, 9, 4, 1000.00, TRUE),
+                    (1010, 1001, NULL, 10, 4, 1000.00, FALSE)
                 """.trimIndent(),
             )
             exec(
@@ -573,20 +654,34 @@ class LegacyBookingWebAppAuthTest {
     private fun newBookingRequest(
         tableId: Long,
         guestName: String,
+        eventId: Long = 1001,
+        guestsCount: Int = 2,
         arrivalBy: String? = null,
     ): String {
         val arrivalByField = arrivalBy?.let { ",\n          \"arrivalBy\": \"$it\"" } ?: ""
         return """
         {
           "clubId": 1001,
-          "eventId": 1001,
+          "eventId": $eventId,
           "tableId": $tableId,
-          "guestsCount": 2,
+          "guestsCount": $guestsCount,
           "guestName": "$guestName",
           "tgUserId": $SPOOFED_USER_ID$arrivalByField
         }
         """.trimIndent()
     }
+
+    private fun assertErrorCode(body: String, expectedCode: String) {
+        val json = Json.parseToJsonElement(body).jsonObject
+        assertEquals(expectedCode, json["code"]?.jsonPrimitive?.content, body)
+    }
+
+    private data class LegacyBookingErrorCase(
+        val name: String,
+        val request: String,
+        val expectedStatus: HttpStatusCode,
+        val expectedCode: String,
+    )
 
     private fun guestTelegramUserIdForTable(tableId: Long): Long? =
         transaction {

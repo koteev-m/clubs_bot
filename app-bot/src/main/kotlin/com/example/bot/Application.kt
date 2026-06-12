@@ -570,10 +570,22 @@ internal fun Application.bootstrapLegacyBookingWebApp(privacyConfig: PrivacyConf
 internal fun Application.isLegacyBookingEnabled(): Boolean =
     resolveFlag("LEGACY_BOOKING_WEBAPP_ENABLED", default = false)
 
-private fun Application.resolveLegacyBookingEnv(name: String): String? {
+internal fun Application.resolveLegacyBookingEnv(name: String): String? {
     val fromConfig = environment.config.propertyOrNull("app.env.$name")
-    if (fromConfig != null) {
-        return fromConfig.getString().trim().takeIf { it.isNotBlank() }
+    return resolveLegacyBookingEnvValue(
+        configValue = fromConfig?.getString(),
+        hasConfigValue = fromConfig != null,
+        processValue = System.getenv(name),
+    )
+}
+
+internal fun resolveLegacyBookingEnvValue(
+    configValue: String?,
+    hasConfigValue: Boolean,
+    processValue: String?,
+): String? {
+    if (hasConfigValue) {
+        return configValue.orEmpty().trim().takeIf { it.isNotBlank() }
     }
-    return System.getenv(name)
+    return processValue
 }

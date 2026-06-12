@@ -27,6 +27,21 @@ class LegacyBookingConfigTest {
     }
 
     @Test
+    fun `legacy bot token reader uses BOT_TOKEN when telegram token is blank`() {
+        val token =
+            LegacyBookingConfig.readLegacyBotToken(
+                envProvider(
+                    mapOf(
+                        "TELEGRAM_BOT_TOKEN" to "   ",
+                        "BOT_TOKEN" to " 222222:fallback ",
+                    ),
+                ),
+            )
+
+        assertEquals("222222:fallback", token)
+    }
+
+    @Test
     fun `enabled legacy flow builds config from valid environment`() {
         val config =
             LegacyBookingConfig.fromEnvForEnabled(
