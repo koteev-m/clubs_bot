@@ -34,6 +34,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.h2.jdbcx.JdbcDataSource
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.Instant
 import java.util.UUID
@@ -178,17 +179,37 @@ class LegacyBookingWebAppAuthTest {
     }
 
     @Test
-    fun `post booking unexpected runtime failure is handled as internal error not conflict`() = testApplication {
+    fun `post booking rejects malformed arrivalBy as validation error`() = testApplication {
         installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
 
         val response = client.post("/api/bookings") {
             validInitData()
             contentType(ContentType.Application.Json)
-            setBody(newBookingRequest(tableId = 1008, guestName = "Runtime Failure", arrivalBy = "not-an-instant"))
+            setBody(newBookingRequest(tableId = 1008, guestName = "Bad Arrival", arrivalBy = "not-an-instant"))
         }
+        val body = response.bodyAsText()
 
-        assertEquals(HttpStatusCode.InternalServerError, response.status, response.bodyAsText())
-        assertFalse(response.bodyAsText().contains("CONFLICT"), response.bodyAsText())
+        assertEquals(HttpStatusCode.BadRequest, response.status, body)
+        assertTrue(body.contains("\"code\":\"validation_error\""), body)
+        assertTrue(body.contains("arrivalBy"), body)
+        assertEquals(0, countBookingsForTable(tableId = 1008))
+    }
+
+    @Test
+    fun `post booking unexpected non constraint failure is internal error not conflict`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+        restrictBookingGuestNameLength()
+
+        val response = client.post("/api/bookings") {
+            validInitData()
+            contentType(ContentType.Application.Json)
+            setBody(newBookingRequest(tableId = 1008, guestName = "Runtime failure name exceeds varchar limit"))
+        }
+        val body = response.bodyAsText()
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status, body)
+        assertFalse(body.contains("CONFLICT"), body)
+        assertFalse(body.contains("\"status\":409"), body)
         assertEquals(0, countBookingsForTable(tableId = 1008))
     }
 
@@ -569,7 +590,7 @@ class LegacyBookingWebAppAuthTest {
 
     private fun guestTelegramUserIdForTable(tableId: Long): Long? =
         transaction {
-            org.jetbrains.exposed.sql.transactions.TransactionManager.current()
+            TransactionManager.current()
                 .exec(
                     """
                     SELECT u.telegram_user_id
@@ -584,7 +605,7 @@ class LegacyBookingWebAppAuthTest {
 
     private fun isBookingPersistedForTelegramUser(tableId: Long, telegramUserId: Long): Boolean =
         transaction {
-            org.jetbrains.exposed.sql.transactions.TransactionManager.current()
+            TransactionManager.current()
                 .exec(
                     """
                     SELECT COUNT(*)
@@ -600,12 +621,18 @@ class LegacyBookingWebAppAuthTest {
 
     private fun countBookingsForTable(tableId: Long): Long =
         transaction {
-            org.jetbrains.exposed.sql.transactions.TransactionManager.current()
+            TransactionManager.current()
                 .exec("SELECT COUNT(*) FROM bookings WHERE table_id = $tableId") { rs ->
                     rs.next()
                     rs.getLong(1)
                 } ?: 0L
         }
+
+    private fun restrictBookingGuestNameLength() {
+        transaction {
+            exec("ALTER TABLE bookings ALTER COLUMN guest_name VARCHAR(32)")
+        }
+    }
 
     private fun insertCancelledBookingWithIdempotencyKey(idempotencyKey: String) {
         val eventStart = Instant.parse("2026-06-04T20:00:00Z")
