@@ -2,15 +2,12 @@ package com.example.bot.deprecated.legacy.web
 
 internal data class LegacyBookingConfig(
     val botToken: String,
-    val hqChatId: String?,
+    val hqChatId: String,
 ) {
     fun botTokenProvider(): String = botToken
 
     fun buildHqNotifier(): LegacyHqNotifier =
-        hqChatId
-            ?.takeIf { it.isNotBlank() }
-            ?.let { TelegramLegacyHqNotifier(token = botToken, chatId = it) }
-            ?: error("LEGACY_HQ_CHAT_ID is required when LEGACY_BOOKING_WEBAPP_ENABLED=true")
+        TelegramLegacyHqNotifier(token = botToken, chatId = hqChatId)
 
     companion object {
         fun fromEnvForEnabled(envProvider: (String) -> String? = System::getenv): LegacyBookingConfig {

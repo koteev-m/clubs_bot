@@ -20,12 +20,16 @@ class ArchitectureGuardTest {
         assertFalse(app.contains("loadKoinModulesReflectively"))
     }
 
-    @Test fun `legacy route isolated and no client provided identity trust`() {
-        val legacy = Files.readString(root.resolve("com/example/bot/deprecated/legacy/web/BookingWebAppRoutes.kt"))
-        val violations = clientProvidedTelegramIdentityPatterns().filter { it.containsMatchIn(legacy) }
+    @Test fun `legacy package isolated and no client provided identity trust`() {
+        val legacySources = legacyProductionSources()
+        val violations = legacySources.flatMap { (path, source) ->
+            clientProvidedTelegramIdentityPatterns()
+                .filter { it.containsMatchIn(source) }
+                .map { path to it }
+        }
 
-        assertTrue(violations.isEmpty(), "Legacy route must not trust client-provided Telegram identity: $violations")
-        assertTrue(legacy.contains("com.example.bot.deprecated.legacy"))
+        assertTrue(violations.isEmpty(), "Legacy package must not trust client-provided Telegram identity: $violations")
+        assertTrue(legacySources.values.any { it.contains("com.example.bot.deprecated.legacy") })
     }
 
     @Test fun `legacy identity guard detects common spoofing accessors`() {
@@ -48,6 +52,17 @@ class ArchitectureGuardTest {
                 clientProvidedTelegramIdentityPatterns().any { it.containsMatchIn(snippet) },
                 "Legacy identity guard did not catch spoofing accessor: $snippet",
             )
+        }
+    }
+
+    private fun legacyProductionSources(): Map<String, String> {
+        val legacyRoot = root.resolve("com/example/bot/deprecated/legacy")
+        return Files.walk(legacyRoot).use { paths ->
+            paths
+                .filter { it.toString().endsWith(".kt") }
+                .sorted()
+                .toList()
+                .associate { root.relativize(it).pathString to Files.readString(it) }
         }
     }
 

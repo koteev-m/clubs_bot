@@ -3,11 +3,10 @@ package com.example.bot.plugins
 import io.ktor.server.application.Application
 
 internal fun Application.resolveEnv(name: String): String? {
-    val fromConfig = environment.config.propertyOrNull("app.env.$name")
-    if (fromConfig != null) {
-        return fromConfig.getString().takeIf { it.isNotBlank() }
-    }
-    return System.getenv(name)
+    val configValue = environment.config.propertyOrNull("app.env.$name")
+        ?.getString()
+        ?.takeIf { it.isNotBlank() }
+    return configValue ?: System.getenv(name)
 }
 
 internal fun Application.resolveFlag(

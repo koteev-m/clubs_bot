@@ -6,6 +6,7 @@ import com.example.bot.isLegacyBookingEnabled
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
+import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.webapp.WebAppInitDataTestHelper
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -177,6 +178,37 @@ class LegacyBookingWebAppAuthTest {
     }
 
     @Test
+    fun `post booking unexpected runtime failure is handled as internal error not conflict`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+
+        val response = client.post("/api/bookings") {
+            validInitData()
+            contentType(ContentType.Application.Json)
+            setBody(newBookingRequest(tableId = 1008, guestName = "Runtime Failure", arrivalBy = "not-an-instant"))
+        }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status, response.bodyAsText())
+        assertFalse(response.bodyAsText().contains("CONFLICT"), response.bodyAsText())
+        assertEquals(0, countBookingsForTable(tableId = 1008))
+    }
+
+    @Test
+    fun `post booking insert constraint conflict remains conflict path`() = testApplication {
+        installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
+        insertCancelledBookingWithIdempotencyKey(idempotencyKey = "tg-$AUTH_USER_ID-1001-1008-2")
+
+        val response = client.post("/api/bookings") {
+            validInitData()
+            contentType(ContentType.Application.Json)
+            setBody(newBookingRequest(tableId = 1008, guestName = "Constraint Conflict"))
+        }
+
+        assertEquals(HttpStatusCode.Conflict, response.status, response.bodyAsText())
+        assertEquals("CONFLICT", response.bodyAsText())
+        assertEquals(1, countBookingsForTable(tableId = 1008))
+    }
+
+    @Test
     fun `legacy api endpoints are fail-closed when auth missing`() = testApplication {
         installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID)
 
@@ -275,6 +307,7 @@ class LegacyBookingWebAppAuthTest {
         overrideMiniAppValidatorForTesting { _, _ -> null }
         application {
             install(ContentNegotiation) { json() }
+            installJsonErrorPages()
             installLegacyBookingWebApp(
                 privacyConfig = privacyConfig(),
                 legacyBotTokenProvider = { LEGACY_BOT_TOKEN },
@@ -313,6 +346,7 @@ class LegacyBookingWebAppAuthTest {
         }
         application {
             install(ContentNegotiation) { json() }
+            installJsonErrorPages()
             installLegacyBookingWebApp(
                 privacyConfig = privacyConfig(),
                 legacyHqNotifier = legacyHqNotifier,
@@ -515,17 +549,23 @@ class LegacyBookingWebAppAuthTest {
         }
     }
 
-    private fun newBookingRequest(tableId: Long, guestName: String): String =
-        """
+    private fun newBookingRequest(
+        tableId: Long,
+        guestName: String,
+        arrivalBy: String? = null,
+    ): String {
+        val arrivalByField = arrivalBy?.let { ",\n          \"arrivalBy\": \"$it\"" } ?: ""
+        return """
         {
           "clubId": 1001,
           "eventId": 1001,
           "tableId": $tableId,
           "guestsCount": 2,
           "guestName": "$guestName",
-          "tgUserId": $SPOOFED_USER_ID
+          "tgUserId": $SPOOFED_USER_ID$arrivalByField
         }
         """.trimIndent()
+    }
 
     private fun guestTelegramUserIdForTable(tableId: Long): Long? =
         transaction {
@@ -566,6 +606,26 @@ class LegacyBookingWebAppAuthTest {
                     rs.getLong(1)
                 } ?: 0L
         }
+
+    private fun insertCancelledBookingWithIdempotencyKey(idempotencyKey: String) {
+        val eventStart = Instant.parse("2026-06-04T20:00:00Z")
+        val eventEnd = Instant.parse("2026-06-05T03:00:00Z")
+        transaction {
+            exec(
+                """
+                INSERT INTO bookings (
+                    id, event_id, club_id, table_id, table_number, guest_user_id, guest_name, guests_count,
+                    min_deposit, total_deposit, slot_start, slot_end, status, qr_secret, idempotency_key,
+                    created_at, updated_at
+                ) VALUES (
+                    RANDOM_UUID(), 1001, 1001, 1008, 8, 1100, 'Cancelled Duplicate', 2,
+                    1000.00, 2000.00, '$eventStart', '$eventEnd', 'CANCELLED',
+                    'cancelled-duplicate-secret', '$idempotencyKey', NOW(), NOW()
+                )
+                """.trimIndent(),
+            )
+        }
+    }
 
     private class RecordingLegacyHqNotifier : LegacyHqNotifier {
         val messages = mutableListOf<String>()
