@@ -53,7 +53,6 @@ import com.example.bot.plugins.installDiagTime
 import com.example.bot.plugins.installHttpSecurityFromEnv
 import com.example.bot.plugins.installHotPathLimiterDefaults
 import com.example.bot.plugins.installRateLimitPluginDefaults
-import com.example.bot.plugins.resolveEnv
 import com.example.bot.plugins.resolveFlag
 import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.installMetrics
@@ -560,7 +559,7 @@ internal fun Application.bootstrapLegacyBookingWebApp(privacyConfig: PrivacyConf
     if (!isLegacyBookingEnabled()) {
         return
     }
-    val legacyConfig = LegacyBookingConfig.fromEnvForEnabled(::resolveEnv)
+    val legacyConfig = LegacyBookingConfig.fromEnvForEnabled(::resolveLegacyBookingEnv)
     installLegacyBookingWebApp(
         privacyConfig = privacyConfig,
         legacyHqNotifier = legacyConfig.buildHqNotifier(),
@@ -570,3 +569,11 @@ internal fun Application.bootstrapLegacyBookingWebApp(privacyConfig: PrivacyConf
 
 internal fun Application.isLegacyBookingEnabled(): Boolean =
     resolveFlag("LEGACY_BOOKING_WEBAPP_ENABLED", default = false)
+
+private fun Application.resolveLegacyBookingEnv(name: String): String? {
+    val fromConfig = environment.config.propertyOrNull("app.env.$name")
+    if (fromConfig != null) {
+        return fromConfig.getString().trim().takeIf { it.isNotBlank() }
+    }
+    return System.getenv(name)
+}
