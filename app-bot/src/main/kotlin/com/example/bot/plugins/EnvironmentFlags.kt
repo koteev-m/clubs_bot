@@ -2,12 +2,16 @@ package com.example.bot.plugins
 
 import io.ktor.server.application.Application
 
-internal fun Application.resolveEnv(name: String): String? {
-    val configValue = environment.config.propertyOrNull("app.env.$name")
-        ?.getString()
-        ?.takeIf { it.isNotBlank() }
-    return configValue ?: System.getenv(name)
-}
+internal fun Application.resolveEnv(name: String): String? =
+    resolveEnvValue(
+        configValue = environment.config.propertyOrNull("app.env.$name")?.getString(),
+        processValue = System.getenv(name),
+    )
+
+internal fun resolveEnvValue(
+    configValue: String?,
+    processValue: String?,
+): String? = configValue?.takeIf { it.isNotBlank() } ?: processValue
 
 internal fun Application.resolveFlag(
     name: String,

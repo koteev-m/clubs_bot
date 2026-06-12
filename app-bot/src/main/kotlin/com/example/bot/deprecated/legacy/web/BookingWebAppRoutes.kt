@@ -503,9 +503,17 @@ fun Application.installLegacyBookingWebApp(
             val req = try {
                 json.decodeFromString<BookingRequest>(raw)
             } catch (_: SerializationException) {
-                return@post call.respond(HttpStatusCode.BadRequest, "invalid json")
+                return@post call.respondError(
+                    HttpStatusCode.BadRequest,
+                    ErrorCodes.invalid_json,
+                    message = "Request body must be valid JSON",
+                )
             } catch (_: IllegalArgumentException) {
-                return@post call.respond(HttpStatusCode.BadRequest, "invalid json")
+                return@post call.respondError(
+                    HttpStatusCode.BadRequest,
+                    ErrorCodes.invalid_json,
+                    message = "Request body must be valid JSON",
+                )
             }
             val parsedArrivalBy: Instant? = try {
                 req.arrivalBy?.let(Instant::parse)
@@ -623,7 +631,7 @@ fun Application.installLegacyBookingWebApp(
                     hqNotificationDispatcher.dispatch(buildNotifyText(result.data, tgUserId, tgUsername, tgDisplay))
                     call.respondText(json.encodeToString(result.data), ContentType.Application.Json)
                 }
-                is BookingError -> call.respond(HttpStatusCode.Conflict, result.code)
+                is BookingError -> call.respondLegacyBookingError(result)
             }
         }
 
@@ -757,6 +765,37 @@ private object Bookings : Table("bookings") {
 private sealed interface BookingResult
 private data class BookingOk(val data: BookingCreated) : BookingResult
 private data class BookingError(val code: String) : BookingResult
+
+private suspend fun io.ktor.server.application.ApplicationCall.respondLegacyBookingError(error: BookingError) {
+    val status = legacyBookingErrorStatus(error.code)
+    respondError(
+        status,
+        error.code,
+        message = legacyBookingErrorMessage(error.code),
+    )
+}
+
+private fun legacyBookingErrorStatus(code: String): HttpStatusCode =
+    when (code) {
+        "EVENT_NOT_FOUND", "TABLE_NOT_FOUND" -> HttpStatusCode.NotFound
+        "EVENT_CLUB_MISMATCH", "TABLE_CLUB_MISMATCH", "TABLE_INACTIVE", "CAPACITY_EXCEEDED" ->
+            HttpStatusCode.BadRequest
+        "ALREADY_BOOKED", "CONFLICT" -> HttpStatusCode.Conflict
+        else -> HttpStatusCode.InternalServerError
+    }
+
+private fun legacyBookingErrorMessage(code: String): String =
+    when (code) {
+        "EVENT_NOT_FOUND" -> "Event was not found"
+        "TABLE_NOT_FOUND" -> "Table was not found"
+        "EVENT_CLUB_MISMATCH" -> "Event does not belong to the requested club"
+        "TABLE_CLUB_MISMATCH" -> "Table does not belong to the requested club"
+        "TABLE_INACTIVE" -> "Table is not active"
+        "CAPACITY_EXCEEDED" -> "Guest count exceeds table capacity"
+        "ALREADY_BOOKED" -> "Table is already booked"
+        "CONFLICT" -> "Booking conflicts with an existing record"
+        else -> "Unexpected booking error"
+    }
 
 /* ==========================  Вспомогательные ========================== */
 
