@@ -1,7 +1,13 @@
 package com.example.bot.deprecated.legacy.web
 
+import io.ktor.server.application.ApplicationStopped
+import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 import java.net.Authenticator
 import java.net.CookieHandler
@@ -99,6 +105,24 @@ class BookingWebAppRoutesPrivacyTest {
         }
 
     @Test
+    fun `legacy notifier dispatcher cancels background job on application stopped`() =
+        testApplication {
+            val notifier = CancellableLegacyHqNotifier()
+
+            application {
+                val dispatcher = notifier.managedDispatcher()
+                dispatcher.cancelOnApplicationStopped(this)
+                dispatcher.dispatch("<b>shutdown</b>")
+
+                runBlocking {
+                    withTimeout(1_000) { notifier.started.await() }
+                    monitor.raise(ApplicationStopped, this@application)
+                    withTimeout(1_000) { notifier.cancelled.await() }
+                }
+            }
+        }
+
+    @Test
     fun `legacy booking insert classifier treats constraint errors as conflict`() {
         assertTrue(isLegacyBookingInsertConflict(RuntimeException(SQLException("duplicate", "23505"))))
         assertTrue(isLegacyBookingInsertConflict(SQLException("foreign key", "23503")))
@@ -116,6 +140,21 @@ class BookingWebAppRoutesPrivacyTest {
             chatId = "1000",
             client = client,
         )
+}
+
+private class CancellableLegacyHqNotifier : LegacyHqNotifier {
+    val started = CompletableDeferred<Unit>()
+    val cancelled = CompletableDeferred<Unit>()
+
+    override suspend fun notify(textHtml: String) {
+        assertTrue(textHtml.isNotBlank())
+        started.complete(Unit)
+        try {
+            delay(60_000)
+        } finally {
+            cancelled.complete(Unit)
+        }
+    }
 }
 
 private sealed interface TelegramResult {

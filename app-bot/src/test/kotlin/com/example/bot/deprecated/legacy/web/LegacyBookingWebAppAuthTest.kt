@@ -46,6 +46,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+@Suppress("LargeClass")
 class LegacyBookingWebAppAuthTest {
     @AfterTest
     fun cleanup() {
@@ -233,6 +234,20 @@ class LegacyBookingWebAppAuthTest {
                 expectedCode = "TABLE_NOT_FOUND",
             ),
             LegacyBookingErrorCase(
+                name = "event club mismatch",
+                request = newBookingRequest(eventId = 1002, tableId = 1008, guestName = "Wrong Event Club"),
+                expectedStatus = HttpStatusCode.BadRequest,
+                expectedCode = "EVENT_CLUB_MISMATCH",
+                expectedMessage = "Event does not belong to the requested club",
+            ),
+            LegacyBookingErrorCase(
+                name = "table club mismatch",
+                request = newBookingRequest(tableId = 1011, guestName = "Wrong Table Club"),
+                expectedStatus = HttpStatusCode.BadRequest,
+                expectedCode = "TABLE_CLUB_MISMATCH",
+                expectedMessage = "Table does not belong to the requested club",
+            ),
+            LegacyBookingErrorCase(
                 name = "table inactive",
                 request = newBookingRequest(tableId = 1010, guestName = "Inactive Table"),
                 expectedStatus = HttpStatusCode.BadRequest,
@@ -267,6 +282,9 @@ class LegacyBookingWebAppAuthTest {
             assertEquals(case.expectedStatus, response.status, "${case.name}: $body")
             assertErrorCode(body, case.expectedCode)
             assertTrue(body.contains("\"status\":${case.expectedStatus.value}"), body)
+            case.expectedMessage?.let { expectedMessage ->
+                assertTrue(body.contains("\"message\":\"$expectedMessage\""), body)
+            }
         }
     }
 
@@ -549,11 +567,18 @@ class LegacyBookingWebAppAuthTest {
         val eventStart = Instant.parse("2026-06-04T20:00:00Z")
         val eventEnd = Instant.parse("2026-06-05T03:00:00Z")
         transaction {
-            exec("INSERT INTO clubs (id, name, description, timezone) VALUES (1001, 'Runtime Club', 'Test club', 'Europe/Moscow')")
+            exec(
+                """
+                INSERT INTO clubs (id, name, description, timezone)
+                VALUES (1001, 'Runtime Club', 'Test club', 'Europe/Moscow'),
+                    (1002, 'Other Club', 'Other test club', 'Europe/Moscow')
+                """.trimIndent(),
+            )
             exec(
                 """
                 INSERT INTO events (id, club_id, title, start_at, end_at, is_special)
-                VALUES (1001, 1001, 'Runtime Night', '$eventStart', '$eventEnd', FALSE)
+                VALUES (1001, 1001, 'Runtime Night', '$eventStart', '$eventEnd', FALSE),
+                    (1002, 1002, 'Other Night', '$eventStart', '$eventEnd', FALSE)
                 """.trimIndent(),
             )
             exec(
@@ -562,7 +587,8 @@ class LegacyBookingWebAppAuthTest {
                 VALUES (1007, 1001, NULL, 7, 4, 1000.00, TRUE),
                     (1008, 1001, NULL, 8, 4, 1000.00, TRUE),
                     (1009, 1001, NULL, 9, 4, 1000.00, TRUE),
-                    (1010, 1001, NULL, 10, 4, 1000.00, FALSE)
+                    (1010, 1001, NULL, 10, 4, 1000.00, FALSE),
+                    (1011, 1002, NULL, 11, 4, 1000.00, TRUE)
                 """.trimIndent(),
             )
             exec(
@@ -655,13 +681,14 @@ class LegacyBookingWebAppAuthTest {
         tableId: Long,
         guestName: String,
         eventId: Long = 1001,
+        clubId: Long = 1001,
         guestsCount: Int = 2,
         arrivalBy: String? = null,
     ): String {
         val arrivalByField = arrivalBy?.let { ",\n          \"arrivalBy\": \"$it\"" } ?: ""
         return """
         {
-          "clubId": 1001,
+          "clubId": $clubId,
           "eventId": $eventId,
           "tableId": $tableId,
           "guestsCount": $guestsCount,
@@ -681,6 +708,7 @@ class LegacyBookingWebAppAuthTest {
         val request: String,
         val expectedStatus: HttpStatusCode,
         val expectedCode: String,
+        val expectedMessage: String? = null,
     )
 
     private fun guestTelegramUserIdForTable(tableId: Long): Long? =
