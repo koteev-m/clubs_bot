@@ -44,6 +44,15 @@ class ArchitectureGuardTest {
                 "formParameters.getAll(\"tgUserId\")",
                 "jsonObject[\"tgUserId\"]",
                 "@Serializable private data class Request(val tgUserId: Long)",
+                """
+                @Serializable
+                private data class Request(
+                    val clubId: Long,
+                    val tgUserId: Long,
+                )
+                """.trimIndent(),
+                "call.receive<Request>().tgUserId",
+                "call.receive<Request>().payload.tgUserId",
                 "json.decodeFromString<Request>(raw).tgUserId",
             )
 
@@ -75,6 +84,8 @@ class ArchitectureGuardTest {
             Regex("\\b(?:queryParameters|parameters|formParameters|receiveParameters\\s*\\([^)]*\\))\\s*\\.\\s*(?:get|getAll)\\s*\\(\\s*\"tgUserId\""),
             Regex("\\bjsonObject\\s*\\[\\s*\"tgUserId\"\\s*]"),
             Regex("@Serializable\\s+[^\\n]*(?:data\\s+)?class\\s+\\w+[^\\n]*\\btgUserId\\b"),
+            Regex("@Serializable\\s+(?:private\\s+|internal\\s+|public\\s+)?(?:data\\s+)?class\\s+\\w+\\s*\\([^)]*\\btgUserId\\b"),
+            Regex("\\bcall\\s*\\.\\s*receive\\s*(?:<[^>]+>)?\\s*\\([^)]*\\)\\s*(?:\\.\\s*\\w+)*\\.\\s*tgUserId"),
             Regex("decodeFromString<[^>]+>\\([^)]*\\)\\s*\\.\\s*tgUserId"),
         )
 }

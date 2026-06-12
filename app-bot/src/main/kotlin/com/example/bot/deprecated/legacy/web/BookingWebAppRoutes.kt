@@ -27,6 +27,8 @@ import com.example.bot.data.booking.BookingStatusNames
 import com.example.bot.data.db.DbErrorClassifier
 import com.example.bot.data.db.DbErrorReason
 import com.example.bot.data.privacy.PrivacyConfig
+import com.example.bot.http.ErrorCodes
+import com.example.bot.http.respondError
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -50,6 +52,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.slf4j.LoggerFactory
@@ -62,6 +65,7 @@ import java.sql.Timestamp
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZonedDateTime
+import java.time.format.DateTimeParseException
 import kotlin.math.max
 import java.util.Locale
 import java.util.UUID
@@ -498,8 +502,20 @@ fun Application.installLegacyBookingWebApp(
             val raw = call.receiveText()
             val req = try {
                 json.decodeFromString<BookingRequest>(raw)
-            } catch (_: Throwable) {
+            } catch (_: SerializationException) {
                 return@post call.respond(HttpStatusCode.BadRequest, "invalid json")
+            } catch (_: IllegalArgumentException) {
+                return@post call.respond(HttpStatusCode.BadRequest, "invalid json")
+            }
+            val parsedArrivalBy: Instant? = try {
+                req.arrivalBy?.let(Instant::parse)
+            } catch (_: DateTimeParseException) {
+                return@post call.respondError(
+                    HttpStatusCode.BadRequest,
+                    ErrorCodes.validation_error,
+                    message = "arrivalBy must be an ISO-8601 instant",
+                    details = mapOf("field" to "arrivalBy"),
+                )
             }
 
             val tgUserId = call.attributes[com.example.bot.plugins.MiniAppUserKey].id
@@ -568,7 +584,7 @@ fun Application.installLegacyBookingWebApp(
                         it[totalDeposit]   = total
                         it[slotStart]      = event[Events.startAt]
                         it[slotEnd]        = event[Events.endAt]
-                        it[arrivalBy]      = req.arrivalBy?.let(Instant::parse)
+                        it[arrivalBy]      = parsedArrivalBy
                         it[status]         = newLegacyBookingStatus
                         it[Bookings.qrSecret] = qrCodeSecret
                         it[idempotencyKey] = idem
