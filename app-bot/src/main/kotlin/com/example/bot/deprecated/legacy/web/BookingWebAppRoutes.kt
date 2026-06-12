@@ -364,7 +364,7 @@ private val CHECKIN_HTML = """
 private val json = Json { ignoreUnknownKeys = true }
 private val legacyRouteLogger = LoggerFactory.getLogger("LegacyBookingWebAppRoutes")
 
-private fun LegacyHqNotifier.managedDispatcher(): LegacyHqNotificationDispatcher {
+internal fun LegacyHqNotifier.managedDispatcher(): LegacyHqNotificationDispatcher {
     val scope =
         CoroutineScope(
             SupervisorJob() +
@@ -374,7 +374,7 @@ private fun LegacyHqNotifier.managedDispatcher(): LegacyHqNotificationDispatcher
     return LegacyHqNotificationDispatcher(this, scope)
 }
 
-private class LegacyHqNotificationDispatcher(
+internal class LegacyHqNotificationDispatcher(
     private val notifier: LegacyHqNotifier,
     private val scope: CoroutineScope,
 ) {
@@ -388,7 +388,7 @@ private class LegacyHqNotificationDispatcher(
                 legacyRouteLogger.warn("Legacy HQ notification timed out")
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Throwable) {
+            } catch (e: RuntimeException) {
                 legacyRouteLogger.warn(
                     "Legacy HQ notification failed: failure={} cause={}",
                     e.javaClass.simpleName,
@@ -403,6 +403,12 @@ private class LegacyHqNotificationDispatcher(
     }
 }
 
+internal fun LegacyHqNotificationDispatcher.cancelOnApplicationStopped(application: Application) {
+    application.monitor.subscribe(ApplicationStopped) {
+        cancel()
+    }
+}
+
 private const val LEGACY_HQ_NOTIFY_TIMEOUT_MS: Long = 10_000
 
 /** Подключить все UI/REST маршруты мини‑приложения бронирования. */
@@ -413,9 +419,7 @@ fun Application.installLegacyBookingWebApp(
     legacyBotTokenProvider: () -> String = { LegacyBookingConfig.readLegacyBotToken() },
 ) {
     val hqNotificationDispatcher = legacyHqNotifier.managedDispatcher()
-    monitor.subscribe(ApplicationStopped) {
-        hqNotificationDispatcher.cancel()
-    }
+    hqNotificationDispatcher.cancelOnApplicationStopped(this)
 
     routing {
         get("/ui/checkin") { call.respondText(CHECKIN_HTML, ContentType.Text.Html) }
@@ -768,9 +772,13 @@ private data class BookingError(val code: String) : BookingResult
 
 private suspend fun io.ktor.server.application.ApplicationCall.respondLegacyBookingError(error: BookingError) {
     val status = legacyBookingErrorStatus(error.code)
+    val publicCode = legacyBookingPublicErrorCode(error.code)
+    if (publicCode == ErrorCodes.internal_error) {
+        legacyRouteLogger.warn("Unknown legacy booking error mapped to internal_error: code={}", error.code)
+    }
     respondError(
         status,
-        error.code,
+        publicCode,
         message = legacyBookingErrorMessage(error.code),
     )
 }
@@ -784,6 +792,20 @@ private fun legacyBookingErrorStatus(code: String): HttpStatusCode =
         else -> HttpStatusCode.InternalServerError
     }
 
+private fun legacyBookingPublicErrorCode(code: String): String =
+    when (code) {
+        "EVENT_NOT_FOUND",
+        "TABLE_NOT_FOUND",
+        "EVENT_CLUB_MISMATCH",
+        "TABLE_CLUB_MISMATCH",
+        "TABLE_INACTIVE",
+        "CAPACITY_EXCEEDED",
+        "ALREADY_BOOKED",
+        "CONFLICT",
+        -> code
+        else -> ErrorCodes.internal_error
+    }
+
 private fun legacyBookingErrorMessage(code: String): String =
     when (code) {
         "EVENT_NOT_FOUND" -> "Event was not found"
@@ -794,7 +816,7 @@ private fun legacyBookingErrorMessage(code: String): String =
         "CAPACITY_EXCEEDED" -> "Guest count exceeds table capacity"
         "ALREADY_BOOKED" -> "Table is already booked"
         "CONFLICT" -> "Booking conflicts with an existing record"
-        else -> "Unexpected booking error"
+        else -> "Internal booking error"
     }
 
 /* ==========================  Вспомогательные ========================== */
