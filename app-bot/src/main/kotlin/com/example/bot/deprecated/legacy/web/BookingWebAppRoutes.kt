@@ -534,100 +534,116 @@ fun Application.installLegacyBookingWebApp(
             val tgUsername = null
             val tgDisplay = null
 
-            val result: BookingResult = transaction {
-                val event = Events
-                    .selectAll()
-                    .where { Events.id eq req.eventId }
-                    .limit(1)
-                    .firstOrNull() ?: return@transaction BookingError("EVENT_NOT_FOUND")
+            val result: BookingResult = try {
+                transaction {
+                    val event = Events
+                        .selectAll()
+                        .where { Events.id eq req.eventId }
+                        .limit(1)
+                        .firstOrNull() ?: return@transaction BookingError(LegacyBookingErrorCode.EVENT_NOT_FOUND)
 
-                if (event[Events.clubId] != req.clubId) {
-                    return@transaction BookingError("EVENT_CLUB_MISMATCH")
-                }
-
-                val table = Tables
-                    .selectAll()
-                    .where { Tables.id eq req.tableId }
-                    .limit(1)
-                    .firstOrNull() ?: return@transaction BookingError("TABLE_NOT_FOUND")
-
-                if (table[Tables.clubId] != req.clubId) return@transaction BookingError("TABLE_CLUB_MISMATCH")
-                if (!table[Tables.active]) return@transaction BookingError("TABLE_INACTIVE")
-                if (req.guestsCount <= 0 || req.guestsCount > table[Tables.capacity]) {
-                    return@transaction BookingError("CAPACITY_EXCEEDED")
-                }
-
-                val existsActive = Bookings
-                    .selectAll()
-                    .where {
-                        (Bookings.eventId eq req.eventId) and
-                            (Bookings.tableId eq req.tableId) and
-                            (Bookings.status inList activeBookingStatuses)
+                    if (event[Events.clubId] != req.clubId) {
+                        return@transaction BookingError(LegacyBookingErrorCode.EVENT_CLUB_MISMATCH)
                     }
-                    .any()
-                if (existsActive) return@transaction BookingError("ALREADY_BOOKED")
 
-                val userId: Long = ensureUser(privacyConfig, tgUserId, tgUsername, tgDisplay, req.phoneE164)
-                val protectedPhone = req.phoneE164?.let { privacyConfig.phoneCipher.protect(it) }
-                val userIdNullable: Long? = userId
+                    val table = Tables
+                        .selectAll()
+                        .where { Tables.id eq req.tableId }
+                        .limit(1)
+                        .firstOrNull() ?: return@transaction BookingError(LegacyBookingErrorCode.TABLE_NOT_FOUND)
 
-                val minDep: BigDecimal = table[Tables.minDeposit]
-                val total: BigDecimal = minDep.multiply(BigDecimal(req.guestsCount))
-
-                val bookingId = UUID.randomUUID()
-                val qrCodeSecret = randomHex()   // по умолчанию 32 байта
-                val idem = "tg-$tgUserId-${req.eventId}-${req.tableId}-${req.guestsCount}"
-
-                try {
-                    Bookings.insert {
-                        it[id]             = bookingId
-                        it[eventId]        = req.eventId
-                        it[clubId]         = req.clubId
-                        it[tableId]        = req.tableId
-                        it[tableNumber]    = table[Tables.tableNumber]
-                        it[guestUserId]    = userIdNullable
-                        it[guestName]      = req.guestName?.takeIf(String::isNotBlank) ?: tgDisplay ?: tgUsername
-                        it[phoneE164]      = null
-                        it[encryptedPhone] = protectedPhone?.encrypted
-                        it[phoneHash]      = protectedPhone?.hash
-                        it[promoterUserId] = null
-                        it[guestsCount]    = req.guestsCount
-                        it[minDeposit]     = minDep
-                        it[totalDeposit]   = total
-                        it[slotStart]      = event[Events.startAt]
-                        it[slotEnd]        = event[Events.endAt]
-                        it[arrivalBy]      = parsedArrivalBy
-                        it[status]         = newLegacyBookingStatus
-                        it[Bookings.qrSecret] = qrCodeSecret
-                        it[idempotencyKey] = idem
-                        it[createdAt]      = Instant.now()
-                        it[updatedAt]      = Instant.now()
+                    if (table[Tables.clubId] != req.clubId) {
+                        return@transaction BookingError(LegacyBookingErrorCode.TABLE_CLUB_MISMATCH)
                     }
-                } catch (e: Throwable) {
-                    if (!isLegacyBookingInsertConflict(e)) {
-                        throw e
+                    if (!table[Tables.active]) {
+                        return@transaction BookingError(LegacyBookingErrorCode.TABLE_INACTIVE)
                     }
-                    legacyRouteLogger.warn(
-                        "Legacy booking insert conflict: failure={} cause={}",
-                        e.javaClass.simpleName,
-                        e.cause?.javaClass?.simpleName ?: "none",
+                    if (req.guestsCount <= 0 || req.guestsCount > table[Tables.capacity]) {
+                        return@transaction BookingError(LegacyBookingErrorCode.CAPACITY_EXCEEDED)
+                    }
+
+                    val existsActive = Bookings
+                        .selectAll()
+                        .where {
+                            (Bookings.eventId eq req.eventId) and
+                                (Bookings.tableId eq req.tableId) and
+                                (Bookings.status inList activeBookingStatuses)
+                        }
+                        .any()
+                    if (existsActive) {
+                        return@transaction BookingError(LegacyBookingErrorCode.ALREADY_BOOKED)
+                    }
+
+                    val userId: Long = ensureUser(privacyConfig, tgUserId, tgUsername, tgDisplay, req.phoneE164)
+                    val protectedPhone = req.phoneE164?.let { privacyConfig.phoneCipher.protect(it) }
+                    val userIdNullable: Long? = userId
+
+                    val minDep: BigDecimal = table[Tables.minDeposit]
+                    val total: BigDecimal = minDep.multiply(BigDecimal(req.guestsCount))
+
+                    val bookingId = UUID.randomUUID()
+                    val qrCodeSecret = randomHex()   // по умолчанию 32 байта
+                    val idem = "tg-$tgUserId-${req.eventId}-${req.tableId}-${req.guestsCount}"
+
+                    try {
+                        Bookings.insert {
+                            it[id]             = bookingId
+                            it[eventId]        = req.eventId
+                            it[clubId]         = req.clubId
+                            it[tableId]        = req.tableId
+                            it[tableNumber]    = table[Tables.tableNumber]
+                            it[guestUserId]    = userIdNullable
+                            it[guestName]      = req.guestName?.takeIf(String::isNotBlank) ?: tgDisplay ?: tgUsername
+                            it[phoneE164]      = null
+                            it[encryptedPhone] = protectedPhone?.encrypted
+                            it[phoneHash]      = protectedPhone?.hash
+                            it[promoterUserId] = null
+                            it[guestsCount]    = req.guestsCount
+                            it[minDeposit]     = minDep
+                            it[totalDeposit]   = total
+                            it[slotStart]      = event[Events.startAt]
+                            it[slotEnd]        = event[Events.endAt]
+                            it[arrivalBy]      = parsedArrivalBy
+                            it[status]         = newLegacyBookingStatus
+                            it[Bookings.qrSecret] = qrCodeSecret
+                            it[idempotencyKey] = idem
+                            it[createdAt]      = Instant.now()
+                            it[updatedAt]      = Instant.now()
+                        }
+                    } catch (e: Throwable) {
+                        if (!isLegacyBookingInsertConflict(e)) {
+                            throw e
+                        }
+                        legacyRouteLogger.warn(
+                            "Legacy booking insert conflict: failure={} cause={}",
+                            e.javaClass.simpleName,
+                            e.cause?.javaClass?.simpleName ?: "none",
+                        )
+                        return@transaction BookingError(LegacyBookingErrorCode.CONFLICT)
+                    }
+
+                    BookingOk(
+                        BookingCreated(
+                            clubId       = req.clubId,
+                            eventId      = req.eventId,
+                            tableId      = req.tableId,
+                            tableNumber  = table[Tables.tableNumber],
+                            guestsCount  = req.guestsCount,
+                            minDeposit   = minDep.toPlainString(),
+                            totalDeposit = total.toPlainString(),
+                            qrSecret     = qrCodeSecret,
+                            bookingRef   = bookingId.toString().take(8),
+                        )
                     )
-                    return@transaction BookingError("CONFLICT")
                 }
-
-                BookingOk(
-                    BookingCreated(
-                        clubId       = req.clubId,
-                        eventId      = req.eventId,
-                        tableId      = req.tableId,
-                        tableNumber  = table[Tables.tableNumber],
-                        guestsCount  = req.guestsCount,
-                        minDeposit   = minDep.toPlainString(),
-                        totalDeposit = total.toPlainString(),
-                        qrSecret     = qrCodeSecret,
-                        bookingRef   = bookingId.toString().take(8),
-                    )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                legacyRouteLogger.warn(
+                    "Legacy booking failed with internal error: failure={}",
+                    e.javaClass.simpleName,
                 )
+                BookingError(LegacyBookingErrorCode.INTERNAL)
             }
 
             when (result) {
@@ -768,56 +784,62 @@ private object Bookings : Table("bookings") {
 
 private sealed interface BookingResult
 private data class BookingOk(val data: BookingCreated) : BookingResult
-private data class BookingError(val code: String) : BookingResult
+private data class BookingError(val code: LegacyBookingErrorCode) : BookingResult
 
-private suspend fun io.ktor.server.application.ApplicationCall.respondLegacyBookingError(error: BookingError) {
-    val status = legacyBookingErrorStatus(error.code)
-    val publicCode = legacyBookingPublicErrorCode(error.code)
-    if (publicCode == ErrorCodes.internal_error) {
-        legacyRouteLogger.warn("Unknown legacy booking error mapped to internal_error: code={}", error.code)
-    }
-    respondError(
-        status,
-        publicCode,
-        message = legacyBookingErrorMessage(error.code),
-    )
+private enum class LegacyBookingErrorCode(
+    val spec: LegacyBookingErrorSpec,
+) {
+    EVENT_NOT_FOUND(
+        LegacyBookingErrorSpec(HttpStatusCode.NotFound, "EVENT_NOT_FOUND", "Event was not found"),
+    ),
+    TABLE_NOT_FOUND(
+        LegacyBookingErrorSpec(HttpStatusCode.NotFound, "TABLE_NOT_FOUND", "Table was not found"),
+    ),
+    EVENT_CLUB_MISMATCH(
+        LegacyBookingErrorSpec(
+            HttpStatusCode.BadRequest,
+            "EVENT_CLUB_MISMATCH",
+            "Event does not belong to the requested club",
+        ),
+    ),
+    TABLE_CLUB_MISMATCH(
+        LegacyBookingErrorSpec(
+            HttpStatusCode.BadRequest,
+            "TABLE_CLUB_MISMATCH",
+            "Table does not belong to the requested club",
+        ),
+    ),
+    TABLE_INACTIVE(
+        LegacyBookingErrorSpec(HttpStatusCode.BadRequest, "TABLE_INACTIVE", "Table is not active"),
+    ),
+    CAPACITY_EXCEEDED(
+        LegacyBookingErrorSpec(HttpStatusCode.BadRequest, "CAPACITY_EXCEEDED", "Guest count exceeds table capacity"),
+    ),
+    ALREADY_BOOKED(
+        LegacyBookingErrorSpec(HttpStatusCode.Conflict, "ALREADY_BOOKED", "Table is already booked"),
+    ),
+    CONFLICT(
+        LegacyBookingErrorSpec(HttpStatusCode.Conflict, "CONFLICT", "Booking conflicts with an existing record"),
+    ),
+    INTERNAL(
+        LegacyBookingErrorSpec(HttpStatusCode.InternalServerError, ErrorCodes.internal_error, "Internal booking error"),
+    ),
 }
 
-private fun legacyBookingErrorStatus(code: String): HttpStatusCode =
-    when (code) {
-        "EVENT_NOT_FOUND", "TABLE_NOT_FOUND" -> HttpStatusCode.NotFound
-        "EVENT_CLUB_MISMATCH", "TABLE_CLUB_MISMATCH", "TABLE_INACTIVE", "CAPACITY_EXCEEDED" ->
-            HttpStatusCode.BadRequest
-        "ALREADY_BOOKED", "CONFLICT" -> HttpStatusCode.Conflict
-        else -> HttpStatusCode.InternalServerError
-    }
+private data class LegacyBookingErrorSpec(
+    val status: HttpStatusCode,
+    val publicCode: String,
+    val message: String,
+)
 
-private fun legacyBookingPublicErrorCode(code: String): String =
-    when (code) {
-        "EVENT_NOT_FOUND",
-        "TABLE_NOT_FOUND",
-        "EVENT_CLUB_MISMATCH",
-        "TABLE_CLUB_MISMATCH",
-        "TABLE_INACTIVE",
-        "CAPACITY_EXCEEDED",
-        "ALREADY_BOOKED",
-        "CONFLICT",
-        -> code
-        else -> ErrorCodes.internal_error
-    }
-
-private fun legacyBookingErrorMessage(code: String): String =
-    when (code) {
-        "EVENT_NOT_FOUND" -> "Event was not found"
-        "TABLE_NOT_FOUND" -> "Table was not found"
-        "EVENT_CLUB_MISMATCH" -> "Event does not belong to the requested club"
-        "TABLE_CLUB_MISMATCH" -> "Table does not belong to the requested club"
-        "TABLE_INACTIVE" -> "Table is not active"
-        "CAPACITY_EXCEEDED" -> "Guest count exceeds table capacity"
-        "ALREADY_BOOKED" -> "Table is already booked"
-        "CONFLICT" -> "Booking conflicts with an existing record"
-        else -> "Internal booking error"
-    }
+private suspend fun io.ktor.server.application.ApplicationCall.respondLegacyBookingError(error: BookingError) {
+    val spec = error.code.spec
+    respondError(
+        spec.status,
+        spec.publicCode,
+        message = spec.message,
+    )
+}
 
 /* ==========================  Вспомогательные ========================== */
 
