@@ -8,10 +8,36 @@ internal fun Application.resolveEnv(name: String): String? =
         processValue = System.getenv(name),
     )
 
+internal enum class BlankConfigSemantics {
+    ABSENT_FALLBACK_TO_PROCESS,
+    EXPLICIT_ABSENT_NO_FALLBACK,
+}
+
 internal fun resolveEnvValue(
     configValue: String?,
     processValue: String?,
-): String? = configValue?.takeIf { it.isNotBlank() } ?: processValue
+): String? =
+    resolveEnvValue(
+        configValue = configValue,
+        hasConfigValue = configValue != null,
+        processValue = processValue,
+        blankConfigSemantics = BlankConfigSemantics.ABSENT_FALLBACK_TO_PROCESS,
+    )
+
+internal fun resolveEnvValue(
+    configValue: String?,
+    hasConfigValue: Boolean,
+    processValue: String?,
+    blankConfigSemantics: BlankConfigSemantics,
+): String? {
+    val configured = configValue.orEmpty().trim()
+    return when {
+        !hasConfigValue -> processValue
+        configured.isNotBlank() -> configured
+        blankConfigSemantics == BlankConfigSemantics.ABSENT_FALLBACK_TO_PROCESS -> processValue
+        else -> null
+    }
+}
 
 internal fun Application.resolveFlag(
     name: String,

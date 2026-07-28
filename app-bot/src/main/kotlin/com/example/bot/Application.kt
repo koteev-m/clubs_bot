@@ -55,6 +55,8 @@ import com.example.bot.plugins.installHotPathLimiterDefaults
 import com.example.bot.plugins.installRateLimitPluginDefaults
 import com.example.bot.plugins.resolveFlag
 import com.example.bot.plugins.installJsonErrorPages
+import com.example.bot.plugins.BlankConfigSemantics
+import com.example.bot.plugins.resolveEnvValue
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
 import com.example.bot.plugins.installRequestGuardsFromEnv
@@ -572,20 +574,10 @@ internal fun Application.isLegacyBookingEnabled(): Boolean =
 
 internal fun Application.resolveLegacyBookingEnv(name: String): String? {
     val fromConfig = environment.config.propertyOrNull("app.env.$name")
-    return resolveLegacyBookingEnvValue(
+    return resolveEnvValue(
         configValue = fromConfig?.getString(),
         hasConfigValue = fromConfig != null,
         processValue = System.getenv(name),
+        blankConfigSemantics = BlankConfigSemantics.EXPLICIT_ABSENT_NO_FALLBACK,
     )
-}
-
-internal fun resolveLegacyBookingEnvValue(
-    configValue: String?,
-    hasConfigValue: Boolean,
-    processValue: String?,
-): String? {
-    if (hasConfigValue) {
-        return configValue.orEmpty().trim().takeIf { it.isNotBlank() }
-    }
-    return processValue
 }
