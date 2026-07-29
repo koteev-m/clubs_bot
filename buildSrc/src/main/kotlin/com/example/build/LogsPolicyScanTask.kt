@@ -16,8 +16,24 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecOperations
+import org.gradle.process.ProcessExecutionException
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.util.regex.Pattern
+import java.util.regex.PatternSyntaxException
 import javax.inject.Inject
+
+private const val MATCH_FOUND_EXIT_CODE = 0
+private const val NO_MATCH_EXIT_CODE = 1
+
+private data class LogsPolicyScanResult(
+    val exitValue: Int,
+    val output: String,
+    val engine: String,
+)
 
 /**
  * CC-friendly реализация: не обращается к `project` в @TaskAction,
@@ -36,12 +52,12 @@ abstract class LogsPolicyScanTask
         @get:PathSensitive(PathSensitivity.RELATIVE)
         val sourceDirs: ConfigurableFileCollection = objects.fileCollection().from(layout.projectDirectory)
 
-        /** Какие globs включать в поиск rg -g <glob>. */
+        /** Какие globs включать в проверку. */
         @get:Input
         val includeGlobs: ListProperty<String> =
             objects.listProperty(String::class.java).convention(emptyList())
 
-        /** Какие globs исключать rg -g !<glob>. */
+        /** Какие globs исключать из проверки. */
         @get:Input
         val excludeGlobs: ListProperty<String> =
             objects.listProperty(String::class.java).convention(
@@ -58,7 +74,7 @@ abstract class LogsPolicyScanTask
                 ),
             )
 
-        /** Регулярки для -e <pattern>. */
+        /** Регулярки для проверки (должны поддерживаться PCRE2 и java.util.regex). */
         @get:Input
         val patterns: ListProperty<String> =
             objects.listProperty(String::class.java).convention(emptyList())
@@ -75,14 +91,89 @@ abstract class LogsPolicyScanTask
 
         @TaskAction
         fun run() {
+            val configuredPatterns = patterns.get()
+            val compiledPatterns = compilePatterns(configuredPatterns)
+            val candidateFiles = collectCandidateFiles()
+            val result =
+                if (candidateFiles.isEmpty()) {
+                    LogsPolicyScanResult(
+                        exitValue = NO_MATCH_EXIT_CODE,
+                        output = "",
+                        engine = "shared file selector",
+                    )
+                } else {
+                    try {
+                        runRipgrep(candidateFiles, configuredPatterns)
+                    } catch (_: ProcessExecutionException) {
+                        logger.lifecycle(
+                            "SEC-02: ripgrep '{}' could not be started; using repository-native JVM fallback.",
+                            ripgrepExecutable.get(),
+                        )
+                        runJvmFallback(candidateFiles, compiledPatterns)
+                    }
+                }
+
+            val out = reportFile.get().asFile
+            out.parentFile.mkdirs()
+            out.writeText(result.output, Charsets.UTF_8)
+
+            when (result.exitValue) {
+                MATCH_FOUND_EXIT_CODE -> {
+                    logger.error("SEC-02: обнаружены совпадения. См. отчёт: {}", out)
+                    throw GradleException("Logs policy check failed. See $out")
+                }
+                NO_MATCH_EXIT_CODE -> {
+                    logger.lifecycle("SEC-02: совпадений не найдено ({} exit=1).", result.engine)
+                }
+                else -> {
+                    logger.error("SEC-02: ripgrep завершился с кодом {}. См. {}", result.exitValue, out)
+                    throw GradleException("ripgrep failed with exit code ${result.exitValue}. See $out")
+                }
+            }
+        }
+
+        private fun collectCandidateFiles(): List<File> {
+            val missingSources = sourceDirs.files.filterNot { it.exists() }
+            if (missingSources.isNotEmpty()) {
+                throw GradleException(
+                    "Logs policy source paths do not exist: " +
+                        missingSources.joinToString { it.absolutePath },
+                )
+            }
+
+            return sourceDirs.asFileTree
+                .matching {
+                    includeGlobs.get().forEach { include(it) }
+                    excludeGlobs.get().forEach { exclude(it) }
+                }.files
+                .asSequence()
+                .filter { it.isFile }
+                .distinctBy { it.absoluteFile.normalize().path }
+                .sortedBy { it.absolutePath }
+                .toList()
+        }
+
+        private fun compilePatterns(configuredPatterns: List<String>): List<Pattern> {
+            if (configuredPatterns.isEmpty()) {
+                throw GradleException("Logs policy scan requires at least one pattern")
+            }
+
+            return try {
+                configuredPatterns.map {
+                    Pattern.compile(it, Pattern.UNICODE_CHARACTER_CLASS)
+                }
+            } catch (failure: PatternSyntaxException) {
+                throw GradleException("Logs policy pattern is not supported by the JVM fallback", failure)
+            }
+        }
+
+        private fun runRipgrep(
+            candidateFiles: List<File>,
+            configuredPatterns: List<String>,
+        ): LogsPolicyScanResult {
             val args = mutableListOf("-n", "--hidden", "-P")
-
-            includeGlobs.get().forEach { args += listOf("-g", it) }
-            excludeGlobs.get().forEach { args += listOf("-g", "!$it") }
-            patterns.get().forEach { args += listOf("-e", it) }
-
-            // Каталоги/файлы для поиска
-            sourceDirs.files.forEach { args += it.absolutePath }
+            configuredPatterns.forEach { args += listOf("-e", it) }
+            candidateFiles.forEach { args += it.absolutePath }
 
             val stdout = ByteArrayOutputStream()
             val stderr = ByteArrayOutputStream()
@@ -103,23 +194,38 @@ abstract class LogsPolicyScanTask
                         append(err)
                     }
                 }
+            return LogsPolicyScanResult(
+                exitValue = result.exitValue,
+                output = output,
+                engine = "rg",
+            )
+        }
 
-            val out = reportFile.get().asFile
-            out.parentFile.mkdirs()
-            out.writeText(output)
-
-            when (result.exitValue) {
-                0 -> {
-                    logger.error("SEC-02: обнаружены совпадения. См. отчёт: {}", out)
-                    throw GradleException("Logs policy check failed. See $out")
+        private fun runJvmFallback(
+            candidateFiles: List<File>,
+            compiledPatterns: List<Pattern>,
+        ): LogsPolicyScanResult {
+            val findings = mutableListOf<String>()
+            try {
+                candidateFiles.forEach { file ->
+                    Files
+                        .newBufferedReader(file.toPath(), StandardCharsets.UTF_8)
+                        .use { reader ->
+                            reader.lineSequence().forEachIndexed { index, line ->
+                                if (compiledPatterns.any { it.matcher(line).find() }) {
+                                    findings += "${file.absolutePath}:${index + 1}:$line"
+                                }
+                            }
+                        }
                 }
-                1 -> {
-                    logger.lifecycle("SEC-02: совпадений не найдено (rg exit=1).")
-                }
-                else -> {
-                    logger.error("SEC-02: ripgrep завершился с кодом {}. См. {}", result.exitValue, out)
-                    throw GradleException("ripgrep failed with exit code ${result.exitValue}. See $out")
-                }
+            } catch (failure: IOException) {
+                throw GradleException("JVM logs policy fallback could not read a source file", failure)
             }
+
+            return LogsPolicyScanResult(
+                exitValue = if (findings.isEmpty()) NO_MATCH_EXIT_CODE else MATCH_FOUND_EXIT_CODE,
+                output = findings.joinToString(separator = "\n", postfix = if (findings.isEmpty()) "" else "\n"),
+                engine = "JVM fallback",
+            )
         }
     }

@@ -287,4 +287,99 @@ ktlint_buildsrc_probe_out="$(
 )"
 assert_contains "$ktlint_buildsrc_probe_out" "quality-gate: buildSrc ktlint coverage verified"
 
+logs_policy_fixture="$TMP_DIR/logs-policy-fixture"
+logs_policy_report="$TMP_DIR/logs-policy-report.txt"
+logs_policy_safe_log="$TMP_DIR/logs-policy-safe.log"
+logs_policy_match_log="$TMP_DIR/logs-policy-match.log"
+logs_policy_rg_error_log="$TMP_DIR/logs-policy-rg-error.log"
+missing_ripgrep="$TMP_DIR/__missing_rg__"
+fake_ripgrep="$TMP_DIR/fake-rg"
+logs_policy_probe="$TMP_DIR/logs-policy-fallback.init.gradle"
+
+mkdir -p \
+  "$logs_policy_fixture/.hidden" \
+  "$logs_policy_fixture/main" \
+  "$logs_policy_fixture/src/test" \
+  "$logs_policy_fixture/dist" \
+  "$logs_policy_fixture/node_modules/example"
+cat > "$logs_policy_fixture/main/Safe.kt" <<'KOT'
+logger.info("bookingId={}", bookingId)
+KOT
+cat > "$logs_policy_fixture/src/test/Ignored.kt" <<'KOT'
+logger.info("qr={}", rawQr)
+KOT
+cat > "$logs_policy_fixture/dist/ignored.js" <<'JS'
+logger.info("qr={}", rawQr)
+JS
+cat > "$logs_policy_fixture/node_modules/example/ignored.ts" <<'TS'
+logger.info("qr={}", rawQr)
+TS
+cat > "$logs_policy_fixture/main/Ignored.txt" <<'TXT'
+logger.info("qr={}", rawQr)
+TXT
+
+cat > "$logs_policy_probe" <<'GRADLE'
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    def appBot = root.findProject(":app-bot")
+    if (appBot != null) {
+        def scanTask = appBot.tasks.findByName("checkLogsPolicy")
+        def sourceDir = System.getProperty("logsPolicySelfcheckSourceDir")
+        def reportPath = System.getProperty("logsPolicySelfcheckReport")
+        def executable = System.getProperty("logsPolicySelfcheckExecutable")
+        if (scanTask == null || sourceDir == null || reportPath == null || executable == null) {
+            throw new GradleException("Logs policy self-check probe is not configured")
+        }
+        scanTask.sourceDirs.setFrom(root.file(sourceDir))
+        scanTask.reportFile.set(root.file(reportPath))
+        scanTask.ripgrepExecutable.set(executable)
+        println "quality-gate: logs policy fallback probe configured"
+    }
+}
+GRADLE
+
+run_logs_policy_fixture() {
+  local executable="$1"
+  local log_file="$2"
+  "$ROOT_DIR/gradlew" \
+    --no-configuration-cache \
+    --rerun-tasks \
+    -DlogsPolicySelfcheckSourceDir="$logs_policy_fixture" \
+    -DlogsPolicySelfcheckReport="$logs_policy_report" \
+    -DlogsPolicySelfcheckExecutable="$executable" \
+    --init-script "$logs_policy_probe" \
+    :app-bot:checkLogsPolicy \
+    -x :app-bot:test \
+    --console=plain >"$log_file" 2>&1
+}
+
+if ! run_logs_policy_fixture "$missing_ripgrep" "$logs_policy_safe_log"; then
+  fail "expected logs policy JVM fallback to pass for safe and excluded sources"
+fi
+assert_contains "$(cat "$logs_policy_safe_log")" "repository-native JVM fallback"
+assert_empty "$(cat "$logs_policy_report")"
+
+cat > "$logs_policy_fixture/.hidden/Unsafe.kt" <<'KOT'
+logger.info("qr={}", rawQr)
+KOT
+if run_logs_policy_fixture "$missing_ripgrep" "$logs_policy_match_log"; then
+  fail "expected logs policy JVM fallback to reject an included SEC-02 violation"
+fi
+assert_contains "$(cat "$logs_policy_match_log")" "repository-native JVM fallback"
+assert_contains "$(cat "$logs_policy_match_log")" "Logs policy check failed"
+assert_contains "$(cat "$logs_policy_report")" ".hidden/Unsafe.kt:1:"
+
+cat > "$fake_ripgrep" <<'SH'
+#!/usr/bin/env bash
+echo "synthetic ripgrep failure" >&2
+exit 2
+SH
+chmod +x "$fake_ripgrep"
+if run_logs_policy_fixture "$fake_ripgrep" "$logs_policy_rg_error_log"; then
+  fail "expected a started ripgrep process error to remain fail-closed"
+fi
+assert_not_contains "$(cat "$logs_policy_rg_error_log")" "repository-native JVM fallback"
+assert_contains "$(cat "$logs_policy_rg_error_log")" "ripgrep failed with exit code 2"
+assert_contains "$(cat "$logs_policy_report")" "synthetic ripgrep failure"
+
 echo "selfcheck: OK"

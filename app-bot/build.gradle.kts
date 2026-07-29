@@ -178,7 +178,7 @@ val runMigrations by tasks.registering(JavaExec::class) {
 // ----------------------------------------------------------------------
 tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
     group = "verification"
-    description = "SEC-02: scan sources for sensitive logging patterns (ripgrep-based)"
+    description = "SEC-02: scan sources for sensitive logging patterns (ripgrep with JVM fallback)"
 
     // Сначала тесты (содержат проверки MDC)
     dependsOn("test")
