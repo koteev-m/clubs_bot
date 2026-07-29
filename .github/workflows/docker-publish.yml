@@ -158,24 +158,25 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release
         with:
           scan-type: image
           image-ref: ${{ needs.build-and-push.outputs.image-ref }}
           severity: HIGH,CRITICAL
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           format: sarif
           output: trivy-image-results.sarif
           exit-code: 1
+          version: v0.69.3
 
       - name: Upload Trivy image SARIF to code scanning
-        if: always()
+        if: ${{ always() && hashFiles('trivy-image-results.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9
         with:
           sarif_file: trivy-image-results.sarif
 
       - name: Persist Trivy image report artifact
-        if: always()
+        if: ${{ always() && hashFiles('trivy-image-results.sarif') != '' }}
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: trivy-image-report

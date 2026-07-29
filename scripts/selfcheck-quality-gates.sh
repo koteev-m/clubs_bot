@@ -520,6 +520,219 @@ assert_job_line() {
   fi
 }
 
+normalize_step_with_contract() {
+  local file="$1"
+  local job_name="$2"
+  local step_name="$3"
+  awk \
+    -v job_target="  $job_name:" \
+    -v step_target="      - name: $step_name" '
+    function indentation(line, prefix) {
+      prefix = line
+      sub(/[^ ].*$/, "", prefix)
+      return length(prefix)
+    }
+    function is_content(line) {
+      return line !~ /^[[:space:]]*($|#)/
+    }
+    $0 == job_target {
+      in_job = 1
+      jobs++
+      next
+    }
+    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+      in_job = 0
+      in_step = 0
+      in_with = 0
+    }
+    in_job && $0 == step_target {
+      in_step = 1
+      steps++
+      next
+    }
+    in_step && is_content($0) && indentation($0) <= 6 {
+      in_step = 0
+      in_with = 0
+    }
+    in_step && $0 == "        with:" {
+      in_with = 1
+      with_blocks++
+      next
+    }
+    in_with && is_content($0) && indentation($0) <= 8 {
+      in_with = 0
+    }
+    in_with && is_content($0) {
+      normalized = $0
+      sub(/^[[:space:]]+/, "", normalized)
+      print normalized
+    }
+    END {
+      if (jobs != 1 || steps != 1 || with_blocks != 1) {
+        exit 42
+      }
+    }
+  ' "$file"
+}
+
+assert_step_with_contract() {
+  local file="$1"
+  local job_name="$2"
+  local step_name="$3"
+  local expected="$4"
+  local actual
+  if ! actual="$(normalize_step_with_contract "$file" "$job_name" "$step_name")"; then
+    fail "step with-contract is missing or ambiguous in $file: $job_name/$step_name"
+  fi
+  if [ "$actual" != "$expected" ]; then
+    fail "step with-contract changed in $file: $job_name/$step_name"
+  fi
+}
+
+assert_step_direct_key_line() {
+  local file="$1"
+  local job_name="$2"
+  local step_name="$3"
+  local key="$4"
+  local expected="$5"
+  if ! awk \
+    -v job_target="  $job_name:" \
+    -v step_target="      - name: $step_name" \
+    -v prefix="        $key:" \
+    -v expected="$expected" '
+      function indentation(line, indent) {
+        indent = line
+        sub(/[^ ].*$/, "", indent)
+        return length(indent)
+      }
+      function is_content(line) {
+        return line !~ /^[[:space:]]*($|#)/
+      }
+      $0 == job_target {
+        in_job = 1
+        jobs++
+        next
+      }
+      in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+        in_job = 0
+        in_step = 0
+      }
+      in_job && $0 == step_target {
+        in_step = 1
+        steps++
+        next
+      }
+      in_step && is_content($0) && indentation($0) <= 6 {
+        in_step = 0
+      }
+      in_step && index($0, prefix) == 1 {
+        keys++
+        if ($0 == expected) {
+          matches++
+        }
+      }
+      END { exit !(jobs == 1 && steps == 1 && keys == 1 && matches == 1) }
+    ' "$file"; then
+    fail "direct '$key' contract changed in step '$job_name/$step_name' in $file"
+  fi
+}
+
+assert_step_has_no_direct_key() {
+  local file="$1"
+  local job_name="$2"
+  local step_name="$3"
+  local key="$4"
+  if ! awk \
+    -v job_target="  $job_name:" \
+    -v step_target="      - name: $step_name" \
+    -v prefix="        $key:" '
+      function indentation(line, indent) {
+        indent = line
+        sub(/[^ ].*$/, "", indent)
+        return length(indent)
+      }
+      function is_content(line) {
+        return line !~ /^[[:space:]]*($|#)/
+      }
+      $0 == job_target {
+        in_job = 1
+        jobs++
+        next
+      }
+      in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+        in_job = 0
+        in_step = 0
+      }
+      in_job && $0 == step_target {
+        in_step = 1
+        steps++
+        next
+      }
+      in_step && is_content($0) && indentation($0) <= 6 {
+        in_step = 0
+      }
+      in_step && index($0, prefix) == 1 {
+        keys++
+      }
+      END { exit !(jobs == 1 && steps == 1 && keys == 0) }
+    ' "$file"; then
+    fail "step '$job_name/$step_name' must not define direct key '$key' in $file"
+  fi
+}
+
+assert_job_direct_key_line() {
+  local file="$1"
+  local job_name="$2"
+  local key="$3"
+  local expected="$4"
+  if ! awk \
+    -v target="  $job_name:" \
+    -v prefix="    $key:" \
+    -v expected="$expected" '
+      $0 == target {
+        in_job = 1
+        jobs++
+        next
+      }
+      in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+        in_job = 0
+      }
+      in_job && index($0, prefix) == 1 {
+        keys++
+        if ($0 == expected) {
+          matches++
+        }
+      }
+      END { exit !(jobs == 1 && keys == 1 && matches == 1) }
+    ' "$file"; then
+    fail "direct '$key' contract changed in job '$job_name' in $file"
+  fi
+}
+
+assert_job_has_no_direct_key() {
+  local file="$1"
+  local job_name="$2"
+  local key="$3"
+  if ! awk \
+    -v target="  $job_name:" \
+    -v prefix="    $key:" '
+      $0 == target {
+        in_job = 1
+        jobs++
+        next
+      }
+      in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+        in_job = 0
+      }
+      in_job && index($0, prefix) == 1 {
+        keys++
+      }
+      END { exit !(jobs == 1 && keys == 0) }
+    ' "$file"; then
+    fail "job '$job_name' must not define direct key '$key' in $file"
+  fi
+}
+
 assert_step_uses_sha_pinned_action() {
   local file="$1"
   local step_name="$2"
@@ -579,6 +792,193 @@ validate_publish_provenance_job_guard() {
   assert_job_line "$file" "verify-and-provenance" "    if: $non_pr_if"
 }
 
+active_workflow_lines() {
+  local workflow_dir="$1"
+  local workflow_file
+  while IFS= read -r workflow_file; do
+    awk '
+      {
+        sub(/\r$/, "")
+        normalized = $0
+        sub(/^[[:space:]]+/, "", normalized)
+        sub(/[[:space:]]+$/, "", normalized)
+        if (normalized == "" || substr(normalized, 1, 1) == "#") {
+          next
+        }
+        print normalized
+      }
+    ' "$workflow_file"
+  done < <(
+    find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print |
+      LC_ALL=C sort
+  )
+}
+
+validate_trivy_action_inventory() {
+  local workflow_dir="$1"
+  local active_lines
+  local action_lines
+  local action_count
+  local invalid_action_lines
+  local trivyignores_count
+
+  active_lines="$(active_workflow_lines "$workflow_dir")"
+  action_lines="$(
+    printf '%s\n' "$active_lines" |
+      awk 'index($0, "aquasecurity/trivy-action@") { print }'
+  )"
+  action_count="$(printf '%s\n' "$action_lines" | awk 'NF { count++ } END { print count + 0 }')"
+  if [ "$action_count" -ne 2 ]; then
+    echo "expected exactly two active trivy-action references, found $action_count" >&2
+    return 1
+  fi
+
+  invalid_action_lines="$(
+    printf '%s\n' "$action_lines" |
+      awk -v expected="$approved_trivy_action_active_line" 'NF && $0 != expected { print }'
+  )"
+  if [ -n "$invalid_action_lines" ]; then
+    echo "trivy-action reference is not the approved SHA/comment contract" >&2
+    return 1
+  fi
+
+  if printf '%s\n' "$active_lines" |
+    awk 'index($0, "aquasecurity/setup-trivy@") { found = 1 } END { exit !found }'; then
+    echo "direct setup-trivy use requires an explicit approved contract" >&2
+    return 1
+  fi
+  if printf '%s\n' "$active_lines" |
+    awk 'index($0, "aquasec/trivy") { found = 1 } END { exit !found }'; then
+    echo "direct aquasec/trivy image use requires an explicit approved contract" >&2
+    return 1
+  fi
+  if printf '%s\n' "$active_lines" |
+    awk '$0 ~ /^ignorefile:/ { found = 1 } END { exit !found }'; then
+    echo "unsupported Trivy input ignorefile is present" >&2
+    return 1
+  fi
+
+  trivyignores_count="$(
+    printf '%s\n' "$active_lines" |
+      awk '$0 == "trivyignores: .trivyignore" { count++ } END { print count + 0 }'
+  )"
+  if [ "$trivyignores_count" -ne 2 ]; then
+    echo "expected exactly two supported trivyignores inputs" >&2
+    return 1
+  fi
+}
+
+validate_trivy_filesystem_workflow() {
+  local file="$1"
+  assert_exact_line "$file" "  pull_request:"
+  assert_job_has_no_direct_key "$file" "trivy" "if"
+  assert_job_has_no_direct_key "$file" "trivy" "continue-on-error"
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy" \
+    "Trivy filesystem scan" \
+    "uses" \
+    "        $approved_trivy_action_active_line"
+  assert_step_has_no_direct_key "$file" "trivy" "Trivy filesystem scan" "if"
+  assert_step_has_no_direct_key "$file" "trivy" "Trivy filesystem scan" "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy" \
+    "Trivy filesystem scan" \
+    "$trivy_filesystem_with_contract"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy" \
+    "Upload Trivy SARIF to code scanning" \
+    "if" \
+    "        if: $trivy_filesystem_report_guard"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "trivy" \
+    "Upload Trivy SARIF to code scanning" \
+    "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy" \
+    "Upload Trivy SARIF to code scanning" \
+    "$trivy_filesystem_sarif_with_contract"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy" \
+    "Persist Trivy report artifact" \
+    "if" \
+    "        if: $trivy_filesystem_report_guard"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "trivy" \
+    "Persist Trivy report artifact" \
+    "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy" \
+    "Persist Trivy report artifact" \
+    "$trivy_filesystem_artifact_with_contract"
+}
+
+validate_trivy_image_workflow() {
+  local file="$1"
+  assert_job_direct_key_line \
+    "$file" \
+    "trivy-image" \
+    "if" \
+    "    if: $non_pr_if"
+  assert_job_has_no_direct_key "$file" "trivy-image" "continue-on-error"
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy-image" \
+    "Trivy image scan" \
+    "uses" \
+    "        $approved_trivy_action_active_line"
+  assert_step_has_no_direct_key "$file" "trivy-image" "Trivy image scan" "if"
+  assert_step_has_no_direct_key "$file" "trivy-image" "Trivy image scan" "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy-image" \
+    "Trivy image scan" \
+    "$trivy_image_with_contract"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy-image" \
+    "Upload Trivy image SARIF to code scanning" \
+    "if" \
+    "        if: $trivy_image_report_guard"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "trivy-image" \
+    "Upload Trivy image SARIF to code scanning" \
+    "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy-image" \
+    "Upload Trivy image SARIF to code scanning" \
+    "$trivy_image_sarif_with_contract"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy-image" \
+    "Persist Trivy image report artifact" \
+    "if" \
+    "        if: $trivy_image_report_guard"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "trivy-image" \
+    "Persist Trivy image report artifact" \
+    "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy-image" \
+    "Persist Trivy image report artifact" \
+    "$trivy_image_artifact_with_contract"
+}
+
 assert_validation_rejected() {
   local fixture_name="$1"
   shift
@@ -609,6 +1009,81 @@ replace_exact_line_once() {
     { print }
     END { if (matches != 1) exit 42 }
   ' "$source_file" >"$target_file"
+}
+
+insert_job_direct_line() {
+  local source_file="$1"
+  local target_file="$2"
+  local job_name="$3"
+  local insertion="$4"
+  awk -v target="  $job_name:" -v insertion="$insertion" '
+    $0 == target {
+      jobs++
+      print
+      print insertion
+      inserted++
+      next
+    }
+    { print }
+    END {
+      if (jobs != 1 || inserted != 1) {
+        exit 42
+      }
+    }
+  ' "$source_file" >"$target_file"
+}
+
+replace_step_line_once() {
+  local source_file="$1"
+  local target_file="$2"
+  local job_name="$3"
+  local step_name="$4"
+  local expected="$5"
+  local replacement="$6"
+  awk \
+    -v job_target="  $job_name:" \
+    -v step_target="      - name: $step_name" \
+    -v expected="$expected" \
+    -v replacement="$replacement" '
+      function indentation(line, indent) {
+        indent = line
+        sub(/[^ ].*$/, "", indent)
+        return length(indent)
+      }
+      function is_content(line) {
+        return line !~ /^[[:space:]]*($|#)/
+      }
+      $0 == job_target {
+        in_job = 1
+        jobs++
+        print
+        next
+      }
+      in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+        in_job = 0
+        in_step = 0
+      }
+      in_job && $0 == step_target {
+        in_step = 1
+        steps++
+        print
+        next
+      }
+      in_step && is_content($0) && indentation($0) <= 6 {
+        in_step = 0
+      }
+      in_step && $0 == expected {
+        matches++
+        print replacement
+        next
+      }
+      { print }
+      END {
+        if (jobs != 1 || steps != 1 || matches != 1) {
+          exit 42
+        }
+      }
+    ' "$source_file" >"$target_file"
 }
 
 move_build_labels_outside_with() {
@@ -692,6 +1167,33 @@ metadata_tags_expression="\${{ steps.meta.outputs.tags }}"
 metadata_labels_expression="\${{ steps.meta.outputs.labels }}"
 docker_image_workflow="$ROOT_DIR/.github/workflows/docker-image.yml"
 docker_publish_workflow="$ROOT_DIR/.github/workflows/docker-publish.yml"
+security_scan_workflow="$ROOT_DIR/.github/workflows/security-scan.yml"
+approved_trivy_action_active_line="uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release"
+trivy_filesystem_report_guard="\${{ always() && hashFiles('trivy-results.sarif') != '' }}"
+trivy_image_report_guard="\${{ always() && hashFiles('trivy-image-results.sarif') != '' }}"
+trivy_filesystem_with_contract='scan-type: fs
+scan-ref: .
+severity: HIGH,CRITICAL
+trivyignores: .trivyignore
+format: sarif
+output: trivy-results.sarif
+exit-code: 1
+version: v0.69.3'
+trivy_image_with_contract='scan-type: image
+image-ref: ${{ needs.build-and-push.outputs.image-ref }}
+severity: HIGH,CRITICAL
+trivyignores: .trivyignore
+format: sarif
+output: trivy-image-results.sarif
+exit-code: 1
+version: v0.69.3'
+trivy_filesystem_sarif_with_contract='sarif_file: trivy-results.sarif'
+trivy_image_sarif_with_contract='sarif_file: trivy-image-results.sarif'
+trivy_filesystem_artifact_with_contract='name: trivy-report
+path: trivy-results.sarif
+if-no-files-found: error'
+trivy_image_artifact_with_contract='name: trivy-image-report
+path: trivy-image-results.sarif'
 
 for workflow_file in "$docker_image_workflow" "$docker_publish_workflow"; do
   assert_exact_line "$workflow_file" "    branches: [ main ]"
@@ -750,6 +1252,13 @@ for protected_step in \
 done
 
 validate_publish_provenance_job_guard "$docker_publish_workflow"
+
+if ! validate_trivy_action_inventory "$ROOT_DIR/.github/workflows"; then
+  fail "Trivy action inventory contract failed"
+fi
+validate_trivy_filesystem_workflow "$security_scan_workflow"
+validate_trivy_image_workflow "$docker_publish_workflow"
+echo "quality-gate: Trivy workflow contract verified"
 
 dockerignore_file="$ROOT_DIR/.dockerignore"
 approved_dockerignore_contract='.git
@@ -935,6 +1444,88 @@ assert_validation_rejected \
   "docker-publish-step-only-provenance-guard" \
   validate_publish_provenance_job_guard \
   "$workflow_step_only_guard_fixture"
+
+legacy_trivy_action_sha_prefix="b6643a29fecd7f34b3597bc6acb0a98b03d33"
+legacy_trivy_action_sha="${legacy_trivy_action_sha_prefix}ff8"
+
+trivy_old_action_fixture="$TMP_DIR/security-scan-old-trivy-action.yml"
+replace_exact_line_once \
+  "$security_scan_workflow" \
+  "$trivy_old_action_fixture" \
+  "        $approved_trivy_action_active_line" \
+  "        uses: aquasecurity/trivy-action@$legacy_trivy_action_sha # 0.33.1"
+assert_validation_rejected \
+  "trivy-old-action-sha" \
+  validate_trivy_filesystem_workflow \
+  "$trivy_old_action_fixture"
+
+trivy_latest_fixture="$TMP_DIR/security-scan-trivy-latest.yml"
+replace_exact_line_once \
+  "$security_scan_workflow" \
+  "$trivy_latest_fixture" \
+  "          version: v0.69.3" \
+  "          version: latest"
+assert_validation_rejected \
+  "trivy-version-latest" \
+  validate_trivy_filesystem_workflow \
+  "$trivy_latest_fixture"
+
+trivy_disallowed_patch_fixture="$TMP_DIR/docker-publish-trivy-v0.69.4.yml"
+replace_exact_line_once \
+  "$docker_publish_workflow" \
+  "$trivy_disallowed_patch_fixture" \
+  "          version: v0.69.3" \
+  "          version: v0.69.4"
+assert_validation_rejected \
+  "trivy-version-v0.69.4" \
+  validate_trivy_image_workflow \
+  "$trivy_disallowed_patch_fixture"
+
+trivy_ignorefile_fixture="$TMP_DIR/security-scan-trivy-ignorefile.yml"
+replace_exact_line_once \
+  "$security_scan_workflow" \
+  "$trivy_ignorefile_fixture" \
+  "          trivyignores: .trivyignore" \
+  "          ignorefile: .trivyignore"
+assert_validation_rejected \
+  "trivy-unsupported-ignorefile" \
+  validate_trivy_filesystem_workflow \
+  "$trivy_ignorefile_fixture"
+
+trivy_fail_open_fixture="$TMP_DIR/docker-publish-trivy-exit-zero.yml"
+replace_exact_line_once \
+  "$docker_publish_workflow" \
+  "$trivy_fail_open_fixture" \
+  "          exit-code: 1" \
+  "          exit-code: 0"
+assert_validation_rejected \
+  "trivy-fail-open-exit-code" \
+  validate_trivy_image_workflow \
+  "$trivy_fail_open_fixture"
+
+trivy_job_continue_fixture="$TMP_DIR/security-scan-trivy-job-continue.yml"
+insert_job_direct_line \
+  "$security_scan_workflow" \
+  "$trivy_job_continue_fixture" \
+  "trivy" \
+  "    continue-on-error: true"
+assert_validation_rejected \
+  "trivy-fail-open-job-continue" \
+  validate_trivy_filesystem_workflow \
+  "$trivy_job_continue_fixture"
+
+trivy_unguarded_sarif_fixture="$TMP_DIR/security-scan-trivy-unguarded-sarif.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_unguarded_sarif_fixture" \
+  "trivy" \
+  "Upload Trivy SARIF to code scanning" \
+  "        if: $trivy_filesystem_report_guard" \
+  "        if: always()"
+assert_validation_rejected \
+  "trivy-unguarded-sarif-upload" \
+  validate_trivy_filesystem_workflow \
+  "$trivy_unguarded_sarif_fixture"
 
 dockerfile="$ROOT_DIR/Dockerfile"
 copy_line="$(awk '$0 == "COPY . ." { print NR }' "$dockerfile")"
