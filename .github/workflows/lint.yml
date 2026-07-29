@@ -39,17 +39,16 @@ jobs:
             ${{ runner.os }}-gradle-
             ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
 
+      - name: Quality gate regression self-check
+        run: ./scripts/selfcheck-quality-gates.sh
+
       - name: Run detekt gate (blocking, baseline-aware)
         run: ./gradlew detektGate --console=plain --stacktrace
 
-      - name: Load quality gate tool versions
-        run: cat scripts/quality-gates.env >> "$GITHUB_ENV"
-
-      - name: Run ktlint gate (changed files only)
+      - name: Run ktlint gate (baseline-aware; Kotlin changes only)
         env:
           VERIFY_TO_SHA: ${{ github.sha }}
           VERIFY_FROM_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          KTLINT_BIN: /usr/local/bin/ktlint
         run: ./scripts/ktlint-changed.sh
 
       - name: Upload lint reports

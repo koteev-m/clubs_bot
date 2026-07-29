@@ -2,6 +2,8 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <!-- Recovery snapshot: exact findings already present at main 88f4815; introduced by 2a5f768/3e5c6bd.
+         Production wiring changes are intentionally out of scope for this quality-only recovery. -->
     <ID>ComplexCondition:AdminTablesRoutes.kt$label == null &amp;&amp; minDeposit == null &amp;&amp; capacity == null &amp;&amp; zone == null &amp;&amp; arrivalWindow == null &amp;&amp; mysteryEligible == null &amp;&amp; tableNumber == null &amp;&amp; x == null &amp;&amp; y == null</ID>
     <ID>ComplexCondition:BookingState.kt$BookingState$cur.status != BookingStatus.BOOKED || cur.plusOneUsed || (deadline != null &amp;&amp; now.isAfter(deadline))</ID>
     <ID>ComplexCondition:BookingState.kt$BookingState$removedLocks &gt; 0 || removedIdempotency &gt; 0 || removedBookings &gt; 0 || removedWatermarks &gt; 0</ID>
@@ -17,13 +19,16 @@
     <ID>DoubleMutabilityForCollection:Keyboards.kt$Keyboards$var row = mutableListOf&lt;InlineKeyboardButton&gt;()</ID>
     <ID>ForbiddenComment:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$// TODO: Booking check-in semantics are not available; arrived guests per booking are assumed to be zero.</ID>
     <ID>ForbiddenComment:OwnerHealthServiceImpl.kt$OwnerHealthServiceImpl$// TODO: when booking check-ins become available, also increment arrived here</ID>
+    <ID>ForbiddenVoid:LegacyHqNotifier.kt$TelegramLegacyHqNotifier$Void</ID>
     <ID>InjectDispatcher:AvailabilityApiRoutes.kt$IO</ID>
     <ID>InjectDispatcher:BookingState.kt$BookingState$Default</ID>
+    <ID>InjectDispatcher:BookingWebAppRoutes.kt$Default</ID>
     <ID>InjectDispatcher:CheckinRoutes.kt$IO</ID>
     <ID>InjectDispatcher:ClubsRoutes.kt$IO</ID>
     <ID>InjectDispatcher:HallRenderer.kt$DefaultHallRenderer$Default</ID>
     <ID>InjectDispatcher:HallRoutes.kt$IO</ID>
     <ID>InjectDispatcher:LayoutRoutes.kt$IO</ID>
+    <ID>InjectDispatcher:LegacyHqNotifier.kt$TelegramLegacyHqNotifier$IO</ID>
     <ID>InjectDispatcher:MenuCallbacksHandler.kt$MenuCallbacksHandler$IO</ID>
     <ID>InjectDispatcher:MyBookingsService.kt$MyBookingsService$IO</ID>
     <ID>InjectDispatcher:ObservabilityRoutes.kt$IO</ID>
@@ -423,6 +428,7 @@
     <ID>UseOrEmpty:BookingRoutes.kt$call.request.headers["Idempotency-Key"] ?: ""</ID>
     <ID>UseOrEmpty:CorsPlugin.kt$envProvider("CORS_ALLOWED_ORIGINS") ?.split(',') ?.map { it.trim() } ?.filter { it.isNotEmpty() } ?: emptyList()</ID>
     <ID>UseOrEmpty:HostSearchService.kt$guestName ?: ""</ID>
+    <ID>UseOrEmpty:LegacyBookingConfig.kt$LegacyBookingConfig.Companion$envProvider("TELEGRAM_BOT_TOKEN")?.trim()?.takeIf { it.isNotBlank() } ?: envProvider("BOT_TOKEN")?.trim()?.takeIf { it.isNotBlank() } ?: ""</ID>
     <ID>UseOrEmpty:MeBookingsRoutes.kt$System.getenv("QR_SECRET") ?: ""</ID>
     <ID>UseOrEmpty:MessageMaskingConverter.kt$MessageMaskingConverter$event.formattedMessage ?: ""</ID>
     <ID>UseOrEmpty:OpsNotificationRenderer.kt$OpsNotificationRenderer$notification.subjectId?.let { " (ID: $it)" } ?: ""</ID>

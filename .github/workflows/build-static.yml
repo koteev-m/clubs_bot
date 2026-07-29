@@ -37,9 +37,6 @@ jobs:
             ${{ runner.os }}-gradle-
             ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
 
-      - name: Gradle format (non-fatal)
-        run: ./gradlew -q formatAll || true
-
       - name: Static check + build
         run: ./gradlew staticCheck build --console=plain
 

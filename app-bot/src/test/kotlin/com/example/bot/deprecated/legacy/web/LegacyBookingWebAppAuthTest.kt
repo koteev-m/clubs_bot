@@ -685,7 +685,7 @@ class LegacyBookingWebAppAuthTest {
         guestsCount: Int = 2,
         arrivalBy: String? = null,
     ): String {
-        val arrivalByField = arrivalBy?.let { ",\n          \"arrivalBy\": \"$it\"" } ?: ""
+        val arrivalByField = arrivalBy?.let { ",\n          \"arrivalBy\": \"$it\"" }.orEmpty()
         return """
         {
           "clubId": $clubId,

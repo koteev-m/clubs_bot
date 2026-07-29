@@ -65,6 +65,23 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    fail "expected output not to contain '$needle', got: $haystack"
+  fi
+}
+
+retry_log="$TMP_DIR/retry-failure.log"
+if RETRY_MAX_ATTEMPTS=2 RETRY_DELAY_SECONDS=0 \
+  "$ROOT_DIR/scripts/retry-command.sh" bash -c 'exit 7' >"$retry_log" 2>&1; then
+  fail "expected retry-command.sh to propagate the final command failure"
+else
+  retry_status=$?
+  assert_eq "$retry_status" "7"
+fi
+assert_contains "$(cat "$retry_log")" "Command failed after 2 attempts (exit 7)"
 
 mkdir -p "$SCA_CACHE_DIR"
 printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
@@ -149,29 +166,41 @@ KOT
   empty_out="$(VERIFY_FROM_SHA=HEAD VERIFY_TO_SHA=HEAD "$ROOT_DIR/scripts/changed-kotlin-files.sh")"
   assert_empty "$empty_out"
 
-  ktlint_skip_out="$(VERIFY_FROM_SHA=HEAD VERIFY_TO_SHA=HEAD KTLINT_BIN=__missing_ktlint__ "$ROOT_DIR/scripts/ktlint-changed.sh")"
+  ktlint_skip_out="$(
+    VERIFY_FROM_SHA=HEAD VERIFY_TO_SHA=HEAD KTLINT_REPO_DIR="$TMP_DIR" GRADLEW_BIN=__missing_gradlew__ \
+      "$ROOT_DIR/scripts/ktlint-changed.sh"
+  )"
   assert_contains "$ktlint_skip_out" "No changed Kotlin files"
 
-  fake_ktlint="$TMP_DIR/fake-ktlint"
-  cat > "$fake_ktlint" <<'SH'
+  fake_gradlew="$TMP_DIR/fake-gradlew"
+  fake_gradle_args="$TMP_DIR/fake-gradle-args"
+  cat > "$fake_gradlew" <<'SH'
 #!/usr/bin/env bash
-exit 0
+printf '%s\n' "$*" > "$FAKE_GRADLE_ARGS_FILE"
+exit "${FAKE_GRADLE_STATUS:-0}"
 SH
-  chmod +x "$fake_ktlint"
+  chmod +x "$fake_gradlew"
   cat > src/App.kt <<'KOT'
 fun main() = println("updated")
 KOT
   git add src/App.kt
   git commit -q -m "kotlin update"
-  mismatch_log="$TMP_DIR/ktlint-checksum-mismatch.log"
-  if VERIFY_FROM_SHA=HEAD~1 VERIFY_TO_SHA=HEAD KTLINT_BIN="$fake_ktlint" KTLINT_SHA256=deadbeef \
-    "$ROOT_DIR/scripts/ktlint-changed.sh" >"$mismatch_log" 2>&1; then
-    fail "expected ktlint-changed.sh to fail on checksum mismatch"
+  ktlint_out="$(
+    VERIFY_FROM_SHA=HEAD~1 VERIFY_TO_SHA=HEAD KTLINT_REPO_DIR="$TMP_DIR" \
+      GRADLEW_BIN="$fake_gradlew" FAKE_GRADLE_ARGS_FILE="$fake_gradle_args" \
+      "$ROOT_DIR/scripts/ktlint-changed.sh"
+  )"
+  assert_contains "$ktlint_out" "running baseline-aware ktlintCheck"
+  assert_eq "$(cat "$fake_gradle_args")" "ktlintCheck --console=plain"
+
+  if VERIFY_FROM_SHA=HEAD~1 VERIFY_TO_SHA=HEAD KTLINT_REPO_DIR="$TMP_DIR" \
+    GRADLEW_BIN="$fake_gradlew" FAKE_GRADLE_ARGS_FILE="$fake_gradle_args" FAKE_GRADLE_STATUS=9 \
+    "$ROOT_DIR/scripts/ktlint-changed.sh" >/dev/null 2>&1; then
+    fail "expected ktlint-changed.sh to propagate ktlintCheck failure"
+  else
+    ktlint_status=$?
+    assert_eq "$ktlint_status" "9"
   fi
-  mismatch_output="$(cat "$mismatch_log")"
-  assert_contains "$mismatch_output" "Checksum mismatch for $fake_ktlint"
-  assert_contains "$mismatch_output" "Expected:"
-  assert_contains "$mismatch_output" "Actual:"
 
   echo "note" > README.md
   git add README.md
@@ -219,5 +248,43 @@ assert_contains "$usage_out" "Usage: scripts/refresh-verification-metadata.sh [d
 
 verify_usage_out="$("$ROOT_DIR/scripts/verify.sh" unknown 2>&1 || true)"
 assert_contains "$verify_usage_out" "Usage: scripts/verify.sh [full|ci|lint|secret-scan|sca-warm-cache]"
+
+dependency_guard_out="$("$ROOT_DIR/gradlew" dependencyGuard --console=plain)"
+for module in app-bot core-data core-domain core-security core-telemetry core-testing tools:perf; do
+  assert_contains "$dependency_guard_out" "Task :${module}:dependencyGuard"
+done
+assert_not_contains "$dependency_guard_out" "0 artifacts checked"
+
+detekt_task_graph="$("$ROOT_DIR/gradlew" detekt --dry-run --console=plain)"
+for module in app-bot core-data core-domain core-security core-telemetry core-testing tools:perf; do
+  assert_contains "$detekt_task_graph" ":${module}:detektMain SKIPPED"
+  assert_contains "$detekt_task_graph" ":${module}:detektTest SKIPPED"
+done
+
+ktlint_buildsrc_probe="$TMP_DIR/ktlint-buildsrc-coverage.init.gradle"
+cat > "$ktlint_buildsrc_probe" <<'GRADLE'
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    def ktlintTask = root.tasks.findByName("runKtlintCheckOverKotlinScripts")
+    if (ktlintTask != null) {
+        def expectedSources = root.fileTree("buildSrc/src/main/kotlin") {
+            include "**/*.kt"
+        }.files
+        def missingSources = expectedSources - ktlintTask.source.files
+        if (!missingSources.isEmpty()) {
+            throw new GradleException(
+                "Root ktlint contract does not cover buildSrc Kotlin sources: " +
+                    missingSources.collect { root.relativePath(it) }.sort().join(", ")
+            )
+        }
+        println "quality-gate: buildSrc ktlint coverage verified"
+    }
+}
+GRADLE
+ktlint_buildsrc_probe_out="$(
+  "$ROOT_DIR/gradlew" help --no-configuration-cache \
+    --init-script "$ktlint_buildsrc_probe" --console=plain
+)"
+assert_contains "$ktlint_buildsrc_probe_out" "quality-gate: buildSrc ktlint coverage verified"
 
 echo "selfcheck: OK"

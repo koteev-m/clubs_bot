@@ -2,8 +2,8 @@ import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
-import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.artifacts.VersionCatalogsExtension
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
@@ -17,6 +17,7 @@ import org.gradle.kotlin.dsl.property
 import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.withType
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
+import org.jlleitschuh.gradle.ktlint.tasks.KtLintCheckTask
 import java.io.File
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -25,9 +26,38 @@ plugins {
     kotlin("jvm") version "2.2.20" apply false
     kotlin("plugin.serialization") version "2.2.20" apply false
     id("io.gitlab.arturbosch.detekt") version "1.23.8" apply false
-    id("org.jlleitschuh.gradle.ktlint") version "12.1.0" apply false
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.0"
     id("org.owasp.dependencycheck") version "12.1.8"
     alias(libs.plugins.versionsPlugin)
+}
+
+configure<KtlintExtension> {
+    version.set("1.3.1")
+    ignoreFailures.set(false)
+    android.set(false)
+    verbose.set(true)
+    outputToConsole.set(true)
+    baseline.set(file("config/ktlint/baseline-build-scripts.xml"))
+    filter {
+        include("**/*.kts")
+        include("buildSrc/src/**/*.kt")
+        exclude("build/**", "*/build/**", "tools/*/build/**")
+    }
+}
+
+tasks.named<KtLintCheckTask>("runKtlintCheckOverKotlinScripts") {
+    include("buildSrc/src/**/*.kt")
+    setSource(
+        fileTree(rootDir) {
+            include("**/*.kts")
+            exclude(".gradle/**", ".idea/**", "build/**", "*/build/**", "tools/*/build/**")
+        },
+    )
+    source(
+        fileTree(rootDir.resolve("buildSrc/src/main/kotlin")) {
+            include("**/*.kt")
+        },
+    )
 }
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
@@ -78,10 +108,15 @@ allprojects {
 // -------------------------
 // Кастомная проверка зависимостей
 // -------------------------
-abstract class DependencyGuard : DefaultTask() {
-    @get:Inject
-    protected abstract val configurationContainer: ConfigurationContainer
+val dependencyGuardConfigurationNames =
+    listOf(
+        "compileClasspath",
+        "runtimeClasspath",
+        "testCompileClasspath",
+        "testRuntimeClasspath",
+    )
 
+abstract class DependencyGuard : DefaultTask() {
     @get:Inject
     protected abstract val providerFactory: ProviderFactory
 
@@ -90,14 +125,11 @@ abstract class DependencyGuard : DefaultTask() {
 
     @get:Input
     val configurationNames: ListProperty<String> =
-        objects.listProperty<String>().convention(
-            listOf(
-                "compileClasspath",
-                "runtimeClasspath",
-                "testCompileClasspath",
-                "testRuntimeClasspath",
-            ),
-        )
+        objects.listProperty<String>()
+
+    @get:Input
+    val artifactCoordinates: ListProperty<String> =
+        objects.listProperty<String>()
 
     @get:Input
     val bannedArtifacts: ListProperty<String> =
@@ -122,20 +154,12 @@ abstract class DependencyGuard : DefaultTask() {
         val banned = bannedArtifacts.get()
         the@ run {
             val enforcedKtor = enforcedKtorVersion.get()
-
-            val configs =
-                configurationNames
-                    .get()
-                    .mapNotNull { name -> configurationContainer.findByName(name) }
-
-            val allArtifacts: Set<String> =
-                configs
-                    .flatMap { cfg ->
-                        cfg.resolvedConfiguration.lenientConfiguration.allModuleDependencies.flatMap { dep ->
-                            sequenceOf("${dep.moduleGroup}:${dep.moduleName}:${dep.moduleVersion}") +
-                                dep.children.map { "${it.moduleGroup}:${it.moduleName}:${it.moduleVersion}" }
-                        }
-                    }.toSet()
+            val allArtifacts = artifactCoordinates.get().toSet()
+            if (allArtifacts.isEmpty()) {
+                throw GradleException(
+                    "DependencyGuard $path: dependency resolution returned 0 artifacts",
+                )
+            }
 
             val legacyStdlib = allArtifacts.filter { line -> banned.any { line.startsWith(it) } }
             if (legacyStdlib.isNotEmpty()) {
@@ -167,15 +191,16 @@ abstract class DependencyGuard : DefaultTask() {
                 )
             }
 
-            println("DependencyGuard: OK (${allArtifacts.size} artifacts checked)")
+            logger.lifecycle("DependencyGuard $path: OK (${allArtifacts.size} artifacts checked)")
         }
     }
 }
 
-tasks.register<DependencyGuard>("dependencyGuard") {
-    group = "verification"
-    description = "Fail build if dependency rules are violated"
-}
+val rootDependencyGuard =
+    tasks.register("dependencyGuard") {
+        group = "verification"
+        description = "Run dependency policy checks for all JVM subprojects"
+    }
 
 val dependencyCheckDataDirPath =
     providers
@@ -490,12 +515,18 @@ subprojects {
     val moduleDetektTestBaseline = rootProject.file("$moduleBaselinePrefix-test.xml")
     val appBotMainBaseline = rootProject.file("config/detekt/baseline-main.xml")
     val appBotTestBaseline = rootProject.file("config/detekt/baseline-test.xml")
+    val moduleKtlintBaseline =
+        rootProject.file(
+            "config/ktlint/baseline-${project.path.removePrefix(":").replace(':', '-')}.xml",
+        )
 
     configure<KtlintExtension> {
+        version.set("1.3.1")
         ignoreFailures.set(false)
         android.set(false)
         verbose.set(true)
         outputToConsole.set(true)
+        baseline.set(moduleKtlintBaseline)
         filter {
             include("**/src/**/*.kt")
         }
@@ -536,6 +567,48 @@ subprojects {
 
     // CLI-обёртки (если есть соответствующие файлы в репо)
     pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+        // The aggregate `detekt` task mixes main and test sources, so it cannot
+        // apply their separate baselines correctly. Keep `check` blocking via
+        // the source-set tasks used by detektGate.
+        tasks.named<Detekt>("detekt") {
+            enabled = false
+            dependsOn("detektMain", "detektTest")
+        }
+        tasks.named("check") {
+            dependsOn("detektMain", "detektTest")
+        }
+
+        val guardedConfigurations =
+            dependencyGuardConfigurationNames.map { configurationName ->
+                configurations.named(configurationName)
+            }
+        val moduleDependencyGuard =
+            tasks.register<DependencyGuard>("dependencyGuard") {
+                group = "verification"
+                description = "Fail build if dependency rules are violated in $path"
+                configurationNames.set(dependencyGuardConfigurationNames)
+                artifactCoordinates.set(
+                    providers.provider {
+                        guardedConfigurations
+                            .flatMap { configurationProvider ->
+                                configurationProvider
+                                    .get()
+                                    .incoming
+                                    .resolutionResult
+                                    .allComponents
+                                    .mapNotNull { component ->
+                                        val id = component.id as? ModuleComponentIdentifier
+                                        id?.let { "${it.group}:${it.module}:${it.version}" }
+                                    }
+                            }.distinct()
+                            .sorted()
+                    },
+                )
+            }
+        rootDependencyGuard.configure {
+            dependsOn(moduleDependencyGuard)
+        }
+
         apply(from = rootProject.file("gradle/detekt-cli.gradle.kts"))
         apply(from = rootProject.file("gradle/ktlint-cli.gradle.kts"))
     }
@@ -563,19 +636,17 @@ subprojects {
     }
 }
 
+tasks.named("ktlintCheck") {
+    dependsOn(
+        subprojects.mapNotNull { it.tasks.findByName("ktlintCheck") },
+    )
+}
+
 // Удобные агрегирующие команды (плагинные таски)
 tasks.register("staticCheck") {
     group = "verification"
     description = "Run detekt and ktlint (plugin tasks) across all Kotlin modules"
-    dependsOn(
-        subprojects.flatMap { sp ->
-            listOfNotNull(
-                sp.tasks.findByName("detekt"),
-                sp.tasks.findByName("detektTest"),
-                sp.tasks.findByName("ktlintCheck"),
-            )
-        },
-    )
+    dependsOn("detektGate", "ktlintCheck")
 }
 
 tasks.register("detektGate") {
