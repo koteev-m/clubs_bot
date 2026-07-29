@@ -21,6 +21,7 @@ RUN --mount=type=cache,target=/root/.gradle \
 # сборка дистрибутива (без тестов) с кешом gradle
 COPY . .
 RUN --mount=type=cache,target=/root/.gradle \
+    mkdir -p miniapp/dist && \
     ./gradlew --no-daemon :app-bot:installDist -x test
 
 # ---------- runtime stage ----------

@@ -42,7 +42,7 @@ jobs:
           images: ${{ env.IMAGE_NAME }}
           tags: |
             type=sha,format=short
-            type=ref,branch=main
+            type=ref,event=branch
             type=semver,pattern={{version}},prefix=v
             type=semver,pattern={{major}}.{{minor}},prefix=v
           labels: |
@@ -70,7 +70,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: true
+          provenance: ${{ github.event_name != 'pull_request' }}
 
       - name: Install cosign
         if: github.event_name != 'pull_request'

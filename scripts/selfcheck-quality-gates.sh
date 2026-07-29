@@ -445,4 +445,506 @@ assert_not_contains "$(cat "$logs_policy_rg_error_log")" "repository-native JVM 
 assert_contains "$(cat "$logs_policy_rg_error_log")" "ripgrep failed with exit code 2"
 assert_contains "$(cat "$logs_policy_report")" "synthetic ripgrep failure"
 
+assert_exact_line() {
+  local file="$1"
+  local expected="$2"
+  local count
+  count="$(awk -v expected="$expected" '$0 == expected { count++ } END { print count + 0 }' "$file")"
+  if [ "$count" -ne 1 ]; then
+    fail "expected one exact line in $file: $expected"
+  fi
+}
+
+assert_step_line() {
+  local file="$1"
+  local step_name="$2"
+  local expected="$3"
+  if ! awk -v target="      - name: $step_name" -v expected="$expected" '
+    $0 == target { in_step = 1; steps++; next }
+    in_step && /^      - / { in_step = 0 }
+    in_step && $0 == expected { matches++ }
+    END { exit !(steps == 1 && matches == 1) }
+  ' "$file"; then
+    fail "step contract changed in $file: $step_name"
+  fi
+}
+
+assert_step_with_line() {
+  local file="$1"
+  local step_name="$2"
+  local expected="$3"
+  if ! awk -v target="      - name: $step_name" -v expected="$expected" '
+    function indentation(line, prefix) {
+      prefix = line
+      sub(/[^ ].*$/, "", prefix)
+      return length(prefix)
+    }
+    function is_content(line) {
+      return line !~ /^[[:space:]]*($|#)/
+    }
+    $0 == target {
+      in_step = 1
+      steps++
+      next
+    }
+    in_step && is_content($0) && indentation($0) <= 6 {
+      in_step = 0
+      in_with = 0
+    }
+    in_step && $0 == "        with:" {
+      in_with = 1
+      with_blocks++
+      next
+    }
+    in_with && is_content($0) && indentation($0) <= 8 {
+      in_with = 0
+    }
+    in_with && $0 == expected { matches++ }
+    END { exit !(steps == 1 && with_blocks == 1 && matches == 1) }
+  ' "$file"; then
+    fail "step with-contract changed in $file: $step_name"
+  fi
+}
+
+assert_job_line() {
+  local file="$1"
+  local job_name="$2"
+  local expected="$3"
+  if ! awk -v target="  $job_name:" -v expected="$expected" '
+    $0 == target { in_job = 1; jobs++; next }
+    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ { in_job = 0 }
+    in_job && $0 == expected { matches++ }
+    END { exit !(jobs == 1 && matches == 1) }
+  ' "$file"; then
+    fail "job contract changed in $file: $job_name"
+  fi
+}
+
+assert_step_uses_sha_pinned_action() {
+  local file="$1"
+  local step_name="$2"
+  local action_name="$3"
+  if ! awk \
+    -v target="      - name: $step_name" \
+    -v prefix="        uses: $action_name@" '
+      $0 == target { in_step = 1; steps++; next }
+      in_step && /^      - / { in_step = 0 }
+      in_step && index($0, prefix) == 1 {
+        uses++
+        sha = substr($0, length(prefix) + 1)
+        sub(/[[:space:]].*$/, "", sha)
+        if (length(sha) == 40 && sha !~ /[^0-9a-f]/) {
+          valid_pins++
+        }
+      }
+      END { exit !(steps == 1 && uses == 1 && valid_pins == 1) }
+    ' "$file"; then
+    fail "$action_name must remain SHA-pinned in step '$step_name' in $file"
+  fi
+}
+
+assert_sha_pinned_action() {
+  local file="$1"
+  local action_name="$2"
+  local sha
+  sha="$(sed -nE "s|^[[:space:]]*uses: ${action_name}@([0-9a-f]+).*|\\1|p" "$file")"
+  case "$sha" in
+    ""|*[!0-9a-f]*)
+      fail "$action_name must remain SHA-pinned in $file"
+      ;;
+  esac
+  if [ "${#sha}" -ne 40 ]; then
+    fail "$action_name must use a full commit SHA in $file"
+  fi
+}
+
+validate_metadata_wiring() {
+  local file="$1"
+  local build_step_name="$2"
+  assert_step_uses_sha_pinned_action \
+    "$file" \
+    "Extract metadata (tags, labels)" \
+    "docker/metadata-action"
+  assert_step_line "$file" "Extract metadata (tags, labels)" "        id: meta"
+  assert_step_uses_sha_pinned_action \
+    "$file" \
+    "$build_step_name" \
+    "docker/build-push-action"
+  assert_step_with_line "$file" "$build_step_name" "          tags: $metadata_tags_expression"
+  assert_step_with_line "$file" "$build_step_name" "          labels: $metadata_labels_expression"
+}
+
+validate_publish_provenance_job_guard() {
+  local file="$1"
+  assert_job_line "$file" "verify-and-provenance" "    if: $non_pr_if"
+}
+
+assert_validation_rejected() {
+  local fixture_name="$1"
+  shift
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+
+  if ( "$@" ) >"$fixture_log" 2>&1; then
+    fail "negative fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  echo "quality-gate: negative fixture $fixture_name rejected (exit $fixture_status)"
+}
+
+replace_exact_line_once() {
+  local source_file="$1"
+  local target_file="$2"
+  local expected="$3"
+  local replacement="$4"
+  awk -v expected="$expected" -v replacement="$replacement" '
+    $0 == expected {
+      matches++
+      if (matches == 1) {
+        print replacement
+        next
+      }
+    }
+    { print }
+    END { if (matches != 1) exit 42 }
+  ' "$source_file" >"$target_file"
+}
+
+move_build_labels_outside_with() {
+  local source_file="$1"
+  local target_file="$2"
+  local build_step_name="$3"
+  local expected="$4"
+  awk \
+    -v target="      - name: $build_step_name" \
+    -v expected="$expected" '
+    $0 == target {
+      in_build_step = 1
+      steps++
+      print
+      next
+    }
+    in_build_step && $0 == "        with:" {
+      print "        env:"
+      print expected
+      print
+      inserted++
+      next
+    }
+    in_build_step && $0 == expected {
+      removed++
+      next
+    }
+    in_build_step && /^      - / {
+      in_build_step = 0
+    }
+    { print }
+    END {
+      if (steps != 1 || removed != 1 || inserted != 1) {
+        exit 42
+      }
+    }
+  ' "$source_file" >"$target_file"
+}
+
+mutate_publish_provenance_guard() {
+  local source_file="$1"
+  local target_file="$2"
+  local move_to_step="$3"
+  awk -v move_to_step="$move_to_step" '
+    BEGIN {
+      target = "  verify-and-provenance:"
+      guard = "    if: github.event_name != '\''pull_request'\''"
+      step_guard = "        if: github.event_name != '\''pull_request'\''"
+    }
+    $0 == target {
+      in_target_job = 1
+      jobs++
+      print
+      next
+    }
+    in_target_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+      in_target_job = 0
+    }
+    in_target_job && $0 == guard {
+      guards++
+      next
+    }
+    in_target_job && move_to_step == "yes" && !inserted && /^      - name:/ {
+      print
+      print step_guard
+      inserted = 1
+      next
+    }
+    { print }
+    END {
+      if (jobs != 1 || guards != 1 || (move_to_step == "yes" && inserted != 1)) {
+        exit 42
+      }
+    }
+  ' "$source_file" >"$target_file"
+}
+
+non_pr_expression="\${{ github.event_name != 'pull_request' }}"
+non_pr_if="github.event_name != 'pull_request'"
+metadata_tags_expression="\${{ steps.meta.outputs.tags }}"
+metadata_labels_expression="\${{ steps.meta.outputs.labels }}"
+docker_image_workflow="$ROOT_DIR/.github/workflows/docker-image.yml"
+docker_publish_workflow="$ROOT_DIR/.github/workflows/docker-publish.yml"
+
+for workflow_file in "$docker_image_workflow" "$docker_publish_workflow"; do
+  assert_exact_line "$workflow_file" "    branches: [ main ]"
+  assert_exact_line "$workflow_file" "    tags: [ 'v*' ]"
+  assert_exact_line "$workflow_file" "  pull_request:"
+  assert_exact_line "$workflow_file" "  workflow_dispatch:"
+
+  metadata_tags="$(
+    awk '
+      $0 == "      - name: Extract metadata (tags, labels)" { in_step = 1 }
+      in_step && $0 == "          tags: |" { in_tags = 1; next }
+      in_tags && $0 ~ /^            type=/ { sub(/^            /, ""); print; next }
+      in_tags && $0 !~ /^            / { exit }
+    ' "$workflow_file"
+  )"
+  expected_metadata_tags="$(
+    printf '%s\n' \
+      "type=sha,format=short" \
+      "type=ref,event=branch" \
+      "type=semver,pattern={{version}},prefix=v" \
+      "type=semver,pattern={{major}}.{{minor}},prefix=v"
+  )"
+  assert_eq "$metadata_tags" "$expected_metadata_tags"
+  assert_not_contains "$metadata_tags" "branch=main"
+
+  assert_sha_pinned_action "$workflow_file" "docker/metadata-action"
+  assert_sha_pinned_action "$workflow_file" "docker/build-push-action"
+  assert_step_line "$workflow_file" "Log in to GHCR" "        if: $non_pr_if"
+done
+
+validate_metadata_wiring "$docker_image_workflow" "Build and (optionally) Push"
+validate_metadata_wiring "$docker_publish_workflow" "Build & (optionally) Push"
+
+assert_step_with_line \
+  "$docker_image_workflow" \
+  "Build and (optionally) Push" \
+  "          push: $non_pr_expression"
+assert_step_with_line \
+  "$docker_image_workflow" \
+  "Build and (optionally) Push" \
+  "          provenance: $non_pr_expression"
+assert_step_with_line \
+  "$docker_publish_workflow" \
+  "Build & (optionally) Push" \
+  "          push: $non_pr_expression"
+assert_step_with_line \
+  "$docker_publish_workflow" \
+  "Build & (optionally) Push" \
+  "          provenance: $non_pr_expression"
+
+for protected_step in \
+  "Sign image (keyless)" \
+  "Generate SBOM (CycloneDX via Syft)" \
+  "Upload SBOM"; do
+  assert_step_line "$docker_publish_workflow" "$protected_step" "        if: $non_pr_if"
+done
+
+validate_publish_provenance_job_guard "$docker_publish_workflow"
+
+dockerignore_file="$ROOT_DIR/.dockerignore"
+approved_dockerignore_contract='.git
+.github
+.githooks
+.idea
+.vscode
+*.iml
+out/
+.gradle
+.kotlin
+build
+buildSrc/.gradle
+buildSrc/.kotlin
+buildSrc/build
+app-bot/build
+core-domain/build
+core-data/build
+core-security/build
+core-telemetry/build
+core-testing/build
+tools/build
+tools/perf/build
+node_modules
+miniapp/node_modules
+miniapp/dist
+*.log
+*.tmp
+.env
+.env.*
+env.env
+scripts/dev-env.sh
+scripts/dev-env.local.sh
+docker-compose*.yml
+.git/
+.gitignore
+.DS_Store
+node_modules/
+app-bot/src/main/resources/miniapp/dist/*'
+
+normalize_dockerignore_contract() {
+  awk '
+    {
+      sub(/\r$/, "")
+      normalized = $0
+      sub(/^[[:space:]]+/, "", normalized)
+      sub(/[[:space:]]+$/, "", normalized)
+      if (normalized == "" || substr(normalized, 1, 1) == "#") {
+        next
+      }
+      print normalized
+    }
+  ' "$1"
+}
+
+validate_dockerignore_contract() {
+  local file="$1"
+  local actual_contract
+  actual_contract="$(normalize_dockerignore_contract "$file")"
+  if [ "$actual_contract" != "$approved_dockerignore_contract" ]; then
+    echo "Dockerignore active-rule contract does not match the approved ordered rules" >&2
+    return 1
+  fi
+}
+
+if ! validate_dockerignore_contract "$dockerignore_file"; then
+  fail "full Dockerignore contract validation failed"
+fi
+
+dockerignore_generated_rules="$(
+  awk '
+    NF && $1 !~ /^#/ && (index($0, "build") || $0 == ".gradle" || $0 == ".kotlin") { print }
+  ' "$dockerignore_file" | LC_ALL=C sort
+)"
+expected_generated_rules="$(
+  printf '%s\n' \
+    ".gradle" \
+    ".kotlin" \
+    "build" \
+    "buildSrc/.gradle" \
+    "buildSrc/.kotlin" \
+    "buildSrc/build" \
+    "app-bot/build" \
+    "core-domain/build" \
+    "core-data/build" \
+    "core-security/build" \
+    "core-telemetry/build" \
+    "core-testing/build" \
+    "tools/build" \
+    "tools/perf/build" |
+    LC_ALL=C sort
+)"
+assert_eq "$dockerignore_generated_rules" "$expected_generated_rules"
+
+for dockerignore_rule in \
+  ".git" \
+  "node_modules" \
+  "miniapp/node_modules" \
+  "miniapp/dist" \
+  ".env" \
+  ".env.*" \
+  "env.env" \
+  "scripts/dev-env.sh" \
+  "scripts/dev-env.local.sh"; do
+  assert_exact_line "$dockerignore_file" "$dockerignore_rule"
+done
+
+if awk 'NF && $1 !~ /^#/ && $0 ~ /^!/' "$dockerignore_file" | grep -q .; then
+  fail ".dockerignore must not use broad re-includes"
+fi
+if [ ! -f "$ROOT_DIR/buildSrc/src/main/kotlin/com/example/build/LogsPolicyScanTask.kt" ]; then
+  fail "LogsPolicyScanTask source is missing"
+fi
+
+dockerignore_wide_kotlin_fixture="$TMP_DIR/dockerignore-wide-kotlin"
+cp "$dockerignore_file" "$dockerignore_wide_kotlin_fixture"
+printf '\n%s\n' "**/*.kt" >>"$dockerignore_wide_kotlin_fixture"
+assert_validation_rejected \
+  "dockerignore-wide-kotlin" \
+  validate_dockerignore_contract \
+  "$dockerignore_wide_kotlin_fixture"
+
+dockerignore_wide_src_fixture="$TMP_DIR/dockerignore-wide-src-main"
+cp "$dockerignore_file" "$dockerignore_wide_src_fixture"
+printf '\n%s\n' "**/src/main/**" >>"$dockerignore_wide_src_fixture"
+assert_validation_rejected \
+  "dockerignore-wide-src-main" \
+  validate_dockerignore_contract \
+  "$dockerignore_wide_src_fixture"
+
+workflow_wrong_id_fixture="$TMP_DIR/docker-image-wrong-metadata-id.yml"
+replace_exact_line_once \
+  "$docker_image_workflow" \
+  "$workflow_wrong_id_fixture" \
+  "        id: meta" \
+  "        id: metadata"
+assert_validation_rejected \
+  "docker-image-wrong-metadata-id" \
+  validate_metadata_wiring \
+  "$workflow_wrong_id_fixture" \
+  "Build and (optionally) Push"
+
+workflow_wrong_tags_fixture="$TMP_DIR/docker-publish-wrong-tags-binding.yml"
+replace_exact_line_once \
+  "$docker_publish_workflow" \
+  "$workflow_wrong_tags_fixture" \
+  "          tags: $metadata_tags_expression" \
+  "          tags: \${{ steps.metadata.outputs.tags }}"
+assert_validation_rejected \
+  "docker-publish-wrong-tags-binding" \
+  validate_metadata_wiring \
+  "$workflow_wrong_tags_fixture" \
+  "Build & (optionally) Push"
+
+workflow_missing_labels_fixture="$TMP_DIR/docker-publish-labels-outside-build-with.yml"
+move_build_labels_outside_with \
+  "$docker_publish_workflow" \
+  "$workflow_missing_labels_fixture" \
+  "Build & (optionally) Push" \
+  "          labels: $metadata_labels_expression"
+assert_validation_rejected \
+  "docker-publish-labels-outside-build-with" \
+  validate_metadata_wiring \
+  "$workflow_missing_labels_fixture" \
+  "Build & (optionally) Push"
+
+workflow_missing_job_guard_fixture="$TMP_DIR/docker-publish-missing-provenance-job-guard.yml"
+mutate_publish_provenance_guard \
+  "$docker_publish_workflow" \
+  "$workflow_missing_job_guard_fixture" \
+  "no"
+assert_validation_rejected \
+  "docker-publish-missing-provenance-job-guard" \
+  validate_publish_provenance_job_guard \
+  "$workflow_missing_job_guard_fixture"
+
+workflow_step_only_guard_fixture="$TMP_DIR/docker-publish-step-only-provenance-guard.yml"
+mutate_publish_provenance_guard \
+  "$docker_publish_workflow" \
+  "$workflow_step_only_guard_fixture" \
+  "yes"
+assert_validation_rejected \
+  "docker-publish-step-only-provenance-guard" \
+  validate_publish_provenance_job_guard \
+  "$workflow_step_only_guard_fixture"
+
+dockerfile="$ROOT_DIR/Dockerfile"
+copy_line="$(awk '$0 == "COPY . ." { print NR }' "$dockerfile")"
+placeholder_line="$(awk 'index($0, "mkdir -p miniapp/dist") { print NR }' "$dockerfile")"
+install_line="$(awk 'index($0, "./gradlew --no-daemon :app-bot:installDist -x test") { print NR }' "$dockerfile")"
+if [ -z "$copy_line" ] || [ -z "$placeholder_line" ] || [ -z "$install_line" ] ||
+  [ "$copy_line" -ge "$placeholder_line" ] || [ "$placeholder_line" -ge "$install_line" ]; then
+  fail "Dockerfile COPY/installDist contract changed"
+fi
+
+echo "quality-gate: Docker workflow/context contract verified"
+
 echo "selfcheck: OK"
