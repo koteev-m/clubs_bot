@@ -243,6 +243,69 @@ else
   assert_eq "$status" "2"
 fi
 
+secret_contract_files="$TMP_DIR/secret-contract-files.txt"
+{
+  git -C "$ROOT_DIR" ls-files -- ".env.example" "scripts/*env*.sh"
+  git -C "$ROOT_DIR" ls-files --others --exclude-standard -- ".env.example" "scripts/*env*.sh"
+} | LC_ALL=C sort -u | while IFS= read -r relative_path; do
+  if [ -f "$ROOT_DIR/$relative_path" ]; then
+    printf '%s\n' "$relative_path"
+  fi
+done > "$secret_contract_files"
+
+secret_contract_file_list="$(cat "$secret_contract_files")"
+assert_contains "$secret_contract_file_list" "scripts/dev-env.example.sh"
+assert_not_contains "$secret_contract_file_list" "scripts/dev-env.sh"
+
+if ! git -C "$ROOT_DIR" check-ignore --no-index -q scripts/dev-env.sh; then
+  fail "expected the local scripts/dev-env.sh to remain ignored"
+fi
+if git -C "$ROOT_DIR" check-ignore --no-index -q scripts/dev-env.example.sh; then
+  fail "expected scripts/dev-env.example.sh to remain trackable"
+fi
+
+while IFS= read -r relative_path; do
+  if LC_ALL=C grep -E -q '[0-9]{6,12}:[A-Za-z0-9_-]{30,}' "$ROOT_DIR/$relative_path"; then
+    fail "tracked dev/example environment file contains a Telegram token literal: $relative_path"
+  fi
+  if grep -q 'gitleaks:allow' "$ROOT_DIR/$relative_path"; then
+    fail "tracked dev/example environment file contains an inline gitleaks allow marker: $relative_path"
+  fi
+done < "$secret_contract_files"
+
+for allowlist_path in .gitleaksignore .gitleaks.toml gitleaks.toml; do
+  if [ -e "$ROOT_DIR/$allowlist_path" ]; then
+    fail "unexpected gitleaks ignore/allowlist file: $allowlist_path"
+  fi
+done
+
+fake_docker="$TMP_DIR/fake-docker"
+fake_docker_args="$TMP_DIR/fake-docker-args.txt"
+fake_docker_log="$TMP_DIR/fake-docker.log"
+cat > "$fake_docker" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FAKE_DOCKER_ARGS_FILE"
+exit 23
+SH
+chmod +x "$fake_docker"
+
+if FAKE_DOCKER_ARGS_FILE="$fake_docker_args" DOCKER_BIN="$fake_docker" \
+  "$ROOT_DIR/scripts/verify.sh" secret-scan >"$fake_docker_log" 2>&1; then
+  fail "expected secret-scan to propagate a started scanner failure"
+else
+  status=$?
+  assert_eq "$status" "23"
+fi
+
+gitleaks_image="$(sed -n 's/^GITLEAKS_IMAGE=//p' "$ROOT_DIR/scripts/quality-gates.env")"
+assert_contains "$gitleaks_image" "@sha256:"
+fake_docker_arg_list="$(cat "$fake_docker_args")"
+assert_contains "$fake_docker_arg_list" "$gitleaks_image"
+assert_contains "$fake_docker_arg_list" "detect"
+assert_contains "$fake_docker_arg_list" "--source"
+assert_contains "$fake_docker_arg_list" "--redact"
+assert_not_contains "$fake_docker_arg_list" "--exit-code 0"
+
 usage_out="$("$ROOT_DIR/scripts/refresh-verification-metadata.sh" unknown 2>&1 || true)"
 assert_contains "$usage_out" "Usage: scripts/refresh-verification-metadata.sh [default|sca]"
 

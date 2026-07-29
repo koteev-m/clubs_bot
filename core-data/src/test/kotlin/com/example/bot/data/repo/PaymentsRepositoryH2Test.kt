@@ -77,7 +77,7 @@ class PaymentsRepositoryH2Test {
                 currency = "RUB",
                 amountMinor = 10_000,
                 payload = "h2-telegram-payload-1",
-                idempotencyKey = "h2-telegram-idem-1",
+                idempotencyKey = "test-a",
             )
         val secondPayment =
             repository.createInitiated(
@@ -86,7 +86,7 @@ class PaymentsRepositoryH2Test {
                 currency = "RUB",
                 amountMinor = 20_000,
                 payload = "h2-telegram-payload-2",
-                idempotencyKey = "h2-telegram-idem-2",
+                idempotencyKey = "test-b",
             )
 
         repository.markCapturedByChargeIds(

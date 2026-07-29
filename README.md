@@ -38,7 +38,7 @@ Task order by mode:
 - `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate scaCheck` → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
-- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, deterministic secret-scan failure без Docker, valid single-file/multi-file SCA cache manifest, negative marker-only/junk/stale/same-size-different-content/file-set-mismatch cases).
+- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, fail-closed secret-scan contract, placeholder-only tracked dev environment, valid single-file/multi-file SCA cache manifest, negative marker-only/junk/stale/same-size-different-content/file-set-mismatch cases).
 
 ## PR quality gates (blocking)
 
@@ -994,6 +994,14 @@ secrets. The application reads configuration from environment variables:
 ```bash
 export $(grep -v '^#' .env | xargs)  # optional helper when using an .env file
 ./gradlew :app-bot:run --console=plain
+```
+
+For the local wrapper, create an ignored environment file from the tracked
+placeholder-only template, fill it locally, and never commit the resulting file:
+
+```bash
+cp scripts/dev-env.example.sh scripts/dev-env.sh
+scripts/run-local.sh
 ```
 
 The application starts all routes via `Application.module()` and performs
