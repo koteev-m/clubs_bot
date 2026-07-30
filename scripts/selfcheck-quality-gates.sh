@@ -1160,17 +1160,136 @@ replace_exact_line_once() {
   local target_file="$2"
   local expected="$3"
   local replacement="$4"
-  awk -v expected="$expected" -v replacement="$replacement" '
-    $0 == expected {
-      matches++
-      if (matches == 1) {
-        print replacement
-        next
-      }
-    }
-    { print }
-    END { if (matches != 1) exit 42 }
-  ' "$source_file" >"$target_file"
+  python3 - "$source_file" "$target_file" "$expected" "$replacement" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+HELPER_NAME = "replace_exact_line_once"
+
+source_file = Path(sys.argv[1])
+target_file = Path(sys.argv[2])
+expected = os.fsencode(sys.argv[3])
+replacement = os.fsencode(sys.argv[4])
+expected_description = f"exact-line(length={len(expected)})"
+
+
+def fail(message):
+    print(f"{HELPER_NAME}: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def split_line_ending(line):
+    if line.endswith(b"\r\n"):
+        return line[:-2], b"\r\n"
+    if line.endswith(b"\n") or line.endswith(b"\r"):
+        return line[:-1], line[-1:]
+    return line, b""
+
+
+if b"\n" in expected or b"\r" in expected:
+    fail(
+        f"source={source_file} expected={expected_description} "
+        "match_count=not-evaluated reason=expected-is-not-one-line"
+    )
+if b"\n" in replacement or b"\r" in replacement:
+    fail(
+        f"source={source_file} expected={expected_description} "
+        "match_count=not-evaluated reason=replacement-is-not-one-line"
+    )
+
+try:
+    source_bytes = source_file.read_bytes()
+    source_mode = stat.S_IMODE(source_file.stat().st_mode)
+except OSError as error:
+    fail(
+        f"source={source_file} expected={expected_description} "
+        f"match_count=not-evaluated reason=source-read-failed:{error.strerror}"
+    )
+
+lines = source_bytes.splitlines(keepends=True)
+matching_indexes = [
+    index
+    for index, line in enumerate(lines)
+    if split_line_ending(line)[0] == expected
+]
+match_count = len(matching_indexes)
+if match_count != 1:
+    fail(
+        f"source={source_file} expected={expected_description} "
+        f"match_count={match_count}"
+    )
+
+matching_index = matching_indexes[0]
+mutated_lines = []
+for index, line in enumerate(lines):
+    if index == matching_index:
+        _, line_ending = split_line_ending(line)
+        mutated_lines.append(replacement + line_ending)
+    else:
+        mutated_lines.append(line)
+mutated_bytes = b"".join(mutated_lines)
+
+temporary_path = None
+try:
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=target_file.parent,
+        prefix=f".{target_file.name}.",
+        delete=False,
+    ) as temporary_file:
+        temporary_path = Path(temporary_file.name)
+        temporary_file.write(mutated_bytes)
+        temporary_file.flush()
+        os.fsync(temporary_file.fileno())
+    os.chmod(temporary_path, source_mode)
+    os.replace(temporary_path, target_file)
+    temporary_path = None
+except OSError as error:
+    fail(
+        f"source={source_file} expected={expected_description} "
+        f"match_count={match_count} reason=target-write-failed:{error.strerror}"
+    )
+finally:
+    if temporary_path is not None:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
+PY
+}
+
+assert_replace_exact_line_rejected() {
+  local fixture_name="$1"
+  local source_file="$2"
+  local target_file="$3"
+  local expected="$4"
+  local replacement="$5"
+  local expected_match_count="$6"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_output
+  local fixture_status
+
+  if replace_exact_line_once \
+    "$source_file" \
+    "$target_file" \
+    "$expected" \
+    "$replacement" >"$fixture_log" 2>&1; then
+    fail "negative fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+
+  assert_eq "$fixture_status" "1"
+  fixture_output="$(cat "$fixture_log")"
+  assert_contains "$fixture_output" "replace_exact_line_once:"
+  assert_contains "$fixture_output" "source=$source_file"
+  assert_contains "$fixture_output" "expected=exact-line(length="
+  assert_contains "$fixture_output" "match_count=$expected_match_count"
+  assert_not_contains "$fixture_output" "exit 42"
+  echo "quality-gate: negative fixture $fixture_name rejected (exit $fixture_status)"
 }
 
 insert_job_direct_line() {
@@ -1357,6 +1476,82 @@ mutate_publish_provenance_guard() {
     }
   ' "$source_file" >"$target_file"
 }
+
+replace_helper_source_fixture="$TMP_DIR/replace-exact-line-source"
+replace_helper_plain_fixture="$TMP_DIR/replace-exact-line-plain"
+replace_helper_expression_fixture="$TMP_DIR/replace-exact-line-expression"
+replace_helper_quotes_fixture="$TMP_DIR/replace-exact-line-quotes"
+replace_helper_backslash_fixture="$TMP_DIR/replace-exact-line-backslash"
+replace_helper_expected_fixture="$TMP_DIR/replace-exact-line-expected"
+printf '%s\n' \
+  "ordinary=before" \
+  '${{ steps.meta.outputs.tags }}' \
+  'quoted="before value"' \
+  'trailing-backslash=before \' >"$replace_helper_source_fixture"
+
+replace_exact_line_once \
+  "$replace_helper_source_fixture" \
+  "$replace_helper_plain_fixture" \
+  "ordinary=before" \
+  "ordinary=after"
+replace_exact_line_once \
+  "$replace_helper_plain_fixture" \
+  "$replace_helper_expression_fixture" \
+  '${{ steps.meta.outputs.tags }}' \
+  '${{ steps.metadata.outputs.tags }}'
+replace_exact_line_once \
+  "$replace_helper_expression_fixture" \
+  "$replace_helper_quotes_fixture" \
+  'quoted="before value"' \
+  'quoted="after value"'
+replace_exact_line_once \
+  "$replace_helper_quotes_fixture" \
+  "$replace_helper_backslash_fixture" \
+  'trailing-backslash=before \' \
+  'trailing-backslash=after \'
+
+printf '%s\n' \
+  "ordinary=after" \
+  '${{ steps.metadata.outputs.tags }}' \
+  'quoted="after value"' \
+  'trailing-backslash=after \' >"$replace_helper_expected_fixture"
+if ! cmp -s "$replace_helper_backslash_fixture" "$replace_helper_expected_fixture"; then
+  fail "replace_exact_line_once did not preserve the positive fixture byte-for-byte"
+fi
+echo "quality-gate: exact-line mutation helper positive fixtures verified"
+
+replace_helper_zero_target="$TMP_DIR/replace-exact-line-zero-target"
+assert_replace_exact_line_rejected \
+  "replace-exact-line-zero-match" \
+  "$replace_helper_source_fixture" \
+  "$replace_helper_zero_target" \
+  "ordinary=missing" \
+  "ordinary=after" \
+  "0"
+if [ -e "$replace_helper_zero_target" ]; then
+  fail "replace_exact_line_once created a target after zero matches"
+fi
+
+replace_helper_duplicate_source="$TMP_DIR/replace-exact-line-duplicate-source"
+replace_helper_duplicate_target="$TMP_DIR/replace-exact-line-duplicate-target"
+replace_helper_duplicate_baseline="$TMP_DIR/replace-exact-line-duplicate-baseline"
+printf '%s\n' \
+  "duplicate=before" \
+  "middle=unchanged" \
+  "duplicate=before" >"$replace_helper_duplicate_source"
+printf '%s\n' "target=sentinel" >"$replace_helper_duplicate_target"
+cp "$replace_helper_duplicate_target" "$replace_helper_duplicate_baseline"
+assert_replace_exact_line_rejected \
+  "replace-exact-line-duplicate-match" \
+  "$replace_helper_duplicate_source" \
+  "$replace_helper_duplicate_target" \
+  "duplicate=before" \
+  "duplicate=after" \
+  "2"
+if ! cmp -s "$replace_helper_duplicate_target" "$replace_helper_duplicate_baseline"; then
+  fail "replace_exact_line_once modified the target after duplicate matches"
+fi
+echo "quality-gate: exact-line mutation helper failure atomicity verified"
 
 non_pr_expression="\${{ github.event_name != 'pull_request' }}"
 non_pr_if="github.event_name != 'pull_request'"
