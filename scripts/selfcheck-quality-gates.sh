@@ -589,6 +589,122 @@ assert_step_with_contract() {
   fi
 }
 
+normalize_step_run_contract() {
+  local file="$1"
+  local job_name="$2"
+  local step_name="$3"
+  awk \
+    -v job_target="  $job_name:" \
+    -v step_target="      - name: $step_name" '
+    function indentation(line, indent) {
+      indent = line
+      sub(/[^ ].*$/, "", indent)
+      return length(indent)
+    }
+    function is_content(line) {
+      return line !~ /^[[:space:]]*($|#)/
+    }
+    $0 == job_target {
+      in_job = 1
+      jobs++
+      next
+    }
+    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+      in_job = 0
+      in_step = 0
+      in_run = 0
+    }
+    in_job && $0 == step_target {
+      in_step = 1
+      steps++
+      next
+    }
+    in_step && is_content($0) && indentation($0) <= 6 {
+      in_step = 0
+      in_run = 0
+    }
+    in_step && $0 == "        run: |" {
+      in_run = 1
+      run_blocks++
+      next
+    }
+    in_run && is_content($0) && indentation($0) <= 8 {
+      in_run = 0
+    }
+    in_run && is_content($0) {
+      normalized = $0
+      sub(/^[[:space:]]+/, "", normalized)
+      print normalized
+    }
+    END {
+      if (jobs != 1 || steps != 1 || run_blocks != 1) {
+        exit 42
+      }
+    }
+  ' "$file"
+}
+
+assert_step_run_contract() {
+  local file="$1"
+  local job_name="$2"
+  local step_name="$3"
+  local expected="$4"
+  local actual
+  if ! actual="$(normalize_step_run_contract "$file" "$job_name" "$step_name")"; then
+    fail "step run-contract is missing or ambiguous in $file: $job_name/$step_name"
+  fi
+  if [ "$actual" != "$expected" ]; then
+    fail "step run-contract changed in $file: $job_name/$step_name"
+  fi
+}
+
+validate_packaged_launcher() {
+  local launcher_file="$1"
+  local expected_main_class="io.ktor.server.netty.EngineMain"
+  local forbidden_main_class="com.example.bot.ApplicationKt"
+
+  if [ ! -f "$launcher_file" ]; then
+    echo "packaged launcher is missing: $launcher_file" >&2
+    return 1
+  fi
+  if [ ! -r "$launcher_file" ]; then
+    echo "packaged launcher is not readable: $launcher_file" >&2
+    return 1
+  fi
+
+  if ! awk \
+    -v expected="$expected_main_class" \
+    -v forbidden="$forbidden_main_class" '
+      {
+        normalized = $0
+        sub(/^[[:space:]]+/, "", normalized)
+        lower = tolower(normalized)
+        if (substr(normalized, 1, 1) == "#") {
+          next
+        }
+        if (substr(normalized, 1, 2) == "::") {
+          next
+        }
+        if (lower ~ /^@?rem([[:space:]]|$)/) {
+          next
+        }
+
+        if (index($0, forbidden) > 0) {
+          forbidden_found = 1
+        }
+        for (field = 1; field <= NF; field++) {
+          if ($field == expected) {
+            expected_found = 1
+          }
+        }
+      }
+      END { exit !(expected_found && !forbidden_found) }
+    ' "$launcher_file"; then
+    echo "packaged launcher main-class contract failed: $launcher_file" >&2
+    return 1
+  fi
+}
+
 assert_step_direct_key_line() {
   local file="$1"
   local job_name="$2"
@@ -790,6 +906,52 @@ validate_metadata_wiring() {
 validate_publish_provenance_job_guard() {
   local file="$1"
   assert_job_line "$file" "verify-and-provenance" "    if: $non_pr_if"
+}
+
+validate_container_smoke_workflow() {
+  local file="$1"
+  local protected_step
+  local forbidden_key
+
+  for forbidden_key in "continue-on-error" "if"; do
+    assert_job_has_no_direct_key "$file" "smoke" "$forbidden_key"
+  done
+
+  for protected_step in "Probe /ready (gating)" "Probe /health"; do
+    for forbidden_key in "continue-on-error" "if"; do
+      assert_step_has_no_direct_key \
+        "$file" \
+        "smoke" \
+        "$protected_step" \
+        "$forbidden_key"
+    done
+  done
+
+  assert_step_run_contract \
+    "$file" \
+    "smoke" \
+    "Run app container" \
+    "$container_smoke_run_contract"
+  assert_step_run_contract \
+    "$file" \
+    "smoke" \
+    "Probe /ready (gating)" \
+    "$container_smoke_ready_contract"
+  assert_step_run_contract \
+    "$file" \
+    "smoke" \
+    "Probe /health" \
+    "$container_smoke_health_contract"
+
+  if awk '
+    index($0, "jdbc:postgresql://127.0.0.1:") ||
+      index($0, "ALLOW_INSECURE_DEV") {
+      found = 1
+    }
+    END { exit !found }
+  ' "$file"; then
+    fail "Container Smoke must use service networking and fail-closed RBAC"
+  fi
 }
 
 active_workflow_lines() {
@@ -1033,6 +1195,41 @@ insert_job_direct_line() {
   ' "$source_file" >"$target_file"
 }
 
+insert_step_direct_line() {
+  local source_file="$1"
+  local target_file="$2"
+  local job_name="$3"
+  local step_name="$4"
+  local insertion="$5"
+  awk \
+    -v job_target="  $job_name:" \
+    -v step_target="      - name: $step_name" \
+    -v insertion="$insertion" '
+      $0 == job_target {
+        in_job = 1
+        jobs++
+        print
+        next
+      }
+      in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+        in_job = 0
+      }
+      in_job && $0 == step_target {
+        steps++
+        print
+        print insertion
+        inserted++
+        next
+      }
+      { print }
+      END {
+        if (jobs != 1 || steps != 1 || inserted != 1) {
+          exit 42
+        }
+      }
+    ' "$source_file" >"$target_file"
+}
+
 replace_step_line_once() {
   local source_file="$1"
   local target_file="$2"
@@ -1168,6 +1365,7 @@ metadata_labels_expression="\${{ steps.meta.outputs.labels }}"
 docker_image_workflow="$ROOT_DIR/.github/workflows/docker-image.yml"
 docker_publish_workflow="$ROOT_DIR/.github/workflows/docker-publish.yml"
 security_scan_workflow="$ROOT_DIR/.github/workflows/security-scan.yml"
+container_smoke_workflow="$ROOT_DIR/.github/workflows/container-smoke.yml"
 approved_trivy_action_active_line="uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release"
 trivy_filesystem_report_guard="\${{ always() && hashFiles('trivy-results.sarif') != '' }}"
 trivy_image_report_guard="\${{ always() && hashFiles('trivy-image-results.sarif') != '' }}"
@@ -1194,6 +1392,37 @@ path: trivy-results.sarif
 if-no-files-found: error'
 trivy_image_artifact_with_contract='name: trivy-image-report
 path: trivy-image-results.sarif'
+container_smoke_run_contract='docker run -d --name app-bot-ci \
+--network "${{ job.services.postgres.network }}" \
+-p 8080:8080 \
+-e APP_PROFILE="DEV" \
+-e RBAC_ENABLED="true" \
+-e DATABASE_URL="jdbc:postgresql://postgres:5432/botdb" \
+-e DATABASE_USER="botuser" \
+-e DATABASE_PASSWORD="botpass" \
+-e TELEGRAM_BOT_TOKEN="000000:TEST" \
+-e WEBHOOK_SECRET_TOKEN="test" \
+-e OWNER_TELEGRAM_ID="0" \
+-e HQ_CHAT_ID="0" \
+-e CLUB1_CHAT_ID="0" \
+-e CLUB2_CHAT_ID="0" \
+-e CLUB3_CHAT_ID="0" \
+-e CLUB4_CHAT_ID="0" \
+app-bot:ci'
+container_smoke_ready_contract='for i in {1..60}; do
+if curl -fsS http://127.0.0.1:8080/ready >/dev/null; then
+exit 0
+fi
+sleep 1
+done
+echo "ready failed" && exit 1'
+container_smoke_health_contract='for i in {1..60}; do
+if curl -fsS http://127.0.0.1:8080/health >/dev/null; then
+exit 0
+fi
+sleep 1
+done
+echo "health failed" && exit 1'
 
 for workflow_file in "$docker_image_workflow" "$docker_publish_workflow"; do
   assert_exact_line "$workflow_file" "    branches: [ main ]"
@@ -1259,6 +1488,14 @@ fi
 validate_trivy_filesystem_workflow "$security_scan_workflow"
 validate_trivy_image_workflow "$docker_publish_workflow"
 echo "quality-gate: Trivy workflow contract verified"
+
+validate_container_smoke_workflow "$container_smoke_workflow"
+echo "quality-gate: Container Smoke runtime/network contract verified"
+
+"$ROOT_DIR/gradlew" :app-bot:installDist --rerun-tasks --console=plain
+validate_packaged_launcher "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot"
+validate_packaged_launcher "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot.bat"
+echo "quality-gate: packaged EngineMain launchers verified"
 
 dockerignore_file="$ROOT_DIR/.dockerignore"
 approved_dockerignore_contract='.git
@@ -1526,6 +1763,133 @@ assert_validation_rejected \
   "trivy-unguarded-sarif-upload" \
   validate_trivy_filesystem_workflow \
   "$trivy_unguarded_sarif_fixture"
+
+container_smoke_ready_continue_fixture="$TMP_DIR/container-smoke-ready-continue.yml"
+insert_step_direct_line \
+  "$container_smoke_workflow" \
+  "$container_smoke_ready_continue_fixture" \
+  "smoke" \
+  "Probe /ready (gating)" \
+  "        continue-on-error: true"
+assert_validation_rejected \
+  "container-smoke-ready-continue-on-error" \
+  validate_container_smoke_workflow \
+  "$container_smoke_ready_continue_fixture"
+
+container_smoke_health_if_false_fixture="$TMP_DIR/container-smoke-health-if-false.yml"
+insert_step_direct_line \
+  "$container_smoke_workflow" \
+  "$container_smoke_health_if_false_fixture" \
+  "smoke" \
+  "Probe /health" \
+  "        if: false"
+assert_validation_rejected \
+  "container-smoke-health-if-false" \
+  validate_container_smoke_workflow \
+  "$container_smoke_health_if_false_fixture"
+
+container_smoke_job_continue_fixture="$TMP_DIR/container-smoke-job-continue.yml"
+insert_job_direct_line \
+  "$container_smoke_workflow" \
+  "$container_smoke_job_continue_fixture" \
+  "smoke" \
+  "    continue-on-error: true"
+assert_validation_rejected \
+  "container-smoke-job-continue-on-error" \
+  validate_container_smoke_workflow \
+  "$container_smoke_job_continue_fixture"
+
+container_smoke_job_if_false_fixture="$TMP_DIR/container-smoke-job-if-false.yml"
+insert_job_direct_line \
+  "$container_smoke_workflow" \
+  "$container_smoke_job_if_false_fixture" \
+  "smoke" \
+  "    if: false"
+assert_validation_rejected \
+  "container-smoke-job-if-false" \
+  validate_container_smoke_workflow \
+  "$container_smoke_job_if_false_fixture"
+
+container_smoke_ready_if_always_fixture="$TMP_DIR/container-smoke-ready-if-always.yml"
+insert_step_direct_line \
+  "$container_smoke_workflow" \
+  "$container_smoke_ready_if_always_fixture" \
+  "smoke" \
+  "Probe /ready (gating)" \
+  "        if: always()"
+assert_validation_rejected \
+  "container-smoke-ready-if-always" \
+  validate_container_smoke_workflow \
+  "$container_smoke_ready_if_always_fixture"
+
+container_smoke_loopback_fixture="$TMP_DIR/container-smoke-loopback.yml"
+replace_exact_line_once \
+  "$container_smoke_workflow" \
+  "$container_smoke_loopback_fixture" \
+  '            -e DATABASE_URL="jdbc:postgresql://postgres:5432/botdb" \' \
+  '            -e DATABASE_URL="jdbc:postgresql://127.0.0.1:5432/botdb" \'
+assert_validation_rejected \
+  "container-smoke-loopback-database" \
+  validate_container_smoke_workflow \
+  "$container_smoke_loopback_fixture"
+
+container_smoke_missing_network_fixture="$TMP_DIR/container-smoke-missing-network.yml"
+replace_exact_line_once \
+  "$container_smoke_workflow" \
+  "$container_smoke_missing_network_fixture" \
+  '            --network "${{ job.services.postgres.network }}" \' \
+  "            # service network removed"
+assert_validation_rejected \
+  "container-smoke-missing-service-network" \
+  validate_container_smoke_workflow \
+  "$container_smoke_missing_network_fixture"
+
+container_smoke_insecure_rbac_fixture="$TMP_DIR/container-smoke-insecure-rbac.yml"
+replace_exact_line_once \
+  "$container_smoke_workflow" \
+  "$container_smoke_insecure_rbac_fixture" \
+  '            -e RBAC_ENABLED="true" \' \
+  '            -e ALLOW_INSECURE_DEV="true" \'
+assert_validation_rejected \
+  "container-smoke-insecure-rbac" \
+  validate_container_smoke_workflow \
+  "$container_smoke_insecure_rbac_fixture"
+
+unix_application_main_fixture="$TMP_DIR/app-bot-unix-application-main"
+printf '%s\n' \
+  '#!/usr/bin/env sh' \
+  'exec java com.example.bot.ApplicationKt "$@"' >"$unix_application_main_fixture"
+assert_validation_rejected \
+  "packaged-unix-application-main" \
+  validate_packaged_launcher \
+  "$unix_application_main_fixture"
+
+windows_application_main_fixture="$TMP_DIR/app-bot-windows-application-main.bat"
+printf '%s\n' \
+  '@echo off' \
+  '"%JAVA_EXE%" com.example.bot.ApplicationKt %*' >"$windows_application_main_fixture"
+assert_validation_rejected \
+  "packaged-windows-application-main" \
+  validate_packaged_launcher \
+  "$windows_application_main_fixture"
+
+missing_expected_main_fixture="$TMP_DIR/app-bot-missing-expected-main"
+printf '%s\n' \
+  '#!/usr/bin/env sh' \
+  'exec java com.example.bot.UnexpectedMain "$@"' >"$missing_expected_main_fixture"
+assert_validation_rejected \
+  "packaged-missing-expected-main" \
+  validate_packaged_launcher \
+  "$missing_expected_main_fixture"
+
+mixed_main_fixture="$TMP_DIR/app-bot-mixed-main"
+printf '%s\n' \
+  '#!/usr/bin/env sh' \
+  'exec java io.ktor.server.netty.EngineMain com.example.bot.ApplicationKt "$@"' >"$mixed_main_fixture"
+assert_validation_rejected \
+  "packaged-engine-and-application-main" \
+  validate_packaged_launcher \
+  "$mixed_main_fixture"
 
 dockerfile="$ROOT_DIR/Dockerfile"
 copy_line="$(awk '$0 == "COPY . ." { print NR }' "$dockerfile")"

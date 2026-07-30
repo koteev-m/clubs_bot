@@ -153,14 +153,36 @@ tasks.named<ProcessResources>("processResources") {
     }
 }
 
+val ktorEngineMainClass = "io.ktor.server.netty.EngineMain"
+
 application {
     // EngineMain + application.conf (modules = [ com.example.bot.ApplicationKt.module ])
-    mainClass.set("com.example.bot.ApplicationKt")
+    mainClass.set(ktorEngineMainClass)
     applicationDefaultJvmArgs =
         listOf(
             "-Dfile.encoding=UTF-8",
             "-XX:+ExitOnOutOfMemoryError",
         )
+}
+
+tasks.named("installDist") {
+    inputs.property("expectedRuntimeMainClass", ktorEngineMainClass)
+
+    doLast {
+        val expectedRuntimeMainClass = inputs.properties.getValue("expectedRuntimeMainClass") as String
+        val launcher = outputs.files.singleFile.resolve("bin/app-bot")
+        check(launcher.isFile) {
+            "installDist launcher was not generated: ${launcher.absolutePath}"
+        }
+
+        val launcherText = launcher.readText()
+        check(launcherText.contains(expectedRuntimeMainClass)) {
+            "installDist launcher must use $expectedRuntimeMainClass"
+        }
+        check(!launcherText.contains("com.example.bot.ApplicationKt")) {
+            "installDist launcher must not use ApplicationKt without a main function"
+        }
+    }
 }
 
 /**

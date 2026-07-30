@@ -56,12 +56,21 @@ jobs:
       - name: Run app container
         run: |
           docker run -d --name app-bot-ci \
+            --network "${{ job.services.postgres.network }}" \
             -p 8080:8080 \
-            -e DATABASE_URL="jdbc:postgresql://127.0.0.1:5432/botdb" \
+            -e APP_PROFILE="DEV" \
+            -e RBAC_ENABLED="true" \
+            -e DATABASE_URL="jdbc:postgresql://postgres:5432/botdb" \
             -e DATABASE_USER="botuser" \
             -e DATABASE_PASSWORD="botpass" \
             -e TELEGRAM_BOT_TOKEN="000000:TEST" \
+            -e WEBHOOK_SECRET_TOKEN="test" \
             -e OWNER_TELEGRAM_ID="0" \
+            -e HQ_CHAT_ID="0" \
+            -e CLUB1_CHAT_ID="0" \
+            -e CLUB2_CHAT_ID="0" \
+            -e CLUB3_CHAT_ID="0" \
+            -e CLUB4_CHAT_ID="0" \
             app-bot:ci
 
       - name: Probe /ready (gating)
