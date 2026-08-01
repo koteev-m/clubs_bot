@@ -1,14 +1,23 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
+import org.gradle.api.Action
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
+import org.gradle.api.Task
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.Internal
+import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
@@ -19,6 +28,14 @@ import org.gradle.kotlin.dsl.withType
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import org.jlleitschuh.gradle.ktlint.tasks.KtLintCheckTask
 import java.io.File
+import java.nio.charset.StandardCharsets
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import javax.inject.Inject
 
@@ -193,6 +210,682 @@ abstract class DependencyGuard : DefaultTask() {
 
             logger.lifecycle("DependencyGuard $path: OK (${allArtifacts.size} artifacts checked)")
         }
+    }
+}
+
+class DetektSarifIdentity private constructor() {
+    companion object {
+        fun validateTaskName(taskName: String) {
+            if (
+                taskName.isEmpty() ||
+                taskName == "." ||
+                taskName == ".." ||
+                taskName.contains("..") ||
+                taskName.any { it == '/' || it == '\\' || it == ':' }
+            ) {
+                throw GradleException("Invalid Detekt task name: $taskName")
+            }
+        }
+
+        fun modulePath(projectPath: String): String {
+            if (projectPath == ":") return ""
+            if (!projectPath.startsWith(":")) {
+                throw GradleException("Invalid Gradle project path: $projectPath")
+            }
+            val parts = projectPath.removePrefix(":").split(':')
+            if (
+                parts.any {
+                    it.isEmpty() ||
+                        it == "." ||
+                        it == ".." ||
+                        it.contains("..") ||
+                        it.any { character -> character == '/' || character == '\\' }
+                }
+            ) {
+                throw GradleException("Invalid Gradle project path: $projectPath")
+            }
+            return parts.joinToString("/")
+        }
+
+        fun taskIdentity(taskName: String): String {
+            validateTaskName(taskName)
+            val detektPrefix = "detekt"
+            val suffix = taskName.removePrefix(detektPrefix)
+            return if (taskName.startsWith(detektPrefix) && suffix.isNotEmpty()) {
+                suffix.replaceFirstChar { it.lowercase() }
+            } else {
+                taskName
+            }
+        }
+
+        fun reportPath(
+            projectPath: String,
+            taskName: String,
+        ): String {
+            val modulePath = modulePath(projectPath)
+            val prefix = if (modulePath.isEmpty()) "" else "$modulePath/"
+            validateTaskName(taskName)
+            return "${prefix}build/reports/detekt/$taskName/detekt.sarif"
+        }
+
+        fun statusPath(
+            projectPath: String,
+            taskName: String,
+        ): String {
+            val modulePath = modulePath(projectPath)
+            val prefix = if (modulePath.isEmpty()) "" else "$modulePath/"
+            validateTaskName(taskName)
+            return "${prefix}build/reports/detekt/status/$taskName.json"
+        }
+
+        fun category(
+            projectPath: String,
+            taskName: String,
+        ): String {
+            val modulePath = modulePath(projectPath).ifEmpty { "root" }
+            return "detekt/$modulePath/${taskIdentity(taskName)}"
+        }
+
+        fun taskPath(
+            projectPath: String,
+            taskName: String,
+        ): String = if (projectPath == ":") ":$taskName" else "$projectPath:$taskName"
+
+        fun validateNoSymlinkComponents(
+            repositoryRoot: Path,
+            target: Path,
+            description: String,
+            allowMissing: Boolean,
+        ) {
+            val normalizedRoot = repositoryRoot.toAbsolutePath().normalize()
+            val normalizedTarget = target.toAbsolutePath().normalize()
+            if (!normalizedTarget.startsWith(normalizedRoot)) {
+                throw GradleException("$description is outside the repository: $normalizedTarget")
+            }
+
+            var current = normalizedRoot
+            val relativeParts = normalizedRoot.relativize(normalizedTarget).toList()
+            relativeParts.forEachIndexed { index, part ->
+                current = current.resolve(part)
+                if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                    if (allowMissing) return
+                    throw GradleException("$description is missing: $normalizedTarget")
+                }
+                if (Files.isSymbolicLink(current)) {
+                    throw GradleException("$description contains a symbolic link: $current")
+                }
+                if (
+                    index < relativeParts.lastIndex &&
+                    !Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)
+                ) {
+                    throw GradleException("$description parent is not a directory: $current")
+                }
+            }
+        }
+    }
+}
+
+abstract class PrepareDetektSarif : DefaultTask() {
+    @get:Internal
+    abstract val reportDirectories: ConfigurableFileCollection
+
+    @get:Internal
+    abstract val repositoryRoot: DirectoryProperty
+
+    @get:OutputFile
+    abstract val preparedMarker: RegularFileProperty
+
+    @TaskAction
+    fun prepare() {
+        val rootPath =
+            repositoryRoot
+                .get()
+                .asFile
+                .toPath()
+                .toAbsolutePath()
+                .normalize()
+
+        fun deleteGeneratedReports(reportDirectory: File) {
+            val reportPath = reportDirectory.toPath().toAbsolutePath().normalize()
+            if (!reportPath.startsWith(rootPath)) {
+                throw GradleException(
+                    "Refusing to remove Detekt reports outside the repository: $reportPath",
+                )
+            }
+            val relativeParts = rootPath.relativize(reportPath).map { it.toString() }
+            if (relativeParts.takeLast(3) != listOf("build", "reports", "detekt")) {
+                throw GradleException(
+                    "Refusing to remove an unapproved Detekt report directory: $reportPath",
+                )
+            }
+
+            DetektSarifIdentity.validateNoSymlinkComponents(
+                rootPath,
+                reportPath,
+                "Detekt report cleanup path",
+                allowMissing = true,
+            )
+
+            if (!Files.exists(reportPath, LinkOption.NOFOLLOW_LINKS)) return
+            if (!Files.isDirectory(reportPath, LinkOption.NOFOLLOW_LINKS)) {
+                throw GradleException("Detekt report path is not a directory: $reportPath")
+            }
+            Files.walkFileTree(
+                reportPath,
+                object : SimpleFileVisitor<Path>() {
+                    override fun visitFile(
+                        file: Path,
+                        attributes: BasicFileAttributes,
+                    ): FileVisitResult {
+                        Files.delete(file)
+                        return FileVisitResult.CONTINUE
+                    }
+
+                    override fun postVisitDirectory(
+                        directory: Path,
+                        error: java.io.IOException?,
+                    ): FileVisitResult {
+                        if (error != null) throw error
+                        Files.delete(directory)
+                        return FileVisitResult.CONTINUE
+                    }
+                },
+            )
+        }
+
+        val rootReportDirectory =
+            preparedMarker
+                .get()
+                .asFile
+                .parentFile
+        deleteGeneratedReports(rootReportDirectory)
+        reportDirectories.files
+            .map { it.toPath().toAbsolutePath().normalize() }
+            .filterNot { it == rootReportDirectory.toPath().toAbsolutePath().normalize() }
+            .sortedBy { it.toString() }
+            .map(Path::toFile)
+            .forEach(::deleteGeneratedReports)
+
+        val marker =
+            linkedMapOf<String, Any>(
+                "schema" to "clubs-bot/detekt-sarif-prepared",
+                "version" to 1,
+            )
+        val target = preparedMarker.get().asFile.toPath()
+        Files.createDirectories(target.parent)
+        val temporary = Files.createTempFile(target.parent, ".prepared-sarif.", ".tmp")
+        try {
+            val content = JsonOutput.prettyPrint(JsonOutput.toJson(marker)) + "\n"
+            Files.writeString(temporary, content, StandardCharsets.UTF_8)
+            Files.move(
+                temporary,
+                target,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+        logger.lifecycle("Detekt SARIF workspace prepared")
+    }
+}
+
+abstract class RecordDetektSarifStatus : DefaultTask() {
+    @get:Input
+    abstract val taskPathValue: Property<String>
+
+    @get:Input
+    abstract val projectPathValue: Property<String>
+
+    @get:Input
+    abstract val taskNameValue: Property<String>
+
+    @get:Input
+    abstract val expectedReportPath: Property<String>
+
+    @get:Input
+    abstract val expectedCategory: Property<String>
+
+    @get:Internal
+    abstract val sourceFiles: ConfigurableFileCollection
+
+    @get:Internal
+    abstract val reportFile: RegularFileProperty
+
+    @get:Internal
+    abstract val repositoryRoot: DirectoryProperty
+
+    @get:OutputFile
+    abstract val statusFile: RegularFileProperty
+
+    @get:Internal
+    lateinit var analyzedTask: Task
+
+    @TaskAction
+    fun record() {
+        val projectPath = projectPathValue.get()
+        val taskName = taskNameValue.get()
+        val taskPath = taskPathValue.get()
+        val reportPath = expectedReportPath.get()
+        val category = expectedCategory.get()
+        if (taskPath != DetektSarifIdentity.taskPath(projectPath, taskName)) {
+            throw GradleException("Detekt status task identity is inconsistent: $taskPath")
+        }
+        if (reportPath != DetektSarifIdentity.reportPath(projectPath, taskName)) {
+            throw GradleException("Detekt status report path is inconsistent: $taskPath")
+        }
+        if (category != DetektSarifIdentity.category(projectPath, taskName)) {
+            throw GradleException("Detekt status category is inconsistent: $taskPath")
+        }
+
+        val rootPath =
+            repositoryRoot
+                .get()
+                .asFile
+                .toPath()
+                .toAbsolutePath()
+                .normalize()
+        val actualReportPath =
+            reportFile
+                .get()
+                .asFile
+                .toPath()
+                .toAbsolutePath()
+                .normalize()
+        if (!actualReportPath.startsWith(rootPath)) {
+            throw GradleException("Detekt SARIF output is outside the repository: $taskPath")
+        }
+        val actualRelativeReport = rootPath.relativize(actualReportPath).joinToString("/")
+        if (actualRelativeReport != reportPath) {
+            throw GradleException("Detekt SARIF output does not match task identity: $taskPath")
+        }
+
+        val sourceCount =
+            sourceFiles.files
+                .asSequence()
+                .filter { it.isFile }
+                .map { it.canonicalPath }
+                .distinct()
+                .count()
+        val taskState = analyzedTask.state
+        val taskSkipMessage = taskState.skipMessage.orEmpty()
+        val reportExists = reportFile.get().asFile.isFile
+        val validIncrementalSkip =
+            taskState.skipped &&
+                (
+                    taskSkipMessage == "FROM-CACHE" ||
+                        (taskSkipMessage == "UP-TO-DATE" && reportExists)
+                )
+        val state =
+            when {
+                taskState.executed &&
+                    taskState.skipped &&
+                    taskState.noSource &&
+                    taskState.failure == null &&
+                    sourceCount == 0 -> "NO_SOURCE"
+                taskState.executed &&
+                    !taskState.noSource &&
+                    sourceCount > 0 &&
+                    (!taskState.skipped || validIncrementalSkip) -> "REPORT_REQUIRED"
+                else -> "INCOMPLETE"
+            }
+        val status =
+            linkedMapOf<String, Any>(
+                "schema" to "clubs-bot/detekt-sarif-status",
+                "version" to 1,
+                "taskPath" to taskPath,
+                "projectPath" to projectPath,
+                "taskName" to taskName,
+                "reportPath" to reportPath,
+                "category" to category,
+                "sourceCount" to sourceCount,
+                "state" to state,
+                "taskExecuted" to taskState.executed,
+                "taskSkipped" to taskState.skipped,
+                "taskSkipMessage" to taskSkipMessage,
+                "taskNoSource" to taskState.noSource,
+                "taskFailed" to (taskState.failure != null),
+                "reportExists" to reportExists,
+            )
+        val target = statusFile.get().asFile.toPath()
+        DetektSarifIdentity.validateNoSymlinkComponents(
+            rootPath,
+            target,
+            "Detekt status output",
+            allowMissing = true,
+        )
+        Files.createDirectories(target.parent)
+        DetektSarifIdentity.validateNoSymlinkComponents(
+            rootPath,
+            target.parent,
+            "Detekt status output parent",
+            allowMissing = false,
+        )
+        val temporary = Files.createTempFile(target.parent, ".${target.fileName}.", ".tmp")
+        try {
+            val content = JsonOutput.prettyPrint(JsonOutput.toJson(status)) + "\n"
+            Files.writeString(temporary, content, StandardCharsets.UTF_8)
+            Files.move(
+                temporary,
+                target,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+        logger.lifecycle("Detekt SARIF status $taskPath: $state ($sourceCount sources)")
+    }
+}
+
+abstract class FinalizeDetektSarifManifest : DefaultTask() {
+    @get:Input
+    abstract val expectedTaskDescriptors: ListProperty<String>
+
+    @get:Internal
+    abstract val repositoryRoot: DirectoryProperty
+
+    @get:Internal
+    abstract val preparedMarker: RegularFileProperty
+
+    @get:Internal
+    abstract val statusDirectories: ConfigurableFileCollection
+
+    @get:OutputFile
+    abstract val manifestFile: RegularFileProperty
+
+    @TaskAction
+    fun finalizeManifest() {
+        val rootPath =
+            repositoryRoot
+                .get()
+                .asFile
+                .toPath()
+                .toAbsolutePath()
+                .normalize()
+        val manifestTarget =
+            manifestFile
+                .get()
+                .asFile
+                .toPath()
+                .toAbsolutePath()
+                .normalize()
+        val expectedManifestTarget = rootPath.resolve("build/reports/detekt/expected-sarif.json")
+        if (manifestTarget != expectedManifestTarget) {
+            throw GradleException("Unexpected Detekt SARIF manifest output: $manifestTarget")
+        }
+        DetektSarifIdentity.validateNoSymlinkComponents(
+            rootPath,
+            manifestTarget,
+            "Detekt SARIF manifest output",
+            allowMissing = true,
+        )
+        if (
+            Files.exists(manifestTarget, LinkOption.NOFOLLOW_LINKS) &&
+            !Files.isRegularFile(manifestTarget, LinkOption.NOFOLLOW_LINKS)
+        ) {
+            throw GradleException("Detekt SARIF manifest output must be a regular file")
+        }
+        Files.deleteIfExists(manifestTarget)
+
+        val markerFile = preparedMarker.get().asFile
+        DetektSarifIdentity.validateNoSymlinkComponents(
+            rootPath,
+            markerFile.toPath(),
+            "Detekt SARIF preparation marker",
+            allowMissing = false,
+        )
+        if (!Files.isRegularFile(markerFile.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+            throw GradleException("Detekt SARIF preparation marker must be a regular file")
+        }
+        val marker =
+            try {
+                JsonSlurper().parse(markerFile)
+            } catch (error: Exception) {
+                throw GradleException("Detekt SARIF preparation marker is missing or invalid", error)
+            }
+        if (
+            marker !is Map<*, *> ||
+            marker.keys != setOf("schema", "version") ||
+            marker["schema"] != "clubs-bot/detekt-sarif-prepared" ||
+            marker["version"] != 1
+        ) {
+            throw GradleException("Detekt SARIF preparation marker contract changed")
+        }
+
+        val descriptors =
+            expectedTaskDescriptors.get().map { encodedDescriptor ->
+                val raw =
+                    try {
+                        JsonSlurper().parseText(encodedDescriptor)
+                    } catch (error: Exception) {
+                        throw GradleException("Invalid Detekt task descriptor", error)
+                    }
+                if (raw !is Map<*, *>) {
+                    throw GradleException("Detekt task descriptor must be an object")
+                }
+                raw
+            }
+        if (descriptors.isEmpty()) {
+            throw GradleException("No enabled non-aggregate Detekt tasks found")
+        }
+        val sortedDescriptors = descriptors.sortedBy { it["taskPath"].toString() }
+        val expectedStatusPaths = sortedDescriptors.map { it["statusPath"].toString() }
+        val actualStatusPaths =
+            statusDirectories.files
+                .asSequence()
+                .filter { it.isDirectory }
+                .flatMap { directory ->
+                    directory
+                        .listFiles()
+                        .orEmpty()
+                        .asSequence()
+                        .filter { it.isFile && it.extension == "json" }
+                }.map { statusFile ->
+                    val statusPath = statusFile.toPath().toAbsolutePath().normalize()
+                    if (!statusPath.startsWith(rootPath)) {
+                        throw GradleException("Detekt status is outside the repository: $statusFile")
+                    }
+                    rootPath.relativize(statusPath).joinToString("/")
+                }.sorted()
+                .toList()
+        if (actualStatusPaths != expectedStatusPaths.sorted()) {
+            throw GradleException(
+                "Detekt status inventory is incomplete or unexpected: " +
+                    "expected=${expectedStatusPaths.sorted()} actual=$actualStatusPaths",
+            )
+        }
+
+        val entries =
+            sortedDescriptors.mapNotNull { descriptor ->
+                val requiredKeys =
+                    setOf(
+                        "taskPath",
+                        "projectPath",
+                        "taskName",
+                        "reportPath",
+                        "category",
+                        "statusPath",
+                    )
+                if (descriptor.keys != requiredKeys) {
+                    throw GradleException("Detekt task descriptor fields changed")
+                }
+
+                fun descriptorString(key: String): String =
+                    descriptor[key] as? String
+                        ?: throw GradleException("Detekt task descriptor $key is invalid")
+
+                val taskPath = descriptorString("taskPath")
+                val projectPath = descriptorString("projectPath")
+                val taskName = descriptorString("taskName")
+                val reportPath = descriptorString("reportPath")
+                val category = descriptorString("category")
+                val statusPath = descriptorString("statusPath")
+                if (
+                    taskPath != DetektSarifIdentity.taskPath(projectPath, taskName) ||
+                    reportPath != DetektSarifIdentity.reportPath(projectPath, taskName) ||
+                    category != DetektSarifIdentity.category(projectPath, taskName) ||
+                    statusPath != DetektSarifIdentity.statusPath(projectPath, taskName)
+                ) {
+                    throw GradleException("Detekt task descriptor identity is inconsistent: $taskPath")
+                }
+
+                val statusFile = rootPath.resolve(statusPath).toFile()
+                DetektSarifIdentity.validateNoSymlinkComponents(
+                    rootPath,
+                    statusFile.toPath(),
+                    "Detekt task status",
+                    allowMissing = false,
+                )
+                if (!Files.isRegularFile(statusFile.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                    throw GradleException("Detekt task status must be a regular file: $taskPath")
+                }
+                val status =
+                    try {
+                        JsonSlurper().parse(statusFile)
+                    } catch (error: Exception) {
+                        throw GradleException("Missing or invalid Detekt status: $taskPath", error)
+                    }
+                val statusKeys =
+                    setOf(
+                        "schema",
+                        "version",
+                        "taskPath",
+                        "projectPath",
+                        "taskName",
+                        "reportPath",
+                        "category",
+                        "sourceCount",
+                        "state",
+                        "taskExecuted",
+                        "taskSkipped",
+                        "taskSkipMessage",
+                        "taskNoSource",
+                        "taskFailed",
+                        "reportExists",
+                    )
+                if (status !is Map<*, *> || status.keys != statusKeys) {
+                    throw GradleException("Detekt status fields changed: $taskPath")
+                }
+                for (key in listOf("taskPath", "projectPath", "taskName", "reportPath", "category")) {
+                    if (status[key] != descriptor[key]) {
+                        throw GradleException("Detekt status $key is inconsistent: $taskPath")
+                    }
+                }
+                if (
+                    status["schema"] != "clubs-bot/detekt-sarif-status" ||
+                    status["version"] != 1
+                ) {
+                    throw GradleException("Detekt status schema changed: $taskPath")
+                }
+                val sourceCount =
+                    (status["sourceCount"] as? Number)
+                        ?.toInt()
+                        ?: throw GradleException("Detekt status sourceCount is invalid: $taskPath")
+                val state =
+                    status["state"] as? String
+                        ?: throw GradleException("Detekt status state is invalid: $taskPath")
+
+                fun statusBoolean(key: String): Boolean =
+                    status[key] as? Boolean
+                        ?: throw GradleException("Detekt status $key is invalid: $taskPath")
+                val taskExecuted = statusBoolean("taskExecuted")
+                val taskSkipped = statusBoolean("taskSkipped")
+                val taskNoSource = statusBoolean("taskNoSource")
+                val taskFailed = statusBoolean("taskFailed")
+                val reportExists = statusBoolean("reportExists")
+                val taskSkipMessage =
+                    status["taskSkipMessage"] as? String
+                        ?: throw GradleException("Detekt status taskSkipMessage is invalid: $taskPath")
+                val reportFile = rootPath.resolve(reportPath).toFile()
+                when (state) {
+                    "NO_SOURCE" -> {
+                        if (
+                            sourceCount != 0 ||
+                            !taskExecuted ||
+                            !taskSkipped ||
+                            !taskNoSource ||
+                            taskFailed ||
+                            reportExists ||
+                            reportFile.exists()
+                        ) {
+                            throw GradleException("Inconsistent NO_SOURCE Detekt status: $taskPath")
+                        }
+                        null
+                    }
+
+                    "REPORT_REQUIRED" -> {
+                        val validIncrementalSkip =
+                            taskSkipped &&
+                                (
+                                    taskSkipMessage == "FROM-CACHE" ||
+                                        (taskSkipMessage == "UP-TO-DATE" && reportExists)
+                                )
+                        if (
+                            sourceCount <= 0 ||
+                            !taskExecuted ||
+                            taskNoSource ||
+                            (taskSkipped && !validIncrementalSkip)
+                        ) {
+                            throw GradleException("Detekt sourceCount must be positive: $taskPath")
+                        }
+                        if (!reportFile.isFile || !reportExists) {
+                            throw GradleException("Required Detekt SARIF report is missing: $taskPath")
+                        }
+                        linkedMapOf<String, Any>(
+                            "taskPath" to taskPath,
+                            "projectPath" to projectPath,
+                            "taskName" to taskName,
+                            "reportPath" to reportPath,
+                            "category" to category,
+                            "sourceCount" to sourceCount,
+                        )
+                    }
+
+                    else -> throw GradleException("Incomplete Detekt execution status: $taskPath")
+                }
+            }
+        if (entries.isEmpty()) {
+            throw GradleException("No Detekt SARIF reports are required")
+        }
+        for (key in listOf("taskPath", "reportPath", "category")) {
+            val values = entries.map { it.getValue(key) }
+            if (values.size != values.distinct().size) {
+                throw GradleException("Detekt SARIF manifest contains duplicate $key values")
+            }
+        }
+        val taskPaths = entries.map { it.getValue("taskPath").toString() }
+        if (taskPaths != taskPaths.sorted()) {
+            throw GradleException("Detekt SARIF manifest entries are not taskPath-sorted")
+        }
+
+        val manifest =
+            linkedMapOf<String, Any>(
+                "schema" to "clubs-bot/detekt-sarif-manifest",
+                "version" to 2,
+                "entries" to entries,
+            )
+        Files.createDirectories(manifestTarget.parent)
+        DetektSarifIdentity.validateNoSymlinkComponents(
+            rootPath,
+            manifestTarget.parent,
+            "Detekt SARIF manifest parent",
+            allowMissing = false,
+        )
+        val temporary = Files.createTempFile(manifestTarget.parent, ".expected-sarif.", ".tmp")
+        try {
+            val content = JsonOutput.prettyPrint(JsonOutput.toJson(manifest)) + "\n"
+            Files.writeString(temporary, content, StandardCharsets.UTF_8)
+            Files.move(
+                temporary,
+                manifestTarget,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+        logger.lifecycle("Detekt SARIF manifest finalized with ${entries.size} required reports")
     }
 }
 
@@ -504,6 +1197,27 @@ tasks.register("scaWarmCacheMark") {
 // -------------------------
 // Настройки подмодулей
 // -------------------------
+val prepareDetektSarif =
+    tasks.register<PrepareDetektSarif>("prepareDetektSarif") {
+        group = "verification"
+        description = "Remove only managed Detekt SARIF lifecycle outputs before analysis"
+        repositoryRoot.set(layout.projectDirectory)
+        reportDirectories.from(
+            (listOf(rootProject) + subprojects).map { candidateProject ->
+                val modulePath = DetektSarifIdentity.modulePath(candidateProject.path)
+                val prefix = if (modulePath.isEmpty()) "" else "$modulePath/"
+                rootProject.layout.projectDirectory.dir("${prefix}build/reports/detekt")
+            },
+        )
+        preparedMarker.set(
+            layout.projectDirectory.file("build/reports/detekt/prepared.json"),
+        )
+        outputs.upToDateWhen { false }
+        notCompatibleWithConfigurationCache(
+            "The managed Detekt report workspace must be recreated for every analysis run",
+        )
+    }
+
 subprojects {
     // Линтеры
     apply(plugin = "io.gitlab.arturbosch.detekt")
@@ -557,25 +1271,80 @@ subprojects {
             sarif.required.set(true)
             xml.required.set(false)
             md.required.set(false)
-            val out = project.layout.buildDirectory
-            html.outputLocation.set(out.file("reports/detekt/detekt.html"))
-            sarif.outputLocation.set(out.file("reports/detekt/detekt.sarif"))
+            val sarifReportPath = DetektSarifIdentity.reportPath(project.path, name)
+            val taskReportDirectory = sarifReportPath.removeSuffix("/detekt.sarif")
+            html.outputLocation.set(
+                rootProject.layout.projectDirectory.file("$taskReportDirectory/detekt.html"),
+            )
+            sarif.outputLocation.set(
+                rootProject.layout.projectDirectory.file(sarifReportPath),
+            )
             txt.required.set(true)
-            txt.outputLocation.set(project.layout.buildDirectory.file("reports/detekt/detekt.txt"))
+            txt.outputLocation.set(
+                rootProject.layout.projectDirectory.file("$taskReportDirectory/detekt.txt"),
+            )
+        }
+
+        if (name != "detekt") {
+            DetektSarifIdentity.validateTaskName(name)
         }
     }
+
+    tasks.withType<Detekt>().all(
+        Action<Detekt> {
+            val analysisTask = this
+            if (analysisTask.name != "detekt") {
+                DetektSarifIdentity.validateTaskName(analysisTask.name)
+                val statusTaskName =
+                    "record${analysisTask.name.replaceFirstChar { it.uppercase() }}SarifStatus"
+                val statusTask =
+                    tasks.register<RecordDetektSarifStatus>(statusTaskName) {
+                        group = "verification"
+                        description = "Record post-execution Detekt SARIF status for ${analysisTask.path}"
+                        taskPathValue.set(analysisTask.path)
+                        projectPathValue.set(project.path)
+                        taskNameValue.set(analysisTask.name)
+                        expectedReportPath.set(
+                            DetektSarifIdentity.reportPath(project.path, analysisTask.name),
+                        )
+                        expectedCategory.set(
+                            DetektSarifIdentity.category(project.path, analysisTask.name),
+                        )
+                        sourceFiles.from(analysisTask.source)
+                        reportFile.set(analysisTask.reports.sarif.outputLocation)
+                        repositoryRoot.set(rootProject.layout.projectDirectory)
+                        statusFile.set(
+                            rootProject.layout.projectDirectory.file(
+                                DetektSarifIdentity.statusPath(project.path, analysisTask.name),
+                            ),
+                        )
+                        analyzedTask = analysisTask
+                        mustRunAfter(analysisTask)
+                        outputs.upToDateWhen { false }
+                        notCompatibleWithConfigurationCache(
+                            "Records the finalized TaskState and execution-time Detekt source inventory",
+                        )
+                    }
+                analysisTask.finalizedBy(statusTask)
+            }
+        },
+    )
 
     // CLI-обёртки (если есть соответствующие файлы в репо)
     pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
         // The aggregate `detekt` task mixes main and test sources, so it cannot
         // apply their separate baselines correctly. Keep `check` blocking via
         // the source-set tasks used by detektGate.
+        val sourceSetDetektTasks =
+            tasks.withType<Detekt>().matching { detektTask ->
+                detektTask.name != "detekt" && detektTask.enabled
+            }
         tasks.named<Detekt>("detekt") {
             enabled = false
-            dependsOn("detektMain", "detektTest")
+            dependsOn(sourceSetDetektTasks)
         }
         tasks.named("check") {
-            dependsOn("detektMain", "detektTest")
+            dependsOn(sourceSetDetektTasks)
         }
 
         val guardedConfigurations =
@@ -636,6 +1405,94 @@ subprojects {
     }
 }
 
+tasks.register<FinalizeDetektSarifManifest>("finalizeDetektSarifManifest") {
+    group = "verification"
+    description = "Finalize the complete expected Detekt SARIF manifest from execution statuses"
+    expectedTaskDescriptors.set(
+        providers.provider {
+            (listOf(rootProject) + subprojects)
+                .flatMap { candidateProject ->
+                    val modulePath = DetektSarifIdentity.modulePath(candidateProject.path)
+                    val expectedProjectDirectory =
+                        if (modulePath.isEmpty()) rootDir else rootDir.resolve(modulePath)
+                    if (candidateProject.projectDir.canonicalFile != expectedProjectDirectory.canonicalFile) {
+                        throw GradleException(
+                            "Detekt project directory does not match its Gradle path: ${candidateProject.path}",
+                        )
+                    }
+
+                    candidateProject.tasks
+                        .withType<Detekt>()
+                        .matching { detektTask -> detektTask.name != "detekt" && detektTask.enabled }
+                        .map { detektTask ->
+                            val reportPath =
+                                DetektSarifIdentity.reportPath(candidateProject.path, detektTask.name)
+                            val expectedReportFile =
+                                rootDir
+                                    .resolve(reportPath)
+                                    .toPath()
+                                    .toAbsolutePath()
+                                    .normalize()
+                            val configuredReportFile =
+                                detektTask.reports.sarif.outputLocation
+                                    .get()
+                                    .asFile
+                                    .toPath()
+                                    .toAbsolutePath()
+                                    .normalize()
+                            val sarifRequired =
+                                detektTask.reports.sarif.required
+                                    .get()
+                            if (!sarifRequired) {
+                                throw GradleException("Detekt SARIF is not required: ${detektTask.path}")
+                            }
+                            if (configuredReportFile != expectedReportFile) {
+                                throw GradleException(
+                                    "Detekt SARIF path does not match task identity: ${detektTask.path}",
+                                )
+                            }
+                            JsonOutput.toJson(
+                                linkedMapOf(
+                                    "taskPath" to detektTask.path,
+                                    "projectPath" to candidateProject.path,
+                                    "taskName" to detektTask.name,
+                                    "reportPath" to reportPath,
+                                    "category" to
+                                        DetektSarifIdentity.category(
+                                            candidateProject.path,
+                                            detektTask.name,
+                                        ),
+                                    "statusPath" to
+                                        DetektSarifIdentity.statusPath(
+                                            candidateProject.path,
+                                            detektTask.name,
+                                        ),
+                                ),
+                            )
+                        }
+                }.sorted()
+        },
+    )
+    repositoryRoot.set(layout.projectDirectory)
+    preparedMarker.set(
+        layout.projectDirectory.file("build/reports/detekt/prepared.json"),
+    )
+    statusDirectories.from(
+        (listOf(rootProject) + subprojects).map { candidateProject ->
+            val modulePath = DetektSarifIdentity.modulePath(candidateProject.path)
+            val prefix = if (modulePath.isEmpty()) "" else "$modulePath/"
+            layout.projectDirectory.dir("${prefix}build/reports/detekt/status")
+        },
+    )
+    manifestFile.set(
+        layout.projectDirectory.file("build/reports/detekt/expected-sarif.json"),
+    )
+    outputs.upToDateWhen { false }
+    notCompatibleWithConfigurationCache(
+        "Finalization validates post-execution task status markers from a separate Gradle invocation",
+    )
+}
+
 tasks.named("ktlintCheck") {
     dependsOn(
         subprojects.mapNotNull { it.tasks.findByName("ktlintCheck") },
@@ -653,16 +1510,9 @@ tasks.register("detektGate") {
     group = "verification"
     description = "Run detekt across all Kotlin subprojects with baseline-aware strategy"
     dependsOn(
-        subprojects.flatMap { project ->
-            val baselineAwareTasks =
-                listOfNotNull(
-                    project.tasks.findByName("detektMain"),
-                    project.tasks.findByName("detektTest"),
-                )
-            if (baselineAwareTasks.isNotEmpty()) {
-                baselineAwareTasks
-            } else {
-                listOfNotNull(project.tasks.findByName("detekt"))
+        subprojects.map { candidateProject ->
+            candidateProject.tasks.withType<Detekt>().matching {
+                name != "detekt" && enabled
             }
         },
     )

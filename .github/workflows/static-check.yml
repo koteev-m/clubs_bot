@@ -3,6 +3,9 @@ on:
   pull_request:
   push:
     branches: [ main, master ]
+permissions:
+  contents: read
+  security-events: write
 jobs:
   detekt:
     runs-on: ubuntu-latest
@@ -21,14 +24,26 @@ jobs:
           cache-key-prefix: >
             ${{ runner.os }}-gradle-
             ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+      - name: Prepare Detekt SARIF
+        run: ./gradlew prepareDetektSarif --no-configuration-cache --console=plain
       - name: Run detekt
-        run: ./gradlew detekt --console=plain
+        run: ./gradlew detekt --continue --no-configuration-cache --console=plain
+      - name: Finalize Detekt SARIF manifest
+        if: always()
+        run: ./gradlew finalizeDetektSarifManifest --no-configuration-cache --console=plain
+      - name: Collect Detekt SARIF
+        id: detekt-sarif-collector
+        if: always()
+        run: python3 scripts/merge-detekt-sarif.py --manifest build/reports/detekt/expected-sarif.json --output build/reports/detekt/combined/detekt.sarif
       - name: Upload detekt HTML report
+        if: ${{ always() && hashFiles('**/build/reports/detekt/detekt*/detekt.html') != '' }}
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: detekt-html
-          path: "**/build/reports/detekt/detekt.html"
+          path: "**/build/reports/detekt/detekt*/detekt.html"
+          if-no-files-found: error
       - name: Upload detekt SARIF to Code Scanning
+        if: ${{ always() && steps.detekt-sarif-collector.outcome == 'success' && hashFiles('build/reports/detekt/combined/detekt.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9
         with:
-          sarif_file: "**/build/reports/detekt/detekt.sarif"
+          sarif_file: build/reports/detekt/combined/detekt.sarif
