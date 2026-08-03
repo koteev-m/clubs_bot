@@ -44,7 +44,7 @@
 
 - `spotlessCheck` / `spotlessApply`
 - `jacocoTestReport` (как Gradle task)
-- `dependencyCheckAnalyze` (OWASP Dependency-Check)
+- прежняя задача SCA-анализа зависимостей, позднее удалённая
 - `gitleaks` task
 
 (проверено через `./gradlew help --task ...`).
@@ -106,7 +106,7 @@
 
 #### Проверка наличия задач
 - `detekt`, `ktlintCheck`, `ktlintFormat` — есть.
-- `spotless*`, `jacocoTestReport`, `dependencyCheckAnalyze` — отсутствуют.
+- `spotless*`, `jacocoTestReport`, а также прежняя задача SCA-анализа зависимостей, позднее удалённая, — отсутствуют.
 
 ### 2.2 В CI (фактические команды)
 

@@ -7,16 +7,10 @@ source "$ROOT_DIR/scripts/sha256-portable.sh"
 TMP_DIR="$(mktemp -d)"
 DETEKT_DYNAMIC_MODULE_DIR="$ROOT_DIR/detekt-selfcheck-fixture"
 DETEKT_DYNAMIC_MODULE_OWNED=0
+DEPENDENCY_DYNAMIC_MODULE_DIR="$ROOT_DIR/dependency-selfcheck-fixture"
+DEPENDENCY_DYNAMIC_MODULE_OWNED=0
 DETEKT_PREPARE_LINK=""
 DETEKT_PREPARE_LINK_OWNED=0
-SCA_CACHE_DIR="$TMP_DIR/sca-cache"
-SCA_MARKER="$SCA_CACHE_DIR/cache-warm.marker"
-SCA_MANIFEST="$SCA_CACHE_DIR/cache-warm.manifest"
-SCA_VALID_LOG="$TMP_DIR/sca-valid.log"
-SCA_MARKER_ONLY_LOG="$TMP_DIR/sca-marker-only.log"
-SCA_JUNK_LOG="$TMP_DIR/sca-junk.log"
-SCA_STALE_LOG="$TMP_DIR/sca-stale.log"
-SCA_SAME_SIZE_LOG="$TMP_DIR/sca-same-size.log"
 
 cleanup() {
   if [ "$DETEKT_PREPARE_LINK_OWNED" = "1" ] && [ -L "$DETEKT_PREPARE_LINK" ]; then
@@ -25,6 +19,9 @@ cleanup() {
   if [ "$DETEKT_DYNAMIC_MODULE_OWNED" = "1" ]; then
     rm -rf "$DETEKT_DYNAMIC_MODULE_DIR"
   fi
+  if [ "$DEPENDENCY_DYNAMIC_MODULE_OWNED" = "1" ]; then
+    rm -rf "$DEPENDENCY_DYNAMIC_MODULE_DIR"
+  fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -32,24 +29,6 @@ trap cleanup EXIT
 fail() {
   echo "selfcheck: $1" >&2
   exit 1
-}
-
-epoch_millis() {
-  if ts="$(python3 - <<'PY'
-import time
-print(int(time.time() * 1000))
-PY
-  )" && [ -n "$ts" ]; then
-    printf '%s\n' "$ts"
-    return 0
-  fi
-
-  if date +%s%3N >/dev/null 2>&1; then
-    date +%s%3N
-    return 0
-  fi
-
-  printf '%s000\n' "$(date +%s)"
 }
 
 assert_empty() {
@@ -92,70 +71,6 @@ else
   assert_eq "$retry_status" "7"
 fi
 assert_contains "$(cat "$retry_log")" "Command failed after 2 attempts (exit 7)"
-
-mkdir -p "$SCA_CACHE_DIR"
-printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
-if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_MARKER_ONLY_LOG" 2>&1; then
-  fail "expected scaPreflight to fail on marker-only cache"
-fi
-assert_contains "$(cat "$SCA_MARKER_ONLY_LOG")" "Warm marker/manifest not found"
-
-printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
-mkdir -p "$SCA_CACHE_DIR/data/cache"
-printf 'payload' > "$SCA_CACHE_DIR/data/cache/nvd.json"
-payload_size="$(wc -c < "$SCA_CACHE_DIR/data/cache/nvd.json" | tr -d ' ')"
-payload_sha="$(sha256_file "$SCA_CACHE_DIR/data/cache/nvd.json")"
-payload_digest="$(printf 'data/cache/nvd.json:%s:%s' "$payload_size" "$payload_sha" | sha256_stdin)"
-printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\n' \
-  "$payload_size" "$payload_digest" "$payload_size" "$payload_sha" > "$SCA_MANIFEST"
-if ! NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_VALID_LOG" 2>&1; then
-  fail "expected scaPreflight to pass with valid cache manifest"
-fi
-
-printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
-printf 'payload-2' > "$SCA_CACHE_DIR/data/cache/nvd2.json"
-payload2_size="$(wc -c < "$SCA_CACHE_DIR/data/cache/nvd2.json" | tr -d ' ')"
-payload2_sha="$(sha256_file "$SCA_CACHE_DIR/data/cache/nvd2.json")"
-payload_multidigest="$(
-  {
-    printf 'data/cache/nvd.json:%s:%s\n' "$payload_size" "$payload_sha"
-    printf 'data/cache/nvd2.json:%s:%s' "$payload2_size" "$payload2_sha"
-  } | sha256_stdin
-)"
-printf 'payloadFileCount=2\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\nfile=data/cache/nvd2.json|%s|%s\n' \
-  "$((payload_size + payload2_size))" "$payload_multidigest" "$payload_size" "$payload_sha" "$payload2_size" "$payload2_sha" > "$SCA_MANIFEST"
-if ! NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_VALID_LOG" 2>&1; then
-  fail "expected scaPreflight to pass with valid multi-file cache manifest"
-fi
-
-printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\n' \
-  "$payload_size" "$payload_digest" "$payload_size" "$payload_sha" > "$SCA_MANIFEST"
-if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_JUNK_LOG" 2>&1; then
-  fail "expected scaPreflight to fail on file-set mismatch (missing entry)"
-fi
-assert_contains "$(cat "$SCA_JUNK_LOG")" "warm manifest does not match cache payload"
-
-printf 'payloadFileCount=1\npayloadTotalBytes=9999\npayloadDigest=junk\nfile=data/cache/nvd.json|%s|junk\n' "$payload_size" > "$SCA_MANIFEST"
-if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_JUNK_LOG" 2>&1; then
-  fail "expected scaPreflight to fail on junk payload manifest"
-fi
-assert_contains "$(cat "$SCA_JUNK_LOG")" "warm manifest does not match cache payload"
-
-printf 'payloadFileCount=1\npayloadTotalBytes=%s\npayloadDigest=%s\nfile=data/cache/nvd.json|%s|%s\n' \
-  "$payload_size" "$payload_digest" "$payload_size" "$payload_sha" > "$SCA_MANIFEST"
-rm -f "$SCA_CACHE_DIR/data/cache/nvd2.json"
-printf 'warmedAt=1\nmaxAgeHours=168\n' > "$SCA_MARKER"
-if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_STALE_LOG" 2>&1; then
-  fail "expected scaPreflight to fail on stale cache marker"
-fi
-assert_contains "$(cat "$SCA_STALE_LOG")" "local cache is stale"
-
-printf 'warmedAt=%s\nmaxAgeHours=168\n' "$(epoch_millis)" > "$SCA_MARKER"
-printf 'abc1234' > "$SCA_CACHE_DIR/data/cache/nvd.json"
-if NVD_API_KEY= ./gradlew --no-configuration-cache -PdependencyCheckDataDir="$SCA_CACHE_DIR" scaPreflight --console=plain >"$SCA_SAME_SIZE_LOG" 2>&1; then
-  fail "expected scaPreflight to fail on same-size-different-content payload"
-fi
-assert_contains "$(cat "$SCA_SAME_SIZE_LOG")" "warm manifest does not match cache payload"
 
 (
   cd "$TMP_DIR"
@@ -317,10 +232,10 @@ assert_contains "$fake_docker_arg_list" "--redact"
 assert_not_contains "$fake_docker_arg_list" "--exit-code 0"
 
 usage_out="$("$ROOT_DIR/scripts/refresh-verification-metadata.sh" unknown 2>&1 || true)"
-assert_contains "$usage_out" "Usage: scripts/refresh-verification-metadata.sh [default|sca]"
+assert_contains "$usage_out" "Usage: scripts/refresh-verification-metadata.sh [default]"
 
 verify_usage_out="$("$ROOT_DIR/scripts/verify.sh" unknown 2>&1 || true)"
-assert_contains "$verify_usage_out" "Usage: scripts/verify.sh [full|ci|lint|secret-scan|sca-warm-cache]"
+assert_contains "$verify_usage_out" "Usage: scripts/verify.sh [full|ci|lint|secret-scan]"
 
 dependency_guard_out="$("$ROOT_DIR/gradlew" dependencyGuard --console=plain)"
 for module in app-bot core-data core-domain core-security core-telemetry core-testing tools:perf; do
@@ -1577,6 +1492,659 @@ validate_trivy_image_workflow() {
     "$trivy_image_artifact_with_contract"
 }
 
+validate_keyless_sca_workflows() {
+  local dependency_submission_file="$1"
+  local sca_file="$2"
+  local security_scan_file="$3"
+
+  python3 - \
+    "$dependency_submission_file" \
+    "$sca_file" \
+    "$security_scan_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+
+DEPENDENCY_SUBMISSION_USES = (
+    "gradle/actions/dependency-submission@"
+    "3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0"
+)
+CHECKOUT_USES = "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7"
+SETUP_JAVA_USES = "actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0"
+SETUP_GRADLE_USES = "gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0"
+TRIVY_USES = (
+    "aquasecurity/trivy-action@"
+    "57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release"
+)
+
+
+def reject(message):
+    print(f"keyless-sca-contract: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+class Workflow:
+    def __init__(self, path):
+        self.path = Path(path)
+        try:
+            self.lines = self.path.read_text(encoding="utf-8").splitlines()
+        except OSError as error:
+            reject(f"cannot read {self.path}: {error}")
+        if any("\t" in line for line in self.lines):
+            reject(f"tabs are not permitted in workflow indentation: {self.path}")
+
+    @staticmethod
+    def _indent(line):
+        return len(line) - len(line.lstrip(" "))
+
+    @staticmethod
+    def _content(line):
+        stripped = line.strip()
+        return bool(stripped) and not stripped.startswith("#")
+
+    def _header_indexes(self, start, end, indent, key):
+        prefix = " " * indent + key + ":"
+        return [
+            index
+            for index in range(start, end)
+            if self._content(self.lines[index]) and self.lines[index].startswith(prefix)
+            and self.lines[index][: len(prefix)] == prefix
+            and (
+                len(self.lines[index]) == len(prefix)
+                or self.lines[index][len(prefix)] in " "
+            )
+        ]
+
+    def _one_header(self, start, end, indent, key):
+        indexes = self._header_indexes(start, end, indent, key)
+        if len(indexes) != 1:
+            reject(
+                f"expected exactly one {key!r} key at indent {indent} in {self.path}; "
+                f"found {len(indexes)}"
+            )
+        return indexes[0]
+
+    def _block_end(self, header_index, header_indent, limit=None):
+        end = len(self.lines) if limit is None else limit
+        for index in range(header_index + 1, end):
+            line = self.lines[index]
+            if self._content(line) and self._indent(line) <= header_indent:
+                return index
+        return end
+
+    def scalar(self, start, end, indent, key, required=True):
+        indexes = self._header_indexes(start, end, indent, key)
+        if not indexes and not required:
+            return None
+        if len(indexes) != 1:
+            reject(
+                f"expected exactly one scalar {key!r} at indent {indent} in {self.path}; "
+                f"found {len(indexes)}"
+            )
+        index = indexes[0]
+        prefix = " " * indent + key + ":"
+        raw_value = self.lines[index][len(prefix) :].strip()
+        if raw_value not in (">", ">-", "|", "|-"):
+            return raw_value
+        block_end = self._block_end(index, indent, end)
+        values = []
+        for line in self.lines[index + 1 : block_end]:
+            if not self._content(line):
+                continue
+            if self._indent(line) < indent + 2:
+                reject(f"malformed block scalar for {key!r} in {self.path}")
+            values.append(line[indent + 2 :].strip())
+        separator = " " if raw_value.startswith(">") else "\n"
+        return separator.join(values)
+
+    def mapping(self, start, end, indent, key, required=True):
+        indexes = self._header_indexes(start, end, indent, key)
+        if not indexes and not required:
+            return None
+        if len(indexes) != 1:
+            reject(
+                f"expected exactly one mapping {key!r} at indent {indent} in {self.path}; "
+                f"found {len(indexes)}"
+            )
+        header = indexes[0]
+        prefix = " " * indent + key + ":"
+        if self.lines[header][len(prefix) :].strip():
+            reject(f"{key!r} must use a block mapping in {self.path}")
+        block_end = self._block_end(header, indent, end)
+        child_indent = indent + 2
+        keys = []
+        for index in range(header + 1, block_end):
+            line = self.lines[index]
+            if not self._content(line) or self._indent(line) != child_indent:
+                continue
+            match = re.match(r"^\s{%d}([^:#][^:]*):" % child_indent, line)
+            if not match:
+                reject(f"malformed {key!r} mapping entry in {self.path}: {line.strip()}")
+            keys.append(match.group(1))
+        if len(keys) != len(set(keys)):
+            reject(f"duplicate key in {key!r} mapping in {self.path}")
+        return {
+            child_key: self.scalar(header + 1, block_end, child_indent, child_key)
+            for child_key in keys
+        }
+
+    def top_scalar(self, key):
+        return self.scalar(0, len(self.lines), 0, key)
+
+    def top_mapping(self, key):
+        return self.mapping(0, len(self.lines), 0, key)
+
+    def top_block(self, key):
+        header = self._one_header(0, len(self.lines), 0, key)
+        prefix = key + ":"
+        if self.lines[header][len(prefix) :].strip():
+            reject(f"top-level {key!r} must use block form in {self.path}")
+        end = self._block_end(header, 0)
+        return "\n".join(
+            line[2:]
+            for line in self.lines[header + 1 : end]
+            if self._content(line)
+        )
+
+    def jobs(self):
+        jobs_header = self._one_header(0, len(self.lines), 0, "jobs")
+        jobs_end = self._block_end(jobs_header, 0)
+        names = []
+        for index in range(jobs_header + 1, jobs_end):
+            line = self.lines[index]
+            if not self._content(line) or self._indent(line) != 2:
+                continue
+            match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if not match:
+                reject(f"malformed job declaration in {self.path}: {line.strip()}")
+            names.append(match.group(1))
+        if len(names) != len(set(names)):
+            reject(f"duplicate job id in {self.path}")
+        return names
+
+    def job_range(self, job_name):
+        jobs_header = self._one_header(0, len(self.lines), 0, "jobs")
+        jobs_end = self._block_end(jobs_header, 0)
+        job_header = self._one_header(jobs_header + 1, jobs_end, 2, job_name)
+        return job_header + 1, self._block_end(job_header, 2, jobs_end)
+
+    def job_scalar(self, job_name, key, required=True):
+        start, end = self.job_range(job_name)
+        return self.scalar(start, end, 4, key, required)
+
+    def job_mapping(self, job_name, key, required=True):
+        start, end = self.job_range(job_name)
+        return self.mapping(start, end, 4, key, required)
+
+    def steps(self, job_name):
+        job_start, job_end = self.job_range(job_name)
+        steps_header = self._one_header(job_start, job_end, 4, "steps")
+        steps_end = self._block_end(steps_header, 4, job_end)
+        names = []
+        for index in range(steps_header + 1, steps_end):
+            line = self.lines[index]
+            if not self._content(line) or self._indent(line) != 6:
+                continue
+            match = re.match(r"^      - name:\s*(.+?)\s*$", line)
+            if not match:
+                reject(f"every step must have an explicit name in {self.path}: {line.strip()}")
+            names.append(match.group(1))
+        if len(names) != len(set(names)):
+            reject(f"duplicate step name in job {job_name!r} in {self.path}")
+        return names
+
+    def step_range(self, job_name, step_name):
+        job_start, job_end = self.job_range(job_name)
+        steps_header = self._one_header(job_start, job_end, 4, "steps")
+        steps_end = self._block_end(steps_header, 4, job_end)
+        target = "      - name: " + step_name
+        indexes = [
+            index
+            for index in range(steps_header + 1, steps_end)
+            if self.lines[index] == target
+        ]
+        if len(indexes) != 1:
+            reject(
+                f"expected exactly one step {step_name!r} in job {job_name!r} in {self.path}"
+            )
+        start = indexes[0]
+        return start + 1, self._block_end(start, 6, steps_end)
+
+    def step_scalar(self, job_name, step_name, key, required=True):
+        start, end = self.step_range(job_name, step_name)
+        return self.scalar(start, end, 8, key, required)
+
+    def step_mapping(self, job_name, step_name, key, required=True):
+        start, end = self.step_range(job_name, step_name)
+        return self.mapping(start, end, 8, key, required)
+
+    def assert_no_fail_open(self, job_name, step_names):
+        if self.job_scalar(job_name, "continue-on-error", required=False) is not None:
+            reject(f"job {job_name!r} has continue-on-error in {self.path}")
+        for step_name in step_names:
+            if self.step_scalar(job_name, step_name, "continue-on-error", required=False) is not None:
+                reject(f"step {step_name!r} has continue-on-error in {self.path}")
+            run = self.step_scalar(job_name, step_name, "run", required=False)
+            if run is not None and "|| true" in run:
+                reject(f"step {step_name!r} hides failure with || true in {self.path}")
+
+    def assert_steps_unguarded(self, job_name, step_names):
+        for step_name in step_names:
+            if self.step_scalar(job_name, step_name, "if", required=False) is not None:
+                reject(f"blocking step {step_name!r} has an execution guard in {self.path}")
+
+
+def expect(actual, expected, description):
+    if actual != expected:
+        reject(f"{description} changed: expected {expected!r}, got {actual!r}")
+
+
+def expect_absent(value, description):
+    if value is not None:
+        reject(f"{description} must be absent")
+
+
+dependency = Workflow(sys.argv[1])
+sca = Workflow(sys.argv[2])
+security = Workflow(sys.argv[3])
+
+expect(dependency.top_scalar("name"), "Dependency Submission", "dependency workflow name")
+expect(
+    dependency.top_block("on"),
+    "push:\n  branches: [ main ]\nworkflow_dispatch:",
+    "dependency workflow triggers",
+)
+expect(
+    dependency.top_mapping("permissions"),
+    {"contents": "write"},
+    "trusted main dependency submission permissions",
+)
+expect(dependency.jobs(), ["submit"], "dependency workflow jobs")
+
+submission_steps = [
+    "Checkout",
+    "Set up JDK 21",
+    "Verify resolved production dependency graph (blocking)",
+    "Submit resolved dependency graph (blocking)",
+]
+expect(dependency.steps("submit"), submission_steps, "dependency submission steps")
+expect(
+    dependency.job_scalar("submit", "if"),
+    "github.event_name == 'push' || github.ref == 'refs/heads/main'",
+    "manual submission main-branch guard",
+)
+expect(
+    dependency.job_mapping("submit", "permissions"),
+    {"contents": "write"},
+    "dependency submission job permissions",
+)
+expect(dependency.step_scalar("submit", "Checkout", "uses"), CHECKOUT_USES, "checkout pin")
+expect(
+    dependency.step_mapping("submit", "Checkout", "with"),
+    {"persist-credentials": "false"},
+    "trusted checkout credential isolation",
+)
+expect(
+    dependency.step_scalar("submit", "Set up JDK 21", "uses"),
+    SETUP_JAVA_USES,
+    "JDK setup pin",
+)
+expect(
+    dependency.step_mapping("submit", "Set up JDK 21", "with"),
+    {"distribution": "temurin", "java-version": "'21'"},
+    "JDK 21 contract",
+)
+expect(
+    dependency.step_scalar(
+        "submit", "Verify resolved production dependency graph (blocking)", "run"
+    ),
+    (
+        "./gradlew verifyResolvedProductionDependencyGraph "
+        "--dependency-verification=strict --no-configuration-cache --console=plain"
+    ),
+    "pre-submission resolved graph verification",
+)
+expect(
+    dependency.step_scalar(
+        "submit", "Submit resolved dependency graph (blocking)", "uses"
+    ),
+    DEPENDENCY_SUBMISSION_USES,
+    "dependency submission action pin",
+)
+expect(
+    dependency.step_mapping(
+        "submit", "Submit resolved dependency graph (blocking)", "with"
+    ),
+    {
+        "gradle-version": "wrapper",
+        "validate-wrappers": "true",
+        "cache-provider": "basic",
+        "dependency-graph": "generate-and-submit",
+        "dependency-resolution-task": (
+            "verifyResolvedProductionDependencyGraph "
+            "ForceDependencyResolutionPlugin_resolveAllDependencies"
+        ),
+        "dependency-graph-report-dir": "build/reports/dependency-submission",
+        "dependency-graph-continue-on-failure": "false",
+        "additional-arguments": (
+            "--dependency-verification=strict --no-configuration-cache --stacktrace"
+        ),
+    },
+    "trusted dependency submission inputs",
+)
+dependency.assert_no_fail_open("submit", submission_steps)
+dependency.assert_steps_unguarded("submit", submission_steps)
+
+expect(sca.top_scalar("name"), "SCA Gate", "required SCA workflow name")
+expect(
+    sca.top_block("on"),
+    "push:\n  branches: [ main ]\npull_request:",
+    "SCA triggers",
+)
+expect(sca.top_mapping("permissions"), {"contents": "read"}, "SCA permissions")
+expect(sca.jobs(), ["dependency-check"], "required SCA job id")
+expect_absent(sca.job_scalar("dependency-check", "if", required=False), "SCA job guard")
+expect(
+    sca.job_mapping("dependency-check", "permissions"),
+    {"contents": "read"},
+    "SCA job permissions",
+)
+sca_steps = [
+    "Checkout",
+    "Set up JDK 21",
+    "Gradle cache & setup",
+    "Verify resolved production dependency graph (blocking)",
+]
+expect(sca.steps("dependency-check"), sca_steps, "SCA graph-integrity steps")
+expect(sca.step_scalar("dependency-check", "Checkout", "uses"), CHECKOUT_USES, "SCA checkout pin")
+expect(
+    sca.step_mapping("dependency-check", "Checkout", "with"),
+    {"persist-credentials": "false"},
+    "SCA checkout credential isolation",
+)
+expect(
+    sca.step_scalar("dependency-check", "Set up JDK 21", "uses"),
+    SETUP_JAVA_USES,
+    "SCA JDK pin",
+)
+expect(
+    sca.step_mapping("dependency-check", "Set up JDK 21", "with"),
+    {"distribution": "temurin", "java-version": "'21'"},
+    "SCA JDK 21 contract",
+)
+expect(
+    sca.step_scalar("dependency-check", "Gradle cache & setup", "uses"),
+    SETUP_GRADLE_USES,
+    "SCA Gradle setup pin",
+)
+expect(
+    sca.step_mapping("dependency-check", "Gradle cache & setup", "with"),
+    {"cache-disabled": "false", "gradle-version": "wrapper", "cache-read-only": "true"},
+    "read-only PR Gradle cache contract",
+)
+expect(
+    sca.step_scalar(
+        "dependency-check", "Verify resolved production dependency graph (blocking)", "run"
+    ),
+    (
+        "./gradlew verifyResolvedProductionDependencyGraph "
+        "--dependency-verification=strict --no-configuration-cache --console=plain"
+    ),
+    "SCA resolved graph verifier invocation",
+)
+sca.assert_no_fail_open("dependency-check", sca_steps)
+sca.assert_steps_unguarded("dependency-check", sca_steps)
+
+expect(security.top_scalar("name"), "Security Scan (Trivy)", "Security Scan name")
+expect(security.top_mapping("permissions"), {"contents": "read", "security-events": "write"}, "Trivy permissions")
+expect(security.jobs(), ["trivy"], "Trivy jobs")
+security_steps = [
+    "Checkout",
+    "Set up JDK 21",
+    "Gradle cache & setup",
+    "Build resolved JVM runtime dependencies (blocking)",
+    "Trivy filesystem scan",
+    "Upload Trivy SARIF to code scanning",
+    "Persist Trivy report artifact",
+]
+expect(security.steps("trivy"), security_steps, "Trivy step ordering")
+expect(security.step_scalar("trivy", "Checkout", "uses"), CHECKOUT_USES, "Trivy checkout pin")
+expect(
+    security.step_mapping("trivy", "Checkout", "with"),
+    {"persist-credentials": "false"},
+    "Trivy checkout credential isolation",
+)
+expect(security.step_scalar("trivy", "Set up JDK 21", "uses"), SETUP_JAVA_USES, "Trivy JDK pin")
+expect(security.step_scalar("trivy", "Gradle cache & setup", "uses"), SETUP_GRADLE_USES, "Trivy Gradle setup pin")
+expect(
+    security.step_scalar(
+        "trivy", "Build resolved JVM runtime dependencies (blocking)", "run"
+    ),
+    (
+        "./gradlew :app-bot:installDist verifyResolvedProductionDependencyGraph "
+        "--dependency-verification=strict --no-configuration-cache --console=plain"
+    ),
+    "Trivy resolved JVM artifact build",
+)
+expect(
+    security.step_scalar("trivy", "Trivy filesystem scan", "uses"),
+    TRIVY_USES,
+    "Trivy action pin",
+)
+expect(
+    security.step_mapping("trivy", "Trivy filesystem scan", "with"),
+    {
+        "scan-type": "fs",
+        "scan-ref": ".",
+        "severity": "HIGH,CRITICAL",
+        "trivyignores": ".trivyignore",
+        "format": "sarif",
+        "output": "trivy-results.sarif",
+        "exit-code": "1",
+        "version": "v0.69.3",
+    },
+    "Trivy blocking scanner inputs",
+)
+security.assert_no_fail_open("trivy", security_steps)
+security.assert_steps_unguarded(
+    "trivy",
+    [
+        "Checkout",
+        "Set up JDK 21",
+        "Gradle cache & setup",
+        "Build resolved JVM runtime dependencies (blocking)",
+        "Trivy filesystem scan",
+    ],
+)
+
+for workflow in (dependency, sca, security):
+    if "secrets." in "\n".join(workflow.lines):
+        reject(f"keyless dependency workflow references a repository secret: {workflow.path}")
+for forbidden in (
+    "workflow_" + "run",
+    "pull_request_" + "target",
+    "download-and-" + "submit",
+    "generate-and-" + "upload",
+    "actions/dependency-" + "review-action@",
+):
+    for workflow in (dependency, sca):
+        if forbidden in "\n".join(workflow.lines):
+            reject(f"forbidden PR submission/review contract remains in {workflow.path}")
+PY
+}
+
+validate_keyless_action_inventory() {
+  local workflow_dir="$1"
+  python3 - "$workflow_dir" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+workflow_dir = Path(sys.argv[1])
+approved = {
+    "gradle/actions/dependency-submission": (
+        "3f131e8634966bd73d06cc69884922b02e6faf92",
+        "# v6.2.0",
+        1,
+    ),
+}
+counts = {name: 0 for name in approved}
+for workflow in sorted(workflow_dir.glob("*.y*ml")):
+    workflow_text = workflow.read_text(encoding="utf-8")
+    for forbidden in (
+        "workflow_" + "run:",
+        "download-and-" + "submit",
+        "generate-and-" + "upload",
+        "actions/dependency-" + "review-action@",
+    ):
+        if forbidden in workflow_text:
+            print(
+                f"keyless-action-inventory: forbidden PR submission/review contract in {workflow.name}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+    for line in workflow_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "uses:" not in stripped:
+            continue
+        match = re.fullmatch(r"uses:\s*([^@\s]+)@([^\s]+)(?:\s+(#.*))?", stripped)
+        if not match:
+            continue
+        action, revision, comment = match.groups()
+        if action == "actions/dependency-" + "review-action":
+            print(
+                f"keyless-action-inventory: Dependency Review is forbidden in {workflow.name}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if action not in approved:
+            continue
+        expected_revision, expected_comment, expected_count = approved[action]
+        if revision != expected_revision or (comment or "") != expected_comment:
+            print(
+                f"keyless-action-inventory: unapproved reference for {action} in {workflow.name}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        counts[action] += 1
+for action, (_, _, expected_count) in approved.items():
+    if counts[action] != expected_count:
+        print(
+            f"keyless-action-inventory: expected {expected_count} references for {action}, "
+            f"found {counts[action]}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+PY
+}
+
+validate_removed_nvd_owasp_inventory() {
+  local root_dir="$1"
+  python3 - "$root_dir" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+
+root = Path(sys.argv[1])
+forbidden = (
+    "NV" + "D_API_KEY",
+    "org.owasp." + "dependencycheck",
+    "dependency" + "Check",
+    "Dependency" + "CheckExtension",
+    "dependency" + "CheckAggregate",
+    "dependency" + "CheckUpdate",
+    "sca" + "Check",
+    "sca" + "Preflight",
+    "sca" + "WarmCacheMark",
+    "dependency" + "CheckDataDir",
+    "cache-warm." + "marker",
+    "cache-warm." + "manifest",
+    "dependency-check-" + "data",
+)
+if (root / ".git").exists():
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=root,
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    relative_paths = [
+        raw_relative.decode("utf-8", errors="strict")
+        for raw_relative in result.stdout.split(b"\0")
+        if raw_relative
+    ]
+else:
+    relative_paths = [
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+    ]
+violations = []
+for relative in relative_paths:
+    path = root / relative
+    if not path.is_file():
+        continue
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        continue
+    matched = [token for token in forbidden if token in text]
+    if matched:
+        violations.append(relative)
+if violations:
+    print(
+        "legacy-sca-inventory: forbidden NVD/OWASP contract remains in: "
+        + ", ".join(sorted(violations)),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+}
+
+validate_resolved_graph_build_contract() {
+  local build_file="$1"
+  python3 - "$build_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+build_file = Path(sys.argv[1])
+text = build_file.read_text(encoding="utf-8")
+required_contracts = {
+    'pluginManager.withPlugin("java")': "JVM projects are not discovered dynamically",
+    ".filterIsInstance<UnresolvedDependencyResult>()": (
+        "unresolved runtime dependencies are not rejected"
+    ),
+    "resolutionResult.allDependencies": "the complete dependency result set is not inspected",
+    "incoming.artifacts.artifactFiles.files": "runtime artifact files are not resolved",
+    '"resolvedArtifacts" to resolvedArtifactFiles.size': "resolved artifacts are not recorded",
+    "val jvmProjectPath = project.path": "JVM project identity is not captured dynamically",
+    "expectedProjectPaths.add(jvmProjectPath)": "expected JVM project identities are not dynamic",
+    "projectGraphFiles.from(resolvedProjectDependencyGraph.flatMap": (
+        "per-project reports are not wired dynamically"
+    ),
+}
+for contract, message in required_contracts.items():
+    if contract not in text:
+        raise SystemExit(f"resolved-graph-build-contract: {message}")
+
+current_projects = {
+    ":app-bot",
+    ":core-data",
+    ":core-domain",
+    ":core-security",
+    ":core-telemetry",
+    ":core-testing",
+    ":tools:perf",
+}
+for match in re.finditer(r"listOf\s*\((.*?)\)", text, flags=re.DOTALL):
+    literals = set(re.findall(r'["\'](:[^"\']+)["\']', match.group(1)))
+    if current_projects.issubset(literals):
+        raise SystemExit("resolved-graph-build-contract: current seven-module allowlist is forbidden")
+PY
+}
+
 assert_validation_rejected() {
   local fixture_name="$1"
   shift
@@ -1748,6 +2316,87 @@ insert_job_direct_line() {
       }
     }
   ' "$source_file" >"$target_file"
+}
+
+replace_job_line_once() {
+  local source_file="$1"
+  local target_file="$2"
+  local job_name="$3"
+  local expected="$4"
+  local replacement="$5"
+
+  python3 - \
+    "$source_file" \
+    "$target_file" \
+    "$job_name" \
+    "$expected" \
+    "$replacement" <<'PY'
+import os
+from pathlib import Path
+import tempfile
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+job_name = sys.argv[3]
+expected = sys.argv[4]
+replacement = sys.argv[5]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+job_header = f"  {job_name}:"
+job_indexes = [
+    index
+    for index, line in enumerate(lines)
+    if line.rstrip("\r\n") == job_header
+]
+if len(job_indexes) != 1:
+    raise SystemExit(
+        f"replace_job_line_once: expected one job {job_name!r}; found {len(job_indexes)}",
+    )
+job_start = job_indexes[0]
+job_end = len(lines)
+for index in range(job_start + 1, len(lines)):
+    logical = lines[index].rstrip("\r\n")
+    if logical and not logical.lstrip().startswith("#"):
+        indentation = len(logical) - len(logical.lstrip(" "))
+        if indentation <= 2:
+            job_end = index
+            break
+matches = [
+    index
+    for index in range(job_start + 1, job_end)
+    if lines[index].rstrip("\r\n") == expected
+]
+if len(matches) != 1:
+    raise SystemExit(
+        "replace_job_line_once: "
+        f"job={job_name!r} expected-line-count={len(matches)}",
+    )
+match = matches[0]
+line_ending = "\r\n" if lines[match].endswith("\r\n") else "\n"
+if not lines[match].endswith(("\r", "\n")):
+    line_ending = ""
+lines[match] = replacement + line_ending
+target.parent.mkdir(parents=True, exist_ok=True)
+temporary_name = None
+try:
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        newline="",
+        dir=target.parent,
+        prefix=f".{target.name}.",
+        delete=False,
+    ) as temporary:
+        temporary_name = temporary.name
+        temporary.writelines(lines)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+    os.replace(temporary_name, target)
+    temporary_name = None
+finally:
+    if temporary_name is not None:
+        Path(temporary_name).unlink(missing_ok=True)
+PY
 }
 
 insert_step_direct_line() {
@@ -1996,6 +2645,8 @@ metadata_labels_expression="\${{ steps.meta.outputs.labels }}"
 docker_image_workflow="$ROOT_DIR/.github/workflows/docker-image.yml"
 docker_publish_workflow="$ROOT_DIR/.github/workflows/docker-publish.yml"
 security_scan_workflow="$ROOT_DIR/.github/workflows/security-scan.yml"
+dependency_submission_workflow="$ROOT_DIR/.github/workflows/dependency-submission.yml"
+sca_workflow="$ROOT_DIR/.github/workflows/sca.yml"
 container_smoke_workflow="$ROOT_DIR/.github/workflows/container-smoke.yml"
 static_check_workflow="$ROOT_DIR/.github/workflows/static-check.yml"
 detekt_permissions_contract='contents: read
@@ -3297,6 +3948,496 @@ for protected_step in \
 done
 
 validate_publish_provenance_job_guard "$docker_publish_workflow"
+
+validate_removed_nvd_owasp_inventory "$ROOT_DIR"
+validate_keyless_action_inventory "$ROOT_DIR/.github/workflows"
+validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$security_scan_workflow"
+echo "quality-gate: keyless dependency-security workflow contract verified"
+
+validate_resolved_graph_build_contract "$ROOT_DIR/build.gradle.kts"
+
+"$ROOT_DIR/gradlew" \
+  verifyResolvedProductionDependencyGraph \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain
+python3 - "$ROOT_DIR" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+aggregate_path = root / "build/reports/dependencies/resolved-production-dependencies.json"
+try:
+    aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    raise SystemExit(f"resolved-graph-contract: aggregate report is unreadable: {error}")
+if (
+    not isinstance(aggregate, dict)
+    or aggregate.get("schema") != "clubs-bot/resolved-production-dependency-graph"
+    or aggregate.get("version") != 1
+):
+    raise SystemExit("resolved-graph-contract: aggregate schema/version is invalid")
+projects = aggregate.get("projects")
+if not isinstance(projects, list) or not projects:
+    raise SystemExit("resolved-graph-contract: aggregate contains 0 JVM projects")
+project_paths = []
+direct_count = 0
+transitive_count = 0
+artifact_count = 0
+for index, project in enumerate(projects):
+    if not isinstance(project, dict):
+        raise SystemExit(f"resolved-graph-contract: project entry {index} is not an object")
+    project_path = project.get("projectPath")
+    if not isinstance(project_path, str) or not project_path.startswith(":"):
+        raise SystemExit(f"resolved-graph-contract: project entry {index} has invalid identity")
+    if project.get("configuration") != "runtimeClasspath":
+        raise SystemExit(f"resolved-graph-contract: {project_path} is not runtimeClasspath")
+    direct = project.get("directDependencies")
+    resolved = project.get("resolvedModules")
+    transitive = project.get("transitiveModules")
+    artifacts = project.get("resolvedArtifacts")
+    if not isinstance(direct, list) or not direct:
+        raise SystemExit(f"resolved-graph-contract: {project_path} has no direct dependencies")
+    if not isinstance(resolved, list) or not resolved:
+        raise SystemExit(f"resolved-graph-contract: {project_path} has no resolved modules")
+    if not isinstance(transitive, list):
+        raise SystemExit(f"resolved-graph-contract: {project_path} transitive graph is invalid")
+    if not isinstance(artifacts, int) or isinstance(artifacts, bool) or artifacts <= 0:
+        raise SystemExit(f"resolved-graph-contract: {project_path} has no resolved artifacts")
+    if not set(transitive).issubset(set(resolved)):
+        raise SystemExit(f"resolved-graph-contract: {project_path} has invalid transitive modules")
+    relative_project = project_path.lstrip(":").replace(":", "/")
+    project_report = root / relative_project / "build/reports/dependencies/runtime-dependencies.json"
+    if project_path == ":":
+        project_report = root / "build/reports/dependencies/runtime-dependencies.json"
+    try:
+        project_value = json.loads(project_report.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise SystemExit(
+            f"resolved-graph-contract: current project report is missing for {project_path}: {error}",
+        )
+    if project_value != project:
+        raise SystemExit(f"resolved-graph-contract: aggregate entry differs for {project_path}")
+    project_paths.append(project_path)
+    direct_count += len(direct)
+    transitive_count += len(transitive)
+    artifact_count += artifacts
+if project_paths != sorted(project_paths) or len(project_paths) != len(set(project_paths)):
+    raise SystemExit("resolved-graph-contract: project identities are not sorted and unique")
+if direct_count == 0 or transitive_count == 0 or artifact_count == 0:
+    raise SystemExit("resolved-graph-contract: direct/transitive/artifact production graph is empty")
+print(
+    "quality-gate: resolved JVM production graph verified "
+    f"({len(projects)} projects, {direct_count} direct, {transitive_count} transitive, "
+    f"{artifact_count} artifacts)",
+)
+PY
+
+hardcoded_graph_fixture="$TMP_DIR/build-hardcoded-jvm-projects.gradle.kts"
+cp "$ROOT_DIR/build.gradle.kts" "$hardcoded_graph_fixture"
+printf '%s\n' \
+  'val hardcodedResolvedGraphProjects = listOf(":app-bot", ":core-data", ":core-domain", ":core-security", ":core-telemetry", ":core-testing", ":tools:perf")' \
+  >>"$hardcoded_graph_fixture"
+assert_validation_rejected \
+  "dependency-graph-hardcoded-seven-module-limit" \
+  validate_resolved_graph_build_contract \
+  "$hardcoded_graph_fixture"
+
+empty_graph_init="$TMP_DIR/empty-resolved-graph.init.gradle"
+cat >"$empty_graph_init" <<'GRADLE'
+gradle.projectsEvaluated {
+    def expectedRoot = new File(System.getenv('DEPENDENCY_REPOSITORY_ROOT')).canonicalFile
+    if (rootProject.rootDir.canonicalFile == expectedRoot) {
+        def aggregate = rootProject.tasks.named('verifyResolvedProductionDependencyGraph').get()
+        aggregate.projectGraphFiles.setFrom([])
+    }
+}
+GRADLE
+empty_graph_log="$TMP_DIR/empty-resolved-graph.log"
+if DEPENDENCY_REPOSITORY_ROOT="$ROOT_DIR" "$ROOT_DIR/gradlew" \
+  verifyResolvedProductionDependencyGraph \
+  --init-script "$empty_graph_init" \
+  --rerun-tasks \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain >"$empty_graph_log" 2>&1; then
+  fail "negative fixture unexpectedly passed: dependency-graph-empty"
+else
+  empty_graph_status=$?
+fi
+assert_contains "$(cat "$empty_graph_log")" "contains 0 JVM projects"
+echo "quality-gate: negative fixture dependency-graph-empty rejected (exit $empty_graph_status)"
+
+missing_module_init="$TMP_DIR/missing-resolved-graph-module.init.gradle"
+cat >"$missing_module_init" <<'GRADLE'
+gradle.projectsEvaluated {
+    def expectedRoot = new File(System.getenv('DEPENDENCY_REPOSITORY_ROOT')).canonicalFile
+    if (rootProject.rootDir.canonicalFile == expectedRoot) {
+        def aggregate = rootProject.tasks.named('verifyResolvedProductionDependencyGraph').get()
+        def filtered = aggregate.projectGraphFiles.files.findAll { report ->
+            !report.path.replace('\\', '/').endsWith(
+                '/core-domain/build/reports/dependencies/runtime-dependencies.json'
+            )
+        }
+        aggregate.projectGraphFiles.setFrom(filtered)
+    }
+}
+GRADLE
+missing_module_log="$TMP_DIR/missing-resolved-graph-module.log"
+if DEPENDENCY_REPOSITORY_ROOT="$ROOT_DIR" "$ROOT_DIR/gradlew" \
+  verifyResolvedProductionDependencyGraph \
+  --init-script "$missing_module_init" \
+  --rerun-tasks \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain >"$missing_module_log" 2>&1; then
+  fail "negative fixture unexpectedly passed: dependency-graph-missing-jvm-module"
+else
+  missing_module_status=$?
+fi
+assert_contains "$(cat "$missing_module_log")" "project inventory mismatch"
+assert_contains "$(cat "$missing_module_log")" ":core-domain"
+echo "quality-gate: negative fixture dependency-graph-missing-jvm-module rejected (exit $missing_module_status)"
+
+if [ -e "$DEPENDENCY_DYNAMIC_MODULE_DIR" ]; then
+  fail "temporary dependency graph fixture module path already exists"
+fi
+mkdir -p "$DEPENDENCY_DYNAMIC_MODULE_DIR"
+DEPENDENCY_DYNAMIC_MODULE_OWNED=1
+cat >"$DEPENDENCY_DYNAMIC_MODULE_DIR/build.gradle.kts" <<'KOTLIN'
+plugins {
+    java
+}
+
+dependencies {
+    runtimeOnly(project(":core-domain"))
+}
+KOTLIN
+dependency_dynamic_init="$TMP_DIR/dependency-dynamic-module.init.gradle"
+cat >"$dependency_dynamic_init" <<'GRADLE'
+gradle.settingsEvaluated { settings ->
+    def expectedRoot = new File(System.getenv('DEPENDENCY_REPOSITORY_ROOT')).canonicalFile
+    if (settings.rootDir.canonicalFile == expectedRoot) {
+        settings.include(':dependency-selfcheck-fixture')
+    }
+}
+GRADLE
+DEPENDENCY_REPOSITORY_ROOT="$ROOT_DIR" "$ROOT_DIR/gradlew" \
+  verifyResolvedProductionDependencyGraph \
+  --init-script "$dependency_dynamic_init" \
+  --rerun-tasks \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain
+python3 - "$ROOT_DIR/build/reports/dependencies/resolved-production-dependencies.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+projects = {entry["projectPath"]: entry for entry in report["projects"]}
+fixture = projects.get(":dependency-selfcheck-fixture")
+if fixture is None:
+    raise SystemExit("future JVM module was omitted from the resolved graph")
+if "project::core-domain" not in fixture.get("directDependencies", []):
+    raise SystemExit("future JVM module project dependency was not recorded")
+if not fixture.get("resolvedModules") or fixture.get("resolvedArtifacts", 0) <= 0:
+    raise SystemExit("future JVM module runtime graph/artifact set is empty")
+if len(projects) != 8:
+    raise SystemExit("future JVM module fixture did not add exactly one project")
+PY
+rm -rf "$DEPENDENCY_DYNAMIC_MODULE_DIR"
+DEPENDENCY_DYNAMIC_MODULE_OWNED=0
+echo "quality-gate: future JVM module dynamic graph inclusion verified"
+
+"$ROOT_DIR/gradlew" \
+  verifyResolvedProductionDependencyGraph \
+  --rerun-tasks \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain
+
+unresolved_dependency_init="$TMP_DIR/unresolved-runtime-dependency.init.gradle"
+cat >"$unresolved_dependency_init" <<'GRADLE'
+gradle.afterProject { project, state ->
+    if (project.path == ':core-domain') {
+        project.dependencies.add(
+            'runtimeOnly',
+            'invalid.example:unresolvable-runtime-selfcheck:0.0.0-does-not-exist'
+        )
+    }
+}
+GRADLE
+unresolved_dependency_log="$TMP_DIR/unresolved-runtime-dependency.log"
+if "$ROOT_DIR/gradlew" \
+  verifyResolvedProductionDependencyGraph \
+  --init-script "$unresolved_dependency_init" \
+  --offline \
+  --rerun-tasks \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain >"$unresolved_dependency_log" 2>&1; then
+  fail "negative fixture unexpectedly passed: dependency-graph-unresolved-runtime"
+else
+  unresolved_dependency_status=$?
+fi
+if ! grep -Fq "Unresolved runtime dependencies for :core-domain" "$unresolved_dependency_log"; then
+  fail "dependency-graph-unresolved-runtime fixture failed for an unexpected reason"
+fi
+echo "quality-gate: negative fixture dependency-graph-unresolved-runtime rejected (exit $unresolved_dependency_status)"
+
+nvd_inventory_fixture="$TMP_DIR/nvd-inventory"
+mkdir -p "$nvd_inventory_fixture"
+printf '%s\n' 'NV''D_API_KEY=forbidden' >"$nvd_inventory_fixture/workflow.yml"
+assert_validation_rejected \
+  "legacy-nvd-reference-reintroduced" \
+  validate_removed_nvd_owasp_inventory \
+  "$nvd_inventory_fixture"
+
+owasp_inventory_fixture="$TMP_DIR/owasp-inventory"
+mkdir -p "$owasp_inventory_fixture"
+printf '%s\n' 'id("org.owasp.''dependencycheck")' >"$owasp_inventory_fixture/build.gradle.kts"
+assert_validation_rejected \
+  "legacy-owasp-plugin-reintroduced" \
+  validate_removed_nvd_owasp_inventory \
+  "$owasp_inventory_fixture"
+
+historical_inventory_fixture="$TMP_DIR/historical-inventory"
+mkdir -p "$historical_inventory_fixture"
+git -C "$historical_inventory_fixture" init -q
+mkdir -p "$historical_inventory_fixture/reports"
+printf '%s\n' 'dependency''CheckAnalyze' \
+  >"$historical_inventory_fixture/reports/Q3_ci_detekt_clean.md"
+git -C "$historical_inventory_fixture" add reports/Q3_ci_detekt_clean.md
+assert_validation_rejected \
+  "legacy-historical-report-reference-reintroduced" \
+  validate_removed_nvd_owasp_inventory \
+  "$historical_inventory_fixture"
+
+required_check_inventory_fixture="$TMP_DIR/required-check-inventory"
+mkdir -p "$required_check_inventory_fixture"
+git -C "$required_check_inventory_fixture" init -q
+mkdir -p "$required_check_inventory_fixture/docs"
+printf '%s\n' 'SCA Gate / dependency-check' \
+  >"$required_check_inventory_fixture/docs/required-check.md"
+git -C "$required_check_inventory_fixture" add docs/required-check.md
+validate_removed_nvd_owasp_inventory "$required_check_inventory_fixture"
+echo "quality-gate: positive fixture required-check-identity accepted"
+
+dependency_submission_action_fixture="$TMP_DIR/dependency-submission-mutable-action.yml"
+replace_step_line_once \
+  "$dependency_submission_workflow" \
+  "$dependency_submission_action_fixture" \
+  "submit" \
+  "Submit resolved dependency graph (blocking)" \
+  "        uses: gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0" \
+  "        uses: gradle/actions/dependency-submission@v6"
+assert_validation_rejected \
+  "dependency-submission-mutable-action" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_action_fixture" \
+  "$sca_workflow" \
+  "$security_scan_workflow"
+
+dependency_submission_continue_fixture="$TMP_DIR/dependency-submission-continue-on-failure.yml"
+replace_step_line_once \
+  "$dependency_submission_workflow" \
+  "$dependency_submission_continue_fixture" \
+  "submit" \
+  "Submit resolved dependency graph (blocking)" \
+  "          dependency-graph-continue-on-failure: false" \
+  "          dependency-graph-continue-on-failure: true"
+assert_validation_rejected \
+  "dependency-submission-continue-on-failure" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_continue_fixture" \
+  "$sca_workflow" \
+  "$security_scan_workflow"
+
+dependency_submission_pr_fixture="$TMP_DIR/dependency-submission-pull-request.yml"
+replace_exact_line_once \
+  "$dependency_submission_workflow" \
+  "$dependency_submission_pr_fixture" \
+  "  workflow_dispatch:" \
+  "  pull_request:"
+assert_validation_rejected \
+  "dependency-submission-pull-request-trigger" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_pr_fixture" \
+  "$sca_workflow" \
+  "$security_scan_workflow"
+
+dependency_submission_guard_fixture="$TMP_DIR/dependency-submission-unguarded-dispatch.yml"
+replace_job_line_once \
+  "$dependency_submission_workflow" \
+  "$dependency_submission_guard_fixture" \
+  "submit" \
+  "    if: github.event_name == 'push' || github.ref == 'refs/heads/main'" \
+  "    if: always()"
+assert_validation_rejected \
+  "dependency-submission-dispatch-without-main-guard" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_guard_fixture" \
+  "$sca_workflow" \
+  "$security_scan_workflow"
+
+dependency_submission_write_fixture="$TMP_DIR/dependency-submission-without-write.yml"
+replace_job_line_once \
+  "$dependency_submission_workflow" \
+  "$dependency_submission_write_fixture" \
+  "submit" \
+  "      contents: write" \
+  "      contents: read"
+assert_validation_rejected \
+  "dependency-submission-without-contents-write" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_write_fixture" \
+  "$sca_workflow" \
+  "$security_scan_workflow"
+
+sca_write_fixture="$TMP_DIR/sca-contents-write.yml"
+replace_job_line_once \
+  "$sca_workflow" \
+  "$sca_write_fixture" \
+  "dependency-check" \
+  "      contents: read" \
+  "      contents: write"
+assert_validation_rejected \
+  "sca-pr-contents-write" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_write_fixture" \
+  "$security_scan_workflow"
+
+sca_secret_fixture="$TMP_DIR/sca-secret-reference.yml"
+insert_step_direct_line \
+  "$sca_workflow" \
+  "$sca_secret_fixture" \
+  "dependency-check" \
+  "Verify resolved production dependency graph (blocking)" \
+  '        env: ${{ secrets.SELF_CHECK_TOKEN }}'
+assert_validation_rejected \
+  "sca-pr-secret-reference" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_secret_fixture" \
+  "$security_scan_workflow"
+
+sca_trusted_trigger_fixture="$TMP_DIR/sca-trusted-trigger.yml"
+replace_exact_line_once \
+  "$sca_workflow" \
+  "$sca_trusted_trigger_fixture" \
+  "  pull_request:" \
+  "  workflow_""run:"
+assert_validation_rejected \
+  "sca-workflow-""run-trigger" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_trusted_trigger_fixture" \
+  "$security_scan_workflow"
+
+sca_dependency_review_fixture="$TMP_DIR/sca-dependency-review.yml"
+replace_step_line_once \
+  "$sca_workflow" \
+  "$sca_dependency_review_fixture" \
+  "dependency-check" \
+  "Gradle cache & setup" \
+  "        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0" \
+  "        uses: actions/dependency-""review-action@v5"
+assert_validation_rejected \
+  "sca-dependency-review-reintroduced" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_dependency_review_fixture" \
+  "$security_scan_workflow"
+
+sca_graph_removed_fixture="$TMP_DIR/sca-without-graph-verifier.yml"
+replace_step_line_once \
+  "$sca_workflow" \
+  "$sca_graph_removed_fixture" \
+  "dependency-check" \
+  "Verify resolved production dependency graph (blocking)" \
+  "          ./gradlew verifyResolvedProductionDependencyGraph" \
+  "          ./gradlew help"
+assert_validation_rejected \
+  "sca-graph-verifier-removed" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_graph_removed_fixture" \
+  "$security_scan_workflow"
+
+trivy_jvm_coverage_fixture="$TMP_DIR/security-scan-without-install-dist.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_jvm_coverage_fixture" \
+  "trivy" \
+  "Build resolved JVM runtime dependencies (blocking)" \
+  "          ./gradlew :app-bot:installDist verifyResolvedProductionDependencyGraph" \
+  "          ./gradlew verifyResolvedProductionDependencyGraph"
+assert_validation_rejected \
+  "trivy-jvm-artifact-coverage-removed" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_jvm_coverage_fixture"
+
+trivy_exit_fixture="$TMP_DIR/security-scan-exit-code-zero.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_exit_fixture" \
+  "trivy" \
+  "Trivy filesystem scan" \
+  "          exit-code: 1" \
+  "          exit-code: 0"
+assert_validation_rejected \
+  "trivy-filesystem-exit-code-zero" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_exit_fixture"
+
+trivy_order_fixture="$TMP_DIR/security-scan-trivy-before-install-dist.yml"
+python3 - "$security_scan_workflow" "$trivy_order_fixture" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+names = [
+    "Build resolved JVM runtime dependencies (blocking)",
+    "Trivy filesystem scan",
+]
+indexes = {}
+for index, line in enumerate(lines):
+    logical = line.rstrip("\r\n")
+    for name in names:
+        if logical == f"      - name: {name}":
+            indexes.setdefault(name, []).append(index)
+if any(len(indexes.get(name, [])) != 1 for name in names):
+    raise SystemExit("trivy-order-fixture: expected one build and one scanner step")
+build_start = indexes[names[0]][0]
+scan_start = indexes[names[1]][0]
+if build_start >= scan_start:
+    raise SystemExit("trivy-order-fixture: source ordering is already invalid")
+scan_end = len(lines)
+for index in range(scan_start + 1, len(lines)):
+    if lines[index].startswith("      - name: "):
+        scan_end = index
+        break
+mutated = lines[:build_start] + lines[scan_start:scan_end] + lines[build_start:scan_start] + lines[scan_end:]
+target.write_text("".join(mutated), encoding="utf-8")
+PY
+assert_validation_rejected \
+  "trivy-filesystem-before-install-dist" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_order_fixture"
 
 if ! validate_trivy_action_inventory "$ROOT_DIR/.github/workflows"; then
   fail "Trivy action inventory contract failed"

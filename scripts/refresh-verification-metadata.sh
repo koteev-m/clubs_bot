@@ -6,16 +6,15 @@ cd "$ROOT_DIR"
 
 print_usage() {
   cat <<'USAGE' >&2
-Usage: scripts/refresh-verification-metadata.sh [default|sca]
+Usage: scripts/refresh-verification-metadata.sh [default]
 
 Modes:
   default  Refresh metadata for lightweight Gradle task graph (help).
-  sca      Heavy metadata refresh for SCA path (scaPreflight + dependencyCheckAggregate graph).
 
 Notes:
   - This script updates Gradle dependency verification metadata only.
-  - Mode "sca" traverses aggregate SCA task graph and preflight contract; it is not a lightweight toolchain-only action.
-  - For real SCA gate run: ./gradlew --no-configuration-cache scaCheck --console=plain
+  - Dependency graph submission runs only from trusted main; dependency vulnerability
+    checks remain the responsibility of the existing fail-closed Trivy scans.
 USAGE
 }
 
@@ -24,9 +23,6 @@ mode="${1:-default}"
 case "$mode" in
   default)
     TASK="help"
-    ;;
-  sca)
-    TASK="dependencyCheckAggregate"
     ;;
   *)
     print_usage

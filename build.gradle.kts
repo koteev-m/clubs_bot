@@ -8,6 +8,9 @@ import org.gradle.api.GradleException
 import org.gradle.api.Task
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
@@ -16,8 +19,11 @@ import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
@@ -27,7 +33,6 @@ import org.gradle.kotlin.dsl.register
 import org.gradle.kotlin.dsl.withType
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import org.jlleitschuh.gradle.ktlint.tasks.KtLintCheckTask
-import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
@@ -36,7 +41,6 @@ import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
-import java.security.MessageDigest
 import javax.inject.Inject
 
 plugins {
@@ -44,7 +48,6 @@ plugins {
     kotlin("plugin.serialization") version "2.2.20" apply false
     id("io.gitlab.arturbosch.detekt") version "1.23.8" apply false
     id("org.jlleitschuh.gradle.ktlint") version "12.1.0"
-    id("org.owasp.dependencycheck") version "12.1.8"
     alias(libs.plugins.versionsPlugin)
 }
 
@@ -210,6 +213,181 @@ abstract class DependencyGuard : DefaultTask() {
 
             logger.lifecycle("DependencyGuard $path: OK (${allArtifacts.size} artifacts checked)")
         }
+    }
+}
+
+abstract class ResolvedProjectDependencyGraph : DefaultTask() {
+    @get:Input
+    abstract val graphJson: Property<String>
+
+    @get:OutputFile
+    abstract val reportFile: RegularFileProperty
+
+    @TaskAction
+    fun writeGraph() {
+        val parsed =
+            JsonSlurper().parseText(graphJson.get()) as? Map<*, *>
+                ?: throw GradleException("Resolved project dependency graph must be a JSON object")
+        if (parsed["projectPath"]?.toString().isNullOrBlank()) {
+            throw GradleException("Resolved project dependency graph is missing projectPath")
+        }
+        val target = reportFile.get().asFile.toPath()
+        Files.createDirectories(target.parent)
+        val temporary = Files.createTempFile(target.parent, ".runtime-dependencies.", ".tmp")
+        try {
+            Files.writeString(
+                temporary,
+                JsonOutput.prettyPrint(JsonOutput.toJson(parsed)) + "\n",
+                StandardCharsets.UTF_8,
+            )
+            Files.move(
+                temporary,
+                target,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+    }
+}
+
+abstract class ResolvedProductionDependencyGraph : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val projectGraphFiles: ConfigurableFileCollection
+
+    @get:Input
+    abstract val expectedProjectPaths: ListProperty<String>
+
+    @get:OutputFile
+    abstract val reportFile: RegularFileProperty
+
+    @TaskAction
+    fun verifyAndWrite() {
+        val parsedProjects =
+            projectGraphFiles.files
+                .map { graphFile ->
+                    @Suppress("UNCHECKED_CAST")
+                    JsonSlurper().parse(graphFile) as? Map<String, Any?>
+                        ?: throw GradleException("Resolved production dependency graph entry must be a JSON object")
+                }.sortedBy { entry -> entry["projectPath"].toString() }
+
+        if (parsedProjects.isEmpty()) {
+            throw GradleException("Resolved production dependency graph contains 0 JVM projects")
+        }
+
+        val projectPaths = parsedProjects.map { entry -> entry["projectPath"].toString() }
+        if (projectPaths.any { it.isBlank() } || projectPaths.size != projectPaths.distinct().size) {
+            throw GradleException(
+                "Resolved production dependency graph contains invalid or duplicate JVM project paths",
+            )
+        }
+        val expectedProjects = expectedProjectPaths.get().sorted()
+        if (expectedProjects.isEmpty()) {
+            throw GradleException("Resolved production dependency graph expects 0 JVM projects")
+        }
+        if (expectedProjects.size != expectedProjects.distinct().size) {
+            throw GradleException(
+                "Resolved production dependency graph has duplicate expected JVM projects: $expectedProjects",
+            )
+        }
+        if (projectPaths != expectedProjects) {
+            val missing = expectedProjects.toSet() - projectPaths.toSet()
+            val unexpected = projectPaths.toSet() - expectedProjects.toSet()
+            throw GradleException(
+                "Resolved production dependency graph project inventory mismatch: " +
+                    "missing=${missing.sorted()}, unexpected=${unexpected.sorted()}",
+            )
+        }
+
+        fun dependencyList(
+            entry: Map<String, Any?>,
+            key: String,
+        ): List<String> =
+            (entry[key] as? List<*>)
+                ?.map { value -> value as? String ?: throw GradleException("$key must contain strings") }
+                ?.sorted()
+                ?: throw GradleException("Resolved production dependency graph entry is missing $key")
+
+        var totalDirect = 0
+        var totalTransitive = 0
+        var totalResolvedModules = 0
+        var totalResolvedArtifacts = 0
+        parsedProjects.forEach { entry ->
+            val projectPath = entry["projectPath"].toString()
+            val directDependencies = dependencyList(entry, "directDependencies")
+            val resolvedModules = dependencyList(entry, "resolvedModules")
+            val transitiveModules = dependencyList(entry, "transitiveModules")
+            val resolvedArtifacts =
+                (entry["resolvedArtifacts"] as? Number)?.toInt()
+                    ?: throw GradleException(
+                        "Resolved production dependency graph entry is missing resolvedArtifacts",
+                    )
+            if (directDependencies.isEmpty()) {
+                throw GradleException("Resolved production dependency graph is empty for $projectPath")
+            }
+            if (resolvedModules.isEmpty()) {
+                throw GradleException("Resolved production module graph is empty for $projectPath")
+            }
+            if (resolvedArtifacts <= 0) {
+                throw GradleException("Resolved production artifact set is empty for $projectPath")
+            }
+            totalDirect += directDependencies.size
+            totalTransitive += transitiveModules.size
+            totalResolvedModules += resolvedModules.size
+            totalResolvedArtifacts += resolvedArtifacts
+        }
+
+        if (
+            totalDirect <= 0 ||
+            totalTransitive <= 0 ||
+            totalResolvedModules <= 0 ||
+            totalResolvedArtifacts <= 0
+        ) {
+            throw GradleException(
+                "Resolved production dependency graph must contain direct/transitive dependencies and artifacts",
+            )
+        }
+
+        val report =
+            linkedMapOf<String, Any>(
+                "schema" to "clubs-bot/resolved-production-dependency-graph",
+                "version" to 1,
+                "projects" to parsedProjects,
+                "totals" to
+                    linkedMapOf(
+                        "projects" to parsedProjects.size,
+                        "directDependencies" to totalDirect,
+                        "transitiveModules" to totalTransitive,
+                        "resolvedModules" to totalResolvedModules,
+                        "resolvedArtifacts" to totalResolvedArtifacts,
+                    ),
+            )
+        val target = reportFile.get().asFile.toPath()
+        Files.createDirectories(target.parent)
+        val temporary = Files.createTempFile(target.parent, ".resolved-production-dependencies.", ".tmp")
+        try {
+            Files.writeString(
+                temporary,
+                JsonOutput.prettyPrint(JsonOutput.toJson(report)) + "\n",
+                StandardCharsets.UTF_8,
+            )
+            Files.move(
+                temporary,
+                target,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+        logger.lifecycle(
+            "Resolved production dependency graph: OK " +
+                "(${parsedProjects.size} JVM projects, $totalDirect direct, " +
+                "$totalTransitive transitive, $totalResolvedModules resolved modules, " +
+                "$totalResolvedArtifacts artifacts)",
+        )
     }
 }
 
@@ -895,304 +1073,18 @@ val rootDependencyGuard =
         description = "Run dependency policy checks for all JVM subprojects"
     }
 
-val dependencyCheckDataDirPath =
-    providers
-        .gradleProperty("dependencyCheckDataDir")
-        .orElse(providers.environmentVariable("DEPENDENCY_CHECK_DATA_DIR"))
-        .orElse("${rootProject.projectDir}/.gradle/dependency-check-data")
-val dependencyCheckDataDir = File(dependencyCheckDataDirPath.get())
-val dependencyCheckWarmMarker = dependencyCheckDataDir.resolve("cache-warm.marker")
-val dependencyCheckWarmManifest = dependencyCheckDataDir.resolve("cache-warm.manifest")
-val scaCacheMaxAgeHours = 168L
-
-data class ScaPayloadEntry(
-    val path: String,
-    val size: Long,
-    val sha256: String,
-)
-
-data class ScaPayloadManifest(
-    val payloadFileCount: Long,
-    val payloadTotalBytes: Long,
-    val payloadDigest: String,
-    val entries: List<ScaPayloadEntry>,
-)
-
-data class ScaPayloadActual(
-    val entries: List<ScaPayloadEntry>,
-    val payloadFileCount: Long,
-    val payloadTotalBytes: Long,
-    val payloadDigest: String,
-)
-
-fun sha256Hex(bytes: ByteArray): String =
-    MessageDigest
-        .getInstance("SHA-256")
-        .digest(bytes)
-        .joinToString("") { "%02x".format(it) }
-
-fun File.sha256HexStreaming(): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    inputStream().buffered().use { input ->
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        while (true) {
-            val read = input.read(buffer)
-            if (read < 0) break
-            digest.update(buffer, 0, read)
-        }
-    }
-    return digest.digest().joinToString("") { "%02x".format(it) }
-}
-
-fun collectScaPayloadEntries(
-    dataDir: File,
-    marker: File,
-    manifest: File,
-): List<ScaPayloadEntry> =
-    dataDir
-        .walkTopDown()
-        .filter { it.isFile }
-        .filterNot { it == marker || it == manifest }
-        .map { file ->
-            val relativePath = file.relativeTo(dataDir).invariantSeparatorsPath
-            ScaPayloadEntry(
-                path = relativePath,
-                size = file.length(),
-                sha256 = file.sha256HexStreaming(),
-            )
-        }.sortedBy { it.path }
-        .toList()
-
-fun aggregateScaPayloadDigest(entries: List<ScaPayloadEntry>): String =
-    sha256Hex(entries.joinToString("\n") { "${it.path}:${it.size}:${it.sha256}" }.toByteArray())
-
-fun serializeScaPayloadManifest(entries: List<ScaPayloadEntry>): String {
-    val totalBytes = entries.sumOf { it.size }
-    val aggregateDigest = aggregateScaPayloadDigest(entries)
-    val payloadLines = entries.joinToString(separator = "\n") { "file=${it.path}|${it.size}|${it.sha256}" }
-    return buildString {
-        append("payloadFileCount=${entries.size}\n")
-        append("payloadTotalBytes=$totalBytes\n")
-        append("payloadDigest=$aggregateDigest\n")
-        if (payloadLines.isNotEmpty()) {
-            append(payloadLines)
-            append('\n')
-        }
-    }
-}
-
-fun parseScaPayloadManifest(file: File): ScaPayloadManifest {
-    val fields = mutableMapOf<String, String>()
-    val entries = mutableListOf<ScaPayloadEntry>()
-    file.readLines().forEach { line ->
-        if (line.startsWith("file=")) {
-            val payload = line.removePrefix("file=")
-            val parts = payload.split('|', limit = 3)
-            if (parts.size != 3) throw GradleException("scaCheck warm manifest is invalid (malformed file entry)")
-            entries +=
-                ScaPayloadEntry(
-                    path = parts[0],
-                    size =
-                        parts[1].toLongOrNull()
-                            ?: throw GradleException("scaCheck warm manifest is invalid (malformed file size)"),
-                    sha256 = parts[2],
-                )
-        } else {
-            val idx = line.indexOf('=')
-            if (idx > 0) {
-                fields[line.substring(0, idx)] = line.substring(idx + 1)
-            }
-        }
-    }
-    return ScaPayloadManifest(
-        payloadFileCount =
-            fields["payloadFileCount"]?.toLongOrNull()
-                ?: throw GradleException("scaCheck warm manifest is invalid (missing payloadFileCount)"),
-        payloadTotalBytes =
-            fields["payloadTotalBytes"]?.toLongOrNull()
-                ?: throw GradleException("scaCheck warm manifest is invalid (missing payloadTotalBytes)"),
-        payloadDigest =
-            fields["payloadDigest"]?.takeIf { it.isNotBlank() }
-                ?: throw GradleException("scaCheck warm manifest is invalid (missing payloadDigest)"),
-        entries = entries.sortedBy { it.path },
-    )
-}
-
-fun collectScaPayloadActual(
-    dataDir: File,
-    marker: File,
-    manifest: File,
-): ScaPayloadActual {
-    val entries = collectScaPayloadEntries(dataDir, marker, manifest)
-    return ScaPayloadActual(
-        entries = entries,
-        payloadFileCount = entries.size.toLong(),
-        payloadTotalBytes = entries.sumOf { it.size },
-        payloadDigest = aggregateScaPayloadDigest(entries),
-    )
-}
-
-fun validateWarmManifestContractOrThrow(
-    expected: ScaPayloadManifest,
-    actual: ScaPayloadActual,
-    errorMessage: String,
-    emptyPayloadErrorMessage: String = errorMessage,
-) {
-    if (expected.payloadFileCount <= 0L || expected.payloadTotalBytes <= 0L || expected.entries.isEmpty()) {
-        throw GradleException(emptyPayloadErrorMessage)
-    }
-    if (
-        expected.payloadFileCount != actual.payloadFileCount ||
-        expected.payloadTotalBytes != actual.payloadTotalBytes ||
-        expected.payloadDigest != actual.payloadDigest ||
-        expected.entries != actual.entries
-    ) {
-        throw GradleException(errorMessage)
-    }
-}
-
-configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-    failBuildOnCVSS = 7.0F
-    suppressionFile = "${rootProject.projectDir}/config/dependency-check/suppressions.xml"
-    formats = listOf("HTML", "JSON")
-    analyzers.assemblyEnabled = false
-    data.directory = dependencyCheckDataDir.path
-    val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
-    nvd.apiKey = nvdApiKey
-    autoUpdate = !nvdApiKey.isNullOrBlank()
-}
-
-tasks.named("dependencyCheckAggregate") {
-    group = "verification"
-    description = "SCA gate: OWASP Dependency-Check aggregate scan (fails on HIGH/CRITICAL CVEs)"
-    dependsOn("scaPreflight")
-    notCompatibleWithConfigurationCache("dependency-check tasks are not configuration-cache safe on Gradle 9")
-}
-
-tasks.register("scaCheck") {
-    group = "verification"
-    description = "Run aggregate JVM SCA policy gate (OWASP Dependency-Check)"
-    dependsOn("dependencyCheckAggregate")
-}
-
-tasks.register("scaPreflight") {
-    group = "verification"
-    description = "Validate SCA prerequisites (NVD API key or warmed/fresh local cache)"
-    notCompatibleWithConfigurationCache("sca preflight reads runtime environment and local cache state")
-    doLast {
-        val nvdApiKey = providers.environmentVariable("NVD_API_KEY").orNull
-        val hasApiKey = !nvdApiKey.isNullOrBlank()
-
-        if (hasApiKey) return@doLast
-
-        if (!dependencyCheckWarmMarker.exists() || !dependencyCheckWarmManifest.exists()) {
-            val markerPath = dependencyCheckWarmMarker.path
-            val manifestPath = dependencyCheckWarmManifest.path
-            throw GradleException(
-                "scaCheck requires NVD_API_KEY or warmed local cache. " +
-                    "Warm marker/manifest not found at $markerPath and $manifestPath. " +
-                    "Run ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark with NVD_API_KEY.",
-            )
-        }
-
-        val markerFields =
-            dependencyCheckWarmMarker
-                .readLines()
-                .mapNotNull { line ->
-                    val idx = line.indexOf('=')
-                    if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
-                }.toMap()
-
-        val warmedAt =
-            markerFields["warmedAt"]?.toLongOrNull()
-                ?: throw GradleException(
-                    "scaCheck warm marker is invalid (missing warmedAt). " +
-                        "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-                )
-
-        val manifest =
-            try {
-                parseScaPayloadManifest(dependencyCheckWarmManifest)
-            } catch (e: GradleException) {
-                throw GradleException(
-                    "${e.message}. Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-                )
-            }
-        val actualPayload =
-            collectScaPayloadActual(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
-        validateWarmManifestContractOrThrow(
-            expected = manifest,
-            actual = actualPayload,
-            errorMessage =
-                "scaCheck warm manifest does not match cache payload. " +
-                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-            emptyPayloadErrorMessage =
-                "scaCheck warm manifest reports empty payload (marker-only/junk state). " +
-                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
+val resolvedProductionDependencyGraph =
+    tasks.register<ResolvedProductionDependencyGraph>("verifyResolvedProductionDependencyGraph") {
+        group = "verification"
+        description = "Resolve and verify non-empty direct/transitive runtime dependency graphs for every JVM project"
+        expectedProjectPaths.convention(emptyList())
+        reportFile.set(
+            layout.buildDirectory.file("reports/dependencies/resolved-production-dependencies.json"),
         )
-
-        val nowMillis = System.currentTimeMillis()
-        val maxAgeMillis = scaCacheMaxAgeHours * 60L * 60L * 1000L
-        if (nowMillis - warmedAt > maxAgeMillis) {
-            throw GradleException(
-                "scaCheck local cache is stale (older than ${scaCacheMaxAgeHours}h). " +
-                    "Re-warm cache: ./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark",
-            )
-        }
-    }
-}
-
-tasks.register("scaWarmCacheMark") {
-    group = "verification"
-    description = "Write explicit marker that local Dependency-Check cache was warmed via dependencyCheckUpdate"
-    dependsOn("dependencyCheckUpdate")
-    doLast {
-        dependencyCheckDataDir.mkdirs()
-        val payloadEntries =
-            collectScaPayloadEntries(dependencyCheckDataDir, dependencyCheckWarmMarker, dependencyCheckWarmManifest)
-
-        if (payloadEntries.isEmpty()) {
-            throw GradleException(
-                "scaWarmCacheMark failed: dependencyCheckUpdate produced empty/invalid payload. " +
-                    "Warm marker/manifest will not be updated.",
-            )
-        }
-
-        val manifestText = serializeScaPayloadManifest(payloadEntries)
-        val tempManifest =
-            kotlin.io.path
-                .createTempFile("sca-warm-manifest", ".tmp")
-                .toFile()
-        val parsedManifest =
-            try {
-                tempManifest.writeText(manifestText)
-                parseScaPayloadManifest(tempManifest)
-            } finally {
-                tempManifest.delete()
-            }
-
-        validateWarmManifestContractOrThrow(
-            expected = parsedManifest,
-            actual =
-                ScaPayloadActual(
-                    entries = payloadEntries,
-                    payloadFileCount = payloadEntries.size.toLong(),
-                    payloadTotalBytes = payloadEntries.sumOf { it.size },
-                    payloadDigest = aggregateScaPayloadDigest(payloadEntries),
-                ),
-            errorMessage =
-                "scaWarmCacheMark failed: generated warm manifest contract is invalid. " +
-                    "Warm marker/manifest will not be updated.",
+        notCompatibleWithConfigurationCache(
+            "The verification task resolves every JVM runtimeClasspath during execution",
         )
-
-        dependencyCheckWarmMarker.writeText(
-            "warmedAt=${System.currentTimeMillis()}\n" +
-                "maxAgeHours=$scaCacheMaxAgeHours\n",
-        )
-        dependencyCheckWarmManifest.writeText(manifestText)
-        logger.lifecycle("Dependency-Check cache warm marker updated: ${dependencyCheckWarmMarker.path}")
     }
-}
 
 // -------------------------
 // Настройки подмодулей
@@ -1380,6 +1272,102 @@ subprojects {
 
         apply(from = rootProject.file("gradle/detekt-cli.gradle.kts"))
         apply(from = rootProject.file("gradle/ktlint-cli.gradle.kts"))
+    }
+
+    pluginManager.withPlugin("java") {
+        val jvmProjectPath = project.path
+        val runtimeClasspath = configurations.named("runtimeClasspath")
+        val resolvedProjectDependencyGraph =
+            tasks.register<ResolvedProjectDependencyGraph>("verifyResolvedProductionDependencyGraph") {
+                group = "verification"
+                description = "Resolve the runtime dependency graph for ${project.path}"
+                graphJson.set(
+                    providers.provider {
+                        val runtimeConfiguration = runtimeClasspath.get()
+                        val resolutionResult = runtimeConfiguration.incoming.resolutionResult
+                        val unresolvedDependencies =
+                            resolutionResult.allDependencies
+                                .filterIsInstance<UnresolvedDependencyResult>()
+                                .map { dependency -> dependency.attempted.displayName }
+                                .distinct()
+                                .sorted()
+                        if (unresolvedDependencies.isNotEmpty()) {
+                            throw GradleException(
+                                "Unresolved runtime dependencies for ${project.path}: " +
+                                    unresolvedDependencies.joinToString(),
+                            )
+                        }
+                        val directComponentIds =
+                            resolutionResult.root.dependencies
+                                .filterIsInstance<ResolvedDependencyResult>()
+                                .map { dependency -> dependency.selected.id }
+                        val directDependencies =
+                            directComponentIds
+                                .map { componentId ->
+                                    when (componentId) {
+                                        is ModuleComponentIdentifier ->
+                                            "module:${componentId.group}:${componentId.module}:${componentId.version}"
+
+                                        is ProjectComponentIdentifier -> "project:${componentId.projectPath}"
+                                        else -> "component:${componentId.displayName}"
+                                    }
+                                }.distinct()
+                                .sorted()
+                        val directModules =
+                            directComponentIds
+                                .filterIsInstance<ModuleComponentIdentifier>()
+                                .map { componentId ->
+                                    "${componentId.group}:${componentId.module}:${componentId.version}"
+                                }.toSet()
+                        val resolvedModules =
+                            resolutionResult.allComponents
+                                .mapNotNull { component ->
+                                    val componentId = component.id as? ModuleComponentIdentifier
+                                    componentId?.let {
+                                        "${it.group}:${it.module}:${it.version}"
+                                    }
+                                }.distinct()
+                                .sorted()
+                        val resolvedArtifactFiles =
+                            runtimeConfiguration.incoming.artifacts.artifactFiles.files
+                                .sortedBy { artifact -> artifact.absolutePath }
+                        val missingArtifactFiles =
+                            resolvedArtifactFiles.filterNot { artifact -> artifact.isFile }
+                        if (resolvedArtifactFiles.isEmpty()) {
+                            throw GradleException(
+                                "Resolved runtime artifact set is empty for ${project.path}",
+                            )
+                        }
+                        if (missingArtifactFiles.isNotEmpty()) {
+                            throw GradleException(
+                                "Resolved runtime artifacts are missing for ${project.path}: " +
+                                    missingArtifactFiles.joinToString { artifact -> artifact.name },
+                            )
+                        }
+                        JsonOutput.toJson(
+                            linkedMapOf(
+                                "projectPath" to project.path,
+                                "configuration" to "runtimeClasspath",
+                                "directDependencies" to directDependencies,
+                                "resolvedModules" to resolvedModules,
+                                "transitiveModules" to resolvedModules.filterNot(directModules::contains),
+                                "resolvedArtifacts" to resolvedArtifactFiles.size,
+                            ),
+                        )
+                    },
+                )
+                reportFile.set(
+                    layout.buildDirectory.file("reports/dependencies/runtime-dependencies.json"),
+                )
+                notCompatibleWithConfigurationCache(
+                    "The verification task resolves this project's runtimeClasspath during execution",
+                )
+            }
+        resolvedProductionDependencyGraph.configure {
+            dependsOn(resolvedProjectDependencyGraph)
+            projectGraphFiles.from(resolvedProjectDependencyGraph.flatMap { it.reportFile })
+            expectedProjectPaths.add(jvmProjectPath)
+        }
     }
 
     // ВАЖНО: CLI-таски не совместимы с конфигурационным кэшем — помечаем это явно

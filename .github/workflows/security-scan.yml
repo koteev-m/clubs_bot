@@ -22,6 +22,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Gradle cache & setup
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        with:
+          cache-disabled: false
+          gradle-version: wrapper
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Build resolved JVM runtime dependencies (blocking)
+        run: >-
+          ./gradlew :app-bot:installDist verifyResolvedProductionDependencyGraph
+          --dependency-verification=strict
+          --no-configuration-cache
+          --console=plain
 
       - name: Trivy filesystem scan
         id: trivy
