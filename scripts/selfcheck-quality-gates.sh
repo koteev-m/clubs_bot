@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKFLOW_YAML_VALIDATOR="$ROOT_DIR/scripts/validate-workflow-yaml.rb"
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/sha256-portable.sh"
 TMP_DIR="$(mktemp -d)"
@@ -866,6 +867,32 @@ normalize_top_level_permissions_contract() {
   ' "$file"
 }
 
+normalize_top_level_trigger_contract() {
+  local file="$1"
+  awk '
+    $0 == "on:" {
+      in_triggers = 1
+      blocks++
+      next
+    }
+    in_triggers && /^[^[:space:]]/ {
+      in_triggers = 0
+    }
+    in_triggers && /^[[:space:]]/ {
+      normalized = $0
+      sub(/^  /, "", normalized)
+      if (normalized !~ /^[[:space:]]*($|#)/) {
+        print normalized
+      }
+    }
+    END {
+      if (blocks != 1) {
+        exit 42
+      }
+    }
+  ' "$file"
+}
+
 validate_detekt_report_manifest() {
   local manifest_file="$1"
   python3 - "$manifest_file" "$ROOT_DIR" <<'PY'
@@ -1303,6 +1330,138 @@ validate_container_smoke_workflow() {
   ' "$file"; then
     fail "Container Smoke must use service networking and fail-closed RBAC"
   fi
+}
+
+validate_tests_workflow_contract() {
+  local file="$1"
+  local permissions_contract
+  local trigger_contract
+  local jobs_contract
+  local job_name
+  local guard_name
+  local unit_run
+  local integration_run
+  local logs_policy_run
+  local postgres_wait_run
+
+  assert_exact_line "$file" "name: Tests"
+
+  if ! trigger_contract="$(normalize_top_level_trigger_contract "$file")"; then
+    fail "Tests workflow top-level trigger block is missing or ambiguous: $file"
+  fi
+  if [ "$trigger_contract" != $'pull_request:\npush:\n  branches: [ main ]\nworkflow_dispatch:' ]; then
+    fail "Tests workflow trigger contract changed: $file"
+  fi
+
+  if grep -Eq '^[[:space:]]*(pull_request_target|workflow_run):' "$file"; then
+    fail "Tests workflow gained a privileged trigger: $file"
+  fi
+
+  if ! permissions_contract="$(normalize_top_level_permissions_contract "$file")"; then
+    fail "Tests workflow top-level permissions are missing or ambiguous: $file"
+  fi
+  if [ "$permissions_contract" != "contents: read" ]; then
+    fail "Tests workflow permissions are not read-only: $file"
+  fi
+
+  if ! jobs_contract="$(awk '
+    $0 == "jobs:" { in_jobs = 1; jobs_blocks++; next }
+    in_jobs && /^  [[:alnum:]_-]+:[[:space:]]*$/ {
+      job = $0
+      sub(/^  /, "", job)
+      sub(/:[[:space:]]*$/, "", job)
+      print job
+    }
+    END { if (jobs_blocks != 1) exit 42 }
+  ' "$file")"; then
+    fail "Tests workflow jobs block is missing or ambiguous: $file"
+  fi
+  if [ "$jobs_contract" != $'unit-tests\nintegration-tests' ]; then
+    fail "Tests workflow must contain exactly unit-tests and integration-tests: $file"
+  fi
+
+  for job_name in unit-tests integration-tests; do
+    assert_job_line "$file" "$job_name" "    runs-on: ubuntu-latest"
+    assert_job_has_no_direct_key "$file" "$job_name" "if"
+    assert_job_has_no_direct_key "$file" "$job_name" "continue-on-error"
+    assert_job_has_no_direct_key "$file" "$job_name" "permissions"
+  done
+  if grep -Fq "continue-on-error:" "$file"; then
+    fail "Tests workflow contains a fail-open continue-on-error contract: $file"
+  fi
+
+  for guard_name in \
+    "Guard: no project-level repositories" \
+    "Guard: no dynamic dependency versions" \
+    "Guard: no dynamic versions in plugin blocks" \
+    "Guard: no dynamic versions in version catalogs"; do
+    assert_exact_line "$file" "        name: \"$guard_name\""
+  done
+
+  if ! unit_run="$(normalize_step_run_contract "$file" "unit-tests" "Run unit tests (retry x3)")"; then
+    fail "unit test command is missing or ambiguous in $file"
+  fi
+  assert_step_has_no_direct_key "$file" "unit-tests" "Run unit tests (retry x3)" "if"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "unit-tests" \
+    "Run unit tests (retry x3)" \
+    "continue-on-error"
+  assert_contains \
+    "$unit_run" \
+    'if ./gradlew clean test --no-configuration-cache $extra --console=plain --stacktrace; then'
+  assert_contains "$unit_run" "exit 1"
+
+  assert_job_line "$file" "integration-tests" "    services:"
+  assert_job_line "$file" "integration-tests" "      postgres:"
+  assert_job_line "$file" "integration-tests" "        image: postgres:16-alpine@sha256:46258a3eb38adf37e77ca5bd41f93ca8b1034f925cf37190a7a8015ba151f3ca"
+
+  if ! integration_run="$(normalize_step_run_contract "$file" "integration-tests" "Run integration tests (retry x3)")"; then
+    fail "integration test command is missing or ambiguous in $file"
+  fi
+  assert_step_has_no_direct_key \
+    "$file" \
+    "integration-tests" \
+    "Run integration tests (retry x3)" \
+    "if"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "integration-tests" \
+    "Run integration tests (retry x3)" \
+    "continue-on-error"
+  assert_contains \
+    "$integration_run" \
+    'if ./gradlew test -PrunIT=true --no-configuration-cache $extra --console=plain --stacktrace; then'
+  assert_contains "$integration_run" "exit 1"
+
+  if ! logs_policy_run="$(normalize_step_run_contract "$file" "integration-tests" "Logs policy scan (SEC-02) (retry x2)")"; then
+    fail "integration logs-policy command is missing or ambiguous in $file"
+  fi
+  assert_step_has_no_direct_key \
+    "$file" \
+    "integration-tests" \
+    "Logs policy scan (SEC-02) (retry x2)" \
+    "if"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "integration-tests" \
+    "Logs policy scan (SEC-02) (retry x2)" \
+    "continue-on-error"
+  assert_contains \
+    "$logs_policy_run" \
+    'if ./gradlew :app-bot:checkLogsPolicy --no-configuration-cache $extra --no-daemon --stacktrace; then'
+  assert_contains "$logs_policy_run" "exit 1"
+
+  if ! postgres_wait_run="$(normalize_step_run_contract "$file" "integration-tests" "Wait for Postgres (5432)")"; then
+    fail "PostgreSQL readiness step is missing or ambiguous in $file"
+  fi
+  assert_step_has_no_direct_key \
+    "$file" \
+    "integration-tests" \
+    "Wait for Postgres (5432)" \
+    "if"
+  assert_contains "$postgres_wait_run" "nc -z 127.0.0.1 5432"
+  assert_contains "$postgres_wait_run" "exit 1"
 }
 
 active_workflow_lines() {
@@ -2179,6 +2338,43 @@ assert_validation_rejected() {
   echo "quality-gate: negative fixture $fixture_name rejected (exit $fixture_status)"
 }
 
+assert_workflow_yaml_rejected() {
+  local fixture_name="$1"
+  local fixture_root="$2"
+  local expected_diagnostic="$3"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+  local fixture_output
+
+  if ruby "$WORKFLOW_YAML_VALIDATOR" "$fixture_root" >"$fixture_log" 2>&1; then
+    fail "negative fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  assert_eq "$fixture_status" "1"
+  fixture_output="$(cat "$fixture_log")"
+  assert_contains "$fixture_output" "$expected_diagnostic"
+  echo "quality-gate: negative fixture $fixture_name rejected (exit $fixture_status)"
+}
+
+assert_workflow_yaml_cli_rejected() {
+  local fixture_name="$1"
+  shift
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+  local fixture_output
+
+  if ruby "$WORKFLOW_YAML_VALIDATOR" "$@" >"$fixture_log" 2>&1; then
+    fail "negative fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  assert_eq "$fixture_status" "2"
+  fixture_output="$(cat "$fixture_log")"
+  assert_contains "$fixture_output" "usage: validate-workflow-yaml.rb [repository-root]"
+  echo "quality-gate: negative fixture $fixture_name rejected (exit $fixture_status)"
+}
+
 replace_exact_line_once() {
   local source_file="$1"
   local target_file="$2"
@@ -2669,6 +2865,7 @@ dependency_submission_workflow="$ROOT_DIR/.github/workflows/dependency-submissio
 sca_workflow="$ROOT_DIR/.github/workflows/sca.yml"
 container_smoke_workflow="$ROOT_DIR/.github/workflows/container-smoke.yml"
 static_check_workflow="$ROOT_DIR/.github/workflows/static-check.yml"
+tests_workflow="$ROOT_DIR/.github/workflows/tests.yml"
 detekt_permissions_contract='contents: read
 security-events: write'
 detekt_html_report_guard="\${{ always() && hashFiles('**/build/reports/detekt/detekt*/detekt.html') != '' }}"
@@ -2734,6 +2931,188 @@ fi
 sleep 1
 done
 echo "health failed" && exit 1'
+
+workflow_cli_default_output="$(ruby "$WORKFLOW_YAML_VALIDATOR")"
+assert_contains \
+  "$workflow_cli_default_output" \
+  "quality-gate: workflow YAML syntax verified ("
+workflow_cli_explicit_output="$(ruby "$WORKFLOW_YAML_VALIDATOR" "$ROOT_DIR")"
+assert_contains \
+  "$workflow_cli_explicit_output" \
+  "quality-gate: workflow YAML syntax verified ("
+echo "quality-gate: workflow YAML validator accepts zero or one repository-root argument"
+
+assert_workflow_yaml_cli_rejected \
+  "workflow-yaml-cli-extra-argument" \
+  "$ROOT_DIR" \
+  "unexpected"
+assert_workflow_yaml_cli_rejected \
+  "workflow-yaml-cli-two-extra-arguments" \
+  "$ROOT_DIR" \
+  "unexpected" \
+  "another"
+assert_workflow_yaml_cli_rejected \
+  "workflow-yaml-cli-unknown-flag" \
+  "$ROOT_DIR" \
+  "--unknown"
+assert_workflow_yaml_cli_rejected \
+  "workflow-yaml-cli-empty-extra-argument" \
+  "$ROOT_DIR" \
+  ""
+
+validate_tests_workflow_contract "$tests_workflow"
+echo "quality-gate: Tests workflow unit/integration contract verified"
+
+workflow_unquoted_fixture="$TMP_DIR/workflow-yaml-unquoted-second-colon"
+git init -q "$workflow_unquoted_fixture"
+mkdir -p "$workflow_unquoted_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Invalid colon fixture' \
+  'on: [push]' \
+  'jobs:' \
+  '  validate:' \
+  '    runs-on: ubuntu-latest' \
+  '    steps:' \
+  '      - name: Guard: invalid fixture' \
+  '        run: echo invalid' \
+  >"$workflow_unquoted_fixture/.github/workflows/unquoted.yml"
+git -C "$workflow_unquoted_fixture" add .github/workflows/unquoted.yml
+if ! grep -Fqx \
+  '      - name: Guard: invalid fixture' \
+  "$workflow_unquoted_fixture/.github/workflows/unquoted.yml"; then
+  fail "workflow-yaml-unquoted-second-colon fixture mutation was not created"
+fi
+assert_workflow_yaml_rejected \
+  "workflow-yaml-unquoted-second-colon" \
+  "$workflow_unquoted_fixture" \
+  "workflow-yaml: .github/workflows/unquoted.yml:7:"
+
+workflow_structure_fixture="$TMP_DIR/workflow-yaml-unclosed-structure"
+git init -q "$workflow_structure_fixture"
+mkdir -p "$workflow_structure_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Invalid structure fixture' \
+  'on: [push]' \
+  'jobs:' \
+  '  validate: [ubuntu-latest' \
+  >"$workflow_structure_fixture/.github/workflows/structure.yml"
+git -C "$workflow_structure_fixture" add .github/workflows/structure.yml
+if ! grep -Fqx \
+  '  validate: [ubuntu-latest' \
+  "$workflow_structure_fixture/.github/workflows/structure.yml"; then
+  fail "workflow-yaml-unclosed-structure fixture mutation was not created"
+fi
+assert_workflow_yaml_rejected \
+  "workflow-yaml-unclosed-structure" \
+  "$workflow_structure_fixture" \
+  "workflow-yaml: .github/workflows/structure.yml:4:"
+
+workflow_yaml_extension_fixture="$TMP_DIR/workflow-yaml-extension"
+git init -q "$workflow_yaml_extension_fixture"
+mkdir -p "$workflow_yaml_extension_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Invalid yaml extension fixture' \
+  'on: [push' \
+  >"$workflow_yaml_extension_fixture/.github/workflows/invalid.yaml"
+git -C "$workflow_yaml_extension_fixture" add .github/workflows/invalid.yaml
+assert_eq \
+  "$(git -C "$workflow_yaml_extension_fixture" ls-files -- '.github/workflows/*.yaml')" \
+  ".github/workflows/invalid.yaml"
+assert_workflow_yaml_rejected \
+  "workflow-yaml-invalid-yaml-extension" \
+  "$workflow_yaml_extension_fixture" \
+  "workflow-yaml: .github/workflows/invalid.yaml:2:"
+
+workflow_mixed_fixture="$TMP_DIR/workflow-yaml-invalid-tests-among-valid"
+git init -q "$workflow_mixed_fixture"
+mkdir -p "$workflow_mixed_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Valid fixture' \
+  'on: [push]' \
+  'jobs:' \
+  '  validate:' \
+  '    runs-on: ubuntu-latest' \
+  '    steps:' \
+  '      - run: echo valid' \
+  >"$workflow_mixed_fixture/.github/workflows/valid.yml"
+printf '%s\n' \
+  'name: Tests' \
+  'on: [pull_request]' \
+  'jobs:' \
+  '  unit-tests:' \
+  '    runs-on: ubuntu-latest' \
+  '    steps:' \
+  '      - name: Guard: invalid tests fixture' \
+  '        run: echo invalid' \
+  >"$workflow_mixed_fixture/.github/workflows/tests.yml"
+git -C "$workflow_mixed_fixture" add .github/workflows/valid.yml .github/workflows/tests.yml
+assert_eq \
+  "$(git -C "$workflow_mixed_fixture" ls-files -- '.github/workflows/*.yml' | wc -l | tr -d ' ')" \
+  "2"
+if ! grep -Fqx \
+  '      - name: Guard: invalid tests fixture' \
+  "$workflow_mixed_fixture/.github/workflows/tests.yml"; then
+  fail "workflow-yaml-invalid-tests-among-valid fixture mutation was not created"
+fi
+assert_workflow_yaml_rejected \
+  "workflow-yaml-invalid-tests-among-valid" \
+  "$workflow_mixed_fixture" \
+  "workflow-yaml: .github/workflows/tests.yml:7:"
+
+workflow_empty_fixture="$TMP_DIR/workflow-yaml-empty-inventory"
+git init -q "$workflow_empty_fixture"
+assert_workflow_yaml_rejected \
+  "workflow-yaml-empty-inventory" \
+  "$workflow_empty_fixture" \
+  "workflow-yaml: no tracked workflow files found"
+
+workflow_positive_fixture="$TMP_DIR/workflow-yaml-positive-anchors"
+git init -q "$workflow_positive_fixture"
+mkdir -p "$workflow_positive_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Positive anchor fixture' \
+  'on: [push]' \
+  'jobs:' \
+  '  validate:' \
+  '    runs-on: ubuntu-latest' \
+  '    steps:' \
+  '      - &guard' \
+  '        name: "Guard: valid fixture"' \
+  '        run: echo valid' \
+  '      - *guard' \
+  >"$workflow_positive_fixture/.github/workflows/anchors.yml"
+printf '%s\n' \
+  'name: Positive yaml extension fixture' \
+  'on: [workflow_dispatch]' \
+  'jobs:' \
+  '  validate:' \
+  '    runs-on: ubuntu-latest' \
+  '    steps:' \
+  '      - run: echo valid' \
+  >"$workflow_positive_fixture/.github/workflows/valid.yaml"
+git -C "$workflow_positive_fixture" add \
+  .github/workflows/anchors.yml \
+  .github/workflows/valid.yaml
+if ! grep -Fqx '      - &guard' "$workflow_positive_fixture/.github/workflows/anchors.yml" ||
+  ! grep -Fqx '      - *guard' "$workflow_positive_fixture/.github/workflows/anchors.yml" ||
+  ! grep -Fqx \
+    '        name: "Guard: valid fixture"' \
+    "$workflow_positive_fixture/.github/workflows/anchors.yml"; then
+  fail "workflow-yaml-positive-anchors fixture was not created"
+fi
+workflow_positive_inventory="$(
+  git -C "$workflow_positive_fixture" ls-files -z -- .github/workflows |
+    tr '\0' '\n' |
+    LC_ALL=C sort
+)"
+assert_eq \
+  "$workflow_positive_inventory" \
+  $'.github/workflows/anchors.yml\n.github/workflows/valid.yaml'
+workflow_positive_output="$(ruby "$WORKFLOW_YAML_VALIDATOR" "$workflow_positive_fixture")"
+assert_contains \
+  "$workflow_positive_output" \
+  "quality-gate: workflow YAML syntax verified (2 tracked files)"
+echo "quality-gate: tracked .yml/.yaml workflows, anchors, aliases, and quoted names accepted"
 
 detekt_report_probe="$TMP_DIR/detekt-report-contract.init.gradle"
 detekt_report_probe_manifest="$TMP_DIR/detekt-report-contract.manifest"
