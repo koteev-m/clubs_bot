@@ -2117,7 +2117,10 @@ required_contracts = {
         "unresolved runtime dependencies are not rejected"
     ),
     "resolutionResult.allDependencies": "the complete dependency result set is not inspected",
-    "incoming.artifacts.artifactFiles.files": "runtime artifact files are not resolved",
+    "runtimeArtifactFiles.from(runtimeClasspath)": (
+        "runtime artifact input does not preserve runtimeClasspath build dependencies"
+    ),
+    "runtimeArtifactFiles.files": "task-owned runtime artifact input is not inspected",
     '"resolvedArtifacts" to resolvedArtifactFiles.size': "resolved artifacts are not recorded",
     "val jvmProjectPath = project.path": "JVM project identity is not captured dynamically",
     "expectedProjectPaths.add(jvmProjectPath)": "expected JVM project identities are not dynamic",
@@ -2128,6 +2131,23 @@ required_contracts = {
 for contract, message in required_contracts.items():
     if contract not in text:
         raise SystemExit(f"resolved-graph-build-contract: {message}")
+
+task_match = re.search(
+    r"abstract class ResolvedProjectDependencyGraph\s*:\s*DefaultTask\(\)\s*\{(.*?)\n\}",
+    text,
+    flags=re.DOTALL,
+)
+if task_match is None or not re.search(
+    r"@get:Classpath\s+abstract val runtimeArtifactFiles:\s*ConfigurableFileCollection",
+    task_match.group(1),
+):
+    raise SystemExit(
+        "resolved-graph-build-contract: runtime artifacts are not a declared classpath input"
+    )
+if "runtimeConfiguration.incoming.artifacts.artifactFiles.files" in text:
+    raise SystemExit(
+        "resolved-graph-build-contract: detached runtime artifact resolution bypasses task inputs"
+    )
 
 current_projects = {
     ":app-bot",
@@ -4047,6 +4067,17 @@ assert_validation_rejected \
   validate_resolved_graph_build_contract \
   "$hardcoded_graph_fixture"
 
+detached_runtime_artifact_fixture="$TMP_DIR/build-detached-runtime-artifacts.gradle.kts"
+replace_exact_line_once \
+  "$ROOT_DIR/build.gradle.kts" \
+  "$detached_runtime_artifact_fixture" \
+  "                runtimeArtifactFiles.from(runtimeClasspath)" \
+  "                runtimeArtifactFiles.from(files())"
+assert_validation_rejected \
+  "dependency-graph-detached-runtime-artifact-input" \
+  validate_resolved_graph_build_contract \
+  "$detached_runtime_artifact_fixture"
+
 empty_graph_init="$TMP_DIR/empty-resolved-graph.init.gradle"
 cat >"$empty_graph_init" <<'GRADLE'
 gradle.projectsEvaluated {
@@ -4106,9 +4137,11 @@ echo "quality-gate: negative fixture dependency-graph-missing-jvm-module rejecte
 if [ -e "$DEPENDENCY_DYNAMIC_MODULE_DIR" ]; then
   fail "temporary dependency graph fixture module path already exists"
 fi
-mkdir -p "$DEPENDENCY_DYNAMIC_MODULE_DIR"
+mkdir -p \
+  "$DEPENDENCY_DYNAMIC_MODULE_DIR/producer" \
+  "$DEPENDENCY_DYNAMIC_MODULE_DIR/consumer"
 DEPENDENCY_DYNAMIC_MODULE_OWNED=1
-cat >"$DEPENDENCY_DYNAMIC_MODULE_DIR/build.gradle.kts" <<'KOTLIN'
+cat >"$DEPENDENCY_DYNAMIC_MODULE_DIR/producer/build.gradle.kts" <<'KOTLIN'
 plugins {
     java
 }
@@ -4116,20 +4149,79 @@ plugins {
 dependencies {
     runtimeOnly(project(":core-domain"))
 }
+
+tasks.named<org.gradle.jvm.tasks.Jar>("jar") {
+    archiveFileName.set("dependency-selfcheck-producer.jar")
+    if (System.getenv("DEPENDENCY_FIXTURE_REMOVE_JAR") == "1") {
+        doLast {
+            archiveFile.get().asFile.delete()
+        }
+    }
+}
+KOTLIN
+cat >"$DEPENDENCY_DYNAMIC_MODULE_DIR/consumer/build.gradle.kts" <<'KOTLIN'
+plugins {
+    java
+}
+
+dependencies {
+    runtimeOnly(project(":dependency-selfcheck-fixture:producer"))
+}
 KOTLIN
 dependency_dynamic_init="$TMP_DIR/dependency-dynamic-module.init.gradle"
 cat >"$dependency_dynamic_init" <<'GRADLE'
 gradle.settingsEvaluated { settings ->
     def expectedRoot = new File(System.getenv('DEPENDENCY_REPOSITORY_ROOT')).canonicalFile
     if (settings.rootDir.canonicalFile == expectedRoot) {
-        settings.include(':dependency-selfcheck-fixture')
+        settings.include(
+            ':dependency-selfcheck-fixture:producer',
+            ':dependency-selfcheck-fixture:consumer'
+        )
     }
 }
 GRADLE
+dependency_producer_jar="$DEPENDENCY_DYNAMIC_MODULE_DIR/producer/build/libs/dependency-selfcheck-producer.jar"
+dependency_consumer_report="$DEPENDENCY_DYNAMIC_MODULE_DIR/consumer/build/reports/dependencies/runtime-dependencies.json"
+dependency_consumer_log="$TMP_DIR/dependency-project-artifact-producer.log"
+if [ -e "$DEPENDENCY_DYNAMIC_MODULE_DIR/producer/build" ] || [ -e "$dependency_producer_jar" ]; then
+  fail "dependency producer fixture started with stale build outputs"
+fi
+DEPENDENCY_REPOSITORY_ROOT="$ROOT_DIR" "$ROOT_DIR/gradlew" \
+  :dependency-selfcheck-fixture:consumer:verifyResolvedProductionDependencyGraph \
+  --init-script "$dependency_dynamic_init" \
+  --rerun-tasks \
+  --no-build-cache \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain >"$dependency_consumer_log" 2>&1
+if [ ! -f "$dependency_producer_jar" ]; then
+  fail "consumer graph verifier did not build its producer project JAR"
+fi
+assert_contains \
+  "$(cat "$dependency_consumer_log")" \
+  "> Task :dependency-selfcheck-fixture:producer:jar"
+python3 - "$dependency_consumer_report" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if report.get("projectPath") != ":dependency-selfcheck-fixture:consumer":
+    raise SystemExit("consumer graph fixture has the wrong project identity")
+if "project::dependency-selfcheck-fixture:producer" not in report.get(
+    "directDependencies", []
+):
+    raise SystemExit("consumer graph omitted its producer project dependency")
+if not report.get("resolvedModules") or report.get("resolvedArtifacts", 0) <= 0:
+    raise SystemExit("consumer project dependency graph/artifact set is empty")
+PY
+echo "quality-gate: clean consumer graph verifier built its producer project JAR"
+
 DEPENDENCY_REPOSITORY_ROOT="$ROOT_DIR" "$ROOT_DIR/gradlew" \
   verifyResolvedProductionDependencyGraph \
   --init-script "$dependency_dynamic_init" \
   --rerun-tasks \
+  --no-build-cache \
   --dependency-verification=strict \
   --no-configuration-cache \
   --console=plain
@@ -4140,19 +4232,57 @@ import sys
 
 report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 projects = {entry["projectPath"]: entry for entry in report["projects"]}
-fixture = projects.get(":dependency-selfcheck-fixture")
-if fixture is None:
-    raise SystemExit("future JVM module was omitted from the resolved graph")
-if "project::core-domain" not in fixture.get("directDependencies", []):
-    raise SystemExit("future JVM module project dependency was not recorded")
-if not fixture.get("resolvedModules") or fixture.get("resolvedArtifacts", 0) <= 0:
-    raise SystemExit("future JVM module runtime graph/artifact set is empty")
-if len(projects) != 8:
-    raise SystemExit("future JVM module fixture did not add exactly one project")
+producer = projects.get(":dependency-selfcheck-fixture:producer")
+consumer = projects.get(":dependency-selfcheck-fixture:consumer")
+if producer is None or consumer is None:
+    raise SystemExit("future JVM producer/consumer modules were omitted from the resolved graph")
+if "project::core-domain" not in producer.get("directDependencies", []):
+    raise SystemExit("future producer project dependency was not recorded")
+if "project::dependency-selfcheck-fixture:producer" not in consumer.get(
+    "directDependencies", []
+):
+    raise SystemExit("future consumer project dependency was not recorded")
+for fixture in (producer, consumer):
+    if not fixture.get("resolvedModules") or fixture.get("resolvedArtifacts", 0) <= 0:
+        raise SystemExit("future JVM module runtime graph/artifact set is empty")
+if len(projects) != 9:
+    raise SystemExit("future JVM fixture did not add exactly two projects")
 PY
+
+rm -rf \
+  "$DEPENDENCY_DYNAMIC_MODULE_DIR/producer/build" \
+  "$DEPENDENCY_DYNAMIC_MODULE_DIR/consumer/build"
+if [ -e "$dependency_producer_jar" ]; then
+  fail "dependency producer fixture JAR remained after fixture output cleanup"
+fi
+missing_producer_log="$TMP_DIR/dependency-graph-missing-producer-artifact.log"
+if DEPENDENCY_REPOSITORY_ROOT="$ROOT_DIR" DEPENDENCY_FIXTURE_REMOVE_JAR=1 \
+  "$ROOT_DIR/gradlew" \
+  :dependency-selfcheck-fixture:consumer:verifyResolvedProductionDependencyGraph \
+  --init-script "$dependency_dynamic_init" \
+  --rerun-tasks \
+  --no-build-cache \
+  --dependency-verification=strict \
+  --no-configuration-cache \
+  --console=plain >"$missing_producer_log" 2>&1; then
+  fail "negative fixture unexpectedly passed: dependency-graph-missing-producer-artifact"
+else
+  missing_producer_status=$?
+fi
+assert_contains \
+  "$(cat "$missing_producer_log")" \
+  "> Task :dependency-selfcheck-fixture:producer:jar"
+assert_contains \
+  "$(cat "$missing_producer_log")" \
+  "Resolved runtime artifacts are missing for :dependency-selfcheck-fixture:consumer: dependency-selfcheck-producer.jar"
+if [ -e "$dependency_producer_jar" ]; then
+  fail "missing producer artifact fixture unexpectedly left its JAR behind"
+fi
+echo "quality-gate: negative fixture dependency-graph-missing-producer-artifact rejected (exit $missing_producer_status)"
+
 rm -rf "$DEPENDENCY_DYNAMIC_MODULE_DIR"
 DEPENDENCY_DYNAMIC_MODULE_OWNED=0
-echo "quality-gate: future JVM module dynamic graph inclusion verified"
+echo "quality-gate: future JVM producer/consumer dynamic graph inclusion verified"
 
 "$ROOT_DIR/gradlew" \
   verifyResolvedProductionDependencyGraph \

@@ -18,6 +18,7 @@ import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.ProviderFactory
+import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
@@ -219,6 +220,9 @@ abstract class DependencyGuard : DefaultTask() {
 abstract class ResolvedProjectDependencyGraph : DefaultTask() {
     @get:Input
     abstract val graphJson: Property<String>
+
+    @get:Classpath
+    abstract val runtimeArtifactFiles: ConfigurableFileCollection
 
     @get:OutputFile
     abstract val reportFile: RegularFileProperty
@@ -1281,6 +1285,7 @@ subprojects {
             tasks.register<ResolvedProjectDependencyGraph>("verifyResolvedProductionDependencyGraph") {
                 group = "verification"
                 description = "Resolve the runtime dependency graph for ${project.path}"
+                runtimeArtifactFiles.from(runtimeClasspath)
                 graphJson.set(
                     providers.provider {
                         val runtimeConfiguration = runtimeClasspath.get()
@@ -1329,7 +1334,7 @@ subprojects {
                                 }.distinct()
                                 .sorted()
                         val resolvedArtifactFiles =
-                            runtimeConfiguration.incoming.artifacts.artifactFiles.files
+                            runtimeArtifactFiles.files
                                 .sortedBy { artifact -> artifact.absolutePath }
                         val missingArtifactFiles =
                             resolvedArtifactFiles.filterNot { artifact -> artifact.isFile }
