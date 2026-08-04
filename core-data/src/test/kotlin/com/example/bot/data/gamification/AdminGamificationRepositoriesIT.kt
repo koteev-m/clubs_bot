@@ -267,7 +267,7 @@ class AdminGamificationRepositoriesIT : PostgresClubIntegrationTest() {
         runBlocking {
             val clubId = insertClub("Settings Club")
             val clock = Clock.fixed(UPDATED_INSTANT, ZoneOffset.UTC)
-            val repo = GamificationSettingsRepository(database)
+            val repo = GamificationSettingsRepository(database, clock)
             val adminRepo = AdminGamificationSettingsRepositoryImpl(repo, clock)
 
             val saved =
