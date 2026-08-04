@@ -388,6 +388,19 @@ assert_exact_line() {
   fi
 }
 
+assert_exact_line_count() {
+  local file="$1"
+  local expected="$2"
+  local expected_count="$3"
+  local actual_count
+  actual_count="$(
+    awk -v expected="$expected" '$0 == expected { count++ } END { print count + 0 }' "$file"
+  )"
+  if [ "$actual_count" -ne "$expected_count" ]; then
+    fail "expected $expected_count exact lines in $file, found $actual_count: $expected"
+  fi
+}
+
 assert_step_line() {
   local file="$1"
   local step_name="$2"
@@ -571,6 +584,57 @@ normalize_step_run_contract() {
     }
     END {
       if (jobs != 1 || steps != 1 || run_blocks != 1) {
+        exit 42
+      }
+    }
+  ' "$file"
+}
+
+normalize_anchored_step_run_contract() {
+  local file="$1"
+  local anchor_name="$2"
+  local step_name="$3"
+  awk \
+    -v anchor_target="      - &$anchor_name" \
+    -v name_target="        name: \"$step_name\"" '
+    function indentation(line, indent) {
+      indent = line
+      sub(/[^ ].*$/, "", indent)
+      return length(indent)
+    }
+    function is_content(line) {
+      return line !~ /^[[:space:]]*($|#)/
+    }
+    $0 == anchor_target {
+      in_step = 1
+      anchors++
+      next
+    }
+    in_step && /^      - / {
+      in_step = 0
+      in_run = 0
+    }
+    in_step && $0 == name_target {
+      names++
+    }
+    in_step && $0 ~ /^        (if|continue-on-error):/ {
+      forbidden_keys++
+    }
+    in_step && $0 == "        run: |" {
+      in_run = 1
+      run_blocks++
+      next
+    }
+    in_run && is_content($0) && indentation($0) <= 8 {
+      in_run = 0
+    }
+    in_run && is_content($0) {
+      normalized = $0
+      sub(/^[[:space:]]+/, "", normalized)
+      print normalized
+    }
+    END {
+      if (anchors != 1 || names != 1 || run_blocks != 1 || forbidden_keys != 0) {
         exit 42
       }
     }
@@ -1343,6 +1407,7 @@ validate_tests_workflow_contract() {
   local integration_run
   local logs_policy_run
   local postgres_wait_run
+  local repository_guard_run
 
   assert_exact_line "$file" "name: Tests"
 
@@ -1397,6 +1462,66 @@ validate_tests_workflow_contract() {
     "Guard: no dynamic versions in version catalogs"; do
     assert_exact_line "$file" "        name: \"$guard_name\""
   done
+
+  if ! repository_guard_run="$(
+    normalize_anchored_step_run_contract \
+      "$file" \
+      "guard-no-project-repositories" \
+      "Guard: no project-level repositories"
+  )"; then
+    fail "Gradle repository guard step is missing, ambiguous, or fail-open in $file"
+  fi
+  assert_eq \
+    "$repository_guard_run" \
+    $'./gradlew help \\\n--dependency-verification=strict \\\n--no-configuration-cache \\\n--no-build-cache \\\n--console=plain'
+  assert_job_line "$file" "unit-tests" "      - &guard-no-project-repositories"
+  assert_job_line "$file" "integration-tests" "      - *guard-no-project-repositories"
+
+  if ! awk '
+    $0 == "  unit-tests:" {
+      in_job = 1
+      jobs++
+      next
+    }
+    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ { in_job = 0 }
+    in_job && $0 == "      - &validate-wrapper" && stage == 0 { stage = 1; next }
+    in_job && $0 == "      - &setup-jdk" && stage == 1 { stage = 2; next }
+    in_job && $0 == "      - &setup-gradle" && stage == 2 { stage = 3; next }
+    in_job && $0 == "      - &env-versions" && stage == 3 { stage = 4; next }
+    in_job && $0 == "      - &guard-no-project-repositories" && stage == 4 {
+      stage = 5
+      next
+    }
+    in_job && $0 == "      - name: Run unit tests (retry x3)" && stage == 5 {
+      stage = 6
+    }
+    END { exit !(jobs == 1 && stage == 6) }
+  ' "$file"; then
+    fail "unit-tests repository guard must run after Wrapper/JDK/Gradle setup and before tests: $file"
+  fi
+
+  if ! awk '
+    $0 == "  integration-tests:" {
+      in_job = 1
+      jobs++
+      next
+    }
+    in_job && /^  [[:alnum:]_-]+:[[:space:]]*$/ { in_job = 0 }
+    in_job && $0 == "      - *validate-wrapper" && stage == 0 { stage = 1; next }
+    in_job && $0 == "      - *setup-jdk" && stage == 1 { stage = 2; next }
+    in_job && $0 == "      - *setup-gradle" && stage == 2 { stage = 3; next }
+    in_job && $0 == "      - *env-versions" && stage == 3 { stage = 4; next }
+    in_job && $0 == "      - *guard-no-project-repositories" && stage == 4 {
+      stage = 5
+      next
+    }
+    in_job && $0 == "      - name: Wait for Postgres (5432)" && stage == 5 {
+      stage = 6
+    }
+    END { exit !(jobs == 1 && stage == 6) }
+  ' "$file"; then
+    fail "integration-tests repository guard must run after Wrapper/JDK/Gradle setup and before tests: $file"
+  fi
 
   if ! unit_run="$(normalize_step_run_contract "$file" "unit-tests" "Run unit tests (retry x3)")"; then
     fail "unit test command is missing or ambiguous in $file"
@@ -2375,6 +2500,110 @@ assert_workflow_yaml_cli_rejected() {
   echo "quality-gate: negative fixture $fixture_name rejected (exit $fixture_status)"
 }
 
+write_native_gradle_repository_settings() {
+  local fixture_root="$1"
+  mkdir -p "$fixture_root"
+  cat >"$fixture_root/settings.gradle.kts" <<'KOTLIN'
+import org.gradle.api.initialization.resolve.RepositoriesMode
+
+rootProject.name = "repository-policy-fixture"
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+    }
+}
+KOTLIN
+}
+
+assert_native_gradle_repository_policy_rejected() {
+  local fixture_name="$1"
+  local fixture_root="$2"
+  local expected_build_file="$3"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+  local fixture_output
+
+  if "$ROOT_DIR/gradlew" \
+    -p "$fixture_root" \
+    help \
+    --dependency-verification=strict \
+    --no-configuration-cache \
+    --no-build-cache \
+    --console=plain >"$fixture_log" 2>&1; then
+    fail "native Gradle repository-policy fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+
+  assert_eq "$fixture_status" "1"
+  fixture_output="$(cat "$fixture_log")"
+  assert_contains \
+    "$fixture_output" \
+    "Build was configured to prefer settings repositories over project repositories"
+  assert_contains "$fixture_output" "was added by build file '$expected_build_file'"
+  assert_not_contains "$fixture_output" "Script compilation error"
+  assert_not_contains "$fixture_output" "Unresolved reference"
+  echo "quality-gate: native Gradle fixture $fixture_name rejected (exit $fixture_status)"
+}
+
+assert_native_gradle_repository_policy_accepted() {
+  local fixture_name="$1"
+  local fixture_root="$2"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+  local fixture_output
+
+  if "$ROOT_DIR/gradlew" \
+    -p "$fixture_root" \
+    help \
+    --dependency-verification=strict \
+    --no-configuration-cache \
+    --no-build-cache \
+    --console=plain >"$fixture_log" 2>&1; then
+    fixture_status=0
+  else
+    fixture_status=$?
+  fi
+
+  assert_eq "$fixture_status" "0"
+  fixture_output="$(cat "$fixture_log")"
+  assert_contains "$fixture_output" "BUILD SUCCESSFUL"
+  echo "quality-gate: native Gradle fixture $fixture_name accepted (exit $fixture_status)"
+}
+
+assert_tests_workflow_contract_rejected() {
+  local fixture_name="$1"
+  local fixture_file="$2"
+  local fixture_root="$TMP_DIR/$fixture_name-repository"
+  local fixture_workflow="$fixture_root/.github/workflows/tests.yml"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+
+  git init -q "$fixture_root"
+  mkdir -p "$fixture_root/.github/workflows"
+  cp "$fixture_file" "$fixture_workflow"
+  git -C "$fixture_root" add .github/workflows/tests.yml
+  assert_eq \
+    "$(git -C "$fixture_root" ls-files)" \
+    ".github/workflows/tests.yml"
+  if ! ruby "$WORKFLOW_YAML_VALIDATOR" "$fixture_root" \
+    >"$TMP_DIR/$fixture_name-yaml.log" 2>&1; then
+    fail "workflow contract fixture is not valid YAML: $fixture_name"
+  fi
+
+  if (validate_tests_workflow_contract "$fixture_workflow") \
+    >"$fixture_log" 2>&1; then
+    fail "Tests workflow contract fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  assert_eq "$fixture_status" "1"
+  assert_contains "$(cat "$fixture_log")" "selfcheck:"
+  echo "quality-gate: Tests workflow fixture $fixture_name rejected (exit $fixture_status)"
+}
+
 replace_exact_line_once() {
   local source_file="$1"
   local target_file="$2"
@@ -2703,6 +2932,116 @@ replace_step_line_once() {
     ' "$source_file" >"$target_file"
 }
 
+insert_anchored_step_direct_line() {
+  local source_file="$1"
+  local target_file="$2"
+  local anchor_name="$3"
+  local step_name="$4"
+  local insertion="$5"
+  awk \
+    -v anchor_target="      - &$anchor_name" \
+    -v name_target="        name: \"$step_name\"" \
+    -v insertion="$insertion" '
+      $0 == anchor_target {
+        in_step = 1
+        anchors++
+        print
+        next
+      }
+      in_step && /^      - / { in_step = 0 }
+      in_step && $0 == name_target {
+        names++
+        print
+        print insertion
+        inserted++
+        next
+      }
+      { print }
+      END {
+        if (anchors != 1 || names != 1 || inserted != 1) {
+          exit 42
+        }
+      }
+    ' "$source_file" >"$target_file"
+}
+
+remove_tests_repository_guard() {
+  local source_file="$1"
+  local target_file="$2"
+  python3 - "$source_file" "$target_file" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+anchor = "      - &guard-no-project-repositories"
+alias = "      - *guard-no-project-repositories"
+anchor_indexes = [
+    index for index, line in enumerate(lines) if line.rstrip("\r\n") == anchor
+]
+alias_indexes = [
+    index for index, line in enumerate(lines) if line.rstrip("\r\n") == alias
+]
+if len(anchor_indexes) != 1 or len(alias_indexes) != 1:
+    raise SystemExit("remove_tests_repository_guard: guard anchor/alias is ambiguous")
+
+anchor_start = anchor_indexes[0]
+anchor_end = len(lines)
+for index in range(anchor_start + 1, len(lines)):
+    logical = lines[index].rstrip("\r\n")
+    if logical.startswith("      - "):
+        anchor_end = index
+        break
+
+removed = lines[anchor_start:anchor_end]
+if not any("Guard: no project-level repositories" in line for line in removed):
+    raise SystemExit("remove_tests_repository_guard: target step name not found")
+
+alias_index = alias_indexes[0]
+kept = [
+    line
+    for index, line in enumerate(lines)
+    if not (anchor_start <= index < anchor_end) and index != alias_index
+]
+target.write_text("".join(kept), encoding="utf-8")
+PY
+}
+
+move_exact_line_before() {
+  local source_file="$1"
+  local target_file="$2"
+  local moving_line="$3"
+  local before_line="$4"
+  python3 - "$source_file" "$target_file" "$moving_line" "$before_line" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+moving_line = sys.argv[3]
+before_line = sys.argv[4]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+
+moving = [
+    index for index, line in enumerate(lines) if line.rstrip("\r\n") == moving_line
+]
+before = [
+    index for index, line in enumerate(lines) if line.rstrip("\r\n") == before_line
+]
+if len(moving) != 1 or len(before) != 1:
+    raise SystemExit("move_exact_line_before: moving/target line is ambiguous")
+
+line = lines.pop(moving[0])
+before_index = next(
+    index for index, candidate in enumerate(lines)
+    if candidate.rstrip("\r\n") == before_line
+)
+lines.insert(before_index, line)
+target.write_text("".join(lines), encoding="utf-8")
+PY
+}
+
 move_build_labels_outside_with() {
   local source_file="$1"
   local target_file="$2"
@@ -2963,6 +3302,44 @@ assert_workflow_yaml_cli_rejected \
 validate_tests_workflow_contract "$tests_workflow"
 echo "quality-gate: Tests workflow unit/integration contract verified"
 
+root_settings_file="$ROOT_DIR/settings.gradle.kts"
+buildsrc_build_file="$ROOT_DIR/buildSrc/build.gradle.kts"
+buildsrc_settings_file="$ROOT_DIR/buildSrc/settings.gradle.kts"
+
+assert_exact_line \
+  "$root_settings_file" \
+  "import org.gradle.api.initialization.resolve.RepositoriesMode"
+assert_exact_line "$root_settings_file" "dependencyResolutionManagement {"
+assert_exact_line \
+  "$root_settings_file" \
+  "    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)"
+assert_exact_line_count "$root_settings_file" "        mavenCentral()" "2"
+assert_exact_line_count \
+  "$root_settings_file" \
+  '        maven("https://maven-central.storage-download.googleapis.com/maven2") {' \
+  "2"
+if grep -Eq 'mavenLocal\(|http://|credentials[[:space:]]*\{' "$root_settings_file"; then
+  fail "root settings contain an unapproved repository contract"
+fi
+
+assert_exact_line \
+  "$buildsrc_settings_file" \
+  "import org.gradle.api.initialization.resolve.RepositoriesMode"
+assert_exact_line "$buildsrc_settings_file" 'rootProject.name = "buildSrc"'
+assert_exact_line "$buildsrc_settings_file" "pluginManagement {"
+assert_exact_line "$buildsrc_settings_file" "dependencyResolutionManagement {"
+assert_exact_line \
+  "$buildsrc_settings_file" \
+  "    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)"
+assert_exact_line "$buildsrc_settings_file" "        gradlePluginPortal()"
+assert_exact_line "$buildsrc_settings_file" "        mavenCentral()"
+buildsrc_build_contract="$(cat "$buildsrc_build_file")"
+assert_eq "$buildsrc_build_contract" $'plugins {\n    `kotlin-dsl`\n}'
+if grep -Eq 'https?://|mavenLocal\(|credentials[[:space:]]*\{' "$buildsrc_settings_file"; then
+  fail "buildSrc settings contain an unapproved repository URL"
+fi
+echo "quality-gate: root and buildSrc settings-level repository contracts verified"
+
 workflow_unquoted_fixture="$TMP_DIR/workflow-yaml-unquoted-second-colon"
 git init -q "$workflow_unquoted_fixture"
 mkdir -p "$workflow_unquoted_fixture/.github/workflows"
@@ -3113,6 +3490,213 @@ assert_contains \
   "$workflow_positive_output" \
   "quality-gate: workflow YAML syntax verified (2 tracked files)"
 echo "quality-gate: tracked .yml/.yaml workflows, anchors, aliases, and quoted names accepted"
+
+native_gradle_standard_fixture="$TMP_DIR/native-gradle-repositories-standard"
+write_native_gradle_repository_settings "$native_gradle_standard_fixture"
+cat >"$native_gradle_standard_fixture/build.gradle.kts" <<'KOTLIN'
+repositories {
+    mavenCentral()
+}
+KOTLIN
+assert_exact_line "$native_gradle_standard_fixture/build.gradle.kts" "repositories {"
+assert_native_gradle_repository_policy_rejected \
+  "native-gradle-repositories-standard" \
+  "$native_gradle_standard_fixture" \
+  "build.gradle.kts"
+
+native_gradle_allprojects_fixture="$TMP_DIR/native-gradle-repositories-allprojects"
+write_native_gradle_repository_settings "$native_gradle_allprojects_fixture"
+cat >"$native_gradle_allprojects_fixture/build.gradle.kts" <<'KOTLIN'
+allprojects {
+    repositories {
+        mavenCentral()
+    }
+}
+KOTLIN
+assert_exact_line "$native_gradle_allprojects_fixture/build.gradle.kts" "allprojects {"
+assert_native_gradle_repository_policy_rejected \
+  "native-gradle-repositories-allprojects" \
+  "$native_gradle_allprojects_fixture" \
+  "build.gradle.kts"
+
+native_gradle_qualified_fixture="$TMP_DIR/native-gradle-repositories-qualified"
+write_native_gradle_repository_settings "$native_gradle_qualified_fixture"
+cat >"$native_gradle_qualified_fixture/build.gradle.kts" <<'KOTLIN'
+project.repositories {
+    mavenCentral()
+}
+KOTLIN
+assert_exact_line \
+  "$native_gradle_qualified_fixture/build.gradle.kts" \
+  "project.repositories {"
+assert_native_gradle_repository_policy_rejected \
+  "native-gradle-repositories-qualified" \
+  "$native_gradle_qualified_fixture" \
+  "build.gradle.kts"
+
+native_gradle_regular_interpolation_fixture="$TMP_DIR/native-gradle-regular-interpolation"
+write_native_gradle_repository_settings "$native_gradle_regular_interpolation_fixture"
+cat >"$native_gradle_regular_interpolation_fixture/build.gradle.kts" <<'KOTLIN'
+val configured = "${repositories { mavenCentral() }}"
+KOTLIN
+assert_exact_line \
+  "$native_gradle_regular_interpolation_fixture/build.gradle.kts" \
+  'val configured = "${repositories { mavenCentral() }}"'
+assert_native_gradle_repository_policy_rejected \
+  "native-gradle-regular-interpolation" \
+  "$native_gradle_regular_interpolation_fixture" \
+  "build.gradle.kts"
+
+native_gradle_triple_interpolation_fixture="$TMP_DIR/native-gradle-triple-interpolation"
+write_native_gradle_repository_settings "$native_gradle_triple_interpolation_fixture"
+cat >"$native_gradle_triple_interpolation_fixture/build.gradle.kts" <<'KOTLIN'
+val configured = """${repositories { mavenCentral() }}"""
+KOTLIN
+assert_exact_line \
+  "$native_gradle_triple_interpolation_fixture/build.gradle.kts" \
+  'val configured = """${repositories { mavenCentral() }}"""'
+assert_native_gradle_repository_policy_rejected \
+  "native-gradle-triple-interpolation" \
+  "$native_gradle_triple_interpolation_fixture" \
+  "build.gradle.kts"
+
+native_gradle_regular_string_fixture="$TMP_DIR/native-gradle-regular-string"
+write_native_gradle_repository_settings "$native_gradle_regular_string_fixture"
+cat >"$native_gradle_regular_string_fixture/build.gradle.kts" <<'KOTLIN'
+val text = "repositories { mavenCentral() }"
+KOTLIN
+assert_exact_line \
+  "$native_gradle_regular_string_fixture/build.gradle.kts" \
+  'val text = "repositories { mavenCentral() }"'
+assert_native_gradle_repository_policy_accepted \
+  "native-gradle-regular-string" \
+  "$native_gradle_regular_string_fixture"
+
+native_gradle_triple_string_fixture="$TMP_DIR/native-gradle-triple-string"
+write_native_gradle_repository_settings "$native_gradle_triple_string_fixture"
+cat >"$native_gradle_triple_string_fixture/build.gradle.kts" <<'KOTLIN'
+val text = """
+repositories {
+    mavenCentral()
+}
+"""
+KOTLIN
+assert_exact_line "$native_gradle_triple_string_fixture/build.gradle.kts" 'val text = """'
+assert_native_gradle_repository_policy_accepted \
+  "native-gradle-triple-string" \
+  "$native_gradle_triple_string_fixture"
+
+native_gradle_comment_fixture="$TMP_DIR/native-gradle-comment"
+write_native_gradle_repository_settings "$native_gradle_comment_fixture"
+cat >"$native_gradle_comment_fixture/build.gradle.kts" <<'KOTLIN'
+// repositories { mavenCentral() }
+KOTLIN
+assert_exact_line \
+  "$native_gradle_comment_fixture/build.gradle.kts" \
+  "// repositories { mavenCentral() }"
+assert_native_gradle_repository_policy_accepted \
+  "native-gradle-comment" \
+  "$native_gradle_comment_fixture"
+
+native_gradle_settings_only_fixture="$TMP_DIR/native-gradle-settings-only"
+write_native_gradle_repository_settings "$native_gradle_settings_only_fixture"
+cat >"$native_gradle_settings_only_fixture/build.gradle.kts" <<'KOTLIN'
+val marker = "settings repositories only"
+KOTLIN
+assert_exact_line \
+  "$native_gradle_settings_only_fixture/settings.gradle.kts" \
+  "        mavenCentral()"
+assert_native_gradle_repository_policy_accepted \
+  "native-gradle-settings-only" \
+  "$native_gradle_settings_only_fixture"
+
+native_gradle_buildsrc_fixture="$TMP_DIR/native-gradle-buildsrc"
+write_native_gradle_repository_settings "$native_gradle_buildsrc_fixture"
+printf '%s\n' 'val marker = "root fixture"' \
+  >"$native_gradle_buildsrc_fixture/build.gradle.kts"
+mkdir -p "$native_gradle_buildsrc_fixture/buildSrc"
+cp "$buildsrc_settings_file" "$native_gradle_buildsrc_fixture/buildSrc/settings.gradle.kts"
+cp "$buildsrc_build_file" "$native_gradle_buildsrc_fixture/buildSrc/build.gradle.kts"
+if ! cmp -s \
+  "$buildsrc_settings_file" \
+  "$native_gradle_buildsrc_fixture/buildSrc/settings.gradle.kts"; then
+  fail "native buildSrc fixture did not preserve the settings contract"
+fi
+cat >>"$native_gradle_buildsrc_fixture/buildSrc/build.gradle.kts" <<'KOTLIN'
+
+repositories {
+    mavenCentral()
+}
+KOTLIN
+assert_exact_line \
+  "$native_gradle_buildsrc_fixture/buildSrc/build.gradle.kts" \
+  "repositories {"
+assert_native_gradle_repository_policy_rejected \
+  "native-gradle-buildsrc" \
+  "$native_gradle_buildsrc_fixture" \
+  "buildSrc/build.gradle.kts"
+
+tests_guard_removed_fixture="$TMP_DIR/tests-guard-removed.yml"
+remove_tests_repository_guard "$tests_workflow" "$tests_guard_removed_fixture"
+assert_not_contains \
+  "$(cat "$tests_guard_removed_fixture")" \
+  "Guard: no project-level repositories"
+assert_tests_workflow_contract_rejected \
+  "tests-guard-removed" \
+  "$tests_guard_removed_fixture"
+
+tests_guard_before_setup_fixture="$TMP_DIR/tests-guard-before-setup.yml"
+move_exact_line_before \
+  "$tests_workflow" \
+  "$tests_guard_before_setup_fixture" \
+  "      - *guard-no-project-repositories" \
+  "      - *validate-wrapper"
+assert_tests_workflow_contract_rejected \
+  "tests-guard-before-setup" \
+  "$tests_guard_before_setup_fixture"
+
+tests_guard_continue_fixture="$TMP_DIR/tests-guard-continue-on-error.yml"
+insert_anchored_step_direct_line \
+  "$tests_workflow" \
+  "$tests_guard_continue_fixture" \
+  "guard-no-project-repositories" \
+  "Guard: no project-level repositories" \
+  "        continue-on-error: true"
+assert_tests_workflow_contract_rejected \
+  "tests-guard-continue-on-error" \
+  "$tests_guard_continue_fixture"
+
+tests_guard_fail_open_fixture="$TMP_DIR/tests-guard-fail-open.yml"
+replace_exact_line_once \
+  "$tests_workflow" \
+  "$tests_guard_fail_open_fixture" \
+  "            --console=plain" \
+  "            --console=plain || true"
+assert_tests_workflow_contract_rejected \
+  "tests-guard-fail-open" \
+  "$tests_guard_fail_open_fixture"
+
+tests_guard_without_strict_fixture="$TMP_DIR/tests-guard-without-strict.yml"
+replace_exact_line_once \
+  "$tests_workflow" \
+  "$tests_guard_without_strict_fixture" \
+  "            --dependency-verification=strict \\" \
+  "            # strict dependency verification removed"
+assert_tests_workflow_contract_rejected \
+  "tests-guard-without-strict" \
+  "$tests_guard_without_strict_fixture"
+
+tests_integration_guard_removed_fixture="$TMP_DIR/tests-integration-guard-removed.yml"
+replace_exact_line_once \
+  "$tests_workflow" \
+  "$tests_integration_guard_removed_fixture" \
+  "      - *guard-no-project-repositories" \
+  "      # integration repository guard removed"
+assert_tests_workflow_contract_rejected \
+  "tests-integration-guard-removed" \
+  "$tests_integration_guard_removed_fixture"
+
+echo "quality-gate: native Gradle repository policy and Tests workflow regressions verified"
 
 detekt_report_probe="$TMP_DIR/detekt-report-contract.init.gradle"
 detekt_report_probe_manifest="$TMP_DIR/detekt-report-contract.manifest"

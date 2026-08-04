@@ -25,58 +25,6 @@ jobs:
         name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
-      - &guard-no-project-repositories
-        name: "Guard: no project-level repositories"
-        run: |
-          set -euo pipefail
-          files=$(git ls-files '**/build.gradle' '**/build.gradle.kts' || true)
-          [ -z "$files" ] && exit 0
-
-          violations=0
-          tmp="$(mktemp)"
-          for f in $files; do
-            sed -E ':a;/\/\*/{N;/\*\//!ba;s/\/\*.*\*\///g}; s,//.*$,,' "$f" > "$tmp"
-
-            if grep -nE '^[[:space:]]*repositories[[:space:]]*\{' "$tmp"; then
-              echo "::error file=$f::Disallowed 'repositories { }' block in $f"
-              violations=1
-              continue
-            fi
-
-            if ! awk -v file="$f" '
-              function trim(s) {
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
-                return s
-              }
-              { lines[NR] = $0 }
-              END {
-                bad = 0
-                for (i = 1; i <= NR; i++) {
-                  if (match(lines[i], /^[[:space:]]*repositories[[:space:]]*$/)) {
-                    j = i + 1
-                    while (j <= NR) {
-                      line = trim(lines[j])
-                      if (line == "") {
-                        j++
-                        continue
-                      }
-                      if (line ~ /^\{/ ) {
-                        printf("::error file=%s::Disallowed 'repositories { }' block (newline style) near line %d\n", file, i)
-                        bad = 1
-                      }
-                      break
-                    }
-                  }
-                }
-                exit bad
-              }
-            ' "$tmp"; then
-              violations=1
-            fi
-          done
-          rm -f "$tmp"
-          exit $violations
-
       - &guard-no-dynamic-versions
         name: "Guard: no dynamic dependency versions"
         run: |
@@ -225,6 +173,15 @@ jobs:
           java -version
           ./gradlew --version
 
+      - &guard-no-project-repositories
+        name: "Guard: no project-level repositories"
+        run: |
+          ./gradlew help \
+            --dependency-verification=strict \
+            --no-configuration-cache \
+            --no-build-cache \
+            --console=plain
+
       - name: Run unit tests (retry x3)
         env:
           CI: "true"
@@ -273,7 +230,6 @@ jobs:
 
     steps:
       - *checkout
-      - *guard-no-project-repositories
       - *guard-no-dynamic-versions
       - *guard-no-dynamic-plugins
       - *guard-no-dynamic-catalogs
@@ -281,6 +237,7 @@ jobs:
       - *setup-jdk
       - *setup-gradle
       - *env-versions
+      - *guard-no-project-repositories
 
       - name: Wait for Postgres (5432)
         run: |
