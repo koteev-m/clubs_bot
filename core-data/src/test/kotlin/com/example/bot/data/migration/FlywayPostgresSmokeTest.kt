@@ -43,8 +43,16 @@ class FlywayPostgresSmokeTest {
         container.start()
         resourcesToClose += AutoCloseable { container.stop() }
 
-        migrateAndTrack(container.jdbcUrl, container.username, container.password, container.driverClassName, "postgresql", resourcesToClose)
+        migrateAndTrack(
+            container.jdbcUrl,
+            container.username,
+            container.password,
+            container.driverClassName,
+            "postgresql",
+            resourcesToClose,
+        )
         withConnection(resourcesToClose) { connection ->
+            assertPaymentsSchema(connection, vendor = "postgresql")
             assertUuidDefault(connection)
             assertJsonColumnType(connection, expectedType = "jsonb")
             assertGuestListLimitRemovedPostgres(connection)

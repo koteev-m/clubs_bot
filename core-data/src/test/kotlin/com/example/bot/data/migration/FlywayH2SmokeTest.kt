@@ -22,6 +22,7 @@ class FlywayH2SmokeTest {
         migrateAndTrack(jdbcUrl, "sa", "", "org.h2.Driver", "h2", resourcesToClose)
 
         withConnection(resourcesToClose) { connection ->
+            assertPaymentsSchema(connection, vendor = "h2")
             assertUuidDefault(connection)
             assertJsonColumnType(connection, expectedType = "json")
             assertGuestListLimitRemoved(connection)
@@ -44,18 +45,22 @@ class FlywayH2SmokeTest {
         }
     }
 
-    private fun assertTableExists(connection: Connection, tableName: String) {
-        connection.prepareStatement(
-            """
-            SELECT 1
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE lower(TABLE_NAME) = ?
-            """.trimIndent(),
-        ).use { statement ->
-            statement.setString(1, tableName.lowercase())
-            statement.executeQuery().use { resultSet ->
-                check(resultSet.next()) { "Expected table $tableName to exist" }
+    private fun assertTableExists(
+        connection: Connection,
+        tableName: String,
+    ) {
+        connection
+            .prepareStatement(
+                """
+                SELECT 1
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE lower(TABLE_NAME) = ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, tableName.lowercase())
+                statement.executeQuery().use { resultSet ->
+                    check(resultSet.next()) { "Expected table $tableName to exist" }
+                }
             }
-        }
     }
 }

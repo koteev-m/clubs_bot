@@ -4,8 +4,8 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.assertThrows
-import java.math.BigDecimal
 import java.sql.Connection
+import java.sql.DatabaseMetaData
 import java.sql.SQLException
 import java.sql.Statement
 import java.sql.Types
@@ -55,13 +55,17 @@ internal fun assertUuidDefault(connection: Connection) {
     val key = "smoke-" + UUID.randomUUID()
     connection
         .prepareStatement(
-            "INSERT INTO payments (provider, currency, amount, status, idempotency_key) VALUES (?, ?, ?, ?, ?)",
+            """
+            INSERT INTO payments (provider, currency, amount_minor, status, payload, idempotency_key)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
         ).use { statement ->
             statement.setString(1, "stripe")
             statement.setString(2, "USD")
-            statement.setBigDecimal(3, BigDecimal("10.00"))
-            statement.setString(4, "INITIATED")
-            statement.setString(5, key)
+            statement.setLong(3, 1_000L)
+            statement.setString(4, "PENDING")
+            statement.setString(5, "payload-$key")
+            statement.setString(6, key)
             statement.executeUpdate()
         }
 
@@ -74,6 +78,61 @@ internal fun assertUuidDefault(connection: Connection) {
         }
     }
 }
+
+internal fun assertPaymentsSchema(
+    connection: Connection,
+    vendor: String,
+) {
+    val metadata = connection.metaData
+    val schemaPattern = connection.schema
+    val columns = mutableMapOf<String, PaymentColumnSchema>()
+    metadata.getColumns(connection.catalog, schemaPattern, "payments", null).use { resultSet ->
+        while (resultSet.next()) {
+            val name = resultSet.getString("COLUMN_NAME").lowercase()
+            columns[name] =
+                PaymentColumnSchema(
+                    jdbcType = resultSet.getInt("DATA_TYPE"),
+                    typeName = resultSet.getString("TYPE_NAME"),
+                    nullable = resultSet.getInt("NULLABLE"),
+                )
+        }
+    }
+
+    val actual =
+        columns.entries
+            .sortedBy { it.key }
+            .joinToString { (name, column) ->
+                "$name(type=${column.typeName}, nullable=${column.nullable})"
+            }
+    check("amount" !in columns) {
+        "$vendor payments schema still contains legacy amount; actual columns: $actual"
+    }
+
+    val amountMinor = columns["amount_minor"]
+    checkNotNull(amountMinor) {
+        "$vendor payments.amount_minor is missing; actual columns: $actual"
+    }
+    check(amountMinor.jdbcType == Types.BIGINT) {
+        "$vendor payments.amount_minor must be BIGINT, was ${amountMinor.typeName}; actual columns: $actual"
+    }
+    check(amountMinor.nullable == DatabaseMetaData.columnNoNulls) {
+        "$vendor payments.amount_minor must be NOT NULL; actual columns: $actual"
+    }
+
+    val payload = columns["payload"]
+    checkNotNull(payload) {
+        "$vendor payments.payload is missing; actual columns: $actual"
+    }
+    check(payload.nullable == DatabaseMetaData.columnNoNulls) {
+        "$vendor payments.payload must be NOT NULL; actual columns: $actual"
+    }
+}
+
+private data class PaymentColumnSchema(
+    val jdbcType: Int,
+    val typeName: String,
+    val nullable: Int,
+)
 
 internal fun assertJsonColumnType(
     connection: Connection,
@@ -95,36 +154,39 @@ internal fun assertJsonColumnType(
 }
 
 internal fun assertGuestListLimitRemoved(connection: Connection) {
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT 1
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE lower(TABLE_NAME) = 'guest_lists' AND lower(COLUMN_NAME) = 'limit'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(!rs.next()) { "legacy column guest_lists.limit should be absent" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(!rs.next()) { "legacy column guest_lists.limit should be absent" }
+            }
         }
-    }
 
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT IS_NULLABLE, COLUMN_DEFAULT
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE lower(TABLE_NAME) = 'guest_lists' AND lower(COLUMN_NAME) = 'capacity'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(rs.next()) { "guest_lists.capacity column not found" }
-            val nullable = rs.getString("IS_NULLABLE").equals("YES", ignoreCase = true)
-            check(!nullable) { "guest_lists.capacity must be NOT NULL" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(rs.next()) { "guest_lists.capacity column not found" }
+                val nullable = rs.getString("IS_NULLABLE").equals("YES", ignoreCase = true)
+                check(!nullable) { "guest_lists.capacity must be NOT NULL" }
+            }
         }
-    }
 }
 
 internal fun assertCheckinsSchema(connection: Connection) {
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE lower(TABLE_NAME) = 'checkins' AND lower(COLUMN_NAME) = 'subject_id'
@@ -133,41 +195,44 @@ internal fun assertCheckinsSchema(connection: Connection) {
             statement.executeQuery().use { rs ->
                 check(rs.next()) { "checkins.subject_id column not found" }
                 val type = rs.getString("DATA_TYPE")
-                val isVarchar = type.equals("VARCHAR", ignoreCase = true) ||
-                    type.equals("CHARACTER VARYING", ignoreCase = true)
+                val isVarchar =
+                    type.equals("VARCHAR", ignoreCase = true) ||
+                        type.equals("CHARACTER VARYING", ignoreCase = true)
                 check(isVarchar) { "checkins.subject_id must be VARCHAR but was $type" }
                 val length = rs.getInt("CHARACTER_MAXIMUM_LENGTH")
                 check(length >= 64) { "checkins.subject_id length expected >= 64 but was $length" }
             }
         }
 
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT CHECK_CLAUSE
         FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
         WHERE lower(CONSTRAINT_NAME) = 'checkins_deny_reason_consistency'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(rs.next()) { "checkins_deny_reason_consistency constraint missing" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(rs.next()) { "checkins_deny_reason_consistency constraint missing" }
+            }
         }
-    }
 }
 
 internal fun assertGuestListStatusConstraintH2(connection: Connection) {
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT 1
         FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
         WHERE lower(CONSTRAINT_NAME) = 'guest_lists_status_check'
           AND lower(TABLE_NAME) = 'guest_lists'
           AND upper(CONSTRAINT_TYPE) = 'CHECK'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(rs.next()) { "guest_lists_status_check constraint missing" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(rs.next()) { "guest_lists_status_check constraint missing" }
+            }
         }
-    }
 }
 
 internal fun assertCheckinsConstraintEnforced(connection: Connection) {
@@ -192,7 +257,10 @@ internal fun assertCheckinsConstraintEnforced(connection: Connection) {
     }
 }
 
-internal fun assertGuestListStatuses(connection: Connection, baseTime: OffsetDateTime) {
+internal fun assertGuestListStatuses(
+    connection: Connection,
+    baseTime: OffsetDateTime,
+) {
     val previousAutoCommit = connection.autoCommit
     connection.autoCommit = true
     try {
@@ -216,7 +284,10 @@ internal fun assertGuestListStatuses(connection: Connection, baseTime: OffsetDat
     }
 }
 
-internal fun insertBaseFixture(connection: Connection, baseTime: OffsetDateTime): GuestListFixture {
+internal fun insertBaseFixture(
+    connection: Connection,
+    baseTime: OffsetDateTime,
+): GuestListFixture {
     val userId = insertUser(connection)
     val clubId = insertClub(connection)
     val eventId = insertEvent(connection, clubId, baseTime)
@@ -224,102 +295,119 @@ internal fun insertBaseFixture(connection: Connection, baseTime: OffsetDateTime)
 }
 
 internal fun insertUser(connection: Connection): Long =
-    connection.prepareStatement(
-        """
-        INSERT INTO users (username, display_name, telegram_user_id, phone_e164)
-        VALUES (?, ?, NULL, NULL)
-        """.trimIndent(),
-        Statement.RETURN_GENERATED_KEYS,
-    ).use { statement ->
-        statement.setString(1, "smoke_user")
-        statement.setString(2, "Smoke User")
-        statement.executeUpdate()
+    connection
+        .prepareStatement(
+            """
+            INSERT INTO users (username, display_name, telegram_user_id, phone_e164)
+            VALUES (?, ?, NULL, NULL)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setString(1, "smoke_user")
+            statement.setString(2, "Smoke User")
+            statement.executeUpdate()
 
-        statement.generatedKeys.use { keys ->
-            check(keys.next()) { "User id not returned" }
-            keys.getLong(1)
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "User id not returned" }
+                keys.getLong(1)
+            }
         }
-    }
 
 internal fun insertClub(connection: Connection): Long =
-    connection.prepareStatement(
-        """
-        INSERT INTO clubs (
-            name, description, timezone, admin_channel_id, bookings_topic_id, checkin_topic_id, qa_topic_id
-        ) VALUES (?, NULL, ?, NULL, NULL, NULL, NULL)
-        """.trimIndent(),
-        Statement.RETURN_GENERATED_KEYS,
-    ).use { statement ->
-        statement.setString(1, "Smoke Club")
-        statement.setString(2, "Europe/Moscow")
-        statement.executeUpdate()
+    connection
+        .prepareStatement(
+            """
+            INSERT INTO clubs (
+                name, description, timezone, admin_channel_id, bookings_topic_id, checkin_topic_id, qa_topic_id
+            ) VALUES (?, NULL, ?, NULL, NULL, NULL, NULL)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setString(1, "Smoke Club")
+            statement.setString(2, "Europe/Moscow")
+            statement.executeUpdate()
 
-        statement.generatedKeys.use { keys ->
-            check(keys.next()) { "Club id not returned" }
-            keys.getLong(1)
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "Club id not returned" }
+                keys.getLong(1)
+            }
         }
-    }
 
-internal fun insertEvent(connection: Connection, clubId: Long, baseTime: OffsetDateTime): Long =
-    connection.prepareStatement(
-        """
-        INSERT INTO events (club_id, title, start_at, end_at, is_special, poster_url)
-        VALUES (?, ?, ?, ?, ?, NULL)
-        """.trimIndent(),
-        Statement.RETURN_GENERATED_KEYS,
-    ).use { statement ->
-        statement.setLong(1, clubId)
-        statement.setString(2, "Smoke Event")
-        statement.setObject(3, baseTime)
-        statement.setObject(4, baseTime.plusHours(2))
-        statement.setBoolean(5, false)
-        statement.executeUpdate()
+internal fun insertEvent(
+    connection: Connection,
+    clubId: Long,
+    baseTime: OffsetDateTime,
+): Long =
+    connection
+        .prepareStatement(
+            """
+            INSERT INTO events (club_id, title, start_at, end_at, is_special, poster_url)
+            VALUES (?, ?, ?, ?, ?, NULL)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setLong(1, clubId)
+            statement.setString(2, "Smoke Event")
+            statement.setObject(3, baseTime)
+            statement.setObject(4, baseTime.plusHours(2))
+            statement.setBoolean(5, false)
+            statement.executeUpdate()
 
-        statement.generatedKeys.use { keys ->
-            check(keys.next()) { "Event id not returned" }
-            keys.getLong(1)
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "Event id not returned" }
+                keys.getLong(1)
+            }
         }
-    }
 
-internal fun insertGuestList(connection: Connection, fixture: GuestListFixture, status: String): Long =
-    connection.prepareStatement(
-        """
-        INSERT INTO guest_lists (
-            club_id, event_id, owner_type, owner_user_id, title, capacity,
-            arrival_window_start, arrival_window_end, status
-        ) VALUES (?, ?, 'ADMIN', ?, ?, ?, ?, ?, ?)
-        """.trimIndent(),
-        Statement.RETURN_GENERATED_KEYS,
-    ).use { statement ->
-        statement.setLong(1, fixture.clubId)
-        statement.setLong(2, fixture.eventId)
-        statement.setLong(3, fixture.userId)
-        statement.setString(4, "Smoke list ${UUID.randomUUID()}")
-        statement.setInt(5, 10)
-        statement.setNull(6, Types.TIMESTAMP_WITH_TIMEZONE)
-        statement.setNull(7, Types.TIMESTAMP_WITH_TIMEZONE)
-        statement.setString(8, status)
-        statement.executeUpdate()
+internal fun insertGuestList(
+    connection: Connection,
+    fixture: GuestListFixture,
+    status: String,
+): Long =
+    connection
+        .prepareStatement(
+            """
+            INSERT INTO guest_lists (
+                club_id, event_id, owner_type, owner_user_id, title, capacity,
+                arrival_window_start, arrival_window_end, status
+            ) VALUES (?, ?, 'ADMIN', ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            Statement.RETURN_GENERATED_KEYS,
+        ).use { statement ->
+            statement.setLong(1, fixture.clubId)
+            statement.setLong(2, fixture.eventId)
+            statement.setLong(3, fixture.userId)
+            statement.setString(4, "Smoke list ${UUID.randomUUID()}")
+            statement.setInt(5, 10)
+            statement.setNull(6, Types.TIMESTAMP_WITH_TIMEZONE)
+            statement.setNull(7, Types.TIMESTAMP_WITH_TIMEZONE)
+            statement.setString(8, status)
+            statement.executeUpdate()
 
-        statement.generatedKeys.use { keys ->
-            check(keys.next()) { "Guest list id not returned" }
-            keys.getLong(1)
+            statement.generatedKeys.use { keys ->
+                check(keys.next()) { "Guest list id not returned" }
+                keys.getLong(1)
+            }
         }
-    }
 
-internal fun insertGuestListEntry(connection: Connection, guestListId: Long, status: String) {
-    connection.prepareStatement(
-        """
-        INSERT INTO guest_list_entries (guest_list_id, full_name, display_name, status)
-        VALUES (?, ?, ?, ?)
-        """.trimIndent(),
-    ).use { statement ->
-        statement.setLong(1, guestListId)
-        statement.setString(2, "Smoke Guest")
-        statement.setString(3, "Smoke Guest")
-        statement.setString(4, status)
-        statement.executeUpdate()
-    }
+internal fun insertGuestListEntry(
+    connection: Connection,
+    guestListId: Long,
+    status: String,
+) {
+    connection
+        .prepareStatement(
+            """
+            INSERT INTO guest_list_entries (guest_list_id, full_name, display_name, status)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setLong(1, guestListId)
+            statement.setString(2, "Smoke Guest")
+            statement.setString(3, "Smoke Guest")
+            statement.setString(4, status)
+            statement.executeUpdate()
+        }
 }
 
 internal data class GuestListFixture(
@@ -329,71 +417,76 @@ internal data class GuestListFixture(
 )
 
 internal fun assertGuestListLimitRemovedPostgres(connection: Connection) {
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT 1
         FROM information_schema.columns
         WHERE table_schema = current_schema()
           AND table_name = 'guest_lists'
           AND column_name = 'limit'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(!rs.next()) { "legacy column guest_lists.limit should be absent" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(!rs.next()) { "legacy column guest_lists.limit should be absent" }
+            }
         }
-    }
 
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT is_nullable
         FROM information_schema.columns
         WHERE table_schema = current_schema()
           AND table_name = 'guest_lists'
           AND column_name = 'capacity'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(rs.next()) { "guest_lists.capacity column not found" }
-            val nullable = rs.getString("is_nullable").equals("YES", ignoreCase = true)
-            check(!nullable) { "guest_lists.capacity must be NOT NULL" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(rs.next()) { "guest_lists.capacity column not found" }
+                val nullable = rs.getString("is_nullable").equals("YES", ignoreCase = true)
+                check(!nullable) { "guest_lists.capacity must be NOT NULL" }
+            }
         }
-    }
 }
 
 internal fun assertCheckinsSchemaPostgres(connection: Connection) {
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT data_type
         FROM information_schema.columns
         WHERE table_schema = current_schema()
           AND table_name = 'checkins'
           AND column_name = 'subject_id'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(rs.next()) { "checkins.subject_id column not found" }
-            val type = rs.getString("data_type")
-            check(type.equals("text", ignoreCase = true)) { "checkins.subject_id must be TEXT but was $type" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(rs.next()) { "checkins.subject_id column not found" }
+                val type = rs.getString("data_type")
+                check(type.equals("text", ignoreCase = true)) { "checkins.subject_id must be TEXT but was $type" }
+            }
         }
-    }
 
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT 1
         FROM information_schema.check_constraints
         WHERE constraint_schema = current_schema()
           AND constraint_name = 'checkins_deny_reason_consistency'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(rs.next()) { "checkins_deny_reason_consistency constraint missing" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(rs.next()) { "checkins_deny_reason_consistency constraint missing" }
+            }
         }
-    }
 }
 
 internal fun assertGuestListStatusConstraintPostgres(connection: Connection) {
-    connection.prepareStatement(
-        """
+    connection
+        .prepareStatement(
+            """
         SELECT 1
         FROM information_schema.table_constraints
         WHERE constraint_schema = current_schema()
@@ -401,11 +494,11 @@ internal fun assertGuestListStatusConstraintPostgres(connection: Connection) {
           AND constraint_name = 'guest_lists_status_check'
           AND constraint_type = 'CHECK'
         """,
-    ).use { statement ->
-        statement.executeQuery().use { rs ->
-            check(rs.next()) { "guest_lists_status_check constraint missing" }
+        ).use { statement ->
+            statement.executeQuery().use { rs ->
+                check(rs.next()) { "guest_lists_status_check constraint missing" }
+            }
         }
-    }
 }
 
 internal fun assertCheckinsConstraintEnforcedPostgres(connection: Connection) {
