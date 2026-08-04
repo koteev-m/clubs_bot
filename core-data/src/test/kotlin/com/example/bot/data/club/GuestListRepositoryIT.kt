@@ -413,7 +413,7 @@ class GuestListRepositoryIT : PostgresClubIntegrationTest() {
                         it[telegramUserId] = null
                         it[plusOnesAllowed] = 0
                         it[plusOnesUsed] = 0
-                        it[category] = "DEFAULT"
+                        it[category] = "REGULAR"
                         it[comment] = null
                         it[status] = GuestListEntryStatus.PLANNED.name
                         it[checkedInAt] = null
@@ -553,7 +553,7 @@ class GuestListRepositoryIT : PostgresClubIntegrationTest() {
                         it[telegramUserId] = null
                         it[plusOnesAllowed] = 0
                         it[plusOnesUsed] = 0
-                        it[category] = "DEFAULT"
+                        it[category] = "REGULAR"
                         it[comment] = null
                         it[status] = GuestListEntryStatus.PLANNED.name
                         it[checkedInAt] = null

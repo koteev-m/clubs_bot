@@ -5,12 +5,14 @@ import com.example.bot.audit.CustomAuditAction
 import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.audit.AuditLogTable
+import com.example.bot.data.db.Clubs
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -32,12 +34,13 @@ class AuditLogRepositoryIT : PostgresIntegrationTest() {
         runBlocking {
             val clock = Clock.fixed(Instant.parse("2025-04-01T08:15:00Z"), ZoneOffset.UTC)
             val repo = AuditLogRepositoryImpl(database, clock)
+            val clubId = insertClub("Audit Club")
             val meta = buildJsonObject { put("bookingId", "abc") }
             val fingerprint = UUID.randomUUID().toString()
             val id =
                 repo.append(
                     AuditLogEvent(
-                        clubId = 7L,
+                        clubId = clubId,
                         nightId = null,
                         actorUserId = 42L,
                         actorRole = null,
@@ -66,11 +69,12 @@ class AuditLogRepositoryIT : PostgresIntegrationTest() {
     fun `append is idempotent for fingerprint`() =
         runBlocking {
             val repo = AuditLogRepositoryImpl(database)
+            val clubId = insertClub("Idempotency Club")
             val fingerprint = "fingerprint-1"
             val id =
                 repo.append(
                     AuditLogEvent(
-                        clubId = 1L,
+                        clubId = clubId,
                         nightId = null,
                         actorUserId = 10L,
                         actorRole = null,
@@ -85,7 +89,7 @@ class AuditLogRepositoryIT : PostgresIntegrationTest() {
             val secondId =
                 repo.append(
                     AuditLogEvent(
-                        clubId = 1L,
+                        clubId = clubId,
                         nightId = null,
                         actorUserId = 10L,
                         actorRole = null,
@@ -112,10 +116,11 @@ class AuditLogRepositoryIT : PostgresIntegrationTest() {
     fun `append sanitizes metadata`() =
         runBlocking {
             val repo = AuditLogRepositoryImpl(database)
+            val clubId = insertClub("Metadata Club")
             val id =
                 repo.append(
                     AuditLogEvent(
-                        clubId = 3L,
+                        clubId = clubId,
                         nightId = null,
                         actorUserId = 99L,
                         actorRole = null,
@@ -153,5 +158,16 @@ class AuditLogRepositoryIT : PostgresIntegrationTest() {
             assertEquals("[REDACTED]", parsed["contact"]?.jsonPrimitive?.content)
             assertEquals("[REDACTED]", parsed["notes"]?.jsonPrimitive?.content)
             assertEquals("ok", parsed["safe"]?.jsonPrimitive?.content)
+        }
+
+    private fun insertClub(name: String): Long =
+        transaction(database) {
+            val id =
+                Clubs.insert {
+                    it[Clubs.name] = name
+                    it[description] = "Audit fixture"
+                    it[timezone] = "UTC"
+                } get Clubs.id
+            id.value.toLong()
         }
 }
