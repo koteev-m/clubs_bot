@@ -6,6 +6,7 @@ import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.audit.AuditLogger
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.core.BookingHoldRepository
@@ -20,6 +21,8 @@ import com.example.bot.data.promo.PromoLinkRepositoryImpl
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.data.security.Role
+import com.example.bot.data.security.UserRepository
+import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.opschat.NoopOpsNotificationPublisher
@@ -36,6 +39,9 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.install
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.mockk.mockk
@@ -113,10 +119,10 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                         single<BookingTemplateRepository> {
                             BookingTemplateRepositoryImpl(get(), get())
                         }
-                        single { ExposedUserRepository(get()) }
-                        single { ExposedUserRoleRepository(get()) }
+                        single<UserRepository> { ExposedUserRepository(get()) }
+                        single<UserRoleRepository> { ExposedUserRoleRepository(get()) }
                         single { NotificationsOutboxRepository(get()) }
-                        single { AuditLogRepositoryImpl(get(), get()) }
+                        single<AuditLogRepository> { AuditLogRepositoryImpl(get(), get()) }
                         single { AuditLogger(get()) }
                         single { BookingRepository(get(), get()) }
                         single { BookingHoldRepository(get(), get()) }
@@ -218,6 +224,7 @@ class PromoTemplateE2EIT : PostgresAppTest() {
                 """.trimIndent()
             testApplication {
                 application {
+                    install(ContentNegotiation) { json() }
                     routing {
                         webhookRoute(
                             security = {
