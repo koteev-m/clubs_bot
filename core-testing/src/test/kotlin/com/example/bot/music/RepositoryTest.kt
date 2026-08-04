@@ -44,7 +44,10 @@ class RepositoryTest {
                 Flyway
                     .configure()
                     .dataSource(pg.jdbcUrl, pg.username, pg.password)
-                    .load()
+                    .locations(
+                        "classpath:db/migration/common",
+                        "classpath:db/migration/postgresql",
+                    ).load()
                     .migrate()
                 val db =
                     Database.connect(
@@ -85,7 +88,10 @@ class RepositoryTest {
                 Flyway
                     .configure()
                     .dataSource(pg.jdbcUrl, pg.username, pg.password)
-                    .load()
+                    .locations(
+                        "classpath:db/migration/common",
+                        "classpath:db/migration/postgresql",
+                    ).load()
                     .migrate()
                 val db =
                     Database.connect(

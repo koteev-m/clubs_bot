@@ -33,7 +33,14 @@ class MigrationTest {
     fun `migrations apply`() {
         PostgreSQLContainer<Nothing>("postgres:15-alpine").use { pg ->
             pg.start()
-            val flyway = Flyway.configure().dataSource(pg.jdbcUrl, pg.username, pg.password).load()
+            val flyway =
+                Flyway
+                    .configure()
+                    .dataSource(pg.jdbcUrl, pg.username, pg.password)
+                    .locations(
+                        "classpath:db/migration/common",
+                        "classpath:db/migration/postgresql",
+                    ).load()
             flyway.migrate()
             pg.createConnection("")!!.use { conn ->
                 val rs = conn.createStatement().executeQuery("select to_regclass('music_items')")
