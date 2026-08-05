@@ -145,7 +145,9 @@ class BookingService(
 
                 is BookingCoreResult.Failure -> {
                     when (result.error) {
-                        BookingCoreError.ActiveHoldExists -> {
+                        BookingCoreError.DuplicateActiveBooking,
+                        BookingCoreError.ActiveHoldExists,
+                        -> {
                             log("booking.hold", req.clubId, "duplicate_active", null, entityId = null)
                             BookingCmdResult.DuplicateActiveBooking
                         }
@@ -240,7 +242,13 @@ class BookingService(
                                         )
                                         BookingCmdResult.AlreadyBooked(confirmedBooking.id) to notification
                                     } else {
-                                        log("booking.confirm", null, "hold_not_found", null, entityId = holdId.toString())
+                                        log(
+                                            "booking.confirm",
+                                            null,
+                                            "hold_not_found",
+                                            null,
+                                            entityId = holdId.toString(),
+                                        )
                                         BookingCmdResult.NotFound to notification
                                     }
                                 }
@@ -251,7 +259,13 @@ class BookingService(
                                 }
 
                                 BookingCoreError.ActiveHoldExists -> {
-                                    log("booking.confirm", null, "active_hold_exists", null, entityId = holdId.toString())
+                                    log(
+                                        "booking.confirm",
+                                        null,
+                                        "active_hold_exists",
+                                        null,
+                                        entityId = holdId.toString(),
+                                    )
                                     BookingCmdResult.DuplicateActiveBooking to notification
                                 }
 
@@ -267,7 +281,8 @@ class BookingService(
 
                                 BookingCoreError.TableNotFound,
                                 BookingCoreError.EventNotFound,
-                                BookingCoreError.UnexpectedFailure -> {
+                                BookingCoreError.UnexpectedFailure,
+                                -> {
                                     log("booking.confirm", null, "unexpected", null, entityId = holdId.toString())
                                     throw IllegalStateException("unexpected booking error: ${booked.error}")
                                 }
@@ -303,20 +318,20 @@ class BookingService(
 
             promoAttribution.attachPending(record.id, telegramUserId)
 
-        val payload =
-            buildJsonObject {
-                put("bookingId", record.id.toString())
-                put("tableId", record.tableId)
-                put("clubId", record.clubId)
-            }
-        outboxRepository.enqueue("booking.confirmed", payload)
-        log(
-            action = "booking.finalize",
-            clubId = record.clubId,
-            outcome = "sent",
-            meta = payload,
-            entityId = record.id.toString(),
-        )
+            val payload =
+                buildJsonObject {
+                    put("bookingId", record.id.toString())
+                    put("tableId", record.tableId)
+                    put("clubId", record.clubId)
+                }
+            outboxRepository.enqueue("booking.confirmed", payload)
+            log(
+                action = "booking.finalize",
+                clubId = record.clubId,
+                outcome = "sent",
+                meta = payload,
+                entityId = record.id.toString(),
+            )
             BookingCmdResult.Booked(record.id)
         }
 
@@ -415,12 +430,24 @@ class BookingService(
 
                     BookingCoreError.OptimisticRetryExceeded -> {
                         val refreshed = bookingRepository.findById(bookingId) ?: current
-                        log(action, clubId, "retry_exceeded", metaFor(bookingId, refreshed.status), entityId = bookingId.toString())
+                        log(
+                            action,
+                            clubId,
+                            "retry_exceeded",
+                            metaFor(bookingId, refreshed.status),
+                            entityId = bookingId.toString(),
+                        )
                         BookingStatusUpdateResult.Conflict(refreshed)
                     }
 
                     else -> {
-                        log(action, clubId, "unexpected", metaFor(bookingId, current.status), entityId = bookingId.toString())
+                        log(
+                            action,
+                            clubId,
+                            "unexpected",
+                            metaFor(bookingId, current.status),
+                            entityId = bookingId.toString(),
+                        )
                         throw IllegalStateException("unexpected booking status update error: ${updated.error}")
                     }
                 }
