@@ -2,7 +2,9 @@ package com.example.bot.data.repo
 
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.BookingStatus
+import com.example.bot.data.db.DbErrorReason
 import com.example.bot.data.db.isUniqueViolation
+import com.example.bot.data.db.withRetriedTx
 import com.example.bot.payments.PaymentsRepository
 import com.example.bot.payments.PaymentsRepository.Action
 import com.example.bot.payments.PaymentsRepository.CancelExecution
@@ -31,6 +33,10 @@ import org.jetbrains.exposed.sql.javatime.timestamp
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.vendors.ForUpdateOption
+import org.jetbrains.exposed.sql.vendors.H2Dialect
+import org.jetbrains.exposed.sql.vendors.PostgreSQLDialect
+import org.jetbrains.exposed.sql.vendors.currentDialect
 import java.sql.Connection
 import java.time.Clock
 import java.time.Instant
@@ -273,15 +279,17 @@ class PaymentsRepositoryImpl(
     ): CancelExecution {
         require(idempotencyKey.isNotBlank()) { "cancel idempotency key must not be blank" }
         val callerContext = currentCoroutineContext()
-        return newSuspendedTransaction(
-            context = Dispatchers.IO,
-            db = db,
-            transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
-        ) {
-            repetitionAttempts = 1
-            val result = executeCancelTransaction(clubId, bookingId, idempotencyKey, reason)
-            callerContext.ensureActive()
-            result
+        return withAtomicPaymentRetry("payment-cancel-atomic") {
+            newSuspendedTransaction(
+                context = Dispatchers.IO,
+                db = db,
+                transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
+            ) {
+                repetitionAttempts = 1
+                val result = executeCancelTransaction(clubId, bookingId, idempotencyKey, reason)
+                callerContext.ensureActive()
+                result
+            }
         }
     }
 
@@ -293,23 +301,37 @@ class PaymentsRepositoryImpl(
     ): RefundExecution {
         validateRefundFingerprint(fingerprint)
         val callerContext = currentCoroutineContext()
-        return newSuspendedTransaction(
-            context = Dispatchers.IO,
-            db = db,
-            transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
-        ) {
-            repetitionAttempts = 1
-            val result =
-                executeRefundTransaction(
-                    clubId = clubId,
-                    bookingId = bookingId,
-                    idempotencyKey = idempotencyKey,
-                    fingerprint = fingerprint,
-                )
-            callerContext.ensureActive()
-            result
+        return withAtomicPaymentRetry("payment-refund-atomic") {
+            newSuspendedTransaction(
+                context = Dispatchers.IO,
+                db = db,
+                transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
+            ) {
+                repetitionAttempts = 1
+                val result =
+                    executeRefundTransaction(
+                        clubId = clubId,
+                        bookingId = bookingId,
+                        idempotencyKey = idempotencyKey,
+                        fingerprint = fingerprint,
+                    )
+                callerContext.ensureActive()
+                result
+            }
         }
     }
+
+    private suspend fun <T> withAtomicPaymentRetry(
+        blockName: String,
+        block: suspend () -> T,
+    ): T =
+        withRetriedTx(
+            name = blockName,
+            manageTransaction = false,
+            maxRetries = ATOMIC_PAYMENT_MAX_RETRIES,
+            retryableReasons = ATOMIC_PAYMENT_RETRY_REASONS,
+            block = block,
+        )
 
     override suspend fun updateStatus(
         id: UUID,
@@ -396,12 +418,7 @@ class PaymentsRepositoryImpl(
         reason: String?,
     ): CancelExecution {
         val bookingRow =
-            BookingsTable
-                .selectAll()
-                .where { (BookingsTable.id eq bookingId) and (BookingsTable.clubId eq clubId) }
-                .forUpdate()
-                .limit(1)
-                .firstOrNull()
+            lockBookingForPaymentOperation(clubId, bookingId)
                 ?: return CancelExecution.NotFound
         return when (
             val claim =
@@ -535,18 +552,30 @@ class PaymentsRepositoryImpl(
         idempotencyKey: String,
         fingerprint: RefundFingerprint,
     ): RefundExecution {
-        val bookingExists =
-            BookingsTable
-                .selectAll()
-                .where { (BookingsTable.id eq bookingId) and (BookingsTable.clubId eq clubId) }
-                .forUpdate()
-                .limit(1)
-                .any()
+        val bookingExists = lockBookingForPaymentOperation(clubId, bookingId) != null
         return if (bookingExists) {
             executeRefundForLockedBooking(bookingId, idempotencyKey, fingerprint)
         } else {
             RefundExecution.Conflict(NOTHING_TO_REFUND_REASON, idempotent = false)
         }
+    }
+
+    private fun lockBookingForPaymentOperation(
+        clubId: Long,
+        bookingId: UUID,
+    ): ResultRow? {
+        val query =
+            BookingsTable
+                .selectAll()
+                .where { (BookingsTable.id eq bookingId) and (BookingsTable.clubId eq clubId) }
+                .limit(1)
+        val lockedQuery =
+            when (currentDialect) {
+                is PostgreSQLDialect -> query.forUpdate(ForUpdateOption.PostgreSQL.ForNoKeyUpdate)
+                is H2Dialect -> query.forUpdate()
+                else -> error("Atomic payment booking lock is unsupported for ${currentDialect.name}")
+            }
+        return lockedQuery.firstOrNull()
     }
 
     private fun executeRefundForLockedBooking(
@@ -950,6 +979,12 @@ class PaymentsRepositoryImpl(
     }
 
     private companion object {
+        private const val ATOMIC_PAYMENT_MAX_RETRIES = 2
+        private val ATOMIC_PAYMENT_RETRY_REASONS =
+            setOf(
+                DbErrorReason.DEADLOCK,
+                DbErrorReason.SERIALIZATION,
+            )
         private const val CAPTURED_STATUS = "CAPTURED"
         private const val REFUNDED_STATUS = "REFUNDED"
         private const val PROCESSING_STATUS = "PROCESSING"

@@ -7,6 +7,7 @@ import io.kotest.matchers.equals.shouldBeEqual
 import io.mockk.every
 import io.mockk.mockk
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import org.jetbrains.exposed.exceptions.ExposedSQLException
 import org.jetbrains.exposed.sql.Database
@@ -90,19 +91,119 @@ class DbTransactionsTest :
             metrics.failures.get() shouldBe 1
         }
 
+        "payment policy retries one deadlock then succeeds" {
+            var attempts = 0
+
+            val result =
+                withRetriedTx(
+                    name = "payment-policy-deadlock",
+                    manageTransaction = false,
+                    maxRetries = 2,
+                    retryableReasons = setOf(DbErrorReason.DEADLOCK, DbErrorReason.SERIALIZATION),
+                ) {
+                    attempts += 1
+                    if (attempts == 1) throw sqlException("40P01")
+                    "ok"
+                }
+
+            result shouldBe "ok"
+            attempts shouldBe 2
+        }
+
+        "payment policy retries one serialization failure then succeeds" {
+            var attempts = 0
+
+            val result =
+                withRetriedTx(
+                    name = "payment-policy-serialization",
+                    manageTransaction = false,
+                    maxRetries = 2,
+                    retryableReasons = setOf(DbErrorReason.DEADLOCK, DbErrorReason.SERIALIZATION),
+                ) {
+                    attempts += 1
+                    if (attempts == 1) throw sqlException("40001")
+                    "ok"
+                }
+
+            result shouldBe "ok"
+            attempts shouldBe 2
+        }
+
+        "payment policy never retries cancellation" {
+            var attempts = 0
+
+            shouldThrow<CancellationException> {
+                withRetriedTx(
+                    name = "payment-policy-cancellation",
+                    manageTransaction = false,
+                    maxRetries = 2,
+                    retryableReasons = setOf(DbErrorReason.DEADLOCK, DbErrorReason.SERIALIZATION),
+                ) {
+                    attempts += 1
+                    throw CancellationException("cancelled")
+                }
+            }
+
+            attempts shouldBe 1
+        }
+
+        "payment policy never retries business validation" {
+            var attempts = 0
+
+            shouldThrow<IllegalArgumentException> {
+                withRetriedTx(
+                    name = "payment-policy-validation",
+                    manageTransaction = false,
+                    maxRetries = 2,
+                    retryableReasons = setOf(DbErrorReason.DEADLOCK, DbErrorReason.SERIALIZATION),
+                ) {
+                    attempts += 1
+                    throw IllegalArgumentException("validation")
+                }
+            }
+
+            attempts shouldBe 1
+        }
+
+        "payment policy never retries unknown sql state" {
+            var attempts = 0
+
+            shouldThrow<SQLException> {
+                withRetriedTx(
+                    name = "payment-policy-unknown",
+                    manageTransaction = false,
+                    maxRetries = 2,
+                    retryableReasons = setOf(DbErrorReason.DEADLOCK, DbErrorReason.SERIALIZATION),
+                ) {
+                    attempts += 1
+                    throw sqlException("ZZ999")
+                }
+            }
+
+            attempts shouldBe 1
+        }
+
         "circuit breaker opens and recovers" {
             val metrics = InMemoryDbMetrics()
             DbMetricsHolder.configure(metrics)
             val fakeClock = MutableClock()
-            circuitBreaker = DatabaseCircuitBreaker(
-                CircuitBreakerConfig(
-                    failureThreshold = 2,
-                    failureWindow = Duration.ofSeconds(30),
-                    openDuration = Duration.ofSeconds(10),
-                ),
-                fakeClock,
-            )
-            transactionExecutor = QueueExecutor(ArrayDeque(generateSequence { SQLTransientConnectionException("conn", "08006") }.take(5).toList()))
+            circuitBreaker =
+                DatabaseCircuitBreaker(
+                    CircuitBreakerConfig(
+                        failureThreshold = 2,
+                        failureWindow = Duration.ofSeconds(30),
+                        openDuration = Duration.ofSeconds(10),
+                    ),
+                    fakeClock,
+                )
+            transactionExecutor =
+                QueueExecutor(
+                    ArrayDeque(
+                        generateSequence {
+                            SQLTransientConnectionException("conn", "08006")
+                        }.take(5).toList(),
+                    ),
+                )
 
             shouldThrow<DatabaseUnavailableException> {
                 withRetriedTx(name = "breaker") { "never" }
@@ -171,7 +272,13 @@ class DbErrorClassifierTest :
         }
 
         "backoff is exponential without jitter" {
-            val cfg = RetryConfig(maxRetries = 3, baseBackoff = Duration.ofMillis(10), maxBackoff = Duration.ofMillis(80), jitter = Duration.ZERO)
+            val cfg =
+                RetryConfig(
+                    maxRetries = 3,
+                    baseBackoff = Duration.ofMillis(10),
+                    maxBackoff = Duration.ofMillis(80),
+                    jitter = Duration.ZERO,
+                )
             computeBackoffMillis(1, cfg) shouldBe 10
             computeBackoffMillis(2, cfg) shouldBe 20
             computeBackoffMillis(3, cfg) shouldBe 40
@@ -179,8 +286,14 @@ class DbErrorClassifierTest :
         }
     })
 
-private class QueueExecutor(private val failures: ArrayDeque<Throwable>) : TransactionExecutor {
-    override suspend fun <T> execute(readOnly: Boolean, database: Database?, block: suspend () -> T): T {
+private class QueueExecutor(
+    private val failures: ArrayDeque<Throwable>,
+) : TransactionExecutor {
+    override suspend fun <T> execute(
+        readOnly: Boolean,
+        database: Database?,
+        block: suspend () -> T,
+    ): T {
         if (failures.isNotEmpty()) {
             throw failures.removeFirst()
         }
