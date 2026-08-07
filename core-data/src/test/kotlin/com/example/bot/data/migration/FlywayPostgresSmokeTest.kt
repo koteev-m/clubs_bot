@@ -53,6 +53,12 @@ class FlywayPostgresSmokeTest {
         )
         withConnection(resourcesToClose) { connection ->
             assertPaymentsSchema(connection, vendor = "postgresql")
+            assertAtomicRefundIndexes(connection)
+            assertAtomicRefundSourceConstraints(connection)
+            assertPostgresRefundCompositeForeignKeys(connection)
+            assertPostgresRefundWriterCompatibility(connection)
+            assertPostgresRefundQueryUsesBookingIndex(connection)
+            assertPostgresRefundTrustedSearchPath(connection)
             assertUuidDefault(connection)
             assertJsonColumnType(connection, expectedType = "jsonb")
             assertGuestListLimitRemovedPostgres(connection)
@@ -61,5 +67,22 @@ class FlywayPostgresSmokeTest {
             assertGuestListStatusConstraintPostgres(connection)
             assertGuestListStatuses(connection, baseTime)
         }
+    }
+
+    @Test
+    fun `postgres atomic refund migration preserves legacy actions`() {
+        val container = PostgreSQLContainer<Nothing>("postgres:16-alpine")
+        container.start()
+        resourcesToClose += AutoCloseable { container.stop() }
+
+        migrateLegacyRefundUpgradeAndTrack(
+            jdbcUrl = container.jdbcUrl,
+            user = container.username,
+            password = container.password,
+            driver = container.driverClassName,
+            vendor = "postgresql",
+            legacyVersion = "54",
+            resourcesToClose = resourcesToClose,
+        )
     }
 }

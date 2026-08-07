@@ -102,6 +102,20 @@ private class NoopPaymentsRepository : PaymentsRepository {
     override suspend fun findActionByIdempotencyKey(key: String): PaymentsRepository.SavedAction? =
         throw UnsupportedOperationException("not used in test")
 
+    override suspend fun executeCancelIdempotently(
+        clubId: Long,
+        bookingId: UUID,
+        idempotencyKey: String,
+        reason: String?,
+    ): PaymentsRepository.CancelExecution = throw UnsupportedOperationException("not used in test")
+
+    override suspend fun executeRefundIdempotently(
+        clubId: Long,
+        bookingId: UUID,
+        idempotencyKey: String,
+        fingerprint: PaymentsRepository.RefundFingerprint,
+    ): PaymentsRepository.RefundExecution = throw UnsupportedOperationException("not used in test")
+
     override suspend fun updateStatus(
         id: UUID,
         status: String,

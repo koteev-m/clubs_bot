@@ -23,6 +23,8 @@ class FlywayH2SmokeTest {
 
         withConnection(resourcesToClose) { connection ->
             assertPaymentsSchema(connection, vendor = "h2")
+            assertAtomicRefundIndexes(connection)
+            assertAtomicRefundSourceConstraints(connection)
             assertUuidDefault(connection)
             assertJsonColumnType(connection, expectedType = "json")
             assertGuestListLimitRemoved(connection)
@@ -43,6 +45,21 @@ class FlywayH2SmokeTest {
             assertTableExists(connection, "tickets")
             assertTableExists(connection, "ticket_messages")
         }
+    }
+
+    @Test
+    fun `h2 atomic refund migration preserves legacy actions`() {
+        val jdbcUrl =
+            "jdbc:h2:mem:flyway-h2-refund-upgrade;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
+        migrateLegacyRefundUpgradeAndTrack(
+            jdbcUrl = jdbcUrl,
+            user = "sa",
+            password = "",
+            driver = "org.h2.Driver",
+            vendor = "h2",
+            legacyVersion = "55",
+            resourcesToClose = resourcesToClose,
+        )
     }
 
     private fun assertTableExists(
