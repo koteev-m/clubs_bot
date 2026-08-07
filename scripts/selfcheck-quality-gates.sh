@@ -5941,6 +5941,1806 @@ assert_validation_rejected \
   validate_packaged_launcher \
   "$mixed_main_fixture"
 
+payment_hardening_validator="$ROOT_DIR/scripts/validate-payment-hardening.py"
+payment_hardening_runtime="$ROOT_DIR/scripts/verify-payment-hardening-runtime.sh"
+python3 "$payment_hardening_validator" --structural "$ROOT_DIR"
+
+validate_lint_payment_runtime_contract() {
+  local workflow_file="$1"
+  ruby - "$workflow_file" <<'RUBY'
+require "psych"
+
+path = ARGV.fetch(0)
+begin
+  workflow = Psych.safe_load(File.binread(path), aliases: false)
+rescue Psych::SyntaxError, SystemCallError => error
+  warn "lint-payment-runtime-contract: workflow is unreadable or malformed: #{error.class}"
+  exit 1
+end
+
+def reject_contract(message)
+  warn "lint-payment-runtime-contract: #{message}"
+  exit 1
+end
+
+reject_contract("workflow root must be a mapping") unless workflow.is_a?(Hash)
+reject_contract("workflow name changed") unless workflow["name"] == "Lint"
+triggers = workflow["on"] || workflow[true]
+reject_contract("workflow triggers must be a mapping") unless triggers.is_a?(Hash)
+reject_contract("pull_request trigger is missing") unless triggers.key?("pull_request")
+push = triggers["push"]
+reject_contract("push trigger must target main") unless push.is_a?(Hash) && push["branches"] == ["main"]
+reject_contract("permissions must be exactly contents: read") unless workflow["permissions"] == {"contents" => "read"}
+
+jobs = workflow["jobs"]
+lint = jobs.is_a?(Hash) ? jobs["lint"] : nil
+reject_contract("lint job is missing") unless lint.is_a?(Hash)
+reject_contract("lint job must not have if") if lint.key?("if")
+reject_contract("lint job must not continue on error") if lint["continue-on-error"]
+steps = lint["steps"]
+reject_contract("lint steps are missing") unless steps.is_a?(Array)
+reject_contract("a lint step continues on error") if steps.any? { |step| step.is_a?(Hash) && step["continue-on-error"] }
+
+checkout_index = steps.index { |step| step.is_a?(Hash) && step["name"] == "Checkout" }
+jdk_index = steps.index { |step| step.is_a?(Hash) && step["name"] == "Set up JDK 21" }
+gradle_index = steps.index { |step| step.is_a?(Hash) && step["name"] == "Gradle cache & setup" }
+gate_indexes = steps.each_index.select do |index|
+  step = steps[index]
+  step.is_a?(Hash) && step["name"] == "Payment hardening required runtime"
+end
+reject_contract("authoritative runtime step must appear exactly once") unless gate_indexes.length == 1
+gate_index = gate_indexes.fetch(0)
+reject_contract("checkout/JDK/Gradle setup must precede the runtime gate") unless [checkout_index, jdk_index, gradle_index].all? && checkout_index < jdk_index && jdk_index < gradle_index && gradle_index < gate_index
+
+checkout = steps.fetch(checkout_index)
+reject_contract("checkout must disable persisted credentials") unless checkout.fetch("with", {})["persist-credentials"] == false
+gate = steps.fetch(gate_index)
+reject_contract("runtime gate must not have if") if gate.key?("if")
+reject_contract("runtime gate must not continue on error") if gate["continue-on-error"]
+reject_contract("runtime gate must not use environment-selected mode") if gate.key?("env")
+run = gate["run"]
+reject_contract("runtime gate must be a direct run block") unless run.is_a?(String)
+normalized = run.lines.map(&:strip).reject(&:empty?).join(" ").gsub(/\\\s+/, "")
+expected = "python3 scripts/validate-payment-hardening.py --run-required-runtime ."
+reject_contract("authoritative runtime command changed") unless normalized == expected
+reject_contract("runtime gate is fail-open") if run.include?("|| true")
+reject_contract("runtime gate uses structural-only mode") if run.include?("structural")
+reject_contract("workflow contains structural-only runtime wiring") if steps.any? { |step| step.is_a?(Hash) && step["run"].is_a?(String) && step["run"].include?("--structural") }
+
+puts "quality-gate: lint payment runtime contract verified"
+RUBY
+}
+
+validate_lint_payment_runtime_contract "$ROOT_DIR/.github/workflows/lint.yml"
+
+assert_payment_hardening_rejected() {
+  local fixture_name="$1"
+  local expected_rule="$2"
+  local fixture_root="$3"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+  local fixture_output
+
+  if python3 "$payment_hardening_validator" "$fixture_root" >"$fixture_log" 2>&1; then
+    fail "payment hardening negative fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  assert_eq "$fixture_status" "1"
+  fixture_output="$(cat "$fixture_log")"
+  assert_contains "$fixture_output" "[$expected_rule]"
+  echo "quality-gate: payment hardening fixture $fixture_name rejected by $expected_rule"
+}
+
+assert_payment_hardening_accepted() {
+  local fixture_name="$1"
+  local fixture_root="$2"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+
+  if ! python3 "$payment_hardening_validator" "$fixture_root" >"$fixture_log" 2>&1; then
+    fail "payment hardening safe fixture $fixture_name was rejected: $(cat "$fixture_log")"
+  fi
+  assert_contains "$(cat "$fixture_log")" "payment-hardening-contract: OK"
+  echo "quality-gate: payment hardening safe fixture $fixture_name accepted"
+}
+
+sensitive_logging_suite="com.example.bot.logging.SensitiveIdempotencyLoggingTest"
+
+payment_hardening_fixture_base="$TMP_DIR/payment-hardening-base"
+payment_hardening_files=(
+  ".github/workflows/lint.yml"
+  ".github/workflows/deploy-ssh.yml"
+  ".github/workflows/db-migrate.yml"
+  "core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
+  "core-data/src/main/resources/db/migration/h2/V056__atomic_booking_refunds.sql"
+  "core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt"
+  "core-security/src/main/kotlin/com/example/bot/security/webhook/WebhookSecurityPlugin.kt"
+  "app-bot/src/main/kotlin/com/example/bot/routes/BookingFinalizeRoutes.kt"
+  "app-bot/src/main/kotlin/com/example/bot/promo/BookingTemplateService.kt"
+  "app-bot/src/main/kotlin/com/example/bot/payments/finalize/DefaultPaymentsFinalizeService.kt"
+  "core-data/src/main/kotlin/com/example/bot/data/db/DbTransactions.kt"
+  "app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt"
+  "app-bot/src/main/kotlin/com/example/bot/routes/PaymentsFinalizeRoutes.kt"
+  "app-bot/src/main/kotlin/com/example/bot/plugins/JsonErrorPages.kt"
+  "app-bot/src/main/kotlin/com/example/bot/logging/SqlThrowableLogging.kt"
+  "app-bot/src/main/kotlin/com/example/bot/logging/DenySensitiveTurboFilter.kt"
+  "app-bot/src/main/resources/logback.xml"
+  "app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt"
+  "app-bot/src/test/kotlin/com/example/bot/logging/SqlThrowableLoggingPersistenceTest.kt"
+  "app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt"
+  "docs/invariants.md"
+  "gradle/libs.versions.toml"
+  "scripts/selfcheck-quality-gates.sh"
+  "scripts/validate-payment-hardening.py"
+  "scripts/verify-payment-hardening-runtime.sh"
+  "scripts/validate-workflow-yaml.rb"
+  "scripts/validate-quiesced-deployment.sh"
+  "scripts/deploy/quiesced-release.sh"
+  "scripts/deploy/remote-compose-release.sh"
+)
+for relative_path in "${payment_hardening_files[@]}"; do
+  mkdir -p "$payment_hardening_fixture_base/$(dirname "$relative_path")"
+  cp "$ROOT_DIR/$relative_path" "$payment_hardening_fixture_base/$relative_path"
+done
+(
+  cd "$payment_hardening_fixture_base"
+  git init -q
+  git add -- .
+)
+
+copy_payment_hardening_fixture() {
+  local fixture_name="$1"
+  local fixture_root="$TMP_DIR/$fixture_name"
+  cp -R "$payment_hardening_fixture_base" "$fixture_root"
+  printf '%s' "$fixture_root"
+}
+
+remove_payment_statement_once() {
+  local file="$1"
+  local marker="$2"
+  python3 - "$file" "$marker" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+marker = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+if text.count(marker) != 1:
+    raise SystemExit(f"payment fixture marker count changed: {marker}")
+start = text.rfind("\n", 0, text.index(marker)) + 1
+end = text.find(";", text.index(marker))
+if end < 0:
+    raise SystemExit(f"payment fixture statement is unterminated: {marker}")
+path.write_text(text[:start] + text[end + 1 :], encoding="utf-8")
+PY
+}
+
+replace_payment_text_once() {
+  local file="$1"
+  local expected="$2"
+  local replacement="$3"
+  python3 - "$file" "$expected" "$replacement" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+expected = sys.argv[2]
+replacement = sys.argv[3]
+text = path.read_text(encoding="utf-8")
+if text.count(expected) != 1:
+    raise SystemExit("payment fixture exact-text source changed")
+path.write_text(text.replace(expected, replacement), encoding="utf-8")
+PY
+}
+
+assert_lint_payment_runtime_rejected() {
+  local fixture_name="$1"
+  local fixture_root="$2"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+
+  if ! ruby "$WORKFLOW_YAML_VALIDATOR" "$fixture_root" >"$TMP_DIR/$fixture_name.yaml.log" 2>&1; then
+    fail "lint workflow negative fixture is not valid YAML: $fixture_name"
+  fi
+  if validate_lint_payment_runtime_contract "$fixture_root/.github/workflows/lint.yml" >"$fixture_log" 2>&1; then
+    fail "lint payment runtime negative fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  assert_eq "$fixture_status" "1"
+  assert_contains "$(cat "$fixture_log")" "lint-payment-runtime-contract:"
+  echo "quality-gate: lint payment runtime fixture $fixture_name rejected"
+}
+
+lint_structural_only="$(copy_payment_hardening_fixture lint-payment-structural-only)"
+replace_payment_text_once \
+  "$lint_structural_only/.github/workflows/lint.yml" \
+  '--run-required-runtime' \
+  '--structural'
+assert_lint_payment_runtime_rejected "lint-payment-structural-only" "$lint_structural_only"
+
+lint_continue_on_error="$(copy_payment_hardening_fixture lint-payment-continue-on-error)"
+replace_payment_text_once \
+  "$lint_continue_on_error/.github/workflows/lint.yml" \
+  '      - name: Payment hardening required runtime
+        run: |' \
+  '      - name: Payment hardening required runtime
+        continue-on-error: true
+        run: |'
+assert_lint_payment_runtime_rejected "lint-payment-continue-on-error" "$lint_continue_on_error"
+
+lint_step_if_false="$(copy_payment_hardening_fixture lint-payment-step-if-false)"
+replace_payment_text_once \
+  "$lint_step_if_false/.github/workflows/lint.yml" \
+  '      - name: Payment hardening required runtime
+        run: |' \
+  '      - name: Payment hardening required runtime
+        if: false
+        run: |'
+assert_lint_payment_runtime_rejected "lint-payment-step-if-false" "$lint_step_if_false"
+
+lint_step_if_always="$(copy_payment_hardening_fixture lint-payment-step-if-always)"
+replace_payment_text_once \
+  "$lint_step_if_always/.github/workflows/lint.yml" \
+  '      - name: Payment hardening required runtime
+        run: |' \
+  '      - name: Payment hardening required runtime
+        if: always()
+        run: |'
+assert_lint_payment_runtime_rejected "lint-payment-step-if-always" "$lint_step_if_always"
+
+lint_job_if="$(copy_payment_hardening_fixture lint-payment-job-if)"
+replace_payment_text_once \
+  "$lint_job_if/.github/workflows/lint.yml" \
+  '  lint:
+    runs-on: ubuntu-latest' \
+  '  lint:
+    if: always()
+    runs-on: ubuntu-latest'
+assert_lint_payment_runtime_rejected "lint-payment-job-if" "$lint_job_if"
+
+lint_changed_command="$(copy_payment_hardening_fixture lint-payment-changed-command)"
+replace_payment_text_once \
+  "$lint_changed_command/.github/workflows/lint.yml" \
+  'python3 scripts/validate-payment-hardening.py' \
+  'python3 -m py_compile scripts/validate-payment-hardening.py'
+assert_lint_payment_runtime_rejected "lint-payment-changed-command" "$lint_changed_command"
+
+lint_or_true="$(copy_payment_hardening_fixture lint-payment-or-true)"
+replace_payment_text_once \
+  "$lint_or_true/.github/workflows/lint.yml" \
+  '            .' \
+  '            . || true'
+assert_lint_payment_runtime_rejected "lint-payment-or-true" "$lint_or_true"
+
+lint_before_setup="$(copy_payment_hardening_fixture lint-payment-before-setup)"
+python3 - "$lint_before_setup/.github/workflows/lint.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+gate = """      - name: Payment hardening required runtime
+        run: |
+          python3 scripts/validate-payment-hardening.py \\
+            --run-required-runtime \\
+            .
+
+"""
+anchor = "      - name: Set up JDK 21\n"
+if text.count(gate) != 1 or text.count(anchor) != 1:
+    raise SystemExit("lint gate ordering fixture source changed")
+text = text.replace(gate, "").replace(anchor, gate + anchor)
+path.write_text(text, encoding="utf-8")
+PY
+assert_lint_payment_runtime_rejected "lint-payment-before-setup" "$lint_before_setup"
+
+payment_migration_symlink="$(copy_payment_hardening_fixture payment-protected-migration-symlink)"
+rm "$payment_migration_symlink/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
+ln -s \
+  "$payment_migration_symlink/core-data/src/main/resources/db/migration/h2/V056__atomic_booking_refunds.sql" \
+  "$payment_migration_symlink/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
+assert_payment_hardening_rejected "payment-protected-migration-symlink" "PH-FILE" "$payment_migration_symlink"
+
+payment_test_symlink="$(copy_payment_hardening_fixture payment-protected-test-symlink)"
+rm "$payment_test_symlink/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt"
+ln -s \
+  "$payment_test_symlink/app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt" \
+  "$payment_test_symlink/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt"
+assert_payment_hardening_rejected "payment-protected-test-symlink" "PH-FILE" "$payment_test_symlink"
+
+payment_doc_symlink="$(copy_payment_hardening_fixture payment-protected-doc-symlink)"
+rm "$payment_doc_symlink/docs/invariants.md"
+ln -s "$payment_doc_symlink/.github/workflows/lint.yml" "$payment_doc_symlink/docs/invariants.md"
+assert_payment_hardening_rejected "payment-protected-doc-symlink" "PH-FILE" "$payment_doc_symlink"
+
+payment_helper_symlink="$(copy_payment_hardening_fixture payment-protected-helper-symlink)"
+rm "$payment_helper_symlink/scripts/verify-payment-hardening-runtime.sh"
+ln -s "$payment_helper_symlink/scripts/selfcheck-quality-gates.sh" \
+  "$payment_helper_symlink/scripts/verify-payment-hardening-runtime.sh"
+assert_payment_hardening_rejected "payment-protected-helper-symlink" "PH-FILE" "$payment_helper_symlink"
+
+payment_parent_symlink="$(copy_payment_hardening_fixture payment-protected-parent-symlink)"
+mv "$payment_parent_symlink/docs" "$payment_parent_symlink/docs-real"
+ln -s docs-real "$payment_parent_symlink/docs"
+assert_payment_hardening_rejected "payment-protected-parent-symlink" "PH-FILE" "$payment_parent_symlink"
+
+payment_non_regular="$(copy_payment_hardening_fixture payment-protected-non-regular)"
+rm "$payment_non_regular/docs/invariants.md"
+mkfifo "$payment_non_regular/docs/invariants.md"
+assert_payment_hardening_rejected "payment-protected-non-regular" "PH-FILE" "$payment_non_regular"
+
+payment_runner_missing="$(copy_payment_hardening_fixture payment-protected-runner-missing)"
+rm "$payment_runner_missing/scripts/validate-payment-hardening.py"
+assert_payment_hardening_rejected "payment-protected-runner-missing" "PH-FILE" "$payment_runner_missing"
+
+payment_missing_payments_index="$(copy_payment_hardening_fixture payment-missing-payments-index)"
+remove_payment_statement_once \
+  "$payment_missing_payments_index/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  "CREATE INDEX IF NOT EXISTS payments_booking_idx"
+assert_payment_hardening_rejected \
+  "payment-missing-payments-index" \
+  "PH-MIGRATION-INDEX" \
+  "$payment_missing_payments_index"
+
+payment_missing_refunds_index="$(copy_payment_hardening_fixture payment-missing-refunds-index)"
+remove_payment_statement_once \
+  "$payment_missing_refunds_index/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  "CREATE INDEX payment_refunds_booking_idx"
+assert_payment_hardening_rejected \
+  "payment-missing-refunds-index" \
+  "PH-MIGRATION-INDEX" \
+  "$payment_missing_refunds_index"
+
+payment_typed_null_result="$(copy_payment_hardening_fixture payment-typed-null-result)"
+replace_exact_line_once \
+  "$payment_typed_null_result/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  "$payment_typed_null_result/typed-null.changed.sql" \
+  "                THEN refund_result_amount_minor IS NOT NULL" \
+  "                THEN TRUE"
+mv \
+  "$payment_typed_null_result/typed-null.changed.sql" \
+  "$payment_typed_null_result/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
+assert_payment_hardening_rejected \
+  "payment-typed-null-result" \
+  "PH-MIGRATION-TYPED" \
+  "$payment_typed_null_result"
+
+payment_positive_null_source="$(copy_payment_hardening_fixture payment-positive-null-source)"
+replace_exact_line_once \
+  "$payment_positive_null_source/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  "$payment_positive_null_source/positive-null.changed.sql" \
+  "                            AND refund_source_kind = 'ATOMIC_ACTION'" \
+  "                            AND (refund_source_kind = 'ATOMIC_ACTION' OR refund_source_kind IS NULL)"
+mv \
+  "$payment_positive_null_source/positive-null.changed.sql" \
+  "$payment_positive_null_source/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
+assert_payment_hardening_rejected \
+  "payment-positive-null-source" \
+  "PH-MIGRATION-TYPED" \
+  "$payment_positive_null_source"
+
+payment_zero_legacy="$(copy_payment_hardening_fixture payment-zero-legacy-not-blocked)"
+replace_exact_line_once \
+  "$payment_zero_legacy/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  "$payment_zero_legacy/zero-legacy.changed.sql" \
+  "            IF NEW.reason::numeric <= 0 THEN" \
+  "            IF NEW.reason::numeric < 0 THEN"
+mv \
+  "$payment_zero_legacy/zero-legacy.changed.sql" \
+  "$payment_zero_legacy/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
+assert_payment_hardening_rejected \
+  "payment-zero-legacy-not-blocked" \
+  "PH-MIGRATION-LEGACY" \
+  "$payment_zero_legacy"
+
+payment_weakened_source="$(copy_payment_hardening_fixture payment-weakened-source-consistency)"
+replace_exact_line_once \
+  "$payment_weakened_source/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  "$payment_weakened_source/source-consistency.changed.sql" \
+  "                AND source_action = 'REFUND'" \
+  "                AND source_action IN ('REFUND', 'CANCEL')"
+mv \
+  "$payment_weakened_source/source-consistency.changed.sql" \
+  "$payment_weakened_source/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
+assert_payment_hardening_rejected \
+  "payment-weakened-source-consistency" \
+  "PH-MIGRATION-SOURCE" \
+  "$payment_weakened_source"
+
+payment_missing_search_path="$(copy_payment_hardening_fixture payment-missing-search-path)"
+replace_payment_text_once \
+  "$payment_missing_search_path/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  $'CREATE OR REPLACE FUNCTION "${flyway:defaultSchema}".payment_refund_block_booking(\n    target_booking_id uuid,\n    target_reason varchar\n) RETURNS void\nLANGUAGE plpgsql\nSET search_path = pg_catalog, "${flyway:defaultSchema}"' \
+  $'CREATE OR REPLACE FUNCTION "${flyway:defaultSchema}".payment_refund_block_booking(\n    target_booking_id uuid,\n    target_reason varchar\n) RETURNS void\nLANGUAGE plpgsql'
+assert_payment_hardening_rejected \
+  "payment-missing-search-path" \
+  "PH-MIGRATION-SEARCH-PATH" \
+  "$payment_missing_search_path"
+
+payment_unqualified_relation="$(copy_payment_hardening_fixture payment-unqualified-relation)"
+replace_payment_text_once \
+  "$payment_unqualified_relation/core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql" \
+  $'    THEN\n        INSERT INTO "${flyway:defaultSchema}".payment_refunds (' \
+  $'    THEN\n        INSERT INTO payment_refunds ('
+assert_payment_hardening_rejected \
+  "payment-unqualified-relation" \
+  "PH-MIGRATION-QUALIFICATION" \
+  "$payment_unqualified_relation"
+
+raw_mdc_fixture_paths=(
+  "core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt"
+  "core-security/src/main/kotlin/com/example/bot/security/webhook/WebhookSecurityPlugin.kt"
+  "app-bot/src/main/kotlin/com/example/bot/routes/BookingFinalizeRoutes.kt"
+  "app-bot/src/main/kotlin/com/example/bot/promo/BookingTemplateService.kt"
+)
+raw_mdc_fixture_index=0
+for relative_path in "${raw_mdc_fixture_paths[@]}"; do
+  raw_mdc_fixture_index=$((raw_mdc_fixture_index + 1))
+  fixture_name="payment-raw-mdc-$raw_mdc_fixture_index"
+  fixture_root="$(copy_payment_hardening_fixture "$fixture_name")"
+  printf '%s\n' \
+    'private fun unsafeIdempotencyLoggingFixture(rawKey: String) {' \
+    '    org.slf4j.MDC.put("idempotencyKey", rawKey)' \
+    '}' >> "$fixture_root/$relative_path"
+  assert_payment_hardening_rejected \
+    "$fixture_name" \
+    "PH-LOG-RAW-SINK" \
+    "$fixture_root"
+done
+
+payment_finalize_raw_log="$(copy_payment_hardening_fixture payment-finalize-raw-log)"
+cat >> \
+  "$payment_finalize_raw_log/app-bot/src/main/kotlin/com/example/bot/payments/finalize/DefaultPaymentsFinalizeService.kt" <<'KOT'
+private fun unsafeIdempotencyLoggingFixture(rawKey: String) {
+    org.slf4j.LoggerFactory.getLogger("fixture").info("idemKey={}", rawKey)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-finalize-raw-log" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_finalize_raw_log"
+
+payment_db_exception_message="$(copy_payment_hardening_fixture payment-db-exception-message)"
+replace_payment_text_once \
+  "$payment_db_exception_message/core-data/src/main/kotlin/com/example/bot/data/db/DbTransactions.kt" \
+  $'                classification.sqlState ?: "<none>",\n                ex.javaClass.simpleName,' \
+  $'                classification.sqlState ?: "<none>",\n                ex.message,'
+assert_payment_hardening_rejected \
+  "payment-db-exception-message" \
+  "PH-LOG-SQL-BOUNDARY" \
+  "$payment_db_exception_message"
+
+payment_logging_class_disabled="$(copy_payment_hardening_fixture payment-logging-class-disabled)"
+replace_payment_text_once \
+  "$payment_logging_class_disabled/app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt" \
+  "class SensitiveIdempotencyLoggingTest {" \
+  $'@org.junit.jupiter.api.Disabled\nclass SensitiveIdempotencyLoggingTest {'
+assert_payment_hardening_rejected \
+  "payment-logging-class-disabled" \
+  "PH-TEST-DISABLED" \
+  "$payment_logging_class_disabled"
+
+payment_logging_method_disabled="$(copy_payment_hardening_fixture payment-logging-method-disabled)"
+replace_payment_text_once \
+  "$payment_logging_method_disabled/app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt" \
+  $'    @Test\n    fun `booking finalize route never serializes raw idempotency key`()' \
+  $'    @Test\n    @org.junit.jupiter.api.Disabled\n    fun `booking finalize route never serializes raw idempotency key`()'
+assert_payment_hardening_rejected \
+  "payment-logging-method-disabled" \
+  "PH-TEST-DISABLED" \
+  "$payment_logging_method_disabled"
+
+payment_logging_test_missing="$(copy_payment_hardening_fixture payment-logging-test-missing)"
+rm \
+  "$payment_logging_test_missing/app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt"
+assert_payment_hardening_rejected \
+  "payment-logging-test-missing" \
+  "PH-FILE" \
+  "$payment_logging_test_missing"
+
+payment_sql_logging_class_disabled="$(copy_payment_hardening_fixture payment-sql-logging-class-disabled)"
+replace_payment_text_once \
+  "$payment_sql_logging_class_disabled/app-bot/src/test/kotlin/com/example/bot/logging/SqlThrowableLoggingPersistenceTest.kt" \
+  "class SqlThrowableLoggingPersistenceTest : PostgresAppTest() {" \
+  $'@org.junit.jupiter.api.Disabled\nclass SqlThrowableLoggingPersistenceTest : PostgresAppTest() {'
+assert_payment_hardening_rejected \
+  "payment-sql-logging-class-disabled" \
+  "PH-TEST-DISABLED" \
+  "$payment_sql_logging_class_disabled"
+
+payment_sql_logging_method_disabled="$(copy_payment_hardening_fixture payment-sql-logging-method-disabled)"
+replace_payment_text_once \
+  "$payment_sql_logging_method_disabled/app-bot/src/test/kotlin/com/example/bot/logging/SqlThrowableLoggingPersistenceTest.kt" \
+  $'    @Test\n    fun `postgres sql throwable never reaches payment route status pages or json logs`()' \
+  $'    @Test\n    @org.junit.jupiter.api.Disabled\n    fun `postgres sql throwable never reaches payment route status pages or json logs`()'
+assert_payment_hardening_rejected \
+  "payment-sql-logging-method-disabled" \
+  "PH-TEST-DISABLED" \
+  "$payment_sql_logging_method_disabled"
+
+payment_sql_logging_test_missing="$(copy_payment_hardening_fixture payment-sql-logging-test-missing)"
+replace_payment_text_once \
+  "$payment_sql_logging_test_missing/app-bot/src/test/kotlin/com/example/bot/logging/SqlThrowableLoggingPersistenceTest.kt" \
+  'fun `postgres sql throwable never reaches payment route status pages or json logs`()' \
+  'fun `removed sql topology regression fixture`()'
+assert_payment_hardening_rejected \
+  "payment-sql-logging-test-missing" \
+  "PH-TEST-MISSING" \
+  "$payment_sql_logging_test_missing"
+
+payment_raw_rbac_logger="$(copy_payment_hardening_fixture payment-raw-rbac-logger)"
+cat >> "$payment_raw_rbac_logger/core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt" <<'KOT'
+private fun unsafeRawLoggerFixture(rawKey: String) {
+    org.slf4j.LoggerFactory.getLogger("fixture").error("raw={}", rawKey)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-raw-rbac-logger" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_rbac_logger"
+
+payment_raw_cancel_refund_logger="$(copy_payment_hardening_fixture payment-raw-cancel-refund-logger)"
+cat >> "$payment_raw_cancel_refund_logger/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
+private fun unsafeRawRouteLoggerFixture(rawKey: String) {
+    logger.error("raw={}", rawKey)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-raw-cancel-refund-logger" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_cancel_refund_logger"
+
+payment_new_production_logger="$(copy_payment_hardening_fixture payment-new-production-logger)"
+mkdir -p "$payment_new_production_logger/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_new_production_logger/some-module/src/main/kotlin/com/example/fixture/UnsafeLogger.kt" <<'KOT'
+package com.example.fixture
+
+private val logger = org.slf4j.LoggerFactory.getLogger("fixture")
+
+fun unsafeNewProductionLogger(idempotencyKey: String) {
+    logger.error("raw={}", idempotencyKey)
+}
+KOT
+git -C "$payment_new_production_logger" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeLogger.kt
+assert_payment_hardening_rejected \
+  "payment-new-production-logger" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_new_production_logger"
+
+payment_non_regular_production="$(copy_payment_hardening_fixture payment-non-regular-production)"
+mkdir -p "$payment_non_regular_production/some-module/src/main/kotlin/com/example/fixture"
+ln -s \
+  "$payment_non_regular_production/core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt" \
+  "$payment_non_regular_production/some-module/src/main/kotlin/com/example/fixture/LinkedProduction.kt"
+git -C "$payment_non_regular_production" add -- some-module/src/main/kotlin/com/example/fixture/LinkedProduction.kt
+assert_payment_hardening_rejected \
+  "payment-non-regular-production" \
+  "PH-INVENTORY" \
+  "$payment_non_regular_production"
+
+payment_new_production_mdc="$(copy_payment_hardening_fixture payment-new-production-mdc)"
+mkdir -p "$payment_new_production_mdc/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_new_production_mdc/some-module/src/main/kotlin/com/example/fixture/UnsafeMdc.kt" <<'KOT'
+package com.example.fixture
+
+fun unsafeNewProductionMdc(idempotencyKey: String) {
+    val firstAlias = idempotencyKey
+    val secondAlias = firstAlias
+    org.slf4j.MDC.put("idempotencyKey", secondAlias)
+}
+KOT
+git -C "$payment_new_production_mdc" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeMdc.kt
+assert_payment_hardening_rejected \
+  "payment-new-production-mdc" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_new_production_mdc"
+
+payment_throwable_alias="$(copy_payment_hardening_fixture payment-throwable-alias)"
+cat >> "$payment_throwable_alias/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
+private fun unsafeThrowableAliasFixture(originalFailure: Throwable) {
+    val firstAlias =
+        originalFailure
+    val secondAlias =
+        firstAlias
+    logger.error("unsafe", secondAlias)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-throwable-alias" \
+  "PH-LOG-SQL-BOUNDARY" \
+  "$payment_throwable_alias"
+
+payment_raw_alias="$(copy_payment_hardening_fixture payment-raw-idempotency-alias)"
+mkdir -p "$payment_raw_alias/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_raw_alias/some-module/src/main/kotlin/com/example/fixture/UnsafeAlias.kt" <<'KOT'
+package com.example.fixture
+
+private val logger = org.slf4j.LoggerFactory.getLogger("fixture")
+
+fun unsafeAlias(headers: Map<String, String>) {
+    val source =
+        headers["Idempotency-Key"]
+    val firstAlias =
+        source
+    val secondAlias =
+        firstAlias
+    logger.warn("raw={}", secondAlias)
+}
+KOT
+git -C "$payment_raw_alias" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeAlias.kt
+assert_payment_hardening_rejected \
+  "payment-raw-idempotency-alias" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_alias"
+
+payment_unknown_helper_return="$(copy_payment_hardening_fixture payment-unknown-helper-return)"
+mkdir -p "$payment_unknown_helper_return/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_unknown_helper_return/some-module/src/main/kotlin/com/example/fixture/UnsafeHelperReturn.kt" <<'KOT'
+package com.example.fixture
+
+private val logger = org.slf4j.LoggerFactory.getLogger("fixture")
+
+private fun identity(value: String): String = value
+
+fun unsafeHelperReturn(idempotencyKey: String) {
+    val alias = identity(idempotencyKey)
+    logger.error("raw={}", alias)
+}
+KOT
+git -C "$payment_unknown_helper_return" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeHelperReturn.kt
+assert_payment_hardening_rejected \
+  "payment-unknown-helper-return" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_unknown_helper_return"
+
+payment_reviewed_projection_spoof="$(copy_payment_hardening_fixture payment-reviewed-projection-spoof)"
+mkdir -p "$payment_reviewed_projection_spoof/app-bot/src/main/kotlin/com/example/bot/booking"
+cp \
+  "$ROOT_DIR/app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt" \
+  "$payment_reviewed_projection_spoof/app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt"
+cat >> "$payment_reviewed_projection_spoof/app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt" <<'KOT'
+private data class UnsafeReviewedProjectionFixture(val error: String)
+
+private fun <T> unsafeProjectionIdentityFixture(value: T): T = value
+
+private fun unsafeReviewedProjectionFixture(idempotencyKey: String) {
+    val result = unsafeProjectionIdentityFixture(UnsafeReviewedProjectionFixture(idempotencyKey))
+    org.slf4j.LoggerFactory.getLogger("fixture").error("raw={}", result.error)
+}
+KOT
+git -C "$payment_reviewed_projection_spoof" add -- app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt
+assert_payment_hardening_rejected \
+  "payment-reviewed-projection-spoof" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_reviewed_projection_spoof"
+
+payment_raw_reassignment="$(copy_payment_hardening_fixture payment-raw-reassignment)"
+mkdir -p "$payment_raw_reassignment/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_raw_reassignment/some-module/src/main/kotlin/com/example/fixture/UnsafeReassignment.kt" <<'KOT'
+package com.example.fixture
+
+private val logger = org.slf4j.LoggerFactory.getLogger("fixture")
+
+fun unsafeReassignment(idempotencyKey: String) {
+    var alias = ""
+    alias = idempotencyKey
+    logger.error("raw={}", alias)
+}
+KOT
+git -C "$payment_raw_reassignment" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeReassignment.kt
+assert_payment_hardening_rejected \
+  "payment-raw-reassignment" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_reassignment"
+
+payment_mixed_fingerprint="$(copy_payment_hardening_fixture payment-mixed-fingerprint-raw)"
+cat >> "$payment_mixed_fingerprint/core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt" <<'KOT'
+private fun unsafeMixedFingerprintFixture(idempotencyKey: String) {
+    val auditFingerprint = fingerprint(idempotencyKey, "POST", "/fixture", "access_granted")
+    org.slf4j.LoggerFactory.getLogger("fixture").error(
+        "fingerprint={} raw={}",
+        auditFingerprint,
+        idempotencyKey,
+    )
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-mixed-fingerprint-raw" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_mixed_fingerprint"
+
+payment_local_fingerprint_shadow="$(copy_payment_hardening_fixture payment-local-fingerprint-shadow)"
+cat >> "$payment_local_fingerprint_shadow/core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt" <<'KOT'
+private fun unsafeLocalFingerprintShadow(idempotencyKey: String) {
+    fun fingerprint(value: String): String = value
+    val leaked = fingerprint(idempotencyKey)
+    org.slf4j.LoggerFactory.getLogger("fixture").error("raw={}", leaked)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-local-fingerprint-shadow" \
+  "PH-SYMBOL-CONTRACT" \
+  "$payment_local_fingerprint_shadow"
+
+payment_member_fingerprint_shadow="$(copy_payment_hardening_fixture payment-member-fingerprint-shadow)"
+cat >> "$payment_member_fingerprint_shadow/core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt" <<'KOT'
+private object UnsafeFingerprintShadow {
+    fun fingerprint(value: String): String = value
+}
+
+private fun unsafeMemberFingerprintShadow(idempotencyKey: String) {
+    val leaked = UnsafeFingerprintShadow.fingerprint(idempotencyKey)
+    org.slf4j.LoggerFactory.getLogger("fixture").error("raw={}", leaked)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-member-fingerprint-shadow" \
+  "PH-SYMBOL-CONTRACT" \
+  "$payment_member_fingerprint_shadow"
+
+payment_fingerprint_overload="$(copy_payment_hardening_fixture payment-fingerprint-overload)"
+cat >> "$payment_fingerprint_overload/core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt" <<'KOT'
+private fun fingerprint(value: String): String = value
+KOT
+assert_payment_hardening_rejected \
+  "payment-fingerprint-overload" \
+  "PH-SYMBOL-CONTRACT" \
+  "$payment_fingerprint_overload"
+
+payment_raw_tracing="$(copy_payment_hardening_fixture payment-raw-tracing)"
+mkdir -p "$payment_raw_tracing/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_raw_tracing/some-module/src/main/kotlin/com/example/fixture/UnsafeTracing.kt" <<'KOT'
+package com.example.fixture
+
+interface FixtureSpan {
+    fun setAttribute(name: String, value: String)
+}
+
+fun unsafeTracing(idempotencyKey: String, span: FixtureSpan) {
+    val alias = idempotencyKey
+    span.setAttribute("payment.idempotency", alias)
+}
+KOT
+git -C "$payment_raw_tracing" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeTracing.kt
+assert_payment_hardening_rejected \
+  "payment-raw-tracing" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_tracing"
+
+payment_generic_tracing="$(copy_payment_hardening_fixture payment-generic-tracing)"
+mkdir -p "$payment_generic_tracing/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_generic_tracing/some-module/src/main/kotlin/com/example/fixture/UnsafeGenericTracing.kt" <<'KOT'
+package com.example.fixture
+
+interface GenericSpan {
+    fun <T> setAttribute(name: String, value: T)
+}
+
+fun unsafeGenericTracing(idempotencyKey: String, span: GenericSpan) {
+    val alias = idempotencyKey
+    span.setAttribute<String>("raw", alias)
+}
+KOT
+git -C "$payment_generic_tracing" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeGenericTracing.kt
+assert_payment_hardening_rejected \
+  "payment-generic-tracing" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_generic_tracing"
+
+payment_raw_require="$(copy_payment_hardening_fixture payment-raw-require-message)"
+mkdir -p "$payment_raw_require/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_raw_require/some-module/src/main/kotlin/com/example/fixture/UnsafeRequire.kt" <<'KOT'
+package com.example.fixture
+
+fun unsafeRequire(idempotencyKey: String) {
+    val alias = idempotencyKey
+    require(false) { "raw=$alias" }
+}
+KOT
+git -C "$payment_raw_require" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeRequire.kt
+assert_payment_hardening_rejected \
+  "payment-raw-require-message" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_require"
+
+payment_raw_check="$(copy_payment_hardening_fixture payment-raw-check-message)"
+mkdir -p "$payment_raw_check/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_raw_check/some-module/src/main/kotlin/com/example/fixture/UnsafeCheck.kt" <<'KOT'
+package com.example.fixture
+
+fun unsafeCheck(idempotencyKey: String) {
+    val alias = idempotencyKey
+    check(false) { "raw=$alias" }
+}
+KOT
+git -C "$payment_raw_check" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeCheck.kt
+assert_payment_hardening_rejected \
+  "payment-raw-check-message" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_check"
+
+payment_raw_exception="$(copy_payment_hardening_fixture payment-raw-exception)"
+mkdir -p "$payment_raw_exception/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_raw_exception/some-module/src/main/kotlin/com/example/fixture/UnsafeException.kt" <<'KOT'
+package com.example.fixture
+
+fun unsafeException(idempotencyKey: String): Nothing {
+    val alias = idempotencyKey
+    throw IllegalStateException("idempotency=$alias")
+}
+KOT
+git -C "$payment_raw_exception" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeException.kt
+assert_payment_hardening_rejected \
+  "payment-raw-exception" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_raw_exception"
+
+payment_safe_business="$(copy_payment_hardening_fixture payment-safe-business-lookup)"
+mkdir -p "$payment_safe_business/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_safe_business/some-module/src/main/kotlin/com/example/fixture/SafeBusiness.kt" <<'KOT'
+package com.example.fixture
+
+fun safeLookup(idempotencyKey: String, stored: Map<String, String>): String? = stored[idempotencyKey]
+KOT
+git -C "$payment_safe_business" add -- some-module/src/main/kotlin/com/example/fixture/SafeBusiness.kt
+assert_payment_hardening_accepted "payment-safe-business-lookup" "$payment_safe_business"
+
+payment_safe_fingerprint="$(copy_payment_hardening_fixture payment-safe-fingerprint)"
+cat >> "$payment_safe_fingerprint/core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt" <<'KOT'
+private fun safeReviewedFingerprintFixture(idempotencyKey: String) {
+    val auditFingerprint = fingerprint(idempotencyKey, "POST", "/fixture", "access_granted")
+    org.slf4j.LoggerFactory.getLogger("fixture").info("auditFingerprint={}", auditFingerprint)
+}
+KOT
+assert_payment_hardening_accepted "payment-safe-fingerprint" "$payment_safe_fingerprint"
+
+payment_exact_result_projection_spoof="$(copy_payment_hardening_fixture payment-exact-result-projection-spoof)"
+cat >> "$payment_exact_result_projection_spoof/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
+private data class FakeResult(val idempotent: String)
+
+private fun unsafeExactResultProjectionSpoof(idempotencyKey: String) {
+    val result = FakeResult(idempotencyKey)
+    logger.error("raw={}", result.idempotent)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-exact-result-projection-spoof" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_exact_result_projection_spoof"
+
+payment_safe_escaped_literal="$(copy_payment_hardening_fixture payment-safe-escaped-idempotency-literal)"
+mkdir -p "$payment_safe_escaped_literal/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_safe_escaped_literal/some-module/src/main/kotlin/com/example/fixture/SafeEscapedLiteral.kt" <<'KOT'
+package com.example.fixture
+
+private val logger = org.slf4j.LoggerFactory.getLogger("fixture")
+
+fun safeEscapedLiteral(idempotencyKey: String) {
+    logger.info("\$idempotencyKey")
+}
+KOT
+git -C "$payment_safe_escaped_literal" add -- some-module/src/main/kotlin/com/example/fixture/SafeEscapedLiteral.kt
+assert_payment_hardening_accepted "payment-safe-escaped-idempotency-literal" "$payment_safe_escaped_literal"
+
+payment_safe_non_sql="$(copy_payment_hardening_fixture payment-safe-non-sql-throwable)"
+mkdir -p "$payment_safe_non_sql/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_safe_non_sql/some-module/src/main/kotlin/com/example/fixture/SafeThrowable.kt" <<'KOT'
+package com.example.fixture
+
+private val logger = org.slf4j.LoggerFactory.getLogger("fixture")
+
+fun safeNonSqlDiagnostic(failure: Throwable) {
+    logger.error("unrelated failure", failure)
+}
+KOT
+git -C "$payment_safe_non_sql" add -- some-module/src/main/kotlin/com/example/fixture/SafeThrowable.kt
+assert_payment_hardening_accepted "payment-safe-non-sql-throwable" "$payment_safe_non_sql"
+
+payment_finalize_route_throwable="$(copy_payment_hardening_fixture payment-finalize-route-throwable)"
+cat >> "$payment_finalize_route_throwable/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsFinalizeRoutes.kt" <<'KOT'
+private fun unsafeFinalizeThrowableFixture(unexpected: Throwable) {
+    logger.error(unexpected) { "unsafe" }
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-finalize-route-throwable" \
+  "PH-LOG-SQL-BOUNDARY" \
+  "$payment_finalize_route_throwable"
+
+payment_json_error_throwable="$(copy_payment_hardening_fixture payment-json-error-throwable)"
+cat >> "$payment_json_error_throwable/app-bot/src/main/kotlin/com/example/bot/plugins/JsonErrorPages.kt" <<'KOT'
+private fun unsafeJsonThrowableFixture(cause: Throwable) {
+    org.slf4j.LoggerFactory.getLogger("fixture").error("unsafe", cause)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-json-error-throwable" \
+  "PH-LOG-SQL-BOUNDARY" \
+  "$payment_json_error_throwable"
+
+payment_sql_helper_direct_throwable="$(copy_payment_hardening_fixture payment-sql-helper-direct-throwable)"
+cat >> "$payment_sql_helper_direct_throwable/app-bot/src/main/kotlin/com/example/bot/logging/SqlThrowableLogging.kt" <<'KOT'
+private fun unsafeSqlHelperThrowableFixture(original: Throwable) {
+    org.slf4j.LoggerFactory.getLogger("fixture").error("failed", original)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-sql-helper-direct-throwable" \
+  "PH-LOG-SQL-BOUNDARY" \
+  "$payment_sql_helper_direct_throwable"
+
+payment_sql_helper_name_spoof="$(copy_payment_hardening_fixture payment-sql-helper-name-spoof)"
+cat >> "$payment_sql_helper_name_spoof/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
+private object UnsafeSqlLogger {
+    fun errorSqlSafe(value: Throwable) {
+        logger.error("failed", value)
+    }
+}
+
+private fun unsafeSqlHelperNameSpoof(original: Throwable) {
+    UnsafeSqlLogger.errorSqlSafe(original)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-sql-helper-name-spoof" \
+  "PH-SYMBOL-CONTRACT" \
+  "$payment_sql_helper_name_spoof"
+
+payment_local_warn_sql_safe="$(copy_payment_hardening_fixture payment-local-warn-sql-safe)"
+cat >> "$payment_local_warn_sql_safe/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
+private fun unsafeLocalWarnSqlSafe(original: Throwable) {
+    fun warnSqlSafe(value: Throwable) {
+        logger.error("failed", value)
+    }
+    warnSqlSafe(original)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-local-warn-sql-safe" \
+  "PH-SYMBOL-CONTRACT" \
+  "$payment_local_warn_sql_safe"
+
+payment_throwable_reassignment="$(copy_payment_hardening_fixture payment-throwable-reassignment)"
+cat >> "$payment_throwable_reassignment/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
+private fun unsafeThrowableReassignmentFixture(original: Throwable) {
+    var alias: Any? = null
+    alias = original
+    logger.error("failed {}", alias)
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-throwable-reassignment" \
+  "PH-LOG-SQL-BOUNDARY" \
+  "$payment_throwable_reassignment"
+
+payment_fluent_set_cause="$(copy_payment_hardening_fixture payment-fluent-set-cause)"
+cat >> "$payment_fluent_set_cause/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
+private fun unsafeFluentCauseFixture(original: Throwable) {
+    org.slf4j.LoggerFactory
+        .getLogger("fixture")
+        .atError()
+        .setCause(original)
+        .log("failed")
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-fluent-set-cause" \
+  "PH-LOG-SQL-BOUNDARY" \
+  "$payment_fluent_set_cause"
+
+payment_fluent_raw_argument="$(copy_payment_hardening_fixture payment-fluent-raw-argument)"
+mkdir -p "$payment_fluent_raw_argument/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_fluent_raw_argument/some-module/src/main/kotlin/com/example/fixture/UnsafeFluentArgument.kt" <<'KOT'
+package com.example.fixture
+
+fun unsafeFluentArgument(idempotencyKey: String) {
+    val alias = idempotencyKey
+    org.slf4j.LoggerFactory
+        .getLogger("fixture")
+        .atError()
+        .addArgument(alias)
+        .log("raw={}")
+}
+KOT
+git -C "$payment_fluent_raw_argument" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeFluentArgument.kt
+assert_payment_hardening_rejected \
+  "payment-fluent-raw-argument" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_fluent_raw_argument"
+
+payment_fluent_raw_key_value="$(copy_payment_hardening_fixture payment-fluent-raw-key-value)"
+mkdir -p "$payment_fluent_raw_key_value/some-module/src/main/kotlin/com/example/fixture"
+cat > "$payment_fluent_raw_key_value/some-module/src/main/kotlin/com/example/fixture/UnsafeFluentKeyValue.kt" <<'KOT'
+package com.example.fixture
+
+fun unsafeFluentKeyValue(idempotencyKey: String) {
+    val alias = idempotencyKey
+    org.slf4j.LoggerFactory
+        .getLogger("fixture")
+        .atError()
+        .addKeyValue("raw", alias)
+        .log("failed")
+}
+KOT
+git -C "$payment_fluent_raw_key_value" add -- some-module/src/main/kotlin/com/example/fixture/UnsafeFluentKeyValue.kt
+assert_payment_hardening_rejected \
+  "payment-fluent-raw-key-value" \
+  "PH-LOG-RAW-SINK" \
+  "$payment_fluent_raw_key_value"
+
+payment_exposed_filter_missing="$(copy_payment_hardening_fixture payment-exposed-filter-missing)"
+replace_payment_text_once \
+  "$payment_exposed_filter_missing/app-bot/src/main/kotlin/com/example/bot/logging/DenySensitiveTurboFilter.kt" \
+  "containsSqlThrowable(t, params) || isUnsafeExposedTransactionFailure(level, format)" \
+  "false"
+assert_payment_hardening_rejected \
+  "payment-exposed-filter-missing" \
+  "PH-LOG-EXPOSED" \
+  "$payment_exposed_filter_missing"
+
+payment_zero_service_disabled="$(copy_payment_hardening_fixture payment-zero-service-disabled)"
+replace_payment_text_once \
+  "$payment_zero_service_disabled/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  $'    @Test\n    fun `refund explicit zero persists terminal success without mutation`()' \
+  $'    @Test\n    @org.junit.jupiter.api.Disabled\n    fun `refund explicit zero persists terminal success without mutation`()'
+assert_payment_hardening_rejected \
+  "payment-zero-service-disabled" \
+  "PH-TEST-DISABLED" \
+  "$payment_zero_service_disabled"
+
+payment_zero_route_disabled="$(copy_payment_hardening_fixture payment-zero-route-disabled)"
+replace_payment_text_once \
+  "$payment_zero_route_disabled/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  $'    @Test\n    fun `refund explicit zero production RBAC route replays stable public result without mutation`()' \
+  $'    @Test\n    @org.junit.jupiter.api.Disabled\n    fun `refund explicit zero production RBAC route replays stable public result without mutation`()'
+assert_payment_hardening_rejected \
+  "payment-zero-route-disabled" \
+  "PH-TEST-DISABLED" \
+  "$payment_zero_route_disabled"
+
+payment_zero_no_rbac="$(copy_payment_hardening_fixture payment-zero-no-rbac)"
+replace_payment_text_once \
+  "$payment_zero_no_rbac/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  '"app.RBAC_ENABLED" to "true"' \
+  '"app.RBAC_ENABLED" to "false"'
+assert_payment_hardening_rejected \
+  "payment-zero-no-rbac" \
+  "PH-TEST-ZERO" \
+  "$payment_zero_no_rbac"
+
+payment_zero_no_principal="$(copy_payment_hardening_fixture payment-zero-no-production-principal)"
+replace_payment_text_once \
+  "$payment_zero_no_principal/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  'call.request.headers["X-Telegram-Id"]' \
+  'call.request.headers["X-Fixture-Bypass"]'
+assert_payment_hardening_rejected \
+  "payment-zero-no-production-principal" \
+  "PH-TEST-ZERO" \
+  "$payment_zero_no_principal"
+
+payment_zero_missing_denial="$(copy_payment_hardening_fixture payment-zero-missing-denial)"
+replace_payment_text_once \
+  "$payment_zero_missing_denial/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  'assertEquals(HttpStatusCode.Forbidden, denied.status)' \
+  'assertEquals(HttpStatusCode.OK, denied.status)'
+assert_payment_hardening_rejected \
+  "payment-zero-missing-denial" \
+  "PH-TEST-ZERO" \
+  "$payment_zero_missing_denial"
+
+payment_zero_test_missing="$(copy_payment_hardening_fixture payment-zero-test-missing)"
+replace_payment_text_once \
+  "$payment_zero_test_missing/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  $'fun `refund explicit zero persists terminal success without mutation`()' \
+  $'fun `disabled zero regression fixture`()'
+assert_payment_hardening_rejected \
+  "payment-zero-test-missing" \
+  "PH-TEST-MISSING" \
+  "$payment_zero_test_missing"
+
+payment_test_raw_string_decoy="$(copy_payment_hardening_fixture payment-test-raw-string-decoy)"
+replace_payment_text_once \
+  "$payment_test_raw_string_decoy/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  'fun `refund explicit zero persists terminal success without mutation`()' \
+  'fun `removed explicit zero regression fixture`()'
+cat >> "$payment_test_raw_string_decoy/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" <<'KOT'
+private val explicitZeroTestDeclarationDecoy = """
+    @Test
+    fun `refund explicit zero persists terminal success without mutation`() {}
+"""
+KOT
+assert_payment_hardening_rejected \
+  "payment-test-raw-string-decoy" \
+  "PH-TEST-MISSING" \
+  "$payment_test_raw_string_decoy"
+
+payment_test_nested_same_name="$(copy_payment_hardening_fixture payment-test-nested-same-name)"
+replace_payment_text_once \
+  "$payment_test_nested_same_name/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  'fun `refund explicit zero persists terminal success without mutation`()' \
+  'fun `renamed top level explicit zero fixture`()'
+cat >> "$payment_test_nested_same_name/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" <<'KOT'
+private class RequiredTestNameContainer {
+    class PaymentsPersistenceTest {
+        @Test
+        fun `refund explicit zero persists terminal success without mutation`() = Unit
+    }
+}
+KOT
+assert_payment_hardening_rejected \
+  "payment-test-nested-same-name" \
+  "PH-TEST-MISSING" \
+  "$payment_test_nested_same_name"
+
+payment_test_other_package="$(copy_payment_hardening_fixture payment-test-other-package)"
+replace_payment_text_once \
+  "$payment_test_other_package/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  'package com.example.bot.payments' \
+  'package com.example.fixture.payments'
+assert_payment_hardening_rejected \
+  "payment-test-other-package" \
+  "PH-TEST-MISSING" \
+  "$payment_test_other_package"
+
+payment_zero_no_error_pages="$(copy_payment_hardening_fixture payment-zero-no-json-error-pages)"
+replace_payment_text_once \
+  "$payment_zero_no_error_pages/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  '                    installJsonErrorPages()' \
+  '                    // installJsonErrorPages removed by negative fixture'
+assert_payment_hardening_rejected \
+  "payment-zero-no-json-error-pages" \
+  "PH-TEST-ZERO" \
+  "$payment_zero_no_error_pages"
+
+payment_zero_weak_forbidden="$(copy_payment_hardening_fixture payment-zero-weak-forbidden-envelope)"
+replace_payment_text_once \
+  "$payment_zero_weak_forbidden/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  '                assertEquals(ErrorCodes.forbidden, deniedBody.code)' \
+  '                assertTrue(denied.bodyAsText().contains("forbidden"))'
+assert_payment_hardening_rejected \
+  "payment-zero-weak-forbidden-envelope" \
+  "PH-TEST-ZERO" \
+  "$payment_zero_weak_forbidden"
+
+payment_test_result_zero="$TMP_DIR/payment-test-result-zero.xml"
+cat > "$payment_test_result_zero" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="0" skipped="0" failures="0" errors="0" />
+XML
+assert_validation_rejected \
+  "payment-test-result-zero" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_zero" \
+    "$sensitive_logging_suite" \
+    "0" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-zero.log")" "[PH-TEST-RESULT]"
+
+payment_test_result_skipped="$TMP_DIR/payment-test-result-skipped.xml"
+cat > "$payment_test_result_skipped" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="1" skipped="1" failures="0" errors="0">
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="booking finalize route never serializes raw idempotency key()"><skipped /></testcase>
+</testsuite>
+XML
+assert_validation_rejected \
+  "payment-test-result-skipped" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_skipped" \
+    "$sensitive_logging_suite" \
+    "0" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-skipped.log")" "[PH-TEST-RESULT]"
+
+payment_test_result_missing="$TMP_DIR/payment-test-result-missing.xml"
+assert_validation_rejected \
+  "payment-test-result-missing" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_missing" \
+    "$sensitive_logging_suite" \
+    "0" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-missing.log")" "[PH-TEST-RESULT]"
+
+payment_test_result_stale="$TMP_DIR/payment-test-result-stale.xml"
+cat > "$payment_test_result_stale" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="1" skipped="0" failures="0" errors="0">
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="booking finalize route never serializes raw idempotency key()" />
+</testsuite>
+XML
+payment_stale_after="$(python3 - "$payment_test_result_stale" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).stat().st_mtime_ns + 1)
+PY
+)"
+assert_validation_rejected \
+  "payment-test-result-stale" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_stale" \
+    "$sensitive_logging_suite" \
+    "$payment_stale_after" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-stale.log")" "[PH-TEST-RESULT]"
+
+payment_test_result_equal_mtime="$TMP_DIR/payment-test-result-equal-mtime.xml"
+cat > "$payment_test_result_equal_mtime" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="1" skipped="0" failures="0" errors="0">
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="booking finalize route never serializes raw idempotency key()" />
+</testsuite>
+XML
+payment_equal_mtime="$(python3 - "$payment_test_result_equal_mtime" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).lstat().st_mtime_ns)
+PY
+)"
+assert_validation_rejected \
+  "payment-test-result-equal-mtime" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_equal_mtime" \
+    "$sensitive_logging_suite" \
+    "$payment_equal_mtime" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-equal-mtime.log")" "[PH-TEST-RESULT]"
+
+payment_test_result_failure="$TMP_DIR/payment-test-result-failure.xml"
+cat > "$payment_test_result_failure" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="1" skipped="0" failures="1" errors="0">
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="booking finalize route never serializes raw idempotency key()"><failure /></testcase>
+</testsuite>
+XML
+assert_validation_rejected \
+  "payment-test-result-failure" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_failure" \
+    "$sensitive_logging_suite" \
+    "0" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-failure.log")" "[PH-TEST-RESULT]"
+
+payment_test_result_error="$TMP_DIR/payment-test-result-error.xml"
+cat > "$payment_test_result_error" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="1" skipped="0" failures="0" errors="1">
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="booking finalize route never serializes raw idempotency key()"><error /></testcase>
+</testsuite>
+XML
+assert_validation_rejected \
+  "payment-test-result-error" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_error" \
+    "$sensitive_logging_suite" \
+    "0" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-error.log")" "[PH-TEST-RESULT]"
+
+payment_test_result_wrong_case="$TMP_DIR/payment-test-result-wrong-case.xml"
+cat > "$payment_test_result_wrong_case" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="1" skipped="0" failures="0" errors="0">
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="unrelated test()" />
+</testsuite>
+XML
+assert_validation_rejected \
+  "payment-test-result-wrong-case" \
+  python3 "$payment_hardening_validator" --verify-junit-xml \
+    "$payment_test_result_wrong_case" \
+    "$sensitive_logging_suite" \
+    "0" \
+    "booking finalize route never serializes raw idempotency key"
+assert_contains "$(cat "$TMP_DIR/payment-test-result-wrong-case.log")" "[PH-TEST-RESULT]"
+
+payment_testcontainers_old_version="$(copy_payment_hardening_fixture payment-testcontainers-old-version)"
+replace_payment_text_once \
+  "$payment_testcontainers_old_version/gradle/libs.versions.toml" \
+  'testcontainers= "1.21.4"' \
+  'testcontainers= "1.19.7"'
+assert_payment_hardening_rejected \
+  "payment-testcontainers-old-version" \
+  "PH-TESTCONTAINERS" \
+  "$payment_testcontainers_old_version"
+
+payment_testcontainers_mixed_module="$(copy_payment_hardening_fixture payment-testcontainers-mixed-module)"
+replace_payment_text_once \
+  "$payment_testcontainers_mixed_module/gradle/libs.versions.toml" \
+  'testcontainers-postgresql = { module = "org.testcontainers:postgresql",       version.ref = "testcontainers" }' \
+  'testcontainers-postgresql = { module = "org.testcontainers:postgresql",       version = "1.19.7" }'
+assert_payment_hardening_rejected \
+  "payment-testcontainers-mixed-module" \
+  "PH-TESTCONTAINERS" \
+  "$payment_testcontainers_mixed_module"
+
+payment_fake_pass_helper="$(copy_payment_hardening_fixture payment-runtime-helper-fake-pass)"
+cat > "$payment_fake_pass_helper/scripts/verify-payment-hardening-runtime.sh" <<'SH'
+#!/usr/bin/env bash
+echo PASS
+exit 0
+SH
+chmod +x "$payment_fake_pass_helper/scripts/verify-payment-hardening-runtime.sh"
+assert_payment_hardening_rejected \
+  "payment-runtime-helper-fake-pass" \
+  "PH-RUNTIME-CONTRACT" \
+  "$payment_fake_pass_helper"
+
+payment_structural_output="$(python3 "$payment_hardening_validator" --structural "$ROOT_DIR")"
+assert_contains "$payment_structural_output" "payment-hardening-mode: STRUCTURAL_ONLY_NON_AUTHORITATIVE"
+assert_not_contains "$payment_structural_output" "payment-hardening-runtime: PASS"
+
+payment_runtime_fixture_base="$TMP_DIR/payment-runtime-base"
+mkdir -p \
+  "$payment_runtime_fixture_base/scripts" \
+  "$payment_runtime_fixture_base/app-bot/src/test/kotlin/com/example/bot/logging" \
+  "$payment_runtime_fixture_base/app-bot/src/test/kotlin/com/example/bot/payments"
+cp "$payment_hardening_validator" "$payment_runtime_fixture_base/scripts/validate-payment-hardening.py"
+cp "$payment_hardening_runtime" "$payment_runtime_fixture_base/scripts/verify-payment-hardening-runtime.sh"
+cp "$ROOT_DIR/app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt" \
+  "$payment_runtime_fixture_base/app-bot/src/test/kotlin/com/example/bot/logging/"
+cp "$ROOT_DIR/app-bot/src/test/kotlin/com/example/bot/logging/SqlThrowableLoggingPersistenceTest.kt" \
+  "$payment_runtime_fixture_base/app-bot/src/test/kotlin/com/example/bot/logging/"
+cp "$ROOT_DIR/app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt" \
+  "$payment_runtime_fixture_base/app-bot/src/test/kotlin/com/example/bot/payments/"
+cat > "$payment_runtime_fixture_base/gradlew" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$@" > "$PWD/runtime-args.txt"
+case "${FAKE_RUNTIME_CASE:-pass}" in
+  exit-nonzero)
+    exit 23
+    ;;
+  no-xml)
+    exit 0
+    ;;
+esac
+
+results="$PWD/app-bot/build/test-results/test"
+mkdir -p "$results"
+
+cat > "$results/TEST-com.example.bot.logging.SensitiveIdempotencyLoggingTest.xml" <<'XML'
+<testsuite name="com.example.bot.logging.SensitiveIdempotencyLoggingTest" tests="6" skipped="0" failures="0" errors="0">
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="booking finalize route never serializes raw idempotency key()" />
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="booking template service never serializes generated idempotency key()" />
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="rbac audit fingerprint does not expose raw key to json logs()" />
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="webhook keeps business key but never serializes it through mdc()" />
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="payments finalize logs presence only for long and short keys()" />
+  <testcase classname="com.example.bot.logging.SensitiveIdempotencyLoggingTest" name="db transaction logs never serialize sql exception detail()" />
+</testsuite>
+XML
+
+sql_tests="1"
+sql_skipped="0"
+sql_failures="0"
+sql_errors="0"
+sql_case='<testcase classname="com.example.bot.logging.SqlThrowableLoggingPersistenceTest" name="postgres sql throwable never reaches payment route status pages or json logs()" />'
+case "${FAKE_RUNTIME_CASE:-pass}" in
+  skipped)
+    sql_skipped="1"
+    sql_case='<testcase classname="com.example.bot.logging.SqlThrowableLoggingPersistenceTest" name="postgres sql throwable never reaches payment route status pages or json logs()"><skipped /></testcase>'
+    ;;
+  failure)
+    sql_failures="1"
+    sql_case='<testcase classname="com.example.bot.logging.SqlThrowableLoggingPersistenceTest" name="postgres sql throwable never reaches payment route status pages or json logs()"><failure /></testcase>'
+    ;;
+  error)
+    sql_errors="1"
+    sql_case='<testcase classname="com.example.bot.logging.SqlThrowableLoggingPersistenceTest" name="postgres sql throwable never reaches payment route status pages or json logs()"><error /></testcase>'
+    ;;
+  zero)
+    sql_tests="0"
+    sql_case=""
+    ;;
+esac
+cat > "$results/TEST-com.example.bot.logging.SqlThrowableLoggingPersistenceTest.xml" <<XML
+<testsuite name="com.example.bot.logging.SqlThrowableLoggingPersistenceTest" tests="$sql_tests" skipped="$sql_skipped" failures="$sql_failures" errors="$sql_errors">
+  $sql_case
+</testsuite>
+XML
+
+first_payment='refund explicit zero persists terminal success without mutation'
+if [ "${FAKE_RUNTIME_CASE:-pass}" = "missing-explicit-zero" ]; then
+  first_payment='unrelated payment testcase'
+fi
+cat > "$results/TEST-com.example.bot.payments.PaymentsPersistenceTest.xml" <<XML
+<testsuite name="com.example.bot.payments.PaymentsPersistenceTest" tests="2" skipped="0" failures="0" errors="0">
+  <testcase classname="com.example.bot.payments.PaymentsPersistenceTest" name="$first_payment()" />
+  <testcase classname="com.example.bot.payments.PaymentsPersistenceTest" name="refund explicit zero production RBAC route replays stable public result without mutation()" />
+</testsuite>
+XML
+
+case "${FAKE_RUNTIME_CASE:-pass}" in
+  missing-xml)
+    rm "$results/TEST-com.example.bot.logging.SqlThrowableLoggingPersistenceTest.xml"
+    ;;
+  stale)
+    touch -t 200001010000 "$results/TEST-com.example.bot.logging.SqlThrowableLoggingPersistenceTest.xml"
+    ;;
+esac
+SH
+chmod +x \
+  "$payment_runtime_fixture_base/gradlew" \
+  "$payment_runtime_fixture_base/scripts/verify-payment-hardening-runtime.sh"
+
+copy_payment_runtime_fixture() {
+  local fixture_name="$1"
+  local fixture_root="$TMP_DIR/$fixture_name"
+  cp -R "$payment_runtime_fixture_base" "$fixture_root"
+  printf '%s' "$fixture_root"
+}
+
+assert_required_runtime_rejected() {
+  local fixture_name="$1"
+  local fixture_case="$2"
+  local fixture_root="$3"
+  local fixture_log="$TMP_DIR/$fixture_name.log"
+  local fixture_status
+
+  if FAKE_RUNTIME_CASE="$fixture_case" python3 \
+    "$fixture_root/scripts/validate-payment-hardening.py" \
+    --run-required-runtime \
+    "$fixture_root" >"$fixture_log" 2>&1; then
+    fail "required payment runtime negative fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  assert_eq "$fixture_status" "1"
+  assert_contains "$(cat "$fixture_log")" "payment-hardening-contract: [PH-"
+  echo "quality-gate: required payment runtime fixture $fixture_name rejected"
+}
+
+payment_runtime_positive="$(copy_payment_runtime_fixture payment-runtime-positive)"
+payment_runtime_positive_output="$(FAKE_RUNTIME_CASE=pass "$payment_runtime_positive/scripts/verify-payment-hardening-runtime.sh")"
+assert_contains "$payment_runtime_positive_output" "payment-hardening-runtime: PASS"
+assert_eq "$(grep -c -x -- '--tests' "$payment_runtime_positive/runtime-args.txt")" "9"
+assert_eq "$(wc -l < "$payment_runtime_positive/runtime-args.txt" | tr -d ' ')" "24"
+required_runtime_filters=(
+  "com.example.bot.logging.SensitiveIdempotencyLoggingTest.booking finalize route never serializes raw idempotency key"
+  "com.example.bot.logging.SensitiveIdempotencyLoggingTest.booking template service never serializes generated idempotency key"
+  "com.example.bot.logging.SensitiveIdempotencyLoggingTest.rbac audit fingerprint does not expose raw key to json logs"
+  "com.example.bot.logging.SensitiveIdempotencyLoggingTest.webhook keeps business key but never serializes it through mdc"
+  "com.example.bot.logging.SensitiveIdempotencyLoggingTest.payments finalize logs presence only for long and short keys"
+  "com.example.bot.logging.SensitiveIdempotencyLoggingTest.db transaction logs never serialize sql exception detail"
+  "com.example.bot.logging.SqlThrowableLoggingPersistenceTest.postgres sql throwable never reaches payment route status pages or json logs"
+  "com.example.bot.payments.PaymentsPersistenceTest.refund explicit zero persists terminal success without mutation"
+  "com.example.bot.payments.PaymentsPersistenceTest.refund explicit zero production RBAC route replays stable public result without mutation"
+)
+for required_filter in "${required_runtime_filters[@]}"; do
+  assert_eq "$(grep -F -c -x -- "$required_filter" "$payment_runtime_positive/runtime-args.txt")" "1"
+done
+for required_argument in \
+  ':app-bot:test' \
+  '-PrunIT=true' \
+  '--rerun-tasks' \
+  '--no-build-cache' \
+  '--no-configuration-cache' \
+  '--console=plain'; do
+  assert_eq "$(grep -F -c -x -- "$required_argument" "$payment_runtime_positive/runtime-args.txt")" "1"
+done
+
+payment_runtime_not_executable="$(copy_payment_runtime_fixture payment-runtime-gradlew-not-executable)"
+chmod -x "$payment_runtime_not_executable/gradlew"
+assert_required_runtime_rejected \
+  "payment-runtime-gradlew-not-executable" \
+  "pass" \
+  "$payment_runtime_not_executable"
+if [ -e "$payment_runtime_not_executable/runtime-args.txt" ]; then
+  fail "non-executable fake Gradle was unexpectedly invoked"
+fi
+
+payment_runtime_exit="$(copy_payment_runtime_fixture payment-runtime-gradle-exit)"
+assert_required_runtime_rejected "payment-runtime-gradle-exit" "exit-nonzero" "$payment_runtime_exit"
+
+payment_runtime_short_manifest="$(copy_payment_runtime_fixture payment-runtime-short-manifest)"
+python3 - "$payment_runtime_short_manifest/scripts/validate-payment-hardening.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+marker = "booking template service never serializes generated idempotency key"
+position = text.index(marker)
+start = text.rfind("    RequiredRuntimeTest(\n", 0, position)
+end = text.index("\n    ),", position) + len("\n    ),")
+if start < 0:
+    raise SystemExit("required runtime manifest fixture source changed")
+path.write_text(text[:start] + text[end:], encoding="utf-8")
+PY
+assert_required_runtime_rejected "payment-runtime-short-manifest" "pass" "$payment_runtime_short_manifest"
+
+payment_runtime_no_xml="$(copy_payment_runtime_fixture payment-runtime-no-xml)"
+assert_required_runtime_rejected "payment-runtime-no-xml" "no-xml" "$payment_runtime_no_xml"
+
+payment_runtime_missing_zero="$(copy_payment_runtime_fixture payment-runtime-missing-explicit-zero)"
+assert_required_runtime_rejected \
+  "payment-runtime-missing-explicit-zero" \
+  "missing-explicit-zero" \
+  "$payment_runtime_missing_zero"
+
+payment_runtime_missing_xml="$(copy_payment_runtime_fixture payment-runtime-missing-xml)"
+assert_required_runtime_rejected "payment-runtime-missing-xml" "missing-xml" "$payment_runtime_missing_xml"
+
+payment_runtime_stale="$(copy_payment_runtime_fixture payment-runtime-stale-xml)"
+assert_required_runtime_rejected "payment-runtime-stale-xml" "stale" "$payment_runtime_stale"
+
+payment_runtime_skipped="$(copy_payment_runtime_fixture payment-runtime-skipped)"
+assert_required_runtime_rejected "payment-runtime-skipped" "skipped" "$payment_runtime_skipped"
+
+payment_runtime_failure="$(copy_payment_runtime_fixture payment-runtime-failure)"
+assert_required_runtime_rejected "payment-runtime-failure" "failure" "$payment_runtime_failure"
+
+payment_runtime_error="$(copy_payment_runtime_fixture payment-runtime-error)"
+assert_required_runtime_rejected "payment-runtime-error" "error" "$payment_runtime_error"
+
+payment_runtime_zero="$(copy_payment_runtime_fixture payment-runtime-zero-tests)"
+assert_required_runtime_rejected "payment-runtime-zero-tests" "zero" "$payment_runtime_zero"
+
+echo "quality-gate: payment hardening contract verified"
+
+quiesced_contract_validator="$ROOT_DIR/scripts/validate-quiesced-deployment.sh"
+"$quiesced_contract_validator" "$ROOT_DIR"
+
+quiesced_fixture_base="$TMP_DIR/quiesced-deployment-base"
+mkdir -p \
+  "$quiesced_fixture_base/.github/workflows" \
+  "$quiesced_fixture_base/scripts/deploy"
+cp "$ROOT_DIR/.github/workflows/deploy-ssh.yml" "$quiesced_fixture_base/.github/workflows/"
+cp "$ROOT_DIR/.github/workflows/db-migrate.yml" "$quiesced_fixture_base/.github/workflows/"
+cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$quiesced_fixture_base/scripts/deploy/"
+cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$quiesced_fixture_base/scripts/deploy/"
+
+copy_quiesced_fixture() {
+  local fixture_name="$1"
+  local fixture_root="$TMP_DIR/$fixture_name"
+  cp -R "$quiesced_fixture_base" "$fixture_root"
+  printf '%s' "$fixture_root"
+}
+
+quiesced_migration_before_stop="$(copy_quiesced_fixture quiesced-migration-before-stop)"
+python3 - "$quiesced_migration_before_stop/scripts/deploy/quiesced-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """  preflight_remote_release
+  quiesce_remote_release
+  assert_remote_app_absent
+  run_database_migration
+"""
+new = """  run_database_migration
+  preflight_remote_release
+  quiesce_remote_release
+  assert_remote_app_absent
+"""
+if text.count(old) != 1:
+    raise SystemExit("migration-before-stop fixture source changed")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-migration-before-stop" \
+  "$quiesced_contract_validator" \
+  "$quiesced_migration_before_stop"
+
+quiesced_old_rollback="$(copy_quiesced_fixture quiesced-old-image-rollback)"
+printf '%s\n' 'previous_tag="pre-v056"' >> \
+  "$quiesced_old_rollback/scripts/deploy/quiesced-release.sh"
+assert_validation_rejected \
+  "quiesced-old-image-rollback" \
+  "$quiesced_contract_validator" \
+  "$quiesced_old_rollback"
+
+quiesced_missing_stop_verification="$(copy_quiesced_fixture quiesced-missing-stop-verification)"
+python3 - "$quiesced_missing_stop_verification/scripts/deploy/remote-compose-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """stop_and_remove_app() {
+  compose_command stop --timeout 60 app
+  compose_command rm -f app
+  assert_app_absent
+}
+"""
+new = """stop_and_remove_app() {
+  compose_command stop --timeout 60 app
+  compose_command rm -f app
+}
+"""
+if text.count(old) != 1:
+    raise SystemExit("stop-verification fixture source changed")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-missing-stop-verification" \
+  "$quiesced_contract_validator" \
+  "$quiesced_missing_stop_verification"
+
+quiesced_different_group="$(copy_quiesced_fixture quiesced-different-concurrency-group)"
+replace_exact_line_once \
+  "$quiesced_different_group/.github/workflows/db-migrate.yml" \
+  "$quiesced_different_group/.github/workflows/db-migrate.changed.yml" \
+  '  group: payments-schema-${{ github.event_name == '\''push'\'' && '\''prod'\'' || inputs.environment }}' \
+  '  group: unsafe-standalone-migration'
+mv \
+  "$quiesced_different_group/.github/workflows/db-migrate.changed.yml" \
+  "$quiesced_different_group/.github/workflows/db-migrate.yml"
+assert_validation_rejected \
+  "quiesced-different-concurrency-group" \
+  "$quiesced_contract_validator" \
+  "$quiesced_different_group"
+
+quiesced_direct_migration="$(copy_quiesced_fixture quiesced-direct-db-migration)"
+replace_exact_line_once \
+  "$quiesced_direct_migration/.github/workflows/db-migrate.yml" \
+  "$quiesced_direct_migration/.github/workflows/db-migrate.changed.yml" \
+  '        run: scripts/deploy/quiesced-release.sh' \
+  '        run: ./gradlew flywayMigrate --no-parallel --console=plain'
+mv \
+  "$quiesced_direct_migration/.github/workflows/db-migrate.changed.yml" \
+  "$quiesced_direct_migration/.github/workflows/db-migrate.yml"
+assert_validation_rejected \
+  "quiesced-direct-db-migration" \
+  "$quiesced_contract_validator" \
+  "$quiesced_direct_migration"
+
+quiesced_missing_revision="$(copy_quiesced_fixture quiesced-missing-revision-check)"
+python3 - "$quiesced_missing_revision/scripts/deploy/remote-compose-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "org.opencontainers.image.revision"
+if old not in text:
+    raise SystemExit("revision fixture source changed")
+path.write_text(text.replace(old, "untrusted.image.revision"), encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-missing-revision-check" \
+  "$quiesced_contract_validator" \
+  "$quiesced_missing_revision"
+
+quiesced_missing_post_migration_check="$(copy_quiesced_fixture quiesced-missing-post-migration-check)"
+python3 - "$quiesced_missing_post_migration_check/scripts/deploy/quiesced-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "  assert_remote_app_absent\n"
+first = text.find(needle, text.find("run_release()"))
+second = text.find(needle, first + len(needle))
+if first < 0 or second < 0:
+    raise SystemExit("post-migration fixture source changed")
+text = text[:second] + text[second + len(needle):]
+path.write_text(text, encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-missing-post-migration-check" \
+  "$quiesced_contract_validator" \
+  "$quiesced_missing_post_migration_check"
+
+quiesced_failure_cleanup="$(copy_quiesced_fixture quiesced-failure-releases-lock)"
+python3 - "$quiesced_failure_cleanup/scripts/deploy/quiesced-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = '    echo "quiesced-release: failure is fail-closed; maintenance lock owner=$remote_owner is retained" >&2\n'
+if text.count(needle) != 1:
+    raise SystemExit("failure-cleanup fixture source changed")
+text = text.replace(needle, needle + "    remote_command cleanup >/dev/null 2>&1 || true\n")
+path.write_text(text, encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-failure-releases-lock" \
+  "$quiesced_contract_validator" \
+  "$quiesced_failure_cleanup"
+
+quiesced_removes_durable_digest="$(copy_quiesced_fixture quiesced-removes-durable-digest)"
+python3 - "$quiesced_removes_durable_digest/scripts/deploy/remote-compose-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = '    rm -f "$lock_dir/docker-compose.release.yml"\n'
+if text.count(needle) != 1:
+    raise SystemExit("durable-digest fixture source changed")
+text = text.replace(needle, '    rm -f "$persistent_override"\n' + needle)
+path.write_text(text, encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-removes-durable-digest" \
+  "$quiesced_contract_validator" \
+  "$quiesced_removes_durable_digest"
+
+quiesced_late_digest_promotion="$(copy_quiesced_fixture quiesced-late-digest-promotion)"
+python3 - "$quiesced_late_digest_promotion/scripts/deploy/remote-compose-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+quiesce = """    promote_persistent_override
+    stop_and_remove_app
+"""
+start = """  assert_app_absent
+  printf '%s' "starting" >"$lock_dir/phase"
+"""
+if text.count(quiesce) != 1 or text.count(start) != 1:
+    raise SystemExit("late-digest-promotion fixture source changed")
+text = text.replace(quiesce, "    stop_and_remove_app\n")
+text = text.replace(start, "  assert_app_absent\n  promote_persistent_override\n" + start.split("\n", 1)[1])
+path.write_text(text, encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-late-digest-promotion" \
+  "$quiesced_contract_validator" \
+  "$quiesced_late_digest_promotion"
+
+quiesced_confirmation_bypass="$(copy_quiesced_fixture quiesced-confirmation-bypass)"
+replace_exact_line_once \
+  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.yml" \
+  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.changed.yml" \
+  '        if: ${{ !inputs.confirm_quiesced_release }}' \
+  '        if: false'
+mv \
+  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.changed.yml" \
+  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.yml"
+assert_validation_rejected \
+  "quiesced-confirmation-bypass" \
+  "$quiesced_contract_validator" \
+  "$quiesced_confirmation_bypass"
+
+quiesced_confirmation_no_exit="$(copy_quiesced_fixture quiesced-confirmation-no-exit)"
+python3 - "$quiesced_confirmation_no_exit/.github/workflows/db-migrate.yml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+guard = """          echo "A standalone migration is forbidden; confirm the full quiesced release." >&2
+          exit 1
+"""
+if text.count(guard) != 1:
+    raise SystemExit("confirmation-no-exit fixture source changed")
+path.write_text(text.replace(guard, guard.splitlines(keepends=True)[0]), encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-confirmation-no-exit" \
+  "$quiesced_contract_validator" \
+  "$quiesced_confirmation_no_exit"
+
+quiesced_confirmation_default="$(copy_quiesced_fixture quiesced-confirmation-default-true)"
+replace_exact_line_once \
+  "$quiesced_confirmation_default/.github/workflows/db-migrate.yml" \
+  "$quiesced_confirmation_default/.github/workflows/db-migrate.changed.yml" \
+  '        default: false' \
+  '        default: true'
+mv \
+  "$quiesced_confirmation_default/.github/workflows/db-migrate.changed.yml" \
+  "$quiesced_confirmation_default/.github/workflows/db-migrate.yml"
+assert_validation_rejected \
+  "quiesced-confirmation-default-true" \
+  "$quiesced_contract_validator" \
+  "$quiesced_confirmation_default"
+
+quiesced_different_environment="$(copy_quiesced_fixture quiesced-different-environment)"
+replace_exact_line_once \
+  "$quiesced_different_environment/.github/workflows/db-migrate.yml" \
+  "$quiesced_different_environment/.github/workflows/db-migrate.changed.yml" \
+  '    environment: ${{ github.event_name == '\''push'\'' && '\''prod'\'' || inputs.environment }}' \
+  '    environment: unsafe-standalone'
+mv \
+  "$quiesced_different_environment/.github/workflows/db-migrate.changed.yml" \
+  "$quiesced_different_environment/.github/workflows/db-migrate.yml"
+assert_validation_rejected \
+  "quiesced-different-environment" \
+  "$quiesced_contract_validator" \
+  "$quiesced_different_environment"
+
+echo "quality-gate: quiesced deployment workflow contract verified"
+
 dockerfile="$ROOT_DIR/Dockerfile"
 copy_line="$(awk '$0 == "COPY . ." { print NR }' "$dockerfile")"
 placeholder_line="$(awk 'index($0, "mkdir -p miniapp/dist") { print NR }' "$dockerfile")"
