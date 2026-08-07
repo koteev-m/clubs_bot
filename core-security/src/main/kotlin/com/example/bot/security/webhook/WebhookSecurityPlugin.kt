@@ -35,7 +35,6 @@ import kotlin.text.Charsets
 
 const val TELEGRAM_SECRET_HEADER: String = "X-Telegram-Bot-Api-Secret-Token"
 private const val IDEMPOTENCY_HEADER = "Idempotency-Key"
-private const val IDEMPOTENCY_MDC_KEY = "idempotency_key"
 private const val UPDATE_ID_MDC_KEY = "update_id"
 private const val READ_BUFFER_SIZE = 8 * 1024
 private val webhookBodyKey = AttributeKey<ByteArray>("webhook.raw.body")
@@ -224,13 +223,6 @@ private data class WebhookSecurityState(
 
     fun applyMdc(call: ApplicationCall): List<String> {
         val keys = mutableListOf<String>()
-        val idempotency =
-            call.attributeOrNull(idempotencyKeyAttr)
-                ?: call.parameters["idempotency_key"]
-        if (idempotency != null) {
-            MDC.put(IDEMPOTENCY_MDC_KEY, idempotency)
-            keys += IDEMPOTENCY_MDC_KEY
-        }
         val updateId = call.attributeOrNull(updateIdKey)
         if (updateId != null) {
             MDC.put(UPDATE_ID_MDC_KEY, updateId.toString())

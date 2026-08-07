@@ -184,13 +184,12 @@ suspend fun <T> withRetriedTx(
 
             metrics.recordTxFailure(reasonLabel)
             log.error(
-                "DB transaction{} failed after {} attempt(s), reason={} sqlState={} message={}",
+                "DB transaction{} failed after {} attempt(s), reason={} sqlState={} cause={}",
                 txName,
                 attempt + 1,
                 reasonLabel,
                 classification.sqlState ?: "<none>",
-                ex.message,
-                ex,
+                ex.javaClass.simpleName,
             )
             throw ex
         }
@@ -200,5 +199,4 @@ suspend fun <T> withRetriedTx(
 }
 
 @Deprecated("Use withRetriedTx with explicit name/readOnly parameters")
-suspend fun <T> withTxRetry(block: suspend () -> T): T =
-    withRetriedTx(manageTransaction = false, block = block)
+suspend fun <T> withTxRetry(block: suspend () -> T): T = withRetriedTx(manageTransaction = false, block = block)

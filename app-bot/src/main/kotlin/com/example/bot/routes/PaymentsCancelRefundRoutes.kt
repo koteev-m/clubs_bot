@@ -2,6 +2,8 @@ package com.example.bot.routes
 
 import com.example.bot.data.security.Role
 import com.example.bot.di.PaymentsService
+import com.example.bot.logging.errorSqlSafe
+import com.example.bot.logging.warnSqlSafe
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.envBool
@@ -184,7 +186,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     runCatching { call.receive<CancelRequest>() }
                         .getOrElse { throwable ->
                             timer.record(Result.Validation)
-                            logger.warn(throwable) {
+                            logger.warnSqlSafe(throwable) {
                                 "[payments] cancel result=validation " +
                                     "club=$clubId " +
                                     "booking=$bookingLabel " +
@@ -236,7 +238,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     } catch (validation: PaymentsService.ValidationException) {
                         timer.record(Result.Validation)
                         setResult(Result.Validation)
-                        logger.warn(validation) {
+                        logger.warnSqlSafe(validation) {
                             "[payments] cancel " +
                                 "result=validation " +
                                 "club=$clubId " +
@@ -252,7 +254,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     } catch (conflict: PaymentsService.ConflictException) {
                         timer.record(Result.Conflict)
                         setResult(Result.Conflict)
-                        logger.warn(conflict) {
+                        logger.warnSqlSafe(conflict) {
                             "[payments] cancel " +
                                 "result=conflict " +
                                 "club=$clubId " +
@@ -268,7 +270,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     } catch (unexpected: Throwable) {
                         timer.record(Result.Unexpected)
                         setResult(Result.Unexpected)
-                        logger.error(unexpected) {
+                        logger.errorSqlSafe(unexpected) {
                             "[payments] cancel " +
                                 "result=unexpected " +
                                 "club=$clubId " +
@@ -366,7 +368,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     runCatching { call.receive<RefundRequest>() }
                         .getOrElse { throwable ->
                             timer.record(Result.Validation)
-                            logger.warn(throwable) {
+                            logger.warnSqlSafe(throwable) {
                                 "[payments] refund " +
                                     "result=validation " +
                                     "club=$clubId " +
@@ -421,7 +423,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     } catch (validation: PaymentsService.ValidationException) {
                         timer.record(Result.Validation)
                         setResult(Result.Validation)
-                        logger.warn(validation) {
+                        logger.warnSqlSafe(validation) {
                             "[payments] refund " +
                                 "result=validation " +
                                 "club=$clubId " +
@@ -437,7 +439,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     } catch (conflict: PaymentsService.ConflictException) {
                         timer.record(Result.Conflict)
                         setResult(Result.Conflict)
-                        logger.warn(conflict) {
+                        logger.warnSqlSafe(conflict) {
                             "[payments] refund " +
                                 "result=conflict " +
                                 "club=$clubId " +
@@ -453,7 +455,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     } catch (unprocessable: PaymentsService.UnprocessableException) {
                         timer.record(Result.Unprocessable)
                         setResult(Result.Unprocessable)
-                        logger.warn(unprocessable) {
+                        logger.warnSqlSafe(unprocessable) {
                             "[payments] refund " +
                                 "result=unprocessable " +
                                 "club=$clubId " +
@@ -469,7 +471,7 @@ private fun io.ktor.server.routing.Route.registerCancelRefundHandlers(
                     } catch (unexpected: Throwable) {
                         timer.record(Result.Unexpected)
                         setResult(Result.Unexpected)
-                        logger.error(unexpected) {
+                        logger.errorSqlSafe(unexpected) {
                             "[payments] refund " +
                                 "result=unexpected " +
                                 "club=$clubId " +

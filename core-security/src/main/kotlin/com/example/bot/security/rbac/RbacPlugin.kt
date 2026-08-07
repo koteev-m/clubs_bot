@@ -48,7 +48,6 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import java.security.MessageDigest
 import java.util.Base64
-import org.slf4j.MDC
 
 private val jsonParser = Json { ignoreUnknownKeys = true }
 
@@ -388,22 +387,23 @@ internal data class RbacState(
                 put("path", path)
                 put("result", result)
             }
-        withIdempotencyMdc(call) {
-            auditLogRepository.append(
-                AuditLogEvent(
-                    clubId = clubId,
-                    nightId = null,
-                    actorUserId = userId,
-                    actorRole = success?.roles?.joinToString(",") { it.name },
-                    subjectUserId = null,
-                    entityType = StandardAuditEntityType.HTTP_ACCESS,
-                    entityId = null,
-                    action = actionForResult(result),
-                    fingerprint = fingerprintFromMdc(method, path, result),
-                    metadata = metaWithIp(meta, ip),
-                ),
-            )
-        }
+        val idempotencyKey =
+            call.request.header("Idempotency-Key")
+                ?: call.request.queryParameters["idempotency_key"]
+        auditLogRepository.append(
+            AuditLogEvent(
+                clubId = clubId,
+                nightId = null,
+                actorUserId = userId,
+                actorRole = success?.roles?.joinToString(",") { it.name },
+                subjectUserId = null,
+                entityType = StandardAuditEntityType.HTTP_ACCESS,
+                entityId = null,
+                action = actionForResult(result),
+                fingerprint = fingerprint(idempotencyKey, method, path, result),
+                metadata = metaWithIp(meta, ip),
+            ),
+        )
     }
 
     private suspend fun logForbidden(
@@ -420,23 +420,6 @@ internal data class RbacState(
     }
 }
 
-private suspend fun withIdempotencyMdc(
-    call: ApplicationCall,
-    block: suspend () -> Unit,
-) {
-    val key = call.request.header("Idempotency-Key") ?: call.request.queryParameters["idempotency_key"]
-    if (key == null) {
-        block()
-    } else {
-        MDC.put("idempotency_key", key)
-        try {
-            block()
-        } finally {
-            MDC.remove("idempotency_key")
-        }
-    }
-}
-
 private fun actionForResult(result: String): StandardAuditAction =
     when (result) {
         "access_granted" -> StandardAuditAction.ACCESS_GRANTED
@@ -444,14 +427,16 @@ private fun actionForResult(result: String): StandardAuditAction =
         else -> StandardAuditAction.LEGACY
     }
 
-private fun fingerprintFromMdc(
+private fun fingerprint(
+    idempotencyKey: String?,
     method: String,
     path: String,
     result: String,
 ): String {
-    val idempotencyKey = MDC.get("idempotency_key")
     if (idempotencyKey.isNullOrBlank()) {
-        return java.util.UUID.randomUUID().toString()
+        return java.util.UUID
+            .randomUUID()
+            .toString()
     }
     val payload = "rbac|$idempotencyKey|$method|$path|$result"
     val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))

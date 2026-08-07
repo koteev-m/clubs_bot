@@ -190,6 +190,7 @@ class TracingSmokeTest :
             val tracing = TracingProvider.create(exporter)
             val loggerContext = LoggerFactory.getILoggerFactory() as LoggerContext
             val listAppender = ListAppender<ILoggingEvent>().apply { start() }
+            val previousTurboFilters = loggerContext.turboFilterList.toList()
             loggerContext.turboFilterList.clear()
             val rootLogger = loggerContext.getLogger(Logger.ROOT_LOGGER_NAME) as Logger
             rootLogger.addAppender(listAppender)
@@ -266,6 +267,8 @@ class TracingSmokeTest :
                 tracing.sdk.close()
                 exporter.reset()
                 resetMiniAppValidator()
+                loggerContext.turboFilterList.clear()
+                loggerContext.turboFilterList.addAll(previousTurboFilters)
             }
         }
     })

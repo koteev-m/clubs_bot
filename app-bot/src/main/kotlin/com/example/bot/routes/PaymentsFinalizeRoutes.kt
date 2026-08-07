@@ -1,5 +1,7 @@
 package com.example.bot.routes
 
+import com.example.bot.logging.errorSqlSafe
+import com.example.bot.logging.warnSqlSafe
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.payments.finalize.PaymentsFinalizeService
 import com.example.bot.plugins.MiniAppUserKey
@@ -120,7 +122,7 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                                 PaymentsMetrics
                                     .timer(metricsProvider, Path.Finalize, Source.MiniApp)
                                     .record(Result.Validation)
-                                logger.warn(throwable) {
+                                logger.warnSqlSafe(throwable) {
                                     "[payments] finalize " +
                                         "result=validation " +
                                         "club=$clubId " +
@@ -192,7 +194,7 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                                     runCatching {
                                         promoService.attachDeepLink(bookingId, request.promoDeepLink)
                                     }.onFailure { throwable ->
-                                        logger.warn(throwable) {
+                                        logger.warnSqlSafe(throwable) {
                                             "[payments] finalize promo-attach-failed" +
                                                 " club=$clubId " +
                                                 "booking=$bookingLabel " +
@@ -225,7 +227,7 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                         } catch (conflict: PaymentsFinalizeService.ConflictException) {
                             timer.record(Result.Conflict)
                             setResult(Result.Conflict)
-                            logger.warn(conflict) {
+                            logger.warnSqlSafe(conflict) {
                                 "[payments] finalize " +
                                     "result=conflict " +
                                     "club=$clubId " +
@@ -241,7 +243,7 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                         } catch (validation: PaymentsFinalizeService.ValidationException) {
                             timer.record(Result.Validation)
                             setResult(Result.Validation)
-                            logger.warn(validation) {
+                            logger.warnSqlSafe(validation) {
                                 "[payments] finalize " +
                                     "result=validation " +
                                     "club=$clubId " +
@@ -257,7 +259,7 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                         } catch (unexpected: Throwable) {
                             timer.record(Result.Unexpected)
                             setResult(Result.Unexpected)
-                            logger.error(unexpected) {
+                            logger.errorSqlSafe(unexpected) {
                                 "[payments] finalize " +
                                     "result=unexpected " +
                                     "club=$clubId " +

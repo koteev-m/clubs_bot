@@ -1,5 +1,9 @@
 package com.example.bot.payments
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.classic.spi.ThrowableProxyUtil
+import ch.qos.logback.core.read.ListAppender
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
@@ -73,6 +77,7 @@ import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
 import org.koin.dsl.module
 import org.koin.ktor.plugin.Koin
+import org.slf4j.LoggerFactory
 import testing.RequiresDocker
 import java.math.BigDecimal
 import java.sql.DriverManager
@@ -508,6 +513,90 @@ class PaymentsPersistenceTest : PostgresAppTest() {
                 PaymentsRepository.Result.Status.OK,
                 repository.findActionByIdempotencyKey("cancel-cancelled")?.result?.status,
             )
+        }
+
+    @Test
+    fun `different booking duplicate claim does not log raw idempotency key`() =
+        runBlocking {
+            val secretKey = "refund-secret-key-${UUID.randomUUID()}"
+            val winner = createService(database, PaymentsRepositoryImpl(database))
+            val loserApplicationName = "raw-key-loser-${UUID.randomUUID()}"
+            val loserDatabase = connectToPostgres(loserApplicationName)
+            val loser = createService(loserDatabase, PaymentsRepositoryImpl(loserDatabase))
+            val winnerBooking = seedBooking(status = BookingStatus.BOOKED, clubId = 55L, idemKey = "booking-55-a")
+            val loserBooking = seedBooking(status = BookingStatus.BOOKED, clubId = 56L, idemKey = "booking-55-b")
+            seedPayment(loserBooking, amountMinor = 500)
+            val lockNamespace = 73_007
+            val lockKey = 73_008
+            val fixture = installBlockingCancelTrigger(lockNamespace, lockKey)
+            val lockConnection = DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
+            var lockHeld = false
+            val rootLogger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+            val appender = ListAppender<ILoggingEvent>().apply { start() }
+            rootLogger.addAppender(appender)
+
+            try {
+                acquireAdvisoryLock(lockConnection, lockNamespace, lockKey)
+                lockHeld = true
+                val cancel =
+                    async(Dispatchers.Default) {
+                        winner.service.cancel(
+                            winnerBooking.clubId,
+                            winnerBooking.id,
+                            "winner",
+                            secretKey,
+                            96L,
+                        )
+                    }
+                awaitAdvisoryWait(lockNamespace, lockKey)
+                val refund =
+                    async(Dispatchers.Default) {
+                        expectValidation {
+                            loser.service.refund(
+                                loserBooking.clubId,
+                                loserBooking.id,
+                                300,
+                                secretKey,
+                                97L,
+                            )
+                        }
+                    }
+                awaitTransactionWait(loserApplicationName)
+                releaseAdvisoryLock(lockConnection, lockNamespace, lockKey)
+                lockHeld = false
+
+                assertFalse(cancel.await().idempotent)
+                assertEquals(
+                    "idempotency key already used for different operation",
+                    refund.await().message,
+                )
+            } finally {
+                if (lockHeld) {
+                    releaseAdvisoryLock(lockConnection, lockNamespace, lockKey)
+                }
+                lockConnection.close()
+                dropActionTrigger(fixture)
+                rootLogger.detachAppender(appender)
+                appender.stop()
+            }
+
+            val emittedLogs =
+                appender.list.joinToString("\n") { event ->
+                    buildString {
+                        append(event.formattedMessage)
+                        event.argumentArray?.let { arguments -> append(arguments.contentDeepToString()) }
+                        append(event.mdcPropertyMap.values.joinToString(" "))
+                        event.throwableProxy?.let { proxy ->
+                            append(ThrowableProxyUtil.asString(proxy))
+                        }
+                    }
+                }
+            assertFalse(emittedLogs.contains(secretKey), emittedLogs)
+            assertEquals(BookingStatus.CANCELLED, currentBookingStatus(winnerBooking.id))
+            assertEquals(BookingStatus.BOOKED, currentBookingStatus(loserBooking.id))
+            assertEquals(1, actionRowsCount(secretKey))
+            assertEquals(0, refundRowsCount(loserBooking.id))
+            assertEquals(500, remainingAmount(loserBooking.id))
         }
 
     @Test
