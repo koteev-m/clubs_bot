@@ -99,6 +99,12 @@
 - Legacy `payment_actions` сохраняют исходные booking/action/status/reason и не получают выдуманный request fingerprint. Однозначная numeric success amount переносится в typed result/source и refund-ledger; malformed success либо неоднозначное сочетание legacy action и `payments.status=REFUNDED` постоянно блокирует новые refunds для booking с публичным `reconciliation_required` conflict.
 - `payments.status=REFUNDED` означает полный refund `payments.amount_minor`. PostgreSQL-триггеры отражают legacy numeric `REFUND/OK` и переход payment в `REFUNDED` в source-typed ledger; DB constraints связывают source booking/status/amount и запрещают две строки для одного source.
 
+## Refund V056: deployment boundary
+
+- Prod/stage schema release использует общий environment concurrency lock и один quiesced workflow: verified image digest загружается и атомарно закрепляется в managed `docker-compose.override.yml` до остановки app и до Flyway. Затем старый app со встроенными workers останавливается и удаляется, отсутствие app проверяется до и после Flyway, после чего запускается только закреплённый image с тем же Git revision.
+- Standalone migration при работающем app запрещена. После начала V056 нельзя автоматически или вручную запускать pre-V056 image; допустимы retry того же/newer schema-compatible image, forward-fix либо контролируемый PITR.
+- Remote maintenance lock остаётся fail-closed при аварийном завершении runner. Перед его ручным удалением оператор обязан проверить owner/state, отсутствие незавершённой migration и фактическое состояние app container.
+
 ## Audit log: контракт и ограничения
 
 ### Что пишем в `audit_log`

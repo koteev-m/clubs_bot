@@ -46,7 +46,10 @@ Not retryable:
 - В core-слое используется `NoOpDbMigrationMetrics` по умолчанию; Micrometer-биндинг `MicrometerDbMigrationMetrics` подключается в `MetricsPlugin` (модуль `app-bot`).
 - Метрики `db.migrations.validate.success|failure` инкрементируются при `validate`, `db.migrations.migrate.success|failure` — при `migrate-and-validate`; gauge `db.migrations.pending` сохраняет последнее известное количество отложенных миграций.
 - `db.migrations.migrate.success` аккумулирует общее число применённых миграций (`migrationsExecuted`), при `appliedCount=0` счётчик не меняется.
-- Прод/стейдж-политика не меняется: приложение лишь валидирует схему, миграции для prod/stage выполняются через CI (`.github/workflows/db-migrate.yml`) или `MigrateMain` в непроизводственных окружениях.
+- В prod/stage приложение лишь валидирует схему. Миграции выполняются внутри полного quiesced release через
+  `.github/workflows/deploy-ssh.yml` либо вручную подтверждённый `.github/workflows/db-migrate.yml`; оба workflow
+  до Flyway закрепляют verified schema-compatible digest в managed Compose override, останавливают app/workers
+  и после migration запускают только этот digest. `MigrateMain` остаётся только для непроизводственных окружений.
 
 ## Использование
 * Новый API: `withRetriedTx(name = "label", readOnly = true) { /* Exposed DSL */ }` — helper сам открывает транзакцию и применяет retry/backoff.

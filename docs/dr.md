@@ -32,9 +32,13 @@
 - Режим задаётся `FLYWAY_MODE`: `validate`, `migrate-and-validate`, `off`. Значения по умолчанию: prod/stage → `validate`, dev/local → `migrate-and-validate`. Legacy-флаг `FLYWAY_VALIDATE_ONLY=true` принудительно ставит `validate`.
 - В prod/stage приложение на старте только валидирует схему (`flyway.validate()`), не вызывает `migrate()` и падает при наличии pending миграций — деплой не должен поднимать устаревшую схему.
 - Out-of-order (`FLYWAY_OUT_OF_ORDER=true`) разрешается только для dev/local; в prod/stage флаг игнорируется.
-- Миграции для prod/stage запускаются исключительно из CI джобы `.github/workflows/db-migrate.yml` с `FLYWAY_MODE=migrate-and-validate` (ручной `workflow_dispatch` или пуш релизного тега). CLI-инструмент `MigrateMain` требует режим `migrate-and-validate` и не позволит миграцию при `APP_ENV=prod/stage`.
+- Миграции prod/stage выполняются только внутри полного quiesced release из `.github/workflows/deploy-ssh.yml` либо ручного `.github/workflows/db-migrate.yml`. Оба workflow используют один environment concurrency lock и один orchestrator: verified new image загружается и закрепляется в managed Compose override заранее, app/workers останавливаются и удаляются, отсутствие app проверяется до и после `flywayMigrate`, затем стартует только digest с ожидаемым Git revision. Standalone migration и release-tag trigger для `db-migrate` запрещены.
+- Если runner аварийно завершился после quiesce, remote maintenance lock и phase остаются как fail-closed guard.
+  Оператор проверяет lock owner, Flyway history и container state до manual cleanup. После успешного релиза
+  managed `docker-compose.override.yml` сохраняет verified digest для последующих обычных Compose-команд. После
+  применения V056 запуск pre-V056 image запрещён; восстановление — schema-compatible forward-fix либо PITR.
 - Вспомогательные переменные: `FLYWAY_LOCATIONS` (список путей через запятую, вендорные `classpath:db/migration/<vendor>` подставляются автоматически), `FLYWAY_BASELINE_ON_MIGRATE` (по умолчанию `true`), `FLYWAY_ENABLED` (по умолчанию `true`), `FLYWAY_SCHEMAS` (при необходимости явных схем).
-- CI workflow `db-migrate` дополнительно логирует текущие `APP_ENV`/`FLYWAY_MODE` и ссылку на исходный `GITHUB_REF`; эти логи считаются источником правды при разборе проблем с применением миграций и должны прикладываться к инцидентам.
+- CI release log с `APP_ENV`, Git revision, verified digest и Flyway output считается источником правды при разборе миграций и прикладывается к инцидентам.
 
 ## Пул подключений (Hikari)
 - Значения берутся из env; невалидные/вне диапазона значения логируются и заменяются на дефолт.
