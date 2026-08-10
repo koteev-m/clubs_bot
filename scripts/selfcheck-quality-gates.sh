@@ -702,6 +702,49 @@ validate_packaged_launcher() {
   fi
 }
 
+validate_packaged_migration_launcher() {
+  local boundary_file="$1"
+  local launcher_file="$2"
+  local expected_main_class="com.example.bot.tools.QuiescedMigrateMainKt"
+
+  if [ ! -f "$boundary_file" ] || [ ! -r "$boundary_file" ] || [ ! -x "$boundary_file" ]; then
+    echo "fixed migration boundary is missing, unreadable or non-executable: $boundary_file" >&2
+    return 1
+  fi
+  for boundary_contract in \
+    'unset JAVA_TOOL_OPTIONS' \
+    'unset JDK_JAVA_OPTIONS' \
+    'unset _JAVA_OPTIONS' \
+    'unset JAVA_OPTS' \
+    'unset APP_BOT_MIGRATE_OPTS' \
+    'unset APP_BOT_MIGRATE_JAVA_OPTS' \
+    'JAVA_HOME=/opt/java/openjdk' \
+    'private_launcher=/opt/app/bin/app-bot-migrate-java' \
+    'exec "$private_launcher"'; do
+    grep -Fq -- "$boundary_contract" "$boundary_file" || {
+      echo "fixed migration boundary lacks: $boundary_contract" >&2
+      return 1
+    }
+  done
+  if grep -Eq 'QuiescedMigrateMainKt|EngineMain|ApplicationKt|\$@|\$\*' "$boundary_file"; then
+    echo "fixed migration boundary bypasses its private launcher contract: $boundary_file" >&2
+    return 1
+  fi
+
+  if [ ! -f "$launcher_file" ] || [ ! -r "$launcher_file" ] || [ ! -x "$launcher_file" ]; then
+    echo "private packaged migration launcher is missing, unreadable or non-executable: $launcher_file" >&2
+    return 1
+  fi
+  grep -Fq "$expected_main_class" "$launcher_file" || {
+    echo "packaged migration launcher main class is missing: $launcher_file" >&2
+    return 1
+  }
+  if grep -Eq 'io\.ktor\.server\.netty\.EngineMain|com\.example\.bot\.ApplicationKt' "$launcher_file"; then
+    echo "packaged migration launcher references application startup: $launcher_file" >&2
+    return 1
+  fi
+}
+
 assert_step_direct_key_line() {
   local file="$1"
   local job_name="$2"
@@ -5545,6 +5588,9 @@ echo "quality-gate: Container Smoke runtime/network contract verified"
 "$ROOT_DIR/gradlew" :app-bot:installDist --rerun-tasks --console=plain
 validate_packaged_launcher "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot"
 validate_packaged_launcher "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot.bat"
+validate_packaged_migration_launcher \
+  "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot-migrate" \
+  "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot-migrate-java"
 echo "quality-gate: packaged EngineMain launchers verified"
 
 dockerignore_file="$ROOT_DIR/.dockerignore"
@@ -6048,11 +6094,20 @@ sensitive_logging_suite="com.example.bot.logging.SensitiveIdempotencyLoggingTest
 
 payment_hardening_fixture_base="$TMP_DIR/payment-hardening-base"
 payment_hardening_files=(
+  "Dockerfile"
+  "docker-compose.yml"
   ".github/workflows/lint.yml"
   ".github/workflows/deploy-ssh.yml"
   ".github/workflows/db-migrate.yml"
+  "app-bot/build.gradle.kts"
+  "app-bot/src/main/dist/bin/app-bot-migrate"
+  "app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt"
+  "app-bot/src/main/resources/quiesced-migration-logback.xml"
+  "app-bot/src/test/kotlin/com/example/bot/tools/QuiescedMigrateMainTest.kt"
   "core-data/src/main/resources/db/migration/postgresql/V056__atomic_booking_refunds.sql"
   "core-data/src/main/resources/db/migration/h2/V056__atomic_booking_refunds.sql"
+  "core-data/src/main/kotlin/com/example/bot/data/db/DbConfig.kt"
+  "core-data/src/test/kotlin/com/example/bot/data/db/FlywayConfigTest.kt"
   "core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt"
   "core-security/src/main/kotlin/com/example/bot/security/webhook/WebhookSecurityPlugin.kt"
   "app-bot/src/main/kotlin/com/example/bot/routes/BookingFinalizeRoutes.kt"
@@ -6068,7 +6123,10 @@ payment_hardening_files=(
   "app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt"
   "app-bot/src/test/kotlin/com/example/bot/logging/SqlThrowableLoggingPersistenceTest.kt"
   "app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt"
+  "docs/dr.md"
   "docs/invariants.md"
+  "docs/ops/release-rollback.md"
+  "docs/runtime-db-resiliency.md"
   "gradle/libs.versions.toml"
   "scripts/selfcheck-quality-gates.sh"
   "scripts/validate-payment-hardening.py"
@@ -6264,6 +6322,67 @@ payment_parent_symlink="$(copy_payment_hardening_fixture payment-protected-paren
 mv "$payment_parent_symlink/docs" "$payment_parent_symlink/docs-real"
 ln -s docs-real "$payment_parent_symlink/docs"
 assert_payment_hardening_rejected "payment-protected-parent-symlink" "PH-FILE" "$payment_parent_symlink"
+
+payment_migration_log_symlink="$(copy_payment_hardening_fixture payment-protected-migration-log-symlink)"
+rm "$payment_migration_log_symlink/app-bot/src/main/resources/quiesced-migration-logback.xml"
+ln -s logback.xml \
+  "$payment_migration_log_symlink/app-bot/src/main/resources/quiesced-migration-logback.xml"
+assert_payment_hardening_rejected \
+  "payment-protected-migration-log-symlink" \
+  "PH-FILE" \
+  "$payment_migration_log_symlink"
+
+payment_migration_boundary_symlink="$(copy_payment_hardening_fixture payment-protected-migration-boundary-symlink)"
+rm "$payment_migration_boundary_symlink/app-bot/src/main/dist/bin/app-bot-migrate"
+ln -s ../../../../build.gradle.kts \
+  "$payment_migration_boundary_symlink/app-bot/src/main/dist/bin/app-bot-migrate"
+assert_payment_hardening_rejected \
+  "payment-protected-migration-boundary-symlink" \
+  "PH-FILE" \
+  "$payment_migration_boundary_symlink"
+
+payment_migration_log_throwable="$(copy_payment_hardening_fixture payment-migration-log-throwable-pattern)"
+replace_payment_text_once \
+  "$payment_migration_log_throwable/app-bot/src/main/resources/quiesced-migration-logback.xml" \
+  '<pattern>%msg%n%nopex</pattern>' \
+  '<pattern>%msg%n%ex</pattern>'
+assert_payment_hardening_rejected \
+  "payment-migration-log-throwable-pattern" \
+  "PH-LOG-MIGRATION" \
+  "$payment_migration_log_throwable"
+
+payment_migration_flyway_logging="$(copy_payment_hardening_fixture payment-migration-flyway-logging)"
+replace_payment_text_once \
+  "$payment_migration_flyway_logging/app-bot/src/main/resources/quiesced-migration-logback.xml" \
+  '<logger name="org.flywaydb" level="OFF" additivity="false" />' \
+  '<logger name="org.flywaydb" level="INFO" additivity="false" />'
+assert_payment_hardening_rejected \
+  "payment-migration-flyway-logging" \
+  "PH-LOG-MIGRATION" \
+  "$payment_migration_flyway_logging"
+
+payment_migration_raw_failure="$(copy_payment_hardening_fixture payment-migration-raw-failure-message)"
+replace_payment_text_once \
+  "$payment_migration_raw_failure/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
+  '    } catch (failure: Exception) {
+        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))' \
+  '    } catch (failure: Exception) {
+        System.err.println(failure.message)
+        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))'
+assert_payment_hardening_rejected \
+  "payment-migration-raw-failure-message" \
+  "PH-LOG-MIGRATION" \
+  "$payment_migration_raw_failure"
+
+payment_migration_test_removed="$(copy_payment_hardening_fixture payment-migration-redaction-test-removed)"
+replace_payment_text_once \
+  "$payment_migration_test_removed/app-bot/src/test/kotlin/com/example/bot/tools/QuiescedMigrateMainTest.kt" \
+  'fun `real entrypoint suppresses connection canaries and stack traces`()' \
+  'fun `real entrypoint emits connection diagnostics`()'
+assert_payment_hardening_rejected \
+  "payment-migration-redaction-test-removed" \
+  "PH-TEST-MISSING" \
+  "$payment_migration_test_removed"
 
 payment_non_regular="$(copy_payment_hardening_fixture payment-protected-non-regular)"
 rm "$payment_non_regular/docs/invariants.md"
@@ -7479,11 +7598,34 @@ quiesced_contract_validator="$ROOT_DIR/scripts/validate-quiesced-deployment.sh"
 quiesced_fixture_base="$TMP_DIR/quiesced-deployment-base"
 mkdir -p \
   "$quiesced_fixture_base/.github/workflows" \
-  "$quiesced_fixture_base/scripts/deploy"
+  "$quiesced_fixture_base/scripts/deploy" \
+  "$quiesced_fixture_base/app-bot/src/main/dist/bin" \
+  "$quiesced_fixture_base/app-bot/src/main/kotlin/com/example/bot/tools" \
+  "$quiesced_fixture_base/app-bot/src/main/resources" \
+  "$quiesced_fixture_base/app-bot/src/test/kotlin/com/example/bot/tools" \
+  "$quiesced_fixture_base/core-data/src/main/kotlin/com/example/bot/data/db"
 cp "$ROOT_DIR/.github/workflows/deploy-ssh.yml" "$quiesced_fixture_base/.github/workflows/"
 cp "$ROOT_DIR/.github/workflows/db-migrate.yml" "$quiesced_fixture_base/.github/workflows/"
 cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$quiesced_fixture_base/scripts/deploy/"
 cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$quiesced_fixture_base/scripts/deploy/"
+cp "$ROOT_DIR/Dockerfile" "$quiesced_fixture_base/"
+cp "$ROOT_DIR/docker-compose.yml" "$quiesced_fixture_base/"
+cp "$ROOT_DIR/app-bot/build.gradle.kts" "$quiesced_fixture_base/app-bot/"
+cp \
+  "$ROOT_DIR/app-bot/src/main/dist/bin/app-bot-migrate" \
+  "$quiesced_fixture_base/app-bot/src/main/dist/bin/"
+cp \
+  "$ROOT_DIR/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
+  "$quiesced_fixture_base/app-bot/src/main/kotlin/com/example/bot/tools/"
+cp \
+  "$ROOT_DIR/app-bot/src/main/resources/quiesced-migration-logback.xml" \
+  "$quiesced_fixture_base/app-bot/src/main/resources/"
+cp \
+  "$ROOT_DIR/app-bot/src/test/kotlin/com/example/bot/tools/QuiescedMigrateMainTest.kt" \
+  "$quiesced_fixture_base/app-bot/src/test/kotlin/com/example/bot/tools/"
+cp \
+  "$ROOT_DIR/core-data/src/main/kotlin/com/example/bot/data/db/DbConfig.kt" \
+  "$quiesced_fixture_base/core-data/src/main/kotlin/com/example/bot/data/db/"
 
 copy_quiesced_fixture() {
   local fixture_name="$1"
@@ -7738,6 +7880,459 @@ assert_validation_rejected \
   "quiesced-different-environment" \
   "$quiesced_contract_validator" \
   "$quiesced_different_environment"
+
+quiesced_runner_checkout_migration="$(copy_quiesced_fixture quiesced-runner-checkout-migration)"
+replace_exact_line_once \
+  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.sh" \
+  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.changed.sh" \
+  '  remote_command migrate' \
+  '  "$repository_root/gradlew" flywayMigrate --no-parallel --console=plain'
+mv \
+  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.changed.sh" \
+  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.sh"
+assert_validation_rejected \
+  "quiesced-runner-checkout-migration" \
+  "$quiesced_contract_validator" \
+  "$quiesced_runner_checkout_migration"
+
+quiesced_mutable_migration_image="$(copy_quiesced_fixture quiesced-mutable-migration-image)"
+python3 - "$quiesced_mutable_migration_image/scripts/deploy/remote-compose-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+start = text.index("migrate_verified_image() {")
+old = '  digest="$(state_value image_digest)"\n'
+position = text.find(old, start)
+if position < 0:
+    raise SystemExit("mutable-migration-image fixture source changed")
+text = text[:position] + '  digest="nightconcierge/app-bot:latest"\n' + text[position + len(old):]
+path.write_text(text, encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-mutable-migration-image" \
+  "$quiesced_contract_validator" \
+  "$quiesced_mutable_migration_image"
+
+quiesced_different_final_digest="$(copy_quiesced_fixture quiesced-different-final-digest)"
+replace_exact_line_once \
+  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.changed.sh" \
+  '  if [ "$migration_digest" != "$digest" ]; then' \
+  '  if [ "$migration_digest" != "$migration_digest" ]; then'
+mv \
+  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-different-final-digest" \
+  "$quiesced_contract_validator" \
+  "$quiesced_different_final_digest"
+
+quiesced_checkout_bind_mount="$(copy_quiesced_fixture quiesced-checkout-bind-mount)"
+replace_exact_line_once \
+  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.changed.sh" \
+  '      --no-deps \' \
+  '      --volume "$PWD:/opt/app" --no-deps \'
+mv \
+  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-checkout-bind-mount" \
+  "$quiesced_contract_validator" \
+  "$quiesced_checkout_bind_mount"
+
+quiesced_early_migrated_phase="$(copy_quiesced_fixture quiesced-early-migrated-phase)"
+python3 - "$quiesced_early_migrated_phase/scripts/deploy/remote-compose-release.sh" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+phase = '  printf \'%s\' "migrated" >"$lock_dir/phase"\n'
+wait = '  migration_exit_code="$(docker wait "$migration_container_id")"\n'
+if text.count(phase) != 1 or text.count(wait) != 1:
+    raise SystemExit("early-migrated fixture source changed")
+text = text.replace(phase, "")
+text = text.replace(wait, phase + wait)
+path.write_text(text, encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-early-migrated-phase" \
+  "$quiesced_contract_validator" \
+  "$quiesced_early_migrated_phase"
+
+quiesced_ignored_migration_exit="$(copy_quiesced_fixture quiesced-ignored-migration-exit)"
+replace_exact_line_once \
+  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.changed.sh" \
+  '  if [ "$migration_exit_code" != "0" ]; then' \
+  '  if false; then'
+mv \
+  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-ignored-migration-exit" \
+  "$quiesced_contract_validator" \
+  "$quiesced_ignored_migration_exit"
+
+quiesced_start_after_failure="$(copy_quiesced_fixture quiesced-start-after-migration-failure)"
+replace_exact_line_once \
+  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.sh" \
+  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.changed.sh" \
+  '  remote_command migrate' \
+  '  remote_command migrate || true'
+mv \
+  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.changed.sh" \
+  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.sh"
+assert_validation_rejected \
+  "quiesced-start-after-migration-failure" \
+  "$quiesced_contract_validator" \
+  "$quiesced_start_after_failure"
+
+quiesced_full_app_migration="$(copy_quiesced_fixture quiesced-full-app-migration)"
+replace_exact_line_once \
+  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.changed.sh" \
+  '      --entrypoint /opt/app/bin/app-bot-migrate \' \
+  '      --entrypoint /opt/app/bin/app-bot \'
+mv \
+  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-full-app-migration" \
+  "$quiesced_contract_validator" \
+  "$quiesced_full_app_migration"
+
+quiesced_private_launcher_bypass="$(copy_quiesced_fixture quiesced-private-launcher-bypass)"
+replace_exact_line_once \
+  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.changed.sh" \
+  '      --entrypoint /opt/app/bin/app-bot-migrate \' \
+  '      --entrypoint /opt/app/bin/app-bot-migrate-java \'
+mv \
+  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-private-launcher-bypass" \
+  "$quiesced_contract_validator" \
+  "$quiesced_private_launcher_bypass"
+
+quiesced_boundary_keeps_java_opts="$(copy_quiesced_fixture quiesced-boundary-keeps-java-opts)"
+replace_exact_line_once \
+  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate" \
+  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
+  'unset JAVA_TOOL_OPTIONS' \
+  ': JAVA_TOOL_OPTIONS is intentionally retained'
+mv \
+  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
+  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate"
+assert_validation_rejected \
+  "quiesced-boundary-keeps-java-opts" \
+  "$quiesced_contract_validator" \
+  "$quiesced_boundary_keeps_java_opts"
+
+quiesced_boundary_forwards_args="$(copy_quiesced_fixture quiesced-boundary-forwards-args)"
+replace_exact_line_once \
+  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate" \
+  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
+  'exec "$private_launcher"' \
+  'exec "$private_launcher" "$@"'
+mv \
+  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
+  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate"
+assert_validation_rejected \
+  "quiesced-boundary-forwards-args" \
+  "$quiesced_contract_validator" \
+  "$quiesced_boundary_forwards_args"
+
+quiesced_remote_empty_java_opts="$(copy_quiesced_fixture quiesced-remote-empty-java-opts)"
+replace_exact_line_once \
+  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.changed.sh" \
+  '      -e QUIESCED_RELEASE_MIGRATION=required \' \
+  '      -e QUIESCED_RELEASE_MIGRATION=required -e JAVA_TOOL_OPTIONS= \'
+mv \
+  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-remote-empty-java-opts" \
+  "$quiesced_contract_validator" \
+  "$quiesced_remote_empty_java_opts"
+
+quiesced_missing_image_entrypoint="$(copy_quiesced_fixture quiesced-missing-image-entrypoint)"
+replace_exact_line_once \
+  "$quiesced_missing_image_entrypoint/Dockerfile" \
+  "$quiesced_missing_image_entrypoint/Dockerfile.changed" \
+  ' && test -x /opt/app/bin/app-bot-migrate \' \
+  ' && test -x /opt/app/bin/app-bot \'
+mv "$quiesced_missing_image_entrypoint/Dockerfile.changed" "$quiesced_missing_image_entrypoint/Dockerfile"
+assert_validation_rejected \
+  "quiesced-missing-image-entrypoint" \
+  "$quiesced_contract_validator" \
+  "$quiesced_missing_image_entrypoint"
+
+quiesced_raw_migration_logs="$(copy_quiesced_fixture quiesced-raw-migration-logs)"
+replace_exact_line_once \
+  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.changed.sh" \
+  '  capture_and_forward_safe_migration_diagnostics "$migration_container_id" "$migration_exit_code"' \
+  '  docker logs "$migration_container_id" >&2'
+mv \
+  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-raw-migration-logs" \
+  "$quiesced_contract_validator" \
+  "$quiesced_raw_migration_logs"
+
+quiesced_unanchored_safe_filter="$(copy_quiesced_fixture quiesced-unanchored-safe-filter)"
+replace_payment_text_once \
+  "$quiesced_unanchored_safe_filter/scripts/deploy/remote-compose-release.sh" \
+  '^migration-safe:v=1\ event=completed\ applied=(0|[1-9][0-9]{0,9})$' \
+  '^migration-safe:v=1\ event=completed\ applied=(.+)'
+assert_validation_rejected \
+  "quiesced-unanchored-safe-filter" \
+  "$quiesced_contract_validator" \
+  "$quiesced_unanchored_safe_filter"
+
+quiesced_forwards_unmatched_line="$(copy_quiesced_fixture quiesced-forwards-unmatched-line)"
+replace_exact_line_once \
+  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.sh" \
+  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.changed.sh" \
+  '  printf '\''%s\n'\'' "migration-safe:v=1 event=started" >&2' \
+  '  printf '\''%s\n'\'' "$line" >&2'
+mv \
+  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.changed.sh" \
+  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.sh"
+assert_validation_rejected \
+  "quiesced-forwards-unmatched-line" \
+  "$quiesced_contract_validator" \
+  "$quiesced_forwards_unmatched_line"
+
+quiesced_rethrows_migration_failure="$(copy_quiesced_fixture quiesced-rethrows-migration-failure)"
+replace_payment_text_once \
+  "$quiesced_rethrows_migration_failure/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
+  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))
+        EXIT_FAILURE' \
+  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))
+        throw failure'
+assert_validation_rejected \
+  "quiesced-rethrows-migration-failure" \
+  "$quiesced_contract_validator" \
+  "$quiesced_rethrows_migration_failure"
+
+quiesced_logs_migration_message="$(copy_quiesced_fixture quiesced-logs-migration-message)"
+replace_payment_text_once \
+  "$quiesced_logs_migration_message/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
+  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))' \
+  '        System.err.println(failure.message)
+        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))'
+assert_validation_rejected \
+  "quiesced-logs-migration-message" \
+  "$quiesced_contract_validator" \
+  "$quiesced_logs_migration_message"
+
+quiesced_logs_migration_throwable="$(copy_quiesced_fixture quiesced-logs-migration-throwable)"
+replace_payment_text_once \
+  "$quiesced_logs_migration_throwable/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
+  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))' \
+  '        val unsafeLogger = LoggerFactory.getLogger("UnsafeMigration")
+        unsafeLogger.error("migration failed", failure)
+        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))'
+assert_validation_rejected \
+  "quiesced-logs-migration-throwable" \
+  "$quiesced_contract_validator" \
+  "$quiesced_logs_migration_throwable"
+
+quiesced_missing_log_config="$(copy_quiesced_fixture quiesced-missing-migration-log-config)"
+rm "$quiesced_missing_log_config/app-bot/src/main/resources/quiesced-migration-logback.xml"
+assert_validation_rejected \
+  "quiesced-missing-migration-log-config" \
+  "$quiesced_contract_validator" \
+  "$quiesced_missing_log_config"
+
+quiesced_flyway_logging="$(copy_quiesced_fixture quiesced-flyway-logging-enabled)"
+replace_payment_text_once \
+  "$quiesced_flyway_logging/app-bot/src/main/resources/quiesced-migration-logback.xml" \
+  '<logger name="org.flywaydb" level="OFF" additivity="false" />' \
+  '<logger name="org.flywaydb" level="INFO" additivity="false" />'
+assert_validation_rejected \
+  "quiesced-flyway-logging-enabled" \
+  "$quiesced_contract_validator" \
+  "$quiesced_flyway_logging"
+
+quiesced_main_uses_migration_logging="$(copy_quiesced_fixture quiesced-main-uses-migration-logging)"
+replace_payment_text_once \
+  "$quiesced_main_uses_migration_logging/app-bot/build.gradle.kts" \
+  '            "-XX:+ExitOnOutOfMemoryError",' \
+  '            "-XX:+ExitOnOutOfMemoryError",
+            "-Dlogback.configurationFile=$quiescedMigrationLogConfig",'
+assert_validation_rejected \
+  "quiesced-main-uses-migration-logging" \
+  "$quiesced_contract_validator" \
+  "$quiesced_main_uses_migration_logging"
+
+quiesced_failure_becomes_success="$(copy_quiesced_fixture quiesced-migration-failure-exit-zero)"
+replace_payment_text_once \
+  "$quiesced_failure_becomes_success/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
+  'private const val EXIT_FAILURE = 1' \
+  'private const val EXIT_FAILURE = 0'
+assert_validation_rejected \
+  "quiesced-migration-failure-exit-zero" \
+  "$quiesced_contract_validator" \
+  "$quiesced_failure_becomes_success"
+
+quiesced_early_completed_event="$(copy_quiesced_fixture quiesced-early-completed-event)"
+python3 - "$quiesced_early_completed_event/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+run = "        val result = migration(::advance)\n"
+complete = "        eventSink(MigrationSafeEvent.Completed(result.migrationsExecuted))\n"
+if text.count(run) != 1 or text.count(complete) != 1:
+    raise SystemExit("early-completed-event fixture source changed")
+text = text.replace(
+    run + complete,
+    "        val result = QuiescedMigrationResult(0)\n" + complete + "        migration(::advance)\n",
+)
+path.write_text(text, encoding="utf-8")
+PY
+assert_validation_rejected \
+  "quiesced-early-completed-event" \
+  "$quiesced_contract_validator" \
+  "$quiesced_early_completed_event"
+
+safe_filter_harness="$TMP_DIR/quiesced-safe-log-filter.sh"
+{
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+  awk '
+    /^emit_safe_migration_diagnostics\(\) \{/ { inside = 1 }
+    inside { print }
+    inside && /^}/ { exit }
+  ' "$ROOT_DIR/scripts/deploy/remote-compose-release.sh"
+  printf '%s\n' 'emit_safe_migration_diagnostics "$1" "$2"'
+} >"$safe_filter_harness"
+chmod +x "$safe_filter_harness"
+
+assert_safe_filter_accepts() {
+  local fixture_name="$1"
+  local migration_exit="$2"
+  local input_file="$3"
+  local output_file="$TMP_DIR/${fixture_name}.output"
+
+  "$safe_filter_harness" "$input_file" "$migration_exit" >"$output_file" 2>&1 ||
+    fail "strict migration parser rejected canonical fixture: $fixture_name"
+  cmp -s "$input_file" "$output_file" ||
+    fail "strict migration parser did not reconstruct the canonical fixture: $fixture_name"
+}
+
+safe_filter_success_zero="$TMP_DIR/quiesced-safe-filter-success-zero.log"
+printf '%s\n' \
+  'migration-safe:v=1 event=started' \
+  'migration-safe:v=1 event=completed applied=0' >"$safe_filter_success_zero"
+assert_safe_filter_accepts "safe-filter-success-zero" 0 "$safe_filter_success_zero"
+
+safe_filter_success_max="$TMP_DIR/quiesced-safe-filter-success-max.log"
+printf '%s\n' \
+  'migration-safe:v=1 event=started' \
+  'migration-safe:v=1 event=completed applied=2147483647' >"$safe_filter_success_max"
+assert_safe_filter_accepts "safe-filter-success-max" 0 "$safe_filter_success_max"
+
+safe_failure_events=(
+  'migration-safe:v=1 event=failed phase=bootstrap category=configuration'
+  'migration-safe:v=1 event=failed phase=configuration category=connection'
+  'migration-safe:v=1 event=failed phase=migration category=authentication'
+  'migration-safe:v=1 event=failed phase=validation category=migration'
+  'migration-safe:v=1 event=failed phase=pending-check category=validation'
+  'migration-safe:v=1 event=failed phase=migration category=cancelled'
+  'migration-safe:v=1 event=failed phase=migration category=unexpected'
+)
+safe_failure_index=0
+for safe_failure_event in "${safe_failure_events[@]}"; do
+  safe_failure_index=$((safe_failure_index + 1))
+  safe_filter_failure_input="$TMP_DIR/quiesced-safe-filter-failure-${safe_failure_index}.log"
+  printf '%s\n' \
+    'migration-safe:v=1 event=started' \
+    "$safe_failure_event" >"$safe_filter_failure_input"
+  assert_safe_filter_accepts \
+    "safe-filter-failure-${safe_failure_index}" \
+    1 \
+    "$safe_filter_failure_input"
+done
+
+safe_filter_negative_dir="$TMP_DIR/quiesced-safe-filter-negative"
+safe_filter_negative_manifest="$TMP_DIR/quiesced-safe-filter-negative.tsv"
+mkdir -p "$safe_filter_negative_dir"
+python3 - "$safe_filter_negative_dir" "$safe_filter_negative_manifest" <<'PY'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+manifest = Path(sys.argv[2])
+started = b"migration-safe:v=1 event=started\n"
+completed = b"migration-safe:v=1 event=completed applied=1\n"
+failed = b"migration-safe:v=1 event=failed phase=migration category=connection\n"
+cases = [
+    ("jdbc-between-events", 0, "protocol", started + b"jdbc:postgresql://raw-sentinel.invalid/db\n" + completed),
+    ("unknown-before-started", 0, "protocol", b"raw-sentinel-before\n" + started + completed),
+    ("unknown-after-completed", 0, "protocol", started + completed + b"raw-sentinel-after\n"),
+    ("completed-before-started", 0, "protocol", completed + started),
+    ("failed-before-started", 1, "protocol", failed + started),
+    ("duplicate-started", 0, "protocol", started + started + completed),
+    ("duplicate-completed", 0, "protocol", started + completed + completed),
+    ("duplicate-failed", 1, "protocol", started + failed + failed),
+    ("completed-and-failed", 0, "protocol", started + completed + failed),
+    ("missing-terminal", 0, "protocol", started),
+    ("missing-started", 0, "protocol", completed),
+    ("blank-line", 0, "protocol", started + b"\n" + completed),
+    ("leading-whitespace", 0, "protocol", b" migration-safe:v=1 event=started\n" + completed),
+    ("trailing-whitespace", 0, "protocol", started + b"migration-safe:v=1 event=completed applied=1 \n"),
+    ("extra-field", 0, "protocol", started + b"migration-safe:v=1 event=completed applied=1 extra=value\n"),
+    ("reordered-fields", 0, "protocol", started + b"migration-safe:event=completed v=1 applied=1\n"),
+    ("unknown-version", 0, "protocol", b"migration-safe:v=2 event=started\n" + completed),
+    ("unknown-event", 0, "protocol", started + b"migration-safe:v=1 event=unknown\n"),
+    ("unknown-phase", 1, "protocol", started + b"migration-safe:v=1 event=failed phase=unknown category=connection\n"),
+    ("unknown-category", 1, "protocol", started + b"migration-safe:v=1 event=failed phase=migration category=unknown\n"),
+    ("applied-negative", 0, "protocol", started + b"migration-safe:v=1 event=completed applied=-1\n"),
+    ("applied-plus", 0, "protocol", started + b"migration-safe:v=1 event=completed applied=+1\n"),
+    ("applied-leading-zero", 0, "protocol", started + b"migration-safe:v=1 event=completed applied=01\n"),
+    ("applied-over-int", 0, "protocol", started + b"migration-safe:v=1 event=completed applied=2147483648\n"),
+    ("applied-huge", 0, "protocol", started + b"migration-safe:v=1 event=completed applied=9999999999\n"),
+    ("ansi-escape", 0, "bytes", started + b"\x1b[31mraw-sentinel\x1b[0m\n" + completed),
+    ("carriage-return", 0, "bytes", started + b"raw-sentinel\r\n" + completed),
+    ("tab", 0, "bytes", started + b"raw\tsentinel\n" + completed),
+    ("other-control", 0, "bytes", started + b"raw\x01sentinel\n" + completed),
+    ("nul-byte", 0, "bytes", started + b"raw\x00sentinel\n" + completed),
+    ("non-ascii", 0, "bytes", started + "небезопасно\n".encode("utf-8") + completed),
+    ("exit-zero-with-failed", 0, "protocol", started + failed),
+    ("nonzero-with-completed", 1, "protocol", started + completed),
+    ("jvm-picked-up", 0, "protocol", b"Picked up JAVA_TOOL_OPTIONS: raw-sentinel\n" + started + completed),
+]
+rows = []
+for name, exit_code, rejection, payload in cases:
+    (root / f"{name}.log").write_bytes(payload)
+    rows.append(f"{name}\t{exit_code}\t{rejection}")
+manifest.write_text("\n".join(rows) + "\n", encoding="ascii")
+PY
+
+while IFS=$'\t' read -r fixture_name migration_exit rejection_kind; do
+  negative_input="$safe_filter_negative_dir/${fixture_name}.log"
+  negative_output="$safe_filter_negative_dir/${fixture_name}.output"
+  if "$safe_filter_harness" "$negative_input" "$migration_exit" >"$negative_output" 2>&1; then
+    fail "strict migration parser accepted invalid fixture: $fixture_name"
+  fi
+  if [ "$rejection_kind" = "bytes" ]; then
+    expected_rejection='remote-release: migration diagnostic protocol rejected non-canonical bytes; raw output suppressed'
+  else
+    expected_rejection='remote-release: migration diagnostic protocol rejected non-canonical output; raw output suppressed'
+  fi
+  assert_eq "$(cat "$negative_output")" "$expected_rejection"
+done <"$safe_filter_negative_manifest"
+echo "quality-gate: strict migration diagnostic protocol fixtures verified"
 
 echo "quality-gate: quiesced deployment workflow contract verified"
 

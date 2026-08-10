@@ -36,10 +36,10 @@
 ## Минимальный протокол восстановления
 
 1. Зафиксировать время инцидента и tag неуспешного релиза.
-2. Зафиксировать применённую Flyway version и verified image digest/revision.
-3. Не удалять stale remote maintenance lock без проверки owner, состояния app и schema history.
+2. Зафиксировать применённую Flyway version, verified image digest/revision и сохранённые в maintenance lock `migration_image_digest`/`migration_image_id`. Они должны совпадать с final app image reference/ID.
+3. Не удалять stale remote maintenance lock без проверки owner/phase, состояния migration/app containers и schema history. В фазе `migrating` сначала установить, завершилась ли Flyway transaction, и только затем решать вопрос о retry/cleanup.
 4. Проверить, что `docker-compose.override.yml` остаётся managed-файлом и его digest совпадает с
    `image_digest` текущего maintenance lock, а revision — с `expected_revision`. До этой проверки не запускать
    ни base Compose, ни сохранённый «последний рабочий» image: после V056 он может быть schema-incompatible.
-5. После forward-fix подтвердить `/ready` и `/health`, снять логи приложения + Flyway summary.
+5. После forward-fix подтвердить `/ready` и `/health`, сохранить application logs и реконструированные canonical `migration-safe:v=1` events вместе со schema-history evidence. Unknown/malformed/duplicate/out-of-order raw output является protocol failure и не разрешает выход из maintenance. Не пересылать в CI полный migration-container output и не включать raw Flyway/JDBC/exception logging; при fail-closed maintenance он доступен только ограниченному оператору как mode `0600` файл на host.
 6. Открыть postmortem-задачу с причиной и корректирующими действиями.

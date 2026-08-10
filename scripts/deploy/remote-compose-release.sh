@@ -16,6 +16,7 @@ fi
 
 lock_dir="/tmp/clubs-bot-schema-${app_env}.lock"
 managed_override_marker="# clubs-bot-managed-quiesced-release"
+migration_container_name=""
 
 state_value() {
   local name="$1"
@@ -183,11 +184,203 @@ YAML
   docker compose config --images | grep -Fxq "$digest"
 }
 
+cleanup_migration_container() {
+  local exit_status=$?
+  if [ -n "$migration_container_name" ]; then
+    docker rm -f "$migration_container_name" >/dev/null 2>&1 || true
+  fi
+  trap - EXIT
+  exit "$exit_status"
+}
+
+emit_safe_migration_diagnostics() {
+  local migration_log_file="$1"
+  local migration_exit_code="$2"
+  local line completed_applied="" failed_phase="" failed_category=""
+  local state="initial" parse_failed=0
+  local LC_ALL=C
+
+  if [[ ! "$migration_exit_code" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    echo "remote-release: migration diagnostic protocol rejected invalid exit status; raw output suppressed" >&2
+    return 1
+  fi
+  if ! od -An -tu1 -v "$migration_log_file" | awk '
+    BEGIN { seen = 0; valid = 1; last = -1 }
+    {
+      for (field = 1; field <= NF; field++) {
+        byte = $field + 0
+        seen = 1
+        last = byte
+        if (byte != 10 && (byte < 32 || byte > 126)) {
+          valid = 0
+        }
+      }
+    }
+    END { exit !(seen && valid && last == 10) }
+  '; then
+    echo "remote-release: migration diagnostic protocol rejected non-canonical bytes; raw output suppressed" >&2
+    return 1
+  fi
+
+  while IFS= read -r line; do
+    case "$state" in
+      initial)
+        if [ "$line" = "migration-safe:v=1 event=started" ]; then
+          state="started"
+        else
+          parse_failed=1
+        fi
+        ;;
+      started)
+        if [ "$migration_exit_code" = "0" ] &&
+          [[ "$line" =~ ^migration-safe:v=1\ event=completed\ applied=(0|[1-9][0-9]{0,9})$ ]]; then
+          completed_applied="${BASH_REMATCH[1]}"
+          if [ "${#completed_applied}" -eq 10 ] && [[ "$completed_applied" > "2147483647" ]]; then
+            parse_failed=1
+          else
+            state="completed"
+          fi
+        elif [ "$migration_exit_code" != "0" ] &&
+          [[ "$line" =~ ^migration-safe:v=1\ event=failed\ phase=(bootstrap|configuration|migration|validation|pending-check)\ category=(configuration|connection|authentication|migration|validation|cancelled|unexpected)$ ]]; then
+          failed_phase="${BASH_REMATCH[1]}"
+          failed_category="${BASH_REMATCH[2]}"
+          state="failed"
+        else
+          parse_failed=1
+        fi
+        ;;
+      completed|failed)
+        parse_failed=1
+        ;;
+      *)
+        parse_failed=1
+        ;;
+    esac
+    if [ "$parse_failed" = "1" ]; then
+      break
+    fi
+  done <"$migration_log_file"
+
+  if [ "$parse_failed" = "1" ] ||
+    { [ "$migration_exit_code" = "0" ] && [ "$state" != "completed" ]; } ||
+    { [ "$migration_exit_code" != "0" ] && [ "$state" != "failed" ]; }; then
+    echo "remote-release: migration diagnostic protocol rejected non-canonical output; raw output suppressed" >&2
+    return 1
+  fi
+
+  printf '%s\n' "migration-safe:v=1 event=started" >&2
+  if [ "$migration_exit_code" = "0" ]; then
+    printf 'migration-safe:v=1 event=completed applied=%s\n' "$completed_applied" >&2
+    return 0
+  fi
+
+  printf 'migration-safe:v=1 event=failed phase=%s category=%s\n' \
+    "$failed_phase" \
+    "$failed_category" >&2
+}
+
+capture_and_forward_safe_migration_diagnostics() {
+  local migration_container_id="$1"
+  local migration_exit_code="$2"
+  local migration_log_file="$lock_dir/migration-container.log"
+
+  umask 077
+  if ! docker logs "$migration_container_id" >"$migration_log_file" 2>&1; then
+    echo "remote-release: migration logs unavailable; raw output suppressed" >&2
+    return 1
+  fi
+  chmod 600 "$migration_log_file"
+  emit_safe_migration_diagnostics "$migration_log_file" "$migration_exit_code"
+  echo "remote-release: complete migration output is retained only in restricted remote maintenance state" >&2
+}
+
+migrate_verified_image() {
+  local digest expected_revision revision expected_image_id migration_container_id
+  local migration_reference migration_image_id migration_exit_code configured_digest_count
+
+  require_phase "quiesced"
+  assert_app_absent
+  digest="$(state_value image_digest)"
+  expected_revision="$(state_value expected_revision)"
+  revision="$(docker image inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$digest")"
+  if [ "$revision" != "$expected_revision" ]; then
+    echo "remote-release: migration image revision does not match maintenance state" >&2
+    exit 1
+  fi
+  expected_image_id="$(docker image inspect --format='{{.Id}}' "$digest")"
+  configured_digest_count="$(compose_command config --images | grep -Fxc "$digest")"
+  if [ "$configured_digest_count" != "1" ]; then
+    echo "remote-release: Compose app image is not uniquely pinned to the verified digest" >&2
+    exit 1
+  fi
+
+  migration_container_name="clubs-bot-migrate-${owner}"
+  if docker inspect "$migration_container_name" >/dev/null 2>&1; then
+    echo "remote-release: migration container already exists; inspect it before retry" >&2
+    exit 1
+  fi
+  printf '%s' "migrating" >"$lock_dir/phase"
+  trap cleanup_migration_container EXIT
+  migration_container_id="$(
+    compose_command run \
+      --detach \
+      --no-deps \
+      --pull never \
+      --name "$migration_container_name" \
+      --entrypoint /opt/app/bin/app-bot-migrate \
+      -e APP_ENV="$app_env" \
+      -e FLYWAY_MODE=migrate-and-validate \
+      -e QUIESCED_RELEASE_MIGRATION=required \
+      app
+  )"
+  if [[ ! "$migration_container_id" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "remote-release: invalid migration container id" >&2
+    exit 1
+  fi
+
+  migration_reference="$(docker inspect --format='{{.Config.Image}}' "$migration_container_id")"
+  migration_image_id="$(docker inspect --format='{{.Image}}' "$migration_container_id")"
+  if [ "$migration_reference" != "$digest" ] || [ "$migration_image_id" != "$expected_image_id" ]; then
+    echo "remote-release: migration container is not the verified release image" >&2
+    exit 1
+  fi
+
+  migration_exit_code="$(docker wait "$migration_container_id")"
+  if [[ ! "$migration_exit_code" =~ ^[0-9]+$ ]]; then
+    echo "remote-release: migration returned an invalid exit status" >&2
+    exit 1
+  fi
+  capture_and_forward_safe_migration_diagnostics "$migration_container_id" "$migration_exit_code"
+  if [ "$migration_exit_code" != "0" ]; then
+    echo "remote-release: verified-image migration failed with exit=$migration_exit_code" >&2
+    exit 1
+  fi
+  if [ "$(docker inspect --format='{{.Config.Image}}' "$migration_container_id")" != "$digest" ] ||
+    [ "$(docker inspect --format='{{.Image}}' "$migration_container_id")" != "$expected_image_id" ]; then
+    echo "remote-release: migration image identity changed during execution" >&2
+    exit 1
+  fi
+
+  docker rm "$migration_container_id" >/dev/null
+  migration_container_name=""
+  trap - EXIT
+  assert_app_absent
+  printf '%s' "$digest" >"$lock_dir/migration_image_digest"
+  printf '%s' "$expected_image_id" >"$lock_dir/migration_image_id"
+  printf '%s' "migrated" >"$lock_dir/phase"
+}
+
 start_and_probe_app() {
-  local digest container_id running_reference running_image_id
+  local digest migration_digest migration_image_id container_id running_reference running_image_id
   assert_app_absent
   printf '%s' "starting" >"$lock_dir/phase"
   digest="$(state_value image_digest)"
+  migration_digest="$(state_value migration_image_digest)"
+  migration_image_id="$(state_value migration_image_id)"
+  if [ "$migration_digest" != "$digest" ]; then
+    echo "remote-release: application digest differs from migration digest" >&2
+    exit 1
+  fi
   compose_command up -d --no-deps app
   container_id="$(compose_command ps -q app)"
   if [ -z "$container_id" ]; then
@@ -200,6 +393,10 @@ start_and_probe_app() {
     exit 1
   fi
   running_image_id="$(docker inspect --format='{{.Image}}' "$container_id")"
+  if [ "$running_image_id" != "$migration_image_id" ]; then
+    echo "remote-release: running app image id differs from migration image id" >&2
+    exit 1
+  fi
   echo "remote-release: running digest=$running_reference image_id=$running_image_id" >&2
 
   for _ in $(seq 1 60); do
@@ -267,10 +464,8 @@ case "$mode" in
     require_owner
     assert_app_absent
     ;;
-  mark-migrated)
-    require_phase "quiesced"
-    assert_app_absent
-    printf '%s' "migrated" >"$lock_dir/phase"
+  migrate)
+    migrate_verified_image
     ;;
   start)
     require_phase "migrated"
@@ -291,11 +486,14 @@ case "$mode" in
       "$lock_dir/active_override_file" \
       "$lock_dir/persistent_override_file" \
       "$lock_dir/image_digest" \
-      "$lock_dir/expected_revision"
+      "$lock_dir/expected_revision" \
+      "$lock_dir/migration_image_digest" \
+      "$lock_dir/migration_image_id" \
+      "$lock_dir/migration-container.log"
     rmdir "$lock_dir"
     ;;
   *)
-    echo "remote-release: expected preflight, quiesce, assert-absent, mark-migrated, start or cleanup" >&2
+    echo "remote-release: expected preflight, quiesce, assert-absent, migrate, start or cleanup" >&2
     exit 2
     ;;
 esac

@@ -1,0 +1,17 @@
+<configuration>
+    <statusListener class="ch.qos.logback.core.status.NopStatusListener" />
+    <contextName>quiesced-migration</contextName>
+
+    <appender name="MIGRATION_SAFE_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%msg%n%nopex</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="org.flywaydb" level="OFF" additivity="false" />
+    <logger name="QuiescedMigrations" level="INFO" additivity="false">
+        <appender-ref ref="MIGRATION_SAFE_CONSOLE" />
+    </logger>
+
+    <root level="OFF" />
+</configuration>

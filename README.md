@@ -1064,8 +1064,15 @@ DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
 - In prod/stage the application only calls `flyway.validate()` on startup and fails fast when
   pending migrations exist (no implicit `migrate()` calls). Out-of-order migrations are disabled
   unless `APP_ENV` is `local|dev` **and** `FLYWAY_OUT_OF_ORDER=true`.
-- Prod/Stage migrations are executed via `.github/workflows/db-migrate.yml` (manual dispatch or
-  release tag) with `FLYWAY_MODE=migrate-and-validate`.
+- Prod/Stage migrations run only inside the full quiesced release used by `.github/workflows/deploy-ssh.yml`
+  or manually confirmed `.github/workflows/db-migrate.yml`. The orchestrator starts
+  `/opt/app/bin/app-bot-migrate` as a one-off Compose container from the exact verified application digest;
+  it inherits the app service DB environment/network and the final app must use the same digest/image ID.
+- The migration-only launcher emits only fixed `migration-safe:v=1` lifecycle events. GitHub Actions receives
+  an allowlisted reconstruction rather than raw Docker/Flyway/JDBC output; restricted full output remains on
+  the remote host in the fail-closed maintenance lock until successful cleanup. The public image launcher
+  removes JVM option injection variables before delegating to its private Java launcher, and any unknown,
+  malformed, duplicated or out-of-order raw line blocks the release.
 - Migration observability: Micrometer counters `db.migrations.*` record validation/migrate outcomes (migrate-success считывает
   общее число применённых миграций) и последнюю seen pending count (exposed on `/metrics`).
 - See `docs/dr.md` for DR/runbook details and pool tuning defaults.

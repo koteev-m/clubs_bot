@@ -12,9 +12,6 @@ required_variables=(
   COMPOSE_PATH
   GHCR_USERNAME
   GHCR_TOKEN
-  DATABASE_URL
-  DATABASE_USER
-  DATABASE_PASSWORD
   GITHUB_RUN_ID
   GITHUB_RUN_ATTEMPT
 )
@@ -132,12 +129,7 @@ assert_remote_app_absent() {
 }
 
 run_database_migration() {
-  export FLYWAY_MODE=migrate-and-validate
-  "$repository_root/gradlew" flywayMigrate --no-parallel --console=plain
-}
-
-mark_remote_migrated() {
-  remote_command mark-migrated
+  remote_command migrate
 }
 
 start_remote_release() {
@@ -156,7 +148,6 @@ run_release() {
   quiesce_remote_release
   assert_remote_app_absent
   run_database_migration
-  mark_remote_migrated
   assert_remote_app_absent
   start_remote_release
   finish_remote_release

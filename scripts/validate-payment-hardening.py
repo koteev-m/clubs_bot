@@ -2444,9 +2444,14 @@ H2_MIGRATION = "core-data/src/main/resources/db/migration/h2/V056__atomic_bookin
 LOGGING_TEST = "app-bot/src/test/kotlin/com/example/bot/logging/SensitiveIdempotencyLoggingTest.kt"
 SQL_LOGGING_TEST = "app-bot/src/test/kotlin/com/example/bot/logging/SqlThrowableLoggingPersistenceTest.kt"
 PAYMENTS_TEST = "app-bot/src/test/kotlin/com/example/bot/payments/PaymentsPersistenceTest.kt"
+MIGRATION_TEST = "app-bot/src/test/kotlin/com/example/bot/tools/QuiescedMigrateMainTest.kt"
+MIGRATION_LOG_CONFIG = "app-bot/src/main/resources/quiesced-migration-logback.xml"
+MIGRATION_BOUNDARY = "app-bot/src/main/dist/bin/app-bot-migrate"
 INVARIANTS_DOC = "docs/invariants.md"
 
 PROTECTED_INPUTS = (
+    "Dockerfile",
+    "docker-compose.yml",
     ".github/workflows/lint.yml",
     ".github/workflows/deploy-ssh.yml",
     ".github/workflows/db-migrate.yml",
@@ -2457,6 +2462,16 @@ PROTECTED_INPUTS = (
     "scripts/validate-quiesced-deployment.sh",
     "scripts/deploy/quiesced-release.sh",
     "scripts/deploy/remote-compose-release.sh",
+    "app-bot/build.gradle.kts",
+    "app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt",
+    MIGRATION_TEST,
+    MIGRATION_LOG_CONFIG,
+    MIGRATION_BOUNDARY,
+    "core-data/src/main/kotlin/com/example/bot/data/db/DbConfig.kt",
+    "core-data/src/test/kotlin/com/example/bot/data/db/FlywayConfigTest.kt",
+    "docs/dr.md",
+    "docs/runtime-db-resiliency.md",
+    "docs/ops/release-rollback.md",
     PG_MIGRATION,
     H2_MIGRATION,
     LOGGING_TEST,
@@ -2466,6 +2481,140 @@ PROTECTED_INPUTS = (
 )
 for protected_input in PROTECTED_INPUTS:
     read(protected_input)
+
+
+def validate_migration_logging_contract() -> None:
+    raw_config = read(MIGRATION_LOG_CONFIG)
+    if "${" in raw_config:
+        reject("PH-LOG-MIGRATION", "migration logging configuration contains variable substitution")
+    try:
+        config = ET.fromstring(raw_config)
+    except ET.ParseError as error:
+        reject("PH-LOG-MIGRATION", f"migration logging configuration is malformed: {error}")
+    if config.tag != "configuration" or config.attrib:
+        reject("PH-LOG-MIGRATION", "migration logging root contract changed")
+    children = list(config)
+    if [child.tag for child in children] != [
+        "statusListener",
+        "contextName",
+        "appender",
+        "logger",
+        "logger",
+        "root",
+    ]:
+        reject("PH-LOG-MIGRATION", "migration logging configuration gained an uncontrolled element")
+
+    status_listener, context_name, appender, flyway_logger, safe_logger, root_logger = children
+    if status_listener.attrib != {"class": "ch.qos.logback.core.status.NopStatusListener"}:
+        reject("PH-LOG-MIGRATION", "migration Logback status output is not suppressed")
+    if (context_name.text or "").strip() != "quiesced-migration" or context_name.attrib:
+        reject("PH-LOG-MIGRATION", "migration Logback context identity changed")
+    if appender.attrib != {
+        "name": "MIGRATION_SAFE_CONSOLE",
+        "class": "ch.qos.logback.core.ConsoleAppender",
+    }:
+        reject("PH-LOG-MIGRATION", "migration logger does not have the sole safe console appender")
+    appender_children = list(appender)
+    if len(appender_children) != 1 or appender_children[0].tag != "encoder" or appender_children[0].attrib:
+        reject("PH-LOG-MIGRATION", "migration console encoder contract changed")
+    encoder_children = list(appender_children[0])
+    if (
+        len(encoder_children) != 1
+        or encoder_children[0].tag != "pattern"
+        or encoder_children[0].attrib
+        or (encoder_children[0].text or "").strip() != "%msg%n%nopex"
+    ):
+        reject("PH-LOG-MIGRATION", "migration console may render uncontrolled exception data")
+    if flyway_logger.attrib != {
+        "name": "org.flywaydb",
+        "level": "OFF",
+        "additivity": "false",
+    } or list(flyway_logger):
+        reject("PH-LOG-MIGRATION", "Flyway internal logging is not fully disabled for migration")
+    if safe_logger.attrib != {
+        "name": "QuiescedMigrations",
+        "level": "INFO",
+        "additivity": "false",
+    }:
+        reject("PH-LOG-MIGRATION", "safe migration logger identity changed")
+    safe_children = list(safe_logger)
+    if len(safe_children) != 1 or safe_children[0].tag != "appender-ref" or safe_children[0].attrib != {
+        "ref": "MIGRATION_SAFE_CONSOLE",
+    }:
+        reject("PH-LOG-MIGRATION", "safe migration logger gained an uncontrolled sink")
+    if root_logger.attrib != {"level": "OFF"} or list(root_logger):
+        reject("PH-LOG-MIGRATION", "migration root logger is not fully disabled")
+
+    migration_main = read("app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt")
+    for required in (
+        '.loggers("slf4j")',
+        "LogManager.getLogManager().reset()",
+        'JulLogger.getLogger("org.postgresql")',
+        'check(System.getProperty("logback.configurationFile") == MIGRATION_LOG_CONFIG)',
+        'check(System.getProperty("logback.statusListenerClass") == MIGRATION_STATUS_LISTENER)',
+        'check(encoder.pattern == "%msg%n%nopex")',
+        "catch (failure: Exception)",
+        "catch (_: Error)",
+        "private const val EXIT_FAILURE = 1",
+        '"migration-safe:v=1 event=started"',
+        '"migration-safe:v=1 event=completed applied=',
+        '"migration-safe:v=1 event=failed phase=',
+    ):
+        if required not in migration_main:
+            reject("PH-LOG-MIGRATION", f"migration safe-output boundary lacks: {required}")
+    if re.search(
+        r"\bthrow\b|\.message\b|printStackTrace|\.(?:trace|debug|info|warn|error)\([^)]*(?:failure|throwable)",
+        migration_main,
+        flags=re.IGNORECASE,
+    ):
+        reject("PH-LOG-MIGRATION", "migration failure path exposes raw throwable data")
+
+    app_build = read("app-bot/build.gradle.kts")
+    for required in (
+        "-Dlogback.configurationFile=$quiescedMigrationLogConfig",
+        "-Dlogback.statusListenerClass=ch.qos.logback.core.status.NopStatusListener",
+        "application launcher must not use the migration-only logging configuration",
+    ):
+        if required not in app_build:
+            reject("PH-LOG-MIGRATION", f"migration launcher logging contract lacks: {required}")
+    application_start = app_build.find("application {")
+    migration_launcher_start = app_build.find("val quiescedMigrationStartScripts")
+    if application_start < 0 or migration_launcher_start <= application_start:
+        reject("PH-LOG-MIGRATION", "application and migration launcher boundaries are ambiguous")
+    if "quiescedMigrationLogConfig" in app_build[application_start:migration_launcher_start]:
+        reject("PH-LOG-MIGRATION", "normal application launcher inherits migration-only logging")
+
+    migration_boundary = read(MIGRATION_BOUNDARY)
+    for required in (
+        "unset JAVA_TOOL_OPTIONS",
+        "unset JDK_JAVA_OPTIONS",
+        "unset _JAVA_OPTIONS",
+        "unset JAVA_OPTS",
+        "unset APP_BOT_MIGRATE_OPTS",
+        "unset APP_BOT_MIGRATE_JAVA_OPTS",
+        "JAVA_HOME=/opt/java/openjdk",
+        "private_launcher=/opt/app/bin/app-bot-migrate-java",
+        'exec "$private_launcher"',
+    ):
+        if required not in migration_boundary:
+            reject("PH-LOG-MIGRATION", f"fixed migration boundary lacks: {required}")
+    if re.search(r"QuiescedMigrateMainKt|EngineMain|ApplicationKt|\$@|\$\*", migration_boundary):
+        reject("PH-LOG-MIGRATION", "fixed migration boundary bypasses its private launcher contract")
+    boundary_mode = safe_regular_file(ROOT, MIGRATION_BOUNDARY).stat().st_mode
+    if not boundary_mode & 0o111:
+        reject("PH-LOG-MIGRATION", "fixed migration boundary is not executable")
+
+
+validate_migration_logging_contract()
+
+for documentation_path, required_text in (
+    ("docs/invariants.md", "Public migration-only wrapper удаляет JVM option injection variables"),
+    ("docs/dr.md", "никогда не пересылается в GitHub Actions"),
+    ("docs/ops/release-rollback.md", "реконструированные canonical `migration-safe:v=1` events"),
+    ("docs/runtime-db-resiliency.md", "pgjdbc JUL сброшен"),
+):
+    if required_text not in read(documentation_path):
+        reject("PH-DOC-MIGRATION-LOG", f"migration log redaction contract is missing: {documentation_path}")
 
 pg = strip_comments(read(PG_MIGRATION), sql=True)
 h2 = strip_comments(read(H2_MIGRATION), sql=True)
@@ -2654,6 +2803,16 @@ required_tests = {
         (
             "refund explicit zero persists terminal success without mutation",
             "refund explicit zero production RBAC route replays stable public result without mutation",
+        ),
+    ),
+    MIGRATION_TEST: (
+        "com.example.bot.tools.QuiescedMigrateMainTest",
+        (
+            "successful process emits only the fixed safe event schema",
+            "connection failure emits category without throwable data",
+            "cancellation remains nonzero without raw exception output",
+            "fatal error uses fixed nonzero diagnostic instead of escaping",
+            "real entrypoint suppresses connection canaries and stack traces",
         ),
     ),
 }

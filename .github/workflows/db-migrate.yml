@@ -33,8 +33,6 @@ jobs:
     environment: ${{ github.event_name == 'push' && 'prod' || inputs.environment }}
     env:
       APP_ENV: ${{ inputs.environment }}
-      FLYWAY_MODE: migrate-and-validate
-      GRADLE_OPTS: "-Dorg.gradle.daemon=true -Dorg.gradle.parallel=false -Dorg.gradle.caching=true"
 
     steps:
       - name: Require full quiesced release confirmation
@@ -45,22 +43,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
-
-      - name: Gradle wrapper validate
-        uses: gradle/wrapper-validation-action@460a3ca55fc5d559238a0efc7fa9f7465df8585d # v3.3.0
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
-        with:
-          java-version: "21"
-          distribution: "temurin"
-
-      - name: Gradle cache and setup
-        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
-        with:
-          cache-disabled: false
-          gradle-version: wrapper
-          cache-read-only: false
 
       - name: Setup SSH agent
         uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387 # v0.9.0
@@ -84,9 +66,6 @@ jobs:
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/app-bot
           IMAGE_TAG: ${{ inputs.image_tag }}
           EXPECTED_REVISION: ${{ github.sha }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DATABASE_USER: ${{ secrets.DATABASE_USER }}
-          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
         run: scripts/deploy/quiesced-release.sh
 
       - name: Done

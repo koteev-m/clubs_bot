@@ -23,7 +23,14 @@ enum class FlywayMode {
     OFF,
 }
 
-enum class AppEnvironment(val raw: String) {
+enum class FlywayExecutionContext {
+    APPLICATION,
+    QUIESCED_MIGRATION,
+}
+
+enum class AppEnvironment(
+    val raw: String,
+) {
     PROD("prod"),
     STAGE("stage"),
     DEV("dev"),
@@ -58,26 +65,36 @@ data class FlywayConfig(
     val appEnv: AppEnvironment = AppEnvironment.LOCAL,
     val outOfOrderRequested: Boolean = false,
     val rawAppEnv: String? = null,
+    val executionContext: FlywayExecutionContext = FlywayExecutionContext.APPLICATION,
 ) {
     val effectiveMode: FlywayMode = computeEffectiveMode()
 
     val outOfOrderEnabled: Boolean = computeOutOfOrderEnabled()
 
     private fun computeEffectiveMode(): FlywayMode =
-        if (appEnv.isProdLike && mode == FlywayMode.MIGRATE_AND_VALIDATE) {
+        if (
+            appEnv.isProdLike &&
+            mode == FlywayMode.MIGRATE_AND_VALIDATE &&
+            executionContext != FlywayExecutionContext.QUIESCED_MIGRATION
+        ) {
             FlywayMode.VALIDATE
         } else {
             mode
         }
 
-    private fun computeOutOfOrderEnabled(): Boolean =
-        outOfOrderRequested && appEnv.allowsOutOfOrder
+    private fun computeOutOfOrderEnabled(): Boolean = outOfOrderRequested && appEnv.allowsOutOfOrder
 
     companion object {
         private const val DEFAULT_LOCATION = "classpath:db/migration"
         private const val COMMON_LOCATION = "$DEFAULT_LOCATION/common"
         private const val POSTGRES_VENDOR = "postgresql"
         private const val H2_VENDOR = "h2"
+
+        private val QUIESCED_MIGRATION_LOCATIONS =
+            listOf(
+                "$DEFAULT_LOCATION/$POSTGRES_VENDOR",
+                COMMON_LOCATION,
+            )
 
         fun fromEnv(
             envProvider: (String) -> String? = System::getenv,
@@ -98,7 +115,10 @@ data class FlywayConfig(
                     else -> null
                 } ?: POSTGRES_VENDOR
 
-            val rawLocations = locationsOverride ?: propertyProvider("FLYWAY_LOCATIONS") ?: envProvider("FLYWAY_LOCATIONS")
+            val rawLocations =
+                locationsOverride
+                    ?: propertyProvider("FLYWAY_LOCATIONS")
+                    ?: envProvider("FLYWAY_LOCATIONS")
             val resolvedLocations = resolveLocations(rawLocations, vendor)
 
             val enabled =
@@ -138,6 +158,23 @@ data class FlywayConfig(
                 appEnv = appEnv,
                 outOfOrderRequested = outOfOrderRequested,
                 rawAppEnv = rawAppEnv,
+            )
+        }
+
+        fun fromQuiescedMigrationEnv(
+            envProvider: (String) -> String? = System::getenv,
+            propertyProvider: (String) -> String? = System::getProperty,
+        ): FlywayConfig {
+            val configured =
+                fromEnv(
+                    envProvider = envProvider,
+                    propertyProvider = propertyProvider,
+                    locationsOverride = QUIESCED_MIGRATION_LOCATIONS.joinToString(","),
+                )
+            return configured.copy(
+                locations = QUIESCED_MIGRATION_LOCATIONS,
+                baselineOnMigrate = false,
+                executionContext = FlywayExecutionContext.QUIESCED_MIGRATION,
             )
         }
 
