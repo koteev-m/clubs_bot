@@ -55,6 +55,7 @@ tasks.withType<Test>().configureEach {
 
 dependencies {
     // Ktor
+    implementation(platform(libs.netty.bom))
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.content.negotiation)
@@ -87,6 +88,7 @@ dependencies {
     runtimeOnly(libs.postgres)
 
     // Миграции — НУЖНО в main (иначе org.flywaydb.core.Flyway не резолвится)
+    implementation(platform(libs.jackson.bom))
     implementation(libs.flyway.core)
     implementation(libs.flyway.pg)
 
