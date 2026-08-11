@@ -28,6 +28,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
     environment: ${{ github.event_name == 'push' && 'prod' || inputs.environment }}
     env:
       APP_ENV: ${{ github.event_name == 'push' && 'prod' || inputs.environment }}
@@ -35,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
 
       - name: Derive immutable release inputs
         id: vars
@@ -66,8 +71,8 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
           COMPOSE_PATH: ${{ secrets.COMPOSE_PATH }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_READ_TOKEN: ${{ github.token }}
           IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/app-bot
           IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
           EXPECTED_REVISION: ${{ github.sha }}

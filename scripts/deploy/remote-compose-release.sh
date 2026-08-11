@@ -79,27 +79,53 @@ validate_compose_contract() {
   fi
 }
 
-preflight_image() {
+preflight_image() (
   local compose_path="$1"
   local image_repository="$2"
   local image_tag="$3"
   local expected_revision="$4"
-  local ghcr_username="$5"
-  local ghcr_token tag_reference revision digest digest_prefix digest_hash
+  local registry_username="$5"
+  local registry_read_token tag_reference revision digest digest_prefix digest_hash
+  local registry_config_dir=""
+
+  cleanup_registry_config() {
+    local exit_status=$?
+    if [ -n "$registry_config_dir" ]; then
+      case "$registry_config_dir" in
+        "/tmp/clubs-bot-docker-config.${owner}."*)
+          rm -rf -- "$registry_config_dir"
+          ;;
+        *)
+          echo "remote-release: refusing unsafe registry credential cleanup" >&2
+          exit_status=1
+          ;;
+      esac
+    fi
+    trap - EXIT
+    exit "$exit_status"
+  }
+  trap cleanup_registry_config EXIT
 
   validate_compose_contract "$compose_path"
-  IFS= read -r ghcr_token || [ -n "$ghcr_token" ]
-  if [ -z "$ghcr_token" ]; then
+  IFS= read -r registry_read_token || [ -n "$registry_read_token" ]
+  if [ -z "$registry_read_token" ]; then
     echo "remote-release: empty registry token" >&2
     exit 2
   fi
-  printf '%s\n' "$ghcr_token" | docker login ghcr.io -u "$ghcr_username" --password-stdin >/dev/null
-  unset ghcr_token
+  umask 077
+  registry_config_dir="$(mktemp -d "/tmp/clubs-bot-docker-config.${owner}.XXXXXX")"
+  chmod 700 "$registry_config_dir"
+  printf '%s\n' "$registry_read_token" |
+    docker --config "$registry_config_dir" login \
+      ghcr.io \
+      -u "$registry_username" \
+      --password-stdin >/dev/null
+  unset registry_read_token
 
   tag_reference="${image_repository}:${image_tag}"
   revision=""
   for _ in $(seq 1 60); do
-    if docker pull "$tag_reference" >/dev/null 2>&1; then
+    if docker --config "$registry_config_dir" pull "$tag_reference" >/dev/null 2>&1; then
       revision="$(docker image inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$tag_reference")"
       if [ "$revision" = "$expected_revision" ]; then
         break
@@ -119,10 +145,10 @@ preflight_image() {
     echo "remote-release: image has no verified repository digest" >&2
     exit 1
   fi
-  docker pull "$digest" >/dev/null
+  docker --config "$registry_config_dir" pull "$digest" >/dev/null
   echo "remote-release: verified revision=$revision digest=$digest" >&2
   printf '%s' "$digest"
-}
+)
 
 create_maintenance_state() {
   local compose_path="$1"
@@ -381,7 +407,7 @@ start_and_probe_app() {
     echo "remote-release: application digest differs from migration digest" >&2
     exit 1
   fi
-  compose_command up -d --no-deps app
+  compose_command up -d --no-deps --pull never app
   container_id="$(compose_command ps -q app)"
   if [ -z "$container_id" ]; then
     echo "remote-release: new app container was not created" >&2
@@ -429,12 +455,12 @@ case "$mode" in
     image_repository="${5:-}"
     image_tag="${6:-}"
     expected_revision="${7:-}"
-    ghcr_username="${8:-}"
+    registry_username="${8:-}"
     if [[ ! "$compose_path" =~ ^/[a-zA-Z0-9._/-]+$ ]] ||
       [[ ! "$image_repository" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]] ||
       [[ ! "$image_tag" =~ ^[a-zA-Z0-9._-]+$ ]] ||
       [[ ! "$expected_revision" =~ ^[0-9a-fA-F]{40}$ ]] ||
-      [[ ! "$ghcr_username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+      [[ ! "$registry_username" =~ ^[a-zA-Z0-9._-]+(\[bot\])?$ ]]; then
       echo "remote-release: invalid preflight input" >&2
       exit 2
     fi
@@ -443,7 +469,7 @@ case "$mode" in
       "$image_repository" \
       "$image_tag" \
       "$expected_revision" \
-      "$ghcr_username"
+      "$registry_username"
     ;;
   quiesce)
     compose_path="${4:-}"

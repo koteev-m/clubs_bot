@@ -1668,8 +1668,8 @@ validate_trivy_action_inventory() {
       awk 'index($0, "aquasecurity/trivy-action@") { print }'
   )"
   action_count="$(printf '%s\n' "$action_lines" | awk 'NF { count++ } END { print count + 0 }')"
-  if [ "$action_count" -ne 2 ]; then
-    echo "expected exactly two active trivy-action references, found $action_count" >&2
+  if [ "$action_count" -ne 4 ]; then
+    echo "expected exactly four active trivy-action references, found $action_count" >&2
     return 1
   fi
 
@@ -1702,8 +1702,8 @@ validate_trivy_action_inventory() {
     printf '%s\n' "$active_lines" |
       awk '$0 == "trivyignores: .trivyignore" { count++ } END { print count + 0 }'
   )"
-  if [ "$trivyignores_count" -ne 2 ]; then
-    echo "expected exactly two supported trivyignores inputs" >&2
+  if [ "$trivyignores_count" -ne 4 ]; then
+    echo "expected exactly four supported trivyignores inputs" >&2
     return 1
   fi
 }
@@ -1730,45 +1730,103 @@ validate_trivy_filesystem_workflow() {
   assert_step_direct_key_line \
     "$file" \
     "trivy" \
-    "Upload Trivy SARIF to code scanning" \
+    "Upload Trivy filesystem SARIF to code scanning" \
     "if" \
     "        if: $trivy_filesystem_report_guard"
   assert_step_has_no_direct_key \
     "$file" \
     "trivy" \
-    "Upload Trivy SARIF to code scanning" \
+    "Upload Trivy filesystem SARIF to code scanning" \
     "continue-on-error"
   assert_step_with_contract \
     "$file" \
     "trivy" \
-    "Upload Trivy SARIF to code scanning" \
+    "Upload Trivy filesystem SARIF to code scanning" \
     "$trivy_filesystem_sarif_with_contract"
 
   assert_step_direct_key_line \
     "$file" \
     "trivy" \
-    "Persist Trivy report artifact" \
+    "Persist Trivy filesystem report artifact" \
     "if" \
     "        if: $trivy_filesystem_report_guard"
   assert_step_has_no_direct_key \
     "$file" \
     "trivy" \
-    "Persist Trivy report artifact" \
+    "Persist Trivy filesystem report artifact" \
     "continue-on-error"
   assert_step_with_contract \
     "$file" \
     "trivy" \
-    "Persist Trivy report artifact" \
+    "Persist Trivy filesystem report artifact" \
     "$trivy_filesystem_artifact_with_contract"
+}
+
+validate_trivy_runtime_workflow() {
+  local file="$1"
+  assert_job_has_no_direct_key "$file" "trivy" "if"
+  assert_job_has_no_direct_key "$file" "trivy" "continue-on-error"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy" \
+    "Inventory Trivy JVM runtime artifacts" \
+    "uses" \
+    "        $approved_trivy_action_active_line"
+  assert_step_has_no_direct_key "$file" "trivy" "Inventory Trivy JVM runtime artifacts" "if"
+  assert_step_has_no_direct_key \
+    "$file" \
+    "trivy" \
+    "Inventory Trivy JVM runtime artifacts" \
+    "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy" \
+    "Inventory Trivy JVM runtime artifacts" \
+    "$trivy_runtime_inventory_with_contract"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy" \
+    "Trivy JVM runtime scan" \
+    "uses" \
+    "        $approved_trivy_action_active_line"
+  assert_step_has_no_direct_key "$file" "trivy" "Trivy JVM runtime scan" "if"
+  assert_step_has_no_direct_key "$file" "trivy" "Trivy JVM runtime scan" "continue-on-error"
+  assert_step_with_contract \
+    "$file" \
+    "trivy" \
+    "Trivy JVM runtime scan" \
+    "$trivy_runtime_with_contract"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy" \
+    "Upload Trivy JVM runtime SARIF to code scanning" \
+    "if" \
+    "        if: $trivy_runtime_report_guard"
+  assert_step_with_contract \
+    "$file" \
+    "trivy" \
+    "Upload Trivy JVM runtime SARIF to code scanning" \
+    "$trivy_runtime_sarif_with_contract"
+
+  assert_step_direct_key_line \
+    "$file" \
+    "trivy" \
+    "Persist Trivy JVM runtime report artifact" \
+    "if" \
+    "        if: $trivy_runtime_artifact_guard"
+  assert_step_with_contract \
+    "$file" \
+    "trivy" \
+    "Persist Trivy JVM runtime report artifact" \
+    "$trivy_runtime_artifact_with_contract"
 }
 
 validate_trivy_image_workflow() {
   local file="$1"
-  assert_job_direct_key_line \
-    "$file" \
-    "trivy-image" \
-    "if" \
-    "    if: $non_pr_if"
+  assert_job_has_no_direct_key "$file" "trivy-image" "if"
   assert_job_has_no_direct_key "$file" "trivy-image" "continue-on-error"
   assert_step_direct_key_line \
     "$file" \
@@ -1843,6 +1901,14 @@ SETUP_GRADLE_USES = "gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46
 TRIVY_USES = (
     "aquasecurity/trivy-action@"
     "57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release"
+)
+UPLOAD_SARIF_USES = (
+    "github/codeql-action/upload-sarif@"
+    "7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9"
+)
+UPLOAD_ARTIFACT_USES = (
+    "actions/upload-artifact@"
+    "b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3"
 )
 
 
@@ -2231,9 +2297,19 @@ security_steps = [
     "Set up JDK 21",
     "Gradle cache & setup",
     "Build resolved JVM runtime dependencies (blocking)",
+    "Prepare trusted Trivy output directory",
     "Trivy filesystem scan",
-    "Upload Trivy SARIF to code scanning",
-    "Persist Trivy report artifact",
+    "Assert fresh Trivy filesystem output",
+    "Upload Trivy filesystem SARIF to code scanning",
+    "Persist Trivy filesystem report artifact",
+    "Assert fresh Trivy JVM inventory path",
+    "Inventory Trivy JVM runtime artifacts",
+    "Verify Trivy JVM analyzer coverage",
+    "Assert fresh Trivy JVM SARIF path",
+    "Trivy JVM runtime scan",
+    "Assert Trivy JVM runtime outputs",
+    "Upload Trivy JVM runtime SARIF to code scanning",
+    "Persist Trivy JVM runtime report artifact",
 ]
 expect(security.steps("trivy"), security_steps, "Trivy step ordering")
 expect(security.step_scalar("trivy", "Checkout", "uses"), CHECKOUT_USES, "Trivy checkout pin")
@@ -2255,6 +2331,64 @@ expect(
     "Trivy resolved JVM artifact build",
 )
 expect(
+    security.step_scalar("trivy", "Prepare trusted Trivy output directory", "id"),
+    "trivy-output",
+    "trusted Trivy output step id",
+)
+expect(
+    security.step_scalar("trivy", "Prepare trusted Trivy output directory", "shell"),
+    "bash",
+    "trusted Trivy output shell",
+)
+expect(
+    security.step_mapping("trivy", "Prepare trusted Trivy output directory", "env"),
+    {
+        "TRIVY_RUNNER_TEMP": "${{ runner.temp }}",
+        "TRIVY_RUN_ID": "${{ github.run_id }}",
+        "TRIVY_RUN_ATTEMPT": "${{ github.run_attempt }}",
+    },
+    "trusted Trivy context inputs",
+)
+expect(
+    security.step_scalar("trivy", "Prepare trusted Trivy output directory", "run"),
+    "\n".join(
+        [
+            "set -euo pipefail",
+            'physical_runner_temp="$(cd -P -- "$TRIVY_RUNNER_TEMP" && pwd -P)"',
+            'physical_workspace="$(cd -P -- "$GITHUB_WORKSPACE" && pwd -P)"',
+            'test "$physical_runner_temp" = "$TRIVY_RUNNER_TEMP"',
+            'output_dir="$physical_runner_temp/clubs-bot-trivy-$TRIVY_RUN_ID-$TRIVY_RUN_ATTEMPT"',
+            'case "$output_dir/" in',
+            '"$physical_workspace/"*)',
+            'echo "trusted Trivy output directory must be outside the checkout" >&2',
+            "exit 1",
+            ";;",
+            "esac",
+            'if [ -e "$output_dir" ] || [ -L "$output_dir" ]; then',
+            'echo "trusted Trivy output directory already exists" >&2',
+            "exit 1",
+            "fi",
+            'mkdir -m 0700 -- "$output_dir"',
+            'test -d "$output_dir"',
+            'test ! -L "$output_dir"',
+            "for output_name in \\",
+            "trivy-filesystem.sarif \\",
+            "trivy-jvm-inventory.json \\",
+            "trivy-jvm-runtime.sarif; do",
+            'test ! -e "$output_dir/$output_name"',
+            'test ! -L "$output_dir/$output_name"',
+            "done",
+            "{",
+            "printf 'directory=%s\\n' \"$output_dir\"",
+            "printf 'filesystem_sarif=%s\\n' \"$output_dir/trivy-filesystem.sarif\"",
+            "printf 'jvm_inventory=%s\\n' \"$output_dir/trivy-jvm-inventory.json\"",
+            "printf 'jvm_sarif=%s\\n' \"$output_dir/trivy-jvm-runtime.sarif\"",
+            '} >> "$GITHUB_OUTPUT"',
+        ]
+    ),
+    "trusted Trivy output preflight",
+)
+expect(
     security.step_scalar("trivy", "Trivy filesystem scan", "uses"),
     TRIVY_USES,
     "Trivy action pin",
@@ -2267,12 +2401,290 @@ expect(
         "severity": "HIGH,CRITICAL",
         "trivyignores": ".trivyignore",
         "format": "sarif",
-        "output": "trivy-results.sarif",
+        "output": "${{ steps.trivy-output.outputs.filesystem_sarif }}",
         "exit-code": "1",
         "version": "v0.69.3",
     },
-    "Trivy blocking scanner inputs",
+    "Trivy filesystem blocking scanner inputs",
 )
+expect(
+    security.step_scalar("trivy", "Assert fresh Trivy filesystem output", "id"),
+    "trivy-filesystem-output",
+    "Trivy filesystem assertion id",
+)
+expect(
+    security.step_scalar("trivy", "Assert fresh Trivy filesystem output", "if"),
+    "${{ always() && steps.trivy-output.outcome == 'success' }}",
+    "Trivy filesystem assertion failure guard",
+)
+expect(
+    security.step_mapping("trivy", "Assert fresh Trivy filesystem output", "env"),
+    {
+        "TRIVY_OUTPUT_DIR": "${{ steps.trivy-output.outputs.directory }}",
+        "TRIVY_REPORT": "${{ steps.trivy-output.outputs.filesystem_sarif }}",
+    },
+    "Trivy filesystem assertion paths",
+)
+expect(
+    security.step_scalar("trivy", "Assert fresh Trivy filesystem output", "run"),
+    "\n".join(
+        [
+            "set -euo pipefail",
+            'test -d "$TRIVY_OUTPUT_DIR"',
+            'test ! -L "$TRIVY_OUTPUT_DIR"',
+            'test "$(dirname -- "$TRIVY_REPORT")" = "$TRIVY_OUTPUT_DIR"',
+            'test -f "$TRIVY_REPORT"',
+            'test ! -L "$TRIVY_REPORT"',
+            'test -s "$TRIVY_REPORT"',
+        ]
+    ),
+    "fresh Trivy filesystem output assertion",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Upload Trivy filesystem SARIF to code scanning", "uses"
+    ),
+    UPLOAD_SARIF_USES,
+    "Trivy filesystem SARIF upload pin",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Upload Trivy filesystem SARIF to code scanning", "if"
+    ),
+    "${{ always() && steps.trivy-filesystem-output.outcome == 'success' }}",
+    "Trivy filesystem upload guard",
+)
+expect(
+    security.step_mapping(
+        "trivy", "Upload Trivy filesystem SARIF to code scanning", "with"
+    ),
+    {
+        "sarif_file": "${{ steps.trivy-output.outputs.filesystem_sarif }}",
+        "checkout_path": "${{ github.workspace }}",
+        "category": "trivy-filesystem",
+    },
+    "Trivy filesystem SARIF upload inputs",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Persist Trivy filesystem report artifact", "uses"
+    ),
+    UPLOAD_ARTIFACT_USES,
+    "Trivy filesystem artifact pin",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Persist Trivy filesystem report artifact", "if"
+    ),
+    "${{ always() && steps.trivy-filesystem-output.outcome == 'success' }}",
+    "Trivy filesystem artifact guard",
+)
+expect(
+    security.step_mapping(
+        "trivy", "Persist Trivy filesystem report artifact", "with"
+    ),
+    {
+        "name": "trivy-filesystem-report",
+        "path": "${{ steps.trivy-output.outputs.filesystem_sarif }}",
+        "if-no-files-found": "error",
+    },
+    "Trivy filesystem artifact inputs",
+)
+expect(
+    security.step_mapping("trivy", "Assert fresh Trivy JVM inventory path", "env"),
+    {
+        "TRIVY_OUTPUT_DIR": "${{ steps.trivy-output.outputs.directory }}",
+        "TRIVY_REPORT": "${{ steps.trivy-output.outputs.jvm_inventory }}",
+    },
+    "Trivy JVM inventory freshness paths",
+)
+expect(
+    security.step_scalar("trivy", "Assert fresh Trivy JVM inventory path", "run"),
+    "\n".join(
+        [
+            "set -euo pipefail",
+            'test -d "$TRIVY_OUTPUT_DIR"',
+            'test ! -L "$TRIVY_OUTPUT_DIR"',
+            'test "$(dirname -- "$TRIVY_REPORT")" = "$TRIVY_OUTPUT_DIR"',
+            'test ! -e "$TRIVY_REPORT"',
+            'test ! -L "$TRIVY_REPORT"',
+        ]
+    ),
+    "Trivy JVM inventory pre-existing path rejection",
+)
+expect(
+    security.step_scalar("trivy", "Inventory Trivy JVM runtime artifacts", "uses"),
+    TRIVY_USES,
+    "Trivy JVM inventory action pin",
+)
+expect(
+    security.step_mapping("trivy", "Inventory Trivy JVM runtime artifacts", "with"),
+    {
+        "scan-type": "rootfs",
+        "scan-ref": "app-bot/build/install/app-bot",
+        "scanners": "vuln",
+        "list-all-pkgs": "true",
+        "trivyignores": ".trivyignore",
+        "format": "json",
+        "output": "${{ steps.trivy-output.outputs.jvm_inventory }}",
+        "exit-code": "0",
+        "version": "v0.69.3",
+    },
+    "Trivy JVM inventory inputs",
+)
+expect(
+    security.step_scalar("trivy", "Verify Trivy JVM analyzer coverage", "run"),
+    (
+        "python3 scripts/verify-trivy-java-inventory.py "
+        '"${{ github.workspace }}" '
+        '"${{ steps.trivy-output.outputs.directory }}" '
+        "trivy-jvm-inventory.json app-bot/build/install/app-bot"
+    ),
+    "Trivy JVM inventory verifier invocation",
+)
+expect(
+    security.step_mapping("trivy", "Assert fresh Trivy JVM SARIF path", "env"),
+    {
+        "TRIVY_OUTPUT_DIR": "${{ steps.trivy-output.outputs.directory }}",
+        "TRIVY_REPORT": "${{ steps.trivy-output.outputs.jvm_sarif }}",
+    },
+    "Trivy JVM SARIF freshness paths",
+)
+expect(
+    security.step_scalar("trivy", "Assert fresh Trivy JVM SARIF path", "run"),
+    "\n".join(
+        [
+            "set -euo pipefail",
+            'test -d "$TRIVY_OUTPUT_DIR"',
+            'test ! -L "$TRIVY_OUTPUT_DIR"',
+            'test "$(dirname -- "$TRIVY_REPORT")" = "$TRIVY_OUTPUT_DIR"',
+            'test ! -e "$TRIVY_REPORT"',
+            'test ! -L "$TRIVY_REPORT"',
+        ]
+    ),
+    "Trivy JVM SARIF pre-existing path rejection",
+)
+expect(
+    security.step_scalar("trivy", "Trivy JVM runtime scan", "uses"),
+    TRIVY_USES,
+    "Trivy JVM runtime action pin",
+)
+expect(
+    security.step_mapping("trivy", "Trivy JVM runtime scan", "with"),
+    {
+        "scan-type": "rootfs",
+        "scan-ref": "app-bot/build/install/app-bot",
+        "scanners": "vuln",
+        "severity": "HIGH,CRITICAL",
+        "trivyignores": ".trivyignore",
+        "format": "sarif",
+        "output": "${{ steps.trivy-output.outputs.jvm_sarif }}",
+        "exit-code": "1",
+        "version": "v0.69.3",
+    },
+    "Trivy JVM blocking scanner inputs",
+)
+expect(
+    security.step_scalar("trivy", "Assert Trivy JVM runtime outputs", "id"),
+    "trivy-jvm-output",
+    "Trivy JVM output assertion id",
+)
+expect(
+    security.step_scalar("trivy", "Assert Trivy JVM runtime outputs", "if"),
+    "${{ always() && steps.trivy-output.outcome == 'success' }}",
+    "Trivy JVM output assertion guard",
+)
+expect(
+    security.step_mapping("trivy", "Assert Trivy JVM runtime outputs", "env"),
+    {
+        "TRIVY_OUTPUT_DIR": "${{ steps.trivy-output.outputs.directory }}",
+        "TRIVY_INVENTORY": "${{ steps.trivy-output.outputs.jvm_inventory }}",
+        "TRIVY_SARIF": "${{ steps.trivy-output.outputs.jvm_sarif }}",
+    },
+    "Trivy JVM output assertion paths",
+)
+expect(
+    security.step_scalar("trivy", "Assert Trivy JVM runtime outputs", "run"),
+    "\n".join(
+        [
+            "set -euo pipefail",
+            'test -d "$TRIVY_OUTPUT_DIR"',
+            'test ! -L "$TRIVY_OUTPUT_DIR"',
+            'for report in "$TRIVY_INVENTORY" "$TRIVY_SARIF"; do',
+            'test "$(dirname -- "$report")" = "$TRIVY_OUTPUT_DIR"',
+            'test -f "$report"',
+            'test ! -L "$report"',
+            'test -s "$report"',
+            "done",
+        ]
+    ),
+    "fresh Trivy JVM output assertion",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Upload Trivy JVM runtime SARIF to code scanning", "uses"
+    ),
+    UPLOAD_SARIF_USES,
+    "Trivy JVM SARIF upload pin",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Upload Trivy JVM runtime SARIF to code scanning", "if"
+    ),
+    "${{ always() && steps.trivy-jvm-output.outcome == 'success' }}",
+    "Trivy JVM SARIF upload guard",
+)
+expect(
+    security.step_mapping(
+        "trivy", "Upload Trivy JVM runtime SARIF to code scanning", "with"
+    ),
+    {
+        "sarif_file": "${{ steps.trivy-output.outputs.jvm_sarif }}",
+        "checkout_path": "${{ github.workspace }}",
+        "category": "trivy-jvm-runtime",
+    },
+    "Trivy JVM SARIF upload inputs",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Persist Trivy JVM runtime report artifact", "uses"
+    ),
+    UPLOAD_ARTIFACT_USES,
+    "Trivy JVM artifact pin",
+)
+expect(
+    security.step_scalar(
+        "trivy", "Persist Trivy JVM runtime report artifact", "if"
+    ),
+    "${{ always() && steps.trivy-jvm-output.outcome == 'success' }}",
+    "Trivy JVM artifact guard",
+)
+expect(
+    security.step_mapping(
+        "trivy", "Persist Trivy JVM runtime report artifact", "with"
+    ),
+    {
+        "name": "trivy-jvm-runtime-report",
+        "path": (
+            "${{ steps.trivy-output.outputs.jvm_inventory }}\n"
+            "${{ steps.trivy-output.outputs.jvm_sarif }}"
+        ),
+        "if-no-files-found": "error",
+    },
+    "Trivy JVM artifact inputs",
+)
+for shell_step in (
+    "Prepare trusted Trivy output directory",
+    "Assert fresh Trivy filesystem output",
+    "Assert fresh Trivy JVM inventory path",
+    "Assert fresh Trivy JVM SARIF path",
+    "Assert Trivy JVM runtime outputs",
+):
+    expect(
+        security.step_scalar("trivy", shell_step, "shell"),
+        "bash",
+        f"{shell_step} shell",
+    )
 security.assert_no_fail_open("trivy", security_steps)
 security.assert_steps_unguarded(
     "trivy",
@@ -2281,7 +2693,13 @@ security.assert_steps_unguarded(
         "Set up JDK 21",
         "Gradle cache & setup",
         "Build resolved JVM runtime dependencies (blocking)",
+        "Prepare trusted Trivy output directory",
         "Trivy filesystem scan",
+        "Assert fresh Trivy JVM inventory path",
+        "Inventory Trivy JVM runtime artifacts",
+        "Verify Trivy JVM analyzer coverage",
+        "Assert fresh Trivy JVM SARIF path",
+        "Trivy JVM runtime scan",
     ],
 )
 
@@ -2301,6 +2719,19 @@ for forbidden in (
 PY
 }
 
+validate_docker_workflow_contracts() {
+  local repository_root="$1"
+
+  if [ "$#" != "1" ]; then
+    echo "workflow-capabilities: expected REPOSITORY_ROOT" >&2
+    return 2
+  fi
+
+  # Structured effective permissions and credential capabilities are the trust root.
+  # The validator literal scan is bounded defense-in-depth; it does not claim
+  # arbitrary shell/interpreter semantic analysis.
+  ruby "$repository_root/scripts/validate-workflow-capabilities.rb" "$repository_root"
+}
 validate_keyless_action_inventory() {
   local workflow_dir="$1"
   python3 - "$workflow_dir" <<'PY'
@@ -2922,6 +3353,62 @@ insert_step_direct_line() {
     ' "$source_file" >"$target_file"
 }
 
+remove_workflow_step_once() {
+  local source_file="$1"
+  local target_file="$2"
+  local job_name="$3"
+  local step_name="$4"
+
+  python3 - "$source_file" "$target_file" "$job_name" "$step_name" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+job_name = sys.argv[3]
+step_name = sys.argv[4]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+
+job_header = f"  {job_name}:"
+job_indexes = [
+    index for index, line in enumerate(lines) if line.rstrip("\r\n") == job_header
+]
+if len(job_indexes) != 1:
+    raise SystemExit(
+        f"remove_workflow_step_once: expected one job {job_name!r}; found {len(job_indexes)}"
+    )
+job_start = job_indexes[0]
+job_end = len(lines)
+for index in range(job_start + 1, len(lines)):
+    logical = lines[index].rstrip("\r\n")
+    if logical and not logical.lstrip().startswith("#"):
+        indentation = len(logical) - len(logical.lstrip(" "))
+        if indentation <= 2:
+            job_end = index
+            break
+
+step_header = f"      - name: {step_name}"
+step_indexes = [
+    index
+    for index in range(job_start + 1, job_end)
+    if lines[index].rstrip("\r\n") == step_header
+]
+if len(step_indexes) != 1:
+    raise SystemExit(
+        "remove_workflow_step_once: "
+        f"expected one step {step_name!r}; found {len(step_indexes)}"
+    )
+step_start = step_indexes[0]
+step_end = job_end
+for index in range(step_start + 1, job_end):
+    if lines[index].startswith("      - name: "):
+        step_end = index
+        break
+
+target.write_text("".join(lines[:step_start] + lines[step_end:]), encoding="utf-8")
+PY
+}
+
 replace_step_line_once() {
   local source_file="$1"
   local target_file="$2"
@@ -3257,14 +3744,34 @@ path: "**/build/reports/detekt/detekt*/detekt.html"
 if-no-files-found: error'
 detekt_sarif_with_contract='sarif_file: build/reports/detekt/combined/detekt.sarif'
 approved_trivy_action_active_line="uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release"
-trivy_filesystem_report_guard="\${{ always() && hashFiles('trivy-results.sarif') != '' }}"
+trivy_filesystem_report_guard="\${{ always() && steps.trivy-filesystem-output.outcome == 'success' }}"
+trivy_runtime_report_guard="\${{ always() && steps.trivy-jvm-output.outcome == 'success' }}"
+trivy_runtime_artifact_guard="$trivy_runtime_report_guard"
 trivy_image_report_guard="\${{ always() && hashFiles('trivy-image-results.sarif') != '' }}"
 trivy_filesystem_with_contract='scan-type: fs
 scan-ref: .
 severity: HIGH,CRITICAL
 trivyignores: .trivyignore
 format: sarif
-output: trivy-results.sarif
+output: ${{ steps.trivy-output.outputs.filesystem_sarif }}
+exit-code: 1
+version: v0.69.3'
+trivy_runtime_inventory_with_contract='scan-type: rootfs
+scan-ref: app-bot/build/install/app-bot
+scanners: vuln
+list-all-pkgs: true
+trivyignores: .trivyignore
+format: json
+output: ${{ steps.trivy-output.outputs.jvm_inventory }}
+exit-code: 0
+version: v0.69.3'
+trivy_runtime_with_contract='scan-type: rootfs
+scan-ref: app-bot/build/install/app-bot
+scanners: vuln
+severity: HIGH,CRITICAL
+trivyignores: .trivyignore
+format: sarif
+output: ${{ steps.trivy-output.outputs.jvm_sarif }}
 exit-code: 1
 version: v0.69.3'
 trivy_image_with_contract='scan-type: image
@@ -3275,13 +3782,25 @@ format: sarif
 output: trivy-image-results.sarif
 exit-code: 1
 version: v0.69.3'
-trivy_filesystem_sarif_with_contract='sarif_file: trivy-results.sarif'
-trivy_image_sarif_with_contract='sarif_file: trivy-image-results.sarif'
-trivy_filesystem_artifact_with_contract='name: trivy-report
-path: trivy-results.sarif
+trivy_filesystem_sarif_with_contract='sarif_file: ${{ steps.trivy-output.outputs.filesystem_sarif }}
+checkout_path: ${{ github.workspace }}
+category: trivy-filesystem'
+trivy_runtime_sarif_with_contract='sarif_file: ${{ steps.trivy-output.outputs.jvm_sarif }}
+checkout_path: ${{ github.workspace }}
+category: trivy-jvm-runtime'
+trivy_image_sarif_with_contract='sarif_file: trivy-image-results.sarif
+category: trivy-release-image'
+trivy_filesystem_artifact_with_contract='name: trivy-filesystem-report
+path: ${{ steps.trivy-output.outputs.filesystem_sarif }}
+if-no-files-found: error'
+trivy_runtime_artifact_with_contract='name: trivy-jvm-runtime-report
+path: |
+${{ steps.trivy-output.outputs.jvm_inventory }}
+${{ steps.trivy-output.outputs.jvm_sarif }}
 if-no-files-found: error'
 trivy_image_artifact_with_contract='name: trivy-image-report
-path: trivy-image-results.sarif'
+path: trivy-image-results.sarif
+if-no-files-found: error'
 container_smoke_run_contract='docker run -d --name app-bot-ci \
 --network "${{ job.services.postgres.network }}" \
 -p 8080:8080 \
@@ -4917,63 +5436,7 @@ assert_validation_rejected \
   validate_detekt_static_workflow \
   "$detekt_missing_security_events_permission_fixture"
 
-for workflow_file in "$docker_image_workflow" "$docker_publish_workflow"; do
-  assert_exact_line "$workflow_file" "    branches: [ main ]"
-  assert_exact_line "$workflow_file" "    tags: [ 'v*' ]"
-  assert_exact_line "$workflow_file" "  pull_request:"
-  assert_exact_line "$workflow_file" "  workflow_dispatch:"
-
-  metadata_tags="$(
-    awk '
-      $0 == "      - name: Extract metadata (tags, labels)" { in_step = 1 }
-      in_step && $0 == "          tags: |" { in_tags = 1; next }
-      in_tags && $0 ~ /^            type=/ { sub(/^            /, ""); print; next }
-      in_tags && $0 !~ /^            / { exit }
-    ' "$workflow_file"
-  )"
-  expected_metadata_tags="$(
-    printf '%s\n' \
-      "type=sha,format=short" \
-      "type=ref,event=branch" \
-      "type=semver,pattern={{version}},prefix=v" \
-      "type=semver,pattern={{major}}.{{minor}},prefix=v"
-  )"
-  assert_eq "$metadata_tags" "$expected_metadata_tags"
-  assert_not_contains "$metadata_tags" "branch=main"
-
-  assert_sha_pinned_action "$workflow_file" "docker/metadata-action"
-  assert_sha_pinned_action "$workflow_file" "docker/build-push-action"
-  assert_step_line "$workflow_file" "Log in to GHCR" "        if: $non_pr_if"
-done
-
-validate_metadata_wiring "$docker_image_workflow" "Build and (optionally) Push"
-validate_metadata_wiring "$docker_publish_workflow" "Build & (optionally) Push"
-
-assert_step_with_line \
-  "$docker_image_workflow" \
-  "Build and (optionally) Push" \
-  "          push: $non_pr_expression"
-assert_step_with_line \
-  "$docker_image_workflow" \
-  "Build and (optionally) Push" \
-  "          provenance: $non_pr_expression"
-assert_step_with_line \
-  "$docker_publish_workflow" \
-  "Build & (optionally) Push" \
-  "          push: $non_pr_expression"
-assert_step_with_line \
-  "$docker_publish_workflow" \
-  "Build & (optionally) Push" \
-  "          provenance: $non_pr_expression"
-
-for protected_step in \
-  "Sign image (keyless)" \
-  "Generate SBOM (CycloneDX via Syft)" \
-  "Upload SBOM"; do
-  assert_step_line "$docker_publish_workflow" "$protected_step" "        if: $non_pr_if"
-done
-
-validate_publish_provenance_job_guard "$docker_publish_workflow"
+validate_docker_workflow_contracts "$ROOT_DIR"
 
 validate_removed_nvd_owasp_inventory "$ROOT_DIR"
 validate_keyless_action_inventory "$ROOT_DIR/.github/workflows"
@@ -5526,15 +5989,217 @@ replace_step_line_once \
   "$security_scan_workflow" \
   "$trivy_exit_fixture" \
   "trivy" \
-  "Trivy filesystem scan" \
+  "Trivy JVM runtime scan" \
   "          exit-code: 1" \
   "          exit-code: 0"
 assert_validation_rejected \
-  "trivy-filesystem-exit-code-zero" \
+  "trivy-jvm-runtime-exit-code-zero" \
   validate_keyless_sca_workflows \
   "$dependency_submission_workflow" \
   "$sca_workflow" \
   "$trivy_exit_fixture"
+
+trivy_runtime_removed_fixture="$TMP_DIR/security-scan-without-jvm-runtime-scan.yml"
+remove_workflow_step_once \
+  "$security_scan_workflow" \
+  "$trivy_runtime_removed_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan"
+assert_validation_rejected \
+  "trivy-jvm-runtime-scan-removed" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_runtime_removed_fixture"
+
+trivy_runtime_fs_fixture="$TMP_DIR/security-scan-jvm-runtime-filesystem.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_runtime_fs_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "          scan-type: rootfs" \
+  "          scan-type: fs"
+assert_validation_rejected \
+  "trivy-jvm-runtime-rootfs-replaced-with-filesystem" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_runtime_fs_fixture"
+
+trivy_runtime_severity_fixture="$TMP_DIR/security-scan-jvm-runtime-critical-only.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_runtime_severity_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "          severity: HIGH,CRITICAL" \
+  "          severity: CRITICAL"
+assert_validation_rejected \
+  "trivy-jvm-runtime-severity-weakened" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_runtime_severity_fixture"
+
+trivy_runtime_continue_fixture="$TMP_DIR/security-scan-jvm-runtime-continue.yml"
+insert_step_direct_line \
+  "$security_scan_workflow" \
+  "$trivy_runtime_continue_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "        continue-on-error: true"
+assert_validation_rejected \
+  "trivy-jvm-runtime-continue-on-error" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_runtime_continue_fixture"
+
+trivy_verifier_removed_fixture="$TMP_DIR/security-scan-without-jvm-inventory-verifier.yml"
+remove_workflow_step_once \
+  "$security_scan_workflow" \
+  "$trivy_verifier_removed_fixture" \
+  "trivy" \
+  "Verify Trivy JVM analyzer coverage"
+assert_validation_rejected \
+  "trivy-jvm-inventory-verifier-removed" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_verifier_removed_fixture"
+
+trivy_wrong_root_fixture="$TMP_DIR/security-scan-jvm-runtime-wrong-root.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_wrong_root_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "          scan-ref: app-bot/build/install/app-bot" \
+  "          scan-ref: app-bot/build/libs"
+assert_validation_rejected \
+  "trivy-jvm-runtime-wrong-scan-root" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_wrong_root_fixture"
+
+trivy_duplicate_reports_fixture="$TMP_DIR/security-scan-duplicate-trivy-reports.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_duplicate_reports_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "          output: \${{ steps.trivy-output.outputs.jvm_sarif }}" \
+  "          output: \${{ steps.trivy-output.outputs.filesystem_sarif }}"
+replace_step_line_once \
+  "$trivy_duplicate_reports_fixture" \
+  "$trivy_duplicate_reports_fixture.changed" \
+  "trivy" \
+  "Upload Trivy JVM runtime SARIF to code scanning" \
+  "          sarif_file: \${{ steps.trivy-output.outputs.jvm_sarif }}" \
+  "          sarif_file: \${{ steps.trivy-output.outputs.filesystem_sarif }}"
+replace_step_line_once \
+  "$trivy_duplicate_reports_fixture.changed" \
+  "$trivy_duplicate_reports_fixture" \
+  "trivy" \
+  "Upload Trivy JVM runtime SARIF to code scanning" \
+  "          category: trivy-jvm-runtime" \
+  "          category: trivy-filesystem"
+assert_validation_rejected \
+  "trivy-runtime-sarif-and-category-duplicate-filesystem" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_duplicate_reports_fixture"
+
+trivy_checkout_output_fixture="$TMP_DIR/security-scan-checkout-output.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_checkout_output_fixture" \
+  "trivy" \
+  "Trivy filesystem scan" \
+  "          output: \${{ steps.trivy-output.outputs.filesystem_sarif }}" \
+  "          output: trivy-filesystem.sarif"
+assert_validation_rejected \
+  "trivy-authoritative-output-returned-to-checkout" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_checkout_output_fixture"
+
+trivy_preflight_removed_fixture="$TMP_DIR/security-scan-without-trusted-output-preflight.yml"
+remove_workflow_step_once \
+  "$security_scan_workflow" \
+  "$trivy_preflight_removed_fixture" \
+  "trivy" \
+  "Prepare trusted Trivy output directory"
+assert_validation_rejected \
+  "trivy-trusted-output-preflight-removed" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_preflight_removed_fixture"
+
+trivy_existing_directory_allowed_fixture="$TMP_DIR/security-scan-existing-output-directory-allowed.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_existing_directory_allowed_fixture" \
+  "trivy" \
+  "Prepare trusted Trivy output directory" \
+  '          if [ -e "$output_dir" ] || [ -L "$output_dir" ]; then' \
+  "          if false; then"
+assert_validation_rejected \
+  "trivy-pre-existing-output-directory-allowed" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_existing_directory_allowed_fixture"
+
+trivy_existing_file_allowed_fixture="$TMP_DIR/security-scan-existing-output-file-allowed.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_existing_file_allowed_fixture" \
+  "trivy" \
+  "Prepare trusted Trivy output directory" \
+  '            test ! -e "$output_dir/$output_name"' \
+  '            test -n "$output_dir/$output_name"'
+assert_validation_rejected \
+  "trivy-pre-existing-output-file-allowed" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_existing_file_allowed_fixture"
+
+trivy_upload_mismatch_fixture="$TMP_DIR/security-scan-stale-upload-path.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_upload_mismatch_fixture" \
+  "trivy" \
+  "Upload Trivy JVM runtime SARIF to code scanning" \
+  "          sarif_file: \${{ steps.trivy-output.outputs.jvm_sarif }}" \
+  "          sarif_file: \${{ steps.trivy-output.outputs.filesystem_sarif }}"
+assert_validation_rejected \
+  "trivy-upload-path-does-not-match-scanner-output" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_upload_mismatch_fixture"
+
+trivy_workspace_temp_fixture="$TMP_DIR/security-scan-workspace-as-trusted-temp.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_workspace_temp_fixture" \
+  "trivy" \
+  "Prepare trusted Trivy output directory" \
+  "          TRIVY_RUNNER_TEMP: \${{ runner.temp }}" \
+  "          TRIVY_RUNNER_TEMP: \${{ github.workspace }}"
+assert_validation_rejected \
+  "trivy-trusted-directory-replaced-with-checkout" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_workspace_temp_fixture"
 
 trivy_order_fixture="$TMP_DIR/security-scan-trivy-before-install-dist.yml"
 python3 - "$security_scan_workflow" "$trivy_order_fixture" <<'PY'
@@ -5546,7 +6211,7 @@ target = Path(sys.argv[2])
 lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
 names = [
     "Build resolved JVM runtime dependencies (blocking)",
-    "Trivy filesystem scan",
+    "Trivy JVM runtime scan",
 ]
 indexes = {}
 for index, line in enumerate(lines):
@@ -5569,16 +6234,246 @@ mutated = lines[:build_start] + lines[scan_start:scan_end] + lines[build_start:s
 target.write_text("".join(mutated), encoding="utf-8")
 PY
 assert_validation_rejected \
-  "trivy-filesystem-before-install-dist" \
+  "trivy-jvm-runtime-before-install-dist" \
   validate_keyless_sca_workflows \
   "$dependency_submission_workflow" \
   "$sca_workflow" \
   "$trivy_order_fixture"
 
+trivy_inventory_repository="$TMP_DIR/trivy-inventory-repository"
+trivy_inventory_trusted="$TMP_DIR/trivy-inventory-trusted"
+trivy_inventory_scan_root="app-bot/build/install/app-bot"
+mkdir -p \
+  "$trivy_inventory_repository/$trivy_inventory_scan_root/lib" \
+  "$trivy_inventory_trusted"
+printf '%s\n' "schema-faithful runtime JAR fixture" \
+  >"$trivy_inventory_repository/$trivy_inventory_scan_root/lib/runtime-1.0.0.jar"
+trivy_inventory_repository="$(cd -P -- "$trivy_inventory_repository" && pwd -P)"
+trivy_inventory_trusted="$(cd -P -- "$trivy_inventory_trusted" && pwd -P)"
+
+trivy_inventory_positive="$trivy_inventory_trusted/positive.json"
+cat >"$trivy_inventory_positive" <<'JSON'
+{
+  "SchemaVersion": 2,
+  "Trivy": {"Version": "0.69.3"},
+  "ArtifactName": "app-bot/build/install/app-bot",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "Java",
+      "Class": "lang-pkgs",
+      "Type": "jar",
+      "Packages": [
+        {
+          "Name": "example:runtime",
+          "Identifier": {"PURL": "pkg:maven/example/runtime@1.0.0", "UID": "runtime"},
+          "Version": "1.0.0",
+          "AnalyzedBy": "jar",
+          "FilePath": "lib/runtime-1.0.0.jar"
+        },
+        {
+          "Name": "example:embedded",
+          "Identifier": {"PURL": "pkg:maven/example/embedded@2.0.0", "UID": "embedded"},
+          "Version": "2.0.0",
+          "AnalyzedBy": "jar",
+          "FilePath": "lib/runtime-1.0.0.jar"
+        }
+      ]
+    }
+  ]
+}
+JSON
+
+python3 - "$trivy_inventory_positive" "$trivy_inventory_trusted" <<'PY'
+from copy import deepcopy
+import json
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target_dir = Path(sys.argv[2])
+positive = json.loads(source.read_text(encoding="utf-8"))
+
+
+def write(name, payload):
+    (target_dir / name).write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def mutated_package(**changes):
+    payload = deepcopy(positive)
+    package = payload["Results"][0]["Packages"][0]
+    package.update(changes)
+    payload["Results"][0]["Packages"] = [package]
+    return payload
+
+
+decoupled = deepcopy(positive)
+first = deepcopy(decoupled["Results"][0]["Packages"][0])
+second = deepcopy(decoupled["Results"][0]["Packages"][1])
+first.update({"AnalyzedBy": "jar", "FilePath": "not-an-archive.txt"})
+second.update({"AnalyzedBy": "gomod", "FilePath": "lib/runtime-1.0.0.jar"})
+decoupled["Results"][0]["Packages"] = [first, second]
+write("decoupled.json", decoupled)
+
+duplicate = deepcopy(positive)
+duplicate["Results"].append(deepcopy(duplicate["Results"][0]))
+write("duplicate-java-result.json", duplicate)
+
+conflicting = deepcopy(positive)
+conflicting["Results"].append(
+    {"Target": "Java", "Class": "lang-pkgs", "Type": "gomod", "Packages": []}
+)
+write("conflicting-java-result.json", conflicting)
+write("wrong-analyzer.json", mutated_package(AnalyzedBy="gomod"))
+write("non-archive-path.json", mutated_package(FilePath="lib/runtime-1.0.0.txt"))
+write("escaping-package-path.json", mutated_package(FilePath="../outside.jar"))
+write("absolute-package-path.json", mutated_package(FilePath="/tmp/runtime.jar"))
+write("missing-package-jar.json", mutated_package(FilePath="lib/missing.jar"))
+write("symlink-package-jar.json", mutated_package(FilePath="lib/runtime-link.jar"))
+
+empty_results = deepcopy(positive)
+empty_results["Results"] = []
+write("empty-results.json", empty_results)
+
+no_packages = deepcopy(positive)
+del no_packages["Results"][0]["Packages"]
+write("java-without-packages.json", no_packages)
+
+escaping_artifact = deepcopy(positive)
+escaping_artifact["ArtifactName"] = "../../outside"
+write("escaping-artifact-root.json", escaping_artifact)
+
+wrong_artifact = deepcopy(positive)
+wrong_artifact["ArtifactName"] = "app-bot/build/libs"
+write("wrong-artifact-root.json", wrong_artifact)
+
+wrong_artifact_type = deepcopy(positive)
+wrong_artifact_type["ArtifactType"] = "repository"
+write("wrong-artifact-type.json", wrong_artifact_type)
+
+pom_only = deepcopy(positive)
+pom_only["Results"] = [
+    {
+        "Target": "pom.xml",
+        "Class": "lang-pkgs",
+        "Type": "pom",
+        "Packages": [
+            {
+                "Name": "example:pom",
+                "Identifier": {"PURL": "pkg:maven/example/pom@1.0.0"},
+                "Version": "1.0.0",
+                "AnalyzedBy": "pom",
+                "FilePath": "pom.xml",
+            }
+        ],
+    }
+]
+write("pom-only.json", pom_only)
+PY
+
+trivy_inventory_positive_out="$(
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+    "$trivy_inventory_repository" \
+    "$trivy_inventory_trusted" \
+    positive.json \
+    "$trivy_inventory_scan_root"
+)"
+assert_contains "$trivy_inventory_positive_out" "runtime_packages=2"
+assert_contains "$trivy_inventory_positive_out" "coupled_jar_packages=2"
+assert_contains "$trivy_inventory_positive_out" "runtime_archives=1"
+
+for trivy_fixture in \
+  decoupled \
+  duplicate-java-result \
+  conflicting-java-result \
+  wrong-analyzer \
+  non-archive-path \
+  escaping-package-path \
+  absolute-package-path \
+  missing-package-jar \
+  empty-results \
+  java-without-packages \
+  escaping-artifact-root \
+  wrong-artifact-root \
+  wrong-artifact-type \
+  pom-only; do
+  assert_validation_rejected \
+    "trivy-jvm-inventory-$trivy_fixture" \
+    python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+    "$trivy_inventory_repository" \
+    "$trivy_inventory_trusted" \
+    "$trivy_fixture.json" \
+    "$trivy_inventory_scan_root"
+done
+
+ln -s runtime-1.0.0.jar \
+  "$trivy_inventory_repository/$trivy_inventory_scan_root/lib/runtime-link.jar"
+assert_validation_rejected \
+  "trivy-jvm-inventory-package-jar-symlink" \
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+  "$trivy_inventory_repository" \
+  "$trivy_inventory_trusted" \
+  symlink-package-jar.json \
+  "$trivy_inventory_scan_root"
+
+ln -s positive.json "$trivy_inventory_trusted/report-link.json"
+assert_validation_rejected \
+  "trivy-jvm-inventory-report-symlink" \
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+  "$trivy_inventory_repository" \
+  "$trivy_inventory_trusted" \
+  report-link.json \
+  "$trivy_inventory_scan_root"
+
+mkfifo "$trivy_inventory_trusted/report-fifo.json"
+assert_validation_rejected \
+  "trivy-jvm-inventory-report-fifo" \
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+  "$trivy_inventory_repository" \
+  "$trivy_inventory_trusted" \
+  report-fifo.json \
+  "$trivy_inventory_scan_root"
+
+printf '%s\n' '{"SchemaVersion": 2, "Results": [' \
+  >"$trivy_inventory_trusted/malformed.json"
+assert_validation_rejected \
+  "trivy-jvm-inventory-malformed" \
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+  "$trivy_inventory_repository" \
+  "$trivy_inventory_trusted" \
+  malformed.json \
+  "$trivy_inventory_scan_root"
+
+assert_validation_rejected \
+  "trivy-jvm-inventory-absolute-report-path" \
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+  "$trivy_inventory_repository" \
+  "$trivy_inventory_trusted" \
+  "$trivy_inventory_positive" \
+  "$trivy_inventory_scan_root"
+assert_validation_rejected \
+  "trivy-jvm-inventory-absolute-expected-root" \
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+  "$trivy_inventory_repository" \
+  "$trivy_inventory_trusted" \
+  positive.json \
+  "/app-bot/build/install/app-bot"
+assert_validation_rejected \
+  "trivy-jvm-inventory-escaping-expected-root" \
+  python3 "$ROOT_DIR/scripts/verify-trivy-java-inventory.py" \
+  "$trivy_inventory_repository" \
+  "$trivy_inventory_trusted" \
+  positive.json \
+  "app-bot/build/install/../install/app-bot"
+echo "quality-gate: Trivy JVM analyzer inventory fixtures verified"
+
 if ! validate_trivy_action_inventory "$ROOT_DIR/.github/workflows"; then
   fail "Trivy action inventory contract failed"
 fi
 validate_trivy_filesystem_workflow "$security_scan_workflow"
+validate_trivy_runtime_workflow "$security_scan_workflow"
 validate_trivy_image_workflow "$docker_publish_workflow"
 echo "quality-gate: Trivy workflow contract verified"
 
@@ -5722,69 +6617,1698 @@ assert_validation_rejected \
   validate_dockerignore_contract \
   "$dockerignore_wide_src_fixture"
 
-workflow_wrong_id_fixture="$TMP_DIR/docker-image-wrong-metadata-id.yml"
-replace_exact_line_once \
-  "$docker_image_workflow" \
-  "$workflow_wrong_id_fixture" \
-  "        id: meta" \
-  "        id: metadata"
-assert_validation_rejected \
-  "docker-image-wrong-metadata-id" \
-  validate_metadata_wiring \
-  "$workflow_wrong_id_fixture" \
-  "Build and (optionally) Push"
+workflow_capability_validator="$ROOT_DIR/scripts/validate-workflow-capabilities.rb"
+workflow_yaml_validator="$ROOT_DIR/scripts/validate-workflow-yaml.rb"
 
-workflow_wrong_tags_fixture="$TMP_DIR/docker-publish-wrong-tags-binding.yml"
-replace_exact_line_once \
-  "$docker_publish_workflow" \
-  "$workflow_wrong_tags_fixture" \
-  "          tags: $metadata_tags_expression" \
-  "          tags: \${{ steps.metadata.outputs.tags }}"
-assert_validation_rejected \
-  "docker-publish-wrong-tags-binding" \
-  validate_metadata_wiring \
-  "$workflow_wrong_tags_fixture" \
-  "Build & (optionally) Push"
+copy_workflow_capability_fixture() {
+  local fixture_name="$1"
+  local fixture_root="$TMP_DIR/workflow-capability-$fixture_name"
+  mkdir -p \
+    "$fixture_root/.github/workflows" \
+    "$fixture_root/docs/ops" \
+    "$fixture_root/scripts/deploy"
+  git -C "$fixture_root" init -q
+  while IFS= read -r -d '' workflow; do
+    cp "$ROOT_DIR/$workflow" "$fixture_root/$workflow"
+  done < <(
+    git -C "$ROOT_DIR" ls-files -z -- \
+      ':(glob).github/workflows/*.yml' \
+      ':(glob).github/workflows/*.yaml'
+  )
+  cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$fixture_root/scripts/deploy/"
+  cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$fixture_root/scripts/deploy/"
+  cp "$ROOT_DIR/docs/ops/secrets-rotation.md" "$fixture_root/docs/ops/"
+  git -C "$fixture_root" add .github/workflows docs/ops scripts/deploy
+  printf '%s\n' "$fixture_root"
+}
 
-workflow_missing_labels_fixture="$TMP_DIR/docker-publish-labels-outside-build-with.yml"
-move_build_labels_outside_with \
-  "$docker_publish_workflow" \
-  "$workflow_missing_labels_fixture" \
-  "Build & (optionally) Push" \
-  "          labels: $metadata_labels_expression"
-assert_validation_rejected \
-  "docker-publish-labels-outside-build-with" \
-  validate_metadata_wiring \
-  "$workflow_missing_labels_fixture" \
-  "Build & (optionally) Push"
+mutate_workflow_capability_fixture() {
+  local fixture_root="$1"
+  local fixture_case="$2"
+  ruby -I"$ROOT_DIR/scripts" -rvalidate-workflow-yaml \
+    - "$fixture_root" "$fixture_case" <<'RUBY'
+require "pathname"
 
-workflow_missing_job_guard_fixture="$TMP_DIR/docker-publish-missing-provenance-job-guard.yml"
-mutate_publish_provenance_guard \
-  "$docker_publish_workflow" \
-  "$workflow_missing_job_guard_fixture" \
-  "no"
-assert_validation_rejected \
-  "docker-publish-missing-provenance-job-guard" \
-  validate_publish_provenance_job_guard \
-  "$workflow_missing_job_guard_fixture"
+root = Pathname.new(ARGV.fetch(0))
+fixture_case = ARGV.fetch(1)
+workflows = root.join(".github/workflows")
 
-workflow_step_only_guard_fixture="$TMP_DIR/docker-publish-step-only-provenance-guard.yml"
-mutate_publish_provenance_guard \
-  "$docker_publish_workflow" \
-  "$workflow_step_only_guard_fixture" \
-  "yes"
-assert_validation_rejected \
-  "docker-publish-step-only-provenance-guard" \
-  validate_publish_provenance_job_guard \
-  "$workflow_step_only_guard_fixture"
+def replace_once(path, old, replacement)
+  text = File.binread(path)
+  old = old.b
+  replacement = replacement.b
+  abort "fixture source changed for #{path}: #{old.inspect}" unless text.scan(old).length == 1
+  File.binwrite(path, text.sub(old, replacement))
+end
+
+def swap_once(path, first, second)
+  text = File.binread(path)
+  abort "fixture source changed for #{path}: #{first.inspect}" unless text.scan(first).length == 1
+  abort "fixture source changed for #{path}: #{second.inspect}" unless text.scan(second).length == 1
+  sentinel = "__CAPABILITY_FIXTURE_SWAP_SENTINEL__"
+  abort "fixture swap sentinel already exists: #{path}" if text.include?(sentinel)
+  text = text.sub(first, sentinel).sub(second, first).sub(sentinel, second)
+  File.binwrite(path, text)
+end
+
+def add_workflow(workflows, name, body)
+  path = workflows.join("#{name}.yml")
+  abort "fixture workflow already exists: #{path}" if path.exist?
+  File.binwrite(path, body)
+end
+
+def read_only_workflow(job_body)
+  header = <<~YAML
+    name: Capability fixture
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+  YAML
+  header + job_body.each_line.map { |line| "    #{line}" }.join
+end
+
+def workflow_with_top_level(top_level)
+  header = <<~YAML
+    name: YAML alias safety fixture
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+  YAML
+  footer = <<~YAML
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo fixture
+  YAML
+  header + top_level + footer
+end
+
+def alias_chain(last_index)
+  lines = ["chain_0: &chain_0", "  value: base"]
+  1.upto(last_index) do |index|
+    lines << "chain_#{index}: &chain_#{index}"
+    lines << "  previous: *chain_#{index - 1}"
+  end
+  lines.join("\n") + "\n"
+end
+
+def alias_references(count)
+  lines = ["shared: &shared", "  value: safe", "references:"]
+  count.times { lines << "  - *shared" }
+  lines.join("\n") + "\n"
+end
+
+def step_blocks(path)
+  lines = File.readlines(path)
+  starts = lines.each_index.select { |index| lines[index].start_with?("      - name:") }
+  abort "fixture has no named steps: #{path}" if starts.empty?
+  prefix = lines[0...starts.first]
+  blocks = starts.each_with_index.map do |start, index|
+    finish = starts.fetch(index + 1, lines.length)
+    lines[start...finish]
+  end
+  [prefix, blocks]
+end
+
+def step_name(block)
+  match = block.first.match(/\A      - name: (.+)\n\z/)
+  abort "fixture has malformed named step: #{block.first.inspect}" unless match
+  match[1]
+end
+
+def write_step_blocks(path, prefix, blocks)
+  File.binwrite(path, (prefix + blocks.flatten).join)
+end
+
+def append_named_step(path, body)
+  prefix, blocks = step_blocks(path)
+  block = body.each_line.map { |line| "      #{line}" }
+  write_step_blocks(path, prefix, blocks + [block])
+end
+
+def insert_after_named_step(path, name, body)
+  prefix, blocks = step_blocks(path)
+  index = blocks.index { |block| step_name(block) == name }
+  abort "fixture step is missing: #{name}" unless index
+  block = body.each_line.map { |line| "      #{line}" }
+  blocks.insert(index + 1, block)
+  write_step_blocks(path, prefix, blocks)
+end
+
+def swap_named_steps(path, first, second)
+  prefix, blocks = step_blocks(path)
+  first_index = blocks.index { |block| step_name(block) == first }
+  second_index = blocks.index { |block| step_name(block) == second }
+  abort "fixture steps are missing: #{first}, #{second}" unless first_index && second_index
+  blocks[first_index], blocks[second_index] = blocks[second_index], blocks[first_index]
+  write_step_blocks(path, prefix, blocks)
+end
+
+def duplicate_named_step(path, name)
+  prefix, blocks = step_blocks(path)
+  index = blocks.index { |block| step_name(block) == name }
+  abort "fixture step is missing: #{name}" unless index
+  blocks.insert(index + 1, blocks[index].dup)
+  write_step_blocks(path, prefix, blocks)
+end
+
+def append_after_rollout(path, prose)
+  marker = "<!-- capability-rollout-order:end -->"
+  replace_once(path, marker, "#{marker}\n\n#{prose}")
+end
+
+rollout_markdown_outside_fixtures = {
+  "rollout-plain-token-outside" => "GHCR_TOKEN",
+  "rollout-plain-pat-outside" => "PAT",
+  "rollout-plain-ghcr-credentials-outside" => "GHCR credentials",
+  "rollout-markdown-star-token-single" => "*GHCR\\_TOKEN*",
+  "rollout-markdown-star-token-double" => "**GHCR\\_TOKEN**",
+  "rollout-markdown-star-token-triple" => "***GHCR\\_TOKEN***",
+  "rollout-markdown-star-username-single" => "*GHCR\\_USERNAME*",
+  "rollout-markdown-star-pat-double" => "**PAT**",
+  "rollout-markdown-star-ghcr-credentials" => "*GHCR credentials*",
+  "rollout-markdown-star-legacy-ghcr-credentials" => "**legacy GHCR credentials**",
+  "rollout-markdown-star-registry-credentials" => "*registry credentials*",
+  "rollout-markdown-star-russian-legacy-credentials" => "*устаревшие учётные данные*",
+  "rollout-markdown-star-russian-ghcr-credentials" => "*учётные данные GHCR*",
+  "rollout-markdown-star-russian-ghcr-secrets" => "*секреты GHCR*",
+  "rollout-markdown-star-token-punctuation" => "(*GHCR\\_TOKEN*)",
+  "rollout-markdown-star-token-double-punctuation" => "**GHCR\\_TOKEN**.",
+  "rollout-markdown-star-token-link-single" =>
+    "[*GHCR\\\\_TOKEN*](https://example.invalid)",
+  "rollout-markdown-star-token-link-double" =>
+    "[**GHCR\\\\_TOKEN**](https://example.invalid)",
+  "rollout-markdown-review-token-underscore-single" => "_GHCR_TOKEN_",
+  "rollout-markdown-review-token-underscore-double" => "__GHCR_TOKEN__",
+  "rollout-markdown-review-username-underscore-single" => "_GHCR_USERNAME_",
+  "rollout-markdown-review-pat-underscore-single" => "_PAT_",
+  "rollout-markdown-review-ghcr-credentials-underscore-single" => "_GHCR credentials_",
+  "rollout-markdown-token-underscore-triple" => "___GHCR_TOKEN___",
+  "rollout-markdown-legacy-ghcr-credentials-underscore-double" =>
+    "__legacy GHCR credentials__",
+  "rollout-markdown-russian-ghcr-secrets-underscore-single" => "_секреты GHCR_",
+  "rollout-markdown-token-underscore-punctuation" => "(_GHCR_TOKEN_)",
+  "rollout-markdown-token-underscore-double-punctuation" => "__GHCR_TOKEN__.",
+  "rollout-markdown-token-underscore-link-single" =>
+    "[_GHCR_TOKEN_](https://example.invalid)",
+  "rollout-markdown-token-underscore-link-double" =>
+    "[__GHCR_TOKEN__](https://example.invalid)",
+  "rollout-markdown-target-after-end-marker" => "_GHCR_TOKEN_",
+  "rollout-neutral-reference-plus-emphasized-target" =>
+    "See [RETIRE_LEGACY_GHCR_CREDENTIALS]. _GHCR_TOKEN_",
+  "rollout-action-id-outside" => "[DELETE_GHCR_TOKEN]",
+  "rollout-bare-action-id-outside" => "DELETE_GHCR_TOKEN",
+  "rollout-action-id-plus-emphasized-target" => "[DELETE_GHCR_TOKEN] _GHCR_TOKEN_",
+}.freeze
+
+valid_rollout_boundary_fixtures = {
+  "valid-rollout-boundary-pattern" => "PATTERN",
+  "valid-rollout-boundary-compatibility" => "COMPATIBILITY",
+  "valid-rollout-boundary-tokenizer" => "GHCR_TOKENIZER",
+  "valid-rollout-boundary-token-alias" => "MY_GHCR_TOKEN_ALIAS",
+  "valid-rollout-boundary-credentials-version" => "REGISTRY_CREDENTIALS_VERSION",
+  "valid-rollout-boundary-action-alias" => "MY_DELETE_GHCR_TOKEN_ALIAS",
+  "valid-rollout-unrelated-emphasis-single" => "*important*",
+  "valid-rollout-unrelated-emphasis-double" => "**security**",
+}.freeze
+
+case fixture_case
+when "alias-self-recursive"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    env: &loop
+      SELF: *loop
+  YAML
+when "alias-mutual-cycle"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    first: &first
+      next: *second
+    second: &second
+      next: *first
+  YAML
+when "alias-cycle-length-three"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    first: &first
+      next: *second
+    second: &second
+      next: *third
+    third: &third
+      next: *first
+  YAML
+when "alias-recursive-sequence"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    env: &loop
+      VALUES:
+        - *loop
+  YAML
+when "alias-recursive-merge"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    defaults: &defaults
+      <<: *defaults
+  YAML
+when "alias-unknown"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    env:
+      VALUE: *missing
+  YAML
+when "alias-forward"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    env:
+      VALUE: *later
+    later: &later
+      OK: true
+  YAML
+when "alias-duplicate-anchor"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    first: &same
+      value: one
+    second: &same
+      value: two
+  YAML
+when "alias-depth-over-limit"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level(alias_chain(WorkflowYamlSafety::MAX_ALIAS_GRAPH_DEPTH + 1))
+  )
+when "alias-edge-count-over-limit"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level(alias_references(WorkflowYamlSafety::MAX_ALIAS_EDGES + 1))
+  )
+when "alias-malformed-identity"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level("env:\n  VALUE: *\n")
+  )
+when "alias-recursive-nested-policy-map"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Nested recursive alias fixture
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - env: &loop
+              SELF: *loop
+            run: echo fixture
+  YAML
+when "yaml-unsafe-object-tag"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level("unsafe: !ruby/object:Object {}\n")
+  )
+when "yaml-symbol-value"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level("unsafe: :symbol\n")
+  )
+when "yaml-custom-tag"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level("unsafe: !fixture tagged\n")
+  )
+when "yaml-multiple-documents"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level("safe: true\n") + "---\nsecond: document\n"
+  )
+when "valid-shared-alias"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    shared: &shared
+      SAFE_VALUE: safe
+    first: *shared
+    second: *shared
+  YAML
+when "valid-nonconflicting-merge"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    defaults: &defaults
+      SAFE_ONE: one
+    env:
+      <<: *defaults
+      SAFE_TWO: two
+  YAML
+when "valid-alias-chain-below-limit"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level(alias_chain(WorkflowYamlSafety::MAX_ALIAS_GRAPH_DEPTH - 1))
+  )
+when "valid-wide-alias-near-limit"
+  add_workflow(
+    workflows,
+    fixture_case,
+    workflow_with_top_level(alias_references(WorkflowYamlSafety::MAX_ALIAS_EDGES - 1))
+  )
+when "valid-repeated-alias-reference"
+  add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
+    shared: &shared
+      SAFE_VALUE: safe
+    references:
+      - *shared
+      - *shared
+      - *shared
+  YAML
+when "workflow-without-permissions"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Missing workflow permissions
+    on:
+      workflow_dispatch:
+    jobs:
+      inspect:
+        permissions:
+          contents: read
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo safe
+  YAML
+when "ambiguous-inherited-default"
+  replace_once(
+    workflows.join("build.yml"),
+    "permissions:\n  contents: read\n\n",
+    ""
+  )
+when "write-all"
+  replace_once(
+    workflows.join("build-static.yml"),
+    "permissions:\n  contents: read",
+    "permissions: write-all"
+  )
+when "third-packages-write", "third-id-token-write", "pr-packages-write"
+  trigger = fixture_case == "pr-packages-write" ? "pull_request" : "workflow_dispatch"
+  permission = fixture_case == "third-id-token-write" ? "id-token" : "packages"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Unauthorized capability
+    on:
+      #{trigger}:
+    permissions:
+      contents: read
+      #{permission}: write
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo unsafe
+  YAML
+when "noncanonical-login-pat"
+  body = <<~YAML
+    steps:
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ghcr.io
+          username: fixture
+          password: ${{ secrets.GHCR_TOKEN }}
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "noncanonical-ghcr-token", "noncanonical-cr-pat"
+  secret = fixture_case == "noncanonical-cr-pat" ? "CR_PAT" : "GHCR_TOKEN"
+  body = <<~YAML
+    env:
+      TOKEN: ${{ secrets.#{secret} }}
+    steps:
+      - run: echo safe
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "dynamic-secrets"
+  body = <<~YAML
+    env:
+      TOKEN: "${{ secrets['GHCR_TOKEN'] }}"
+    steps:
+      - run: echo safe
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "tojson-secrets"
+  body = <<~YAML
+    env:
+      SECRET_DUMP: ${{ toJSON(secrets) }}
+    steps:
+      - run: echo safe
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "secrets-inherit"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Reusable secret inheritance
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+    jobs:
+      call:
+        permissions:
+          contents: read
+        uses: example/repository/.github/workflows/reusable.yml@0123456789abcdef0123456789abcdef01234567
+        secrets: inherit
+  YAML
+when "future-prod-environment"
+  body = <<~YAML
+    environment: prod
+    steps:
+      - run: echo safe
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "future-ssh-secret"
+  body = <<~YAML
+    env:
+      KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+    steps:
+      - run: echo safe
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "deploy-extra-ssh", "db-extra-ssh"
+  workflow = fixture_case.start_with?("deploy") ? "deploy-ssh.yml" : "db-migrate.yml"
+  append_named_step(workflows.join(workflow), <<~YAML)
+    - name: Unexpected remote execution
+      env:
+        SSH_USER: ${{ secrets.SSH_USER }}
+        SSH_HOST: ${{ secrets.SSH_HOST }}
+        SSH_PORT: ${{ secrets.SSH_PORT }}
+      run: ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "python3 -c 'print(1)'"
+  YAML
+when "deploy-extra-scp", "db-extra-scp"
+  workflow = fixture_case.start_with?("deploy") ? "deploy-ssh.yml" : "db-migrate.yml"
+  append_named_step(workflows.join(workflow), <<~YAML)
+    - name: Unexpected remote copy
+      env:
+        SSH_USER: ${{ secrets.SSH_USER }}
+        SSH_HOST: ${{ secrets.SSH_HOST }}
+        SSH_PORT: ${{ secrets.SSH_PORT }}
+      run: scp -P "$SSH_PORT" artifact "$SSH_USER@$SSH_HOST:/tmp/artifact"
+  YAML
+when "deploy-extra-remote-action", "db-extra-remote-action"
+  workflow = fixture_case.start_with?("deploy") ? "deploy-ssh.yml" : "db-migrate.yml"
+  append_named_step(workflows.join(workflow), <<~YAML)
+    - name: Unexpected remote action
+      uses: appleboy/ssh-action@0123456789abcdef0123456789abcdef01234567
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: python3 -c 'print(1)'
+  YAML
+when "deploy-changed-orchestrator", "db-changed-orchestrator"
+  workflow = fixture_case.start_with?("deploy") ? "deploy-ssh.yml" : "db-migrate.yml"
+  replace_once(
+    workflows.join(workflow),
+    "        run: scripts/deploy/quiesced-release.sh",
+    "        run: scripts/deploy/quiesced-release.sh --unexpected-remote-command"
+  )
+when "deploy-reordered-setup-orchestrator", "db-reordered-setup-orchestrator"
+  workflow = fixture_case.start_with?("deploy") ? "deploy-ssh.yml" : "db-migrate.yml"
+  swap_named_steps(
+    workflows.join(workflow),
+    "Setup SSH agent",
+    "Quiesce, migrate and start verified image"
+  )
+when "deploy-duplicate-orchestrator", "db-duplicate-orchestrator"
+  workflow = fixture_case.start_with?("deploy") ? "deploy-ssh.yml" : "db-migrate.yml"
+  duplicate_named_step(workflows.join(workflow), "Quiesce, migrate and start verified image")
+when "deploy-remote-after-orchestrator", "db-remote-after-orchestrator"
+  workflow = fixture_case.start_with?("deploy") ? "deploy-ssh.yml" : "db-migrate.yml"
+  insert_after_named_step(
+    workflows.join(workflow),
+    "Quiesce, migrate and start verified image",
+    <<~YAML
+      - name: Remote command after orchestrator
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "echo unexpected"
+    YAML
+  )
+when "vars-ghcr-token", "vars-registry-password"
+  variable = fixture_case == "vars-ghcr-token" ? "GHCR_TOKEN" : "REGISTRY_PASSWORD"
+  body = <<~YAML
+    env:
+      SAFE_ALIAS: ${{ vars.#{variable} }}
+    steps:
+      - run: echo delegated
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "env-ghcr-token-ref"
+  body = <<~YAML
+    steps:
+      - env:
+          SAFE_ALIAS: ${{ env.GHCR_TOKEN }}
+        run: echo delegated
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "registry-token-key", "docker-password-key"
+  env_name = fixture_case == "registry-token-key" ? "REGISTRY_TOKEN" : "DOCKER_PASSWORD"
+  body = <<~YAML
+    env:
+      #{env_name}: inert
+    steps:
+      - run: echo delegated
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "registry-intermediate-alias"
+  body = <<~YAML
+    env:
+      SOURCE_ALIAS: ${{ vars.GHCR_TOKEN }}
+    steps:
+      - env:
+          DELEGATED_ALIAS: ${{ env.SOURCE_ALIAS }}
+        run: echo delegated
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "registry-arbitrary-interpreter"
+  body = <<~YAML
+    steps:
+      - run: |
+          python3 -c 'print("delegated registry flow")' "${{ vars.GHCR_TOKEN }}"
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "dynamic-vars-index", "dynamic-env-index"
+  source = fixture_case == "dynamic-vars-index" ? "vars['GHCR_TOKEN']" : "env['GHCR_TOKEN']"
+  body = <<~YAML
+    env:
+      SAFE_ALIAS: "${{ #{source} }}"
+    steps:
+      - run: echo delegated
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "empty-workflow-permissions"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Empty workflow permissions
+    on:
+      workflow_dispatch:
+    permissions: {}
+    jobs:
+      inspect:
+        permissions:
+          contents: read
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo unsafe
+  YAML
+when "empty-privileged-job-permissions"
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "    permissions:\n      contents: read\n      packages: read\n",
+    "    permissions: {}\n"
+  )
+when "empty-ordinary-job-permissions"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Empty ordinary job permissions
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        permissions: {}
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo unsafe
+  YAML
+when "checkout-missing-with"
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7\n        with:\n          persist-credentials: false\n",
+    "        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7\n"
+  )
+when "checkout-persist-true", "checkout-persist-quoted-true", "checkout-persist-quoted-false"
+  value = {
+    "checkout-persist-true" => "true",
+    "checkout-persist-quoted-true" => '"true"',
+    "checkout-persist-quoted-false" => '"false"',
+  }.fetch(fixture_case)
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "          persist-credentials: false",
+    "          persist-credentials: #{value}"
+  )
+when "checkout-second"
+  duplicate_named_step(workflows.join("deploy-ssh.yml"), "Checkout")
+when *rollout_markdown_outside_fixtures.keys
+  append_after_rollout(
+    root.join("docs/ops/secrets-rotation.md"),
+    rollout_markdown_outside_fixtures.fetch(fixture_case)
+  )
+when *valid_rollout_boundary_fixtures.keys
+  append_after_rollout(
+    root.join("docs/ops/secrets-rotation.md"),
+    valid_rollout_boundary_fixtures.fetch(fixture_case)
+  )
+when "rollout-markdown-target-in-step-one"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "1. [CAPABILITY_POLICY_COMMIT] Capability policy reviewed and committed.",
+    "1. [CAPABILITY_POLICY_COMMIT] Capability policy reviewed and committed; _GHCR_TOKEN_."
+  )
+when "rollout-markdown-target-in-step-seven"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "7. [STAGE_DEPLOY_GITHUB_TOKEN_GREEN] Complete a successful stage deployment through `github.token`.",
+    "7. [STAGE_DEPLOY_GITHUB_TOKEN_GREEN] Complete a successful stage deployment through `github.token`; _GHCR_TOKEN_."
+  )
+when "rollout-markdown-target-before-start-marker"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:start -->",
+    "_GHCR_TOKEN_\n\n<!-- capability-rollout-order:start -->"
+  )
+when "valid-rollout-action-isolation"
+  path = root.join("docs/ops/secrets-rotation.md")
+  step_eight = File.binread(path).lines.find do |line|
+    line.include?("[RETIRE_LEGACY_GHCR_CREDENTIALS]")
+  end
+  abort "rollout action-isolation fixture is missing step 8" unless step_eight
+  action_ids = %w[
+    DELETE_GHCR_TOKEN
+    DELETE_UNUSED_GHCR_USERNAME
+    REVOKE_LEGACY_PAT
+    CLEAN_REMOTE_DOCKER_CREDENTIALS
+  ]
+  action_ids.each do |action_id|
+    abort "rollout action ID is not exact: #{action_id}" unless
+      step_eight.scan("[#{action_id}]").length == 1
+  end
+  append_after_rollout(path, "Action isolation remains exact and bounded.")
+when "premature-secrets-removal"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nDelete `GHCR_TOKEN` and revoke the old PAT before merge.\n"
+  )
+when "rollout-remove-after-ci-before-stage"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nRemove `GHCR_TOKEN` after hosted PR CI, before stage deploy.\n"
+  )
+when "rollout-russian-clean-before-stage"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nочистить `GHCR_TOKEN` после CI до stage deploy.\n"
+  )
+when "rollout-revoke-pat-before-stage"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nRevoke PAT after access confirmation but before stage deployment.\n"
+  )
+when "rollout-delete-credentials-before-merge"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nDelete credentials before merge.\n"
+  )
+when "rollout-remove-username-after-push"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nRemove `GHCR_USERNAME` immediately after push.\n"
+  )
+when "rollout-destroy-legacy-ghcr-before-merge"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nDestroy legacy GHCR credentials before merge.\n"
+  )
+when "rollout-purge-ghcr-before-stage"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nPurge GHCR credentials before stage deployment.\n"
+  )
+when "rollout-russian-liquidate-before-stage"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nликвидировать устаревшие учётные данные до stage deploy.\n"
+  )
+when "rollout-destroy-ghcr-without-timing"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nDestroy GHCR credentials.\n"
+  )
+when "rollout-disable-token-without-timing"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nDisable GHCR_TOKEN now.\n"
+  )
+when "rollout-archive-username-after-ci"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nArchive GHCR_USERNAME after CI.\n"
+  )
+when "rollout-invalidate-pat-before-stage"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nInvalidate PAT before stage.\n"
+  )
+when "rollout-target-in-step-one"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "1. [CAPABILITY_POLICY_COMMIT] Capability policy reviewed and committed.",
+    "1. [CAPABILITY_POLICY_COMMIT] Capability policy reviewed; legacy GHCR credentials."
+  )
+when "rollout-target-in-step-seven"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "7. [STAGE_DEPLOY_GITHUB_TOKEN_GREEN] Complete a successful stage deployment through `github.token`.",
+    "7. [STAGE_DEPLOY_GITHUB_TOKEN_GREEN] Complete a successful stage deployment through `github.token`; GHCR credentials."
+  )
+when "rollout-target-after-end-marker"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:end -->",
+    "<!-- capability-rollout-order:end -->\n\nDestroy registry credentials."
+  )
+when "rollout-target-before-start-marker"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:start -->",
+    "Archive legacy credentials.\n\n<!-- capability-rollout-order:start -->"
+  )
+when "rollout-duplicate-token-action"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "[DELETE_GHCR_TOKEN] delete `GHCR_TOKEN`;",
+    "[DELETE_GHCR_TOKEN] delete `GHCR_TOKEN`; [DELETE_GHCR_TOKEN] delete `GHCR_TOKEN`;"
+  )
+when "rollout-duplicate-token-target"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "delete `GHCR_TOKEN`;",
+    "delete `GHCR_TOKEN` and `GHCR_TOKEN`;"
+  )
+when "rollout-renamed-token-target"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "delete `GHCR_TOKEN`;",
+    "delete `GHCR_ACCESS_TOKEN`;"
+  )
+when "rollout-missing-token-action"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "[DELETE_GHCR_TOKEN] delete `GHCR_TOKEN`; ",
+    ""
+  )
+when "rollout-missing-pat-action"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "[REVOKE_LEGACY_PAT] revoke legacy `PAT`; ",
+    ""
+  )
+when "rollout-renamed-retirement-action"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "[CLEAN_REMOTE_DOCKER_CREDENTIALS]",
+    "[PURGE_REMOTE_DOCKER_CREDENTIALS]"
+  )
+when "rollout-registry-credentials-outside"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nArchive registry credentials.\n"
+  )
+when "rollout-russian-ghcr-secrets-outside"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nсекреты GHCR.\n"
+  )
+when "rollout-retirement-without-timing"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "## GHCR rollout gate\n",
+    "## GHCR rollout gate\n\nArchive legacy credentials.\n"
+  )
+when "rollout-duplicate-block"
+  path = root.join("docs/ops/secrets-rotation.md")
+  text = File.binread(path)
+  marker_block = text.match(
+    /<!-- capability-rollout-order:start -->.*?<!-- capability-rollout-order:end -->/m
+  )
+  abort "canonical rollout block is missing" unless marker_block
+  replace_once(
+    path,
+    "<!-- capability-rollout-order:end -->",
+    "<!-- capability-rollout-order:end -->\n\n#{marker_block[0]}"
+  )
+when "rollout-missing-step-seven", "rollout-missing-step-eight"
+  path = root.join("docs/ops/secrets-rotation.md")
+  id = fixture_case.end_with?("seven") ?
+    "STAGE_DEPLOY_GITHUB_TOKEN_GREEN" : "RETIRE_LEGACY_GHCR_CREDENTIALS"
+  text = File.binread(path)
+  matching = text.lines.select { |line| line.include?("[#{id}]") }
+  abort "rollout fixture step is ambiguous: #{id}" unless matching.length == 1
+  File.binwrite(path, text.sub(matching.first, ""))
+when "rollout-reordered-merge-stage"
+  path = root.join("docs/ops/secrets-rotation.md")
+  text = File.binread(path)
+  merge_line = text.lines.find { |line| line.include?("[MERGE_PR]") }
+  stage_line = text.lines.find { |line| line.include?("[STAGE_DEPLOY_GITHUB_TOKEN_GREEN]") }
+  abort "rollout reorder fixture source changed" unless merge_line && stage_line
+  swap_once(path, merge_line, stage_line)
+when "rollout-extra-retirement-step"
+  path = root.join("docs/ops/secrets-rotation.md")
+  text = File.binread(path)
+  step_eight = text.lines.find { |line| line.include?("[RETIRE_LEGACY_GHCR_CREDENTIALS]") }
+  abort "rollout step 8 is missing" unless step_eight
+  replace_once(
+    path,
+    step_eight,
+    "8. [EARLY_RETIREMENT] Remove credentials before merge.\n#{step_eight}"
+  )
+when "rollout-unknown-step-id"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "[HOSTED_PR_CI_GREEN]",
+    "[HOSTED_PIPELINE_GREEN]"
+  )
+when "rollout-multiple-step-eight"
+  path = root.join("docs/ops/secrets-rotation.md")
+  text = File.binread(path)
+  step_eight = text.lines.find { |line| line.include?("[RETIRE_LEGACY_GHCR_CREDENTIALS]") }
+  abort "rollout step 8 is missing" unless step_eight
+  replace_once(path, step_eight, step_eight + step_eight)
+when "rollout-retirement-identifier-outside"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:end -->",
+    "<!-- capability-rollout-order:end -->\n\nLegacy `GHCR_TOKEN` operator note."
+  )
+when "rollout-end-before-start"
+  swap_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:start -->",
+    "<!-- capability-rollout-order:end -->"
+  )
+when "valid-rollout-unrelated-prose"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:end -->",
+    "<!-- capability-rollout-order:end -->\n\nUnrelated operator prose remains allowed outside the bounded contract."
+  )
+when "valid-rollout-reference-id"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:end -->",
+    "<!-- capability-rollout-order:end -->\n\nSee [RETIRE_LEGACY_GHCR_CREDENTIALS]."
+  )
+when "valid-ghcr-package-access-prose"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:end -->",
+    "<!-- capability-rollout-order:end -->\n\nGHCR package access uses the job-scoped `github.token`."
+  )
+when "valid-general-security-prose"
+  replace_once(
+    root.join("docs/ops/secrets-rotation.md"),
+    "<!-- capability-rollout-order:end -->",
+    "<!-- capability-rollout-order:end -->\n\nSecurity-sensitive access is reviewed and audited."
+  )
+when "duplicate-workflow-permissions"
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "permissions:\n  contents: read\n",
+    "permissions:\n  packages: write\npermissions:\n  contents: read\n"
+  )
+when "duplicate-job-permissions"
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "    permissions:\n      contents: read\n      packages: read\n",
+    "    permissions:\n      packages: write\n    permissions:\n      contents: read\n      packages: read\n"
+  )
+when "duplicate-env"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Duplicate env
+    on: [workflow_dispatch]
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        env:
+          SAFE_VALUE: first
+          SAFE_VALUE: second
+        steps:
+          - run: echo unsafe
+  YAML
+when "duplicate-jobs-key"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Duplicate jobs key
+    on: [workflow_dispatch]
+    permissions:
+      contents: read
+    jobs: {}
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo unsafe
+  YAML
+when "duplicate-step-run"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Duplicate step run
+    on: [workflow_dispatch]
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo first
+            run: echo second
+  YAML
+when "duplicate-nested-with"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Duplicate nested with
+    on: [workflow_dispatch]
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+            with:
+              persist-credentials: false
+              persist-credentials: true
+  YAML
+when "duplicate-anchor-merge"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Duplicate anchor merge
+    on: [workflow_dispatch]
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        env: &safe_env
+          SAFE_VALUE: first
+        steps:
+          - env:
+              <<: *safe_env
+              SAFE_VALUE: second
+            run: echo unsafe
+  YAML
+when "deploy-ghcr-token"
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "          REGISTRY_READ_TOKEN: ${{ github.token }}",
+    "          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}"
+  )
+when "deploy-token-without-packages-read"
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "      contents: read\n      packages: read",
+    "      contents: read"
+  )
+when "deploy-packages-write"
+  replace_once(
+    workflows.join("deploy-ssh.yml"),
+    "      packages: read",
+    "      packages: write"
+  )
+when "canonical-loses-job-isolation"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "    permissions:\n      contents: read\n      packages: write\n      id-token: write\n",
+    ""
+  )
+when "canonical-workflow-write"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "permissions:\n  contents: read",
+    "permissions:\n  contents: read\n  packages: write"
+  )
+when "interpreter-packages-write"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Delegated publisher capability
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+      packages: write
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - run: python3 -c 'print("docker push ghcr.io/example/image:tag")'
+  YAML
+when "interpreter-registry-secret"
+  body = <<~YAML
+    env:
+      REGISTRY_TOKEN: ${{ secrets.GHCR_TOKEN }}
+    steps:
+      - run: python3 -c 'print("docker push ghcr.io/example/image:tag")'
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "default-docker-config"
+  replace_once(
+    root.join("scripts/deploy/remote-compose-release.sh"),
+    'docker --config "$registry_config_dir" login',
+    "docker login"
+  )
+when "temporary-config-cleanup-removed"
+  replace_once(
+    root.join("scripts/deploy/remote-compose-release.sh"),
+    "  trap cleanup_registry_config EXIT\n",
+    ""
+  )
+when "literal-docker-push", "literal-docker-image-push", "literal-buildx-push"
+  command = {
+    "literal-docker-push" => "docker push ghcr.io/example/image:tag",
+    "literal-docker-image-push" => "docker image push ghcr.io/example/image:tag",
+    "literal-buildx-push" => "docker buildx build --push .",
+  }.fetch(fixture_case)
+  body = <<~YAML
+    steps:
+      - run: #{command}
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "literal-build-push-action"
+  body = <<~YAML
+    steps:
+      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75
+        with:
+          push: true
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "duplicate-release-metadata"
+  body = <<~YAML
+    steps:
+      - uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81
+        with:
+          images: ghcr.io/example/image
+          tags: |
+            type=sha,format=short
+            type=semver,pattern={{version}},prefix=v
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "self-hosted-runner"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Persistent runner credential risk
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: self-hosted
+        steps:
+          - run: python3 -c 'print("delegated execution")'
+  YAML
+when "valid-read-only-pr"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Read-only PR fixture
+    on:
+      pull_request:
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo safe
+  YAML
+when "valid-arbitrary-interpreter"
+  body = <<~YAML
+    steps:
+      - run: python3 -c 'print("docker push is inert text")'
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "valid-read-only-docker"
+  body = <<~YAML
+    steps:
+      - run: |
+          docker pull ghcr.io/example/public-image:fixture
+          docker image inspect ghcr.io/example/public-image:fixture
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "valid-inherited-permissions"
+  body = <<~YAML
+    steps:
+      - run: echo inherited
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "valid-job-permission-override"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Valid job permission override
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        permissions:
+          contents: read
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo overridden
+  YAML
+when "valid-anchor-alias"
+  add_workflow(workflows, fixture_case, <<~YAML)
+    name: Valid anchor alias
+    on:
+      workflow_dispatch:
+    permissions:
+      contents: read
+    jobs:
+      inspect:
+        runs-on: ubuntu-latest
+        steps:
+          - &safe_step
+            name: Safe anchored step
+            run: echo safe
+          - *safe_step
+  YAML
+when "valid-unrelated-env"
+  body = <<~YAML
+    env:
+      DISPLAY_NAME: clubs-bot
+    steps:
+      - run: echo "$DISPLAY_NAME"
+  YAML
+  add_workflow(workflows, fixture_case, read_only_workflow(body))
+when "valid-code-scanning", "valid-dependency-submission", "valid-deploy",
+     "valid-canonical-publisher", "valid-built-in-registry-token", "valid-corrected-docs",
+     "valid-current-alias-inventory", "valid-current-rollout-document"
+  # The isolated tracked production tree itself exercises these exact allowlisted jobs.
+else
+  abort "unknown capability fixture: #{fixture_case}"
+end
+RUBY
+  git -C "$fixture_root" add -A
+}
+
+assert_capability_fixture_invalid() {
+  local fixture_name="$1"
+  local fixture_root
+  fixture_root="$(copy_workflow_capability_fixture "$fixture_name")"
+  mutate_workflow_capability_fixture "$fixture_root" "$fixture_name"
+  ruby "$workflow_yaml_validator" "$fixture_root" >/dev/null ||
+    fail "capability fixture is not valid tracked YAML: $fixture_name"
+  bash -n "$fixture_root/scripts/deploy/quiesced-release.sh" ||
+    fail "capability fixture runner syntax is invalid: $fixture_name"
+  bash -n "$fixture_root/scripts/deploy/remote-compose-release.sh" ||
+    fail "capability fixture remote syntax is invalid: $fixture_name"
+  if ruby "$workflow_capability_validator" "$fixture_root" >"$TMP_DIR/$fixture_name.out" 2>&1; then
+    fail "capability validator accepted invalid fixture: $fixture_name"
+  fi
+  echo "quality-gate: negative capability fixture $fixture_name rejected"
+}
+
+assert_capability_fixture_valid() {
+  local fixture_name="$1"
+  local fixture_root
+  fixture_root="$(copy_workflow_capability_fixture "$fixture_name")"
+  mutate_workflow_capability_fixture "$fixture_root" "$fixture_name"
+  ruby "$workflow_yaml_validator" "$fixture_root" >/dev/null ||
+    fail "positive capability fixture is not valid tracked YAML: $fixture_name"
+  bash -n "$fixture_root/scripts/deploy/quiesced-release.sh" ||
+    fail "positive capability fixture runner syntax is invalid: $fixture_name"
+  bash -n "$fixture_root/scripts/deploy/remote-compose-release.sh" ||
+    fail "positive capability fixture remote syntax is invalid: $fixture_name"
+  ruby "$workflow_capability_validator" "$fixture_root" >/dev/null ||
+    fail "capability validator rejected positive fixture: $fixture_name"
+  echo "quality-gate: positive capability fixture $fixture_name accepted"
+}
+
+assert_duplicate_capability_fixture_invalid() {
+  local fixture_name="$1"
+  local fixture_root
+  fixture_root="$(copy_workflow_capability_fixture "$fixture_name")"
+  mutate_workflow_capability_fixture "$fixture_root" "$fixture_name"
+  if ruby "$workflow_yaml_validator" "$fixture_root" >"$TMP_DIR/$fixture_name.yaml.out" 2>&1; then
+    fail "workflow YAML validator accepted duplicate-key fixture: $fixture_name"
+  fi
+  if ruby "$workflow_capability_validator" "$fixture_root" >"$TMP_DIR/$fixture_name.out" 2>&1; then
+    fail "capability validator accepted duplicate-key fixture: $fixture_name"
+  fi
+  echo "quality-gate: duplicate-key fixture $fixture_name rejected before safe_load"
+}
+
+assert_no_ruby_backtrace() {
+  local fixture_name="$1"
+  shift
+  if grep -E \
+    'SystemStackError|stack level too deep|\.\.\. [0-9]+ levels|^[[:space:]]*from .*:[0-9]+:in|\.rb:[0-9]+:in `' \
+    "$@" >/dev/null; then
+    fail "YAML safety fixture emitted a Ruby backtrace: $fixture_name"
+  fi
+}
+
+assert_yaml_safety_fixture_invalid() {
+  local fixture_name="$1"
+  local fixture_root yaml_log capability_log yaml_status capability_status fixture_path
+  fixture_root="$(copy_workflow_capability_fixture "$fixture_name")"
+  mutate_workflow_capability_fixture "$fixture_root" "$fixture_name"
+  fixture_path="$fixture_root/.github/workflows/$fixture_name.yml"
+  [ -f "$fixture_path" ] && [ ! -L "$fixture_path" ] ||
+    fail "YAML safety fixture source is not a regular file: $fixture_name"
+  git -C "$fixture_root" ls-files --error-unmatch \
+    ".github/workflows/$fixture_name.yml" >/dev/null ||
+    fail "YAML safety fixture source is not tracked: $fixture_name"
+  yaml_log="$TMP_DIR/$fixture_name.yaml.out"
+  capability_log="$TMP_DIR/$fixture_name.capability.out"
+
+  if ruby "$workflow_yaml_validator" "$fixture_root" >"$yaml_log" 2>&1; then
+    fail "workflow YAML reader accepted unsafe alias fixture: $fixture_name"
+  else
+    yaml_status=$?
+  fi
+  if ruby "$workflow_capability_validator" "$fixture_root" >"$capability_log" 2>&1; then
+    fail "capability reader accepted unsafe alias fixture: $fixture_name"
+  else
+    capability_status=$?
+  fi
+  assert_eq "$yaml_status" "1"
+  assert_eq "$capability_status" "1"
+  assert_no_ruby_backtrace "$fixture_name" "$yaml_log" "$capability_log"
+  echo "quality-gate: both YAML readers rejected bounded fixture $fixture_name without backtrace"
+}
+
+assert_yaml_safety_fixture_valid() {
+  local fixture_name="$1"
+  local fixture_root yaml_log capability_log
+  fixture_root="$(copy_workflow_capability_fixture "$fixture_name")"
+  mutate_workflow_capability_fixture "$fixture_root" "$fixture_name"
+  yaml_log="$TMP_DIR/$fixture_name.yaml.out"
+  capability_log="$TMP_DIR/$fixture_name.capability.out"
+
+  ruby "$workflow_yaml_validator" "$fixture_root" >"$yaml_log" 2>&1 ||
+    fail "workflow YAML reader rejected safe alias fixture: $fixture_name"
+  ruby "$workflow_capability_validator" "$fixture_root" >"$capability_log" 2>&1 ||
+    fail "capability reader rejected safe alias fixture: $fixture_name"
+  assert_no_ruby_backtrace "$fixture_name" "$yaml_log" "$capability_log"
+  if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
+    assert_eq \
+      "$(git -C "$fixture_root" ls-files -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
+      "20"
+    grep -Fqx '      - &checkout' "$fixture_root/.github/workflows/tests.yml" ||
+      fail "current tests.yml anchor fixture is missing"
+    grep -Fqx '      - *checkout' "$fixture_root/.github/workflows/tests.yml" ||
+      fail "current tests.yml alias fixture is missing"
+  fi
+  echo "quality-gate: both YAML readers accepted bounded fixture $fixture_name"
+}
+
+for yaml_safety_fixture in \
+  alias-self-recursive \
+  alias-mutual-cycle \
+  alias-cycle-length-three \
+  alias-recursive-sequence \
+  alias-recursive-merge \
+  alias-unknown \
+  alias-forward \
+  alias-duplicate-anchor \
+  alias-depth-over-limit \
+  alias-edge-count-over-limit \
+  alias-malformed-identity \
+  alias-recursive-nested-policy-map \
+  yaml-unsafe-object-tag \
+  yaml-symbol-value \
+  yaml-custom-tag \
+  yaml-multiple-documents; do
+  assert_yaml_safety_fixture_invalid "$yaml_safety_fixture"
+done
+
+for yaml_safety_fixture in \
+  valid-current-alias-inventory \
+  valid-shared-alias \
+  valid-nonconflicting-merge \
+  valid-alias-chain-below-limit \
+  valid-wide-alias-near-limit \
+  valid-repeated-alias-reference; do
+  assert_yaml_safety_fixture_valid "$yaml_safety_fixture"
+done
+
+for capability_fixture in \
+  workflow-without-permissions \
+  ambiguous-inherited-default \
+  write-all \
+  third-packages-write \
+  third-id-token-write \
+  pr-packages-write \
+  noncanonical-login-pat \
+  noncanonical-ghcr-token \
+  noncanonical-cr-pat \
+  dynamic-secrets \
+  tojson-secrets \
+  secrets-inherit \
+  future-prod-environment \
+  future-ssh-secret \
+  deploy-extra-ssh \
+  db-extra-ssh \
+  deploy-extra-scp \
+  db-extra-scp \
+  deploy-extra-remote-action \
+  db-extra-remote-action \
+  deploy-changed-orchestrator \
+  db-changed-orchestrator \
+  deploy-reordered-setup-orchestrator \
+  db-reordered-setup-orchestrator \
+  deploy-duplicate-orchestrator \
+  db-duplicate-orchestrator \
+  deploy-remote-after-orchestrator \
+  db-remote-after-orchestrator \
+  vars-ghcr-token \
+  vars-registry-password \
+  env-ghcr-token-ref \
+  registry-token-key \
+  docker-password-key \
+  registry-intermediate-alias \
+  registry-arbitrary-interpreter \
+  dynamic-vars-index \
+  dynamic-env-index \
+  empty-workflow-permissions \
+  empty-privileged-job-permissions \
+  empty-ordinary-job-permissions \
+  checkout-missing-with \
+  checkout-persist-true \
+  checkout-persist-quoted-true \
+  checkout-persist-quoted-false \
+  checkout-second \
+  rollout-plain-token-outside \
+  rollout-plain-pat-outside \
+  rollout-plain-ghcr-credentials-outside \
+  rollout-markdown-star-token-single \
+  rollout-markdown-star-token-double \
+  rollout-markdown-star-token-triple \
+  rollout-markdown-star-username-single \
+  rollout-markdown-star-pat-double \
+  rollout-markdown-star-ghcr-credentials \
+  rollout-markdown-star-legacy-ghcr-credentials \
+  rollout-markdown-star-registry-credentials \
+  rollout-markdown-star-russian-legacy-credentials \
+  rollout-markdown-star-russian-ghcr-credentials \
+  rollout-markdown-star-russian-ghcr-secrets \
+  rollout-markdown-star-token-punctuation \
+  rollout-markdown-star-token-double-punctuation \
+  rollout-markdown-star-token-link-single \
+  rollout-markdown-star-token-link-double \
+  rollout-markdown-review-token-underscore-single \
+  rollout-markdown-review-token-underscore-double \
+  rollout-markdown-review-username-underscore-single \
+  rollout-markdown-review-pat-underscore-single \
+  rollout-markdown-review-ghcr-credentials-underscore-single \
+  rollout-markdown-token-underscore-triple \
+  rollout-markdown-legacy-ghcr-credentials-underscore-double \
+  rollout-markdown-russian-ghcr-secrets-underscore-single \
+  rollout-markdown-token-underscore-punctuation \
+  rollout-markdown-token-underscore-double-punctuation \
+  rollout-markdown-token-underscore-link-single \
+  rollout-markdown-token-underscore-link-double \
+  rollout-markdown-target-in-step-one \
+  rollout-markdown-target-in-step-seven \
+  rollout-markdown-target-before-start-marker \
+  rollout-markdown-target-after-end-marker \
+  rollout-neutral-reference-plus-emphasized-target \
+  rollout-action-id-outside \
+  rollout-bare-action-id-outside \
+  rollout-action-id-plus-emphasized-target \
+  premature-secrets-removal \
+  rollout-remove-after-ci-before-stage \
+  rollout-russian-clean-before-stage \
+  rollout-revoke-pat-before-stage \
+  rollout-delete-credentials-before-merge \
+  rollout-remove-username-after-push \
+  rollout-destroy-legacy-ghcr-before-merge \
+  rollout-purge-ghcr-before-stage \
+  rollout-russian-liquidate-before-stage \
+  rollout-destroy-ghcr-without-timing \
+  rollout-disable-token-without-timing \
+  rollout-archive-username-after-ci \
+  rollout-invalidate-pat-before-stage \
+  rollout-target-in-step-one \
+  rollout-target-in-step-seven \
+  rollout-target-after-end-marker \
+  rollout-target-before-start-marker \
+  rollout-duplicate-token-action \
+  rollout-duplicate-token-target \
+  rollout-renamed-token-target \
+  rollout-missing-token-action \
+  rollout-missing-pat-action \
+  rollout-renamed-retirement-action \
+  rollout-registry-credentials-outside \
+  rollout-russian-ghcr-secrets-outside \
+  rollout-retirement-without-timing \
+  rollout-duplicate-block \
+  rollout-missing-step-seven \
+  rollout-missing-step-eight \
+  rollout-reordered-merge-stage \
+  rollout-extra-retirement-step \
+  rollout-unknown-step-id \
+  rollout-multiple-step-eight \
+  rollout-retirement-identifier-outside \
+  rollout-end-before-start \
+  deploy-ghcr-token \
+  deploy-token-without-packages-read \
+  deploy-packages-write \
+  canonical-loses-job-isolation \
+  canonical-workflow-write \
+  interpreter-packages-write \
+  interpreter-registry-secret \
+  default-docker-config \
+  temporary-config-cleanup-removed \
+  literal-docker-push \
+  literal-docker-image-push \
+  literal-buildx-push \
+  literal-build-push-action \
+  duplicate-release-metadata \
+  self-hosted-runner; do
+  assert_capability_fixture_invalid "$capability_fixture"
+done
+
+for duplicate_fixture in \
+  duplicate-workflow-permissions \
+  duplicate-job-permissions \
+  duplicate-env \
+  duplicate-jobs-key \
+  duplicate-step-run \
+  duplicate-nested-with \
+  duplicate-anchor-merge; do
+  assert_duplicate_capability_fixture_invalid "$duplicate_fixture"
+done
+
+for capability_fixture in \
+  valid-read-only-pr \
+  valid-code-scanning \
+  valid-dependency-submission \
+  valid-deploy \
+  valid-canonical-publisher \
+  valid-arbitrary-interpreter \
+  valid-read-only-docker \
+  valid-inherited-permissions \
+  valid-job-permission-override \
+  valid-anchor-alias \
+  valid-unrelated-env \
+  valid-built-in-registry-token \
+  valid-corrected-docs \
+  valid-current-rollout-document \
+  valid-rollout-action-isolation \
+  valid-rollout-boundary-pattern \
+  valid-rollout-boundary-compatibility \
+  valid-rollout-boundary-tokenizer \
+  valid-rollout-boundary-token-alias \
+  valid-rollout-boundary-credentials-version \
+  valid-rollout-boundary-action-alias \
+  valid-rollout-unrelated-emphasis-single \
+  valid-rollout-unrelated-emphasis-double \
+  valid-rollout-unrelated-prose \
+  valid-rollout-reference-id \
+  valid-ghcr-package-access-prose \
+  valid-general-security-prose; do
+  assert_capability_fixture_valid "$capability_fixture"
+done
+
+validate_temporary_remote_docker_credentials() {
+  local fixture_root="$TMP_DIR/temporary-remote-docker-credentials"
+  local fake_bin="$fixture_root/bin"
+  local fake_home="$fixture_root/home"
+  local compose_path="$fixture_root/compose"
+  local docker_log="$fixture_root/docker.log"
+  local stdout_file="$fixture_root/stdout.log"
+  local stderr_file="$fixture_root/stderr.log"
+  local token="fixture-registry-token-do-not-log"
+  local revision="0123456789abcdef0123456789abcdef01234567"
+  local repository="ghcr.io/example/clubs_bot/app-bot"
+  local digest_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  local default_config="$fake_home/.docker/config.json"
+  local default_before default_after default_mode_before default_mode_after
+  local case_name expected_status actual_status registry_config credential_path
+
+  mkdir -p "$fake_bin" "$fake_home/.docker" "$compose_path"
+  printf '%s\n' '{"auths":{"sentinel.invalid":{"auth":"unchanged"}}}' >"$default_config"
+  chmod 600 "$default_config"
+  printf '%s\n' 'services:' '  app:' '    image: local-only' >"$compose_path/docker-compose.yml"
+
+  cat >"$fake_bin/docker" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+config_dir=""
+if [ "${1:-}" = "--config" ]; then
+  config_dir="${2:-}"
+  shift 2
+fi
+command_name="${1:-}"
+shift || true
+
+record_config() {
+  local mode
+  mode="$(stat -c '%a' "$config_dir" 2>/dev/null || stat -f '%Lp' "$config_dir")"
+  printf 'config=%s\tmode=%s\tcommand=%s\n' \
+    "$config_dir" "$mode" "$command_name" >>"$FAKE_DOCKER_LOG"
+}
+
+case "$command_name" in
+  compose)
+    printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+    printf '%s\n' app
+    ;;
+  login)
+    [ -n "$config_dir" ]
+    case " $* " in
+      *" --password-stdin "*) ;;
+      *) exit 91 ;;
+    esac
+    IFS= read -r supplied_token || [ -n "$supplied_token" ]
+    [ "$supplied_token" = "$FAKE_EXPECTED_TOKEN" ]
+    unset supplied_token
+    record_config
+    printf '%s\n' '{"auths":{"ghcr.io":{"auth":"temporary-only"}}}' >"$config_dir/config.json"
+    printf 'credential=%s\n' "$config_dir/config.json" >>"$FAKE_DOCKER_LOG"
+    [ "$FAKE_FAILURE" != "login" ] || exit 23
+    ;;
+  pull)
+    [ -n "$config_dir" ]
+    record_config
+    reference="${1:-}"
+    printf 'reference=%s\n' "$reference" >>"$FAKE_DOCKER_LOG"
+    if [ "$FAKE_FAILURE" = "digest-pull" ] && [[ "$reference" == *@sha256:* ]]; then
+      exit 24
+    fi
+    ;;
+  image)
+    [ "${1:-}" = "inspect" ]
+    if [[ "$*" == *"Config.Labels"* ]]; then
+      printf '%s\n' "$FAKE_EXPECTED_REVISION"
+    elif [[ "$*" == *"RepoDigests"* ]]; then
+      printf '%s@sha256:%s\n' "$FAKE_IMAGE_REPOSITORY" "$FAKE_DIGEST_HASH"
+    else
+      exit 92
+    fi
+    ;;
+  *)
+    exit 93
+    ;;
+esac
+SH
+  chmod 700 "$fake_bin/docker"
+
+  default_before="$(shasum -a 256 "$default_config")"
+  default_mode_before="$(stat -c '%a' "$default_config" 2>/dev/null || stat -f '%Lp' "$default_config")"
+
+  for case_name in success login digest-pull; do
+    : >"$docker_log"
+    : >"$stdout_file"
+    : >"$stderr_file"
+    expected_status=0
+    [ "$case_name" = "success" ] || expected_status=1
+    set +e
+    printf '%s\n' "$token" |
+      env \
+        PATH="$fake_bin:$PATH" \
+        HOME="$fake_home" \
+        FAKE_DOCKER_LOG="$docker_log" \
+        FAKE_EXPECTED_TOKEN="$token" \
+        FAKE_EXPECTED_REVISION="$revision" \
+        FAKE_IMAGE_REPOSITORY="$repository" \
+        FAKE_DIGEST_HASH="$digest_hash" \
+        FAKE_FAILURE="$case_name" \
+        bash "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" \
+          preflight \
+          123-1 \
+          stage \
+          "$compose_path" \
+          "$repository" \
+          fixture \
+          "$revision" \
+          fixture-user >"$stdout_file" 2>"$stderr_file"
+    actual_status=$?
+    set -e
+
+    if { [ "$expected_status" = "0" ] && [ "$actual_status" != "0" ]; } ||
+      { [ "$expected_status" != "0" ] && [ "$actual_status" = "0" ]; }; then
+      fail "temporary Docker credential case $case_name returned $actual_status"
+    fi
+    registry_config="$(awk -F '\t' '/^config=/{sub(/^config=/, "", $1); print $1}' "$docker_log" | sort -u)"
+    [ -n "$registry_config" ] || fail "temporary Docker config was not observed: $case_name"
+    [ "$(printf '%s\n' "$registry_config" | wc -l | tr -d ' ')" = "1" ] ||
+      fail "multiple Docker configs were used: $case_name"
+    case "$registry_config" in
+      /tmp/clubs-bot-docker-config.123-1.*) ;;
+      *) fail "unexpected temporary Docker config path: $registry_config" ;;
+    esac
+    [ ! -e "$registry_config" ] || fail "temporary Docker config survived $case_name"
+    if awk -F '\t' '/^config=/ && $2 != "mode=700" { exit 1 }' "$docker_log"; then
+      :
+    else
+      fail "temporary Docker config mode is not 0700: $case_name"
+    fi
+    credential_path="$(sed -n 's/^credential=//p' "$docker_log")"
+    [ "$credential_path" = "$registry_config/config.json" ] ||
+      fail "credential was written outside the temporary Docker config: $case_name"
+    if grep -Fq "$token" "$docker_log" "$stdout_file" "$stderr_file"; then
+      fail "registry token leaked into structural test output: $case_name"
+    fi
+    if [ "$case_name" = "success" ]; then
+      [ "$(cat "$stdout_file")" = "$repository@sha256:$digest_hash" ] ||
+        fail "temporary Docker credential success returned the wrong digest"
+      [ "$(grep -c $'\tcommand=login$' "$docker_log")" = "1" ] ||
+        fail "temporary Docker login count changed"
+      [ "$(grep -c $'\tcommand=pull$' "$docker_log")" = "2" ] ||
+        fail "temporary Docker tag/digest pull count changed"
+    fi
+  done
+
+  default_after="$(shasum -a 256 "$default_config")"
+  default_mode_after="$(stat -c '%a' "$default_config" 2>/dev/null || stat -f '%Lp' "$default_config")"
+  [ "$default_after" = "$default_before" ] || fail "default Docker config content changed"
+  [ "$default_mode_after" = "$default_mode_before" ] || fail "default Docker config mode changed"
+  echo "quality-gate: temporary remote Docker credentials cleaned on success/failure"
+}
+
+validate_temporary_remote_docker_credentials
+validate_docker_workflow_contracts "$ROOT_DIR"
+echo "quality-gate: workflow capability policy and bounded literal defense fixtures verified"
 
 legacy_trivy_action_sha_prefix="b6643a29fecd7f34b3597bc6acb0a98b03d33"
 legacy_trivy_action_sha="${legacy_trivy_action_sha_prefix}ff8"
 
 trivy_old_action_fixture="$TMP_DIR/security-scan-old-trivy-action.yml"
-replace_exact_line_once \
+replace_step_line_once \
   "$security_scan_workflow" \
   "$trivy_old_action_fixture" \
+  "trivy" \
+  "Trivy filesystem scan" \
   "        $approved_trivy_action_active_line" \
   "        uses: aquasecurity/trivy-action@$legacy_trivy_action_sha # 0.33.1"
 assert_validation_rejected \
@@ -5793,9 +8317,11 @@ assert_validation_rejected \
   "$trivy_old_action_fixture"
 
 trivy_latest_fixture="$TMP_DIR/security-scan-trivy-latest.yml"
-replace_exact_line_once \
+replace_step_line_once \
   "$security_scan_workflow" \
   "$trivy_latest_fixture" \
+  "trivy" \
+  "Trivy filesystem scan" \
   "          version: v0.69.3" \
   "          version: latest"
 assert_validation_rejected \
@@ -5815,9 +8341,11 @@ assert_validation_rejected \
   "$trivy_disallowed_patch_fixture"
 
 trivy_ignorefile_fixture="$TMP_DIR/security-scan-trivy-ignorefile.yml"
-replace_exact_line_once \
+replace_step_line_once \
   "$security_scan_workflow" \
   "$trivy_ignorefile_fixture" \
+  "trivy" \
+  "Trivy filesystem scan" \
   "          trivyignores: .trivyignore" \
   "          ignorefile: .trivyignore"
 assert_validation_rejected \
@@ -5852,7 +8380,7 @@ replace_step_line_once \
   "$security_scan_workflow" \
   "$trivy_unguarded_sarif_fixture" \
   "trivy" \
-  "Upload Trivy SARIF to code scanning" \
+  "Upload Trivy filesystem SARIF to code scanning" \
   "        if: $trivy_filesystem_report_guard" \
   "        if: always()"
 assert_validation_rejected \

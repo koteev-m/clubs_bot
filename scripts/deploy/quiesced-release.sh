@@ -10,8 +10,8 @@ required_variables=(
   SSH_HOST
   SSH_PORT
   COMPOSE_PATH
-  GHCR_USERNAME
-  GHCR_TOKEN
+  REGISTRY_USERNAME
+  REGISTRY_READ_TOKEN
   GITHUB_RUN_ID
   GITHUB_RUN_ATTEMPT
 )
@@ -49,13 +49,17 @@ if [[ ! "$COMPOSE_PATH" =~ ^/[a-zA-Z0-9._/-]+$ ]]; then
   echo "quiesced-release: COMPOSE_PATH must be a simple absolute path" >&2
   exit 2
 fi
-if [[ ! "$GHCR_USERNAME" =~ ^[a-zA-Z0-9._-]+$ ]] ||
+if [[ ! "$REGISTRY_USERNAME" =~ ^[a-zA-Z0-9._-]+(\[bot\])?$ ]] ||
   [[ ! "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]] ||
   [[ ! "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then
   echo "quiesced-release: invalid release identity" >&2
   exit 2
 fi
 
+# Drop the exported workflow token before scp/ssh can inherit it. The lowercase
+# copy is a shell-only value and is consumed solely by the preflight stdin pipe.
+registry_read_token="$REGISTRY_READ_TOKEN"
+unset REGISTRY_READ_TOKEN
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 remote_owner="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 remote_script="/tmp/clubs-bot-release-${remote_owner}.sh"
@@ -97,15 +101,16 @@ ssh -p "$SSH_PORT" "$ssh_target" "chmod 700 '$remote_script'"
 preflight_remote_release() {
   local digest_prefix digest_hash
   verified_digest="$(
-    printf '%s\n' "$GHCR_TOKEN" |
+    printf '%s\n' "$registry_read_token" |
       remote_command \
         preflight \
         "$COMPOSE_PATH" \
         "$IMAGE_REPOSITORY" \
         "$IMAGE_TAG" \
         "$EXPECTED_REVISION" \
-      "$GHCR_USERNAME"
+      "$REGISTRY_USERNAME"
   )"
+  unset registry_read_token
   digest_prefix="${IMAGE_REPOSITORY}@sha256:"
   digest_hash="${verified_digest#"$digest_prefix"}"
   if [ "$digest_hash" = "$verified_digest" ] || [[ ! "$digest_hash" =~ ^[0-9a-f]{64}$ ]]; then

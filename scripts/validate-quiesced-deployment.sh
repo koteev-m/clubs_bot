@@ -133,7 +133,14 @@ required_remote_contract=(
   'mkdir "$lock_dir"'
   'org.opencontainers.image.revision'
   '.RepoDigests'
-  'docker pull "$digest"'
+  'registry_config_dir="$(mktemp -d "/tmp/clubs-bot-docker-config.${owner}.XXXXXX")"'
+  'chmod 700 "$registry_config_dir"'
+  'trap cleanup_registry_config EXIT'
+  'rm -rf -- "$registry_config_dir"'
+  'docker --config "$registry_config_dir" login'
+  '--password-stdin'
+  'docker --config "$registry_config_dir" pull "$tag_reference"'
+  'docker --config "$registry_config_dir" pull "$digest"'
   '# clubs-bot-managed-quiesced-release'
   'docker-compose.override.yml'
   'docker compose config --images'
@@ -153,6 +160,7 @@ required_remote_contract=(
   'application digest differs from migration digest'
   'running app image id differs from migration image id'
   'running app is not pinned to the verified digest'
+  'compose_command up -d --no-deps --pull never app'
   'http://127.0.0.1:8080/ready'
   'http://127.0.0.1:8080/health'
 )
@@ -241,7 +249,7 @@ start_body="$({
 })"
 first_absent_line="$(printf '%s\n' "$start_body" | grep -n -m1 'assert_app_absent' | cut -d: -f1)"
 same_digest_line="$(printf '%s\n' "$start_body" | grep -n -m1 'migration_digest" != "$digest' | cut -d: -f1)"
-start_line="$(printf '%s\n' "$start_body" | grep -n -m1 'compose_command up -d --no-deps app' | cut -d: -f1)"
+start_line="$(printf '%s\n' "$start_body" | grep -n -m1 'compose_command up -d --no-deps --pull never app' | cut -d: -f1)"
 image_line="$(printf '%s\n' "$start_body" | grep -n -m1 'running_reference=' | cut -d: -f1)"
 same_image_line="$(printf '%s\n' "$start_body" | grep -n -m1 'running_image_id" != "$migration_image_id' | cut -d: -f1)"
 ready_line="$(printf '%s\n' "$start_body" | grep -n -m1 '/ready' | cut -d: -f1)"
