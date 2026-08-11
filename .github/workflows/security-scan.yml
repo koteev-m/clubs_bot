@@ -92,6 +92,7 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           trivyignores: .trivyignore
           format: sarif
           output: ${{ steps.trivy-output.outputs.filesystem_sarif }}
@@ -184,6 +185,7 @@ jobs:
           scan-ref: app-bot/build/install/app-bot
           scanners: vuln
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           trivyignores: .trivyignore
           format: sarif
           output: ${{ steps.trivy-output.outputs.jvm_sarif }}

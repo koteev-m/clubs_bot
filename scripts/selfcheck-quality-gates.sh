@@ -2399,6 +2399,7 @@ expect(
         "scan-type": "fs",
         "scan-ref": ".",
         "severity": "HIGH,CRITICAL",
+        "limit-severities-for-sarif": "true",
         "trivyignores": ".trivyignore",
         "format": "sarif",
         "output": "${{ steps.trivy-output.outputs.filesystem_sarif }}",
@@ -2576,6 +2577,7 @@ expect(
         "scan-ref": "app-bot/build/install/app-bot",
         "scanners": "vuln",
         "severity": "HIGH,CRITICAL",
+        "limit-severities-for-sarif": "true",
         "trivyignores": ".trivyignore",
         "format": "sarif",
         "output": "${{ steps.trivy-output.outputs.jvm_sarif }}",
@@ -3751,6 +3753,7 @@ trivy_image_report_guard="\${{ always() && hashFiles('trivy-image-results.sarif'
 trivy_filesystem_with_contract='scan-type: fs
 scan-ref: .
 severity: HIGH,CRITICAL
+limit-severities-for-sarif: true
 trivyignores: .trivyignore
 format: sarif
 output: ${{ steps.trivy-output.outputs.filesystem_sarif }}
@@ -3769,6 +3772,7 @@ trivy_runtime_with_contract='scan-type: rootfs
 scan-ref: app-bot/build/install/app-bot
 scanners: vuln
 severity: HIGH,CRITICAL
+limit-severities-for-sarif: true
 trivyignores: .trivyignore
 format: sarif
 output: ${{ steps.trivy-output.outputs.jvm_sarif }}
@@ -6041,6 +6045,73 @@ assert_validation_rejected \
   "$dependency_submission_workflow" \
   "$sca_workflow" \
   "$trivy_runtime_severity_fixture"
+
+trivy_filesystem_sarif_limit_missing_fixture="$TMP_DIR/security-scan-filesystem-sarif-limit-missing.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_filesystem_sarif_limit_missing_fixture" \
+  "trivy" \
+  "Trivy filesystem scan" \
+  "          limit-severities-for-sarif: true" \
+  ""
+assert_validation_rejected \
+  "trivy-filesystem-sarif-limit-missing" \
+  validate_trivy_filesystem_workflow \
+  "$trivy_filesystem_sarif_limit_missing_fixture"
+
+trivy_runtime_sarif_limit_missing_fixture="$TMP_DIR/security-scan-jvm-sarif-limit-missing.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_runtime_sarif_limit_missing_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "          limit-severities-for-sarif: true" \
+  ""
+assert_validation_rejected \
+  "trivy-jvm-sarif-limit-missing" \
+  validate_trivy_runtime_workflow \
+  "$trivy_runtime_sarif_limit_missing_fixture"
+
+trivy_filesystem_sarif_limit_false_fixture="$TMP_DIR/security-scan-filesystem-sarif-limit-false.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_filesystem_sarif_limit_false_fixture" \
+  "trivy" \
+  "Trivy filesystem scan" \
+  "          limit-severities-for-sarif: true" \
+  "          limit-severities-for-sarif: false"
+assert_validation_rejected \
+  "trivy-filesystem-sarif-limit-false" \
+  validate_trivy_filesystem_workflow \
+  "$trivy_filesystem_sarif_limit_false_fixture"
+
+trivy_runtime_sarif_limit_false_fixture="$TMP_DIR/security-scan-jvm-sarif-limit-false.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_runtime_sarif_limit_false_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "          limit-severities-for-sarif: true" \
+  "          limit-severities-for-sarif: false"
+assert_validation_rejected \
+  "trivy-jvm-sarif-limit-false" \
+  validate_trivy_runtime_workflow \
+  "$trivy_runtime_sarif_limit_false_fixture"
+
+trivy_sarif_limit_only_one_fixture="$TMP_DIR/security-scan-sarif-limit-only-filesystem.yml"
+replace_step_line_once \
+  "$security_scan_workflow" \
+  "$trivy_sarif_limit_only_one_fixture" \
+  "trivy" \
+  "Trivy JVM runtime scan" \
+  "          limit-severities-for-sarif: true" \
+  ""
+assert_validation_rejected \
+  "trivy-sarif-limit-present-only-for-filesystem" \
+  validate_keyless_sca_workflows \
+  "$dependency_submission_workflow" \
+  "$sca_workflow" \
+  "$trivy_sarif_limit_only_one_fixture"
 
 trivy_runtime_continue_fixture="$TMP_DIR/security-scan-jvm-runtime-continue.yml"
 insert_step_direct_line \
