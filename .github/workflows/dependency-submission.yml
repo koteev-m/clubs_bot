@@ -1,0 +1,57 @@
+name: Dependency Submission
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dependency-submission-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  submit:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Verify resolved production dependency graph (blocking)
+        run: >-
+          ./gradlew verifyResolvedProductionDependencyGraph
+          --dependency-verification=strict
+          --no-configuration-cache
+          --console=plain
+
+      - name: Submit resolved dependency graph (blocking)
+        uses: gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          gradle-version: wrapper
+          validate-wrappers: true
+          cache-provider: basic
+          dependency-graph: generate-and-submit
+          dependency-resolution-task: >-
+            verifyResolvedProductionDependencyGraph
+            ForceDependencyResolutionPlugin_resolveAllDependencies
+          dependency-graph-report-dir: build/reports/dependency-submission
+          dependency-graph-continue-on-failure: false
+          additional-arguments: >-
+            --dependency-verification=strict
+            --no-configuration-cache
+            --stacktrace

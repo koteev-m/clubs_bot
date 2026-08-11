@@ -49,14 +49,14 @@ class PromoterAdminRepositoryIT : PostgresClubIntegrationTest() {
 
             transaction(database) {
                 val accessRow =
-                    PromoterClubAccessTable
+                    PromoterClubAccessProbeTable
                         .selectAll()
                         .where {
-                            (PromoterClubAccessTable.clubId eq clubId) and
-                                (PromoterClubAccessTable.promoterUserId eq promoterId)
+                            (PromoterClubAccessProbeTable.clubId eq clubId) and
+                                (PromoterClubAccessProbeTable.promoterUserId eq promoterId)
                         }.firstOrNull()
                 assertNotNull(accessRow)
-                assertEquals(true, accessRow!![PromoterClubAccessTable.accessEnabled])
+                assertEquals(true, accessRow!![PromoterClubAccessProbeTable.accessEnabled])
 
                 val roleRow =
                     UserRolesTable
@@ -85,14 +85,14 @@ class PromoterAdminRepositoryIT : PostgresClubIntegrationTest() {
 
             transaction(database) {
                 val accessRow =
-                    PromoterClubAccessTable
+                    PromoterClubAccessProbeTable
                         .selectAll()
                         .where {
-                            (PromoterClubAccessTable.clubId eq clubId) and
-                                (PromoterClubAccessTable.promoterUserId eq promoterId)
+                            (PromoterClubAccessProbeTable.clubId eq clubId) and
+                                (PromoterClubAccessProbeTable.promoterUserId eq promoterId)
                         }.firstOrNull()
                 assertNotNull(accessRow)
-                assertEquals(false, accessRow!![PromoterClubAccessTable.accessEnabled])
+                assertEquals(false, accessRow!![PromoterClubAccessProbeTable.accessEnabled])
 
                 val roleRow =
                     UserRolesTable
@@ -128,7 +128,7 @@ class PromoterAdminRepositoryIT : PostgresClubIntegrationTest() {
         }
 }
 
-private object PromoterClubAccessTable : Table("promoter_club_access") {
+private object PromoterClubAccessProbeTable : Table("promoter_club_access") {
     val clubId = long("club_id")
     val promoterUserId = long("promoter_user_id")
     val accessEnabled = bool("access_enabled")

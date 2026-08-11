@@ -85,6 +85,27 @@
 - `POST /api/admin/clubs/{clubId}/nights/{nightStartUtc}/tables/{tableId}/free` — закрытие сессии стола.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L374-L427】
 - `PUT /api/admin/clubs/{clubId}/nights/{nightStartUtc}/deposits/{depositId}` — обновление суммы и allocations, **reason обязателен**; ответ возвращает обновлённый депозит.【F:app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt†L429-L497】
 
+## Refund: booking-level финансовая идемпотентность
+
+- Refund остаётся booking-aggregate операцией endpoint-а `/api/clubs/{clubId}/bookings/{bookingId}/refund`; конкретный `paymentId` в контракт не входит.
+- Источник финансовой истины находится в БД: original captured total — сумма `payments.amount_minor` в статусах `CAPTURED` и `REFUNDED`, refunded total — сумма окончательно успешных записей refund-ledger. Process-local state запрещено использовать для расчёта остатка или exactly-once mutation.
+- Captured payments одной booking должны иметь одну currency. Несколько currency дают fail-closed conflict без refund mutation.
+- Fingerprint keyed refund состоит из `bookingId`, action `REFUND`, request mode (`EXPLICIT` либо `ALL_REMAINING`) и `requestAmountMinor` (`NULL` только для `ALL_REMAINING`). `EXPLICIT` и `ALL_REMAINING` остаются разными payload даже при одинаковой effective amount.
+- Явный `amountMinor=0` — допустимый `EXPLICIT` payload. Первый авторизованный вызов занимает key и возвращает `200`, `refundAmountMinor=0`, `idempotent=false`; replay возвращает тот же `200` с `idempotent=true`. В БД сохраняется terminal `REFUND/OK` с request/result amount `0` и `refund_source_kind = NULL`; поэтому `payment_refunds` row не создаётся и remainder не меняется. `EXPLICIT/0` не совпадает с `ALL_REMAINING` или иной суммой: повтор с таким payload получает 409 без mutation. RBAC authorization выполняется до финансовой операции и до записи action.
+- `payment_actions.idempotency_key` глобально уникален. Тот же key и fingerprint replay-ит сохранённый terminal result без повторной mutation; другой amount/mode даёт `idempotency payload mismatch`, а другой booking/action сохраняет существующий validation contract.
+- Terminal outcomes сохраняются и воспроизводятся без изменения HTTP-смысла: `OK` возвращает исходную refund amount, `CONFLICT` — тот же 409, `ERROR` — тот же 422.
+- Claim, booking/payment row locks, расчёт remainder, запись refund-ledger и terminal action выполняются атомарно в одной PostgreSQL transaction. Exception/cancellation откатывает claim и mutation; persistent `PROCESSING` не допускается.
+- Correctness должна сохраняться между coroutine, разными экземплярами сервиса и application processes; JVM-lock, `Mutex`, `synchronized` и process-local ledger не являются механизмом корректности.
+- Legacy `payment_actions` сохраняют исходные booking/action/status/reason и не получают выдуманный request fingerprint. Однозначная numeric success amount переносится в typed result/source и refund-ledger; malformed success либо неоднозначное сочетание legacy action и `payments.status=REFUNDED` постоянно блокирует новые refunds для booking с публичным `reconciliation_required` conflict.
+- `payments.status=REFUNDED` означает полный refund `payments.amount_minor`. PostgreSQL-триггеры отражают legacy numeric `REFUND/OK` и переход payment в `REFUNDED` в source-typed ledger; DB constraints связывают source booking/status/amount и запрещают две строки для одного source.
+
+## Refund V056: deployment boundary
+
+- Prod/stage schema release использует общий environment concurrency lock и один quiesced workflow: verified image digest загружается и атомарно закрепляется в managed `docker-compose.override.yml` до остановки app и до Flyway. Затем старый app со встроенными workers останавливается и удаляется, а Flyway выполняет migration-only launcher из one-off container сервиса `app` с exact закреплённым digest и тем же Compose DB environment/network. Фаза `migrated` и migration digest/image ID записываются только после успешного exit/validate/zero-pending; application запускается только из тех же digest/image ID.
+- Public migration-only wrapper удаляет JVM option injection variables и запускает private Java launcher с изолированной logging configuration. Raw stream состоит ровно из `migration-safe:v=1 event=started` и одного соответствующего exit-status terminal event: `completed applied=<0..2147483647>` либо `failed phase=<allowlisted> category=<allowlisted>`. JDBC URL, host/port/database, username/password, query parameters, SQL, exception message и stack trace запрещены и в полном Docker output, и в GitHub Actions. Remote orchestrator отклоняет любую неизвестную, malformed, дублированную или переставленную строку и реконструирует только canonical events; parse failure сохраняет maintenance mode. Полный output хранится с mode `0600` внутри maintenance lock до успешного cleanup и доступен только ограниченному оператору на host.
+- Standalone migration при работающем app запрещена. После начала V056 нельзя автоматически или вручную запускать pre-V056 image; допустимы retry того же/newer schema-compatible image, forward-fix либо контролируемый PITR.
+- Remote maintenance lock остаётся fail-closed при аварийном завершении runner. Перед его ручным удалением оператор обязан проверить owner/state, Flyway history, состояние migration container и фактическое состояние app container.
+
 ## Audit log: контракт и ограничения
 
 ### Что пишем в `audit_log`

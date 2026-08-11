@@ -35,10 +35,10 @@ scripts/verify.sh ci
 Task order by mode:
 
 - `full` mode: `formatAll` → `staticCheck` → `test` → `test -PrunIT=true`.
-- `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate scaCheck` → `test -PrunIT=true` → `secret-scan`.
+- `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate` → resolved production dependency graph + `app-bot` runtime distribution → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
-- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, deterministic secret-scan failure без Docker, valid single-file/multi-file SCA cache manifest, negative marker-only/junk/stale/same-size-different-content/file-set-mismatch cases).
+- `scripts/selfcheck-quality-gates.sh`: быстрый smoke/regression для shell-обвязки quality gates (empty diff, fallback single-commit, fail-closed secret scan, resolved dependency graph, trusted-main submission, pinned actions, placeholder-only tracked dev environment).
 
 ## PR quality gates (blocking)
 
@@ -51,21 +51,36 @@ Every PR is blocked until all gates are green:
   Current policy: app bundle line coverage is at least **40%**, and critical booking/check-in/payments contour is at least **60%**.
   Critical contour classes: `BookingA3RoutesKt`, `SecuredBookingRoutesKt`, `CheckinRoutesKt`, `CheckinCompatRoutesKt`, `HostCheckinRoutesKt`, `PaymentsCancelRefundRoutesKt`, `PaymentsFinalizeRoutesKt`, `BookingState`, `PaymentsObservability`, `UiCheckinMetrics`.
 - **Secret scan gate** (`.github/workflows/secret-scan.yml`) runs gitleaks on each PR and push to `main`.
-- **SCA gate** (`.github/workflows/sca.yml`) runs `./gradlew scaCheck` (OWASP Dependency-Check), failing the build on CVSS >= 7.0 (HIGH/CRITICAL).
-  CI green-path: `NVD_API_KEY` в secrets и запуск `./gradlew --no-configuration-cache scaCheck`.
-  Local green-path: либо `NVD_API_KEY`, либо явно прогретый и свежий cache через `./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark` (пишутся `.gradle/dependency-check-data/cache-warm.marker` и `.gradle/dependency-check-data/cache-warm.manifest`).
-  `scaPreflight` валидирует manifest-based contract (exact file set (включая лишние/отсутствующие файлы) + SHA-256 каждого payload-файла + aggregate digest) и не считает marker-only/junk cache корректными данными.
-  Local без key, без warm-cache или со stale marker (>168h) — deterministic fail в `scaPreflight` с инструкцией как прогреть cache.
+- **SCA gate** (`.github/workflows/sca.yml`) keeps the required check name `SCA Gate / dependency-check` for branch-protection compatibility. It is read-only and fail-closed: every JVM module must produce a non-empty, fully resolved production `runtimeClasspath` graph. This gate verifies graph integrity; it is not a CVE scanner.
+- **Runtime and package scanning** (`.github/workflows/security-scan.yml` and `.github/workflows/docker-publish.yml`) is the PR vulnerability gate and remains fail-closed. The filesystem scan builds the `app-bot` distribution first, so Trivy scans resolved runtime JARs together with repository manifests and the pnpm lockfile; the image scan validates the released container. HIGH and CRITICAL findings block the check.
+- **Resolved JVM dependency submission** (`.github/workflows/dependency-submission.yml`) runs only from trusted `main` code (push to `main`, or a manual dispatch guarded to `main`). After the same strict graph verification, the official Gradle action submits direct and transitive dependencies with the built-in `GITHUB_TOKEN`. Pull requests never submit snapshots and receive no write permission.
+- **DependencyGuard** remains a separate blocking build-integrity check for version alignment, dynamic/SNAPSHOT coordinates and unexpectedly empty configurations. It is not a CVE scanner.
 
-### Waiver process for SCA findings
+No personal API key is required for this architecture. Main-only dependency submission uses GitHub's built-in token, while Trivy remains pinned to the repository's approved action and binary versions. Do not add new vulnerability suppressions to make a finding green; upgrade the dependency or document a narrowly scoped, time-bounded exception through the normal security review.
 
-Temporary waivers must be declared in `config/dependency-check/suppressions.xml` with:
+### Required GitHub repository settings
 
-1. a ticket/incident reference;
-2. explicit business justification and compensating controls;
-3. an expiry date and cleanup owner.
+These settings cannot be proven from the repository and remain **UNKNOWN** until an administrator verifies them in **Settings → Code security and analysis**:
 
-Waivers are temporary by policy: remove suppression entries as soon as the dependency is upgraded.
+1. enable **Dependency graph**;
+2. enable **Dependabot alerts**;
+3. optionally enable **Dependabot security updates** after agreeing the automatic security-PR policy;
+4. leave **Automatic dependency submission** disabled because this repository supplies an explicit, validated Gradle submission workflow. Running both would create duplicate snapshots.
+
+Do not add a Dependabot version-update schedule unless that separate product decision is approved. If `SCA Gate / dependency-check` is already required by branch protection, keep that exact check required. Rename it only in a coordinated change that updates branch protection at the same time.
+
+### First keyless-SCA rollout
+
+1. Merge PR #471 after the existing `SCA Gate / dependency-check` graph-integrity check and `Security Scan (Trivy)` are green; no administrator bypass is required.
+2. Open **Settings → Code security and analysis**.
+3. Enable or verify **Dependency graph**.
+4. Enable or verify **Dependabot alerts**.
+5. Keep **Automatic dependency submission** disabled because this repository has an explicit submission workflow.
+6. Optionally enable **Dependabot security updates** only after agreeing the automatic security-PR policy.
+7. Run **Dependency Submission** with `workflow_dispatch` on `main`.
+8. Verify the submitted graph in **Insights → Dependency graph**.
+9. Confirm that all seven current JVM modules and representative direct/transitive runtime packages are present. Seven is a rollout snapshot, not an architectural limit; future JVM modules are discovered dynamically.
+10. Keep subsequent pull requests protected by the independent SCA graph-integrity and Trivy vulnerability checks. Dependency Review can be evaluated later, after the first main snapshot and GitHub comparison behavior are verified separately.
 
 ### False positives для secret scan (gitleaks)
 
@@ -81,20 +96,16 @@ Gate не отключаем. Для подтверждённого ложног
 # lint contract как в CI (detekt по всем модулям + changed-files ktlint)
 scripts/verify.sh lint
 
-# SCA gate (CVSS >= 7.0 блокирует)
-./gradlew --no-configuration-cache scaCheck --console=plain
+# resolved production JVM graph: непустой direct/transitive graph обязателен
+./gradlew --no-configuration-cache verifyResolvedProductionDependencyGraph \
+  --dependency-verification=strict --console=plain
 
-# прогреть локальный cache для SCA без постоянного NVD_API_KEY
-./gradlew --no-configuration-cache dependencyCheckUpdate scaWarmCacheMark --console=plain
+# materialize the same resolved app runtime JAR surface scanned by Trivy in CI
+./gradlew --no-configuration-cache :app-bot:installDist \
+  --dependency-verification=strict --console=plain
 
-# no-key/no-cache (или stale cache) path: scaPreflight завершится ошибкой
-./gradlew --no-configuration-cache scaCheck --console=plain
-
-# refresh dependency verification metadata (tooling only, не реальный SCA scan)
+# refresh dependency verification metadata (checksums only, не vulnerability scan)
 scripts/refresh-verification-metadata.sh
-
-# heavy-path metadata refresh для SCA task graph (scaPreflight + dependencyCheckAggregate), не "лёгкий" режим
-scripts/refresh-verification-metadata.sh sca
 
 # secret scan (локально, если установлен docker)
 docker run --rm -v "$PWD:/repo" -w /repo \
@@ -102,7 +113,7 @@ docker run --rm -v "$PWD:/repo" -w /repo \
   detect --source . --redact --verbose
 ```
 
-Итоговый blocking-эффект в GitHub зависит от двух условий одновременно: workflow должен завершиться ошибкой и соответствующий check должен быть добавлен в branch protection как Required.
+Local graph/distribution commands prove dependency resolution and the artifact surface; PR vulnerability evaluation remains the responsibility of the pinned, fail-closed Trivy workflow. Итоговый blocking-эффект в GitHub зависит от двух условий одновременно: workflow должен завершиться ошибкой и соответствующий check должен быть добавлен в branch protection как Required.
 
 Browse API routes for clubs/events currently rely on in-memory repositories shipped with the app module; a production-grade database module will replace them in future iterations without changing the public API surface. Responses are JSON (UTF-8) with `Cache-Control: max-age=60, must-revalidate`, `Vary: X-Telegram-Init-Data` and stable ETags even for `304 Not Modified` replies.
 
@@ -996,6 +1007,14 @@ export $(grep -v '^#' .env | xargs)  # optional helper when using an .env file
 ./gradlew :app-bot:run --console=plain
 ```
 
+For the local wrapper, create an ignored environment file from the tracked
+placeholder-only template, fill it locally, and never commit the resulting file:
+
+```bash
+cp scripts/dev-env.example.sh scripts/dev-env.sh
+scripts/run-local.sh
+```
+
 The application starts all routes via `Application.module()` and performs
 Flyway migrations on startup. After successful migrations, `/ready` returns
 `READY` while `/health` returns `OK` once the DB probe succeeds.
@@ -1045,8 +1064,15 @@ DATABASE_USER=postgres DATABASE_PASSWORD=postgres \
 - In prod/stage the application only calls `flyway.validate()` on startup and fails fast when
   pending migrations exist (no implicit `migrate()` calls). Out-of-order migrations are disabled
   unless `APP_ENV` is `local|dev` **and** `FLYWAY_OUT_OF_ORDER=true`.
-- Prod/Stage migrations are executed via `.github/workflows/db-migrate.yml` (manual dispatch or
-  release tag) with `FLYWAY_MODE=migrate-and-validate`.
+- Prod/Stage migrations run only inside the full quiesced release used by `.github/workflows/deploy-ssh.yml`
+  or manually confirmed `.github/workflows/db-migrate.yml`. The orchestrator starts
+  `/opt/app/bin/app-bot-migrate` as a one-off Compose container from the exact verified application digest;
+  it inherits the app service DB environment/network and the final app must use the same digest/image ID.
+- The migration-only launcher emits only fixed `migration-safe:v=1` lifecycle events. GitHub Actions receives
+  an allowlisted reconstruction rather than raw Docker/Flyway/JDBC output; restricted full output remains on
+  the remote host in the fail-closed maintenance lock until successful cleanup. The public image launcher
+  removes JVM option injection variables before delegating to its private Java launcher, and any unknown,
+  malformed, duplicated or out-of-order raw line blocks the release.
 - Migration observability: Micrometer counters `db.migrations.*` record validation/migrate outcomes (migrate-success считывает
   общее число применённых миграций) и последнюю seen pending count (exposed on `/metrics`).
 - See `docs/dr.md` for DR/runbook details and pool tuning defaults.

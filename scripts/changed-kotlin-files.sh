@@ -39,20 +39,10 @@ collect_changed_kotlin_files() {
   local range
   range="$(resolve_diff_range)"
 
-  local files=()
-  mapfile -t files < <(
-    git diff --name-only --diff-filter=ACMR "$range" -- '*.kt' '*.kts' | sed '/^$/d'
-  )
-
-  local existing=()
   local file
-  for file in "${files[@]}"; do
-    [ -f "$file" ] && existing+=("$file")
-  done
-
-  if [ ${#existing[@]} -gt 0 ]; then
-    printf '%s\n' "${existing[@]}"
-  fi
+  while IFS= read -r file; do
+    [ -n "$file" ] && [ -f "$file" ] && printf '%s\n' "$file"
+  done < <(git diff --name-only --diff-filter=ACMR "$range" -- '*.kt' '*.kts')
 }
 
 collect_changed_kotlin_files

@@ -39,10 +39,10 @@ class DefaultPaymentsFinalizeService(
             )
             if (logger.isDebugEnabled) {
                 logger.debug(
-                    "payments.finalize.idempotent clubId={} bookingId={} idemKey={}",
+                    "payments.finalize.idempotent clubId={} bookingId={} idempotencyKeyPresent={}",
                     clubId,
                     bookingId,
-                    maskIdemKey(idemKey),
+                    idemKey.isNotBlank(),
                 )
             }
             return PaymentsFinalizeService.FinalizeResult(existing.status)
@@ -66,11 +66,11 @@ class DefaultPaymentsFinalizeService(
 
         val stored = tryPersistResult(bookingId, idemKey, tokenDigest, paymentStatus)
         logger.info(
-            "payments.finalize.stored clubId={} bookingId={} status={} idemKey={}",
+            "payments.finalize.stored clubId={} bookingId={} status={} idempotencyKeyPresent={}",
             clubId,
             bookingId,
             stored.status,
-            maskIdemKey(idemKey),
+            idemKey.isNotBlank(),
         )
         return PaymentsFinalizeService.FinalizeResult(stored.status)
     }
@@ -108,7 +108,11 @@ class DefaultPaymentsFinalizeService(
             )
             existing
         } else {
-            logger.error("payments.finalize.persist_failed bookingId={}", bookingId, error)
+            logger.error(
+                "payments.finalize.persist_failed bookingId={} cause={}",
+                bookingId,
+                error.javaClass.simpleName,
+            )
             throw error
         }
     }
@@ -143,13 +147,6 @@ class DefaultPaymentsFinalizeService(
             // Корректный unsigned-hex для отрицательных байт
             String.format(Locale.ROOT, "%02x", b.toInt() and UNSIGNED_BYTE_MASK)
         }
-    }
-
-    private fun maskIdemKey(value: String): String {
-        if (value.length <= 8) return value
-        val prefix = value.take(4)
-        val suffix = value.takeLast(4)
-        return "$prefix…$suffix"
     }
 
     companion object {

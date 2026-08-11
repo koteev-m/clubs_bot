@@ -1,0 +1,1181 @@
+#!/usr/bin/env ruby
+
+require "open3"
+require "pathname"
+require "set"
+require "yaml"
+require_relative "validate-workflow-yaml"
+
+module WorkflowCapabilityPolicy
+  module_function
+
+  CANONICAL_PUBLISHER = ".github/workflows/docker-publish.yml"
+  CANONICAL_PUBLISHER_JOB = "build-and-push"
+  DEPLOY_JOBS = {
+    [".github/workflows/deploy-ssh.yml", "deploy"] =>
+      "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
+    [".github/workflows/db-migrate.yml", "migrate"] =>
+      "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
+  }.freeze
+  DEPLOY_SECRETS = Set.new(
+    %w[COMPOSE_PATH SSH_HOST SSH_PORT SSH_PRIVATE_KEY SSH_USER]
+  ).freeze
+  CHECKOUT_ACTION = "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332"
+  SSH_AGENT_ACTION = "webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387"
+  PUBLISHER_LOGIN_ACTION = "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567"
+
+  DEPLOY_ORCHESTRATOR_ENV = {
+    "SSH_USER" => "${{ secrets.SSH_USER }}",
+    "SSH_HOST" => "${{ secrets.SSH_HOST }}",
+    "SSH_PORT" => "${{ secrets.SSH_PORT || '22' }}",
+    "COMPOSE_PATH" => "${{ secrets.COMPOSE_PATH }}",
+    "REGISTRY_USERNAME" => "${{ github.actor }}",
+    "REGISTRY_READ_TOKEN" => "${{ github.token }}",
+    "IMAGE_REPOSITORY" => "ghcr.io/${{ github.repository }}/app-bot",
+    "EXPECTED_REVISION" => "${{ github.sha }}",
+  }.freeze
+
+  EXPECTED_PRIVILEGED_JOBS = {
+    [".github/workflows/deploy-ssh.yml", "deploy"] => {
+      "runs-on" => "ubuntu-latest",
+      "timeout-minutes" => 30,
+      "permissions" => {"contents" => "read", "packages" => "read"},
+      "environment" => "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
+      "env" => {
+        "APP_ENV" => "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
+      },
+      "steps" => [
+        {
+          "name" => "Checkout",
+          "uses" => CHECKOUT_ACTION,
+          "with" => {"persist-credentials" => false},
+        },
+        {
+          "name" => "Derive immutable release inputs",
+          "id" => "vars",
+          "shell" => "bash",
+          "run" => <<~'BASH',
+            set -euo pipefail
+            if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ ^v.* ]]; then
+              image_tag="${GITHUB_REF_NAME}"
+            else
+              image_tag="${{ inputs.image_tag }}"
+            fi
+            test -n "$image_tag"
+            echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+          BASH
+        },
+        {
+          "name" => "Setup SSH agent",
+          "uses" => SSH_AGENT_ACTION,
+          "with" => {"ssh-private-key" => "${{ secrets.SSH_PRIVATE_KEY }}"},
+        },
+        {
+          "name" => "Add host to known_hosts",
+          "shell" => "bash",
+          "run" => <<~'BASH',
+            set -euo pipefail
+            ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts"
+          BASH
+        },
+        {
+          "name" => "Quiesce, migrate and start verified image",
+          "env" => DEPLOY_ORCHESTRATOR_ENV.merge(
+            "IMAGE_TAG" => "${{ steps.vars.outputs.image_tag }}"
+          ),
+          "run" => "scripts/deploy/quiesced-release.sh",
+        },
+        {
+          "name" => "Done",
+          "run" => 'echo "Quiesced release complete for ${APP_ENV}"',
+        },
+      ],
+    },
+    [".github/workflows/db-migrate.yml", "migrate"] => {
+      "runs-on" => "ubuntu-latest",
+      "timeout-minutes" => 30,
+      "permissions" => {"contents" => "read", "packages" => "read"},
+      "environment" => "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
+      "env" => {"APP_ENV" => "${{ inputs.environment }}"},
+      "steps" => [
+        {
+          "name" => "Require full quiesced release confirmation",
+          "if" => "${{ !inputs.confirm_quiesced_release }}",
+          "run" => <<~'BASH',
+            echo "A standalone migration is forbidden; confirm the full quiesced release." >&2
+            exit 1
+          BASH
+        },
+        {
+          "name" => "Checkout",
+          "uses" => CHECKOUT_ACTION,
+          "with" => {"persist-credentials" => false},
+        },
+        {
+          "name" => "Setup SSH agent",
+          "uses" => SSH_AGENT_ACTION,
+          "with" => {"ssh-private-key" => "${{ secrets.SSH_PRIVATE_KEY }}"},
+        },
+        {
+          "name" => "Add host to known_hosts",
+          "shell" => "bash",
+          "run" => <<~'BASH',
+            set -euo pipefail
+            ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts"
+          BASH
+        },
+        {
+          "name" => "Quiesce, migrate and start verified image",
+          "env" => DEPLOY_ORCHESTRATOR_ENV.merge(
+            "IMAGE_TAG" => "${{ inputs.image_tag }}"
+          ),
+          "run" => "scripts/deploy/quiesced-release.sh",
+        },
+        {
+          "name" => "Done",
+          "run" => 'echo "Quiesced database release complete for ${APP_ENV}"',
+        },
+      ],
+    },
+  }.freeze
+
+  EXPECTED_EFFECTIVE_PERMISSIONS = {
+    [CANONICAL_PUBLISHER, CANONICAL_PUBLISHER_JOB] => {
+      "contents" => "read",
+      "packages" => "write",
+      "id-token" => "write",
+    },
+    [CANONICAL_PUBLISHER, "verify-and-provenance"] => {
+      "contents" => "read",
+      "packages" => "read",
+    },
+    [CANONICAL_PUBLISHER, "trivy-image"] => {
+      "contents" => "read",
+      "packages" => "read",
+      "security-events" => "write",
+    },
+    [".github/workflows/dependency-submission.yml", "submit"] => {
+      "contents" => "write",
+    },
+    [".github/workflows/release.yml", "release"] => {
+      "contents" => "write",
+    },
+    [".github/workflows/secret-scan.yml", "gitleaks"] => {
+      "contents" => "read",
+      "security-events" => "write",
+    },
+    [".github/workflows/security-scan.yml", "trivy"] => {
+      "contents" => "read",
+      "security-events" => "write",
+    },
+    [".github/workflows/static-check.yml", "detekt"] => {
+      "contents" => "read",
+      "security-events" => "write",
+    },
+    [".github/workflows/deploy-ssh.yml", "deploy"] => {
+      "contents" => "read",
+      "packages" => "read",
+    },
+    [".github/workflows/db-migrate.yml", "migrate"] => {
+      "contents" => "read",
+      "packages" => "read",
+    },
+  }.freeze
+
+  EXPECTED_TRIGGERS = {
+    CANONICAL_PUBLISHER => {
+      "push" => {"branches" => ["main"], "tags" => ["v*"]},
+      "workflow_dispatch" => nil,
+    },
+    ".github/workflows/dependency-submission.yml" => {
+      "push" => {"branches" => ["main"]},
+      "workflow_dispatch" => nil,
+    },
+    ".github/workflows/release.yml" => {
+      "push" => {"tags" => ["v*"]},
+    },
+    ".github/workflows/secret-scan.yml" => {
+      "pull_request" => nil,
+      "push" => {"branches" => ["main"]},
+    },
+    ".github/workflows/security-scan.yml" => {
+      "push" => {"branches" => ["main", "master"], "tags" => ["v*"]},
+      "pull_request" => nil,
+      "workflow_dispatch" => nil,
+    },
+    ".github/workflows/static-check.yml" => {
+      "pull_request" => nil,
+      "push" => {"branches" => ["main", "master"]},
+    },
+    ".github/workflows/deploy-ssh.yml" => {
+      "workflow_dispatch" => {
+        "inputs" => {
+          "environment" => {
+            "description" => "Target environment",
+            "required" => true,
+            "default" => "stage",
+            "type" => "choice",
+            "options" => ["stage", "prod"],
+          },
+          "image_tag" => {
+            "description" => "Published app-bot image tag for this Git revision",
+            "required" => true,
+            "type" => "string",
+          },
+        },
+      },
+      "push" => {"tags" => ["v*"]},
+    },
+    ".github/workflows/db-migrate.yml" => {
+      "workflow_dispatch" => {
+        "inputs" => {
+          "environment" => {
+            "description" => "Target environment",
+            "required" => true,
+            "default" => "stage",
+            "type" => "choice",
+            "options" => ["stage", "prod"],
+          },
+          "image_tag" => {
+            "description" => "Published app-bot image tag for this Git revision",
+            "required" => true,
+            "type" => "string",
+          },
+          "confirm_quiesced_release" => {
+            "description" => "Stop the app, migrate, and start only the selected new image",
+            "required" => true,
+            "default" => false,
+            "type" => "boolean",
+          },
+        },
+      },
+    },
+  }.freeze
+
+  PERMISSION_NAMES = Set.new(
+    %w[
+      actions artifact-metadata attestations checks contents deployments
+      discussions id-token issues models packages pages pull-requests
+      security-events statuses vulnerability-alerts
+    ]
+  ).freeze
+  REGISTRY_SECRET_NAMES = Set.new(
+    %w[
+      CR_PAT GHCR_TOKEN GHCR_USERNAME PACKAGE_TOKEN REGISTRY_TOKEN
+      REGISTRY_USERNAME
+    ]
+  ).freeze
+  REGISTRY_NAME_TOKENS = %w[GHCR REGISTRY DOCKER PACKAGE CONTAINER].freeze
+  CREDENTIAL_NAME_TOKENS = %w[
+    TOKEN PAT PASSWORD PASS SECRET CREDENTIAL AUTH KEY USERNAME
+  ].freeze
+  ROLLOUT_START_MARKER = "<!-- capability-rollout-order:start -->"
+  ROLLOUT_END_MARKER = "<!-- capability-rollout-order:end -->"
+  ROLLOUT_STEP_IDS = %w[
+    CAPABILITY_POLICY_COMMIT
+    DEPENDENCY_REMEDIATION_COMMIT
+    PUSH_BOTH_COMMITS
+    HOSTED_PR_CI_GREEN
+    MERGE_PR
+    GHCR_ACTIONS_READ_CONFIRMED
+    STAGE_DEPLOY_GITHUB_TOKEN_GREEN
+    RETIRE_LEGACY_GHCR_CREDENTIALS
+  ].freeze
+  ROLLOUT_RETIREMENT_ACTION_IDS = %w[
+    DELETE_GHCR_TOKEN
+    DELETE_UNUSED_GHCR_USERNAME
+    REVOKE_LEGACY_PAT
+    CLEAN_REMOTE_DOCKER_CREDENTIALS
+  ].freeze
+  ROLLOUT_REQUIRED_RETIREMENT_TARGETS = %w[
+    GHCR_TOKEN
+    GHCR_USERNAME
+    PAT
+    REMOTE_DOCKER_CREDENTIAL_CLEANUP
+  ].freeze
+  ROLLOUT_NEUTRAL_REFERENCE = "[RETIRE_LEGACY_GHCR_CREDENTIALS]"
+
+  def rollout_escaped_identifier_source(identifier)
+    identifier
+      .split("_", -1)
+      .map { |part| Regexp.escape(part) }
+      .join('(?:\\\\)*_')
+  end
+
+  def rollout_markdown_target_pattern(body, boundary, options = 0)
+    variants = ["(?<!#{boundary})#{body}(?!#{boundary})"]
+    1.upto(3) do |width|
+      delimiter = "_" * width
+      variants << "(?<!#{boundary})#{delimiter}#{body}#{delimiter}(?!#{boundary})"
+    end
+    1.upto(3) do |width|
+      delimiter = "\\*" * width
+      variants <<
+        "(?<!#{boundary})(?<!\\*)#{delimiter}#{body}#{delimiter}" \
+        "(?!\\*)(?!#{boundary})"
+    end
+    Regexp.new("(?:#{variants.join('|')})", options)
+  end
+
+  # The outer boundary deliberately retains underscore as an identifier byte.
+  # Markdown delimiters are consumed only by explicit 1/2/3-width alternatives,
+  # so action IDs and compound identifiers never expose a target substring.
+  ROLLOUT_RETIREMENT_TARGET_PATTERNS = [
+    [
+      "GHCR_TOKEN",
+      rollout_markdown_target_pattern(
+        rollout_escaped_identifier_source("GHCR_TOKEN"),
+        "[A-Za-z0-9_]"
+      )
+    ],
+    [
+      "GHCR_USERNAME",
+      rollout_markdown_target_pattern(
+        rollout_escaped_identifier_source("GHCR_USERNAME"),
+        "[A-Za-z0-9_]"
+      )
+    ],
+    ["PAT", rollout_markdown_target_pattern("PAT", "[A-Za-z0-9_]")],
+    [
+      "REMOTE_DOCKER_CREDENTIAL_CLEANUP",
+      rollout_markdown_target_pattern(
+        rollout_escaped_identifier_source("REMOTE_DOCKER_CREDENTIAL_CLEANUP"),
+        "[A-Za-z0-9_]"
+      )
+    ],
+    [
+      "legacy GHCR credentials",
+      rollout_markdown_target_pattern(
+        "legacy[[:space:]]+GHCR[[:space:]]+credentials?",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+    [
+      "GHCR credentials",
+      rollout_markdown_target_pattern(
+        "GHCR[[:space:]]+credentials?",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+    [
+      "registry credentials",
+      rollout_markdown_target_pattern(
+        "registry[[:space:]]+credentials?",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+    [
+      "legacy credentials",
+      rollout_markdown_target_pattern(
+        "legacy[[:space:]]+credentials?",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+    [
+      "устаревшие учётные данные",
+      rollout_markdown_target_pattern(
+        "устаревшие[[:space:]]+уч[её]тные[[:space:]]+данные",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+    [
+      "учётные данные GHCR",
+      rollout_markdown_target_pattern(
+        "уч[её]тные[[:space:]]+данные[[:space:]]+GHCR",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+    [
+      "секреты GHCR",
+      rollout_markdown_target_pattern(
+        "секреты[[:space:]]+GHCR",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+    [
+      "credentials",
+      rollout_markdown_target_pattern(
+        "credentials?",
+        '[\p{L}\p{N}_]',
+        Regexp::IGNORECASE
+      )
+    ],
+  ].freeze
+  ROLLOUT_STEP_LINES = [
+    "1. [CAPABILITY_POLICY_COMMIT] Capability policy reviewed and committed.",
+    "2. [DEPENDENCY_REMEDIATION_COMMIT] Fix all 22 HIGH findings in a separate commit; they remain blocking until then.",
+    "3. [PUSH_BOTH_COMMITS] Push both commits without rewriting history.",
+    "4. [HOSTED_PR_CI_GREEN] Hosted PR CI completed successfully.",
+    "5. [MERGE_PR] Merge the PR only after hosted PR CI is green.",
+    "6. [GHCR_ACTIONS_READ_CONFIRMED] Confirm GHCR Manage Actions Read access.",
+    "7. [STAGE_DEPLOY_GITHUB_TOKEN_GREEN] Complete a successful stage deployment through `github.token`.",
+    "8. [RETIRE_LEGACY_GHCR_CREDENTIALS] Only after successful step 7: [DELETE_GHCR_TOKEN] delete `GHCR_TOKEN`; [DELETE_UNUSED_GHCR_USERNAME] delete `GHCR_USERNAME` if unused; [REVOKE_LEGACY_PAT] revoke legacy `PAT`; [CLEAN_REMOTE_DOCKER_CREDENTIALS] complete `REMOTE_DOCKER_CREDENTIAL_CLEANUP` by inspecting and cleaning the remote Docker config and temporary directories.",
+  ].freeze
+  MAX_POLICY_TRAVERSAL_DEPTH = WorkflowYamlSafety::MAX_LOADED_CONTAINER_DEPTH
+  MAX_POLICY_TRAVERSAL_NODES = 100_000
+  RELEASE_METADATA_TAGS = [
+    "type=sha,format=short",
+    "type=ref,event=branch",
+    "type=semver,pattern={{version}},prefix=v",
+    "type=semver,pattern={{major}}.{{minor}},prefix=v",
+  ].freeze
+
+  def reject(message)
+    warn "workflow-capabilities: #{message}"
+    exit 1
+  end
+
+  def parse_permissions(value, context)
+    case value
+    when Hash
+      reject("#{context}: permissions map must not be empty") if value.empty?
+      value.each_with_object({}) do |(name, access), normalized|
+        reject("#{context}: permission name is not a string") unless name.is_a?(String)
+        reject("#{context}: unknown permission #{name.inspect}") unless PERMISSION_NAMES.include?(name)
+        reject("#{context}: invalid access for #{name}") unless %w[none read write].include?(access)
+        if name == "id-token" && access == "read"
+          reject("#{context}: id-token only supports write or none")
+        end
+        normalized[name] = access unless access == "none"
+      end
+    when "write-all"
+      reject("#{context}: write-all is forbidden")
+    when "read-all"
+      reject("#{context}: read-all is not an explicit minimal permission map")
+    else
+      reject("#{context}: permissions must be an explicit mapping")
+    end
+  end
+
+  def tracked_workflow_paths(root)
+    stdout, stderr, status = Open3.capture3(
+      "git", "-C", root.to_s, "ls-files", "-z", "--",
+      ":(glob).github/workflows/*.yml",
+      ":(glob).github/workflows/*.yaml"
+    )
+    reject("git ls-files failed: #{stderr.strip}") unless status.success?
+    reject("tracked workflow inventory is empty") if stdout.empty?
+    reject("tracked workflow inventory is not NUL-terminated") unless stdout.end_with?("\0")
+    paths = stdout.split("\0", -1)
+    paths.pop
+    reject("tracked workflow inventory is empty") if paths.empty?
+    reject("tracked workflow inventory contains duplicates") unless paths.uniq.length == paths.length
+    paths.each do |path|
+      unless path.match?(%r{\A\.github/workflows/[^/]+\.(?:yml|yaml)\z})
+        reject("unexpected tracked workflow path: #{path}")
+      end
+    end
+    paths.sort
+  end
+
+  def ensure_regular_path(root, relative_path)
+    current = root.to_s
+    relative_path.split("/").each_with_index do |component, index|
+      current = File.join(current, component)
+      status = File.lstat(current)
+      reject("#{relative_path}: path contains a symlink") if status.symlink?
+      if index == relative_path.split("/").length - 1
+        reject("#{relative_path}: tracked path is not a regular file") unless status.file?
+      else
+        reject("#{relative_path}: parent is not a directory") unless status.directory?
+      end
+    end
+  rescue SystemCallError => error
+    reject("#{relative_path}: cannot inspect tracked path (#{error.class})")
+  end
+
+  def load_workflow(root, relative_path)
+    ensure_regular_path(root, relative_path)
+    raw = File.binread(root.join(relative_path))
+    data = WorkflowYamlSafety.safe_load_workflow(raw, relative_path)
+    [data, raw]
+  rescue WorkflowYamlSafety::ModelError => error
+    reject(error.message)
+  rescue Psych::Exception, ArgumentError => error
+    reject("#{relative_path}: malformed YAML (#{error.class})")
+  rescue SystemStackError
+    reject("#{relative_path}: depth: bounded YAML validation failed")
+  rescue SystemCallError => error
+    reject("#{relative_path}: workflow is unreadable (#{error.class})")
+  end
+
+  def workflow_triggers(workflow, path)
+    keys = ["on", true].select { |key| workflow.key?(key) }
+    reject("#{path}: trigger block is missing or ambiguous") unless keys.length == 1
+    value = workflow.fetch(keys.first)
+    reject("#{path}: trigger block must be a mapping") unless value.is_a?(Hash)
+    value
+  end
+
+  def each_string(value, location = [], &block)
+    active = {}
+    visited = 0
+    stack = [[:enter, value, location, 0]]
+    until stack.empty?
+      action, current, current_location, depth = stack.pop
+      if action == :exit
+        active.delete(current.object_id)
+        next
+      end
+      if action == :key
+        block.call(current, current_location)
+        next
+      end
+
+      visited += 1
+      if visited > MAX_POLICY_TRAVERSAL_NODES
+        reject("policy traversal node count exceeds #{MAX_POLICY_TRAVERSAL_NODES}")
+      end
+      reject("policy traversal depth exceeds #{MAX_POLICY_TRAVERSAL_DEPTH}") if
+        depth > MAX_POLICY_TRAVERSAL_DEPTH
+
+      case current
+      when String
+        block.call(current, current_location)
+      when Hash
+        object_id = current.object_id
+        reject("policy traversal encountered a recursive mapping") if active.key?(object_id)
+        active[object_id] = true
+        stack << [:exit, current, current_location, depth]
+        current.to_a.reverse_each do |key, child|
+          stack << [:enter, child, current_location + [key.to_s], depth + 1]
+          if key.is_a?(String)
+            stack << [:key, key, current_location + ["<key>"], depth + 1]
+          end
+        end
+      when Array
+        object_id = current.object_id
+        reject("policy traversal encountered a recursive sequence") if active.key?(object_id)
+        active[object_id] = true
+        stack << [:exit, current, current_location, depth]
+        (current.length - 1).downto(0) do |index|
+          stack << [
+            :enter,
+            current[index],
+            current_location + [index.to_s],
+            depth + 1,
+          ]
+        end
+      end
+    end
+  end
+
+  def registry_credential_name?(name)
+    return false unless name.is_a?(String)
+    normalized = name.gsub(/([a-z0-9])([A-Z])/, '\1_\2')
+      .upcase
+      .gsub(/[^A-Z0-9]+/, "_")
+      .gsub(/\A_+|_+\z/, "")
+    tokens = normalized.split("_")
+    registry = normalized.include?("CR_PAT") ||
+      !(tokens & REGISTRY_NAME_TOKENS).empty?
+    credential = normalized.include?("CR_PAT") ||
+      !(tokens & CREDENTIAL_NAME_TOKENS).empty?
+    registry && credential
+  end
+
+  def validate_env_map(value, context, allowed_registry_env = {})
+    return if value.nil?
+    reject("#{context}: env must be a mapping") unless value.is_a?(Hash)
+    value.each do |name, source|
+      reject("#{context}: env name must be a string") unless name.is_a?(String)
+      next unless registry_credential_name?(name)
+      next if allowed_registry_env[name] == source
+      reject("#{context}: registry-looking credential env is forbidden: #{name}")
+    end
+  end
+
+  def scalar_inventory(value, context)
+    secret_names = Set.new
+    github_token_refs = 0
+    each_string(value) do |text, location|
+      if text.match?(/\bsecrets\s*\[/i)
+        reject("#{context}: dynamic secrets access at #{location.join('.')}")
+      end
+      if text.match?(/\btoJSON\s*\(\s*secrets\s*\)/i)
+        reject("#{context}: toJSON(secrets) is forbidden")
+      end
+      if text.match?(/\b(?:vars|env)\s*\[/i)
+        reject("#{context}: dynamic vars/env access at #{location.join('.')}")
+      end
+      text.scan(/\bsecrets\.([A-Za-z_][A-Za-z0-9_]*)/) do |match|
+        name = match.first
+        if registry_credential_name?(name)
+          reject("#{context}: registry-looking credential secret is forbidden: #{name}")
+        end
+        secret_names << name
+      end
+      text.scan(/\b(?:vars|env)\.([A-Za-z_][A-Za-z0-9_]*)/i) do |match|
+        name = match.first
+        next unless registry_credential_name?(name)
+        reject(
+          "#{context}: registry-looking vars/env reference at #{location.join('.')}: #{name}"
+        )
+      end
+      github_token_refs += text.scan(/\bgithub\.token\b/).length
+    end
+    [secret_names, github_token_refs]
+  end
+
+  def step_list(job, context)
+    steps = job["steps"]
+    return [] if steps.nil?
+    reject("#{context}: steps must be a list") unless steps.is_a?(Array)
+    steps.each do |step|
+      reject("#{context}: malformed step") unless step.is_a?(Hash)
+    end
+    steps
+  end
+
+  def validate_exact_value(actual, expected, context)
+    visited = 0
+    stack = [[actual, expected, context, 0]]
+    until stack.empty?
+      current, wanted, current_context, depth = stack.pop
+      visited += 1
+      if visited > MAX_POLICY_TRAVERSAL_NODES
+        reject("#{context}: exact-value traversal node count exceeds #{MAX_POLICY_TRAVERSAL_NODES}")
+      end
+      if depth > MAX_POLICY_TRAVERSAL_DEPTH
+        reject("#{context}: exact-value traversal depth exceeds #{MAX_POLICY_TRAVERSAL_DEPTH}")
+      end
+
+      if wanted.is_a?(Hash)
+        reject("#{current_context}: expected a mapping") unless current.is_a?(Hash)
+        missing = wanted.keys - current.keys
+        unexpected = current.keys - wanted.keys
+        reject("#{current_context}: missing field #{missing.first.inspect}") unless missing.empty?
+        reject("#{current_context}: unexpected field #{unexpected.first.inspect}") unless unexpected.empty?
+        wanted.to_a.reverse_each do |name, wanted_value|
+          stack << [
+            current[name],
+            wanted_value,
+            "#{current_context}/#{name}",
+            depth + 1,
+          ]
+        end
+      elsif wanted.is_a?(Array)
+        reject("#{current_context}: expected a list") unless current.is_a?(Array)
+        unless current.length == wanted.length
+          reject(
+            "#{current_context}: expected list length #{wanted.length}, got #{current.length}"
+          )
+        end
+        (wanted.length - 1).downto(0) do |index|
+          stack << [
+            current[index],
+            wanted[index],
+            "#{current_context}[#{index}]",
+            depth + 1,
+          ]
+        end
+      elsif current != wanted
+        reject("#{current_context}: expected #{wanted.inspect}, got #{current.inspect}")
+      end
+    end
+  end
+
+  def validate_exact_steps(actual, expected, context)
+    reject("#{context}: steps must be a list") unless actual.is_a?(Array)
+    unless actual.length == expected.length
+      reject("#{context}: exact step count changed; expected #{expected.length}, got #{actual.length}")
+    end
+    actual.zip(expected).each_with_index do |(actual_step, expected_step), index|
+      reject("#{context}/step[#{index}]: step must be a mapping") unless actual_step.is_a?(Hash)
+      identity = expected_step["name"] || expected_step["id"] || "step #{index}"
+      validate_exact_value(actual_step, expected_step, "#{context}/step[#{index}] #{identity}")
+    end
+  end
+
+  # Defense-in-depth only: deliberately recognizes obvious literal command starts.
+  # Capability and credential policy, not shell semantic analysis, proves exclusivity.
+  def literal_shell_publisher?(run)
+    return false unless run.is_a?(String)
+    run.each_line.any? do |line|
+      stripped = line.lstrip
+      next false if stripped.start_with?("#")
+      stripped.match?(%r{\A(?:/usr/bin/)?docker\s+(?:image\s+)?push(?:\s|$)}) ||
+        stripped.match?(%r{\A(?:/usr/bin/)?docker\s+buildx\b[^\n]*\s--push(?:=true)?(?:\s|$)})
+    end
+  end
+
+  def metadata_tags(step)
+    value = step.dig("with", "tags")
+    return [] if value.nil?
+    reject("metadata action tags must be a string") unless value.is_a?(String)
+    value.lines.map(&:strip).reject(&:empty?)
+  end
+
+  def validate_registry_and_literal_policy(path, job_name, job, effective)
+    context = "#{path}/#{job_name}"
+    canonical = path == CANONICAL_PUBLISHER && job_name == CANONICAL_PUBLISHER_JOB
+    login_count = 0
+    publisher_count = 0
+    metadata_count = 0
+    validate_env_map(job["env"], "#{context}/env") if job.key?("env")
+
+    step_list(job, context).each_with_index do |step, index|
+      allowed_registry_env = if DEPLOY_JOBS.key?([path, job_name]) &&
+                                step["run"] == "scripts/deploy/quiesced-release.sh"
+                               {
+                                 "REGISTRY_USERNAME" => "${{ github.actor }}",
+                                 "REGISTRY_READ_TOKEN" => "${{ github.token }}",
+                               }
+                             else
+                               {}
+                             end
+      validate_env_map(step["env"], "#{context}/step[#{index}]/env", allowed_registry_env) if
+        step.key?("env")
+      uses = step["uses"]
+      if uses.is_a?(String) && uses.start_with?("docker/login-action@")
+        reject("#{context}: Docker login is outside the canonical publisher") unless canonical
+        login_count += 1
+        expected_login = {
+          "name" => "Log in to GHCR",
+          "uses" => PUBLISHER_LOGIN_ACTION,
+          "with" => {
+            "registry" => "ghcr.io",
+            "username" => "${{ github.actor }}",
+            "password" => "${{ github.token }}",
+          },
+        }
+        validate_exact_value(step, expected_login, "#{context}/canonical GHCR login")
+        unless effective["packages"] == (canonical ? "write" : "read")
+          reject("#{context}: Docker login lacks the exact packages capability")
+        end
+      end
+
+      if uses.is_a?(String) && uses.start_with?("docker/build-push-action@")
+        push = step.dig("with", "push")
+        if push == true || push == "true"
+          reject("#{context}: build-push publication is outside canonical publisher") unless canonical
+          publisher_count += 1
+        end
+      end
+
+      if uses.is_a?(String) && uses.start_with?("docker/metadata-action@")
+        tags = metadata_tags(step)
+        if canonical
+          metadata_count += 1
+          reject("#{context}: canonical release metadata tags changed") unless tags == RELEASE_METADATA_TAGS
+          reject("#{context}: duplicate canonical release metadata tags") unless tags.uniq == tags
+        elsif !(tags & RELEASE_METADATA_TAGS).empty?
+          reject("#{context}: duplicate release metadata tags outside canonical publisher")
+        end
+      end
+
+      if literal_shell_publisher?(step["run"])
+        reject("#{context}: literal Docker publisher is forbidden (defense-in-depth)")
+      end
+    end
+
+    return unless canonical
+    reject("#{context}: canonical GHCR login count changed") unless login_count == 1
+    reject("#{context}: canonical publisher action count changed") unless publisher_count == 1
+    reject("#{context}: canonical metadata action count changed") unless metadata_count == 1
+  end
+
+  def expected_secret_names(path, job_name)
+    key = [path, job_name]
+    return DEPLOY_SECRETS if DEPLOY_JOBS.key?(key)
+    return Set.new(["GITHUB_TOKEN"]) if key == [".github/workflows/release.yml", "release"]
+    Set.new
+  end
+
+  def expected_github_token_refs(path, job_name)
+    key = [path, job_name]
+    return 1 if key == [CANONICAL_PUBLISHER, CANONICAL_PUBLISHER_JOB]
+    return 1 if DEPLOY_JOBS.key?(key)
+    0
+  end
+
+  def validate_job_secrets(path, job_name, job)
+    context = "#{path}/#{job_name}"
+    if job["secrets"] == "inherit"
+      reject("#{context}: secrets: inherit is forbidden")
+    end
+    secret_names, github_token_refs = scalar_inventory(job, context)
+    expected_names = expected_secret_names(path, job_name)
+    unless secret_names == expected_names
+      reject(
+        "#{context}: secret allowlist mismatch; expected #{expected_names.to_a.sort.inspect}, " \
+        "got #{secret_names.to_a.sort.inspect}"
+      )
+    end
+    registry_secrets = secret_names & REGISTRY_SECRET_NAMES
+    unless registry_secrets.empty?
+      reject("#{context}: registry credential secret is forbidden: #{registry_secrets.to_a.sort.join(', ')}")
+    end
+    expected_token_refs = expected_github_token_refs(path, job_name)
+    unless github_token_refs == expected_token_refs
+      reject(
+        "#{context}: github.token reference count changed; " \
+        "expected #{expected_token_refs}, got #{github_token_refs}"
+      )
+    end
+  end
+
+  def validate_environment(path, job_name, job)
+    key = [path, job_name]
+    environment = job["environment"]
+    expected = DEPLOY_JOBS[key]
+    if expected
+      reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
+    elsif !environment.nil?
+      reject("#{path}/#{job_name}: environment use is not allowlisted")
+    end
+  end
+
+  def validate_deploy_job_contract(path, job_name, job)
+    expected = EXPECTED_PRIVILEGED_JOBS[[path, job_name]]
+    return unless expected
+    context = "#{path}/#{job_name}"
+    reject("#{context}: privileged job must be a mapping") unless job.is_a?(Hash)
+    missing = expected.keys - job.keys
+    unexpected = job.keys - expected.keys
+    reject("#{context}: missing privileged job field #{missing.first.inspect}") unless missing.empty?
+    reject("#{context}: unexpected privileged job field #{unexpected.first.inspect}") unless unexpected.empty?
+    expected.each do |name, expected_value|
+      if name == "steps"
+        validate_exact_steps(job[name], expected_value, context)
+      else
+        validate_exact_value(job[name], expected_value, "#{context}/#{name}")
+      end
+    end
+  end
+
+  def validate_privileged_trigger(path, triggers, jobs)
+    expected = EXPECTED_TRIGGERS[path]
+    return unless expected
+    validate_exact_value(triggers, expected, "#{path}: privileged trigger contract")
+    if path == CANONICAL_PUBLISHER
+      guard = jobs.dig(CANONICAL_PUBLISHER_JOB, "if")
+      expected_guard = "github.event_name == 'push' || github.ref == 'refs/heads/main'"
+      reject("#{path}: workflow_dispatch publisher guard changed") unless guard == expected_guard
+    elsif path == ".github/workflows/dependency-submission.yml"
+      guard = jobs.dig("submit", "if")
+      expected_guard = "github.event_name == 'push' || github.ref == 'refs/heads/main'"
+      reject("#{path}: trusted dependency submission guard changed") unless guard == expected_guard
+    end
+  end
+
+  def function_body(source, name)
+    match = source.match(/^#{Regexp.escape(name)}\(\) \{\n(?<body>.*?)^\}/m)
+    reject("remote deploy contract: missing #{name} function") unless match
+    match[:body]
+  end
+
+  def validate_remote_credential_contract(root)
+    runner_path = "scripts/deploy/quiesced-release.sh"
+    remote_path = "scripts/deploy/remote-compose-release.sh"
+    tracked, _stderr, status = Open3.capture3(
+      "git", "-C", root.to_s, "ls-files", "-z", "--", runner_path, remote_path
+    )
+    reject("deploy script inventory failed") unless status.success?
+    inventory = tracked.split("\0", -1)
+    inventory.pop
+    reject("deploy scripts must be tracked") unless inventory.sort == [remote_path, runner_path].sort
+    [runner_path, remote_path].each { |path| ensure_regular_path(root, path) }
+    runner = File.binread(root.join(runner_path))
+    remote = File.binread(root.join(remote_path))
+
+    reject("runner retains legacy GHCR credential contract") if runner.match?(/GHCR_(?:TOKEN|USERNAME)/)
+    %w[REGISTRY_USERNAME REGISTRY_READ_TOKEN].each do |name|
+      reject("runner lacks #{name} contract") unless runner.include?(name)
+    end
+    reject("runner enables shell tracing") if runner.match?(/(?:^|\s)set\s+-[^\n]*x/)
+    reject("runner enables automatic variable export") if
+      runner.match?(/(?:^|\s)set\s+(?:-[^\n\s]*a|(?:-o|--option)\s+allexport)(?:\s|$)/)
+    unless runner.match?(/printf '%s\\n' "\$registry_read_token" \|\s*\n\s*remote_command/m)
+      reject("runner must send the read token to the remote preflight only through stdin")
+    end
+    reject("runner fails to drop exported REGISTRY_READ_TOKEN") unless runner.include?("unset REGISTRY_READ_TOKEN")
+    reject("runner places a registry token in the SSH command") if
+      function_body(runner, "remote_command").match?(/REGISTRY_READ_TOKEN|registry_read_token/)
+    expected_runner_token_lines = [
+      "REGISTRY_READ_TOKEN",
+      'registry_read_token="$REGISTRY_READ_TOKEN"',
+      "unset REGISTRY_READ_TOKEN",
+      'printf \'%s\\n\' "$registry_read_token" |',
+      "unset registry_read_token",
+    ].sort
+    actual_runner_token_lines = runner.lines.grep(/REGISTRY_READ_TOKEN|registry_read_token/).map(&:strip).sort
+    unless actual_runner_token_lines == expected_runner_token_lines
+      reject("runner registry token flow changed outside the stdin-only contract")
+    end
+    capture_index = runner.index('registry_read_token="$REGISTRY_READ_TOKEN"')
+    drop_index = runner.index("unset REGISTRY_READ_TOKEN")
+    first_child_index = [runner.index("\nscp "), runner.index("\nssh ")].compact.min
+    unless capture_index && drop_index && first_child_index &&
+           capture_index < drop_index && drop_index < first_child_index
+      reject("runner must remove the exported token before its first scp/ssh child")
+    end
+
+    reject("remote helper retains legacy GHCR credential contract") if remote.match?(/ghcr_(?:token|username)/i)
+    reject("remote helper references persistent Docker credentials") if
+      remote.match?(%r{(?:\$HOME|~)/\.docker|\.docker/config\.json|docker\s+logout})
+    required_remote_literals = [
+      'registry_config_dir="$(mktemp -d "/tmp/clubs-bot-docker-config.${owner}.XXXXXX")"',
+      'chmod 700 "$registry_config_dir"',
+      'trap cleanup_registry_config EXIT',
+      'rm -rf -- "$registry_config_dir"',
+      'docker --config "$registry_config_dir" login',
+      '--password-stdin',
+      'docker --config "$registry_config_dir" pull "$tag_reference"',
+      'docker --config "$registry_config_dir" pull "$digest"',
+      'compose_command up -d --no-deps --pull never app',
+    ]
+    required_remote_literals.each do |literal|
+      reject("remote helper lacks temporary credential contract: #{literal}") unless remote.include?(literal)
+    end
+    expected_remote_token_lines = [
+      "local registry_read_token tag_reference revision digest digest_prefix digest_hash",
+      'IFS= read -r registry_read_token || [ -n "$registry_read_token" ]',
+      'if [ -z "$registry_read_token" ]; then',
+      'printf \'%s\\n\' "$registry_read_token" |',
+      "unset registry_read_token",
+    ].sort
+    actual_remote_token_lines = remote.lines.grep(/registry_read_token/).map(&:strip).sort
+    unless actual_remote_token_lines == expected_remote_token_lines
+      reject("remote registry token flow changed outside password-stdin")
+    end
+    remote.each_line do |line|
+      next unless line.match?(/\bdocker\b.*\b(?:login|pull)\b/)
+      unless line.include?('docker --config "$registry_config_dir"')
+        reject("remote helper has login/pull outside the temporary Docker config")
+      end
+    end
+    state_body = function_body(remote, "create_maintenance_state")
+    reject("registry credential leaks into maintenance state") if state_body.match?(/REGISTRY_|registry_read_token/i)
+    %w[migrate_verified_image start_and_probe_app].each do |name|
+      reject("registry credential leaks into #{name}") if function_body(remote, name).match?(/REGISTRY_|registry_read_token/i)
+    end
+  end
+
+  def validate_rollout_documentation(root)
+    relative_path = "docs/ops/secrets-rotation.md"
+    tracked, _stderr, status = Open3.capture3(
+      "git", "-C", root.to_s, "ls-files", "--error-unmatch", "--", relative_path
+    )
+    reject("rollout documentation must be tracked") unless
+      status.success? && tracked.strip == relative_path
+    ensure_regular_path(root, relative_path)
+    document = File.binread(root.join(relative_path)).force_encoding(Encoding::UTF_8)
+    reject("#{relative_path}: rollout documentation is not valid UTF-8") unless
+      document.valid_encoding?
+
+    start_count = document.scan(ROLLOUT_START_MARKER).length
+    end_count = document.scan(ROLLOUT_END_MARKER).length
+    reject("#{relative_path}: expected exactly one rollout start marker") unless start_count == 1
+    reject("#{relative_path}: expected exactly one rollout end marker") unless end_count == 1
+
+    start_index = document.index(ROLLOUT_START_MARKER)
+    end_index = document.index(ROLLOUT_END_MARKER)
+    reject("#{relative_path}: rollout end marker precedes start marker") unless
+      start_index < end_index
+    section_start = start_index + ROLLOUT_START_MARKER.length
+    section = document[section_start...end_index]
+    section_lines = section.lines.map(&:strip).reject(&:empty?)
+    numbered_lines = section_lines.select { |line| line.match?(/\A\d+\.\s/) }
+    reject("#{relative_path}: rollout section must contain exactly 8 numbered steps") unless
+      numbered_lines.length == 8 && section_lines.length == 8
+
+    parsed_steps = numbered_lines.map do |line|
+      match = line.match(/\A(?<number>\d+)\. \[(?<id>[A-Z0-9_]+)\] (?<text>.+)\z/)
+      reject("#{relative_path}: malformed rollout step #{line.inspect}") unless match
+      [match[:number].to_i, match[:id], line]
+    end
+    numbers = parsed_steps.map(&:first)
+    ids = parsed_steps.map { |step| step[1] }
+    reject("#{relative_path}: rollout step numbers must be exactly 1 through 8") unless
+      numbers == (1..8).to_a
+    reject("#{relative_path}: rollout step IDs must be unique") unless ids.uniq.length == ids.length
+    reject("#{relative_path}: rollout step IDs are missing, extra, or reordered") unless
+      ids == ROLLOUT_STEP_IDS
+
+    step_eight = parsed_steps.fetch(7)[2]
+    step_eight_bracket_ids = step_eight.scan(/\[([A-Z0-9_]+)\]/).flatten
+    step_eight_action_ids = step_eight_bracket_ids.drop(1)
+    duplicate_action = step_eight_action_ids.find do |action_id|
+      step_eight_action_ids.count(action_id) > 1
+    end
+    if duplicate_action
+      reject("#{relative_path}: duplicate retirement action ID in canonical step 8: #{duplicate_action}")
+    end
+    unknown_action = step_eight_action_ids.find do |action_id|
+      !ROLLOUT_RETIREMENT_ACTION_IDS.include?(action_id)
+    end
+    if unknown_action
+      reject("#{relative_path}: unknown retirement action ID in canonical step 8: #{unknown_action}")
+    end
+    missing_action = ROLLOUT_RETIREMENT_ACTION_IDS.find do |action_id|
+      !step_eight_action_ids.include?(action_id)
+    end
+    if missing_action
+      reject("#{relative_path}: missing retirement action ID in canonical step 8: #{missing_action}")
+    end
+    unless step_eight_action_ids == ROLLOUT_RETIREMENT_ACTION_IDS
+      reject("#{relative_path}: retirement action IDs are reordered in canonical step 8")
+    end
+
+    ROLLOUT_REQUIRED_RETIREMENT_TARGETS.each do |target|
+      pattern = ROLLOUT_RETIREMENT_TARGET_PATTERNS.assoc(target).fetch(1)
+      target_count = step_eight.scan(pattern).length
+      if target_count.zero?
+        reject("#{relative_path}: missing retirement target in canonical step 8: #{target}")
+      end
+      if target_count > 1
+        reject("#{relative_path}: duplicate retirement target in canonical step 8: #{target}")
+      end
+    end
+
+    parsed_steps.first(7).each do |number, id, line|
+      target = rollout_retirement_target(line)
+      next unless target
+
+      reject("#{relative_path}: retirement target #{target} in wrong step #{number} [#{id}]")
+    end
+
+    before_section = document[0...start_index]
+    after_section = document[(end_index + ROLLOUT_END_MARKER.length)..-1].to_s
+    outside_section = before_section + after_section
+    outside_target = rollout_retirement_target(
+      mask_rollout_neutral_reference(outside_section)
+    )
+    if outside_target
+      reject("#{relative_path}: retirement target outside rollout section: #{outside_target}")
+    end
+
+    reject("#{relative_path}: exact bounded rollout contract changed") unless
+      numbered_lines == ROLLOUT_STEP_LINES
+
+    reject("#{relative_path}: manual GitHub settings contract changed") unless
+      document.include?("GitHub settings меняются только вручную")
+  end
+
+  def mask_rollout_neutral_reference(text)
+    text.gsub(ROLLOUT_NEUTRAL_REFERENCE) do |reference|
+      " " * reference.length
+    end
+  end
+
+  def rollout_retirement_action_id(text)
+    exact_ids = text.scan(
+      /(?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?![A-Za-z0-9_])/
+    )
+    ROLLOUT_RETIREMENT_ACTION_IDS.find do |candidate|
+      exact_ids.include?(candidate)
+    end
+  end
+
+  def rollout_retirement_target(text)
+    action_id = rollout_retirement_action_id(text)
+    return action_id if action_id
+
+    target = ROLLOUT_RETIREMENT_TARGET_PATTERNS.find do |_name, pattern|
+      text.match?(pattern)
+    end
+    target&.first
+  end
+
+  def run(root)
+    paths = tracked_workflow_paths(root)
+    workflows = {}
+    paths.each do |path|
+      workflow, raw = load_workflow(root, path)
+      workflows[path] = [workflow, raw]
+    end
+    reject("canonical publisher workflow is missing") unless workflows.key?(CANONICAL_PUBLISHER)
+
+    observed_exact_jobs = Set.new
+    workflows.each do |path, (workflow, _raw)|
+      triggers = workflow_triggers(workflow, path)
+      reject("#{path}: workflow permissions are omitted") unless workflow.key?("permissions")
+      workflow_permissions = parse_permissions(workflow["permissions"], "#{path}/workflow")
+      if path == CANONICAL_PUBLISHER && workflow_permissions.values.include?("write")
+        reject("#{path}: canonical publisher may not have workflow-level write")
+      end
+
+      jobs = workflow["jobs"]
+      reject("#{path}: jobs block must be a non-empty mapping") unless jobs.is_a?(Hash) && !jobs.empty?
+      if path == CANONICAL_PUBLISHER
+        expected_jobs = %w[build-and-push trivy-image verify-and-provenance].sort
+        reject("#{path}: canonical job inventory changed") unless jobs.keys.sort == expected_jobs
+        unless workflow_permissions == {"contents" => "read"}
+          reject("#{path}: canonical workflow baseline must be contents: read")
+        end
+      end
+      validate_privileged_trigger(path, triggers, jobs)
+      top_level = workflow.reject { |key, _value| key == "jobs" }
+      validate_env_map(workflow["env"], "#{path}/workflow/env") if workflow.key?("env")
+      top_secrets, top_token_refs = scalar_inventory(top_level, "#{path}/workflow")
+      reject("#{path}: workflow-level secret reference is forbidden") unless top_secrets.empty?
+      reject("#{path}: workflow-level github.token reference is forbidden") unless top_token_refs.zero?
+
+      jobs.each do |job_name, job|
+        context = "#{path}/#{job_name}"
+        reject("#{context}: job must be a mapping") unless job.is_a?(Hash)
+        effective = if job.key?("permissions")
+                      parse_permissions(job["permissions"], "#{context}/permissions")
+                    else
+                      workflow_permissions
+                    end
+        expected = EXPECTED_EFFECTIVE_PERMISSIONS[[path, job_name]] || {"contents" => "read"}
+        reject("#{context}: effective permissions changed; expected #{expected.inspect}, got #{effective.inspect}") unless
+          effective == expected
+        observed_exact_jobs << [path, job_name] if EXPECTED_EFFECTIVE_PERMISSIONS.key?([path, job_name])
+
+        if path == CANONICAL_PUBLISHER && !job.key?("permissions")
+          reject("#{context}: canonical publisher jobs require job-level permission isolation")
+        end
+        if DEPLOY_JOBS.key?([path, job_name]) && !job.key?("permissions")
+          reject("#{context}: deployment jobs require job-level permission isolation")
+        end
+        if job.key?("steps") && job["runs-on"] != "ubuntu-latest"
+          reject("#{context}: jobs with steps must use an ephemeral ubuntu-latest runner")
+        end
+        validate_environment(path, job_name, job)
+        validate_deploy_job_contract(path, job_name, job)
+        validate_job_secrets(path, job_name, job)
+        validate_registry_and_literal_policy(path, job_name, job, effective)
+      end
+    end
+
+    required_exact_jobs = Set.new(EXPECTED_EFFECTIVE_PERMISSIONS.keys)
+    missing = required_exact_jobs - observed_exact_jobs
+    reject("required privileged jobs are missing: #{missing.to_a.inspect}") unless missing.empty?
+    validate_remote_credential_contract(root)
+    validate_rollout_documentation(root)
+    puts(
+      "quality-gate: capability policy enforces exact workflow privileges " \
+      "(#{paths.length} tracked workflows); literal publisher scan is defense-in-depth only"
+    )
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  if ARGV.length > 1
+    warn "usage: validate-workflow-capabilities.rb [repository-root]"
+    exit 2
+  end
+
+  repository_root = Pathname.new(
+    ARGV.fetch(0) { File.expand_path("..", __dir__) }
+  ).expand_path
+  WorkflowCapabilityPolicy.reject("repository root is not a directory") unless
+    repository_root.directory?
+  begin
+    WorkflowCapabilityPolicy.run(repository_root)
+  rescue Psych::Exception, ArgumentError => error
+    WorkflowCapabilityPolicy.reject("validation aborted safely (#{error.class})")
+  rescue SystemStackError
+    WorkflowCapabilityPolicy.reject("validation exceeded the bounded traversal policy")
+  end
+end

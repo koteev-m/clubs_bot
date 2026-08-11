@@ -13,11 +13,12 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
-import org.slf4j.MDC
 import java.util.UUID
 
 @Serializable
-private data class FinalizePayload(val bookingId: String)
+private data class FinalizePayload(
+    val bookingId: String,
+)
 
 fun Application.bookingFinalizeRoutes(
     bookingService: BookingService,
@@ -44,29 +45,22 @@ fun Application.bookingFinalizeRoutes(
                         .getOrNull()
                         ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid bookingId")
 
-                val idem = call.request.headers["Idempotency-Key"] ?: "finalize:$bookingId"
-                MDC.put("Idempotency-Key", idem)
-
-                try {
-                    when (val result = bookingService.finalize(bookingId, telegramUserId)) {
-                        is BookingCmdResult.Booked ->
-                            call.respond(
-                                HttpStatusCode.OK,
-                                mapOf("status" to "booked", "bookingId" to result.bookingId.toString()),
-                            )
-                        BookingCmdResult.NotFound ->
-                            call.respond(HttpStatusCode.NotFound, mapOf("error" to "not_found"))
-                        else ->
-                            call.respond(
-                                HttpStatusCode.Conflict,
-                                mapOf(
-                                    "error" to "conflict",
-                                    "code" to (result::class.simpleName ?: "Unknown"),
-                                ),
-                            )
-                    }
-                } finally {
-                    MDC.remove("Idempotency-Key")
+                when (val result = bookingService.finalize(bookingId, telegramUserId)) {
+                    is BookingCmdResult.Booked ->
+                        call.respond(
+                            HttpStatusCode.OK,
+                            mapOf("status" to "booked", "bookingId" to result.bookingId.toString()),
+                        )
+                    BookingCmdResult.NotFound ->
+                        call.respond(HttpStatusCode.NotFound, mapOf("error" to "not_found"))
+                    else ->
+                        call.respond(
+                            HttpStatusCode.Conflict,
+                            mapOf(
+                                "error" to "conflict",
+                                "code" to (result::class.simpleName ?: "Unknown"),
+                            ),
+                        )
                 }
             }
         }

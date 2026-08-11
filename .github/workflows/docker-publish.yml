@@ -4,13 +4,10 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 concurrency:
   group: docker-publish-${{ github.ref }}
@@ -21,13 +18,20 @@ env:
 
 jobs:
   build-and-push:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     outputs:
       image-ref: ${{ steps.image-ref.outputs.image }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
 
       - name: Set up QEMU (multi-arch emulation)
         uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
@@ -42,7 +46,7 @@ jobs:
           images: ${{ env.IMAGE_NAME }}
           tags: |
             type=sha,format=short
-            type=ref,branch=main
+            type=ref,event=branch
             type=semver,pattern={{version}},prefix=v
             type=semver,pattern={{major}}.{{minor}},prefix=v
           labels: |
@@ -51,21 +55,20 @@ jobs:
             org.opencontainers.image.title=app-bot
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
 
-      - name: Build & (optionally) Push
+      - name: Build & Push
         id: build
         uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         with:
           context: .
           file: Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          platforms: ${{ github.event_name != 'pull_request' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -73,22 +76,18 @@ jobs:
           provenance: true
 
       - name: Install cosign
-        if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
 
       - name: Sign image (keyless)
-        if: github.event_name != 'pull_request'
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: cosign sign --yes ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
       - name: Capture image reference
         id: image-ref
-        if: github.event_name != 'pull_request'
         run: echo "image=${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate SBOM (CycloneDX via Syft)
-        if: github.event_name != 'pull_request'
         uses: anchore/sbom-action@251a468eed47e5082b105c3ba6ee500c0e65a764 # v0.17.6
         with:
           image: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
@@ -96,20 +95,17 @@ jobs:
           output-file: sbom.cdx.json
 
       - name: Upload SBOM
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: sbom
           path: sbom.cdx.json
 
   verify-and-provenance:
-    if: github.event_name != 'pull_request'
     needs: build-and-push
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
-      id-token: write
 
     steps:
       - name: Install cosign
@@ -146,37 +142,42 @@ jobs:
           path: provenance.jsonl
 
   trivy-image:
-    if: github.event_name != 'pull_request'
     needs: build-and-push
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
       security-events: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release
         with:
           scan-type: image
           image-ref: ${{ needs.build-and-push.outputs.image-ref }}
           severity: HIGH,CRITICAL
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           format: sarif
           output: trivy-image-results.sarif
           exit-code: 1
+          version: v0.69.3
 
       - name: Upload Trivy image SARIF to code scanning
-        if: always()
+        if: ${{ always() && hashFiles('trivy-image-results.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9
         with:
           sarif_file: trivy-image-results.sarif
+          category: trivy-release-image
 
       - name: Persist Trivy image report artifact
-        if: always()
+        if: ${{ always() && hashFiles('trivy-image-results.sarif') != '' }}
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: trivy-image-report
           path: trivy-image-results.sarif
+          if-no-files-found: error

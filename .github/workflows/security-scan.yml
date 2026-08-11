@@ -22,28 +22,209 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73 # v4.4.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Gradle cache & setup
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        with:
+          cache-disabled: false
+          gradle-version: wrapper
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Build resolved JVM runtime dependencies (blocking)
+        run: >-
+          ./gradlew :app-bot:installDist verifyResolvedProductionDependencyGraph
+          --dependency-verification=strict
+          --no-configuration-cache
+          --console=plain
+
+      - name: Prepare trusted Trivy output directory
+        id: trivy-output
+        shell: bash
+        env:
+          TRIVY_RUNNER_TEMP: ${{ runner.temp }}
+          TRIVY_RUN_ID: ${{ github.run_id }}
+          TRIVY_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          physical_runner_temp="$(cd -P -- "$TRIVY_RUNNER_TEMP" && pwd -P)"
+          physical_workspace="$(cd -P -- "$GITHUB_WORKSPACE" && pwd -P)"
+          test "$physical_runner_temp" = "$TRIVY_RUNNER_TEMP"
+          output_dir="$physical_runner_temp/clubs-bot-trivy-$TRIVY_RUN_ID-$TRIVY_RUN_ATTEMPT"
+          case "$output_dir/" in
+            "$physical_workspace/"*)
+              echo "trusted Trivy output directory must be outside the checkout" >&2
+              exit 1
+              ;;
+          esac
+          if [ -e "$output_dir" ] || [ -L "$output_dir" ]; then
+            echo "trusted Trivy output directory already exists" >&2
+            exit 1
+          fi
+          mkdir -m 0700 -- "$output_dir"
+          test -d "$output_dir"
+          test ! -L "$output_dir"
+          for output_name in \
+            trivy-filesystem.sarif \
+            trivy-jvm-inventory.json \
+            trivy-jvm-runtime.sarif; do
+            test ! -e "$output_dir/$output_name"
+            test ! -L "$output_dir/$output_name"
+          done
+          {
+            printf 'directory=%s\n' "$output_dir"
+            printf 'filesystem_sarif=%s\n' "$output_dir/trivy-filesystem.sarif"
+            printf 'jvm_inventory=%s\n' "$output_dir/trivy-jvm-inventory.json"
+            printf 'jvm_sarif=%s\n' "$output_dir/trivy-jvm-runtime.sarif"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Trivy filesystem scan
         id: trivy
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release
         with:
           scan-type: fs
+          scan-ref: .
           severity: HIGH,CRITICAL
-          ignorefile: .trivyignore
+          limit-severities-for-sarif: true
+          trivyignores: .trivyignore
           format: sarif
-          output: trivy-results.sarif
+          output: ${{ steps.trivy-output.outputs.filesystem_sarif }}
           exit-code: 1
+          version: v0.69.3
 
-      - name: Upload Trivy SARIF to code scanning
-        if: always()
+      - name: Assert fresh Trivy filesystem output
+        id: trivy-filesystem-output
+        if: ${{ always() && steps.trivy-output.outcome == 'success' }}
+        shell: bash
+        env:
+          TRIVY_OUTPUT_DIR: ${{ steps.trivy-output.outputs.directory }}
+          TRIVY_REPORT: ${{ steps.trivy-output.outputs.filesystem_sarif }}
+        run: |
+          set -euo pipefail
+          test -d "$TRIVY_OUTPUT_DIR"
+          test ! -L "$TRIVY_OUTPUT_DIR"
+          test "$(dirname -- "$TRIVY_REPORT")" = "$TRIVY_OUTPUT_DIR"
+          test -f "$TRIVY_REPORT"
+          test ! -L "$TRIVY_REPORT"
+          test -s "$TRIVY_REPORT"
+
+      - name: Upload Trivy filesystem SARIF to code scanning
+        if: ${{ always() && steps.trivy-filesystem-output.outcome == 'success' }}
         uses: github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9
         with:
-          sarif_file: trivy-results.sarif
+          sarif_file: ${{ steps.trivy-output.outputs.filesystem_sarif }}
+          checkout_path: ${{ github.workspace }}
+          category: trivy-filesystem
 
-      - name: Persist Trivy report artifact
-        if: always()
+      - name: Persist Trivy filesystem report artifact
+        if: ${{ always() && steps.trivy-filesystem-output.outcome == 'success' }}
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: trivy-report
-          path: trivy-results.sarif
+          name: trivy-filesystem-report
+          path: ${{ steps.trivy-output.outputs.filesystem_sarif }}
+          if-no-files-found: error
+
+      - name: Assert fresh Trivy JVM inventory path
+        shell: bash
+        env:
+          TRIVY_OUTPUT_DIR: ${{ steps.trivy-output.outputs.directory }}
+          TRIVY_REPORT: ${{ steps.trivy-output.outputs.jvm_inventory }}
+        run: |
+          set -euo pipefail
+          test -d "$TRIVY_OUTPUT_DIR"
+          test ! -L "$TRIVY_OUTPUT_DIR"
+          test "$(dirname -- "$TRIVY_REPORT")" = "$TRIVY_OUTPUT_DIR"
+          test ! -e "$TRIVY_REPORT"
+          test ! -L "$TRIVY_REPORT"
+
+      - name: Inventory Trivy JVM runtime artifacts
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release
+        with:
+          scan-type: rootfs
+          scan-ref: app-bot/build/install/app-bot
+          scanners: vuln
+          list-all-pkgs: true
+          trivyignores: .trivyignore
+          format: json
+          output: ${{ steps.trivy-output.outputs.jvm_inventory }}
+          exit-code: 0
+          version: v0.69.3
+
+      - name: Verify Trivy JVM analyzer coverage
+        run: >-
+          python3 scripts/verify-trivy-java-inventory.py
+          "${{ github.workspace }}"
+          "${{ steps.trivy-output.outputs.directory }}"
+          trivy-jvm-inventory.json
+          app-bot/build/install/app-bot
+
+      - name: Assert fresh Trivy JVM SARIF path
+        shell: bash
+        env:
+          TRIVY_OUTPUT_DIR: ${{ steps.trivy-output.outputs.directory }}
+          TRIVY_REPORT: ${{ steps.trivy-output.outputs.jvm_sarif }}
+        run: |
+          set -euo pipefail
+          test -d "$TRIVY_OUTPUT_DIR"
+          test ! -L "$TRIVY_OUTPUT_DIR"
+          test "$(dirname -- "$TRIVY_REPORT")" = "$TRIVY_OUTPUT_DIR"
+          test ! -e "$TRIVY_REPORT"
+          test ! -L "$TRIVY_REPORT"
+
+      - name: Trivy JVM runtime scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release
+        with:
+          scan-type: rootfs
+          scan-ref: app-bot/build/install/app-bot
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
+          trivyignores: .trivyignore
+          format: sarif
+          output: ${{ steps.trivy-output.outputs.jvm_sarif }}
+          exit-code: 1
+          version: v0.69.3
+
+      - name: Assert Trivy JVM runtime outputs
+        id: trivy-jvm-output
+        if: ${{ always() && steps.trivy-output.outcome == 'success' }}
+        shell: bash
+        env:
+          TRIVY_OUTPUT_DIR: ${{ steps.trivy-output.outputs.directory }}
+          TRIVY_INVENTORY: ${{ steps.trivy-output.outputs.jvm_inventory }}
+          TRIVY_SARIF: ${{ steps.trivy-output.outputs.jvm_sarif }}
+        run: |
+          set -euo pipefail
+          test -d "$TRIVY_OUTPUT_DIR"
+          test ! -L "$TRIVY_OUTPUT_DIR"
+          for report in "$TRIVY_INVENTORY" "$TRIVY_SARIF"; do
+            test "$(dirname -- "$report")" = "$TRIVY_OUTPUT_DIR"
+            test -f "$report"
+            test ! -L "$report"
+            test -s "$report"
+          done
+
+      - name: Upload Trivy JVM runtime SARIF to code scanning
+        if: ${{ always() && steps.trivy-jvm-output.outcome == 'success' }}
+        uses: github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0 # v4.31.9
+        with:
+          sarif_file: ${{ steps.trivy-output.outputs.jvm_sarif }}
+          checkout_path: ${{ github.workspace }}
+          category: trivy-jvm-runtime
+
+      - name: Persist Trivy JVM runtime report artifact
+        if: ${{ always() && steps.trivy-jvm-output.outcome == 'success' }}
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: trivy-jvm-runtime-report
+          path: |
+            ${{ steps.trivy-output.outputs.jvm_inventory }}
+            ${{ steps.trivy-output.outputs.jvm_sarif }}
           if-no-files-found: error

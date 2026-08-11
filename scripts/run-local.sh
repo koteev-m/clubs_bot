@@ -2,7 +2,15 @@
 set -euo pipefail
 
 # 1) Окружение
-source "$(dirname "$0")/dev-env.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEV_ENV_FILE="$SCRIPT_DIR/dev-env.sh"
+if [ ! -f "$DEV_ENV_FILE" ]; then
+  echo "[run-local] Missing ignored local environment file: scripts/dev-env.sh" >&2
+  echo "[run-local] Copy scripts/dev-env.example.sh and fill the local copy." >&2
+  exit 2
+fi
+# shellcheck disable=SC1090
+source "$DEV_ENV_FILE"
 
 # 2) Убьём любой процесс, занявший порт
 if lsof -tiTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then

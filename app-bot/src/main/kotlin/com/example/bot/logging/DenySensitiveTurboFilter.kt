@@ -16,6 +16,13 @@ class DenySensitiveTurboFilter : TurboFilter() {
         params: Array<out Any>?,
         t: Throwable?,
     ): FilterReply {
+        if (
+            logger?.name == EXPOSED_LOGGER &&
+            (containsSqlThrowable(t, params) || isUnsafeExposedTransactionFailure(level, format))
+        ) {
+            return FilterReply.DENY
+        }
+
         val message =
             when {
                 format.isNullOrEmpty() -> format.orEmpty()
@@ -31,6 +38,26 @@ class DenySensitiveTurboFilter : TurboFilter() {
     }
 
     companion object {
+        private const val EXPOSED_LOGGER = "Exposed"
         private val SENSITIVE_PATTERN = Regex("""(?i)\b(qr|start_param|idempotencyKey)\b""")
+
+        private fun containsSqlThrowable(
+            throwable: Throwable?,
+            params: Array<out Any>?,
+        ): Boolean =
+            throwable?.safeSqlFailureOrNull() != null ||
+                params.orEmpty().any { parameter ->
+                    (parameter as? Throwable)?.safeSqlFailureOrNull() != null
+                }
+
+        private fun isUnsafeExposedTransactionFailure(
+            level: Level?,
+            format: String?,
+        ): Boolean =
+            level != null &&
+                level.isGreaterOrEqual(Level.WARN) &&
+                format?.startsWith("Transaction attempt #") == true &&
+                format.contains(" failed:") &&
+                format.contains("Statement(s):")
     }
 }

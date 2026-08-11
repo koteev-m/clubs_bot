@@ -46,7 +46,21 @@ Not retryable:
 - В core-слое используется `NoOpDbMigrationMetrics` по умолчанию; Micrometer-биндинг `MicrometerDbMigrationMetrics` подключается в `MetricsPlugin` (модуль `app-bot`).
 - Метрики `db.migrations.validate.success|failure` инкрементируются при `validate`, `db.migrations.migrate.success|failure` — при `migrate-and-validate`; gauge `db.migrations.pending` сохраняет последнее известное количество отложенных миграций.
 - `db.migrations.migrate.success` аккумулирует общее число применённых миграций (`migrationsExecuted`), при `appliedCount=0` счётчик не меняется.
-- Прод/стейдж-политика не меняется: приложение лишь валидирует схему, миграции для prod/stage выполняются через CI (`.github/workflows/db-migrate.yml`) или `MigrateMain` в непроизводственных окружениях.
+- В prod/stage приложение лишь валидирует схему. Миграции выполняются внутри полного quiesced release через
+  `.github/workflows/deploy-ssh.yml` либо вручную подтверждённый `.github/workflows/db-migrate.yml`; оба workflow
+  до Flyway закрепляют verified schema-compatible digest в managed Compose override и останавливают app/workers.
+  Flyway запускается отдельным `/opt/app/bin/app-bot-migrate` в one-off Compose container из этого exact digest,
+  наследуя DB environment/network сервиса `app`; runner checkout и отдельные runner DB secrets не используются.
+  После успешного exit, validate и zero-pending check lock записывает migration digest/image ID, а application
+  запускается только при совпадении обоих значений. Обычный app startup остаётся validate-only.
+- Public `app-bot-migrate` удаляет JVM option injection variables и через `exec` запускает private
+  `app-bot-migrate-java`, который использует отдельный packaged Logback contract: root/Flyway выключены, pgjdbc JUL сброшен,
+  а наружу выходят только фиксированные `migration-safe:v=1` start/completion/failure events с allowlisted
+  phase/category. Throwable/message, JDBC URL, DB identity/credentials, query parameters и stack trace не выводятся.
+  Remote helper сохраняет полный output как mode `0600` внутри maintenance lock, но в CI реконструирует только
+  allowlisted события. Raw stream обязан содержать ровно `started` и один соответствующий exit-status terminal
+  event; unknown/malformed/duplicate/out-of-order/control-byte output остаётся fail-closed. Этот контракт защищён
+  container sentinel tests и не является обещанием безопасности произвольной будущей library configuration.
 
 ## Использование
 * Новый API: `withRetriedTx(name = "label", readOnly = true) { /* Exposed DSL */ }` — helper сам открывает транзакцию и применяет retry/backoff.

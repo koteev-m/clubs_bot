@@ -98,17 +98,22 @@ class BookingHoldRepositoryIT : PostgresIntegrationTest() {
     fun `cleanup removes expired holds`() =
         runBlocking {
             val context = seedData()
-            val repo = BookingHoldRepository(database, Clock.fixed(context.now, ZoneOffset.UTC))
-            repo.createHold(
-                context.tableId,
-                context.slotStart,
-                context.slotEnd,
-                guestsCount = 1,
-                ttl = Duration.ofMinutes(1),
-                idempotencyKey = "hold-expired",
-            )
+            val expiredRepo = BookingHoldRepository(database, Clock.fixed(context.now, ZoneOffset.UTC))
+            val expired =
+                expiredRepo.createHold(
+                    context.tableId,
+                    context.slotStart,
+                    context.slotEnd,
+                    guestsCount = 1,
+                    ttl = Duration.ofMinutes(1),
+                    idempotencyKey = "hold-expired",
+                ) as BookingCoreResult.Success
+            assertEquals(context.now.plus(Duration.ofMinutes(1)), expired.value.expiresAt)
+
+            val cleanupAt = context.now.plusSeconds(600)
+            val activeRepo = BookingHoldRepository(database, Clock.fixed(cleanupAt, ZoneOffset.UTC))
             val active =
-                repo.createHold(
+                activeRepo.createHold(
                     context.tableId,
                     context.slotStart,
                     context.slotEnd,
@@ -116,14 +121,17 @@ class BookingHoldRepositoryIT : PostgresIntegrationTest() {
                     ttl = Duration.ofHours(1),
                     idempotencyKey = "hold-active",
                 ) as BookingCoreResult.Success
-            val removed = repo.cleanupExpired(context.now.plusSeconds(600))
+            val removed = activeRepo.cleanupExpired(cleanupAt)
             assertEquals(1, removed)
-            val remaining =
-                com.example.bot.data.booking.BookingHoldsTable
-                    .selectAll()
-                    .where { com.example.bot.data.booking.BookingHoldsTable.id eq active.value.id }
-                    .empty()
-            assertFalse(remaining)
+            val (expiredRemoved, activeRemoved) =
+                transaction(database) {
+                    val holds = com.example.bot.data.booking.BookingHoldsTable
+                    val expiredIsMissing = holds.selectAll().where { holds.id eq expired.value.id }.empty()
+                    val activeIsMissing = holds.selectAll().where { holds.id eq active.value.id }.empty()
+                    expiredIsMissing to activeIsMissing
+                }
+            assertTrue(expiredRemoved)
+            assertFalse(activeRemoved)
         }
 
     private fun seedData(): SeedContext {

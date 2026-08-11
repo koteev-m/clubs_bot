@@ -22,6 +22,9 @@ class FlywayH2SmokeTest {
         migrateAndTrack(jdbcUrl, "sa", "", "org.h2.Driver", "h2", resourcesToClose)
 
         withConnection(resourcesToClose) { connection ->
+            assertPaymentsSchema(connection, vendor = "h2")
+            assertAtomicRefundIndexes(connection)
+            assertAtomicRefundSourceConstraints(connection)
             assertUuidDefault(connection)
             assertJsonColumnType(connection, expectedType = "json")
             assertGuestListLimitRemoved(connection)
@@ -44,18 +47,37 @@ class FlywayH2SmokeTest {
         }
     }
 
-    private fun assertTableExists(connection: Connection, tableName: String) {
-        connection.prepareStatement(
-            """
-            SELECT 1
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE lower(TABLE_NAME) = ?
-            """.trimIndent(),
-        ).use { statement ->
-            statement.setString(1, tableName.lowercase())
-            statement.executeQuery().use { resultSet ->
-                check(resultSet.next()) { "Expected table $tableName to exist" }
+    @Test
+    fun `h2 atomic refund migration preserves legacy actions`() {
+        val jdbcUrl =
+            "jdbc:h2:mem:flyway-h2-refund-upgrade;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
+        migrateLegacyRefundUpgradeAndTrack(
+            jdbcUrl = jdbcUrl,
+            user = "sa",
+            password = "",
+            driver = "org.h2.Driver",
+            vendor = "h2",
+            legacyVersion = "55",
+            resourcesToClose = resourcesToClose,
+        )
+    }
+
+    private fun assertTableExists(
+        connection: Connection,
+        tableName: String,
+    ) {
+        connection
+            .prepareStatement(
+                """
+                SELECT 1
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE lower(TABLE_NAME) = ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setString(1, tableName.lowercase())
+                statement.executeQuery().use { resultSet ->
+                    check(resultSet.next()) { "Expected table $tableName to exist" }
+                }
             }
-        }
     }
 }

@@ -9,8 +9,19 @@ out/
 
 # Gradle / build
 .gradle
+.kotlin
 build
-**/build
+buildSrc/.gradle
+buildSrc/.kotlin
+buildSrc/build
+app-bot/build
+core-domain/build
+core-data/build
+core-security/build
+core-telemetry/build
+core-testing/build
+tools/build
+tools/perf/build
 
 # Node / front
 node_modules
@@ -24,6 +35,9 @@ miniapp/dist
 # Secrets / env
 .env
 .env.*
+env.env
+scripts/dev-env.sh
+scripts/dev-env.local.sh
 docker-compose*.yml
 
 # VCS / OS

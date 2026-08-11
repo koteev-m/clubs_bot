@@ -4,6 +4,8 @@ import com.example.bot.http.ApiErrorHandledKey
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
+import com.example.bot.logging.errorSqlSafe
+import com.example.bot.logging.safeSqlFailureOrNull
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -49,7 +51,7 @@ fun Application.installJsonErrorPages() {
             call.respondError(
                 HttpStatusCode.BadRequest,
                 ErrorCodes.validation_error,
-                message = cause.message,
+                message = if (cause.safeSqlFailureOrNull() == null) cause.message else null,
             )
         }
 
@@ -100,7 +102,7 @@ fun Application.installJsonErrorPages() {
         exception<Throwable> { call, cause ->
             if (cause is CancellationException) throw cause
             if (!call.request.path().startsWith("/api/")) throw cause
-            logger.error("unhandled exception for API path {}", call.request.path(), cause)
+            logger.errorSqlSafe("unhandled exception for API path {}", call.request.path(), cause)
             call.ensureMiniAppNoStoreHeadersIfNeeded()
             call.respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
         }

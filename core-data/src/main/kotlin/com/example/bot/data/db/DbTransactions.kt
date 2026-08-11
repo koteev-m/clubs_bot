@@ -53,12 +53,25 @@ internal fun resolveSlowQueryThresholdMs(envValue: String?): Long? {
 
 private val slowQueryThresholdMs: Long? = resolveSlowQueryThresholdMs(System.getenv(ENV_SLOW_QUERY_MS))
 
+private fun totalAttempts(maxRetries: Int): Int {
+    require(maxRetries >= 0) { "maxRetries must not be negative" }
+    return Math.addExact(maxRetries, 1)
+}
+
 internal interface TransactionExecutor {
-    suspend fun <T> execute(readOnly: Boolean, database: Database?, block: suspend () -> T): T
+    suspend fun <T> execute(
+        readOnly: Boolean,
+        database: Database?,
+        block: suspend () -> T,
+    ): T
 }
 
 internal object ExposedTransactionExecutor : TransactionExecutor {
-    override suspend fun <T> execute(readOnly: Boolean, database: Database?, block: suspend () -> T): T =
+    override suspend fun <T> execute(
+        readOnly: Boolean,
+        database: Database?,
+        block: suspend () -> T,
+    ): T =
         newSuspendedTransaction(context = Dispatchers.IO, db = database) {
             block()
         }
@@ -70,7 +83,10 @@ internal var transactionExecutor: TransactionExecutor = ExposedTransactionExecut
 @Volatile
 internal var sleep: suspend (Long) -> Unit = { delay(it) }
 
-internal fun computeBackoffMillis(attempt: Int, config: RetryConfig = retryConfig): Long {
+internal fun computeBackoffMillis(
+    attempt: Int,
+    config: RetryConfig = retryConfig,
+): Long {
     if (attempt <= 0) return 0
     val expShift = attempt.coerceAtMost(20)
     val multiplier = 1L shl (expShift - 1)
@@ -91,31 +107,40 @@ private val circuitBreakerConfig: CircuitBreakerConfig = CircuitBreakerConfigPro
 internal var circuitBreaker: DatabaseCircuitBreaker = DatabaseCircuitBreaker(circuitBreakerConfig)
 
 @Suppress("unused")
-private val configLog: Unit = run {
-    val slowQueryLabel = slowQueryThresholdMs?.toString() ?: "off"
-    log.info(
-        "DbTx config: maxRetries={} baseBackoffMs={} maxBackoffMs={} jitterMs={} slowQueryMs={} breaker(threshold={}, windowSec={}, openSec={})",
-        retryConfig.maxRetries,
-        retryConfig.baseBackoff.toMillis(),
-        retryConfig.maxBackoff.toMillis(),
-        retryConfig.jitter.toMillis(),
-        slowQueryLabel,
-        circuitBreakerConfig.failureThreshold,
-        circuitBreakerConfig.failureWindow.seconds,
-        circuitBreakerConfig.openDuration.seconds,
-    )
-}
+private val configLog: Unit =
+    run {
+        val slowQueryLabel = slowQueryThresholdMs?.toString() ?: "off"
+        log.info(
+            "DbTx config: maxRetries={} baseBackoffMs={} maxBackoffMs={} jitterMs={} slowQueryMs={} breaker(threshold={}, windowSec={}, openSec={})",
+            retryConfig.maxRetries,
+            retryConfig.baseBackoff.toMillis(),
+            retryConfig.maxBackoff.toMillis(),
+            retryConfig.jitter.toMillis(),
+            slowQueryLabel,
+            circuitBreakerConfig.failureThreshold,
+            circuitBreakerConfig.failureWindow.seconds,
+            circuitBreakerConfig.openDuration.seconds,
+        )
+    }
 
+@Suppress("ThrowsCount")
 suspend fun <T> withRetriedTx(
     name: String? = null,
     readOnly: Boolean = false,
     database: Database? = null,
     manageTransaction: Boolean = true,
+    maxRetries: Int = retryConfig.maxRetries,
+    retryableReasons: Set<DbErrorReason> =
+        setOf(
+            DbErrorReason.DEADLOCK,
+            DbErrorReason.SERIALIZATION,
+            DbErrorReason.CONNECTION,
+        ),
     block: suspend () -> T,
 ): T {
     val txName = name?.let { " [$it]" } ?: ""
     val metrics = DbMetricsHolder.metrics
-    val totalAttempts = retryConfig.maxRetries + 1
+    val totalAttempts = totalAttempts(maxRetries)
 
     if (circuitBreaker.isOpen()) {
         metrics.recordTxFailure(DbErrorReason.CONNECTION.label)
@@ -164,7 +189,10 @@ suspend fun <T> withRetriedTx(
                 throw DatabaseUnavailableException("Database circuit breaker opened", ex)
             }
 
-            val shouldRetry = classification.retryable && attempt < retryConfig.maxRetries
+            val shouldRetry =
+                classification.retryable &&
+                    classification.reason in retryableReasons &&
+                    attempt < maxRetries
             if (shouldRetry) {
                 metrics.recordTxRetry(reasonLabel)
                 val backoffMillis = computeBackoffMillis(attempt + 1)
@@ -184,13 +212,12 @@ suspend fun <T> withRetriedTx(
 
             metrics.recordTxFailure(reasonLabel)
             log.error(
-                "DB transaction{} failed after {} attempt(s), reason={} sqlState={} message={}",
+                "DB transaction{} failed after {} attempt(s), reason={} sqlState={} cause={}",
                 txName,
                 attempt + 1,
                 reasonLabel,
                 classification.sqlState ?: "<none>",
-                ex.message,
-                ex,
+                ex.javaClass.simpleName,
             )
             throw ex
         }
@@ -200,5 +227,4 @@ suspend fun <T> withRetriedTx(
 }
 
 @Deprecated("Use withRetriedTx with explicit name/readOnly parameters")
-suspend fun <T> withTxRetry(block: suspend () -> T): T =
-    withRetriedTx(manageTransaction = false, block = block)
+suspend fun <T> withTxRetry(block: suspend () -> T): T = withRetriedTx(manageTransaction = false, block = block)

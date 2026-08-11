@@ -71,6 +71,7 @@ class PaymentsObservabilitySmokeTest : StringSpec() {
             val metricsProvider = MetricsProvider(registry)
             val paymentsRepository = InMemoryPaymentsRepository()
             val bookingId = UUID.randomUUID()
+            paymentsRepository.seedCaptured(bookingId, 1_500)
             val bookingRepository =
                 TestPaymentsBookingRepository().apply {
                     seed(bookingId = bookingId, clubId = 1L, status = BookingStatus.BOOKED)
@@ -83,14 +84,6 @@ class PaymentsObservabilitySmokeTest : StringSpec() {
                     metricsProvider = metricsProvider,
                     tracer = null,
                 )
-
-            service.seedLedger(
-                clubId = 1L,
-                bookingId = bookingId,
-                status = "BOOKED",
-                capturedMinor = 1_500,
-                refundedMinor = 0,
-            )
 
             testApplication {
                 application {
@@ -176,7 +169,19 @@ private fun Application.configurePaymentsTestApp(
 
 private class InMemoryPaymentsRepository : PaymentsRepository {
     private val actions = ConcurrentHashMap<String, PaymentsRepository.SavedAction>()
+    private val capturedByBooking = ConcurrentHashMap<UUID, Long>()
+    private val refundedByBooking = ConcurrentHashMap<UUID, Long>()
+    private val cancelBookings = ConcurrentHashMap<UUID, Pair<Long, Boolean>>()
+    private val refundResults = ConcurrentHashMap<String, StoredRefund>()
     private val idSequence = AtomicLong(0)
+
+    fun seedCaptured(
+        bookingId: UUID,
+        amountMinor: Long,
+    ) {
+        capturedByBooking[bookingId] = amountMinor
+        cancelBookings.putIfAbsent(bookingId, 1L to false)
+    }
 
     override suspend fun createInitiated(
         bookingId: UUID?,
@@ -229,11 +234,170 @@ private class InMemoryPaymentsRepository : PaymentsRepository {
                 result = result,
                 createdAt = Instant.now(),
             )
-        actions[key] = saved
-        return saved
+        return actions.putIfAbsent(key, saved) ?: saved
     }
 
     override suspend fun findActionByIdempotencyKey(key: String): PaymentsRepository.SavedAction? = actions[key]
+
+    override suspend fun executeCancelIdempotently(
+        clubId: Long,
+        bookingId: UUID,
+        idempotencyKey: String,
+        reason: String?,
+    ): PaymentsRepository.CancelExecution =
+        synchronized(this) {
+            actions[idempotencyKey]?.let { existing ->
+                if (existing.bookingId != bookingId || existing.action != PaymentsRepository.Action.CANCEL) {
+                    return@synchronized PaymentsRepository.CancelExecution.IdempotencyBindingMismatch
+                }
+                return@synchronized when (existing.result.status) {
+                    PaymentsRepository.Result.Status.OK,
+                    PaymentsRepository.Result.Status.ALREADY,
+                    ->
+                        PaymentsRepository.CancelExecution.Success(
+                            clubId = clubId,
+                            bookingId = bookingId,
+                            slotStart = Instant.EPOCH,
+                            idempotent = true,
+                            alreadyCancelled = existing.result.status == PaymentsRepository.Result.Status.ALREADY,
+                        )
+                    PaymentsRepository.Result.Status.CONFLICT ->
+                        PaymentsRepository.CancelExecution.Conflict(
+                            existing.result.reason ?: "cannot cancel",
+                            idempotent = true,
+                        )
+                    PaymentsRepository.Result.Status.ERROR ->
+                        PaymentsRepository.CancelExecution.StoredError(
+                            existing.result.reason ?: "cannot cancel",
+                            idempotent = true,
+                        )
+                }
+            }
+            val state =
+                cancelBookings[bookingId]
+                    ?: return@synchronized PaymentsRepository.CancelExecution.NotFound
+            if (state.first != clubId) {
+                return@synchronized PaymentsRepository.CancelExecution.NotFound
+            }
+            val alreadyCancelled = state.second
+            cancelBookings[bookingId] = clubId to true
+            val status =
+                if (alreadyCancelled) {
+                    PaymentsRepository.Result.Status.ALREADY
+                } else {
+                    PaymentsRepository.Result.Status.OK
+                }
+            actions[idempotencyKey] =
+                PaymentsRepository.SavedAction(
+                    id = idSequence.incrementAndGet(),
+                    bookingId = bookingId,
+                    idempotencyKey = idempotencyKey,
+                    action = PaymentsRepository.Action.CANCEL,
+                    result =
+                        PaymentsRepository.Result(
+                            status,
+                            reason ?: "already_cancelled".takeIf { alreadyCancelled },
+                        ),
+                    createdAt = Instant.now(),
+                )
+            PaymentsRepository.CancelExecution.Success(
+                clubId = clubId,
+                bookingId = bookingId,
+                slotStart = Instant.EPOCH,
+                idempotent = false,
+                alreadyCancelled = alreadyCancelled,
+            )
+        }
+
+    override suspend fun executeRefundIdempotently(
+        clubId: Long,
+        bookingId: UUID,
+        idempotencyKey: String,
+        fingerprint: PaymentsRepository.RefundFingerprint,
+    ): PaymentsRepository.RefundExecution =
+        synchronized(this) {
+            actions[idempotencyKey]?.let { existing ->
+                if (existing.bookingId != bookingId || existing.action != PaymentsRepository.Action.REFUND) {
+                    return@synchronized PaymentsRepository.RefundExecution.IdempotencyBindingMismatch
+                }
+                val stored =
+                    refundResults[idempotencyKey]
+                        ?: return@synchronized PaymentsRepository.RefundExecution.IdempotencyPayloadMismatch
+                if (stored.fingerprint != fingerprint) {
+                    return@synchronized PaymentsRepository.RefundExecution.IdempotencyPayloadMismatch
+                }
+                return@synchronized stored.execution.asIdempotent()
+            }
+
+            val captured = capturedByBooking[bookingId] ?: 0L
+            val refunded = refundedByBooking[bookingId] ?: 0L
+            val remainder = captured - refunded
+            val requested = fingerprint.requestAmountMinor ?: remainder
+            val execution =
+                when {
+                    fingerprint.mode == PaymentsRepository.RefundRequestMode.ALL_REMAINING && remainder <= 0 ->
+                        PaymentsRepository.RefundExecution.Conflict("nothing to refund", idempotent = false)
+                    remainder <= 0 && requested > 0 ->
+                        PaymentsRepository.RefundExecution.Conflict("nothing to refund", idempotent = false)
+                    requested > remainder ->
+                        PaymentsRepository.RefundExecution.Unprocessable("exceeds remainder", idempotent = false)
+                    else -> {
+                        refundedByBooking[bookingId] = refunded + requested
+                        PaymentsRepository.RefundExecution.Success(
+                            amountMinor = requested,
+                            remainingMinor = remainder - requested,
+                            idempotent = false,
+                        )
+                    }
+                }
+            if (idempotencyKey.isNotBlank()) {
+                refundResults[idempotencyKey] = StoredRefund(bookingId, fingerprint, execution)
+                val result =
+                    when (execution) {
+                        is PaymentsRepository.RefundExecution.Success ->
+                            PaymentsRepository.Result(
+                                PaymentsRepository.Result.Status.OK,
+                                execution.amountMinor.toString(),
+                            )
+                        is PaymentsRepository.RefundExecution.Conflict ->
+                            PaymentsRepository.Result(PaymentsRepository.Result.Status.CONFLICT, execution.reason)
+                        is PaymentsRepository.RefundExecution.Unprocessable ->
+                            PaymentsRepository.Result(PaymentsRepository.Result.Status.ERROR, execution.reason)
+                        PaymentsRepository.RefundExecution.IdempotencyBindingMismatch,
+                        PaymentsRepository.RefundExecution.IdempotencyPayloadMismatch,
+                        -> error("mismatch cannot be persisted")
+                    }
+                actions[idempotencyKey] =
+                    PaymentsRepository.SavedAction(
+                        id = idSequence.incrementAndGet(),
+                        bookingId = bookingId,
+                        idempotencyKey = idempotencyKey,
+                        action = PaymentsRepository.Action.REFUND,
+                        result = result,
+                        createdAt = Instant.now(),
+                        refundFingerprint = fingerprint,
+                        refundResultAmountMinor =
+                            (execution as? PaymentsRepository.RefundExecution.Success)?.amountMinor,
+                    )
+            }
+            execution
+        }
+
+    private fun PaymentsRepository.RefundExecution.asIdempotent(): PaymentsRepository.RefundExecution =
+        when (this) {
+            is PaymentsRepository.RefundExecution.Success -> copy(idempotent = true, remainingMinor = null)
+            is PaymentsRepository.RefundExecution.Conflict -> copy(idempotent = true)
+            is PaymentsRepository.RefundExecution.Unprocessable -> copy(idempotent = true)
+            PaymentsRepository.RefundExecution.IdempotencyBindingMismatch,
+            PaymentsRepository.RefundExecution.IdempotencyPayloadMismatch,
+            -> this
+        }
+
+    private data class StoredRefund(
+        val bookingId: UUID,
+        val fingerprint: PaymentsRepository.RefundFingerprint,
+        val execution: PaymentsRepository.RefundExecution,
+    )
 }
 
 private class TestPaymentsBookingRepository : PaymentsBookingRepository {

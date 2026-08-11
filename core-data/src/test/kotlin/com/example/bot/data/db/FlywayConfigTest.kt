@@ -33,6 +33,48 @@ class FlywayConfigTest {
     }
 
     @Test
+    fun `prod application cannot enable migration explicitly`() {
+        val env =
+            mapOf(
+                "APP_ENV" to "prod",
+                "DATABASE_URL" to "jdbc:postgresql://localhost:5432/postgres",
+                "FLYWAY_MODE" to "migrate-and-validate",
+            )
+
+        val cfg = FlywayConfig.fromEnv(envProvider = { env[it] }, propertyProvider = { null })
+
+        assertEquals(FlywayExecutionContext.APPLICATION, cfg.executionContext)
+        assertEquals(FlywayMode.MIGRATE_AND_VALIDATE, cfg.mode)
+        assertEquals(FlywayMode.VALIDATE, cfg.effectiveMode)
+    }
+
+    @Test
+    fun `quiesced migration uses fixed postgres resources without weakening application startup`() {
+        val env =
+            mapOf(
+                "APP_ENV" to "stage",
+                "DATABASE_URL" to "jdbc:postgresql://localhost:5432/postgres",
+                "FLYWAY_MODE" to "migrate-and-validate",
+                "FLYWAY_LOCATIONS" to "filesystem:/runner/checkout/migrations",
+                "FLYWAY_BASELINE_ON_MIGRATE" to "true",
+            )
+
+        val cfg = FlywayConfig.fromQuiescedMigrationEnv(envProvider = { env[it] }, propertyProvider = { null })
+
+        assertEquals(FlywayExecutionContext.QUIESCED_MIGRATION, cfg.executionContext)
+        assertEquals(FlywayMode.MIGRATE_AND_VALIDATE, cfg.effectiveMode)
+        assertEquals(
+            listOf(
+                "classpath:db/migration/postgresql",
+                "classpath:db/migration/common",
+            ),
+            cfg.locations,
+        )
+        assertFalse(cfg.baselineOnMigrate)
+        assertFalse(cfg.outOfOrderEnabled)
+    }
+
+    @Test
     fun `dev defaults migrate and allow out of order`() {
         val env =
             mapOf(
@@ -115,7 +157,13 @@ class FlywayConfigTest {
     fun `execution uses common plus vendor migrations for default h2 resolution`() {
         val cfg =
             FlywayConfig.fromEnv(
-                envProvider = { key -> if (key == "DATABASE_URL") "jdbc:h2:mem:test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1" else null },
+                envProvider = { key ->
+                    if (key == "DATABASE_URL") {
+                        "jdbc:h2:mem:test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+                    } else {
+                        null
+                    }
+                },
                 propertyProvider = { null },
             )
 
@@ -129,7 +177,13 @@ class FlywayConfigTest {
     fun `execution tolerates root override with explicit common without duplicate migrations`() {
         val cfg =
             FlywayConfig.fromEnv(
-                envProvider = { key -> if (key == "DATABASE_URL") "jdbc:h2:mem:test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1" else null },
+                envProvider = { key ->
+                    if (key == "DATABASE_URL") {
+                        "jdbc:h2:mem:test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+                    } else {
+                        null
+                    }
+                },
                 propertyProvider = { null },
                 locationsOverride = "classpath:db/migration,classpath:db/migration/common",
             )
@@ -144,7 +198,13 @@ class FlywayConfigTest {
     fun `execution tolerates vendor-only override and still executes common migrations`() {
         val cfg =
             FlywayConfig.fromEnv(
-                envProvider = { key -> if (key == "DATABASE_URL") "jdbc:h2:mem:test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1" else null },
+                envProvider = { key ->
+                    if (key == "DATABASE_URL") {
+                        "jdbc:h2:mem:test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+                    } else {
+                        null
+                    }
+                },
                 propertyProvider = { null },
                 locationsOverride = "classpath:db/migration/h2",
             )

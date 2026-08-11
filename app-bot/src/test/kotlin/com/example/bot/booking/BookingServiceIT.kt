@@ -16,6 +16,7 @@ import com.example.bot.data.promo.PromoAttributionRepositoryImpl
 import com.example.bot.data.promo.PromoLinkRepositoryImpl
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
+import com.example.bot.data.security.Role
 import com.example.bot.promo.InMemoryPromoAttributionStore
 import com.example.bot.promo.PromoAttributionCoordinator
 import com.example.bot.promo.PromoAttributionService
@@ -37,6 +38,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
+import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -105,11 +107,9 @@ class BookingServiceIT : PostgresAppTest() {
                         .andWhere { BookingHoldsTable.tableId eq seed.tableId }
                         .andWhere {
                             BookingHoldsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
-                        }
-                        .andWhere {
+                        }.andWhere {
                             BookingHoldsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
-                        }
-                        .count()
+                        }.count()
                 }
             assertEquals(1, activeHolds)
         }
@@ -231,11 +231,9 @@ class BookingServiceIT : PostgresAppTest() {
                         .andWhere { BookingsTable.tableId eq seed.tableId }
                         .andWhere {
                             BookingsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
-                        }
-                        .andWhere {
+                        }.andWhere {
                             BookingsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
-                        }
-                        .andWhere { BookingsTable.status eq BookingStatus.BOOKED.name }
+                        }.andWhere { BookingsTable.status eq BookingStatus.BOOKED.name }
                         .count()
                 }
             assertEquals(1, activeBookingsForSlot)
@@ -302,11 +300,9 @@ class BookingServiceIT : PostgresAppTest() {
                         .andWhere { BookingsTable.tableId eq seed.tableId }
                         .andWhere {
                             BookingsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
-                        }
-                        .andWhere {
+                        }.andWhere {
                             BookingsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
-                        }
-                        .andWhere { BookingsTable.status eq BookingStatus.BOOKED.name }
+                        }.andWhere { BookingsTable.status eq BookingStatus.BOOKED.name }
                         .count()
                 }
             val activeHoldCount =
@@ -316,11 +312,9 @@ class BookingServiceIT : PostgresAppTest() {
                         .andWhere { BookingHoldsTable.tableId eq seed.tableId }
                         .andWhere {
                             BookingHoldsTable.slotStart eq OffsetDateTime.ofInstant(seed.slotStart, ZoneOffset.UTC)
-                        }
-                        .andWhere {
+                        }.andWhere {
                             BookingHoldsTable.slotEnd eq OffsetDateTime.ofInstant(seed.slotEnd, ZoneOffset.UTC)
-                        }
-                        .andWhere { BookingHoldsTable.expiresAt greater fixedNow.atOffset(ZoneOffset.UTC) }
+                        }.andWhere { BookingHoldsTable.expiresAt greater fixedNow.atOffset(ZoneOffset.UTC) }
                         .count()
                 }
             assertTrue(bookedCount == 1L || activeHoldCount == 1L)
@@ -398,10 +392,17 @@ class BookingServiceIT : PostgresAppTest() {
             val seed = seedData()
             val promoterTelegramId = 1_000_001L
             val guestTelegramId = 2_000_002L
+            val promoterUserId = insertPromoUser(promoterTelegramId, "booking-promoter")
+            assignPromoRole(promoterUserId, Role.PROMOTER, seed.clubId)
+            val guestUserId = insertPromoUser(guestTelegramId, "booking-guest")
+            assignPromoRole(guestUserId, Role.GUEST, null)
+
+            assertEquals(PromoLinkIssueResult.NotAuthorized, promoService.issuePromoLink(guestTelegramId))
 
             val issued = promoService.issuePromoLink(promoterTelegramId)
             assertTrue(issued is PromoLinkIssueResult.Success)
             issued as PromoLinkIssueResult.Success
+            assertEquals(seed.clubId, issued.promoLink.clubId)
 
             val startResult = promoService.registerStart(guestTelegramId, issued.token)
             assertEquals(PromoStartResult.Stored, startResult)
@@ -561,6 +562,50 @@ class BookingServiceIT : PostgresAppTest() {
                 slotEnd = slotEnd,
             )
         }
+    }
+
+    private fun insertPromoUser(
+        telegramId: Long,
+        username: String,
+    ): Long =
+        transaction(database) {
+            BookingPromoUsersFixtureTable.insert { row ->
+                row[BookingPromoUsersFixtureTable.telegramUserId] = telegramId
+                row[BookingPromoUsersFixtureTable.username] = username
+            } get BookingPromoUsersFixtureTable.id
+        }
+
+    private fun assignPromoRole(
+        userId: Long,
+        role: Role,
+        clubId: Long?,
+    ) {
+        transaction(database) {
+            BookingPromoUserRolesFixtureTable.insert { row ->
+                row[BookingPromoUserRolesFixtureTable.userId] = userId
+                row[BookingPromoUserRolesFixtureTable.roleCode] = role.name
+                row[BookingPromoUserRolesFixtureTable.scopeType] = if (clubId == null) "GLOBAL" else "CLUB"
+                row[BookingPromoUserRolesFixtureTable.scopeClubId] = clubId
+            }
+        }
+    }
+
+    private object BookingPromoUsersFixtureTable : Table("users") {
+        val id = long("id").autoIncrement()
+        val telegramUserId = long("telegram_user_id")
+        val username = text("username").nullable()
+
+        override val primaryKey = PrimaryKey(id)
+    }
+
+    private object BookingPromoUserRolesFixtureTable : Table("user_roles") {
+        val id = long("id").autoIncrement()
+        val userId = long("user_id")
+        val roleCode = text("role_code")
+        val scopeType = text("scope_type")
+        val scopeClubId = long("scope_club_id").nullable()
+
+        override val primaryKey = PrimaryKey(id)
     }
 
     private data class SeedData(

@@ -106,6 +106,7 @@ dependencies {
     implementation(libs.hikari)
 
     // Flyway (runtime приложения) — core + модуль Postgres (ВАЖНО для PG16+)
+    implementation(platform(libs.jackson.bom))
     implementation(libs.flyway.core)
     implementation(libs.flyway.pg)
     implementation(libs.postgres)
@@ -125,6 +126,7 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
 
     // Зависимости для Gradle flyway-плагина (задач flywayMigrate/flywayInfo/etc.)
+    flyway(platform(libs.jackson.bom))
     flyway(libs.flyway.core)
     flyway(libs.flyway.pg)
     flyway(libs.postgres)

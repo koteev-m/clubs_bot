@@ -10,7 +10,6 @@ import com.example.bot.data.security.UserRoleRepository
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.slf4j.LoggerFactory
-import org.slf4j.MDC
 import java.time.Duration
 import java.time.Instant
 import java.util.LinkedHashMap
@@ -218,49 +217,41 @@ class BookingTemplateService(
                 request.tableId,
             )
 
-        MDC.put(MDC_IDEMPOTENCY_KEY, idempotency)
-        MDC.put(MDC_TEMPLATE_ID, templateId.toString())
-
-        return try {
-            val guests = request.guestsOverride ?: template.tableCapacityMin
-            val holdResult =
-                bookingService.hold(
-                    HoldRequest(
-                        clubId = template.clubId,
-                        tableId = request.tableId,
-                        slotStart = request.slotStart,
-                        slotEnd = request.slotEnd,
-                        guestsCount = guests,
-                        ttl = request.holdTtl,
-                    ),
-                    "$idempotency:hold",
+        val guests = request.guestsOverride ?: template.tableCapacityMin
+        val holdResult =
+            bookingService.hold(
+                HoldRequest(
+                    clubId = template.clubId,
+                    tableId = request.tableId,
+                    slotStart = request.slotStart,
+                    slotEnd = request.slotEnd,
+                    guestsCount = guests,
+                    ttl = request.holdTtl,
+                ),
+                "$idempotency:hold",
+            )
+        if (holdResult !is BookingCmdResult.HoldCreated) {
+            logger.debug("applyTemplate hold result {}", holdResult)
+            return holdResult
+        }
+        return when (
+            val confirmed =
+                bookingService.confirm(
+                    holdResult.holdId,
+                    "$idempotency:confirm",
+                    promoterUserId = template.promoterUserId,
                 )
-            if (holdResult !is BookingCmdResult.HoldCreated) {
-                logger.debug("applyTemplate hold result {}", holdResult)
-                return holdResult
-            }
-            when (
-                val confirmed =
-                    bookingService.confirm(
-                        holdResult.holdId,
-                        "$idempotency:confirm",
-                        promoterUserId = template.promoterUserId,
-                    )
-            ) {
-                is BookingCmdResult.Booked ->
-                    finalizeAndNotify(
-                        confirmed.bookingId,
-                        actor,
-                        template,
-                        request,
-                        idempotency,
-                    )
+        ) {
+            is BookingCmdResult.Booked ->
+                finalizeAndNotify(
+                    confirmed.bookingId,
+                    actor,
+                    template,
+                    request,
+                    idempotency,
+                )
 
-                else -> confirmed
-            }
-        } finally {
-            MDC.remove(MDC_IDEMPOTENCY_KEY)
-            MDC.remove(MDC_TEMPLATE_ID)
+            else -> confirmed
         }
     }
 
@@ -361,8 +352,6 @@ class BookingTemplateService(
 
     companion object {
         private const val PROMO_TEMPLATE_BOOKED_TOPIC = "promo.template.booked"
-        private const val MDC_IDEMPOTENCY_KEY = "Idempotency-Key"
-        private const val MDC_TEMPLATE_ID = "templateId"
     }
 }
 

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ "main", "master" ]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -16,8 +19,8 @@ jobs:
     timeout-minutes: 30
     env:
       GRADLE_OPTS: "-Dorg.gradle.daemon=true -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.configuration-cache=true"
-      KOTLIN_VERSION: "2.2.10"
-      KTOR_VERSION: "3.3.0"
+      KOTLIN_VERSION: "2.2.20"
+      KTOR_VERSION: "3.3.1"
       runIT: "false"
 
     steps:
@@ -50,10 +53,10 @@ jobs:
           echo "KTOR_VERSION=$KTOR_VERSION"
 
       - name: Lint & Detekt (retry)
-        run: |
-          set -e
-          retry() { n=0; until [ "$n" -ge 3 ]; do "$@" && break; n=$((n+1)); echo "Retry $n..."; sleep 10; done; }
-          retry ./gradlew ktlintFormat ktlintCheck detekt --console=plain
+        run: >-
+          RETRY_MAX_ATTEMPTS=3 RETRY_DELAY_SECONDS=10
+          ./scripts/retry-command.sh
+          ./gradlew ktlintCheck detektGate --console=plain
 
       - name: Dependency Guard
         run: ./gradlew dependencyGuard --console=plain -PktorEnforcedVersion=$KTOR_VERSION
@@ -62,7 +65,7 @@ jobs:
         run: ./gradlew test --console=plain
 
       - name: Build (retry)
-        run: |
-          set -e
-          retry() { n=0; until [ "$n" -ge 3 ]; do "$@" && break; n=$((n+1)); echo "Retry $n..."; sleep 10; done; }
-          retry ./gradlew clean build --console=plain
+        run: >-
+          RETRY_MAX_ATTEMPTS=3 RETRY_DELAY_SECONDS=10
+          ./scripts/retry-command.sh
+          ./gradlew clean build --console=plain

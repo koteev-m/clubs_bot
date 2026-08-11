@@ -21,6 +21,7 @@ RUN --mount=type=cache,target=/root/.gradle \
 # сборка дистрибутива (без тестов) с кешом gradle
 COPY . .
 RUN --mount=type=cache,target=/root/.gradle \
+    mkdir -p miniapp/dist && \
     ./gradlew --no-daemon :app-bot:installDist -x test
 
 # ---------- runtime stage ----------
@@ -37,7 +38,11 @@ RUN apt-get update \
 
 # самодостаточный дистрибутив Ktor
 COPY --from=builder /app/app-bot/build/install/app-bot /opt/app
-RUN chmod -R a-w /opt/app \
+RUN test -x /opt/app/bin/app-bot \
+ && test -x /opt/app/bin/app-bot-migrate \
+ && test -x /opt/app/bin/app-bot-migrate-java \
+ && test ! -e /opt/app/gradlew \
+ && chmod -R a-w /opt/app \
  && mkdir -p /var/cache/app \
  && chown 10001:10001 /var/cache/app
 USER 10001:10001

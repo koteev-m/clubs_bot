@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="core-testing/build.gradle.kts">
+        <error line="73" column="38" source="standard:chain-method-continuation" />
+        <error line="73" column="44" source="standard:chain-method-continuation" />
+    </file>
+    <file name="gradle/detekt-cli.gradle.kts">
+        <error line="2" column="1" source="standard:no-wildcard-imports" />
+        <error line="20" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="21" column="44" source="standard:chain-method-continuation" />
+        <error line="21" column="67" source="standard:chain-method-continuation" />
+        <error line="22" column="44" source="standard:chain-method-continuation" />
+        <error line="22" column="67" source="standard:chain-method-continuation" />
+        <error line="22" column="74" source="standard:trailing-comma-on-call-site" />
+        <error line="27" column="55" source="standard:chain-method-continuation" />
+        <error line="27" column="77" source="standard:chain-method-continuation" />
+        <error line="27" column="83" source="standard:chain-method-continuation" />
+        <error line="33" column="24" source="standard:argument-list-wrapping" />
+        <error line="35" column="25" source="standard:argument-list-wrapping" />
+        <error line="36" column="25" source="standard:argument-list-wrapping" />
+        <error line="36" column="77" source="standard:trailing-comma-on-call-site" />
+        <error line="39" column="1" source="standard:no-blank-line-before-rbrace" />
+    </file>
+    <file name="gradle/ktlint-cli.gradle.kts">
+        <error line="18" column="64" source="standard:trailing-comma-on-call-site" />
+        <error line="27" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="29" column="19" source="standard:trailing-comma-on-call-site" />
+        <error line="34" column="68" source="standard:argument-list-wrapping" />
+        <error line="34" column="106" source="standard:argument-list-wrapping" />
+        <error line="48" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="50" column="19" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="settings.gradle.kts">
+        <error line="44" column="17" source="standard:trailing-comma-on-call-site" />
+    </file>
+</baseline>

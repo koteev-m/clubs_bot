@@ -17,11 +17,13 @@ import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Testcontainers
 import testing.RequiresDocker
+import java.time.Clock
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 
 @RequiresDocker
 @Tag("it")
@@ -96,9 +98,9 @@ class AvailabilityCalendarTest {
                 override suspend fun listActiveBookingTableIds(eventId: Long) = emptySet<Long>()
             }
 
-        val resolver = OperatingRulesResolver(repo)
         val from = LocalDate.of(2025, 5, 2).atStartOfDay(ZoneId.of("UTC")).toInstant()
         val to = LocalDate.of(2025, 5, 6).atStartOfDay(ZoneId.of("UTC")).toInstant()
+        val resolver = OperatingRulesResolver(repo, Clock.fixed(from, ZoneOffset.UTC))
         val slots = runBlocking { resolver.resolve(1, from, to) }
 
         assertEquals(3, slots.size)

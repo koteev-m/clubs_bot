@@ -4,6 +4,7 @@ import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.db.Clubs
+import com.example.bot.data.security.UsersTable
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -83,6 +84,7 @@ class BookingRepositoryIT : PostgresIntegrationTest() {
     fun `create booking stores guest user id when provided`() =
         runBlocking {
             val context = seedData()
+            val guestUserId = insertGuestUser()
             val result =
                 bookingRepo.createBooked(
                     clubId = context.clubId,
@@ -92,10 +94,10 @@ class BookingRepositoryIT : PostgresIntegrationTest() {
                     guests = 2,
                     minRate = BigDecimal("120.00"),
                     idempotencyKey = "guest-user-id",
-                    guestUserId = 42,
+                    guestUserId = guestUserId,
                 )
             val created = (result as BookingCoreResult.Success).value
-            assertEquals(42, created.guestUserId)
+            assertEquals(guestUserId, created.guestUserId)
         }
 
     @Test
@@ -154,6 +156,19 @@ class BookingRepositoryIT : PostgresIntegrationTest() {
             )
         }
     }
+
+    private fun insertGuestUser(): Long =
+        transaction(database) {
+            UsersTable.insert {
+                it[telegramUserId] = 4_200_000_042L
+                it[username] = "booking-guest"
+                it[displayName] = "Booking Guest"
+                it[phoneE164] = null
+                it[encryptedPhone] = null
+                it[phoneHash] = null
+                it[anonymizedAt] = null
+            } get UsersTable.id
+        }
 
     private data class SeedContext(
         val clubId: Long,

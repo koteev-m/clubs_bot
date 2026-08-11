@@ -33,6 +33,22 @@ interface PaymentsRepository {
 
     enum class Action { CANCEL, REFUND }
 
+    enum class RefundRequestMode {
+        EXPLICIT,
+        ALL_REMAINING,
+    }
+
+    enum class RefundSourceKind {
+        ATOMIC_ACTION,
+        LEGACY_ACTION,
+        PAYMENT_STATUS,
+    }
+
+    data class RefundFingerprint(
+        val mode: RefundRequestMode,
+        val requestAmountMinor: Long?,
+    )
+
     data class Result(
         val status: Status,
         val reason: String?,
@@ -52,7 +68,56 @@ interface PaymentsRepository {
         val action: Action,
         val result: Result,
         val createdAt: Instant,
+        val refundFingerprint: RefundFingerprint? = null,
+        val refundResultAmountMinor: Long? = null,
+        val refundSourceKind: RefundSourceKind? = null,
     )
+
+    sealed interface CancelExecution {
+        data class Success(
+            val clubId: Long,
+            val bookingId: UUID,
+            val slotStart: Instant,
+            val idempotent: Boolean,
+            val alreadyCancelled: Boolean,
+        ) : CancelExecution
+
+        data class Conflict(
+            val reason: String,
+            val idempotent: Boolean,
+        ) : CancelExecution
+
+        data class StoredError(
+            val reason: String,
+            val idempotent: Boolean,
+        ) : CancelExecution
+
+        data object NotFound : CancelExecution
+
+        data object IdempotencyBindingMismatch : CancelExecution
+    }
+
+    sealed interface RefundExecution {
+        data class Success(
+            val amountMinor: Long,
+            val remainingMinor: Long?,
+            val idempotent: Boolean,
+        ) : RefundExecution
+
+        data class Conflict(
+            val reason: String,
+            val idempotent: Boolean,
+        ) : RefundExecution
+
+        data class Unprocessable(
+            val reason: String,
+            val idempotent: Boolean,
+        ) : RefundExecution
+
+        data object IdempotencyBindingMismatch : RefundExecution
+
+        data object IdempotencyPayloadMismatch : RefundExecution
+    }
 
     @Suppress("LongParameterList")
     suspend fun createInitiated(
@@ -95,7 +160,6 @@ interface PaymentsRepository {
 
     suspend fun findByIdempotencyKey(idempotencyKey: String): PaymentRecord?
 
-
     suspend fun recordAction(
         bookingId: UUID,
         key: String,
@@ -104,6 +168,20 @@ interface PaymentsRepository {
     ): SavedAction
 
     suspend fun findActionByIdempotencyKey(key: String): SavedAction?
+
+    suspend fun executeCancelIdempotently(
+        clubId: Long,
+        bookingId: UUID,
+        idempotencyKey: String,
+        reason: String?,
+    ): CancelExecution
+
+    suspend fun executeRefundIdempotently(
+        clubId: Long,
+        bookingId: UUID,
+        idempotencyKey: String,
+        fingerprint: RefundFingerprint,
+    ): RefundExecution
 
     suspend fun updateStatus(
         id: UUID,

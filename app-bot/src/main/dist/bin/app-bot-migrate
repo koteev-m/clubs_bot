@@ -1,0 +1,32 @@
+#!/bin/sh
+set -u
+
+emit_boundary_failure() {
+    printf '%s\n' 'migration-safe:v=1 event=started'
+    printf '%s\n' 'migration-safe:v=1 event=failed phase=bootstrap category=configuration'
+    exit 1
+}
+
+if [ "$#" -ne 0 ]; then
+    emit_boundary_failure
+fi
+
+unset JAVA_TOOL_OPTIONS
+unset JDK_JAVA_OPTIONS
+unset _JAVA_OPTIONS
+unset JAVA_OPTS
+unset DEFAULT_JVM_OPTS
+unset APP_BOT_OPTS
+unset APP_BOT_MIGRATE_OPTS
+unset APP_BOT_MIGRATE_JAVA_OPTS
+
+JAVA_HOME=/opt/java/openjdk
+PATH="$JAVA_HOME/bin:/usr/bin:/bin"
+export JAVA_HOME PATH
+
+private_launcher=/opt/app/bin/app-bot-migrate-java
+if [ ! -x "$private_launcher" ]; then
+    emit_boundary_failure
+fi
+
+exec "$private_launcher"

@@ -3,9 +3,11 @@ import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.application.tasks.CreateStartScripts
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.jar.JarFile
 
 plugins {
     kotlin("jvm")
@@ -53,6 +55,7 @@ tasks.withType<Test>().configureEach {
 
 dependencies {
     // Ktor
+    implementation(platform(libs.netty.bom))
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.content.negotiation)
@@ -85,6 +88,7 @@ dependencies {
     runtimeOnly(libs.postgres)
 
     // Миграции — НУЖНО в main (иначе org.flywaydb.core.Flyway не резолвится)
+    implementation(platform(libs.jackson.bom))
     implementation(libs.flyway.core)
     implementation(libs.flyway.pg)
 
@@ -153,14 +157,138 @@ tasks.named<ProcessResources>("processResources") {
     }
 }
 
+val ktorEngineMainClass = "io.ktor.server.netty.EngineMain"
+val quiescedMigrationMainClass = "com.example.bot.tools.QuiescedMigrateMainKt"
+val quiescedMigrationLogConfig = "quiesced-migration-logback.xml"
+
 application {
     // EngineMain + application.conf (modules = [ com.example.bot.ApplicationKt.module ])
-    mainClass.set("com.example.bot.ApplicationKt")
+    mainClass.set(ktorEngineMainClass)
     applicationDefaultJvmArgs =
         listOf(
             "-Dfile.encoding=UTF-8",
             "-XX:+ExitOnOutOfMemoryError",
         )
+}
+
+val quiescedMigrationStartScripts by tasks.registering(CreateStartScripts::class) {
+    applicationName = "app-bot-migrate-java"
+    mainClass.set(quiescedMigrationMainClass)
+    classpath =
+        tasks
+            .named<CreateStartScripts>("startScripts")
+            .get()
+            .classpath
+    outputDir =
+        layout.buildDirectory
+            .dir("quiesced-migration-start-scripts")
+            .get()
+            .asFile
+    defaultJvmOpts =
+        application.applicationDefaultJvmArgs +
+        listOf(
+            "-Dlogback.configurationFile=$quiescedMigrationLogConfig",
+            "-Dlogback.statusListenerClass=ch.qos.logback.core.status.NopStatusListener",
+        )
+    doFirst {
+        checkNotNull(outputDir).deleteRecursively()
+    }
+}
+
+distributions {
+    named("main") {
+        contents {
+            from(quiescedMigrationStartScripts) {
+                into("bin")
+            }
+        }
+    }
+}
+
+tasks.named("installDist") {
+    inputs.property("expectedRuntimeMainClass", ktorEngineMainClass)
+    inputs.property("expectedQuiescedMigrationMainClass", quiescedMigrationMainClass)
+    inputs.property("expectedQuiescedMigrationLogConfig", quiescedMigrationLogConfig)
+
+    doLast {
+        val expectedRuntimeMainClass = inputs.properties.getValue("expectedRuntimeMainClass") as String
+        val expectedQuiescedMigrationMainClass =
+            inputs.properties.getValue("expectedQuiescedMigrationMainClass") as String
+        val expectedQuiescedMigrationLogConfig =
+            inputs.properties.getValue("expectedQuiescedMigrationLogConfig") as String
+        val launcher = outputs.files.singleFile.resolve("bin/app-bot")
+        check(launcher.isFile) {
+            "installDist launcher was not generated: ${launcher.absolutePath}"
+        }
+
+        val launcherText = launcher.readText()
+        check(launcherText.contains(expectedRuntimeMainClass)) {
+            "installDist launcher must use $expectedRuntimeMainClass"
+        }
+        check(!launcherText.contains("com.example.bot.ApplicationKt")) {
+            "installDist launcher must not use ApplicationKt without a main function"
+        }
+        check(!launcherText.contains(expectedQuiescedMigrationLogConfig)) {
+            "application launcher must not use the migration-only logging configuration"
+        }
+
+        val publicMigrationLauncher = launcher.parentFile.resolve("app-bot-migrate")
+        check(publicMigrationLauncher.isFile && publicMigrationLauncher.canExecute()) {
+            "fixed quiesced migration boundary was not packaged: ${publicMigrationLauncher.absolutePath}"
+        }
+        val publicMigrationLauncherText = publicMigrationLauncher.readText()
+        val requiredBoundaryContracts =
+            listOf(
+                "unset JAVA_TOOL_OPTIONS",
+                "unset JDK_JAVA_OPTIONS",
+                "unset _JAVA_OPTIONS",
+                "unset JAVA_OPTS",
+                "unset APP_BOT_MIGRATE_JAVA_OPTS",
+                "JAVA_HOME=/opt/java/openjdk",
+                "exec \"\$private_launcher\"",
+            )
+        for (requiredBoundaryContract in requiredBoundaryContracts) {
+            check(publicMigrationLauncherText.contains(requiredBoundaryContract)) {
+                "fixed quiesced migration boundary lacks: $requiredBoundaryContract"
+            }
+        }
+        check(!publicMigrationLauncherText.contains(expectedQuiescedMigrationMainClass)) {
+            "public migration boundary must delegate only to the private launcher"
+        }
+
+        val migrationLaunchers =
+            listOf(
+                launcher.parentFile.resolve("app-bot-migrate-java"),
+                launcher.parentFile.resolve("app-bot-migrate-java.bat"),
+            )
+        migrationLaunchers.forEach { migrationLauncher ->
+            check(migrationLauncher.isFile) {
+                "quiesced migration launcher was not generated: ${migrationLauncher.absolutePath}"
+            }
+            if (migrationLauncher.extension != "bat") {
+                check(migrationLauncher.canExecute()) {
+                    "quiesced migration launcher is not executable: ${migrationLauncher.absolutePath}"
+                }
+            }
+            val migrationLauncherText = migrationLauncher.readText()
+            check(migrationLauncherText.contains(expectedQuiescedMigrationMainClass)) {
+                "quiesced migration launcher must use $expectedQuiescedMigrationMainClass"
+            }
+            check(!migrationLauncherText.contains(expectedRuntimeMainClass)) {
+                "quiesced migration launcher must not start Ktor EngineMain"
+            }
+            check(migrationLauncherText.contains("-Dlogback.configurationFile=$expectedQuiescedMigrationLogConfig")) {
+                "quiesced migration launcher must use the packaged safe logging configuration"
+            }
+        }
+
+        val appJar = outputs.files.singleFile.resolve("lib/app-bot.jar")
+        JarFile(appJar).use { jar ->
+            check(jar.getEntry(expectedQuiescedMigrationLogConfig) != null) {
+                "migration-only logging configuration is absent from app-bot.jar"
+            }
+        }
+    }
 }
 
 /**
@@ -178,7 +306,7 @@ val runMigrations by tasks.registering(JavaExec::class) {
 // ----------------------------------------------------------------------
 tasks.register<LogsPolicyScanTask>("checkLogsPolicy") {
     group = "verification"
-    description = "SEC-02: scan sources for sensitive logging patterns (ripgrep-based)"
+    description = "SEC-02: scan sources for sensitive logging patterns (ripgrep with JVM fallback)"
 
     // Сначала тесты (содержат проверки MDC)
     dependsOn("test")

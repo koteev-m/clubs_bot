@@ -91,6 +91,20 @@ class PaymentsServiceTest {
             }
 
             override suspend fun findActionByIdempotencyKey(key: String): SavedAction? = actions[key]
+
+            override suspend fun executeCancelIdempotently(
+                clubId: Long,
+                bookingId: UUID,
+                idempotencyKey: String,
+                reason: String?,
+            ): PaymentsRepository.CancelExecution = throw UnsupportedOperationException("not used in test")
+
+            override suspend fun executeRefundIdempotently(
+                clubId: Long,
+                bookingId: UUID,
+                idempotencyKey: String,
+                fingerprint: PaymentsRepository.RefundFingerprint,
+            ): PaymentsRepository.RefundExecution = throw UnsupportedOperationException("not used in test")
         }
 
     private val service = PaymentsService(bookingService, repo, auditLogger)
@@ -116,23 +130,25 @@ class PaymentsServiceTest {
         ctor.isAccessible = true
 
         val args =
-            ctor.parameterTypes.map { type ->
-                when (type) {
-                    java.lang.Integer.TYPE, Integer::class.java -> 1 // подойдёт для eventId/tableId/guestsCount и т.п.
-                    java.lang.Long.TYPE, java.lang.Long::class.java -> 0L
-                    java.lang.Boolean.TYPE, java.lang.Boolean::class.java -> false
-                    java.lang.Double.TYPE, java.lang.Double::class.java -> 0.0
-                    java.lang.Float.TYPE, java.lang.Float::class.java -> 0f
-                    String::class.java -> "x"
-                    UUID::class.java -> UUID.randomUUID()
-                    Instant::class.java -> Instant.now()
-                    BigDecimal::class.java -> deposit
-                    else -> {
-                        // Если это nullable‑тип в байткоде — пройдёт null, для примитивов не должно встречаться.
-                        null
+            ctor.parameterTypes
+                .map { type ->
+                    when (type) {
+                        // Подойдёт для eventId/tableId/guestsCount и т.п.
+                        java.lang.Integer.TYPE, Integer::class.java -> 1
+                        java.lang.Long.TYPE, java.lang.Long::class.java -> 0L
+                        java.lang.Boolean.TYPE, java.lang.Boolean::class.java -> false
+                        java.lang.Double.TYPE, java.lang.Double::class.java -> 0.0
+                        java.lang.Float.TYPE, java.lang.Float::class.java -> 0f
+                        String::class.java -> "x"
+                        UUID::class.java -> UUID.randomUUID()
+                        Instant::class.java -> Instant.now()
+                        BigDecimal::class.java -> deposit
+                        else -> {
+                            // Если это nullable‑тип в байткоде — пройдёт null, для примитивов не должно встречаться.
+                            null
+                        }
                     }
-                }
-            }.toTypedArray()
+                }.toTypedArray()
         return ctor.newInstance(*args) as ConfirmInput
     }
 
