@@ -2721,6 +2721,98 @@ for forbidden in (
 PY
 }
 
+validate_dependency_submission_verification_metadata() {
+  local metadata_file="$1"
+
+  python3 - "$metadata_file" <<'PY'
+from pathlib import Path
+import sys
+import xml.etree.ElementTree as ET
+
+
+def reject(message):
+    print(f"dependency-submission-metadata: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+path = Path(sys.argv[1])
+try:
+    root = ET.parse(path).getroot()
+except (OSError, ET.ParseError) as error:
+    reject(f"verification metadata is unreadable: {type(error).__name__}")
+
+namespace = "https://schema.gradle.org/dependency-verification"
+tag = lambda name: f"{{{namespace}}}{name}"
+if root.tag != tag("verification-metadata"):
+    reject("unexpected verification metadata root")
+configuration = root.find(tag("configuration"))
+if configuration is None:
+    reject("configuration is missing")
+if configuration.attrib:
+    reject("configuration must not have attributes")
+configuration_children = list(configuration)
+if [child.tag for child in configuration_children] != [
+    tag("verify-metadata"),
+    tag("verify-signatures"),
+]:
+    reject("verification configuration must contain only the exact strict settings")
+if any(child.attrib or list(child) for child in configuration_children):
+    reject("verification configuration settings must be scalar")
+verify_metadata, verify_signatures = configuration_children
+if (verify_metadata.text or "").strip() != "true":
+    reject("Gradle metadata verification must remain enabled")
+if (verify_signatures.text or "").strip() != "false":
+    reject("Gradle signature verification mode changed")
+if root.findall(f".//{tag('trusted-artifacts')}") or root.findall(
+    f".//{tag('trusting')}"
+):
+    reject("broad trusted artifact selectors are forbidden")
+components = root.find(tag("components"))
+if components is None:
+    reject("components are missing")
+matches = [
+    component
+    for component in components.findall(tag("component"))
+    if component.attrib
+    == {
+        "group": "org.gradle",
+        "name": "github-dependency-graph-gradle-plugin",
+        "version": "1.4.1",
+    }
+]
+if len(matches) != 1:
+    reject("expected exactly one exact component for injected plugin 1.4.1")
+
+expected = {
+    "github-dependency-graph-gradle-plugin-1.4.1.jar": (
+        "571cc95ec821649ca14c3895d637e8071af8f219f1f2aa4588cff3a95ea429c5"
+    ),
+    "github-dependency-graph-gradle-plugin-1.4.1.module": (
+        "ed793bb8d17435a8b37260a5d72808b76db832e9ca58d136980e34336b2c18b2"
+    ),
+}
+artifacts = matches[0].findall(tag("artifact"))
+actual_names = [artifact.attrib.get("name") for artifact in artifacts]
+if len(actual_names) != len(set(actual_names)):
+    reject("injected plugin artifact entries are duplicated")
+if set(actual_names) != set(expected):
+    reject("injected plugin must verify exactly its runtime JAR and module metadata")
+for artifact in artifacts:
+    name = artifact.attrib.get("name")
+    if artifact.attrib != {"name": name}:
+        reject(f"unexpected artifact selector attributes for {name}")
+    children = list(artifact)
+    if len(children) != 1 or children[0].tag != tag("sha256"):
+        reject(f"{name} must have exactly one SHA-256 checksum")
+    checksum = children[0]
+    if checksum.attrib != {
+        "value": expected[name],
+        "origin": "Verified from Gradle Plugin Portal",
+    }:
+        reject(f"{name} SHA-256 or provenance changed")
+PY
+}
+
 validate_docker_workflow_contracts() {
   local repository_root="$1"
 
@@ -3781,6 +3873,7 @@ version: v0.69.3'
 trivy_image_with_contract='scan-type: image
 image-ref: ${{ needs.build-and-push.outputs.image-ref }}
 severity: HIGH,CRITICAL
+limit-severities-for-sarif: true
 trivyignores: .trivyignore
 format: sarif
 output: trivy-image-results.sarif
@@ -5450,6 +5543,214 @@ validate_keyless_sca_workflows \
   "$security_scan_workflow"
 echo "quality-gate: keyless dependency-security workflow contract verified"
 
+verification_metadata="$ROOT_DIR/gradle/verification-metadata.xml"
+validate_dependency_submission_verification_metadata "$verification_metadata"
+
+plugin_metadata_version_fixture="$TMP_DIR/verification-metadata-plugin-version.xml"
+replace_exact_line_once \
+  "$verification_metadata" \
+  "$plugin_metadata_version_fixture" \
+  '      <component group="org.gradle" name="github-dependency-graph-gradle-plugin" version="1.4.1">' \
+  '      <component group="org.gradle" name="github-dependency-graph-gradle-plugin" version="1.4.0">'
+assert_validation_rejected \
+  "dependency-submission-plugin-version-missing" \
+  validate_dependency_submission_verification_metadata \
+  "$plugin_metadata_version_fixture"
+
+plugin_metadata_checksum_fixture="$TMP_DIR/verification-metadata-plugin-checksum.xml"
+replace_exact_line_once \
+  "$verification_metadata" \
+  "$plugin_metadata_checksum_fixture" \
+  '            <sha256 value="571cc95ec821649ca14c3895d637e8071af8f219f1f2aa4588cff3a95ea429c5" origin="Verified from Gradle Plugin Portal"/>' \
+  '            <sha256 value="0000000000000000000000000000000000000000000000000000000000000000" origin="Verified from Gradle Plugin Portal"/>'
+assert_validation_rejected \
+  "dependency-submission-plugin-checksum-changed" \
+  validate_dependency_submission_verification_metadata \
+  "$plugin_metadata_checksum_fixture"
+
+plugin_metadata_module_checksum_fixture="$TMP_DIR/verification-metadata-plugin-module-checksum.xml"
+replace_exact_line_once \
+  "$verification_metadata" \
+  "$plugin_metadata_module_checksum_fixture" \
+  '            <sha256 value="ed793bb8d17435a8b37260a5d72808b76db832e9ca58d136980e34336b2c18b2" origin="Verified from Gradle Plugin Portal"/>' \
+  '            <sha256 value="0000000000000000000000000000000000000000000000000000000000000000" origin="Verified from Gradle Plugin Portal"/>'
+assert_validation_rejected \
+  "dependency-submission-plugin-module-checksum-changed" \
+  validate_dependency_submission_verification_metadata \
+  "$plugin_metadata_module_checksum_fixture"
+
+remove_dependency_submission_metadata_artifact() {
+  local source_file="$1"
+  local target_file="$2"
+  local artifact_name="$3"
+  local companion_name="$4"
+
+  python3 - "$source_file" "$target_file" "$artifact_name" "$companion_name" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+import xml.etree.ElementTree as ET
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+artifact_name = sys.argv[3]
+companion_name = sys.argv[4]
+namespace = "https://schema.gradle.org/dependency-verification"
+tag = lambda name: f"{{{namespace}}}{name}"
+tree = ET.parse(source)
+root = tree.getroot()
+components = root.find(tag("components"))
+if components is None:
+    raise SystemExit("metadata artifact fixture: components are missing")
+matches = [
+    component
+    for component in components.findall(tag("component"))
+    if component.attrib
+    == {
+        "group": "org.gradle",
+        "name": "github-dependency-graph-gradle-plugin",
+        "version": "1.4.1",
+    }
+]
+if len(matches) != 1:
+    raise SystemExit("metadata artifact fixture: exact component count changed")
+component = matches[0]
+targets = [
+    artifact
+    for artifact in component.findall(tag("artifact"))
+    if artifact.attrib == {"name": artifact_name}
+]
+companions = [
+    artifact
+    for artifact in component.findall(tag("artifact"))
+    if artifact.attrib == {"name": companion_name}
+]
+if len(targets) != 1 or len(companions) != 1:
+    raise SystemExit("metadata artifact fixture: target or companion count changed")
+component.remove(targets[0])
+ET.register_namespace("", namespace)
+tree.write(target, encoding="utf-8", xml_declaration=True)
+shutil.copymode(source, target)
+
+mutated = ET.parse(target).getroot()
+mutated_components = mutated.find(tag("components"))
+mutated_match = [
+    value
+    for value in mutated_components.findall(tag("component"))
+    if value.attrib
+    == {
+        "group": "org.gradle",
+        "name": "github-dependency-graph-gradle-plugin",
+        "version": "1.4.1",
+    }
+]
+if len(mutated_match) != 1:
+    raise SystemExit("metadata artifact fixture: mutated component count changed")
+names = [
+    artifact.attrib.get("name")
+    for artifact in mutated_match[0].findall(tag("artifact"))
+]
+if artifact_name in names or names.count(companion_name) != 1:
+    raise SystemExit("metadata artifact fixture: intended removal was not isolated")
+PY
+}
+
+plugin_metadata_missing_jar_fixture="$TMP_DIR/verification-metadata-plugin-missing-jar.xml"
+remove_dependency_submission_metadata_artifact \
+  "$verification_metadata" \
+  "$plugin_metadata_missing_jar_fixture" \
+  "github-dependency-graph-gradle-plugin-1.4.1.jar" \
+  "github-dependency-graph-gradle-plugin-1.4.1.module"
+assert_validation_rejected \
+  "dependency-submission-plugin-jar-missing" \
+  validate_dependency_submission_verification_metadata \
+  "$plugin_metadata_missing_jar_fixture"
+
+plugin_metadata_missing_module_fixture="$TMP_DIR/verification-metadata-plugin-missing-module.xml"
+remove_dependency_submission_metadata_artifact \
+  "$verification_metadata" \
+  "$plugin_metadata_missing_module_fixture" \
+  "github-dependency-graph-gradle-plugin-1.4.1.module" \
+  "github-dependency-graph-gradle-plugin-1.4.1.jar"
+assert_validation_rejected \
+  "dependency-submission-plugin-module-missing" \
+  validate_dependency_submission_verification_metadata \
+  "$plugin_metadata_missing_module_fixture"
+
+plugin_metadata_trusted_group_fixture="$TMP_DIR/verification-metadata-plugin-trusted-group.xml"
+replace_exact_line_once \
+  "$verification_metadata" \
+  "$plugin_metadata_trusted_group_fixture" \
+  '      <verify-signatures>false</verify-signatures>' \
+  '      <verify-signatures>false</verify-signatures><trusted-artifacts><trust group="org.gradle"/></trusted-artifacts>'
+assert_validation_rejected \
+  "dependency-submission-plugin-broad-trust" \
+  validate_dependency_submission_verification_metadata \
+  "$plugin_metadata_trusted_group_fixture"
+echo "quality-gate: injected dependency plugin verification metadata contract verified"
+
+oci_verifier_script="$ROOT_DIR/scripts/verify-oci-provenance.py"
+oci_verifier_test="$ROOT_DIR/scripts/tests/test_verify_oci_provenance.py"
+oci_verifier_test_package="$ROOT_DIR/scripts/tests/__init__.py"
+for required_oci_file in \
+  "$oci_verifier_script" \
+  "$oci_verifier_test" \
+  "$oci_verifier_test_package"; do
+  if [ ! -f "$required_oci_file" ] || [ -L "$required_oci_file" ]; then
+    fail "OCI verifier source/test path is not a regular non-symlink file: $required_oci_file"
+  fi
+done
+oci_verifier_mode="$(
+  stat -c '%a' "$oci_verifier_script" 2>/dev/null ||
+    stat -f '%Lp' "$oci_verifier_script"
+)"
+if [ "$oci_verifier_mode" != "644" ]; then
+  fail "OCI verifier script mode must be 0644, got $oci_verifier_mode"
+fi
+for required_oci_test_file in "$oci_verifier_test" "$oci_verifier_test_package"; do
+  oci_test_mode="$(
+    stat -c '%a' "$required_oci_test_file" 2>/dev/null ||
+      stat -f '%Lp' "$required_oci_test_file"
+  )"
+  if [ "$oci_test_mode" != "644" ]; then
+    fail "OCI verifier test file mode must be 0644, got $oci_test_mode"
+  fi
+done
+
+unittest_failure_dir="$TMP_DIR/unittest-failure"
+mkdir -p "$unittest_failure_dir"
+cat >"$unittest_failure_dir/test_intentional_failure.py" <<'PY'
+import unittest
+
+
+class IntentionalFailure(unittest.TestCase):
+    def test_failure_status_propagates(self):
+        self.fail("intentional unittest runner probe")
+PY
+if PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$unittest_failure_dir" \
+  python3 -m unittest -v test_intentional_failure \
+  >"$TMP_DIR/unittest-intentional-failure.log" 2>&1; then
+  fail "Python unittest runner returned zero for an intentional failure"
+else
+  unittest_failure_status=$?
+fi
+if [ "$unittest_failure_status" -eq 0 ]; then
+  fail "Python unittest failure did not produce a nonzero status"
+fi
+
+if (
+  cd "$ROOT_DIR"
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 -m unittest -v scripts.tests.test_verify_oci_provenance
+); then
+  :
+else
+  oci_test_status=$?
+  fail "checked-out OCI verifier behavioral tests failed (exit $oci_test_status)"
+fi
+echo "quality-gate: checked-out OCI verifier tests executed and failures propagate"
+echo "quality-gate: test/implementation independence relies on external review and rulesets"
+
 validate_resolved_graph_build_contract "$ROOT_DIR/build.gradle.kts"
 
 "$ROOT_DIR/gradlew" \
@@ -6697,6 +6998,7 @@ copy_workflow_capability_fixture() {
   mkdir -p \
     "$fixture_root/.github/workflows" \
     "$fixture_root/docs/ops" \
+    "$fixture_root/gradle" \
     "$fixture_root/scripts/deploy"
   git -C "$fixture_root" init -q
   while IFS= read -r -d '' workflow; do
@@ -6708,8 +7010,15 @@ copy_workflow_capability_fixture() {
   )
   cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$fixture_root/scripts/deploy/"
+  cp "$ROOT_DIR/scripts/verify-oci-provenance.py" "$fixture_root/scripts/"
+  cp "$ROOT_DIR/gradle/verification-metadata.xml" "$fixture_root/gradle/"
   cp "$ROOT_DIR/docs/ops/secrets-rotation.md" "$fixture_root/docs/ops/"
-  git -C "$fixture_root" add .github/workflows docs/ops scripts/deploy
+  git -C "$fixture_root" add \
+    .github/workflows \
+    docs/ops \
+    gradle/verification-metadata.xml \
+    scripts/deploy \
+    scripts/verify-oci-provenance.py
   printf '%s\n' "$fixture_root"
 }
 
@@ -6847,6 +7156,50 @@ def duplicate_named_step(path, name)
   abort "fixture step is missing: #{name}" unless index
   blocks.insert(index + 1, blocks[index].dup)
   write_step_blocks(path, prefix, blocks)
+end
+
+def named_job_step_bounds(path, job_name, step_name)
+  lines = File.readlines(path)
+  job_header = "  #{job_name}:\n"
+  job_indexes = lines.each_index.select { |index| lines[index] == job_header }
+  abort "fixture job count changed: #{job_name}" unless job_indexes.length == 1
+  job_start = job_indexes.first
+  job_end = lines.length
+  ((job_start + 1)...lines.length).each do |index|
+    logical = lines[index].sub(/\r?\n\z/, "")
+    next if logical.empty? || logical.lstrip.start_with?("#")
+    indentation = logical.length - logical.lstrip.length
+    if indentation <= 2
+      job_end = index
+      break
+    end
+  end
+  step_header = "      - name: #{step_name}\n"
+  step_indexes = (job_start...job_end).select do |index|
+    lines[index] == step_header
+  end
+  abort "fixture step count changed: #{job_name}/#{step_name}" unless
+    step_indexes.length == 1
+  step_start = step_indexes.first
+  step_end = job_end
+  ((step_start + 1)...job_end).each do |index|
+    if lines[index].start_with?("      - name: ")
+      step_end = index
+      break
+    end
+  end
+  [lines, step_start, step_end]
+end
+
+def remove_named_job_step(path, job_name, step_name)
+  lines, step_start, step_end = named_job_step_bounds(path, job_name, step_name)
+  File.binwrite(path, (lines[0...step_start] + lines[step_end..]).join)
+end
+
+def insert_after_named_job_step(path, job_name, step_name, body)
+  lines, _step_start, step_end = named_job_step_bounds(path, job_name, step_name)
+  insertion = body.each_line.map { |line| "      #{line}" }
+  File.binwrite(path, (lines[0...step_end] + insertion + lines[step_end..]).join)
 end
 
 def append_after_rollout(path, prose)
@@ -7728,6 +8081,157 @@ when "canonical-workflow-write"
     "permissions:\n  contents: read",
     "permissions:\n  contents: read\n  packages: write"
   )
+when "canonical-provenance-identity-regexp"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "            --certificate-identity \"https://github.com/\$GITHUB_WORKFLOW_REF\" \\",
+    "            --certificate-identity-regexp \"https://github.com/.+\" \\"
+  )
+when "canonical-verifier-invocation-removed"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "          python3 scripts/verify-oci-provenance.py \\\n",
+    "          # Verifier invocation removed by structural negative fixture.\n"
+  )
+when "canonical-verifier-wrong-script-path"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "python3 scripts/verify-oci-provenance.py",
+    "python3 scripts/verify-provenance-untrusted.py"
+  )
+when "canonical-verifier-inline-python"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "            --event-name \"$EXPECTED_EVENT_NAME\"\n",
+    "            --event-name \"$EXPECTED_EVENT_NAME\"\n" \
+    "          python3 - <<'PY'\n" \
+    "          print(\"duplicate inline verifier\")\n" \
+    "          PY\n"
+  )
+when "canonical-verifier-extra-argument"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "            --event-name \"$EXPECTED_EVENT_NAME\"\n",
+    "            --event-name \"$EXPECTED_EVENT_NAME\" \\\n" \
+    "            --allow-unsigned\n"
+  )
+when "canonical-verifier-mutable-image-ref"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "          REGISTRY_ACTOR: ${{ github.actor }}\n" \
+    "          IMAGE_REF: ${{ needs.build-and-push.outputs.image-ref }}\n" \
+    "          EXPECTED_REPOSITORY: ${{ github.repository }}",
+    "          REGISTRY_ACTOR: ${{ github.actor }}\n" \
+    "          IMAGE_REF: ${{ env.IMAGE_NAME }}:latest\n" \
+    "          EXPECTED_REPOSITORY: ${{ github.repository }}"
+  )
+when "canonical-provenance-artifact-always"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "      - name: Upload provenance attestation\n        uses:",
+    "      - name: Upload provenance attestation\n        if: always()\n        uses:"
+  )
+when "canonical-provenance-extra-step"
+  insert_after_named_job_step(
+    workflows.join("docker-publish.yml"),
+    "verify-and-provenance",
+    "Upload provenance attestation",
+    <<~YAML
+      - name: Unrelated publisher fixture
+        run: echo unrelated
+    YAML
+  )
+when "canonical-signature-step-removed"
+  remove_named_job_step(
+    workflows.join("docker-publish.yml"),
+    "verify-and-provenance",
+    "Verify image signature (keyless)"
+  )
+when "canonical-verifier-step-removed"
+  remove_named_job_step(
+    workflows.join("docker-publish.yml"),
+    "verify-and-provenance",
+    "Verify OCI graph and SLSA provenance"
+  )
+when "canonical-provenance-upload-step-removed"
+  remove_named_job_step(
+    workflows.join("docker-publish.yml"),
+    "verify-and-provenance",
+    "Upload provenance attestation"
+  )
+when "canonical-trivy-step-removed"
+  remove_named_job_step(
+    workflows.join("docker-publish.yml"),
+    "trivy-image",
+    "Trivy image scan"
+  )
+when "canonical-publisher-extra-step"
+  insert_after_named_job_step(
+    workflows.join("docker-publish.yml"),
+    "build-and-push",
+    "Build & Push",
+    <<~YAML
+      - name: Unrelated publisher fixture
+        run: echo unrelated
+    YAML
+  )
+when "canonical-trivy-limit-missing"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "          limit-severities-for-sarif: true\n",
+    "          # limit-severities-for-sarif removed by negative fixture\n"
+  )
+when "canonical-trivy-limit-false", "canonical-trivy-limit-quoted-false",
+     "canonical-trivy-limit-quoted-true"
+  value = {
+    "canonical-trivy-limit-false" => "false",
+    "canonical-trivy-limit-quoted-false" => '"false"',
+    "canonical-trivy-limit-quoted-true" => '"true"',
+  }.fetch(fixture_case)
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "          limit-severities-for-sarif: true",
+    "          limit-severities-for-sarif: #{value}"
+  )
+when "canonical-trivy-severity-critical"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "          severity: HIGH,CRITICAL",
+    "          severity: CRITICAL"
+  )
+when "canonical-trivy-severity-medium-high-critical"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "          severity: HIGH,CRITICAL",
+    "          severity: MEDIUM,HIGH,CRITICAL"
+  )
+when "canonical-trivy-exit-zero"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    "          exit-code: 1",
+    "          exit-code: 0"
+  )
+when "canonical-trivy-mutable-image-ref"
+  replace_once(
+    workflows.join("docker-publish.yml"),
+    '          image-ref: ${{ needs.build-and-push.outputs.image-ref }}',
+    '          image-ref: ${{ env.IMAGE_NAME }}:latest'
+  )
+when "dependency-submission-strict-removed"
+  replace_once(
+    workflows.join("dependency-submission.yml"),
+    "          additional-arguments: >-\n            --dependency-verification=strict\n            --no-configuration-cache\n            --stacktrace",
+    "          additional-arguments: >-\n            --no-configuration-cache\n            --stacktrace"
+  )
+when "dependency-submission-extra-step"
+  insert_after_named_step(
+    workflows.join("dependency-submission.yml"),
+    "Submit resolved dependency graph (blocking)",
+    <<~YAML
+      - name: Unrelated dependency publisher fixture
+        run: echo unrelated
+    YAML
+  )
 when "interpreter-packages-write"
   add_workflow(workflows, fixture_case, <<~YAML)
     name: Delegated publisher capability
@@ -8154,6 +8658,29 @@ for capability_fixture in \
   deploy-packages-write \
   canonical-loses-job-isolation \
   canonical-workflow-write \
+  canonical-provenance-identity-regexp \
+  canonical-verifier-invocation-removed \
+  canonical-verifier-wrong-script-path \
+  canonical-verifier-inline-python \
+  canonical-verifier-extra-argument \
+  canonical-verifier-mutable-image-ref \
+  canonical-provenance-artifact-always \
+  canonical-provenance-extra-step \
+  canonical-signature-step-removed \
+  canonical-verifier-step-removed \
+  canonical-provenance-upload-step-removed \
+  canonical-trivy-step-removed \
+  canonical-publisher-extra-step \
+  canonical-trivy-limit-missing \
+  canonical-trivy-limit-false \
+  canonical-trivy-limit-quoted-false \
+  canonical-trivy-limit-quoted-true \
+  canonical-trivy-severity-critical \
+  canonical-trivy-severity-medium-high-critical \
+  canonical-trivy-exit-zero \
+  canonical-trivy-mutable-image-ref \
+  dependency-submission-strict-removed \
+  dependency-submission-extra-step \
   interpreter-packages-write \
   interpreter-registry-secret \
   default-docker-config \
@@ -8166,6 +8693,7 @@ for capability_fixture in \
   self-hosted-runner; do
   assert_capability_fixture_invalid "$capability_fixture"
 done
+
 
 for duplicate_fixture in \
   duplicate-workflow-permissions \
