@@ -11,6 +11,9 @@ module WorkflowCapabilityPolicy
 
   CANONICAL_PUBLISHER = ".github/workflows/docker-publish.yml"
   CANONICAL_PUBLISHER_JOB = "build-and-push"
+  PROVENANCE_VERIFIER_PATH = "scripts/verify-oci-provenance.py"
+  GRADLE_VERIFICATION_METADATA_PATH = "gradle/verification-metadata.xml"
+  DEPENDENCY_SUBMISSION_WORKFLOW = ".github/workflows/dependency-submission.yml"
   DEPLOY_JOBS = {
     [".github/workflows/deploy-ssh.yml", "deploy"] =>
       "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
@@ -21,8 +24,59 @@ module WorkflowCapabilityPolicy
     %w[COMPOSE_PATH SSH_HOST SSH_PORT SSH_PRIVATE_KEY SSH_USER]
   ).freeze
   CHECKOUT_ACTION = "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332"
+  SETUP_JAVA_ACTION = "actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73"
+  DEPENDENCY_SUBMISSION_ACTION =
+    "gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92"
   SSH_AGENT_ACTION = "webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387"
   PUBLISHER_LOGIN_ACTION = "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567"
+  COSIGN_INSTALLER_ACTION = "sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409"
+  TRIVY_ACTION = "aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1"
+  UPLOAD_SARIF_ACTION = "github/codeql-action/upload-sarif@7c9a7896f03bb1f3de14c5663ed46759e27443e0"
+  UPLOAD_ARTIFACT_ACTION = "actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882"
+  INLINE_PROVENANCE_MARKERS = [
+    "python3 - <<",
+    "class SafeRedirectHandler",
+    "SLSA_PROVENANCE =",
+  ].freeze
+  GRADLE_PLUGIN_141_METADATA = <<~'XML'.chomp
+    <component group="org.gradle" name="github-dependency-graph-gradle-plugin" version="1.4.1">
+    <artifact name="github-dependency-graph-gradle-plugin-1.4.1.jar">
+    <sha256 value="571cc95ec821649ca14c3895d637e8071af8f219f1f2aa4588cff3a95ea429c5" origin="Verified from Gradle Plugin Portal"/>
+    </artifact>
+    <artifact name="github-dependency-graph-gradle-plugin-1.4.1.module">
+    <sha256 value="ed793bb8d17435a8b37260a5d72808b76db832e9ca58d136980e34336b2c18b2" origin="Verified from Gradle Plugin Portal"/>
+    </artifact>
+    </component>
+  XML
+
+  CANONICAL_STEP_NAMES = {
+    "build-and-push" => [
+      "Checkout",
+      "Set up QEMU (multi-arch emulation)",
+      "Set up Docker Buildx",
+      "Extract metadata (tags, labels)",
+      "Log in to GHCR",
+      "Build & Push",
+      "Install cosign",
+      "Sign image (keyless)",
+      "Capture image reference",
+      "Generate SBOM (CycloneDX via Syft)",
+      "Upload SBOM",
+    ],
+    "verify-and-provenance" => [
+      "Checkout",
+      "Install cosign",
+      "Verify image signature (keyless)",
+      "Verify OCI graph and SLSA provenance",
+      "Upload provenance attestation",
+    ],
+    "trivy-image" => [
+      "Checkout",
+      "Trivy image scan",
+      "Upload Trivy image SARIF to code scanning",
+      "Persist Trivy image report artifact",
+    ],
+  }.freeze
 
   DEPLOY_ORCHESTRATOR_ENV = {
     "SSH_USER" => "${{ secrets.SSH_USER }}",
@@ -491,6 +545,17 @@ module WorkflowCapabilityPolicy
     reject("#{relative_path}: cannot inspect tracked path (#{error.class})")
   end
 
+  def validate_gradle_plugin_metadata(root)
+    ensure_regular_path(root, GRADLE_VERIFICATION_METADATA_PATH)
+    metadata = File.binread(root.join(GRADLE_VERIFICATION_METADATA_PATH))
+    normalized = metadata.lines.map(&:strip).join("\n")
+    count = normalized.scan(GRADLE_PLUGIN_141_METADATA).length
+    reject("Gradle dependency-submission plugin 1.4.1 metadata changed") unless count == 1
+  rescue SystemCallError => error
+    reject("Gradle verification metadata is unreadable (#{error.class})")
+  end
+
+
   def load_workflow(root, relative_path)
     ensure_regular_path(root, relative_path)
     raw = File.binread(root.join(relative_path))
@@ -694,6 +759,393 @@ module WorkflowCapabilityPolicy
     end
   end
 
+  def validate_canonical_step_inventory(job_name, job, context)
+    expected_names = CANONICAL_STEP_NAMES.fetch(job_name)
+    steps = step_list(job, context)
+    actual_names = steps.map.with_index do |step, index|
+      name = step["name"]
+      reject("#{context}/step[#{index}]: every canonical step must have a name") unless
+        name.is_a?(String) && !name.empty?
+      name
+    end
+    reject("#{context}: canonical step names must be unique") unless
+      actual_names.uniq.length == actual_names.length
+    unless actual_names == expected_names
+      reject(
+        "#{context}: exact canonical step inventory changed; " \
+        "expected #{expected_names.inspect}, got #{actual_names.inspect}"
+      )
+    end
+    steps
+  end
+
+  def validate_build_and_push_job(job, steps, context)
+    validate_exact_value(
+      job.reject { |key, _value| key == "steps" },
+      {
+        "if" => "github.event_name == 'push' || github.ref == 'refs/heads/main'",
+        "runs-on" => "ubuntu-latest",
+        "permissions" => {
+          "contents" => "read",
+          "packages" => "write",
+          "id-token" => "write",
+        },
+        "outputs" => {
+          "image-ref" => "${{ steps.image-ref.outputs.image }}",
+        },
+      },
+      "#{context}/job fields"
+    )
+    validate_exact_steps(
+      steps,
+      [
+        {
+          "name" => "Checkout",
+          "uses" => CHECKOUT_ACTION,
+          "with" => {"persist-credentials" => false},
+        },
+        {
+          "name" => "Set up QEMU (multi-arch emulation)",
+          "uses" => "docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf",
+        },
+        {
+          "name" => "Set up Docker Buildx",
+          "uses" => "docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5",
+        },
+        {
+          "name" => "Extract metadata (tags, labels)",
+          "id" => "meta",
+          "uses" => "docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81",
+          "with" => {
+            "images" => "${{ env.IMAGE_NAME }}",
+            "tags" => <<~'TAGS',
+              type=sha,format=short
+              type=ref,event=branch
+              type=semver,pattern={{version}},prefix=v
+              type=semver,pattern={{major}}.{{minor}},prefix=v
+            TAGS
+            "labels" => <<~'LABELS',
+              org.opencontainers.image.source=${{ github.repository }}
+              org.opencontainers.image.revision=${{ github.sha }}
+              org.opencontainers.image.title=app-bot
+            LABELS
+          },
+        },
+        {
+          "name" => "Log in to GHCR",
+          "uses" => PUBLISHER_LOGIN_ACTION,
+          "with" => {
+            "registry" => "ghcr.io",
+            "username" => "${{ github.actor }}",
+            "password" => "${{ github.token }}",
+          },
+        },
+        {
+          "name" => "Build & Push",
+          "id" => "build",
+          "uses" => "docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75",
+          "with" => {
+            "context" => ".",
+            "file" => "Dockerfile",
+            "push" => true,
+            "platforms" => "linux/amd64,linux/arm64",
+            "tags" => "${{ steps.meta.outputs.tags }}",
+            "labels" => "${{ steps.meta.outputs.labels }}",
+            "cache-from" => "type=gha",
+            "cache-to" => "type=gha,mode=max",
+            "provenance" => true,
+          },
+        },
+        {
+          "name" => "Install cosign",
+          "uses" => COSIGN_INSTALLER_ACTION,
+        },
+        {
+          "name" => "Sign image (keyless)",
+          "env" => {"COSIGN_EXPERIMENTAL" => "true"},
+          "run" => "cosign sign --yes ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}",
+        },
+        {
+          "name" => "Capture image reference",
+          "id" => "image-ref",
+          "run" => 'echo "image=${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"',
+        },
+        {
+          "name" => "Generate SBOM (CycloneDX via Syft)",
+          "uses" => "anchore/sbom-action@251a468eed47e5082b105c3ba6ee500c0e65a764",
+          "with" => {
+            "image" => "${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}",
+            "format" => "cyclonedx-json",
+            "output-file" => "sbom.cdx.json",
+          },
+        },
+        {
+          "name" => "Upload SBOM",
+          "uses" => UPLOAD_ARTIFACT_ACTION,
+          "with" => {
+            "name" => "sbom",
+            "path" => "sbom.cdx.json",
+          },
+        },
+      ],
+      context
+    )
+  end
+
+  def validate_provenance_job(job, steps, context)
+    validate_exact_value(
+      job.reject { |key, _value| key == "steps" },
+      {
+        "needs" => CANONICAL_PUBLISHER_JOB,
+        "runs-on" => "ubuntu-latest",
+        "permissions" => {
+          "contents" => "read",
+          "packages" => "read",
+        },
+      },
+      "#{context}/job fields"
+    )
+
+    validate_exact_value(
+      steps.fetch(0),
+      {
+        "name" => "Checkout",
+        "uses" => CHECKOUT_ACTION,
+        "with" => {"persist-credentials" => false},
+      },
+      "#{context}/checkout"
+    )
+    validate_exact_value(
+      steps.fetch(1),
+      {
+        "name" => "Install cosign",
+        "uses" => COSIGN_INSTALLER_ACTION,
+      },
+      "#{context}/Cosign installer"
+    )
+    validate_exact_value(
+      steps.fetch(2),
+      {
+        "name" => "Verify image signature (keyless)",
+        "env" => {
+          "COSIGN_EXPERIMENTAL" => "true",
+          "IMAGE_REF" => "${{ needs.build-and-push.outputs.image-ref }}",
+        },
+        "run" => <<~'BASH',
+          set -euo pipefail
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" \
+            --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
+            --certificate-github-workflow-ref "$GITHUB_REF" \
+            --certificate-github-workflow-sha "$GITHUB_SHA" \
+            --certificate-github-workflow-name "$GITHUB_WORKFLOW" \
+            --certificate-github-workflow-trigger "$GITHUB_EVENT_NAME" \
+            "$IMAGE_REF"
+        BASH
+      },
+      "#{context}/signed index verification"
+    )
+
+    # This is deliberately a structural contract only. Executable in-repo tests
+    # cover the currently checked-out implementation. A whole-file SHA would be
+    # only a change detector, not semantic proof; simultaneous malicious changes
+    # to implementation and tests are controlled by external review/rulesets.
+    validate_exact_value(
+      steps.fetch(3),
+      {
+        "name" => "Verify OCI graph and SLSA provenance",
+        "shell" => "bash",
+        "env" => {
+          "GH_TOKEN" => "${{ github.token }}",
+          "REGISTRY_ACTOR" => "${{ github.actor }}",
+          "IMAGE_REF" => "${{ needs.build-and-push.outputs.image-ref }}",
+          "EXPECTED_REPOSITORY" => "${{ github.repository }}",
+          "EXPECTED_REF" => "${{ github.ref }}",
+          "EXPECTED_SHA" => "${{ github.sha }}",
+          "EXPECTED_RUN_ID" => "${{ github.run_id }}",
+          "EXPECTED_RUN_ATTEMPT" => "${{ github.run_attempt }}",
+          "EXPECTED_WORKFLOW_REF" => "${{ github.workflow_ref }}",
+          "EXPECTED_WORKFLOW_NAME" => "${{ github.workflow }}",
+          "EXPECTED_EVENT_NAME" => "${{ github.event_name }}",
+        },
+        "run" => <<~'BASH',
+          set -euo pipefail
+          python3 scripts/verify-oci-provenance.py \
+            --image-ref "$IMAGE_REF" \
+            --repository "$EXPECTED_REPOSITORY" \
+            --ref "$EXPECTED_REF" \
+            --sha "$EXPECTED_SHA" \
+            --run-id "$EXPECTED_RUN_ID" \
+            --run-attempt "$EXPECTED_RUN_ATTEMPT" \
+            --workflow-ref "$EXPECTED_WORKFLOW_REF" \
+            --workflow-name "$EXPECTED_WORKFLOW_NAME" \
+            --event-name "$EXPECTED_EVENT_NAME"
+        BASH
+      },
+      "#{context}/provenance verifier invocation"
+    )
+
+    validate_exact_value(
+      steps.fetch(4),
+      {
+        "name" => "Upload provenance attestation",
+        "uses" => UPLOAD_ARTIFACT_ACTION,
+        "with" => {
+          "name" => "slsa-provenance",
+          "path" => "provenance.jsonl",
+          "if-no-files-found" => "error",
+        },
+      },
+      "#{context}/verified provenance artifact"
+    )
+  end
+
+  def validate_trivy_image_job(job, steps, context)
+    validate_exact_value(
+      job.reject { |key, _value| key == "steps" },
+      {
+        "needs" => CANONICAL_PUBLISHER_JOB,
+        "runs-on" => "ubuntu-latest",
+        "permissions" => {
+          "contents" => "read",
+          "packages" => "read",
+          "security-events" => "write",
+        },
+      },
+      "#{context}/job fields"
+    )
+
+    validate_exact_value(
+      steps.fetch(0),
+      {
+        "name" => "Checkout",
+        "uses" => CHECKOUT_ACTION,
+        "with" => {"persist-credentials" => false},
+      },
+      "#{context}/checkout"
+    )
+    validate_exact_value(
+      steps.fetch(1),
+      {
+        "name" => "Trivy image scan",
+        "uses" => TRIVY_ACTION,
+        "with" => {
+          "scan-type" => "image",
+          "image-ref" => "${{ needs.build-and-push.outputs.image-ref }}",
+          "severity" => "HIGH,CRITICAL",
+          "limit-severities-for-sarif" => true,
+          "trivyignores" => ".trivyignore",
+          "format" => "sarif",
+          "output" => "trivy-image-results.sarif",
+          "exit-code" => 1,
+          "version" => "v0.69.3",
+        },
+      },
+      "#{context}/blocking Trivy image scan"
+    )
+    validate_exact_value(
+      steps.fetch(2),
+      {
+        "name" => "Upload Trivy image SARIF to code scanning",
+        "if" => "${{ always() && hashFiles('trivy-image-results.sarif') != '' }}",
+        "uses" => UPLOAD_SARIF_ACTION,
+        "with" => {
+          "sarif_file" => "trivy-image-results.sarif",
+          "category" => "trivy-release-image",
+        },
+      },
+      "#{context}/Trivy SARIF upload"
+    )
+    validate_exact_value(
+      steps.fetch(3),
+      {
+        "name" => "Persist Trivy image report artifact",
+        "if" => "${{ always() && hashFiles('trivy-image-results.sarif') != '' }}",
+        "uses" => UPLOAD_ARTIFACT_ACTION,
+        "with" => {
+          "name" => "trivy-image-report",
+          "path" => "trivy-image-results.sarif",
+          "if-no-files-found" => "error",
+        },
+      },
+      "#{context}/Trivy report artifact"
+    )
+  end
+
+  def validate_dependency_submission_job(path, job_name, job)
+    return unless path == DEPENDENCY_SUBMISSION_WORKFLOW && job_name == "submit"
+
+    context = "#{path}/#{job_name}"
+    steps = step_list(job, context)
+    validate_exact_value(
+      job.reject { |key, _value| key == "steps" },
+      {
+        "if" => "github.event_name == 'push' || github.ref == 'refs/heads/main'",
+        "runs-on" => "ubuntu-latest",
+        "timeout-minutes" => 30,
+        "permissions" => {"contents" => "write"},
+      },
+      "#{context}/job fields"
+    )
+    validate_exact_steps(
+      steps,
+      [
+        {
+          "name" => "Checkout",
+          "uses" => CHECKOUT_ACTION,
+          "with" => {"persist-credentials" => false},
+        },
+        {
+          "name" => "Set up JDK 21",
+          "uses" => SETUP_JAVA_ACTION,
+          "with" => {
+            "distribution" => "temurin",
+            "java-version" => "21",
+          },
+        },
+        {
+          "name" => "Verify resolved production dependency graph (blocking)",
+          "run" =>
+            "./gradlew verifyResolvedProductionDependencyGraph " \
+            "--dependency-verification=strict --no-configuration-cache --console=plain",
+        },
+        {
+          "name" => "Submit resolved dependency graph (blocking)",
+          "uses" => DEPENDENCY_SUBMISSION_ACTION,
+          "with" => {
+            "gradle-version" => "wrapper",
+            "validate-wrappers" => true,
+            "cache-provider" => "basic",
+            "dependency-graph" => "generate-and-submit",
+            "dependency-resolution-task" =>
+              "verifyResolvedProductionDependencyGraph " \
+              "ForceDependencyResolutionPlugin_resolveAllDependencies",
+            "dependency-graph-report-dir" => "build/reports/dependency-submission",
+            "dependency-graph-continue-on-failure" => false,
+            "additional-arguments" =>
+              "--dependency-verification=strict --no-configuration-cache --stacktrace",
+          },
+        },
+      ],
+      context
+    )
+  end
+
+  def validate_canonical_job_contract(path, job_name, job)
+    return unless path == CANONICAL_PUBLISHER
+    context = "#{path}/#{job_name}"
+    steps = validate_canonical_step_inventory(job_name, job, context)
+    case job_name
+    when "build-and-push"
+      validate_build_and_push_job(job, steps, context)
+    when "verify-and-provenance"
+      validate_provenance_job(job, steps, context)
+    when "trivy-image"
+      validate_trivy_image_job(job, steps, context)
+    end
+  end
+
   # Defense-in-depth only: deliberately recognizes obvious literal command starts.
   # Capability and credential policy, not shell semantic analysis, proves exclusivity.
   def literal_shell_publisher?(run)
@@ -792,6 +1244,7 @@ module WorkflowCapabilityPolicy
   def expected_github_token_refs(path, job_name)
     key = [path, job_name]
     return 1 if key == [CANONICAL_PUBLISHER, CANONICAL_PUBLISHER_JOB]
+    return 1 if key == [CANONICAL_PUBLISHER, "verify-and-provenance"]
     return 1 if DEPLOY_JOBS.key?(key)
     0
   end
@@ -1086,6 +1539,8 @@ module WorkflowCapabilityPolicy
   end
 
   def run(root)
+    ensure_regular_path(root, PROVENANCE_VERIFIER_PATH)
+    validate_gradle_plugin_metadata(root)
     paths = tracked_workflow_paths(root)
     workflows = {}
     paths.each do |path|
@@ -1095,7 +1550,7 @@ module WorkflowCapabilityPolicy
     reject("canonical publisher workflow is missing") unless workflows.key?(CANONICAL_PUBLISHER)
 
     observed_exact_jobs = Set.new
-    workflows.each do |path, (workflow, _raw)|
+    workflows.each do |path, (workflow, raw)|
       triggers = workflow_triggers(workflow, path)
       reject("#{path}: workflow permissions are omitted") unless workflow.key?("permissions")
       workflow_permissions = parse_permissions(workflow["permissions"], "#{path}/workflow")
@@ -1106,6 +1561,8 @@ module WorkflowCapabilityPolicy
       jobs = workflow["jobs"]
       reject("#{path}: jobs block must be a non-empty mapping") unless jobs.is_a?(Hash) && !jobs.empty?
       if path == CANONICAL_PUBLISHER
+        inline_marker = INLINE_PROVENANCE_MARKERS.find { |marker| raw.include?(marker) }
+        reject("#{path}: inline OCI provenance verifier is forbidden") if inline_marker
         expected_jobs = %w[build-and-push trivy-image verify-and-provenance].sort
         reject("#{path}: canonical job inventory changed") unless jobs.keys.sort == expected_jobs
         unless workflow_permissions == {"contents" => "read"}
@@ -1114,6 +1571,39 @@ module WorkflowCapabilityPolicy
       end
       validate_privileged_trigger(path, triggers, jobs)
       top_level = workflow.reject { |key, _value| key == "jobs" }
+      trigger_key = workflow.key?("on") ? "on" : true
+      if path == CANONICAL_PUBLISHER
+        validate_exact_value(
+          top_level,
+          {
+            "name" => "Docker Publish (GHCR)",
+            trigger_key => EXPECTED_TRIGGERS.fetch(CANONICAL_PUBLISHER),
+            "permissions" => {"contents" => "read"},
+            "concurrency" => {
+              "group" => "docker-publish-${{ github.ref }}",
+              "cancel-in-progress" => true,
+            },
+            "env" => {
+              "IMAGE_NAME" => "ghcr.io/${{ github.repository }}/app-bot",
+            },
+          },
+          "#{path}: canonical workflow fields"
+        )
+      elsif path == DEPENDENCY_SUBMISSION_WORKFLOW
+        validate_exact_value(
+          top_level,
+          {
+            "name" => "Dependency Submission",
+            trigger_key => EXPECTED_TRIGGERS.fetch(DEPENDENCY_SUBMISSION_WORKFLOW),
+            "permissions" => {"contents" => "write"},
+            "concurrency" => {
+              "group" => "dependency-submission-${{ github.ref }}",
+              "cancel-in-progress" => true,
+            },
+          },
+          "#{path}: dependency submission workflow fields"
+        )
+      end
       validate_env_map(workflow["env"], "#{path}/workflow/env") if workflow.key?("env")
       top_secrets, top_token_refs = scalar_inventory(top_level, "#{path}/workflow")
       reject("#{path}: workflow-level secret reference is forbidden") unless top_secrets.empty?
@@ -1143,6 +1633,8 @@ module WorkflowCapabilityPolicy
         end
         validate_environment(path, job_name, job)
         validate_deploy_job_contract(path, job_name, job)
+        validate_dependency_submission_job(path, job_name, job)
+        validate_canonical_job_contract(path, job_name, job)
         validate_job_secrets(path, job_name, job)
         validate_registry_and_literal_policy(path, job_name, job, effective)
       end
@@ -1155,7 +1647,9 @@ module WorkflowCapabilityPolicy
     validate_rollout_documentation(root)
     puts(
       "quality-gate: capability policy enforces exact workflow privileges " \
-      "(#{paths.length} tracked workflows); literal publisher scan is defense-in-depth only"
+      "and structural verifier invocation (#{paths.length} tracked workflows); " \
+      "checked-out tests exercise Python behavior, while independent integrity " \
+      "depends on external review/rulesets"
     )
   end
 end

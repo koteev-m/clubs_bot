@@ -108,38 +108,63 @@ jobs:
       packages: read
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
+
       - name: Install cosign
         uses: sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409 # v3.7.0
 
       - name: Verify image signature (keyless)
         env:
           COSIGN_EXPERIMENTAL: "true"
+          IMAGE_REF: ${{ needs.build-and-push.outputs.image-ref }}
         run: |
+          set -euo pipefail
           cosign verify \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
-            ${{ needs.build-and-push.outputs.image-ref }}
+            --certificate-identity "https://github.com/$GITHUB_WORKFLOW_REF" \
+            --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
+            --certificate-github-workflow-ref "$GITHUB_REF" \
+            --certificate-github-workflow-sha "$GITHUB_SHA" \
+            --certificate-github-workflow-name "$GITHUB_WORKFLOW" \
+            --certificate-github-workflow-trigger "$GITHUB_EVENT_NAME" \
+            "$IMAGE_REF"
 
-      - name: Download SLSA provenance attestation
+      - name: Verify OCI graph and SLSA provenance
+        shell: bash
         env:
-          COSIGN_EXPERIMENTAL: "true"
-        run: cosign download attestation --type slsaprovenance ${{ needs.build-and-push.outputs.image-ref }} > provenance.jsonl
-
-      - name: Verify SLSA provenance attestation
-        env:
-          COSIGN_EXPERIMENTAL: "true"
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_ACTOR: ${{ github.actor }}
+          IMAGE_REF: ${{ needs.build-and-push.outputs.image-ref }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_REF: ${{ github.ref }}
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_WORKFLOW_NAME: ${{ github.workflow }}
+          EXPECTED_EVENT_NAME: ${{ github.event_name }}
         run: |
-          cosign verify-attestation \
-            --type slsaprovenance \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.+" \
-            ${{ needs.build-and-push.outputs.image-ref }}
+          set -euo pipefail
+          python3 scripts/verify-oci-provenance.py \
+            --image-ref "$IMAGE_REF" \
+            --repository "$EXPECTED_REPOSITORY" \
+            --ref "$EXPECTED_REF" \
+            --sha "$EXPECTED_SHA" \
+            --run-id "$EXPECTED_RUN_ID" \
+            --run-attempt "$EXPECTED_RUN_ATTEMPT" \
+            --workflow-ref "$EXPECTED_WORKFLOW_REF" \
+            --workflow-name "$EXPECTED_WORKFLOW_NAME" \
+            --event-name "$EXPECTED_EVENT_NAME"
 
       - name: Upload provenance attestation
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: slsa-provenance
           path: provenance.jsonl
+          if-no-files-found: error
 
   trivy-image:
     needs: build-and-push
@@ -161,6 +186,7 @@ jobs:
           scan-type: image
           image-ref: ${{ needs.build-and-push.outputs.image-ref }}
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
           trivyignores: .trivyignore
           format: sarif
           output: trivy-image-results.sarif
