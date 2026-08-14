@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, replace
 from email.message import Message
@@ -766,6 +767,146 @@ class OciVerifierBehaviorTest(unittest.TestCase):
             lambda manifest: manifest["config"].__setitem__("data", "%%%%"),
             "base64",
         )
+
+    def test_modern_inline_config_rejects_valid_noncanonical_base64(
+        self,
+    ) -> None:
+        canonical_data = "e30="
+        noncanonical_data = "e31="
+        decoded = base64.b64decode(noncanonical_data, validate=True)
+        self.assertEqual(decoded, b"{}")
+        self.assertEqual(
+            base64.b64encode(decoded).decode("ascii"),
+            canonical_data,
+        )
+        self.assertNotEqual(noncanonical_data, canonical_data)
+
+        mutated_platform = "linux/arm64"
+
+        def use_noncanonical_inline_config(
+            platform_name: str,
+            manifest: dict[str, Any],
+        ) -> None:
+            if platform_name == mutated_platform:
+                self.assertEqual(manifest["config"]["data"], canonical_data)
+                manifest["config"]["data"] = noncanonical_data
+
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            attestation_mutator=use_noncanonical_inline_config,
+        )
+        attestation_url = graph.attestation_urls[mutated_platform]
+        attestation_route = graph.transport.routes[attestation_url]
+        attestation = json.loads(attestation_route.body)
+        platform_descriptor = graph.platform_descriptor(mutated_platform)
+        self.assertEqual(
+            attestation["config"],
+            {
+                "mediaType": verifier.OCI_EMPTY_CONFIG,
+                "digest": verifier.EMPTY_JSON_DIGEST,
+                "size": verifier.EMPTY_JSON_SIZE,
+                "data": noncanonical_data,
+            },
+        )
+        self.assertEqual(
+            attestation["artifactType"],
+            verifier.DOCKER_ATTESTATION_ARTIFACT,
+        )
+        self.assertEqual(
+            attestation["subject"],
+            {
+                key: platform_descriptor[key]
+                for key in ("mediaType", "digest", "size")
+            },
+        )
+
+        statement_raw = encode(graph.statements[mutated_platform])
+        expected_layer = descriptor(
+            statement_raw,
+            verifier.IN_TOTO,
+            annotations={
+                "in-toto.io/predicate-type": verifier.SLSA_PROVENANCE,
+            },
+        )
+        self.assertEqual(attestation["layers"], [expected_layer])
+        self.assertEqual(
+            graph.transport.routes[
+                f"{graph.context.repository_url}/blobs/"
+                f"{expected_layer['digest']}"
+            ].body,
+            statement_raw,
+        )
+
+        attestation_raw = encode(attestation)
+        attestation_descriptor = next(
+            item
+            for item in graph.attestation_descriptors()
+            if item["annotations"]["vnd.docker.reference.digest"]
+            == platform_descriptor["digest"]
+        )
+        self.assertEqual(attestation_route.body, attestation_raw)
+        self.assertEqual(attestation_descriptor["size"], len(attestation_raw))
+        self.assertEqual(
+            attestation_descriptor["digest"],
+            sha256_digest(attestation_raw),
+        )
+        self.assertEqual(
+            attestation_url,
+            f"{graph.context.repository_url}/manifests/"
+            f"{attestation_descriptor['digest']}",
+        )
+        self.assertEqual(
+            attestation_route.headers.get_all("Docker-Content-Digest"),
+            [attestation_descriptor["digest"]],
+        )
+
+        index_route = graph.transport.routes[graph.index_url]
+        index_raw = encode(graph.index)
+        index_digest = sha256_digest(index_raw)
+        self.assertEqual(index_route.body, index_raw)
+        self.assertEqual(
+            index_route.headers.get_all("Docker-Content-Digest"),
+            [index_digest],
+        )
+        self.assertEqual(
+            graph.context.image_ref,
+            f"ghcr.io/{graph.context.image_path}@{index_digest}",
+        )
+
+        credential = "workflow-token-must-not-leak"
+        original_directory = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            try:
+                os.chdir(directory)
+                with self.assertRaises(verifier.PolicyError) as caught:
+                    verifier.verify_oci_provenance(
+                        graph.context,
+                        graph.transport,
+                        github_token=credential,
+                        actor="fixture-actor",
+                    )
+            finally:
+                os.chdir(original_directory)
+            diagnostic = str(caught.exception)
+            self.assertEqual(
+                diagnostic,
+                "modern attestation config data is not canonical base64",
+            )
+            self.assertFalse((directory / "provenance.jsonl").exists())
+            self.assertEqual(
+                list(directory.glob(".provenance.*.tmp")),
+                [],
+            )
+
+        for sensitive_material in (
+            credential,
+            "fixture-bearer-token",
+            "token?",
+            "service=ghcr.io",
+            f"scope=repository:{graph.context.image_path}:pull",
+        ):
+            self.assertNotIn(sensitive_material, diagnostic)
 
     def test_modern_decoded_config_data_must_be_empty_json(self) -> None:
         self.assert_modern_policy_failure(
