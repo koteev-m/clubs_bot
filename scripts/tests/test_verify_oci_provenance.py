@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, replace
 from email.message import Message
@@ -176,6 +177,7 @@ class FixtureGraph:
 
 StatementMutator = Callable[[str, dict[str, Any]], None]
 PlatformMutator = Callable[[str, dict[str, Any]], None]
+AttestationMutator = Callable[[str, dict[str, Any]], None]
 IndexMutator = Callable[[dict[str, Any]], None]
 
 
@@ -183,9 +185,14 @@ def build_graph(
     *,
     statement_mutator: StatementMutator | None = None,
     platform_mutator: PlatformMutator | None = None,
+    attestation_mutator: AttestationMutator | None = None,
     index_mutator: IndexMutator | None = None,
     docker_platform: str | None = None,
+    attestation_mode: str = "legacy",
+    attestation_target_overrides: dict[str, str] | None = None,
 ) -> FixtureGraph:
+    if attestation_mode not in {"legacy", "modern-inline", "modern-fetched"}:
+        raise ValueError("unsupported fixture attestation mode")
     context = verifier.VerificationContext(
         image_ref="pending",
         repository=REPOSITORY,
@@ -258,10 +265,14 @@ def build_graph(
     attestation_descriptors: list[dict[str, Any]] = []
     attestation_urls: dict[str, str] = {}
     for platform_name in sorted(verifier.EXPECTED_PLATFORMS):
-        platform_digest = platform_digests[platform_name]
+        attested_platform_name = (attestation_target_overrides or {}).get(
+            platform_name,
+            platform_name,
+        )
+        platform_digest = platform_digests[attested_platform_name]
         subject_name = (
             f"pkg:docker/ghcr.io/{context.image_path}@sha-{SHA[:7]}"
-            f"?platform={platform_name.replace('/', '%2F')}"
+            f"?platform={attested_platform_name.replace('/', '%2F')}"
         )
         statement = {
             "_type": verifier.IN_TOTO_STATEMENT,
@@ -320,23 +331,40 @@ def build_graph(
                 "in-toto.io/predicate-type": verifier.SLSA_PROVENANCE,
             },
         )
-        config_document = {
-            "architecture": "unknown",
-            "os": "unknown",
-            "config": {},
-            "rootfs": {
-                "type": "layers",
-                "diff_ids": [layer["digest"]],
-            },
-        }
-        config_raw = encode(config_document)
-        config = descriptor(config_raw, verifier.OCI_CONFIG)
+        if attestation_mode == "legacy":
+            config_document = {
+                "architecture": "unknown",
+                "os": "unknown",
+                "config": {},
+                "rootfs": {
+                    "type": "layers",
+                    "diff_ids": [layer["digest"]],
+                },
+            }
+            config_raw = encode(config_document)
+            config = descriptor(config_raw, verifier.OCI_CONFIG)
+        else:
+            config_raw = b"{}"
+            config = descriptor(config_raw, verifier.OCI_EMPTY_CONFIG)
+            if attestation_mode == "modern-inline":
+                config["data"] = verifier.EMPTY_JSON_DATA
         attestation_manifest = {
             "schemaVersion": 2,
             "mediaType": verifier.OCI_MANIFEST,
             "config": config,
             "layers": [layer],
         }
+        if attestation_mode != "legacy":
+            platform_descriptor = platform_descriptors[attested_platform_name]
+            attestation_manifest["artifactType"] = (
+                verifier.DOCKER_ATTESTATION_ARTIFACT
+            )
+            attestation_manifest["subject"] = {
+                key: platform_descriptor[key]
+                for key in ("mediaType", "digest", "size")
+            }
+        if attestation_mutator is not None:
+            attestation_mutator(platform_name, attestation_manifest)
         attestation_raw = encode(attestation_manifest)
         attestation_digest = sha256_digest(attestation_raw)
         attestation_descriptor = descriptor(
@@ -357,10 +385,11 @@ def build_graph(
             attestation_raw,
             response_headers(attestation_digest, verifier.OCI_MANIFEST),
         )
-        routes[f"{context.repository_url}/blobs/{config['digest']}"] = FakeRoute(
-            config_raw,
-            Message(),
-        )
+        config_digest = config.get("digest")
+        if isinstance(config_digest, str):
+            routes[
+                f"{context.repository_url}/blobs/{config_digest}"
+            ] = FakeRoute(config_raw, Message())
         routes[f"{context.repository_url}/blobs/{layer['digest']}"] = FakeRoute(
             statement_raw,
             Message(),
@@ -433,6 +462,24 @@ class OciVerifierBehaviorTest(unittest.TestCase):
             verifier.verify_oci_provenance(graph.context, graph.transport)
         self.assertIn(diagnostic, str(caught.exception))
 
+    def assert_modern_policy_failure(
+        self,
+        mutator: Callable[[dict[str, Any]], None],
+        diagnostic: str,
+    ) -> None:
+        def mutate_arm64(
+            platform_name: str,
+            manifest: dict[str, Any],
+        ) -> None:
+            if platform_name == "linux/arm64":
+                mutator(manifest)
+
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            attestation_mutator=mutate_arm64,
+        )
+        self.assert_policy_failure(graph, diagnostic)
+
     def test_valid_amd64_arm64_graph(self) -> None:
         graph = build_graph()
         statements = verifier.verify_oci_provenance(
@@ -459,6 +506,79 @@ class OciVerifierBehaviorTest(unittest.TestCase):
         self.assertNotIn(
             "workflow-token-not-logged",
             json.dumps(graph.transport.calls),
+        )
+
+    def test_modern_oci_artifact_inline_empty_config_is_accepted(self) -> None:
+        graph = build_graph(attestation_mode="modern-inline")
+        statements = verifier.verify_oci_provenance(
+            graph.context,
+            graph.transport,
+        )
+        self.assertEqual(
+            [platform for platform, _ in statements],
+            ["linux/amd64", "linux/arm64"],
+        )
+        config_calls = [
+            call
+            for call in graph.transport.calls
+            if call["request_type"] == verifier.CONFIG_BLOB_REQUEST
+        ]
+        self.assertEqual(config_calls, [])
+
+    def test_modern_oci_artifact_fetched_empty_config_is_accepted(self) -> None:
+        graph = build_graph(attestation_mode="modern-fetched")
+        statements = verifier.verify_oci_provenance(
+            graph.context,
+            graph.transport,
+        )
+        self.assertEqual(len(statements), 2)
+        config_calls = [
+            call
+            for call in graph.transport.calls
+            if call["request_type"] == verifier.CONFIG_BLOB_REQUEST
+        ]
+        self.assertEqual(len(config_calls), 2)
+        self.assertEqual(
+            {call["expected_digest"] for call in config_calls},
+            {verifier.EMPTY_JSON_DIGEST},
+        )
+
+    def test_modern_index_reference_annotation_is_optional(self) -> None:
+        def remove_reference_annotations(index: dict[str, Any]) -> None:
+            for item in index["manifests"]:
+                annotations = item.get("annotations", {})
+                if (
+                    annotations.get("vnd.docker.reference.type")
+                    == "attestation-manifest"
+                ):
+                    annotations.pop("vnd.docker.reference.digest")
+
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            index_mutator=remove_reference_annotations,
+        )
+        statements = verifier.verify_oci_provenance(
+            graph.context,
+            graph.transport,
+        )
+        self.assertEqual(
+            [platform for platform, _ in statements],
+            ["linux/amd64", "linux/arm64"],
+        )
+
+    def test_legacy_buildkit_compatibility_is_explicitly_accepted(self) -> None:
+        graph = build_graph(attestation_mode="legacy")
+        statements = verifier.verify_oci_provenance(
+            graph.context,
+            graph.transport,
+        )
+        self.assertEqual(len(statements), 2)
+        self.assertEqual(
+            sum(
+                call["request_type"] == verifier.CONFIG_BLOB_REQUEST
+                for call in graph.transport.calls
+            ),
+            2,
         )
 
     def test_valid_docker_v2_platform_manifest_branch(self) -> None:
@@ -555,14 +675,327 @@ class OciVerifierBehaviorTest(unittest.TestCase):
         )
         self.assert_policy_failure(graph, "schemaVersion is not 2")
 
+    def test_modern_missing_artifact_type_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest.pop("artifactType"),
+            "artifactType",
+        )
+
+    def test_modern_wrong_artifact_type_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest.__setitem__(
+                "artifactType",
+                "application/vnd.example.attestation.v1+json",
+            ),
+            "artifactType",
+        )
+
+    def test_modern_missing_subject_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest.pop("subject"),
+            "subject",
+        )
+
+    def test_modern_schema_version_must_be_integer_two(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest.__setitem__("schemaVersion", 2.0),
+            "not an OCI manifest",
+        )
+
+    def test_modern_subject_must_be_canonical_buildkit_descriptor(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["subject"].__setitem__(
+                "unknownField",
+                {},
+            ),
+            "canonical BuildKit descriptor",
+        )
+
+    def test_modern_subject_digest_mismatch_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["subject"].__setitem__(
+                "digest",
+                f"sha256:{'f' * 64}",
+            ),
+            "subject digest",
+        )
+
+    def test_modern_subject_size_mismatch_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["subject"].__setitem__(
+                "size",
+                manifest["subject"]["size"] + 1,
+            ),
+            "subject size",
+        )
+
+    def test_modern_subject_media_type_mismatch_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["subject"].__setitem__(
+                "mediaType",
+                verifier.DOCKER_MANIFEST,
+            ),
+            "subject media type",
+        )
+
+    def test_modern_wrong_empty_config_media_type_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["config"].__setitem__(
+                "mediaType",
+                "application/vnd.example.empty.v1+json",
+            ),
+            "empty config media type",
+        )
+
+    def test_modern_wrong_empty_config_digest_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["config"].__setitem__(
+                "digest",
+                f"sha256:{'e' * 64}",
+            ),
+            "empty config digest",
+        )
+
+    def test_modern_wrong_empty_config_size_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["config"].__setitem__("size", 3),
+            "empty config size",
+        )
+
+    def test_modern_invalid_base64_config_data_is_rejected(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["config"].__setitem__("data", "%%%%"),
+            "base64",
+        )
+
+    def test_modern_inline_config_rejects_valid_noncanonical_base64(
+        self,
+    ) -> None:
+        canonical_data = "e30="
+        noncanonical_data = "e31="
+        decoded = base64.b64decode(noncanonical_data, validate=True)
+        self.assertEqual(decoded, b"{}")
+        self.assertEqual(
+            base64.b64encode(decoded).decode("ascii"),
+            canonical_data,
+        )
+        self.assertNotEqual(noncanonical_data, canonical_data)
+
+        mutated_platform = "linux/arm64"
+
+        def use_noncanonical_inline_config(
+            platform_name: str,
+            manifest: dict[str, Any],
+        ) -> None:
+            if platform_name == mutated_platform:
+                self.assertEqual(manifest["config"]["data"], canonical_data)
+                manifest["config"]["data"] = noncanonical_data
+
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            attestation_mutator=use_noncanonical_inline_config,
+        )
+        attestation_url = graph.attestation_urls[mutated_platform]
+        attestation_route = graph.transport.routes[attestation_url]
+        attestation = json.loads(attestation_route.body)
+        platform_descriptor = graph.platform_descriptor(mutated_platform)
+        self.assertEqual(
+            attestation["config"],
+            {
+                "mediaType": verifier.OCI_EMPTY_CONFIG,
+                "digest": verifier.EMPTY_JSON_DIGEST,
+                "size": verifier.EMPTY_JSON_SIZE,
+                "data": noncanonical_data,
+            },
+        )
+        self.assertEqual(
+            attestation["artifactType"],
+            verifier.DOCKER_ATTESTATION_ARTIFACT,
+        )
+        self.assertEqual(
+            attestation["subject"],
+            {
+                key: platform_descriptor[key]
+                for key in ("mediaType", "digest", "size")
+            },
+        )
+
+        statement_raw = encode(graph.statements[mutated_platform])
+        expected_layer = descriptor(
+            statement_raw,
+            verifier.IN_TOTO,
+            annotations={
+                "in-toto.io/predicate-type": verifier.SLSA_PROVENANCE,
+            },
+        )
+        self.assertEqual(attestation["layers"], [expected_layer])
+        self.assertEqual(
+            graph.transport.routes[
+                f"{graph.context.repository_url}/blobs/"
+                f"{expected_layer['digest']}"
+            ].body,
+            statement_raw,
+        )
+
+        attestation_raw = encode(attestation)
+        attestation_descriptor = next(
+            item
+            for item in graph.attestation_descriptors()
+            if item["annotations"]["vnd.docker.reference.digest"]
+            == platform_descriptor["digest"]
+        )
+        self.assertEqual(attestation_route.body, attestation_raw)
+        self.assertEqual(attestation_descriptor["size"], len(attestation_raw))
+        self.assertEqual(
+            attestation_descriptor["digest"],
+            sha256_digest(attestation_raw),
+        )
+        self.assertEqual(
+            attestation_url,
+            f"{graph.context.repository_url}/manifests/"
+            f"{attestation_descriptor['digest']}",
+        )
+        self.assertEqual(
+            attestation_route.headers.get_all("Docker-Content-Digest"),
+            [attestation_descriptor["digest"]],
+        )
+
+        index_route = graph.transport.routes[graph.index_url]
+        index_raw = encode(graph.index)
+        index_digest = sha256_digest(index_raw)
+        self.assertEqual(index_route.body, index_raw)
+        self.assertEqual(
+            index_route.headers.get_all("Docker-Content-Digest"),
+            [index_digest],
+        )
+        self.assertEqual(
+            graph.context.image_ref,
+            f"ghcr.io/{graph.context.image_path}@{index_digest}",
+        )
+
+        credential = "workflow-token-must-not-leak"
+        original_directory = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            try:
+                os.chdir(directory)
+                with self.assertRaises(verifier.PolicyError) as caught:
+                    verifier.verify_oci_provenance(
+                        graph.context,
+                        graph.transport,
+                        github_token=credential,
+                        actor="fixture-actor",
+                    )
+            finally:
+                os.chdir(original_directory)
+            diagnostic = str(caught.exception)
+            self.assertEqual(
+                diagnostic,
+                "modern attestation config data is not canonical base64",
+            )
+            self.assertFalse((directory / "provenance.jsonl").exists())
+            self.assertEqual(
+                list(directory.glob(".provenance.*.tmp")),
+                [],
+            )
+
+        for sensitive_material in (
+            credential,
+            "fixture-bearer-token",
+            "token?",
+            "service=ghcr.io",
+            f"scope=repository:{graph.context.image_path}:pull",
+        ):
+            self.assertNotIn(sensitive_material, diagnostic)
+
+    def test_modern_decoded_config_data_must_be_empty_json(self) -> None:
+        self.assert_modern_policy_failure(
+            lambda manifest: manifest["config"].__setitem__("data", "W10="),
+            "empty JSON",
+        )
+
+    def test_modern_fetched_config_blob_must_be_empty_json(self) -> None:
+        graph = build_graph(attestation_mode="modern-fetched")
+        config_url = (
+            f"{graph.context.repository_url}/blobs/"
+            f"{verifier.EMPTY_JSON_DIGEST}"
+        )
+        graph.transport.routes[config_url].body = b"[]"
+        self.assert_policy_failure(graph, "empty JSON")
+
+    def test_modern_artifact_with_legacy_config_is_rejected(self) -> None:
+        def use_legacy_config(manifest: dict[str, Any]) -> None:
+            layer_digest = manifest["layers"][0]["digest"]
+            legacy_raw = encode(
+                {
+                    "architecture": "unknown",
+                    "os": "unknown",
+                    "config": {},
+                    "rootfs": {
+                        "type": "layers",
+                        "diff_ids": [layer_digest],
+                    },
+                }
+            )
+            manifest["config"] = descriptor(legacy_raw, verifier.OCI_CONFIG)
+
+        self.assert_modern_policy_failure(
+            use_legacy_config,
+            "empty config media type",
+        )
+
+    def test_empty_config_without_modern_contract_is_rejected(self) -> None:
+        def use_empty_config(
+            platform_name: str,
+            manifest: dict[str, Any],
+        ) -> None:
+            if platform_name == "linux/arm64":
+                manifest["config"] = {
+                    "mediaType": verifier.OCI_EMPTY_CONFIG,
+                    "digest": verifier.EMPTY_JSON_DIGEST,
+                    "size": verifier.EMPTY_JSON_SIZE,
+                    "data": verifier.EMPTY_JSON_DATA,
+                }
+
+        graph = build_graph(
+            attestation_mode="legacy",
+            attestation_mutator=use_empty_config,
+        )
+        self.assert_policy_failure(graph, "legacy attestation config")
+
+    def test_modern_and_legacy_platform_attestations_cannot_be_mixed(self) -> None:
+        def remove_modern_contract(
+            platform_name: str,
+            manifest: dict[str, Any],
+        ) -> None:
+            if platform_name == "linux/arm64":
+                manifest.pop("artifactType")
+                manifest.pop("subject")
+
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            attestation_mutator=remove_modern_contract,
+        )
+        self.assert_policy_failure(graph, "mix modern and legacy")
+
     def test_partial_and_duplicate_provenance_graphs_are_rejected(self) -> None:
         def remove_last_attestation(index: dict[str, Any]) -> None:
             index["manifests"].pop()
 
-        graph = build_graph(index_mutator=remove_last_attestation)
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            index_mutator=remove_last_attestation,
+        )
         self.assert_policy_failure(graph, "exactly one provenance manifest")
 
-        def duplicate_reference(index: dict[str, Any]) -> None:
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            attestation_target_overrides={"linux/arm64": "linux/amd64"},
+        )
+        self.assert_policy_failure(graph, "cover each verified platform exactly once")
+
+    def test_modern_index_reference_must_match_subject_digest(self) -> None:
+        def mismatch_reference(index: dict[str, Any]) -> None:
             attestations = [
                 item
                 for item in index["manifests"]
@@ -577,8 +1010,11 @@ class OciVerifierBehaviorTest(unittest.TestCase):
                 "vnd.docker.reference.digest"
             ]
 
-        graph = build_graph(index_mutator=duplicate_reference)
-        self.assert_policy_failure(graph, "cover each verified platform exactly once")
+        graph = build_graph(
+            attestation_mode="modern-inline",
+            index_mutator=mismatch_reference,
+        )
+        self.assert_policy_failure(graph, "reference annotation")
 
     def test_wrong_slsa_statement_predicate_and_subject_are_rejected(self) -> None:
         def wrong_type(platform: str, statement: dict[str, Any]) -> None:
@@ -637,11 +1073,65 @@ class OciVerifierBehaviorTest(unittest.TestCase):
         self.assert_policy_failure(graph, "builder identity does not match")
 
 
+@unittest.skipUnless(
+    os.environ.get("RUN_LIVE_OCI_PROVENANCE_TEST") == "1",
+    "set RUN_LIVE_OCI_PROVENANCE_TEST=1 for the read-only GHCR check",
+)
+class LiveOciVerifierTest(unittest.TestCase):
+    def test_current_published_digest_has_two_platform_statements(self) -> None:
+        context = verifier.VerificationContext(
+            image_ref=(
+                "ghcr.io/koteev-m/clubs_bot/app-bot@"
+                "sha256:a77c67453e638245a82fa7bdfea520a9c8b423776aad159aa"
+                "266434b11281973"
+            ),
+            repository="koteev-m/clubs_bot",
+            expected_ref="refs/heads/main",
+            expected_sha="119195e810ac9f4c901d3dc1fa8048c85f53783e",
+            run_id="31731324119",
+            run_attempt="1",
+            workflow_ref=(
+                "koteev-m/clubs_bot/.github/workflows/"
+                "docker-publish.yml@refs/heads/main"
+            ),
+            workflow_name="Docker Publish (GHCR)",
+            event_name="push",
+        )
+        github_token = os.environ.get("GH_TOKEN", "")
+        actor = os.environ.get("REGISTRY_ACTOR", "") if github_token else ""
+        if github_token and not actor:
+            self.fail("REGISTRY_ACTOR is required when GH_TOKEN is set")
+        statements = verifier.verify_oci_provenance(
+            context,
+            verifier.UrllibRegistryTransport(context.image_path),
+            github_token=github_token,
+            actor=actor,
+        )
+        self.assertEqual(
+            [platform for platform, _ in statements],
+            ["linux/amd64", "linux/arm64"],
+        )
+        self.assertEqual(len(statements), 2)
+        self.assertTrue(
+            all(
+                statement.get("_type") == verifier.IN_TOTO_STATEMENT
+                and statement.get("predicateType") == verifier.SLSA_PROVENANCE
+                for _, statement in statements
+            )
+        )
+
+
 class RedirectPolicyTest(unittest.TestCase):
     image_path = f"{REPOSITORY}/app-bot"
     digest = f"sha256:{'a' * 64}"
 
-    def signed_blob_url(self, **changes: str) -> str:
+    def signed_blob_url(
+        self,
+        *,
+        digest: str | None = None,
+        bucket: str = "ghcrblobs01",
+        **changes: str,
+    ) -> str:
         query = {
             "hmac": "b" * 64,
             "se": "2026-08-12T12:00:00Z",
@@ -659,16 +1149,21 @@ class RedirectPolicyTest(unittest.TestCase):
         }
         query.update(changes)
         return (
-            "https://pkg-containers.githubusercontent.com/ghcrblobs01/blobs/"
-            f"{self.digest}?{urlencode(query)}"
+            "https://pkg-containers.githubusercontent.com/"
+            f"{bucket}/blobs/{digest or self.digest}?{urlencode(query)}"
         )
 
-    def source_blob_request(self) -> Request:
+    def source_blob_request(
+        self,
+        request_type: str = verifier.LAYER_BLOB_REQUEST,
+        digest: str | None = None,
+    ) -> Request:
+        expected_digest = digest or self.digest
         request = Request(
-            f"https://ghcr.io/v2/{self.image_path}/blobs/{self.digest}"
+            f"https://ghcr.io/v2/{self.image_path}/blobs/{expected_digest}"
         )
-        request._oci_request_type = verifier.LAYER_BLOB_REQUEST
-        request._oci_expected_digest = self.digest
+        request._oci_request_type = request_type
+        request._oci_expected_digest = expected_digest
         request._oci_redirect_count = 0
         return request
 
@@ -742,6 +1237,64 @@ class RedirectPolicyTest(unittest.TestCase):
                 self.signed_blob_url(),
             )
 
+    def test_ghcr1_redirect_is_only_for_canonical_empty_config(self) -> None:
+        destination = self.signed_blob_url(
+            digest=verifier.EMPTY_JSON_DIGEST,
+            bucket="ghcr1",
+        )
+        config_request = self.source_blob_request(
+            verifier.CONFIG_BLOB_REQUEST,
+            verifier.EMPTY_JSON_DIGEST,
+        )
+        config_request.add_unredirected_header(
+            "Authorization",
+            "Bearer must-not-cross-origin",
+        )
+        redirected = verifier.SafeRedirectHandler(
+            self.image_path
+        ).redirect_request(
+            config_request,
+            None,
+            307,
+            "Temporary Redirect",
+            Message(),
+            destination,
+        )
+        self.assertEqual(redirected.full_url, destination)
+        self.assertIsNone(redirected.get_header("Authorization"))
+
+        layer_request = self.source_blob_request(
+            verifier.LAYER_BLOB_REQUEST,
+            verifier.EMPTY_JSON_DIGEST,
+        )
+        with self.assertRaises(verifier.RedirectPolicyError):
+            verifier.SafeRedirectHandler(self.image_path).redirect_request(
+                layer_request,
+                None,
+                307,
+                "Temporary Redirect",
+                Message(),
+                destination,
+            )
+
+        other_digest_destination = self.signed_blob_url(
+            digest=self.digest,
+            bucket="ghcr1",
+        )
+        other_config_request = self.source_blob_request(
+            verifier.CONFIG_BLOB_REQUEST,
+            self.digest,
+        )
+        with self.assertRaises(verifier.RedirectPolicyError):
+            verifier.SafeRedirectHandler(self.image_path).redirect_request(
+                other_config_request,
+                None,
+                307,
+                "Temporary Redirect",
+                Message(),
+                other_digest_destination,
+            )
+
 
 class OutputAndCliTest(unittest.TestCase):
     def assert_no_artifacts(self, directory: Path) -> None:
@@ -774,6 +1327,7 @@ class OutputAndCliTest(unittest.TestCase):
 
     def test_verification_failure_leaves_no_final_or_temp_output(self) -> None:
         graph = build_graph(
+            attestation_mode="modern-inline",
             statement_mutator=lambda platform, statement: (
                 statement.__setitem__("predicateType", "wrong")
                 if platform == "linux/arm64"

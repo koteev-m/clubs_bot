@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 from dataclasses import dataclass
 from email.message import Message
 from enum import IntEnum
@@ -30,6 +31,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 OCI_INDEX = "application/vnd.oci.image.index.v1+json"
 OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 OCI_CONFIG = "application/vnd.oci.image.config.v1+json"
+OCI_EMPTY_CONFIG = "application/vnd.oci.empty.v1+json"
 OCI_IMAGE_LAYERS = {
     "application/vnd.oci.image.layer.v1.tar",
     "application/vnd.oci.image.layer.v1.tar+gzip",
@@ -54,6 +56,15 @@ PLATFORM_LAYER_TYPES = {
     DOCKER_MANIFEST: DOCKER_IMAGE_LAYERS,
 }
 IN_TOTO = "application/vnd.in-toto+json"
+DOCKER_ATTESTATION_ARTIFACT = (
+    "application/vnd.docker.attestation.manifest.v1+json"
+)
+EMPTY_JSON_BYTES = b"{}"
+EMPTY_JSON_DIGEST = (
+    "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+)
+EMPTY_JSON_SIZE = 2
+EMPTY_JSON_DATA = "e30="
 IN_TOTO_STATEMENT = "https://in-toto.io/Statement/v1"
 SLSA_PROVENANCE = "https://slsa.dev/provenance/v1"
 BUILDKIT_BUILD_TYPE = (
@@ -264,14 +275,28 @@ def validate_initial_request(
         raise RedirectPolicyError
 
 
-def validate_blob_redirect(url: str, expected_digest: str) -> None:
+def validate_blob_redirect(
+    url: str,
+    expected_digest: str,
+    request_type: str = LAYER_BLOB_REQUEST,
+) -> None:
     parsed, origin = canonical_secure_url(url)
-    if origin != BLOB_CDN_ORIGIN:
+    if (
+        origin != BLOB_CDN_ORIGIN
+        or request_type not in BLOB_REQUESTS
+        or not isinstance(expected_digest, str)
+        or DIGEST.fullmatch(expected_digest) is None
+    ):
         raise RedirectPolicyError
-    expected_path = re.compile(
+    standard_path = re.compile(
         rf"/ghcrblobs[0-9]{{2}}/blobs/{re.escape(expected_digest)}\Z"
     )
-    if expected_path.fullmatch(parsed.path) is None:
+    empty_config_path = (
+        request_type == CONFIG_BLOB_REQUEST
+        and expected_digest == EMPTY_JSON_DIGEST
+        and parsed.path == f"/ghcr1/blobs/{EMPTY_JSON_DIGEST}"
+    )
+    if standard_path.fullmatch(parsed.path) is None and not empty_config_path:
         raise RedirectPolicyError
     query = unique_query(parsed.query, len(BLOB_CDN_QUERY_KEYS))
     if set(query) != BLOB_CDN_QUERY_KEYS or (
@@ -340,7 +365,7 @@ class SafeRedirectHandler(HTTPRedirectHandler):
             expected_digest,
             self.image_path,
         )
-        validate_blob_redirect(new_url, expected_digest)
+        validate_blob_redirect(new_url, expected_digest, request_type)
         redirected = super().redirect_request(
             request,
             fp,
@@ -473,6 +498,54 @@ def validate_descriptor(
     digest_hex(descriptor.get("digest"), description)
     descriptor_size(descriptor, description)
     return media_type
+
+
+def verify_modern_empty_config(
+    config: Any,
+    context: VerificationContext,
+    transport: RegistryTransport,
+    authorization: str,
+) -> None:
+    """Verify the exact OCI empty descriptor used by BuildKit artifacts."""
+
+    if not isinstance(config, dict):
+        reject("modern attestation empty config descriptor must be an object")
+    required_keys = {"mediaType", "digest", "size"}
+    if set(config) not in (required_keys, required_keys | {"data"}):
+        reject("modern attestation empty config descriptor has unexpected fields")
+    if config.get("mediaType") != OCI_EMPTY_CONFIG:
+        reject("modern attestation empty config media type is invalid")
+    if config.get("digest") != EMPTY_JSON_DIGEST:
+        reject("modern attestation empty config digest is invalid")
+    if type(config.get("size")) is not int or config.get("size") != (
+        EMPTY_JSON_SIZE
+    ):
+        reject("modern attestation empty config size is invalid")
+
+    if "data" in config:
+        encoded = config["data"]
+        if not isinstance(encoded, str) or len(encoded) != len(EMPTY_JSON_DATA):
+            reject("modern attestation config data is not strict base64")
+        try:
+            config_raw = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise PolicyError(
+                "modern attestation config data is not strict base64"
+            ) from error
+        if base64.b64encode(config_raw).decode("ascii") != encoded:
+            reject("modern attestation config data is not canonical base64")
+    else:
+        config_raw, _ = transport.fetch(
+            context.image_path,
+            f"{context.repository_url}/blobs/{EMPTY_JSON_DIGEST}",
+            CONFIG_BLOB_REQUEST,
+            expected_digest=EMPTY_JSON_DIGEST,
+            authorization=authorization,
+        )
+
+    if config_raw != EMPTY_JSON_BYTES:
+        reject("modern attestation config data is not exact empty JSON")
+    validate_bytes(config_raw, config, "modern attestation empty config")
 
 
 def require_content_digest(
@@ -726,21 +799,8 @@ def verify_oci_provenance(
     verified_digest_platforms = {
         digest: platform for platform, digest in verified_platform_records
     }
-    referenced_digests: list[Any] = []
-    for descriptor in provenance_descriptors:
-        annotations = descriptor.get("annotations", {})
-        referenced = annotations.get("vnd.docker.reference.digest")
-        if referenced not in verified_digest_platforms:
-            reject(
-                "provenance manifest does not reference a verified platform image"
-            )
-        referenced_digests.append(referenced)
-    if set(referenced_digests) != set(verified_digest_platforms) or (
-        len(referenced_digests) != len(set(referenced_digests))
-    ):
-        reject(
-            "provenance manifests do not cover each verified platform exactly once"
-        )
+    if len(verified_digest_platforms) != len(EXPECTED_PLATFORMS):
+        reject("verified platform manifest digests are not unique")
 
     expected_builder = (
         f"https://github.com/{context.repository}/actions/runs/{context.run_id}/"
@@ -748,18 +808,10 @@ def verify_oci_provenance(
     )
     expected_source = f"https://github.com/{context.repository}"
     verified_statements: list[tuple[str, dict[str, Any]]] = []
-    for descriptor in sorted(
-        provenance_descriptors,
-        key=lambda item: verified_digest_platforms[
-            item["annotations"]["vnd.docker.reference.digest"]
-        ],
-    ):
+    claimed_platforms: set[str] = set()
+    attestation_modes: set[str] = set()
+    for descriptor in provenance_descriptors:
         manifest_digest = descriptor["digest"]
-        referenced_digest = descriptor["annotations"][
-            "vnd.docker.reference.digest"
-        ]
-        platform_name = verified_digest_platforms[referenced_digest]
-        verified_platform_digest = verified_platform_digests[platform_name]
         manifest_raw, manifest_headers = transport.fetch(
             context.image_path,
             f"{context.repository_url}/manifests/{manifest_digest}",
@@ -773,18 +825,104 @@ def verify_oci_provenance(
             manifest_digest,
             "attestation manifest",
         )
+        require_content_type(
+            manifest_headers,
+            OCI_MANIFEST,
+            "attestation manifest",
+        )
         validate_bytes(manifest_raw, descriptor, "attestation manifest")
         manifest = parse_object(manifest_raw, "attestation manifest")
         if (
-            manifest.get("schemaVersion") != 2
+            type(manifest.get("schemaVersion")) is not int
+            or manifest.get("schemaVersion") != 2
             or manifest.get("mediaType") != OCI_MANIFEST
         ):
             reject("attestation object is not an OCI manifest")
+
+        annotations = descriptor["annotations"]
+        artifact_type_present = "artifactType" in manifest
+        subject_present = "subject" in manifest
+        if artifact_type_present or subject_present:
+            mode = "modern"
+            if manifest.get("artifactType") != DOCKER_ATTESTATION_ARTIFACT:
+                reject("modern attestation artifactType is invalid")
+            if not subject_present:
+                reject("modern attestation subject is missing")
+            subject = manifest["subject"]
+            if not isinstance(subject, dict) or set(subject) != {
+                "mediaType",
+                "digest",
+                "size",
+            }:
+                reject(
+                    "modern attestation subject is not the canonical "
+                    "BuildKit descriptor"
+                )
+            validate_descriptor(
+                subject,
+                "modern attestation subject",
+                PLATFORM_MANIFEST_TYPES,
+            )
+            subject_digest = subject["digest"]
+            platform_name = verified_digest_platforms.get(subject_digest, "")
+            if not platform_name:
+                reject(
+                    "modern attestation subject digest does not match a "
+                    "verified platform image"
+                )
+            platform_descriptor = platform_descriptors[platform_name]
+            if subject.get("mediaType") != platform_descriptor["mediaType"]:
+                reject(
+                    "modern attestation subject media type does not match the "
+                    "verified platform descriptor"
+                )
+            if subject_digest != platform_descriptor["digest"]:
+                reject(
+                    "modern attestation subject digest does not match the "
+                    "verified platform descriptor"
+                )
+            if subject.get("size") != platform_descriptor["size"]:
+                reject(
+                    "modern attestation subject size does not match the "
+                    "verified platform descriptor"
+                )
+            reference_key = "vnd.docker.reference.digest"
+            if (
+                reference_key in annotations
+                and annotations[reference_key] != subject_digest
+            ):
+                reject(
+                    "index attestation reference annotation does not match "
+                    "the modern subject digest"
+                )
+        else:
+            mode = "legacy"
+            referenced_digest = annotations.get(
+                "vnd.docker.reference.digest"
+            )
+            platform_name = (
+                verified_digest_platforms.get(referenced_digest, "")
+                if isinstance(referenced_digest, str)
+                else ""
+            )
+            if not platform_name:
+                reject(
+                    "legacy provenance manifest does not reference a verified "
+                    "platform image"
+                )
+
+        attestation_modes.add(mode)
+        if len(attestation_modes) != 1:
+            reject("attestation manifests mix modern and legacy formats")
+        if platform_name in claimed_platforms:
+            reject(
+                "provenance manifests do not cover each verified platform "
+                "exactly once"
+            )
+        claimed_platforms.add(platform_name)
+        verified_platform_digest = verified_platform_digests[platform_name]
+
         config = manifest.get("config")
-        if not isinstance(config, dict) or config.get("mediaType") != OCI_CONFIG:
-            reject("attestation manifest has an invalid OCI config")
-        config_digest = config.get("digest")
-        digest_hex(config_digest, "attestation config")
         layers = manifest.get("layers")
         if not isinstance(layers, list) or len(layers) != 1:
             reject("attestation manifest must contain exactly one layer")
@@ -799,29 +937,52 @@ def verify_oci_provenance(
             reject("attestation layer predicate type is not SLSA provenance v1")
         layer_digest = layer.get("digest")
         digest_hex(layer_digest, "attestation layer")
-        config_raw, _ = transport.fetch(
-            context.image_path,
-            f"{context.repository_url}/blobs/{config_digest}",
-            CONFIG_BLOB_REQUEST,
-            expected_digest=config_digest,
-            authorization=authorization,
-        )
-        validate_bytes(config_raw, config, "attestation config")
-        config_document = parse_object(config_raw, "attestation config")
-        if (
-            config_document.get("architecture") != "unknown"
-            or config_document.get("os") != "unknown"
-            or config_document.get("config") != {}
-        ):
-            reject(
-                "attestation config is not the BuildKit unknown-platform contract"
+
+        if mode == "modern":
+            verify_modern_empty_config(
+                config,
+                context,
+                transport,
+                authorization,
             )
-        rootfs = config_document.get("rootfs")
-        if not isinstance(rootfs, dict) or (
-            rootfs.get("type") != "layers"
-            or rootfs.get("diff_ids") != [layer_digest]
-        ):
-            reject("attestation config does not bind the provenance layer")
+        else:
+            if (
+                not isinstance(config, dict)
+                or config.get("mediaType") != OCI_CONFIG
+            ):
+                reject("legacy attestation config is not an OCI image config")
+            config_digest = config.get("digest")
+            digest_hex(config_digest, "legacy attestation config")
+            config_raw, _ = transport.fetch(
+                context.image_path,
+                f"{context.repository_url}/blobs/{config_digest}",
+                CONFIG_BLOB_REQUEST,
+                expected_digest=config_digest,
+                authorization=authorization,
+            )
+            validate_bytes(config_raw, config, "legacy attestation config")
+            config_document = parse_object(
+                config_raw,
+                "legacy attestation config",
+            )
+            if (
+                config_document.get("architecture") != "unknown"
+                or config_document.get("os") != "unknown"
+                or config_document.get("config") != {}
+            ):
+                reject(
+                    "legacy attestation config is not the BuildKit "
+                    "unknown-platform contract"
+                )
+            rootfs = config_document.get("rootfs")
+            if not isinstance(rootfs, dict) or (
+                rootfs.get("type") != "layers"
+                or rootfs.get("diff_ids") != [layer_digest]
+            ):
+                reject(
+                    "legacy attestation config does not bind the provenance "
+                    "layer"
+                )
         statement_raw, _ = transport.fetch(
             context.image_path,
             f"{context.repository_url}/blobs/{layer_digest}",
@@ -943,8 +1104,11 @@ def verify_oci_provenance(
             reject("BuildKit source repository does not match the repository")
         verified_statements.append((platform_name, statement))
 
-    if len(verified_statements) != len(EXPECTED_PLATFORMS):
+    if claimed_platforms != EXPECTED_PLATFORMS or (
+        len(verified_statements) != len(EXPECTED_PLATFORMS)
+    ):
         reject("verified provenance statement set is incomplete")
+    verified_statements.sort(key=lambda item: item[0])
     return verified_statements
 
 
