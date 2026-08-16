@@ -20,12 +20,13 @@ DB_PASS="${DB_PASS:-botpass}"
 # Важно: используем имя контейнера Postgres как хост!
 DATABASE_URL="jdbc:postgresql://${PG_NAME}:${PG_PORT_CONT}/${DB_NAME}"
 
-# Телеграм токены/флаги — безопасные дефолты для smoke (polling, фиктивный токен)
+# Телеграм токены/флаги — безопасные DEV-дефолты для smoke (polling, фиктивный токен)
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-000000:TEST_TOKEN}"
 BOT_TOKEN="${BOT_TOKEN:-$TELEGRAM_BOT_TOKEN}"   # Mini App initData = тот же токен
 TELEGRAM_USE_POLLING="${TELEGRAM_USE_POLLING:-true}"
+MINI_APP_URL="${MINI_APP_URL:-http://127.0.0.1:${APP_PORT_HOST}/app}"
 
-APP_PROFILE="${APP_PROFILE:-PROD}"
+APP_PROFILE="${APP_PROFILE:-DEV}"
 FLYWAY_ENABLED="${FLYWAY_ENABLED:-true}"
 # ГЛАВНЫЙ ФИКС: ограничиваем миграции Postgres-папкой
 FLYWAY_LOCATIONS="${FLYWAY_LOCATIONS:-classpath:db/migration/postgresql}"
@@ -99,6 +100,7 @@ docker run -d --name "${APP_NAME}" \
   -e TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN}" \
   -e BOT_TOKEN="${BOT_TOKEN}" \
   -e TELEGRAM_USE_POLLING="${TELEGRAM_USE_POLLING}" \
+  -e MINI_APP_URL="${MINI_APP_URL}" \
   -e OWNER_TELEGRAM_ID="${OWNER_TELEGRAM_ID}" \
   "${APP_IMAGE}" >/dev/null
 

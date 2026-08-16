@@ -117,6 +117,7 @@ import com.example.bot.routes.promoterRatingRoutes
 import com.example.bot.routes.securedBookingRoutes
 import com.example.bot.routes.trackOfNightRoutes
 import com.example.bot.routes.waitlistRoutes
+import com.example.bot.routes.webAppRoutes
 import com.example.bot.routes.invitationRoutes
 import com.example.bot.routes.telegramWebhookRoutes
 import com.example.bot.routes.healthRoute
@@ -139,6 +140,8 @@ import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
+import io.ktor.server.plugins.compression.Compression
+import io.ktor.server.plugins.compression.gzip
 import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
@@ -291,6 +294,7 @@ fun Application.module() {
             userRepository = userRepository,
             supportService = supportService,
             botUsername = config.bot.username,
+            miniAppUrl = config.miniAppUrl,
             qrSecretProvider = { System.getenv("QR_SECRET") ?: "" },
         )
     val telegramCallbackRouter =
@@ -510,6 +514,7 @@ private fun Application.bootstrapPlatformPlugins() {
     configureLoggingAndRequestId()
     installAppConfig()
     install(AutoHeadResponse)
+    install(Compression) { gzip() }
     installWebAppEtagForFingerprints()
     install(ConditionalHeaders)
     installMetrics()
@@ -552,6 +557,7 @@ private fun Application.bootstrapKoin() {
 }
 
 private fun Application.bootstrapRoutes(privacyConfig: PrivacyConfig) {
+    webAppRoutes()
     bootstrapLegacyBookingWebApp(privacyConfig)
 }
 

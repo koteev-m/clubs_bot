@@ -57,6 +57,7 @@ services:
       # --- public urls ---
       BASE_URL: ${BASE_URL}
       WEBAPP_ORIGIN: ${WEBAPP_ORIGIN}
+      MINI_APP_URL: ${MINI_APP_URL:?MINI_APP_URL is required}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
 
       # --- feature flags ---

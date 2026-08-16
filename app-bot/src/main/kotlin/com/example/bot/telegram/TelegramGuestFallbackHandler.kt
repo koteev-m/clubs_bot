@@ -14,6 +14,7 @@ import com.pengrad.telegrambot.model.CallbackQuery
 import com.pengrad.telegrambot.model.Chat
 import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
+import com.pengrad.telegrambot.model.WebAppInfo
 import com.pengrad.telegrambot.model.request.ForceReply
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
@@ -31,6 +32,7 @@ class TelegramGuestFallbackHandler(
     private val userRepository: UserRepository,
     private val supportService: SupportService,
     private val botUsername: String?,
+    private val miniAppUrl: String?,
     private val qrSecretProvider: () -> String,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
@@ -42,9 +44,16 @@ class TelegramGuestFallbackHandler(
         }
         val message = update.message() ?: return false
         val text = message.text()?.trim().orEmpty()
+        val privateChat = isPrivateChat(message.chat())
+
+        if (privateChat && isBareStart(text)) {
+            val configuredMiniAppUrl = miniAppUrl ?: return false
+            handleBareStart(message, configuredMiniAppUrl)
+            return true
+        }
 
         if (text.equals("/cancel", ignoreCase = true) || text.startsWith("/cancel@", ignoreCase = true)) {
-            if (isPrivateChat(message.chat())) {
+            if (privateChat) {
                 sendToMessage(message, "Ок, отменено. Когда будете готовы, используйте /ask.")
                 return true
             }
@@ -55,7 +64,7 @@ class TelegramGuestFallbackHandler(
             return handleAskReply(message)
         }
 
-        if (!isPrivateChat(message.chat())) return false
+        if (!privateChat) return false
 
         when {
             isCommand(text, "qr", "my_pass") -> {
@@ -77,6 +86,22 @@ class TelegramGuestFallbackHandler(
         }
 
         return false
+    }
+
+    private suspend fun handleBareStart(
+        message: Message,
+        configuredMiniAppUrl: String,
+    ) {
+        val keyboard =
+            InlineKeyboardMarkup(
+                arrayOf(
+                    InlineKeyboardButton(OPEN_MINI_APP_BUTTON_TEXT)
+                        .webApp(WebAppInfo(configuredMiniAppUrl)),
+                ),
+            )
+        val request = SendMessage(message.chat().id(), WELCOME_TEXT).replyMarkup(keyboard)
+        applyThread(request, message.threadIdOrNull())
+        send(request)
     }
 
     private suspend fun handleQr(message: Message) {
@@ -249,10 +274,10 @@ class TelegramGuestFallbackHandler(
         }
         val user = userRepository.getByTelegramId(telegramUserId)
         if (user == null) {
-            val miniappHint = botUsername?.let { " https://t.me/$it/app" }.orEmpty()
+            val miniAppHint = miniAppUrl?.let { " Откройте Mini App: $it" }.orEmpty()
             sendToMessage(
                 message,
-                "Похоже, вы ещё не зарегистрированы. Напишите /start или откройте miniapp.$miniappHint",
+                "Похоже, вы ещё не зарегистрированы. Напишите /start.$miniAppHint",
             )
         }
         return user
@@ -285,6 +310,17 @@ class TelegramGuestFallbackHandler(
         return typeName.equals("Private", ignoreCase = true)
     }
 
+    private fun isBareStart(text: String): Boolean =
+        text.equals("/start", ignoreCase = true) || isConfiguredBotStart(text)
+
+    private fun isConfiguredBotStart(text: String): Boolean =
+        botUsername
+            ?.trim()
+            ?.removePrefix("@")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { text.equals("/start@$it", ignoreCase = true) }
+            ?: false
+
     private fun parseClubIdMarker(text: String): Long? {
         val marker = Regex("clubId:(\\d+)")
         val id = marker.find(text)?.groupValues?.getOrNull(1)
@@ -305,6 +341,9 @@ class TelegramGuestFallbackHandler(
         }
     }
 }
+
+private const val WELCOME_TEXT = "Добро пожаловать в Night Concierge!"
+private const val OPEN_MINI_APP_BUTTON_TEXT = "Открыть Night Concierge"
 
 @Suppress("DEPRECATION")
 private fun Message.threadIdOrNull(): Int? = runCatching { messageThreadId() }.getOrNull()

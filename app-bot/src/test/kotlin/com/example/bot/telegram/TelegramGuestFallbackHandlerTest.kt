@@ -21,6 +21,7 @@ import com.pengrad.telegrambot.model.Chat
 import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.model.User as TelegramUser
+import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.SendMessage
@@ -36,6 +37,147 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class TelegramGuestFallbackHandlerTest {
+    @Test
+    fun `bare start welcomes unregistered user with exact mini app url without lookup`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            var userLookups = 0
+            val unregisteredUserRepository =
+                object : UserRepository {
+                    override suspend fun getByTelegramId(id: Long): User? {
+                        userLookups++
+                        return null
+                    }
+
+                    override suspend fun getById(id: Long): User? {
+                        userLookups++
+                        return null
+                    }
+                }
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = unregisteredUserRepository,
+                    botUsername = "NightConcierge_Bot",
+                    miniAppUrl = TEST_MINI_APP_URL,
+                )
+
+            val handled = handler.handle(messageUpdate(text = " \n/start\t"))
+
+            assertTrue(handled)
+            assertEquals(1, sender.requests.size)
+            val request = sender.requests.single() as SendMessage
+            val markup = request.parameters["reply_markup"] as InlineKeyboardMarkup
+            val buttons = markup.inlineKeyboard().flatMap { it.asList() }
+            assertEquals("Добро пожаловать в Night Concierge!", request.parameters["text"])
+            assertEquals(1, buttons.size)
+            assertEquals("Открыть Night Concierge", buttons.single().text)
+            assertEquals(TEST_MINI_APP_URL, buttons.single().webApp?.url())
+            assertEquals(0, userLookups)
+        }
+
+    @Test
+    fun `configured bot mention is accepted as bare start`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    botUsername = "NightConcierge_Bot",
+                )
+
+            val handled = handler.handle(messageUpdate(text = "/start@NightConcierge_Bot"))
+
+            assertTrue(handled)
+            assertEquals(1, sender.requests.filterIsInstance<SendMessage>().size)
+        }
+
+    @Test
+    fun `start payloads malformed prefixes and other bot mentions are not consumed`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    botUsername = "NightConcierge_Bot",
+                )
+            val ignoredTexts =
+                listOf(
+                    "/start inv_token",
+                    "/start promo-token",
+                    "/start other",
+                    "/start anything",
+                    "/start@NightConcierge_Bot inv_token",
+                    "/startSomething",
+                    "/start@OtherBot",
+                    "hello",
+                )
+
+            ignoredTexts.forEach { text ->
+                assertFalse(handler.handle(messageUpdate(text = text)), text)
+            }
+
+            assertTrue(sender.requests.isEmpty())
+        }
+
+    @Test
+    fun `bare start is ignored outside private chat`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler = handler(sender = sender, now = TEST_NOW, bookings = emptyList())
+
+            val handled = handler.handle(messageUpdate(text = "/start", chatType = "Group"))
+
+            assertFalse(handled)
+            assertTrue(sender.requests.isEmpty())
+        }
+
+    @Test
+    fun `router keeps invitation start reachable after fallback`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val fallback = handler(sender = sender, now = TEST_NOW, bookings = emptyList())
+            var invitationCalls = 0
+            val router =
+                TelegramCallbackRouter(
+                    supportHandler = { throw AssertionError("support should not be called") },
+                    invitationHandler = { invitationCalls++ },
+                    guestFallbackHandler = fallback::handle,
+                    paymentsHandler = mockk(relaxed = true),
+                )
+
+            router.route(messageUpdate(text = "/start inv_token"))
+
+            assertEquals(1, invitationCalls)
+            assertTrue(sender.requests.isEmpty())
+        }
+
+    @Test
+    fun `router does not pass bare start to invitation handler`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val fallback = handler(sender = sender, now = TEST_NOW, bookings = emptyList())
+            var invitationCalls = 0
+            val router =
+                TelegramCallbackRouter(
+                    supportHandler = { throw AssertionError("support should not be called") },
+                    invitationHandler = { invitationCalls++ },
+                    guestFallbackHandler = fallback::handle,
+                    paymentsHandler = mockk(relaxed = true),
+                )
+
+            router.route(messageUpdate(text = "/start"))
+
+            assertEquals(0, invitationCalls)
+            assertEquals(1, sender.requests.filterIsInstance<SendMessage>().size)
+        }
+
     @Test
     fun `qr command returns no booking message`() = runBlocking {
         val sender = FallbackRecordingTelegramSender()
@@ -206,26 +348,30 @@ class TelegramGuestFallbackHandlerTest {
         bookings: List<Booking>,
         qrSecret: String = "qr-secret",
         supportService: SupportService = RecordingSupportService(),
+        userRepository: UserRepository = RegisteredFallbackUserRepository,
+        botUsername: String? = "clubbot",
+        miniAppUrl: String = TEST_MINI_APP_URL,
     ): TelegramGuestFallbackHandler {
         val bookingState = mockk<BookingState>()
         every { bookingState.now() } returns now
         every { bookingState.findUserBookings(55L) } returns bookings
-        val userRepository =
-            object : UserRepository {
-                override suspend fun getByTelegramId(id: Long): User? = if (id == 101L) User(55L, 101L, "guest") else null
-
-                override suspend fun getById(id: Long): User? = null
-            }
         return TelegramGuestFallbackHandler(
             send = sender::send,
             bookingState = bookingState,
             clubsRepository = StaticClubsRepository(),
             userRepository = userRepository,
             supportService = supportService,
-            botUsername = "clubbot",
+            botUsername = botUsername,
+            miniAppUrl = miniAppUrl,
             qrSecretProvider = { qrSecret },
         )
     }
+}
+
+private object RegisteredFallbackUserRepository : UserRepository {
+    override suspend fun getByTelegramId(id: Long): User? = if (id == 101L) User(55L, 101L, "guest") else null
+
+    override suspend fun getById(id: Long): User? = null
 }
 
 private data class CreateTicketCall(
@@ -348,8 +494,10 @@ private fun messageUpdate(
     val chat = mockk<Chat>()
     val type = mockk<Chat.Type>()
     val from = mockk<TelegramUser>()
+    every { update.preCheckoutQuery() } returns null
     every { update.callbackQuery() } returns null
     every { update.message() } returns message
+    every { message.successfulPayment() } returns null
     every { message.text() } returns text
     every { message.chat() } returns chat
     every { message.from() } returns from
@@ -429,3 +577,6 @@ private fun sampleTicketWithMessage(
         )
     return TicketWithMessage(ticket, message)
 }
+
+private val TEST_NOW = Instant.parse("2026-01-01T20:00:00Z")
+private const val TEST_MINI_APP_URL = "https://night.example/app"
