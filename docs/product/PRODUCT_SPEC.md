@@ -1,6 +1,6 @@
 # Нормализованная продуктовая спецификация
 
-Статус документа: первая базовая линия для review. Строки `SOURCE` нормализуют, но не расширяют [CONCEPT_SOURCE.md](CONCEPT_SOURCE.md). Строки `DECISION_REQUIRED` фиксируют невыбранный вариант или контракт. Repository-only требования, которых source не устанавливает, не становятся source promises: они зарегистрированы как конфликт и зависят от `DEC-026`. Ни один тип не означает, что capability реализован. Неурегулированные варианты вынесены в [OPEN_DECISIONS.md](OPEN_DECISIONS.md).
+Статус документа: target product specification после применения явно принятых решений к первой базовой линии для review. Строки `SOURCE` нормализуют, но не расширяют immutable [CONCEPT_SOURCE.md](CONCEPT_SOURCE.md). Строки `DECISION_REQUIRED` фиксируют невыбранный вариант или контракт. `DEC-026/D` принят пользователем 2026-08-17: repository-only capabilities не становятся target requirements автоматически; до отдельной item-level классификации `KEEP`, `AMEND`, `DEFER` или `REJECT` unresolved repository-only capability не является target promise и не может появляться в target navigation. Ни один тип не означает, что capability реализован. Неурегулированные варианты вынесены в [OPEN_DECISIONS.md](OPEN_DECISIONS.md).
 
 Каждая из 170 строк имеет собственный bounded `Source locator`. Для строки `SOURCE` указанные диапазоны подтверждают её продуктовый смысл; для строки `DECISION_REQUIRED` locator указывает точное место source, создающее контекст или tension, но не выдаёт предлагаемый вариант решения за текст source.
 
@@ -399,5 +399,5 @@ iBota не является способом обойти этот порядо�
 
 - Конкретную AI-модель, поставщика, точность или экономический эффект.
 - Принятые публичные названия, MVP-состав ролей и multi-club launch policy до решений пользователя.
-- Repository-only additions (включая playlists/favourites, exports/auto-reports и cloning/templates) не считаются source promises до решения `DEC-026`; их нельзя ни автоматически принять, ни автоматически удалить из target scope.
+- По принятому `DEC-026/D` repository-only additions (включая playlists/favourites, exports/auto-reports и cloning/templates) не становятся target promises автоматически; до отдельной item-level классификации их нельзя ни принять, ни удалить из target scope.
 - Availability любого Telegram capability без повторной официальной проверки непосредственно перед реализацией/release.

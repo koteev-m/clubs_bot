@@ -2,6 +2,8 @@
 
 Roadmap задаёт последовательность проверяемых outcomes, а не календарные сроки, capacity или story points. Он не означает, что рекомендации приняты. Любая production реализация выполняется отдельными задачами с code/tests/Gradle gates.
 
+`DEC-026/D` принят и больше не является unresolved governance blocker. Он определяет только способ классификации conflicts: все восемь disputed capabilities из [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md) сохраняют item-level `DECISION_REQUIRED` и не входят автоматически ни в recommended first slice, ни в phase scope, ни в target navigation.
+
 ## 1. Foundation already reusable
 
 Следующие части имеют доказанный production/test foundation и не требуют переписывания «с нуля»: Ktor/DB bootstrap, webhook ingress queue, initData HMAC validation, RBAC/club-scope primitives, audit/redaction primitives, club/event persistence, layout/tables repositories, GuestList/invitation/check-in services, user/night visit uniqueness, deposit operation ledger, finance templates/shift freeze, support persistence/list/reply/delivery primitives, music backend и deterministic analytics snapshot.
@@ -73,7 +75,9 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **Acceptance boundary:** приняты только выбранные пользователем public names, launch model, role mapping, operational-night model, canonical UI, support workflow, repository/source precedence and booking implementation direction; decisions записаны явно.
 - **Excluded scope:** production changes.
 - **Staging smoke:** не применяется; review проверяет непротиворечивую decision log и updated traceability.
-- **Decision prerequisites:** `DEC-001`–`DEC-012`, `DEC-017`, `DEC-018`, `DEC-025`, `DEC-026` в той части, которая блокирует соответствующий slice.
+- **Governance activity:** `classify repository/source conflicts individually`.
+- **Activity status:** pending item-level decisions; это governance tracking, а не product implementation.
+- **Decision prerequisites:** `DEC-001`–`DEC-012`, `DEC-017`, `DEC-018`, `DEC-025`; принятый `DEC-026/D` больше не является prerequisite.
 
 ### Phase 1 — Private support loop
 
@@ -124,7 +128,7 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **Category:** Reuse with product completion.
 - **User outcome:** confirmed attendance produces understandable progress; guest can consume moderated music/content.
 - **Included IDs:** `LOY-001`–`LOY-007`, `MUS-001`–`MUS-007`, remaining `CAT-002`, `UX-001` sections.
-- **Dependencies:** unified entrance-first check-in with table-seating bypass closed; canonical guest navigation; DJ/moderation/payment decisions; `DEC-026` for repository-only mystery/playlists/favourites scope.
+- **Dependencies:** unified entrance-first check-in with table-seating bypass closed; canonical guest navigation; DJ/moderation/payment decisions; separate item-level decisions for repository-only mystery/playlists/favourites scope under accepted `DEC-026/D` governance.
 - **Acceptance boundary:** first sub-slice may be stamps/early/badges/My Nights; published music may be read-only. Raffles/table loyalty/donations enter only with separate accepted scope.
 - **Excluded scope:** AI assistant, paid music support unless payment decision covers it.
 - **Staging smoke:** duplicate check-in produces one stamp; early threshold override; badge fingerprint retry; Russian names; published/unpublished file visibility; like/vote idempotency.
@@ -150,7 +154,7 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **Acceptance boundary:** one master creates a usable club/profile/calendar/hall/tables/rules/finance/modules/personnel; configuration audit exists; degraded manual journal can reconcile.
 - **Excluded scope:** AI-filled wizard/instructions.
 - **Staging smoke:** create second club from empty config; overnight holiday; upload/activate plan; book/scan/seat/close; role isolation; rollback invalid config; Mini App/scanner degraded drills.
-- **Decision prerequisites:** `DEC-003`–`DEC-006`, `DEC-008`, `DEC-023`, `DEC-026` for disputed templates/cloning scope.
+- **Decision prerequisites:** `DEC-003`–`DEC-006`, `DEC-008`, `DEC-023`; disputed templates/cloning additionally require a separate item-level decision under accepted `DEC-026/D` governance.
 
 ### Phase 8 — iBota safe read/draft layer
 
@@ -180,6 +184,6 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - Не строить loyalty, finance или analytics поверх нескольких definitions of operational night.
 - Не добавлять новые features одновременно в static и React Mini App; сначала выбрать canonical packaging.
 - Не трактовать duplicate HOLD routes как недетерминированную runtime ambiguity: secured DB branch уже выбирается детерминированно; перед расширением согласовать DTO/owner implementation и удалить либо намеренно адаптировать shadowed A3 path.
-- Не включать disputed `AGENTS.md` additions как accepted scope до `DEC-026`.
+- Не включать disputed additions из прежнего `AGENTS.md` snapshot как accepted scope или target navigation до отдельной item-level classification; принятый `DEC-026/D` сам эти items не классифицирует.
 - Не включать campaigns, Guest Mode, paid broadcasts, bot-to-bot или business updates только потому, что код/platform primitive существует.
 - Каждая phase заканчивается end-to-end staging smoke с persistence и authorization, а не только render/UI demo.
