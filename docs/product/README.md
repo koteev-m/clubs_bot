@@ -11,18 +11,23 @@
 5. [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) — dependency-aware последовательность, а не календарный план.
 6. [CONCEPT_SOURCE.md](CONCEPT_SOURCE.md) — неизменяемый первичный источник намерения.
 
-## Предлагаемое управление документами
+## Управление документами
 
-Ниже — `DECISION_REQUIRED`, то есть proposed governance для review, а не принятое пользователем правило:
+`DEC-026`, option D, принят пользователем 2026-08-17. Принята ровно следующая governance policy:
 
-1. Решения пользователя только после их явного принятия и записи в decision log.
-2. `PRODUCT_SPEC.md` после принятия governance и самих решений.
-3. `CONCEPT_SOURCE.md` как источник намерения.
-4. `AS_BUILT.md` как снимок текущей реализации.
-5. Production code и tests как доказательство исполнения.
-6. Существующие repository documents — по granular reconciliation status из [AS_BUILT.md](AS_BUILT.md), а не с blanket-ярлыком historical.
+1. [CONCEPT_SOURCE.md](CONCEPT_SOURCE.md) остаётся неизменяемым источником исходного замысла.
+2. [PRODUCT_SPEC.md](PRODUCT_SPEC.md) является target product specification после применения явно принятых решений.
+3. Каждое расхождение между concept, `AGENTS.md`, repository docs и code классифицируется отдельно как `KEEP`, `AMEND`, `DEFER` или `REJECT`.
+4. Наличие требования в прежнем `AGENTS.md`, legacy docs или implementation в code не даёт capability автоматического product acceptance или priority.
+5. До отдельного item-level решения disputed capability нельзя удалять, объявлять обязательной/принятой или выводить в пользовательскую navigation.
+6. `AGENTS.md` служит короткой navigation/instruction map для repository, product docs, engineering rules и обязательных проверок, а не второй полной product spec.
 
-Это предложение намеренно не делает текущий код автоматическим продуктовым приоритетом. Код отвечает на вопрос «что подключено сейчас», но не переопределяет целевой продукт. Аналогично, концепция отвечает на вопрос «что задумано», но не доказывает runtime availability. `AGENTS.md` и `CONTRIBUTING.md` остаются current repository instructions и не объявляются superseded; product conflicts между `AGENTS.md` и source зарегистрированы в [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md) и требуют `DEC-026`.
+Следующие baseline proposals не приняты `DEC-026` и остаются `DECISION_REQUIRED` там, где требуют выбора пользователя:
+
+- решения пользователя только после их явного принятия и записи в decision log;
+- [AS_BUILT.md](AS_BUILT.md) как снимок текущей реализации;
+- production code и tests как доказательство исполнения;
+- существующие repository documents — по granular reconciliation status из [AS_BUILT.md](AS_BUILT.md), а не с blanket-ярлыком historical.
 
 ## Статусы
 
@@ -37,7 +42,9 @@
 | `GAP` | Требуемого поведения в relevant production path не найдено. |
 | `UNKNOWN` | Repository не даёт достаточного доказательства. |
 | `DECISION_REQUIRED` | Нужен явный выбор пользователя. |
-В этой базовой линии нет принятых решений: все decision records имеют `DECISION_REQUIRED`. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
+| `ACCEPTED_DECISION` | Прямо принято пользователем и записано в decision record. |
+
+В этой базовой линии принят только `DEC-026`; остальные 26 decision records имеют `DECISION_REQUIRED`. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
 
 ## Правила доказательности
 

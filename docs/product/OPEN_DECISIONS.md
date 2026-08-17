@@ -1,6 +1,6 @@
 # Решения пользователя
 
-Здесь только выборы, которые нельзя вывести из source или принять по рекомендации аудитора. У каждого решения статус `DECISION_REQUIRED`. Рекомендованный default — самый простой способ снять зависимость, а не автоматически выбранный вариант.
+Здесь только выборы, которые нельзя вывести из source или принять по рекомендации аудитора. Decision record может иметь статус `DECISION_REQUIRED` или `ACCEPTED_DECISION`. `ACCEPTED_DECISION` возможен только после прямого решения пользователя; рекомендация агента не считается принятием. Рекомендованный default — самый простой способ снять зависимость, а не автоматически выбранный вариант.
 
 ## `DEC-001` — публичное имя продукта
 
@@ -304,15 +304,38 @@
 
 ## `DEC-026` — precedence: `CONCEPT_SOURCE` vs repository product requirements
 
-- **Context:** `AGENTS.md` is a current repository instruction and adds or specifies reminder «скоро слетит», spontaneous tables, mystery-upgrade, richer allocation categories, playlists/favourites, channel posts, exports/auto-reports and cloning/templates beyond or differently from `CONCEPT_SOURCE`.
+- **Context:** прежний snapshot `AGENTS.md` добавлял или конкретизировал reminder «скоро слетит», spontaneous tables, mystery-upgrade, richer allocation categories, playlists/favourites, channel posts, exports/auto-reports and cloning/templates beyond or differently from `CONCEPT_SOURCE`.
 - **Source tension:** immutable source does not contain every repository promise or describes a narrower capability; silently merging either direction would change product scope.
 - **Code tension:** some repository additions already have wired or partial implementations, while others are absent or unwired; code existence cannot settle product precedence.
 - **Options:** (A) concept overrides all repository additions; (B) repository additions remain mandatory; (C) merge both into a separately accepted superseding product spec; (D) classify every conflict individually as keep, amend, defer or reject.
-- **Recommendation:** D, recording each item explicitly and leaving both source and repository instruction unchanged until the user decides.
-- **Consequences:** A can discard current repository obligations; B can fabricate source scope; C is broad and requires a new accepted baseline; D is slower item-by-item but preserves traceability and avoids silent promises/deletions.
+- **Recommendation:** D; эта рекомендация сама по себе не являлась принятием.
+- **Selected option:** D.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-17.
+- **Accepted policy:**
+  1. `docs/product/CONCEPT_SOURCE.md` остаётся неизменяемым источником исходного замысла.
+  2. `docs/product/PRODUCT_SPEC.md` становится целевой продуктовой спецификацией после внесения явно принятых решений.
+  3. Каждое расхождение между концепцией, `AGENTS.md`, существующей документацией и кодом классифицируется отдельно:
+     - `KEEP`
+     - `AMEND`
+     - `DEFER`
+     - `REJECT`
+  4. Наличие требования в старом `AGENTS.md` или наличие реализации в коде само по себе не делает capability обязательной частью продукта.
+  5. До отдельного решения спорные capabilities нельзя:
+     - удалять;
+     - объявлять обязательными;
+     - считать принятыми;
+     - выводить в пользовательскую навигацию.
+  6. `AGENTS.md` должен стать короткой картой repository, product docs, engineering rules и обязательных проверок без дублирования полной продуктовой спецификации.
+- **Consequences:**
+  - conflicts классифицируются item-by-item;
+  - наличие code не определяет product priority;
+  - прежний `AGENTS.md` snapshot не является target product spec;
+  - disputed capabilities остаются unresolved до отдельных item-level решений;
+  - `AGENTS.md` превращается в repository map.
 - **Depends on:** none.
-- **Blocks:** `DEC-019`, `DEC-023`.
-- **Status:** `DECISION_REQUIRED`.
+- **Blocks:** none at governance-method level; `DEC-019`, `DEC-023` и конкретные conflict items сохраняют собственные unresolved decisions.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-027` — AI grounding and explanation contract
 
