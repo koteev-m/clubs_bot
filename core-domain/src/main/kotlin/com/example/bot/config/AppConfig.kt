@@ -1,6 +1,8 @@
 package com.example.bot.config
 
 import java.lang.StringBuilder
+import java.net.URI
+import java.net.URISyntaxException
 
 enum class AppProfile { DEV, STAGE, PROD }
 
@@ -84,6 +86,7 @@ data class ClubEndpoints(
 data class AppConfig(
     val profile: AppProfile,
     val runMode: BotRunMode,
+    val miniAppUrl: String?,
     val bot: BotConfig,
     val webhook: WebhookConfig,
     val db: DbConfig,
@@ -98,6 +101,15 @@ data class AppConfig(
         private const val DEFAULT_CHAT_RPS = 2
         private const val DEFAULT_WORKER_PARALLELISM = 4
         private const val DEFAULT_HEALTH_DB_TIMEOUT_MS = 150L
+        private const val MIN_EXPLICIT_PORT = 1
+        private const val MAX_EXPLICIT_PORT = 65_535
+        private const val PROD_LIKE_POLLING_ERROR =
+            "Telegram polling is unsupported for STAGE/PROD; configure webhook mode"
+        private const val MINI_APP_URL_REQUIRED_ERROR =
+            "MINI_APP_URL is required for APP_PROFILE=STAGE/PROD"
+        private const val MINI_APP_URL_INVALID_ERROR =
+            "MINI_APP_URL must be absolute with a non-empty host, https in STAGE/PROD, " +
+                "and no userinfo, query, or fragment"
 
         fun fromEnv(): AppConfig {
             val profile = env("APP_PROFILE")?.let { AppProfile.valueOf(it.uppercase()) } ?: AppProfile.DEV
@@ -107,6 +119,10 @@ data class AppConfig(
                 } else {
                     BotRunMode.WEBHOOK
                 }
+            check(profile == AppProfile.DEV || runMode == BotRunMode.WEBHOOK) {
+                PROD_LIKE_POLLING_ERROR
+            }
+            val miniAppUrl = resolveMiniAppUrl(env("MINI_APP_URL"), profile)
             val bot =
                 BotConfig(
                     token = envRequired("TELEGRAM_BOT_TOKEN"),
@@ -193,13 +209,71 @@ data class AppConfig(
                         system = env("CLUB4_SYSTEM_THREAD_ID")?.toIntOrNull(),
                     ),
                 )
-            return AppConfig(profile, runMode, bot, webhook, db, workers, health, localApi, hq, clubs)
+            return AppConfig(profile, runMode, miniAppUrl, bot, webhook, db, workers, health, localApi, hq, clubs)
+        }
+
+        private fun resolveMiniAppUrl(
+            raw: String?,
+            profile: AppProfile,
+        ): String? {
+            if (raw.isNullOrBlank()) {
+                check(profile == AppProfile.DEV) { MINI_APP_URL_REQUIRED_ERROR }
+                return null
+            }
+
+            val uri =
+                try {
+                    URI(raw)
+                } catch (_: URISyntaxException) {
+                    error(MINI_APP_URL_INVALID_ERROR)
+                }
+            check(
+                uri.isAbsolute &&
+                    (uri.scheme == "https" || profile == AppProfile.DEV && uri.scheme == "http") &&
+                    !uri.host.isNullOrEmpty() &&
+                    uri.rawUserInfo == null &&
+                    hasValidPort(uri) &&
+                    uri.rawQuery == null &&
+                    uri.rawFragment == null,
+            ) {
+                MINI_APP_URL_INVALID_ERROR
+            }
+            return raw
+        }
+
+        private fun hasValidPort(uri: URI): Boolean {
+            val authority = uri.rawAuthority ?: return false
+            val (portSeparator, authorityIsValid) =
+                if (authority.startsWith("[")) {
+                    val closingBracket = authority.indexOf(']')
+                    when {
+                        closingBracket == authority.lastIndex -> null to true
+                        closingBracket >= 0 && authority.getOrNull(closingBracket + 1) == ':' ->
+                            closingBracket + 1 to true
+                        else -> null to false
+                    }
+                } else {
+                    authority.lastIndexOf(':').takeIf { it >= 0 } to true
+                }
+            return authorityIsValid &&
+                if (portSeparator == null) {
+                    uri.port == -1
+                } else {
+                    val rawPort = authority.substring(portSeparator + 1)
+                    val explicitPort = rawPort.toIntOrNull()
+                    rawPort.isNotEmpty() &&
+                        rawPort.all { it in '0'..'9' } &&
+                        explicitPort != null &&
+                        explicitPort in MIN_EXPLICIT_PORT..MAX_EXPLICIT_PORT &&
+                        uri.port == explicitPort
+                }
         }
     }
 
     fun toSafeString(): String {
         val sb = StringBuilder()
         sb.appendLine("AppConfig(profile=$profile, runMode=$runMode)")
+        sb.appendLine("  MiniApp(urlConfigured=${miniAppUrl != null})")
         sb.appendLine("  ${bot.safe()}")
         sb.appendLine("  ${webhook.safe()}")
         sb.appendLine("  ${db.safe()}")

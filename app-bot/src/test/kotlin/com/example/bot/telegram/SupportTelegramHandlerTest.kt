@@ -148,10 +148,11 @@ class TelegramCallbackRouterTest {
 
     @Test
     fun `routes invitation callbacks to invitation handler`() = runBlocking {
+        var invitationCalls = 0
         val router =
             TelegramCallbackRouter(
                 supportHandler = { throw AssertionError("support should not be called") },
-                invitationHandler = {},
+                invitationHandler = { invitationCalls++ },
                 guestFallbackHandler = { false },
                 paymentsHandler = mockk(relaxed = true),
             )
@@ -160,6 +161,8 @@ class TelegramCallbackRouterTest {
 
         router.route(updateConfirm)
         router.route(updateDecline)
+
+        assertEquals(2, invitationCalls)
     }
 
     @Test
@@ -202,6 +205,31 @@ class TelegramCallbackRouterTest {
         coVerify(exactly = 1) { paymentsHandler.handlePreCheckout(query) }
         coVerify(exactly = 0) { paymentsHandler.handleSuccessfulPayment(any()) }
     }
+
+    @Test
+    fun `routes successful payment updates before message handlers`() =
+        runBlocking {
+            val paymentsHandler = mockk<PaymentsHandlers>()
+            val router =
+                TelegramCallbackRouter(
+                    supportHandler = { throw AssertionError("support should not be called") },
+                    invitationHandler = { throw AssertionError("invitation should not be called") },
+                    guestFallbackHandler = { throw AssertionError("fallback should not be called") },
+                    paymentsHandler = paymentsHandler,
+                )
+            val update = mockk<Update>()
+            val message = mockk<Message>()
+            val successfulPayment = mockk<com.pengrad.telegrambot.model.SuccessfulPayment>()
+            every { update.preCheckoutQuery() } returns null
+            every { update.message() } returns message
+            every { message.successfulPayment() } returns successfulPayment
+            coEvery { paymentsHandler.handleSuccessfulPayment(message) } returns Unit
+
+            router.route(update)
+
+            coVerify(exactly = 0) { paymentsHandler.handlePreCheckout(any()) }
+            coVerify(exactly = 1) { paymentsHandler.handleSuccessfulPayment(message) }
+        }
 
     @Test
     fun `routes non callback updates to invitation handler when fallback ignored update`() = runBlocking {
