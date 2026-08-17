@@ -1,0 +1,245 @@
+# AS_BUILT: repository snapshot
+
+Аудит выполнен read-only по production/test source на branch `codex/product-rebaseline-audit`, HEAD `df7685facb52a6e5731a520669dfa2c73f6ccf24`, синхронному exact `origin/main`, 2026-08-17. Внешний deployment, VPS, Telegram configuration, runtime data и secrets не проверялись; фактическая доступность уже развёрнутого экземпляра поэтому `UNKNOWN`.
+
+## 1. Repository inventory и метод
+
+Проверены root `README*`, `AGENTS.md`, `docs/**`, `reports/**`, application entrypoint/wiring, Telegram webhook/router/handlers, Ktor routes, services/repositories/DTO, migrations PostgreSQL/H2, роли и security plugins, Mini App source/tracked dist/static assets, packaging/Docker path и relevant tests в:
+
+- `app-bot/src/main/**`, `app-bot/src/test/**`;
+- `core-domain/**`, `core-data/**`, `core-security/**`, `core-telemetry/**`, `core-testing/**`;
+- `miniapp/**`;
+- `Dockerfile`, `docker-compose*.yml`, Gradle resource packaging и operational docs только там, где они влияют на product availability.
+
+Generated `build/**` не использовался как product evidence. Для важных утверждений проверялась цепочка `entrypoint → registered route/router → service/repository → persistence → response/UI`; наличие отдельного файла без вызова из `Application.module` отмечается как `PRESENT_UNWIRED`.
+
+## 2. Production runtime spine
+
+| Layer | Status | Evidence | Что доказано |
+|---|---|---|---|
+| Ktor entrypoint | `AS_BUILT` | `app-bot/src/main/resources/application.conf:6-14`, symbol `modules`; `app-bot/build.gradle.kts:160-171`, `ktorEngineMainClass`; `Dockerfile:40-59` | Packaged process запускает Netty `EngineMain`, который вызывает `ApplicationKt.module`; это не polling main. |
+| Application bootstrap | `AS_BUILT` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:163-181`, `module`; `app-bot/src/main/kotlin/com/example/bot/Application.kt:513-562`, `bootstrap*` | Plugins, DB migrations, security, Koin, routes и seed-if-empty включены в основной module. |
+| HTTP route registry | `AS_BUILT` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:334-503` | Здесь находится фактический перечень подключённых product routes; эта регистрация использована как граница wiring. |
+| Telegram ingress | `AS_BUILT` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:275-320`; `app-bot/src/main/kotlin/com/example/bot/routes/TelegramWebhookRoutes.kt:26-98`; `app-bot/src/main/kotlin/com/example/bot/telegram/webhook/TelegramWebhookIngressWorker.kt:18-121` | Webhook кладёт update в DB ingress queue, worker передаёт его production router. |
+| Telegram command router | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramCallbackRouter.kt:5-38`; `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:41-89` | Router обрабатывает payments, invitation/support callback и bounded private commands; iBota, Guest Mode и business updates не маршрутизируются. |
+| Polling entry | `PRESENT_UNWIRED` | `app-bot/src/main/kotlin/com/example/bot/polling/PollingMain.kt:44-55`, `main`; `app-bot/build.gradle.kts:160-171`; `Dockerfile:58-59` | Отдельный polling entry существует, но packaged launcher — Ktor EngineMain; handler polling entry не выполняет product flow. |
+
+## 3. Что реально открывается на `/app`
+
+### 3.1. Canonical packaged surface
+
+`/app` — `AS_BUILT` как статическая витрина «Куда пойдём?», а не React role shell:
+
+- `app-bot/src/main/kotlin/com/example/bot/routes/WebAppRoutes.kt:15-29`, `webAppRoutes`, читает classpath resource "webapp/app/index.html" и раздаёт resources под `/app`;
+- `app-bot/src/main/kotlin/com/example/bot/Application.kt:559-577` всегда вызывает этот route, а отдельный legacy booking WebApp включается только feature flag с default `false`;
+- `app-bot/build.gradle.kts:139-158`, task `copyMiniAppDist`, копирует сначала tracked `miniapp/dist`, затем tracked static source, с `DuplicatesStrategy.INCLUDE`;
+- `Dockerfile:21-25` не собирает React/Vite: он использует tracked assets и запускает `installDist`;
+- `miniapp/src/main/resources/miniapp/index.html:1-95` задаёт `<title>Куда пойдём?</title>`, фильтры, список клубов и events;
+- `app-bot/src/test/kotlin/com/example/bot/routes/WebAppRoutesTest.kt:20-77` проверяет, что `/app`/`/app/` равны packaged index, имеют этот title/base и рабочие assets под `/app/assets`.
+
+Отдельный `app-bot/src/main/kotlin/com/example/bot/webapp/WebAppRoutes.kt:23-65`, symbol `com.example.bot.webapp.webAppRoutes`, также определяет `/app` и `/miniapp/me`, но не импортирован и не вызван production `Application.module`. `app-bot/src/main/kotlin/com/example/bot/Application.kt:559-562` вызывает только `com.example.bot.routes.webAppRoutes`; альтернативный symbol имеет статус `PRESENT_UNWIRED` и не создаёт второй доступный production entry.
+
+Runtime flow этой страницы: `/app` → static `index.html` → `miniapp/src/main/resources/miniapp/assets/js/browse.js:71-102,213-247` → authenticated `GET /api/clubs` и `GET /api/events` → `clubsRoutes` → DB repositories → cards/list. Страница не содержит role switch, бронирование, QR, вопросы, staff operations или iBota.
+
+### 3.2. React source
+
+React Mini App — `PRESENT_UNWIRED` относительно canonical `/app`:
+
+- `miniapp/dist/index.html:1-12` — tracked stale build с absolute `/assets/...`, тогда как canonical test требует `/app/assets/...`;
+- `miniapp/src/app/App.tsx:13-41`, `App`, выбирает `admin`, `promoter`, `entry`, `my-nights` или `guest` по доверенному query parameter `mode`, а не по server-provided role model;
+- `miniapp/src/modules/guest/pages/GuestShell.tsx:9-128` имеет только «Забронировать», «Моя бронь», «Профиль клуба», «Мои ночи», «Музыка»; canonical source navigation из восьми guest sections и iBota отсутствует;
+- `miniapp/src/modules/entry/pages/EntryConsole.tsx:9-73` содержит entry/scanner/waitlist/checklist, но требует ручного ввода club/event ID;
+- `miniapp/src/modules/admin/pages/AdminShell.tsx:5-64` и `miniapp/src/modules/promoter/pages/PromoterShell.tsx:4-64` содержат role-like sections, но не являются served canonical entry;
+- `miniapp/src/modules/common/components/ClubPicker.tsx:7-26` вызывает `/api/clubs` без filter, а `app-bot/src/main/kotlin/com/example/bot/routes/ClubsRoutes.kt:91-109` на такой запрос возвращает пустой list;
+- `miniapp/src/modules/common/components/NightPicker.tsx:18-90` вызывает `/api/clubs/{clubId}/nights`, но defining route `app-bot/src/main/kotlin/com/example/bot/routes/AvailabilityApiRoutes.kt:39-75` не зарегистрирован в `app-bot/src/main/kotlin/com/example/bot/Application.kt:334-503`.
+
+Следствие: существование React screens не является доказательством UI exposure. Даже при ручной подмене entry основная guest/admin night selection цепочка обрывается на unwired API.
+
+## 4. Key flow audit
+
+| Flow | Status | Production wiring | Persistence | Tests | UI/Telegram exposure и availability |
+|---|---|---|---|---|---|
+| Bare `/start` → Mini App | `AS_BUILT` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:289-314` → `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramCallbackRouter.kt:5-38` → `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:49-52,91-105` | Не требуется; handler не читает и не создаёт application user | `app-bot/src/test/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandlerTest.kt:39-78` | Private chat получает одно сообщение и WebApp button даже для незарегистрированного Telegram user. Текст называет продукт Night Concierge (`app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:345-346`). External deployed URL/config — `UNKNOWN`. |
+| `/app` → catalogue/events | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:559-562` → `app-bot/src/main/kotlin/com/example/bot/routes/WebAppRoutes.kt:15-29` → static browse JS → `app-bot/src/main/kotlin/com/example/bot/routes/ClubsRoutes.kt:81-249` | Clubs/events DB tables and repositories | `app-bot/src/test/kotlin/com/example/bot/routes/WebAppRoutesTest.kt:20-77`; `app-bot/src/test/kotlin/com/example/bot/routes/ClubsRoutesTest.kt:1-500` | Catalogue list/filter работает по source wiring; нет club detail/content/CTA и role surfaces. |
+| Club → operational nights → free tables | `PRESENT_UNWIRED` | React calls are in `miniapp/src/modules/common/components/NightPicker.tsx:37-53` and `miniapp/src/modules/guest/pages/HallMap.tsx:7-42`; route definitions are `app-bot/src/main/kotlin/com/example/bot/routes/AvailabilityApiRoutes.kt:39-75`, but absent from `app-bot/src/main/kotlin/com/example/bot/Application.kt:334-503` | Events/tables persist; weekly/holiday/exception adapter returns empty lists | `core-domain/src/test/kotlin/com/example/bot/time/OperatingRulesResolverTest.kt:16` | Domain resolver tests не делают endpoint production-wired. Canonical static `/app` этот flow не использует. |
+| Guest HOLD/confirm | `PARTIAL` | Both families are registered at `app-bot/src/main/kotlin/com/example/bot/Application.kt:339-349,499-503`. Secured branch adds `authorize` + `clubScoped` Constant selectors (`core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt:228-260`) and is deterministically selected by pinned Ktor 3.3.1 (`gradle/libs.versions.toml:4`) | Actual selected path uses DB `BookingService`; A3 memory path is not selected for the conflicting methods | `app-bot/src/test/kotlin/com/example/bot/routes/BookingA3RoutesTest.kt:60`; `app-bot/src/test/kotlin/com/example/bot/routes/SecuredBookingRoutesTest.kt:224` test each family separately | A3/React sends `tableId,eventId,guestCount` and numeric `bookingId` (`app-bot/src/main/kotlin/com/example/bot/routes/BookingA3Routes.kt:60-68`; `miniapp/src/modules/guest/components/BookingFlow.tsx:240-306`), while selected DB handler expects slot/TTL and UUID `holdId` (`app-bot/src/main/kotlin/com/example/bot/booking/dto/Requests.kt:9-38`), so current client gets `invalid_payload`. A3 handlers are registered but shadowed/unreachable; the secured handler is selected deterministically. |
+| Guest booking cancellation/payment | `PRESENT_UNWIRED` | Definitions: `app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt:70-300`, `app-bot/src/main/kotlin/com/example/bot/routes/PaymentsFinalizeRoutes.kt:50-281`, `app-bot/src/main/kotlin/com/example/bot/routes/BookingFinalizeRoutes.kt:23-68`, `app-bot/src/main/kotlin/com/example/bot/routes/ConfirmRoutes.kt:19-29`; none called by `app-bot/src/main/kotlin/com/example/bot/Application.kt:334-503` | Payment/refund tables/repositories exist | Route/repository tests exist | Telegram router handles pre-checkout/success messages, but no production caller sends invoice/finalizes this guest flow. |
+| GuestList name/bulk/invitation | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:337,359-374,447-448` → promoter/list/invitation routes | DB-backed guest lists, entries, invitations | `app-bot/src/test/kotlin/com/example/bot/routes/PromoterGuestListRoutesTest.kt:80-900`; `app-bot/src/test/kotlin/com/example/bot/routes/GuestListInvitationCheckinE2ETest.kt:67`; Postgres ITs | API supports single/bulk names and invitation links/QR; canonical `/app` has no promoter UI and AI import is absent. |
+| QR/check-in | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:354-358,496` → two check-in route families → `CheckinServiceImpl`/repositories | `checkin_records` unique per subject; `club_visits` unique per club/night/user | `app-bot/src/test/kotlin/com/example/bot/routes/HostCheckinRoutesTest.kt:58`; `app-bot/src/test/kotlin/com/example/bot/routes/PromoterInviteCheckinIntegrationTest.kt:65`; `core-data/src/test/kotlin/com/example/bot/data/club/CheckinDbRepositoryTest.kt:24` | Scanner/search React is unwired; Telegram `/qr` emits booking QR only. Multiple QR codecs prevent one proven Night Pass contract. Separately, table seating can create the same user/night visit before entrance (`app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:301-314,442-455,792-829`), so visit ordering is not entrance-only. |
+| Table seat/deposit/free | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:383-400` → `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:122-618` → table session/deposit repositories; seating calls `markHasTableIfPossible` at `301-314,442-455,792-829` | DB session + append-only operations ledger; helper also persists a `TABLE_DEPOSIT` visit through `VisitRepository.tryCheckIn` | `app-bot/src/test/kotlin/com/example/bot/routes/AdminTableOpsRoutesTest.kt:69` | API supports seat/free/deposit adjustment, but canonical UI absent; modes/top-up/security/stop-sales are incomplete. The visit side effect bypasses the source entrance-before-stamp boundary. |
+| Financial shift | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:395-401` → `app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt:190-316` → shift repositories | DB reports/templates; closed update rejected | `app-bot/src/test/kotlin/com/example/bot/routes/AdminFinanceShiftRoutesTest.kt:51` | Draft is lazily created by GET, not auto-opened; close role set differs; no super-role correction path. React screen is unwired. |
+| Gamification | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:350-353,407-413` → guest/admin routes → `GamificationEngine`; table seating independently calls `VisitRepository.tryCheckIn` with `TABLE_DEPOSIT` (`app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:301-314,442-455,792-829`) | Visits/badges/coupons/fingerprints persisted; visit counts feed progress at `core-data/src/main/kotlin/com/example/bot/data/visits/VisitRepositories.kt:139-209` | `app-bot/src/test/kotlin/com/example/bot/routes/GuestGamificationRoutesTest.kt:51`; `app-bot/src/test/kotlin/com/example/bot/routes/AdminGamificationRoutesTest.kt:58` | Visits/early/badges/reward ladder exist, but visit/stamp progress may appear before accepted entrance check-in. Source raffles and complete table-loyalty journeys do not; `mysteryEligible` has no end-to-end journey. React exposure unwired. |
+| Support | `PARTIAL` | Private `/ask` is handled by `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:156-254`; registered support API `app-bot/src/main/kotlin/com/example/bot/Application.kt:450-472` exposes staff list/reply at `app-bot/src/main/kotlin/com/example/bot/routes/SupportRoutes.kt:246-400` and guest delivery at `381-389,459-493` | DB tickets/messages/ratings; reply persists at `core-data/src/main/kotlin/com/example/bot/data/support/SupportRepository.kt:237-279` | `/ask` test injects an existing user at `app-bot/src/test/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandlerTest.kt:243-267,345-375`; API/repository tests cover later primitives | `/ask`, persistence, RBAC API and Telegram delivery primitives are wired only after an application user exists. Fresh-user provisioning and a served staff inbox/detail/reply surface are absent; `app-bot/src/main/kotlin/com/example/bot/telegram/SupportTelegramHandler.kt:30-106` handles rating callbacks only. Source statuses/taxonomy transitions remain unresolved. |
+| Music | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:414,423-446` → admin/public/likes/battles/track routes | DB items/assets/playlists/likes/votes/stems | `app-bot/src/test/kotlin/com/example/bot/routes/AdminMusicRoutesTest.kt:65`; `app-bot/src/test/kotlin/com/example/bot/routes/MusicRoutesTest.kt:48-700` | Backend exposes substantial music functions; no DJ role, donations or canonical served React UI. |
+| Campaign communications | `PRESENT_UNWIRED` | `app-bot/src/main/kotlin/com/example/bot/routes/NotifyRoutes.kt:314-345`, `app-bot/src/main/kotlin/com/example/bot/routes/OutboxAdminRoutes.kt:103-300`, `app-bot/src/main/kotlin/com/example/bot/workers/SchedulerModule.kt:87-135` exist but are not called from `app-bot/src/main/kotlin/com/example/bot/Application.kt:334-503` | Campaign/outbox repositories exist | Unit/route tests exist | Operational Telegram notifications are separately wired (`app-bot/src/main/kotlin/com/example/bot/Application.kt:316-320`); source guest campaigns/subscriptions/quiet hours are not production-wired. |
+| Analytics | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:402-406` → `app-bot/src/main/kotlin/com/example/bot/routes/AdminAnalyticsRoutes.kt:111-209` → `app-bot/src/main/kotlin/com/example/bot/analytics/AdminAnalyticsSnapshotService.kt:99-214` | Cached snapshots + source repositories | `app-bot/src/test/kotlin/com/example/bot/routes/AdminAnalyticsRoutesTest.kt:45` | Owner/global/head-manager club/night snapshot exists; role-specific promoter/finance/network comparisons, export and AI queries do not. |
+
+### 4.1. Identity boundary for the first support slice
+
+- Bare `/start` succeeds without an application user lookup or row (`app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:49-52,91-105`).
+- `/ask` immediately calls `resolveUser`, which reads `UserRepository.getByTelegramId`; an unknown Telegram user receives the not-registered response and cannot reach club selection/ticket creation (`app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:82-84,156-180,269-283`).
+- The production `ExposedUserRepository` exposes reads only (`core-data/src/main/kotlin/com/example/bot/data/security/ExposedUserRepositories.kt:15-37`); current Telegram routing contains no ensure/create writer.
+- The located `ensureUser` writer belongs to the deprecated legacy booking WebApp (`app-bot/src/main/kotlin/com/example/bot/deprecated/legacy/web/BookingWebAppRoutes.kt:829-848`), whose production bootstrap is disabled by default (`app-bot/src/main/kotlin/com/example/bot/Application.kt:559-577`). It is not evidence that fresh-user provisioning is available.
+- The `/ask` test uses the pre-created `RegisteredFallbackUserRepository` fixture (`app-bot/src/test/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandlerTest.kt:243-267,345-375`) and therefore does not close this production gap.
+
+## 5. Domain-by-domain state
+
+| # | Domain | Status | Evidence | Wired/persistence/UI/missing summary |
+|---:|---|---|---|---|
+| 1 | Product identity and naming | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:345-346`; `miniapp/src/main/resources/miniapp/index.html:7-14`; `docker-compose.yml:20-28` | Runtime surfaces say Night Concierge and «Куда пойдём?», while source says Telegram Club OS/iBota. No single canonical identity. |
+| 2 | Multi-club / network model | `PARTIAL` | `core-data/src/main/kotlin/com/example/bot/data/db/Tables.kt:8-27`; `app-bot/src/main/kotlin/com/example/bot/routes/ClubsRoutes.kt:81-249`; `core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt:127-169` | Club IDs/TZ/content fields, filtered catalogue and club scope exist; network product flow and first-release policy remain unresolved. |
+| 3 | Roles and RBAC | `PARTIAL` | `core-data/src/main/kotlin/com/example/bot/data/security/Role.kt:6-15`; `core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt:94-194`; `core-security/src/main/kotlin/com/example/bot/security/rbac/RbacHelpers.kt:5-10` | Enforced role/club scope exists, but role enum lacks floor manager, financial manager and DJ; promoter is not a distinct global role model. |
+| 4 | Club calendar and operational night | `PARTIAL` | `core-domain/src/main/kotlin/com/example/bot/time/OperatingRulesResolver.kt:16-35,156-320`; `core-data/src/main/kotlin/com/example/bot/availability/DefaultAvailabilityService.kt:48-99`; `core-domain/src/main/kotlin/com/example/bot/policy/CutoffPolicy.kt:10-31` | Resolver understands TZ/overnight/rule precedence, but production adapter supplies no hours/holidays/exceptions and cutoff is 60 min before start, not configurable end-minus-2h. |
+| 5 | Club catalogue/content | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/ClubsRoutes.kt:41-79,81-249`; `miniapp/src/main/resources/miniapp/index.html:19-89` | List/events are wired; API DTO has no description/address/posters/photos/music detail or booking/question CTA. |
+| 6 | Guest table booking | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:339-349,499-503`; `core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt:228-260`; `app-bot/src/main/kotlin/com/example/bot/routes/SecuredBookingRoutes.kt:26-149`; `app-bot/src/main/kotlin/com/example/bot/routes/BookingA3Routes.kt:60-68` | Secured DB branch is deterministically selected; A3 branch is shadowed for conflicting methods. Full guest data/rules/deposit/cancel/payment journey is absent and A3/React DTO fails against selected handler. |
+| 7 | Table HOLD and lifecycle | `PARTIAL` | Selected DB path `app-bot/src/main/kotlin/com/example/bot/routes/SecuredBookingRoutes.kt:26-149` → `app-bot/src/main/kotlin/com/example/bot/booking/BookingService.kt:69-230`; shadowed A3 state `app-bot/src/main/kotlin/com/example/bot/booking/a3/BookingState.kt:27-213` | DB TTL/idempotency foundation exists; no proven one-active-HOLD-per-user invariant, 30-min post-arrival lifecycle or manager extension, and current client DTO is incompatible. |
+| 8 | Mini App navigation/role surfaces | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/WebAppRoutes.kt:15-29`; `app-bot/src/test/kotlin/com/example/bot/routes/WebAppRoutesTest.kt:20-77`; `miniapp/src/app/App.tsx:13-41`; `miniapp/src/modules/guest/pages/GuestShell.tsx:9-128` | Served `/app` is catalogue-only. Rich guest/staff/admin React code is `PRESENT_UNWIRED` and incomplete against source navigation. |
+| 9 | Guest lists | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/PromoterGuestListRoutes.kt:628-797`; `core-data/src/main/resources/db/migration/postgresql/V017__guest_list_invites_checkins.sql:1-83` | Bulk/single/list/invitation APIs persist; canonical role UI and AI cleanup/draft are missing. |
+| 10 | Invitations and Night Pass | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/GuestListInviteRoutes.kt:30-115`; `app-bot/src/main/kotlin/com/example/bot/routes/PromoterInvitesRoutes.kt:63-118`; `app-bot/src/main/kotlin/com/example/bot/routes/MeBookingsRoutes.kt:122-214` | Invitation and booking-specific QR flows exist, but they are separate codecs/tokens, not one Night Pass per user/night. |
+| 11 | Check-in and QR | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/HostCheckinRoutes.kt:98-243`; `core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt:995-1124`; table bypass `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:301-314,442-455,792-829`; DB constraints `core-data/src/main/resources/db/migration/postgresql/V017__guest_list_invites_checkins.sql:70-83`, `core-data/src/main/resources/db/migration/postgresql/V034__operational_night_overrides_club_visits.sql:10-24` | Scan/search/deny/idempotent-by-subject and unique visit exist; unique check-in per user/night across all subjects is not enforced, and seating can create visit before entrance. |
+| 12 | Table operations | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:117-166,168-618`; `app-bot/src/main/kotlin/com/example/bot/routes/SecuredBookingRoutes.kt:125-148` | Seat/free/no-show and table state APIs exist; no deposit/by-bill/by-club modes or stop-sales/Undo. |
+| 13 | Deposits/top-ups/services | `PARTIAL` | `core-data/src/main/kotlin/com/example/bot/data/booking/BookingTables.kt:131-136`; `core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt:214-340`; `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:515-618` | INITIAL plus append-only ADJUSTMENT is wired; TOPUP/SECURITY enums exist but no production use, and allocation/guard service semantics are incomplete. |
+| 14 | Financial shift | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceShiftRoutes.kt:190-316`; `core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt:424-559,588-633` | People/bracelets/revenue/flags/reconciliation/close freeze exist; auto-open, finance-only close and super-role correction are missing. |
+| 15 | Loyalty/gamification | `PARTIAL` | `core-domain/src/main/kotlin/com/example/bot/gamification/GamificationTypes.kt:5-36`; `core-domain/src/main/kotlin/com/example/bot/gamification/GamificationEngine.kt:7-125`; `core-data/src/main/kotlin/com/example/bot/data/visits/VisitRepositories.kt:139-209`; table seating bypass `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:301-314,442-455,792-829` | Unique fingerprints and visit progress exist, but seating may create/count a visit before entrance check-in; raffles and complete table-loyalty source model do not. |
+| 16 | Club support/questions | `PARTIAL` | `core-domain/src/main/kotlin/com/example/bot/support/SupportModels.kt:6-29`; `app-bot/src/main/kotlin/com/example/bot/routes/SupportRoutes.kt:118-400,459-493`; `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:156-254`; `core-data/src/main/kotlin/com/example/bot/data/support/SupportRepository.kt:131-279` | DB/API/private `/ask`/Telegram reply primitives exist. No served staff inbox/detail/reply surface; statuses differ and source transition graph is undefined. |
+| 17 | DJ/music/files/interactions | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/AdminMusicRoutes.kt:122-207,300-463`; `app-bot/src/main/kotlin/com/example/bot/routes/MusicRoutes.kt:36-210`; `app-bot/src/main/kotlin/com/example/bot/routes/MusicBattleRoutes.kt:88-183`; `app-bot/src/main/kotlin/com/example/bot/routes/TrackOfNightRoutes.kt:25-90` | Files, publish/unpublish, playlists, likes, battles/votes and track-of-night are wired; DJ role, donations and complete role UI are absent. |
+| 18 | Communications/broadcasts | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/Application.kt:316-320`; `app-bot/src/main/kotlin/com/example/bot/notifications/TelegramOperationalNotificationService.kt:169-324`; `app-bot/src/main/kotlin/com/example/bot/routes/NotifyRoutes.kt:314-345`; `app-bot/src/main/kotlin/com/example/bot/workers/SchedulerModule.kt:87-135` | Staff operational notifications run; guest campaign stack is `PRESENT_UNWIRED`, and subscriptions/quiet hours/calendar segmentation are missing. |
+| 19 | Analytics/reports | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/AdminAnalyticsRoutes.kt:69-80,111-209`; `app-bot/src/main/kotlin/com/example/bot/analytics/AdminAnalyticsSnapshotService.kt:99-214` | Club/night attendance/deposit/shift/segment snapshot with caveats exists for global roles; source’s four role views/network trends/AI queries are incomplete. |
+| 20 | Role checklists/procedures | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/host/ShiftChecklistService.kt:8-48`; `app-bot/src/main/kotlin/com/example/bot/routes/HostChecklistRoutes.kt:36-134` | Fixed Host checklist API is wired but ephemeral/in-memory; other roles, golden rules and broad operating procedure integration are absent. |
+| 21 | Club onboarding without code | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/routes/AdminClubsRoutes.kt:57-165`; `app-bot/src/main/kotlin/com/example/bot/routes/AdminHallsRoutes.kt:59-260`; `app-bot/src/main/kotlin/com/example/bot/routes/AdminTablesRoutes.kt:101-460`; `app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceTemplateRoutes.kt:73-350` | CRUD/config fragments exist for club/hall/table/plan/finance and modules, but no single wizard, calendar rule editor, full role/module setup or audited end-to-end onboarding. |
+| 22 | Failure/degraded modes | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:41-175`; `docs/ops/degraded-mode-sop.md:1-41` | Private `/my`, `/qr`, `/ask` fallback is wired; scanner→manual journal, map→list switch and recovery are predominantly `DOC_ONLY`. |
+| 23 | Audit/fraud/security | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/plugins/RbacStartupGuard.kt:24-82`; `core-security/src/main/kotlin/com/example/bot/security/auth/InitDataValidator.kt:17-94`; `core-security/src/main/kotlin/com/example/bot/security/webhook/WebhookSecurityPlugin.kt:44-170`; `core-data/src/main/kotlin/com/example/bot/data/audit/AuditLogRepositoryImpl.kt:97-139`; `app-bot/src/main/kotlin/com/example/bot/plugins/InitDataAuth.kt:140-153` | Webhook secret/security, initData HMAC/age, RBAC, audit and redaction exist. Query-string `initData` remains accepted without prod/stage gate; fraud controls are fragmentary. |
+| 24 | iBota in private bot chat | `GAP` | — | No iBota/LLM intent router, button or assistant service found; current commands are fixed `/start`, `/qr`, `/my`, `/invites`, `/ask`. |
+| 25 | iBota in Mini App | `GAP` | — | No assistant button, panel, screen-context contract or AI endpoint in served or React source. |
+| 26 | Guest Mode | `GAP` | — | Router does not consume `guest_message`/`guest_query_id` and no `answerGuestQuery` client path exists. |
+| 27 | AI form filling/confirmation | `GAP` | — | No NLP-to-form draft pipeline or AI confirmation state exists. |
+| 28 | Role-scoped AI analytics | `GAP` | — | Deterministic analytics endpoints exist, but no AI query/grounding/role-scoped response path. |
+| 29 | AI safety/critical confirmation | `GAP` | — | RBAC/audit primitives are reusable, but no AI action layer exists to enforce the source contract. |
+| 30 | Bot-to-bot/business-connected readiness | `GAP` | — | No routing for bot-originated/private bot communication or Telegram business connection/message update types. |
+
+### 5.1. Requirement-level status corrections
+
+Эти rows фиксируют границы, которые нельзя считать complete production availability; они синхронны с [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md).
+
+| Requirement | Status | Production evidence | Missing boundary |
+|---|---|---|---|
+| `RBAC-003` | `PARTIAL` | Reusable production role/scope primitives `core-security/src/main/kotlin/com/example/bot/security/rbac/RbacPlugin.kt:94-194`; fixed Telegram router `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramCallbackRouter.kt:5-38` | Foundation exists, but no iBota layer integrates it; the bounded iBota role/scope contract is absent end-to-end. |
+| `GL-003` | `PARTIAL` | Production registrations `app-bot/src/main/kotlin/com/example/bot/Application.kt:359-374,447-448`; creation `app-bot/src/main/kotlin/com/example/bot/routes/PromoterGuestListRoutes.kt:761-797`; separate QR routes `app-bot/src/main/kotlin/com/example/bot/routes/GuestListInviteRoutes.kt:30-115`, `app-bot/src/main/kotlin/com/example/bot/routes/PromoterInvitesRoutes.kt:63-118` | Invitation link/QR exists; unified Night Pass contract отсутствует. |
+| `CHK-007` | `PARTIAL` | Entrance path `core-data/src/main/kotlin/com/example/bot/data/checkin/CheckinServiceImpl.kt:995-1124`; seating path `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:301-314,442-455,792-829` | `TABLE_DEPOSIT` seating can create visit before entrance acceptance. |
+| `LOY-001` | `PARTIAL` | Unique visit/counts `core-data/src/main/kotlin/com/example/bot/data/visits/VisitRepositories.kt:139-209`; table-seating bypass `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:301-314,442-455,792-829` | One row/night is enforced, but entrance-first stamp/progress ordering is not. |
+| `SUP-004` | `PARTIAL` | Production registration `app-bot/src/main/kotlin/com/example/bot/Application.kt:450-472`; staff API/delivery `app-bot/src/main/kotlin/com/example/bot/routes/SupportRoutes.kt:246-400,459-493`; persistence `core-data/src/main/kotlin/com/example/bot/data/support/SupportRepository.kt:237-279` | Served staff inbox/detail/reply surface отсутствует. |
+| `MUS-001` | `PARTIAL` | Registered admin backend `app-bot/src/main/kotlin/com/example/bot/Application.kt:414`; upload `app-bot/src/main/kotlin/com/example/bot/routes/AdminMusicRoutes.kt:355-463`; `core-data/src/main/kotlin/com/example/bot/data/security/Role.kt:6-15` | Current role model has no DJ and no DJ-specific served journey. |
+| `ONB-006` | `PARTIAL` | Production registrations `app-bot/src/main/kotlin/com/example/bot/Application.kt:383-401`; finance template `app-bot/src/main/kotlin/com/example/bot/routes/AdminFinanceTemplateRoutes.kt:73-350`; per-operation allocation `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:200-296,515-618` | No Add Club master and no reusable deposit-allocation configuration model. |
+
+## 6. Important persistence findings
+
+- `PARTIAL`: operational-night schema exists (`core-data/src/main/resources/db/migration/postgresql/V1__init.sql:24-75`), but `core-data/src/main/kotlin/com/example/bot/availability/DefaultAvailabilityService.kt:61-73` ignores weekly/holiday/exception rows.
+- `PARTIAL`: guest check-in record has `UNIQUE(subject_type, subject_id)` (`core-data/src/main/resources/db/migration/postgresql/V017__guest_list_invites_checkins.sql:70-83`), while visit has `UNIQUE(club_id, night_start_utc, user_id)` (`core-data/src/main/resources/db/migration/postgresql/V034__operational_night_overrides_club_visits.sql:10-24`). Это защищает один visit row, но не исключает несколько check-in records через разные subjects. Кроме того, `app-bot/src/main/kotlin/com/example/bot/routes/AdminTableOpsRoutes.kt:301-314,442-455,792-829` создаёт `TABLE_DEPOSIT` visit до entrance check-in; он учитывается `core-data/src/main/kotlin/com/example/bot/data/visits/VisitRepositories.kt:139-209` в progress metrics.
+- `AS_BUILT`: deposit repository appends operation delta rather than silently overwriting history (`core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt:214-340`); however only INITIAL/ADJUSTMENT are wired.
+- `AS_BUILT`: closed shift rejects ordinary draft/deposit mutations (`core-data/src/main/kotlin/com/example/bot/data/finance/ShiftReportRepositories.kt:478-559`; `core-data/src/main/kotlin/com/example/bot/data/booking/TableSessionDepositRepositories.kt:676-696`). No authorized correction-after-close flow exists.
+- `PARTIAL`: A3 booking state is process memory (`app-bot/src/main/kotlin/com/example/bot/booking/a3/BookingState.kt:27-61`), but for conflicting `/hold` and `/confirm` methods its registered handler is shadowed by the more-specific secured route. Production deterministically reaches `app-bot/src/main/kotlin/com/example/bot/routes/SecuredBookingRoutes.kt:26-149` and DB `BookingService`; persistence for those methods is deterministically DB-backed. The remaining failure is the incompatible A3/React DTO, which returns `invalid_payload` at the selected handler.
+
+## 7. Tests versus production
+
+| Area | Test evidence | Interpretation |
+|---|---|---|
+| RBAC/initData/webhook | `core-security/src/test/kotlin/com/example/bot/security/rbac/RbacPluginTest.kt:31`; `core-security/src/test/kotlin/com/example/bot/security/auth/InitDataValidatorTest.kt:20-330`; `core-security/src/test/kotlin/com/example/bot/security/webhook/WebhookSecurityPluginTest.kt:36-172` | Strong tests for primitives; they do not negate query-transport exposure in `InitDataAuth`. |
+| Calendar | `core-domain/src/test/kotlin/com/example/bot/time/OperatingRulesResolverTest.kt:16` | Resolver logic is tested; production data adapter and route remain incomplete/unwired. |
+| Booking | `app-bot/src/test/kotlin/com/example/bot/routes/BookingA3RoutesTest.kt:60`; `app-bot/src/test/kotlin/com/example/bot/routes/SecuredBookingRoutesTest.kt:224` | Each implementation is tested in isolation. Deterministic secured-branch selection follows the registered selector topology and pinned Ktor resolver; tests do not make the shadowed A3 path production-available. |
+| Guest list/check-in | `app-bot/src/test/kotlin/com/example/bot/routes/GuestListInvitationCheckinE2ETest.kt:67`; `app-bot/src/test/kotlin/com/example/bot/routes/PromoterInviteCheckinIntegrationTest.kt:65`; Postgres `core-data/src/test/kotlin/com/example/bot/data/club/CheckinDbRepositoryTest.kt:24` | DB flows have test evidence; unified Night Pass/user-night uniqueness does not. |
+| Table/finance | `app-bot/src/test/kotlin/com/example/bot/routes/AdminTableOpsRoutesTest.kt:69`; `app-bot/src/test/kotlin/com/example/bot/routes/AdminFinanceShiftRoutesTest.kt:51` | Wired APIs are protected; missing source modes/roles/correction flow remain missing. |
+| `/app` | `app-bot/src/test/kotlin/com/example/bot/routes/WebAppRoutesTest.kt:20-77` | Explicitly proves the packaged static catalogue is canonical, not the React shell. |
+
+## 8. Dead, unwired and legacy paths
+
+Detailed disposition is in [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md). The material `PRESENT_UNWIRED` set is:
+
+- availability API variants: `app-bot/src/main/kotlin/com/example/bot/routes/AvailabilityApiRoutes.kt:39-75`, `app-bot/src/main/kotlin/com/example/bot/routes/AvailabilityRoutes.kt:15-31`, `app-bot/src/main/kotlin/com/example/bot/routes/GuestFlowRoutes.kt:14-22`;
+- booking/payment variants: `app-bot/src/main/kotlin/com/example/bot/routes/BookingRoutes.kt:21-71`, `app-bot/src/main/kotlin/com/example/bot/routes/BookingFinalizeRoutes.kt:23-68`, `app-bot/src/main/kotlin/com/example/bot/routes/ConfirmRoutes.kt:19-29`, `app-bot/src/main/kotlin/com/example/bot/routes/PaymentsFinalizeRoutes.kt:50-281`, `app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt:70-300`;
+- campaigns/outbox/scheduler: `app-bot/src/main/kotlin/com/example/bot/routes/NotifyRoutes.kt:314-345`, `app-bot/src/main/kotlin/com/example/bot/routes/OutboxAdminRoutes.kt:103-300`, `app-bot/src/main/kotlin/com/example/bot/workers/SchedulerModule.kt:87-135`;
+- React role shell and tracked `miniapp/dist/index.html:1-12` relative to canonical packaged `/app`;
+- alternative `app-bot/src/main/kotlin/com/example/bot/webapp/WebAppRoutes.kt:23-65`, whose `webAppRoutes` symbol is not called; production calls `com.example.bot.routes.webAppRoutes` at `app-bot/src/main/kotlin/com/example/bot/Application.kt:559-562`;
+- A3 `/hold` and `/confirm` handlers in `app-bot/src/main/kotlin/com/example/bot/routes/BookingA3Routes.kt:70-430`, registered but shadowed by the secured branch for those conflicting methods;
+- polling entry `app-bot/src/main/kotlin/com/example/bot/polling/PollingMain.kt:44-55` relative to Docker/Gradle launcher;
+- secondary `core-security/src/main/kotlin/com/example/bot/security/Security.kt:11-38` role/access model (`USER`, `ADMIN`) relative to canonical `core-data` RBAC.
+
+## 9. Existing docs reconciliation
+
+Это классификация старых документов, не product statuses из основного enum.
+
+| Document | Reconciliation status | Причина |
+|---|---|---|
+| `README.md` | `CURRENT_BUT_PARTIAL` | Полезный engineering/API overview и описание static Mini App, но не canonical product contract и не раскрывает все wiring conflicts. |
+| `AGENTS.md` | `CONFLICTS_WITH_SOURCE` | Действующая repository instruction, не historical document. `AGENTS.md:9,12,14,16-18,20` добавляет или иначе формулирует product promises, которых `CONCEPT_SOURCE.md` не устанавливает полностью; precedence остаётся `DEC-026`. Файл не изменяется и не superseded proposed governance. |
+| `CONTRIBUTING.md` | `CURRENT_AND_COMPATIBLE` | Действующая engineering policy по repositories, dependency verification/version pinning и supply chain (`CONTRIBUTING.md:3-43`); product conflict не найден, runtime capability она не доказывает. |
+| `README_pilot_QR.md` | `HISTORICAL` | Pilot-era QR entry; не описывает текущий multi-route state. |
+| `docs/README_pilot_QR.md` | `HISTORICAL` | Дублирует pilot контекст. |
+| `docs/CHECKLIST_pilot_QR.md` | `HISTORICAL` | Point-in-time release checklist. |
+| `miniapp/README.md` | `CONFLICTS_WITH_CODE` | Описывает React dev/build flow, тогда как production Docker не запускает frontend build и `/app` закреплён static test. |
+| `docs/RBAC.md` | `CURRENT_BUT_PARTIAL` | Совместим с RBAC primitives, но canonical role catalogue уже не покрывает source roles. |
+| `docs/SEC02_LOG_AUDIT.md` | `CURRENT_BUT_PARTIAL` | Актуален для log/audit hardening, но не покрывает product audit register целиком. |
+| `docs/WEBHOOK_SECURITY.md` | `CURRENT_AND_COMPATIBLE` | Соответствует wired webhook guard/ingress; остаётся operational reference. |
+| `docs/alerts.md` | `CURRENT_BUT_PARTIAL` | Operational alert reference, не product analytics/communications contract. |
+| `docs/audit_p25_notes.md` | `HISTORICAL` | Старый audit snapshot; отдельные выводы, включая finance availability, больше не совпадают с code. |
+| `docs/concept_gap_review.md` | `OVERLAPS_NEW_SYSTEM` | Предыдущая gap review без нынешней полной ID traceability и exact runtime baseline. |
+| `docs/dr.md` | `CURRENT_BUT_PARTIAL` | Disaster-recovery reference; не доказывает source degraded product UX. |
+| `docs/error-registry.md` | `CURRENT_AND_COMPATIBLE` | Engineering error reference; не продуктовая спецификация. |
+| `docs/headers-and-cache.md` | `CURRENT_AND_COMPATIBLE` | Совместим с current HTTP/static behavior. |
+| `docs/invariants.md` | `CURRENT_BUT_PARTIAL` | Важные engineering invariants, но не полная нормализация source и часть product invariants не enforced end-to-end. |
+| `docs/music.md` | `CURRENT_BUT_PARTIAL` | Полезен для music backend; содержит transport/history assumptions, которые нельзя считать canonical product truth. |
+| `docs/observability-slo.md` | `CURRENT_AND_COMPATIBLE` | Operational SLO reference вне product priority. |
+| `docs/observability.md` | `CURRENT_AND_COMPATIBLE` | Telemetry reference, совместимый с wiring. |
+| `docs/ops/degraded-mode-sop.md` | `CURRENT_BUT_PARTIAL` | SOP полезен как manual procedure, но значительная часть заявленных fallbacks не wired. |
+| `docs/ops/ingress.md` | `CURRENT_AND_COMPATIBLE` | Соответствует DB webhook ingress path. |
+| `docs/ops/release-rollback.md` | `CURRENT_AND_COMPATIBLE` | Operational process, не product availability evidence. |
+| `docs/ops/secrets-rotation.md` | `CURRENT_AND_COMPATIBLE` | Operational security reference. |
+| `docs/p2.4-discovery-bot-fallbacks.md` | `OVERLAPS_NEW_SYSTEM` | Полезная discovery/history; current source и runtime audit имеют более широкий scope. |
+| `docs/privacy.md` | `CURRENT_BUT_PARTIAL` | Privacy primitives есть, но Guest Mode/AI policy пока только target. |
+| `docs/qr-rotation.md` | `CURRENT_BUT_PARTIAL` | Описывает rotation отдельных QR codecs, не единый Night Pass. |
+| `docs/runtime-db-resiliency.md` | `CURRENT_AND_COMPATIBLE` | DB operational reference. |
+| `docs/runtime-security.md` | `CURRENT_BUT_PARTIAL` | Security hardening в основном wired; query-string initData остаётся конфликтом guardrail. |
+| `docs/security.md` | `CURRENT_BUT_PARTIAL` | Обзор безопасности, но не полная product security baseline. |
+| `docs/supply-chain.md` | `CURRENT_AND_COMPATIBLE` | Build/dependency reference вне product spec. |
+| `reports/00_quality_gates.md` | `HISTORICAL` | Point-in-time audit artifact. |
+| `reports/00_repo_map.md` | `HISTORICAL` | Repository snapshot, не canonical current inventory. |
+| `reports/00_risks_first_look.md` | `HISTORICAL` | Point-in-time risks. |
+| `reports/01_block_01_rbac.md` | `HISTORICAL` | Block audit superseded by current baseline. |
+| `reports/02_block_02_calendar.md` | `HISTORICAL` | Block audit superseded; adapter/wiring assessed here. |
+| `reports/03_block_03_club_showcase.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/04_block_04_booking_flow.md` | `HISTORICAL` | Does not replace current duplicate-route finding. |
+| `reports/05_block_05_miniapp_map.md` | `HISTORICAL` | Does not represent canonical static `/app` baseline. |
+| `reports/06_block_06_entry_guestlists.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/07_block_07_tables_ops.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/08_block_08_shift_finance.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/09_block_09_gamification.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/10_block_10_support.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/11_block_11_music_dj.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/12_block_12_comms.md` | `HISTORICAL` | Campaign code existence must not be mistaken for wiring. |
+| `reports/13_block_13_analytics.md` | `HISTORICAL` | Block audit superseded. |
+| `reports/14_block_14_ops_playbook.md` | `HISTORICAL` | Point-in-time procedures assessment. |
+| `reports/15_block_15_admin_scaling.md` | `HISTORICAL` | CRUD fragments do not constitute current end-to-end wizard. |
+| `reports/16_block_16_failure_modes.md` | `HISTORICAL` | Point-in-time failure-mode audit. |
+| `reports/17_block_17_security_spec.md` | `HISTORICAL` | Security block snapshot; current issues recorded here. |
+| `reports/Q1_security_deep_review.md` | `HISTORICAL` | Point-in-time specialist audit. |
+| `reports/Q2_arch_clean_senior_review.md` | `HISTORICAL` | Point-in-time architecture review. |
+| `reports/Q3_ci_detekt_clean.md` | `HISTORICAL` | CI snapshot, not current product state. |
+| `reports/Q4_performance_scalability.md` | `HISTORICAL` | Point-in-time quality review. |
+| `reports/Q5_db_schema_integrity.md` | `HISTORICAL` | Schema audit snapshot. |
+| `reports/Q6_telegram_surface_review.md` | `HISTORICAL` | Telegram surface snapshot predating this product baseline. |
+| `reports/Q7_concurrency_consistency.md` | `HISTORICAL` | Concurrency snapshot; does not resolve duplicate booking route. |
+| `reports/Q8_observability_slo.md` | `HISTORICAL` | Point-in-time telemetry review. |
+| `reports/Q9_tests_quality_plan.md` | `HISTORICAL` | Test plan, not execution/product evidence. |
+| `reports/Q10_privacy_data_governance.md` | `HISTORICAL` | Privacy audit snapshot. |
+| `reports/Q11_payments_audit.md` | `HISTORICAL` | Payment code audit; current routes remain unwired. |
+| `reports/Q12_deploy_ops_readiness.md` | `HISTORICAL` | Deployment readiness snapshot; no deployment checked in this task. |
+
+## 10. Documentation migration proposal
+
+Статус предложения: `DECISION_REQUIRED`.
+
+- После review сделать `PRODUCT_SPEC.md` canonical target, `AS_BUILT.md` canonical dated implementation snapshot, `CONCEPT_CODE_GAP.md` canonical traceability, `OPEN_DECISIONS.md` decision queue и `PRODUCT_ROADMAP.md` sequencing view.
+- `CONCEPT_SOURCE.md` оставить immutable source of intent.
+- `AGENTS.md` и `CONTRIBUTING.md` оставить current repository instructions; proposed product governance их не supersede. `README.md`, `docs/RBAC.md`, security/ops/runbook документы оставить granular engineering references и добавить позже backlinks на product requirement IDs.
+- Pilot/readiness/reports оставить historical и позднее переместить в явно названный archive без удаления audit history.
+- `docs/concept_gap_review.md`, `docs/audit_p25_notes.md` и block reports не использовать как current status после принятия новой системы; добавить banner/cross-link в отдельной docs migration задаче.
+- Не архивировать/редактировать старые документы до отдельного решения и scope-authorized изменения.
