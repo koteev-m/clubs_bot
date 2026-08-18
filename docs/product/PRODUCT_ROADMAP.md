@@ -2,7 +2,7 @@
 
 Roadmap задаёт последовательность проверяемых outcomes, а не календарные сроки, capacity или story points. Он не означает, что рекомендации приняты. Любая production реализация выполняется отдельными задачами с code/tests/Gradle gates.
 
-`DEC-026/D` принят и больше не является unresolved governance blocker. Он определяет только способ классификации conflicts: все восемь disputed capabilities из [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md) сохраняют item-level `DECISION_REQUIRED` и не входят автоматически ни в recommended first slice, ни в phase scope, ни в target navigation.
+`DEC-026/D` принят и больше не является unresolved governance blocker. Initial eight disputed capabilities из [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md) теперь имеют item-level classifications: семь `AMEND` и один `DEFER`. Classification не означает `AS_BUILT`, implementation start или автоматическое включение в navigation; accepted boundaries размещены только в будущих phases ниже.
 
 ## 1. Foundation already reusable
 
@@ -76,7 +76,7 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **Excluded scope:** production changes.
 - **Staging smoke:** не применяется; review проверяет непротиворечивую decision log и updated traceability.
 - **Governance activity:** `classify repository/source conflicts individually`.
-- **Activity status:** pending item-level decisions; это governance tracking, а не product implementation.
+- **Activity status:** initial eight item-level decisions accepted; остальные conflicts продолжают требовать собственных решений. Это governance tracking, а не product implementation.
 - **Decision prerequisites:** `DEC-001`–`DEC-012`, `DEC-017`, `DEC-018`, `DEC-025`; принятый `DEC-026/D` больше не является prerequisite.
 
 ### Phase 1 — Private support loop
@@ -128,7 +128,7 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **Category:** Reuse with product completion.
 - **User outcome:** confirmed attendance produces understandable progress; guest can consume moderated music/content.
 - **Included IDs:** `LOY-001`–`LOY-007`, `MUS-001`–`MUS-007`, remaining `CAT-002`, `UX-001` sections.
-- **Dependencies:** unified entrance-first check-in with table-seating bypass closed; canonical guest navigation; DJ/moderation/payment decisions; separate item-level decisions for repository-only mystery/playlists/favourites scope under accepted `DEC-026/D` governance.
+- **Dependencies:** unified entrance-first check-in with table-seating bypass closed; canonical guest navigation; DJ/moderation/payment decisions; accepted mystery and playlists/favourites boundaries применяются только через отдельные future-phase placements ниже.
 - **Acceptance boundary:** first sub-slice may be stamps/early/badges/My Nights; published music may be read-only. Raffles/table loyalty/donations enter only with separate accepted scope.
 - **Excluded scope:** AI assistant, paid music support unless payment decision covers it.
 - **Staging smoke:** duplicate check-in produces one stamp; early threshold override; badge fingerprint retry; Russian names; published/unpublished file visibility; like/vote idempotency.
@@ -154,7 +154,7 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **Acceptance boundary:** one master creates a usable club/profile/calendar/hall/tables/rules/finance/modules/personnel; configuration audit exists; degraded manual journal can reconcile.
 - **Excluded scope:** AI-filled wizard/instructions.
 - **Staging smoke:** create second club from empty config; overnight holiday; upload/activate plan; book/scan/seat/close; role isolation; rollback invalid config; Mini App/scanner degraded drills.
-- **Decision prerequisites:** `DEC-003`–`DEC-006`, `DEC-008`, `DEC-023`; disputed templates/cloning additionally require a separate item-level decision under accepted `DEC-026/D` governance.
+- **Decision prerequisites:** `DEC-003`–`DEC-006`, `DEC-008`, `DEC-023`; accepted templates/cloning boundary применяется только через onboarding/network-scaling placement ниже.
 
 ### Phase 8 — iBota safe read/draft layer
 
@@ -178,12 +178,72 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **Staging smoke:** one guest response; missing history/participant assumptions; three-bot mention handling; malicious loop; business connect/disconnect/right changes; PII redaction and private handoff.
 - **Decision prerequisites:** `DEC-015`, explicit bot-to-bot/business enablement decisions.
 
-## 4. Sequencing guardrails
+## 4. Accepted decision placement in future phases
+
+Все placements ниже являются sequencing constraints для будущей работы. Они не меняют status или содержимое recommended first product slice, не означают начало implementation и не объявляют current code соответствующим accepted contract.
+
+### Booking lifecycle phase
+
+- **Included decision:** `DEC-028` — reminder «скоро слетит» (`AMEND`).
+- **Prerequisites:** canonical booking/HOLD lifecycle, включая различие HOLD expiry и arrival-retention completion; согласованные lifecycle notifications и anti-spam policy.
+- **Acceptance boundary:** сохраняется reminder перед canonical expiry; точный trigger остаётся blocked и не выбирается, пока lifecycle не определит HOLD, arrival retention или оба события вместе с timing, recipients, channel, repeat policy and anti-spam.
+- **Excluded scope:** любой преждевременно выбранный trigger, current-code readiness claim и navigation entry до принятия lifecycle.
+- **First-slice inclusion:** none; capability не входит в первый product slice.
+
+### Table operations / finance configuration phase
+
+- **Included decisions:** `DEC-029` — staff-only walk-in seating (`AMEND`); `DEC-031` — richer allocation categories (`AMEND`).
+- **Prerequisites:** canonical operational night, staff permission matrix, free-table/stop-sales rules, entrance/check-in ordering, financial ledger, table/deposit configuration and audited correction design.
+- **Acceptance boundary:** walk-in creates a table session without fictitious booking, uses an explicit deposit/bill/club mode, confirmation/audit and ledger, and never creates check-in/stamp/loyalty progress; allocations use club-configured canonical categories, exact totals, historical snapshots and append-only correcting operations.
+- **Excluded scope:** guest walk-in section, check-in bypass, free-text allocation categories, merging allocation categories with financial-shift revenue articles, exposing internal allocations to guests, or selecting the initial category catalogue here.
+- **First-slice inclusion:** none; neither capability входит в первый product slice.
+
+### Loyalty phase
+
+- **Included decision:** `DEC-030` — mystery-upgrade (`DEFER`).
+- **Prerequisites:** canonical Night Pass/check-in, loyalty ledger, reward catalogue, anti-fraud and audit; a future revisit must separately define upgrade subject, eligibility, probability/selection, budget owner, validity, staff confirmation and abuse prevention.
+- **Acceptance boundary:** future hypothesis is preserved only after all prerequisites and a separate revisit.
+- **Excluded scope:** current target promise, MVP, navigation, implementation requirement or inference from existing `mysteryEligible`-like fragments; `DEFER` is not deletion/rejection.
+- **First-slice inclusion:** none; capability исключена из первого product slice.
+
+### Music phase
+
+- **Included decision:** `DEC-032` — private favourites and curated playlists (`AMEND`).
+- **Prerequisites and ordered sequence:** (1) read-only published music catalogue → (2) private favourites → (3) accepted DJ role and authoring contract, which still requires the corresponding explicit accepted decision → (4) curated playlists. Each step follows the preceding step; moderation, access policy and content-rights enforcement apply throughout.
+- **Acceptance boundary:** favourites are private bookmarks for published tracks/sets with only aggregated statistics; curated playlists are authored by authorized DJ/admin and are associated with club, event or operational night.
+- **Excluded scope:** public user-created playlists, collaborative editing, social catalogue, disclosure of user lists, and importing battles/stems or all current likes/playlists as one accepted contract.
+- **First-slice inclusion:** none; no target navigation before the music phase.
+
+### Communications phase
+
+- **Included decision:** `DEC-033` — channel posts (`AMEND`).
+- **Prerequisites:** pre-connected allowlisted club/network channels, separate communications permission, content safety/redaction, preview/explicit confirmation and audit of actor/target/confirmed content/result.
+- **Acceptance boundary:** iBota may draft but never self-publish; publishing, edit and delete are distinct confirmed actions, and channel posts remain separate from personal notifications and segmented broadcasts.
+- **Excluded scope:** authority from arbitrary text channel/chat IDs, PII or staff-only content, and automatic scheduling.
+- **First-slice inclusion:** none; capability appears only in this future communications phase.
+
+### Analytics/communications phase
+
+- **Included decision:** `DEC-034` — on-demand exports and scheduled auto-reports (`AMEND`).
+- **Prerequisites:** canonical role/scoped reports and metrics; frozen financial reporting and explicit non-final operational semantics; permissions/privacy/audit; accepted communications delivery before scheduling.
+- **Acceptance boundary:** authorized on-demand export with fixed filters/period/scope/timezone and versioned metadata is delivered before scheduled reports; scheduled delivery requires allowlisted recipients/channels, test delivery, explicit enablement, result log, bounded retry and deduplication.
+- **Excluded scope:** choosing CSV/XLSX/PDF formats in this roadmap, unpermissioned PII, schedule before canonical metrics/delivery contract, or AI narrative before a separately accepted AI-grounding decision; AI text never replaces source numbers.
+- **First-slice inclusion:** none; neither capability входит в первый product slice or target navigation before analytics/communications phase.
+
+### Onboarding/network-scaling phase
+
+- **Included decision:** `DEC-035` — versioned configuration templates and create from existing club (`AMEND`).
+- **Prerequisites:** canonical allowlisted club configuration categories; creating and publishing a versioned configuration template is authorized only for Owner or an authorized GLOBAL role; independent-ID draft creation, validation, preview, explicit confirmation, audit and content-rights checks. `DEC-035` does not define authority for create-from-existing; it requires a separate accepted permission policy before implementation.
+- **Acceptance boundary:** a versioned template or explicitly selected snapshot categories create an independent new club draft; template changes do not mutate existing clubs and create-from-existing never creates a live link.
+- **Excluded scope:** guest navigation; copying tokens, secrets, credentials/keys, staff/roles, guests/PII, bookings/HOLD/GuestList/Night Pass/visits/table sessions, financial operations/shifts, audit/idempotency/runtime incident/delivery history; content/media without explicit rights-checked opt-in.
+- **First-slice inclusion:** none; capability не входит в первый product slice.
+
+## 5. Sequencing guardrails
 
 - Не начинать AI mutation до deterministic service acceptance и common confirmation contract.
 - Не строить loyalty, finance или analytics поверх нескольких definitions of operational night.
 - Не добавлять новые features одновременно в static и React Mini App; сначала выбрать canonical packaging.
 - Не трактовать duplicate HOLD routes как недетерминированную runtime ambiguity: secured DB branch уже выбирается детерминированно; перед расширением согласовать DTO/owner implementation и удалить либо намеренно адаптировать shadowed A3 path.
-- Не включать disputed additions из прежнего `AGENTS.md` snapshot как accepted scope или target navigation до отдельной item-level classification; принятый `DEC-026/D` сам эти items не классифицирует.
+- Не включать disputed additions из прежнего `AGENTS.md` snapshot без собственной item-level classification; accepted initial eight реализуются только в своих future-phase boundaries и не считаются соответствующими current code автоматически.
 - Не включать campaigns, Guest Mode, paid broadcasts, bot-to-bot или business updates только потому, что код/platform primitive существует.
 - Каждая phase заканчивается end-to-end staging smoke с persistence и authorization, а не только render/UI demo.

@@ -348,3 +348,299 @@
 - **Depends on:** `DEC-016`.
 - **Blocks:** none.
 - **Status:** `DECISION_REQUIRED`.
+
+## `DEC-028` — reminder «скоро слетит»
+
+- **Context:** прежний repository requirement выделял отдельное уведомление «скоро слетит» рядом с booking/HOLD flow.
+- **Source tension:** source допускает общее напоминание о существующей брони и описывает HOLD, post-arrival retention, no-show и release, но не определяет отдельный expiry-reminder trigger.
+- **Code tension:** booking/HOLD lifecycle остаётся частичным, а наличие operational notification primitives не доказывает canonical trigger, timing, audience или anti-spam contract для такого reminder.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `AMEND`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Сохраняется идея уведомления перед canonical истечением брони.
+  - Capability привязывается к будущему canonical booking lifecycle.
+  - Пока не принято, относится ли reminder:
+    - к истечению HOLD;
+    - к завершению arrival retention;
+    - к обоим событиям.
+  - Trigger, timing, recipients, channel, repeat policy и anti-spam определяются вместе с booking/HOLD lifecycle.
+  - Capability не входит в первый product slice.
+  - До принятия canonical lifecycle не реализуется и не выводится в navigation.
+  - Конкретный trigger этим решением не выбран.
+- **Consequences:** reminder является принятой amended extension, но не implementation-ready requirement; lifecycle event и delivery policy остаются unresolved implementation/product parameters.
+- **Depends on:** `DEC-008`, `DEC-018`.
+- **Blocks:** реализацию reminder и его появление в navigation до принятия canonical booking lifecycle.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-029` — spontaneous tables: staff-only walk-in seating
+
+- **Context:** repository называл spontaneous tables; пользователь принял более точную staff-only capability для посадки без предварительной брони.
+- **Source tension:** source требует staff table seating и режимы «депозит / по счёту / от клуба», но не определяет spontaneous-table creation как отдельный product contract.
+- **Code tension:** current table routes содержат spontaneous opening/session fragments, technical `WITH_QR/NO_QR` modes и путь, способный создать visit при посадке; это не соответствует автоматически canonical walk-in permissions, commercial modes, ledger, audit и entrance ordering.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `AMEND`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Canonical name: staff-only walk-in seating.
+  - Посадка за свободный стол без предварительной брони.
+  - Создаётся table session, а не фиктивная booking.
+  - Действие доступно только авторизованному staff согласно будущей принятой permission matrix.
+  - Стол должен быть свободен в текущую operational night.
+  - Stop-sales и другие блокировки обязательны.
+  - Staff явно выбирает режим:
+    - депозит;
+    - по счёту;
+    - от клуба.
+  - Требуются confirmation и audit.
+  - Денежные изменения проходят через financial ledger.
+  - Night Pass может быть привязан, но не является обязательным условием самой посадки.
+  - Walk-in seating не создаёт check-in, stamp или loyalty progress в обход принятого entrance/check-in contract.
+  - Capability не показывается гостю как самостоятельный раздел.
+  - Не входит в первый product slice.
+- **Consequences:** current spontaneous-table code не считается уже соответствующим принятому контракту; implementation должен быть проверен заново против permission, operational-night, stop-sales, ledger, confirmation/audit и entrance boundaries.
+- **Depends on:** `DEC-004`, `DEC-005`, `DEC-008`, `DEC-012`, `DEC-021`.
+- **Blocks:** canonical walk-in implementation и staff surface до принятия permission matrix и зависимых lifecycle contracts.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-030` — mystery-upgrade
+
+- **Context:** repository requirement и отдельные code fragments упоминали mystery eligibility/upgrade вне source loyalty contract.
+- **Source tension:** source включает stamps, early arrival, badges, raffles и table loyalty, но не определяет mystery-upgrade.
+- **Code tension:** отдельный `mysteryEligible`-подобный flag или fragment не образует end-to-end mechanic, reward contract, anti-fraud или audit journey и не является product acceptance.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `DEFER`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Сохраняется только как будущая product hypothesis.
+  - Исключается из MVP.
+  - Исключается из первого product slice.
+  - Не появляется в target navigation.
+  - Существующие или похожие code-фрагменты не считаются принятым контрактом.
+  - Возврат к механике возможен только после:
+    - canonical Night Pass/check-in;
+    - loyalty ledger;
+    - catalogue of rewards;
+    - anti-fraud;
+    - audit.
+  - До возврата должны быть отдельно определены:
+    - предмет upgrade;
+    - eligibility;
+    - probability/selection;
+    - budget owner;
+    - validity;
+    - staff confirmation;
+    - abuse prevention.
+  - Текущего target requirement реализации mystery-upgrade нет.
+- **Consequences:** `DEFER` сохраняет hypothesis для возможного будущего revisit, но не означает ни удаление, ни rejection, ни current target promise.
+- **Depends on:** `DEC-011`, `DEC-013`, `DEC-021`.
+- **Blocks:** никакой текущий slice; реализация остаётся заблокированной до отдельного revisit после выполнения accepted prerequisites.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-031` — richer allocation categories
+
+- **Context:** repository конкретизировал более богатое распределение депозитов и доплат сверх source examples bar/balls/50-50/other configured categories.
+- **Source tension:** source требует configurable allocation, но не фиксирует canonical category catalogue, snapshot semantics или correction workflow.
+- **Code tension:** current append-only deposit operations и arbitrary allocation rows дают только foundation; canonical club-level category directory, immutable historical identity and explicit correcting operation contract не доказаны end-to-end.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `AMEND`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Категории распределения настраиваются на уровне клуба.
+  - Каждая отдельная операция депозита или доплаты может распределяться по нескольким активным категориям.
+  - Сумма allocations обязана точно совпадать с суммой операции.
+  - Free-text вместо canonical category не используется.
+  - Историческая операция сохраняет snapshot имени/identity категории.
+  - Изменение справочника не переписывает историю.
+  - Финансовая история append-only.
+  - Исправление выполняется отдельной correcting operation с reason, confirmation и audit.
+  - Личная охрана остаётся отдельной услугой.
+  - Allocation categories не смешиваются с financial-shift revenue articles.
+  - Внутреннее распределение не показывается гостю.
+  - Не входит в первый product slice.
+  - Initial catalogue определяется позже вместе с table/deposit configuration.
+  - Стартовый набор категорий этим решением не выбран.
+- **Consequences:** принято направление canonical club configuration и historical safety; initial catalogue и implementation slice остаются unresolved.
+- **Depends on:** `DEC-004`, `DEC-005`, `DEC-008`, `DEC-012`.
+- **Blocks:** implementation category directory, allocations и correcting flow до согласования table/deposit configuration.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-032` — playlists/favourites
+
+- **Context:** repository объединял playlists, likes/favourites, battles и stems вокруг более узкого source music catalogue/interactions contract.
+- **Source tension:** source принимает DJ files, moderation, track-of-night, votes/reactions, donations and statistics, но не public or private playlist/favourite semantics.
+- **Code tension:** wired playlists/likes/battles/stems APIs и tests не доказывают canonical served UI, DJ role, privacy, moderation/content-rights boundary или принятие всех этих mechanics единым контрактом.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `AMEND`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Контракт разделяется на две capability.
+  - **Private favourites:**
+    - Личные приватные bookmarks гостя.
+    - Можно сохранять только опубликованные tracks/sets.
+    - Favourites не обходят moderation, hiding или access policy.
+    - Aggregated statistics допустима.
+    - Список конкретных пользователей не раскрывается DJ или другим гостям.
+    - Рассматривается после read-only music catalogue.
+  - **Curated playlists:**
+    - Создаются только авторизованным DJ или administrator.
+    - Curated playlists связаны с club, event или operational night.
+    - Подчиняются moderation и content rights.
+    - Рассматриваются после принятия DJ role и authoring contract.
+  - Не входят в текущий scope:
+    - public user-created playlists;
+    - collaborative editing;
+    - social music catalogue.
+  - Обе capability:
+    - не входят в первый product slice;
+    - не появляются в target navigation до music phase.
+  - Существующие playlists/likes/battles/stems не считаются единым принятым контрактом.
+  - Battles/stems этим решением не принимаются.
+- **Consequences:** music phase получает две bounded extensions; privacy, DJ authorization, moderation and rights обязательны, а public/collaborative/social scope и battles/stems остаются вне решения.
+- **Depends on:** `DEC-004`, `DEC-005`, `DEC-014`.
+- **Blocks:** favourites и curated-playlist implementation/navigation до соответствующих catalogue и DJ-authoring prerequisites.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-033` — channel posts
+
+- **Context:** repository requirement предлагал channel posts рядом с source draft/preview and broadcast capabilities.
+- **Source tension:** source разрешает iBota готовить announcement draft и требует preview/confirmation для communications, но не задаёт authority для generic Telegram channel publishing.
+- **Code tension:** operational notifications wired, а campaign/outbox/scheduler fragments present but unwired; ни один fragment не доказывает allowlisted channel authority, separate permission, confirmed-content audit или accepted channel-post workflow.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `AMEND`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Публикация разрешена только в заранее подключённые Telegram channels клуба или сети.
+  - Требуется отдельное communications permission.
+  - iBota может подготовить draft, но не публикует самостоятельно.
+  - Обязательны preview и explicit confirmation.
+  - Произвольный channel/chat ID из пользовательского текста не является authority.
+  - Запрещена публикация PII и внутренних staff-only данных.
+  - Audit фиксирует:
+    - actor;
+    - target channel;
+    - подтверждённую версию content;
+    - send result.
+  - Edit/delete опубликованного сообщения является отдельным подтверждаемым действием.
+  - Channel posts отделены от:
+    - personal notifications;
+    - segmented broadcasts.
+  - Automatic scheduling этим решением не принимается.
+  - Не входит в первый product slice.
+  - Появляется только в communications phase.
+- **Consequences:** принято только human-confirmed allowlisted publishing; automatic scheduling и authority из свободного текста исключены из accepted scope.
+- **Depends on:** `DEC-004`, `DEC-005`, `DEC-006`.
+- **Blocks:** channel-post implementation до communications permission, allowlist, preview/confirmation и audit contract.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-034` — exports/auto-reports
+
+- **Context:** repository requirement объединял export formats и automatic reports поверх source role analytics.
+- **Source tension:** source задаёт role-scoped reports and analytic queries, но не определяет export artifact metadata, frozen/non-final semantics или scheduled delivery.
+- **Code tension:** deterministic analytics snapshots и finance freeze foundations существуют частично, но on-demand export, sensitive-artifact access audit, scheduled delivery и AI narrative grounding contract не доказаны.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `AMEND`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Контракт разделяется на две capability.
+  - **On-demand exports:**
+    - Запускаются только авторизованным role/scope principal.
+    - Формируются из canonical report.
+    - Используют зафиксированные:
+      - filters;
+      - period;
+      - club/network scope;
+      - timezone.
+    - Содержат metadata:
+      - generated-at;
+      - report version;
+      - filters;
+      - scope;
+      - timezone.
+    - Financial export после shift close использует frozen data.
+    - Незакрытый operational report явно помечается non-final.
+    - PII включается только при отдельном permission и реальной operational need; иначе маскируется или исключается.
+    - Создание и доступ к sensitive export аудируются.
+    - CSV/XLSX/PDF и другие форматы выбираются в implementation slice, не здесь.
+  - **Scheduled auto-reports:**
+    - Разрешаются только после появления canonical metrics и принятого communications delivery contract.
+    - Schedule настраивается уполномоченной ролью.
+    - Получатели и channels заранее allowlisted.
+    - Требуются:
+      - test delivery;
+      - explicit enablement;
+      - result log;
+      - bounded retry;
+      - deduplication.
+    - AI narrative не подменяет source numbers.
+    - AI narrative требует отдельного принятого AI grounding contract.
+  - Обе capability:
+    - не входят в первый product slice;
+    - не появляются в target navigation до analytics/communications phase.
+- **Consequences:** on-demand export предшествует scheduled delivery; formats остаются implementation choice, sensitive data получает separate permission/audit boundary, а AI narrative остаётся blocked до принятия grounding contract.
+- **Depends on:** `DEC-004`, `DEC-005`, `DEC-006`, `DEC-012`; scheduled delivery additionally depends on an accepted communications delivery contract, and AI narrative additionally depends on `DEC-027` becoming accepted.
+- **Blocks:** export/report delivery implementation до canonical reports/metrics, communications delivery и соответствующих authorization/privacy contracts.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-035` — cloning/templates
+
+- **Context:** repository requirement предлагал templates/cloning как ускорение source Add Club master.
+- **Source tension:** source требует no-code onboarding нового клуба, но не задаёт reusable template, cloning, snapshot selection или prohibited-data boundary.
+- **Code tension:** current club/hall/table/finance configuration CRUD fragments не образуют versioned template or create-from-existing workflow и не доказывают secret/PII/runtime exclusion.
+- **Available classifications:** `KEEP`, `AMEND`, `DEFER`, `REJECT`.
+- **Selected classification:** `AMEND`.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Контракт состоит из двух безопасных механизмов.
+  - **Versioned configuration templates:**
+    - Шаблон содержит только allowlisted club configuration.
+    - Создаётся и публикуется Owner или уполномоченной GLOBAL role.
+    - Может содержать только явно разрешённые categories.
+    - Изменение template не меняет уже созданные clubs.
+    - Применение создаёт draft.
+    - Перед применением обязательны:
+      - validation;
+      - preview;
+      - explicit confirmation;
+      - audit.
+  - **Create from existing club:**
+    - Создаёт новый club draft из snapshot выбранного клуба.
+    - Не создаёт live-link или дальнейшую синхронизацию.
+    - Каждая категория copying выбирается явно.
+    - Новый club получает новые IDs и независимую configuration.
+  - Запрещено копировать:
+    - Telegram tokens;
+    - webhook secrets;
+    - credentials;
+    - signing/QR keys;
+    - staff assignments;
+    - user roles;
+    - guests и PII;
+    - bookings;
+    - HOLD;
+    - GuestList;
+    - Night Pass;
+    - visits;
+    - table sessions;
+    - financial operations;
+    - financial shifts;
+    - audit logs;
+    - idempotency records;
+    - runtime incidents;
+    - delivery history.
+  - Content/media копируется только отдельной явной опцией и после проверки rights.
+  - Capability относится к onboarding/network-scaling phase.
+  - Не входит в первый product slice.
+  - Не появляется в guest navigation.
+- **Consequences:** accepted scope ограничен draft-producing allowlisted snapshot mechanisms; live synchronization и перенос secrets, runtime, staff, user, financial, audit and delivery state запрещены.
+- **Depends on:** `DEC-003`, `DEC-004`, `DEC-005`, `DEC-006`, `DEC-008`.
+- **Blocks:** template/cloning implementation до canonical configuration models, category allowlist, authorization, validation, preview, confirmation and audit.
+- **Status:** `ACCEPTED_DECISION`.
