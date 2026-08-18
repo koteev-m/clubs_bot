@@ -22,6 +22,8 @@
 5. До отдельного item-level решения disputed capability нельзя удалять, объявлять обязательной/принятой или выводить в пользовательскую navigation.
 6. `AGENTS.md` служит короткой navigation/instruction map для repository, product docs, engineering rules и обязательных проверок, а не второй полной product spec.
 
+Initial eight repository/source conflict items классифицированы пользователем 2026-08-18: семь `AMEND`, один `DEFER`. Classification не означает `AS_BUILT`, соответствие текущего кода или завершённую implementation. [PRODUCT_SPEC.md](PRODUCT_SPEC.md) содержит отдельный accepted-decision overlay layer, не смешанный со 170 immutable-source requirement rows.
+
 Следующие baseline proposals не приняты `DEC-026` и остаются `DECISION_REQUIRED` там, где требуют выбора пользователя:
 
 - решения пользователя только после их явного принятия и записи в decision log;
@@ -44,7 +46,7 @@
 | `DECISION_REQUIRED` | Нужен явный выбор пользователя. |
 | `ACCEPTED_DECISION` | Прямо принято пользователем и записано в decision record. |
 
-В этой базовой линии принят только `DEC-026`; остальные 26 decision records имеют `DECISION_REQUIRED`. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
+Decision log содержит 35 records: 9 `ACCEPTED_DECISION` (`DEC-026`, `DEC-028`–`DEC-035`) и 26 `DECISION_REQUIRED`; `DEC-027` остаётся pending. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
 
 ## Правила доказательности
 
