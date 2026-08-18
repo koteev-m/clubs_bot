@@ -33,10 +33,23 @@
 - **Code tension:** club entity/scope есть; network analytics/onboarding отсутствуют.
 - **Options:** (A) один реальный клуб поверх multi-club data model; (B) несколько клубов с первого usable release.
 - **Recommendation:** один клуб operationally, не удаляя `clubId`/scope из модели.
-- **Consequences:** A уменьшает content/calendar/onboarding scope; B требует сразу решить network roles, comparison и configuration completeness.
+- **Selected option:** A.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Первый usable release запускается операционно для одного реального пилотного клуба.
+  - Multi-club data model сохраняется.
+  - `clubId` сохраняется.
+  - `CLUB/GLOBAL scope` сохраняется в архитектуре.
+  - Network analytics не входят в первый release.
+  - Полноценный multi-club onboarding не входит в первый release.
+  - Межклубный UX не входит в первый release.
+  - Конкретный пилотный клуб выбирается configuration/data.
+  - Пилотный клуб не зашивается в product architecture или code.
+- **Consequences:** первый release ограничен одним configuration/data-selected клубом, при этом multi-club model, `clubId` и `CLUB/GLOBAL scope` остаются target architecture; network analytics, полноценный multi-club onboarding и межклубный UX отложены за границу первого release.
 - **Depends on:** none.
 - **Blocks:** `DEC-004`, `DEC-006`, `DEC-007`, `DEC-008`, `DEC-024`.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-004` — MVP role set
 
@@ -45,10 +58,25 @@
 - **Code tension:** `Role` содержит OWNER, GLOBAL_ADMIN, HEAD_MANAGER, CLUB_ADMIN, MANAGER, ENTRY_MANAGER, PROMOTER, GUEST.
 - **Options:** (A) Guest + Host + club manager/admin + Owner; (B) все source roles; (C) Guest-only first slice с staff API вне slice.
 - **Recommendation:** для первого operational slice Guest, ENTRY_MANAGER, MANAGER/CLUB_ADMIN и OWNER; finance/DJ/promoter additions — следующими capability slices.
-- **Consequences:** default требует временно документировать совмещённые обязанности, но не стирать target role distinctions.
+- **Selected option:** A.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Роли первого usable release:
+    - Гость;
+    - Host / Менеджер входа;
+    - Менеджер клуба;
+    - Админ клуба;
+    - Владелец / Owner.
+  - Менеджер зала сохраняется как target role distinction, но его системное соответствие определяется `DEC-005`.
+  - Промоутер, Финансовый менеджер и DJ остаются в target role model, но не входят в первый release.
+  - Главный админ и Главный менеджер сети остаются в target role model, но не входят в первый release.
+  - Исключение роли из первого release не означает удаление из продукта.
+  - Это решение не определяет permission matrix самостоятельно.
+- **Consequences:** первый release использует bounded role set; остальные source/target roles сохраняются для последующих capability slices, а permission matrix и временное системное соответствие Менеджера зала определяются отдельно.
 - **Depends on:** `DEC-003`.
 - **Blocks:** `DEC-005`, `DEC-006`, `DEC-012`, `DEC-014`, `DEC-021`, `DEC-023`, `DEC-025`.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-005` — различия Host, entrance manager, floor manager, club manager и admin
 
@@ -57,10 +85,30 @@
 - **Code tension:** ENTRY_MANAGER и MANAGER есть; floor/club manager distinction не выражен, CLUB_ADMIN смешивает operation/config.
 - **Options:** (A) пять отдельных ролей; (B) Host=ENTRY_MANAGER, floor+club=MANAGER, admin отдельно; (C) capability permissions без жёстких role names.
 - **Recommendation:** B для MVP, с явной permission matrix и миграционным путём к C.
-- **Consequences:** A повышает setup complexity; B может дать club manager лишние table permissions; C требует более крупного RBAC redesign.
+- **Selected option:** B.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Гость → `GUEST`.
+  - Host / Менеджер входа → `ENTRY_MANAGER`.
+  - Менеджер зала и Менеджер клуба временно объединяются в `MANAGER`.
+  - Админ клуба → `CLUB_ADMIN`.
+  - Владелец → `OWNER`.
+  - `ENTRY_MANAGER`, `MANAGER` и `CLUB_ADMIN` работают только в CLUB scope.
+  - `OWNER` сохраняет GLOBAL scope.
+  - В pilot release `OWNER` фактически видит один настроенный клуб, но архитектурный GLOBAL scope не удаляется.
+  - Отдельная системная роль Менеджера зала в первом release не создаётся.
+  - Target distinction Менеджера зала сохраняется для будущего capability-based RBAC.
+  - Полномочия определяются сочетанием role + scope + explicit permission.
+  - Название роли само по себе не предоставляет все операции соседних или старших ролей.
+  - Критические действия требуют confirmation и audit.
+  - `GLOBAL_ADMIN`, `HEAD_MANAGER` и `PROMOTER` не удаляются из existing model.
+  - `GLOBAL_ADMIN`, `HEAD_MANAGER` и `PROMOTER` не входят в новые onboarding/navigation flows первого release.
+  - Право на support inbox/reply определяется `DEC-025`.
+- **Consequences:** первый release переиспользует существующие system roles с явными scope и permission boundaries; отдельный floor-manager system role и capability-based RBAC остаются будущей эволюцией, а legacy roles не получают новые onboarding/navigation flows автоматически.
 - **Depends on:** `DEC-004`.
 - **Blocks:** `DEC-012`, `DEC-021`, `DEC-023`, `DEC-025`.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-006` — GLOBAL promoter model
 
@@ -81,10 +129,36 @@
 - **Code tension:** static page имеет filters/list/events; React имеет пять tabs и не является canonical.
 - **Options:** (A) static catalogue как home с постепенным deep-link flow; (B) React shell как canonical; (C) новый minimal shell.
 - **Recommendation:** C, но не делать canonical shell prerequisite первого support slice: сохранить видимый `/start → private /ask` после добавления idempotent minimal user provisioning, а role-aware guest shell вводить только вместе с выбранным shell-based outcome.
-- **Consequences:** A накапливает legacy JS; B требует сначала исправить packaging/unwired APIs; C требует явного cutover. Private `/ask` позволяет проверить support loop без ложной зависимости от calendar/rich detail, но current production path принимает только уже существующего application user; provisioning — технический prerequisite slice, а не выбранный здесь registration contract.
+- **Selected option:** C.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Будущий canonical guest home создаётся как новый minimal role-aware shell.
+  - Target information architecture сохраняет:
+    - Клубы;
+    - Календарь;
+    - Схема / Столы;
+    - Мои брони;
+    - Пропуск;
+    - Мои ночи;
+    - Музыка;
+    - Вопросы.
+  - Раздел появляется в active target navigation только после:
+    - принятия связанных решений;
+    - полного production wiring;
+    - RBAC verification;
+    - successful staging smoke.
+  - Unresolved, unwired и placeholder capabilities не показываются как рабочие.
+  - Первый support slice остаётся private Telegram flow `/start → /ask`.
+  - Первый support slice не зависит от redesign Mini App.
+  - Pilot club выбирается data/configuration, не hardcode.
+  - Public name и final labels остаются зависимостью `DEC-001`.
+  - Reuse/cutover strategy принадлежит `DEC-017`.
+  - iBota не появляется как active entry до отдельного принятия AI contract.
+- **Consequences:** новый role-aware shell остаётся future canonical guest home, но private support slice может быть реализован независимо; navigation раскрывает только fully wired, RBAC-verified и smoke-tested capabilities, а final labels и cutover сохраняют отдельные authorities.
 - **Depends on:** `DEC-001`, `DEC-003`.
 - **Blocks:** `DEC-016`, `DEC-017`, `DEC-025`.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-008` — canonical operational-night definition
 
@@ -201,10 +275,37 @@
 - **Code tension:** Gradle merges two asset sources; Docker does not build React; test asserts static title.
 - **Options:** (A) retain static and extend; (B) make React canonical; (C) new shell reusing selected React components.
 - **Recommendation:** C; retain static only as temporary fallback until the first end-to-end shell passes smoke.
-- **Consequences:** requires an explicit cutover and removal of duplicate asset inputs in a later code task; avoids silently editing unused React.
+- **Selected option:** C.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Canonical Mini App создаётся как новый role-aware shell.
+  - Разрешено выборочно переиспользовать current React:
+    - components;
+    - API clients;
+    - stores;
+    - styles.
+  - Reuse допускается только после проверки соответствия:
+    - accepted requirements;
+    - production API;
+    - RBAC;
+    - packaging/build contract.
+  - Current static `/app` остаётся temporary fallback.
+  - Static `/app` не развивается как target product.
+  - Existing React shell не является автоматически принятой canonical implementation.
+  - В результате должны остаться:
+    - один canonical `/app`;
+    - один build/package/serve pipeline;
+    - один source of assets.
+  - Раздел появляется в navigation только после полного wiring, RBAC, tests и staging smoke.
+  - Cutover является explicit operation после successful end-to-end smoke.
+  - Legacy static implementation и duplicate asset inputs удаляются только после cutover.
+  - Первый support slice остаётся private Telegram flow.
+  - Minimal staff support inbox может быть отдельным bounded surface.
+- **Consequences:** отдельная implementation-задача должна построить новый shell, доказать допустимый reuse и провести explicit cutover; static `/app` остаётся временным fallback, а первый support slice и bounded staff inbox не блокируются полным redesign.
 - **Depends on:** `DEC-007`.
 - **Blocks:** `DEC-025`.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-018` — retain/replace booking/check-in/payment implementations
 
@@ -297,10 +398,71 @@
 - **Code tension:** current code has topics and `OPENED`, `IN_PROGRESS`, `ANSWERED`, `CLOSED`, DB persistence and RBAC list/reply APIs, but no served staff inbox/detail surface and no accepted lifecycle contract.
 - **Options:** (A) minimal MVP categories + `NEW/IN_PROGRESS/RESOLVED/CLOSED`, defer `WAITING`; (B) all source statuses with an explicit transition matrix; (C) map current statuses to source names first, then extend; each option must decide allowed transitions, who may change status, close/reopen, staff roles, inbox surface, escalation and audit.
 - **Recommendation:** A for the bounded first slice, with one staff role set, explicit close/reopen rule and audited staff mutations; this is a recommendation, not a selected workflow.
-- **Consequences:** A minimizes the UI/state-machine implementation but defers a source-listed status; B is complete but broader; C minimizes migration yet risks cementing current semantics. No option is usable until staff access and end-to-end delivery acceptance are explicit.
+- **Selected option:** A.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - Категории первого usable release:
+    1. Адрес / как добраться.
+    2. Правила / дресс-код.
+    3. Списки / вход.
+    4. Брони / депозит.
+    5. Потерял вещь.
+    6. Жалоба / сервис.
+    7. Другое.
+  - Категорию выбирает гость.
+  - AI classification не входит в первый slice.
+  - AI draft reply не входит в первый slice.
+  - AI auto-answer не входит в первый slice.
+  - Support inbox доступен `MANAGER` и `CLUB_ADMIN`.
+  - Staff access действует только в CLUB scope соответствующего клуба.
+  - Требуются явные permissions отдельно для:
+    - просмотра;
+    - staff reply;
+    - изменения статуса.
+  - `ENTRY_MANAGER` доступа к support inbox не получает.
+  - `OWNER` не получает operational reply permission только из-за названия роли.
+  - Возможный owner oversight требует отдельного explicit permission.
+  - Гость видит только собственные tickets/messages.
+  - Lifecycle первого slice: `NEW → IN_PROGRESS → RESOLVED → CLOSED`.
+  - Новый ticket создаётся в `NEW`.
+  - Explicit «Взять в работу» переводит `NEW → IN_PROGRESS`.
+  - Первый staff reply также переводит `NEW → IN_PROGRESS`.
+  - Staff reply сам по себе не устанавливает `RESOLVED`.
+  - `RESOLVED` устанавливается отдельным explicit confirmed action после ответа.
+  - Новое guest message в `RESOLVED` автоматически переводит ticket обратно в `IN_PROGRESS`.
+  - `CLOSED` разрешён только из `RESOLVED`.
+  - `CLOSED` является terminal в первом release.
+  - Manual reopen `CLOSED` отсутствует.
+  - Для нового вопроса после `CLOSED` создаётся новый ticket.
+  - `WAITING` сохраняется в target model, но не входит в первый slice.
+  - Явно исключены:
+    - SLA;
+    - priority model;
+    - platform/network escalation;
+    - automatic assignment;
+    - automatic close timer;
+    - manual reopen `CLOSED`;
+    - AI classification;
+    - AI draft;
+    - AI auto-answer.
+  - Аудируются:
+    - staff reply;
+    - status change;
+    - close;
+    - Telegram delivery result.
+  - Audit содержит:
+    - actor;
+    - club;
+    - ticket;
+    - old status;
+    - new status, если применимо.
+  - Message body остаётся в ticket thread.
+  - Message body не дублируется в audit payload.
+- **Consequences:** первый slice получает guest-selected taxonomy, bounded four-state lifecycle, explicit support permissions и audit contract; `WAITING`, escalation/automation/priority/SLA и все AI support functions остаются вне slice, а current code требует отдельной migration и end-to-end implementation.
 - **Depends on:** `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`.
 - **Blocks:** none.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-026` — precedence: `CONCEPT_SOURCE` vs repository product requirements
 
@@ -643,4 +805,81 @@
 - **Consequences:** accepted scope ограничен draft-producing allowlisted snapshot mechanisms; live synchronization и перенос secrets, runtime, staff, user, financial, audit and delivery state запрещены.
 - **Depends on:** `DEC-003`, `DEC-004`, `DEC-005`, `DEC-006`, `DEC-008`.
 - **Blocks:** template/cloning implementation до canonical configuration models, category allowlist, authorization, validation, preview, confirmation and audit.
+- **Status:** `ACCEPTED_DECISION`.
+
+## `DEC-036` — first product slice: Private Support Loop
+
+- **Context:** product baseline содержал только recommended first slice; пользователь явно принимает bounded Private Support Loop как первый product slice, не объявляя его реализованным.
+- **Source tension:** source задаёт guest question categories, internal inbox, status catalogue и staff reply, но не определяет first-slice boundary, fresh-user provisioning, exact transition graph, staff permission boundary или delivery/audit acceptance.
+- **Code tension:** production содержит `/start`, `/ask`, club selection, ticket/message persistence, staff list/reply API и Telegram delivery primitives, но `/ask` требует существующего application user; served staff surface, accepted lifecycle, semantic permissions, support audit и truthful delivery result отсутствуют end-to-end.
+- **Options:** (A) accept bounded Private Support Loop; (B) revise the boundary; (C) defer implementation.
+- **Selected option:** A.
+- **Accepted by:** user.
+- **Accepted at:** 2026-08-18.
+- **Accepted contract:**
+  - **Product boundary:** первый product slice — Private Support Loop для одного реального пилотного клуба.
+  - **Visible flow:** `/start → idempotent provisioning минимальной application identity → private /ask → club selection из production data → support category selection → persisted ticket → persisted initial message → minimal staff inbox → ticket detail → staff reply → Telegram delivery гостю → RESOLVED / CLOSED по DEC-025`.
+  - **Fresh-user provisioning:**
+    - Fresh Telegram user проходит flow без предварительной регистрации.
+    - Provisioning минимален и не является full registration/profile flow.
+    - Provisioning keyed by `telegram_user_id`.
+    - Последовательные повторы сходятся к одной logical identity.
+    - Конкурентные/retry вызовы сходятся к одной logical identity.
+    - В БД остаётся одна user row для одного `telegram_user_id`.
+    - Необработанные unique-constraint/SQL errors наружу не выходят.
+    - Concrete concurrency mechanism этим решением не выбирается.
+    - Username/display name могут использоваться только если переданы и нужны.
+    - Phone и rich profile не являются prerequisite slice.
+  - **Staff authority:**
+    - Inbox/view/reply/status доступны только `MANAGER` и `CLUB_ADMIN`.
+    - Доступ действует только в CLUB scope соответствующего клуба.
+    - Доступ действует только через explicit permissions.
+    - `ENTRY_MANAGER` доступа не получает.
+    - `OWNER` не получает operational reply permission автоматически.
+    - Unauthorized staff не видит ticket и не может ответить.
+  - **Lifecycle:** используется exact `DEC-025` lifecycle `NEW → IN_PROGRESS → RESOLVED → CLOSED`; new guest message from `RESOLVED` returns ticket to `IN_PROGRESS`; `CLOSED` terminal в первом release; manual reopen отсутствует.
+  - **Persistence and delivery:**
+    - Ticket сохраняется в БД.
+    - Initial message сохраняется в БД.
+    - Staff replies сохраняются в БД.
+    - Данные переживают process restart.
+    - Reply доставляется гостю через Telegram.
+    - Delivery result наблюдаем и аудируется.
+    - Delivery failure не должен выдавать ложный success.
+  - **Staff surface:** minimal staff inbox может быть отдельным bounded surface и не зависит от полного canonical Mini App redesign; required minimum:
+    - ticket list;
+    - club-scoped filtering;
+    - ticket detail;
+    - thread;
+    - reply action;
+    - take-in-work action;
+    - resolve action;
+    - close action;
+    - permission denial.
+  - **Audit:** staff reply, status change, close и Telegram delivery result аудируются; audit не дублирует message body.
+  - **Explicitly excluded:**
+    - calendar truth;
+    - operational-night UI;
+    - rich club detail;
+    - booking;
+    - HOLD;
+    - payments;
+    - deposits;
+    - Night Pass;
+    - check-in;
+    - loyalty;
+    - music;
+    - broadcasts;
+    - channel posts;
+    - exports;
+    - iBota;
+    - Guest Mode;
+    - all AI functions;
+    - complete guest-home redesign;
+    - extended registration/profile flow.
+  - **Product status:** slice accepted by product boundary but not implemented; canonical status `ACCEPTED_NOT_IMPLEMENTED`.
+  - **Implementation boundary:** до отдельной implementation-задачи production code не меняется.
+- **Consequences:** Private Support Loop становится первым accepted product slice и получает canonical slice specification; acceptance не меняет current production status и оставляет весь code/tests delivery отдельной implementation-задаче.
+- **Depends on:** `DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`.
+- **Blocks:** implementation первого slice до отдельной design/code/test/review задачи.
 - **Status:** `ACCEPTED_DECISION`.
