@@ -10,59 +10,71 @@ Roadmap задаёт последовательность проверяемых
 
 Reuse не означает keep-as-is: the secured DB HOLD branch is selected but its A3/React client contract is broken; query-string initData, incomplete role coverage, table-seating visit bypass, unwired availability/campaigns и canonical UI packaging должны быть разрешены до соответствующих slices. Private `/ask` code is reusable only after an application user exists; fresh Telegram user provisioning is not part of the current production foundation.
 
-## 2. Recommended first product slice
+## 2. Accepted first product slice
 
-Статус: `RECOMMENDED_NOT_ACCEPTED`.
+Статус: [`ACCEPTED_NOT_IMPLEMENTED`](slices/PRIVATE_SUPPORT_LOOP.md).
 
-### Private support loop
+### [Private Support Loop](slices/PRIVATE_SUPPORT_LOOP.md)
 
-`/start → private /ask → club selection → persisted support ticket → minimal staff list/detail/reply inbox → Telegram delivery гостю`
+`/start → idempotent minimal application-identity provisioning → private /ask → production-backed club selection → guest-selected support category → persisted ticket + initial message → minimal staff list/detail/thread/reply/status inbox → Telegram delivery гостю → RESOLVED / CLOSED`
 
 #### Reusable foundation
 
 - bare private Telegram `/start` response primitive, which does not look up or create an application user;
 - `/ask` command, Telegram club-selection callback and support ticket creation path for an already provisioned application user;
 - support ticket/message persistence;
-- RBAC list/reply API and service primitives;
+- generic RBAC/club-scope and list/reply/status API/service primitives, которые ещё не соответствуют accepted support permissions/lifecycle;
 - guest Telegram delivery primitive.
 
 #### New implementation required
 
-- idempotent minimal Telegram user provisioning before `/ask` can succeed for a fresh guest: ensure/create keyed by unique `telegram_user_id`, producing the database-generated `users.id` required by support, with duplicate-safe concurrent/repeated `/start` behavior;
-- provisioning data boundary: `username`/`display_name` are optional and may be retained only when supplied and justified; phone, contact and rich profile fields are not required. A provisioning failure must stop before club/question state, return a bounded retry message and leave no partial ticket;
-- provisioning must use a production-owned path and must not depend on the disabled legacy booking WebApp writer. Whether ensure runs inside `/start` or in an idempotent pre-`/ask` guard is a slice design dependency; this roadmap does not accept a broad registration/profile flow;
-- минимальный served staff inbox и ticket detail;
-- staff reply UI/action поверх существующего API;
-- verified RBAC/club scope для staff support surface;
-- выбранная minimal category/status/transition policy по `DEC-025`;
-- end-to-end delivery smoke с persistence и authorization.
+- idempotent minimal Telegram user provisioning owned by private bare `/start`: ensure/create keyed by unique `telegram_user_id`, producing the database-generated `users.id` required by support; first, sequential repeated and controlled concurrent/retry `/start` processing converge to one logical identity and one row;
+- provisioning data boundary: `username`/`display_name` are optional and may be retained only when supplied and justified; phone, contact and rich profile fields are not required. Failure returns a bounded non-success outcome without raw unique/SQL/internal details; exact UI presentation, copy, button and retry affordance remain implementation design;
+- provisioning must use a production-owned path and must not depend on the disabled legacy booking WebApp writer. `/ask` may fail closed or defensively verify identity, but it is not an alternative primary provisioning trigger; this roadmap does not accept a broad registration/profile flow;
+- `ENGINEERING_VALIDATION`: DB write/transaction failure returns no success and leaves no partial identity, club/category/question, ticket or thread state; this is a correctness gate, not an additional user decision;
+- exact seven-category guest selection and mapping;
+- минимальный served staff inbox, ticket detail и thread;
+- staff reply/take/resolve/close actions поверх reusable primitives;
+- accepted `MANAGER`/`CLUB_ADMIN` CLUB-scope access through separate support view/reply/status permissions, с denial для `ENTRY_MANAGER`, role-only `OWNER` и foreign-club staff;
+- exact `DEC-025` lifecycle `NEW → IN_PROGRESS → RESOLVED → CLOSED`, accepted confirmation только для explicit resolve и terminal-state enforcement;
+- required support/delivery audit without message-body duplication;
+- truthful observable Telegram delivery without false success;
+- end-to-end staging smoke с persistence, authorization, lifecycle, restart и delivery outcome.
 
 #### Explicitly excluded from first slice
 
 - calendar truth и current/next operational night;
+- operational-night UI;
 - rich club detail и canonical guest home redesign;
-- booking/HOLD, payment/deposit и Night Pass;
-- loyalty, music, broadcasts;
+- booking/HOLD, payments/deposits, Night Pass и check-in;
+- loyalty, music, broadcasts, channel posts и exports;
 - registration/profile enrichment beyond the minimal support identity record;
-- AI auto-answer, iBota и Guest Mode.
+- iBota, Guest Mode и все AI functions;
+- capabilities accepted by `DEC-028`–`DEC-035`.
 
-Acceptance boundary:
+Canonical acceptance boundary: полная нумерованная [acceptance matrix](slices/PRIVATE_SUPPORT_LOOP.md#acceptance-matrix) в slice specification. Она расширяет прежние 13 пунктов accepted category, lifecycle, permission, audit и delivery clauses и не меняет их смысл.
 
-1. Fresh Telegram guest вызывает `/start`.
-2. Первый `/start` создаёт или обеспечивает ровно одну минимальную application user identity, нужную support flow.
-3. Повторный последовательный `/start` не создаёт вторую user row и возвращает ту же логическую identity.
-4. Два или более конкурентных/retry ensure-вызова для одного `telegram_user_id` сходятся к одной application user identity: в БД остаётся ровно одна строка, caller не получает необработанный unique-constraint/SQL error, а оба пути получают один логический результат либо безопасный идемпотентный outcome; конкретный concurrency mechanism остаётся implementation choice slice.
-5. Гость вызывает `/ask`.
-6. Гость выбирает клуб из production-backed list.
-7. Вопрос создаёт persisted ticket и persisted initial message.
-8. Разрешённый staff видит ticket в минимальном served inbox.
-9. Staff открывает ticket detail и отвечает.
-10. Ответ сохраняется и доставляется гостю в Telegram.
-11. Unauthorized staff не видит ticket и не может ответить.
-12. Ticket, initial message и reply переживают process restart через DB persistence.
-13. Staging smoke начинается с ранее неизвестного Telegram user, контролируемо проверяет sequential и concurrent/retry provisioning и затем проходит end-to-end без ручной подмены URL/role/mode.
+### Previous 13-item crosswalk
 
-Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. Slice остаётся `RECOMMENDED_NOT_ACCEPTED`; решение о запуске не принято.
+| Previous item | Preserved meaning | Canonical acceptance IDs | Preservation result |
+|---:|---|---|---|
+| 1 | Fresh Telegram guest вызывает `/start` | `PSL-AC-01` | `PASS` |
+| 2 | Первый private bare `/start` создаёт/обеспечивает минимальную application identity | `PSL-AC-02`, `PSL-AC-07` | `PASS` |
+| 3 | Повторный последовательный `/start` не создаёт вторую row и возвращает ту же identity | `PSL-AC-03`, `PSL-AC-05` | `PASS` |
+| 4 | Concurrent/retry обработка `/start` сходится к одной identity без raw unique/SQL error | `PSL-AC-04`–`PSL-AC-06` | `PASS` |
+| 5 | Гость вызывает private `/ask` | `PSL-AC-08` | `PASS` |
+| 6 | Гость выбирает клуб из production-backed list | `PSL-AC-09` | `PASS` |
+| 7 | Вопрос создаёт persisted ticket и initial message | `PSL-AC-10`, `PSL-AC-11` | `PASS` |
+| 8 | Разрешённый staff видит ticket в minimal served inbox | `PSL-AC-13`, `PSL-AC-16`, `PSL-AC-32` | `PASS` |
+| 9 | Staff открывает detail и отвечает | `PSL-AC-13`, `PSL-AC-14`, `PSL-AC-16`, `PSL-AC-21` | `PASS` |
+| 10 | Reply сохраняется и доставляется гостю | `PSL-AC-21`–`PSL-AC-24` | `PASS` |
+| 11 | Unauthorized staff не видит ticket и не отвечает | `PSL-AC-17`–`PSL-AC-19` | `PASS` |
+| 12 | Ticket, initial message и reply переживают restart | `PSL-AC-29` | `PASS` |
+| 13 | Staging smoke начинается с unknown user и проверяет sequential/concurrent provisioning и E2E без ручной подмены | [Staging smoke](slices/PRIVATE_SUPPORT_LOOP.md#staging-smoke), `PSL-AC-01`–`PSL-AC-35` | `PASS` |
+
+Accepted product authorities: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-036`. Они не являются unresolved blockers первого slice.
+
+Technical implementation prerequisites remain: production-owned provisioning writer and concurrency design; exact permission constants; category/status migration; bounded staff UI technology; delivery queue/outbox/retry design; Ktor/Postgres tests; successful staging smoke. Эти choices должны сохранять accepted contract и не меняют статус `ACCEPTED_NOT_IMPLEMENTED` сами по себе.
 
 ## 3. Phases
 
@@ -72,23 +84,24 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 - **User outcome:** команда знает, какой продукт и какой runtime path строится; silent parallel implementations не получают новых функций.
 - **Included IDs:** `PROD-003`, `RBAC-001`, `RBAC-002`, `UX-001`, `CAL-001`, `PASS-001`, `FIN-002`, `SUP-002`.
 - **Dependencies:** review [OPEN_DECISIONS.md](OPEN_DECISIONS.md).
-- **Acceptance boundary:** приняты только выбранные пользователем public names, launch model, role mapping, operational-night model, canonical UI, support workflow, repository/source precedence and booking implementation direction; decisions записаны явно.
+- **Acceptance boundary:** accepted launch model, first-release role mapping, canonical UI strategy, support workflow, repository/source precedence и first product slice записаны явно; public names, operational-night model и booking implementation direction остаются отдельными pending decisions.
 - **Excluded scope:** production changes.
 - **Staging smoke:** не применяется; review проверяет непротиворечивую decision log и updated traceability.
 - **Governance activity:** `classify repository/source conflicts individually`.
 - **Activity status:** initial eight item-level decisions accepted; остальные conflicts продолжают требовать собственных решений. Это governance tracking, а не product implementation.
-- **Decision prerequisites:** `DEC-001`–`DEC-012`, `DEC-017`, `DEC-018`, `DEC-025`; принятый `DEC-026/D` больше не является prerequisite.
+- **Decision status:** `DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017` и `DEC-025` приняты и больше не являются unresolved blockers Private Support Loop. Pending work этой foundation phase сохраняется для `DEC-001`, `DEC-002`, `DEC-006`, `DEC-008`–`DEC-012`, `DEC-018`; принятый `DEC-026/D` больше не является prerequisite.
 
 ### Phase 1 — Private support loop
 
 - **Category:** Reuse with minimal new staff surface.
-- **User outcome:** гость задаёт вопрос выбранному клубу в private Telegram flow, разрешённый staff отвечает из minimal served inbox, и ответ приходит гостю.
+- **Status:** [`ACCEPTED_NOT_IMPLEMENTED`](slices/PRIVATE_SUPPORT_LOOP.md).
+- **User outcome:** fresh guest выбирает клуб и category в private Telegram flow, разрешённый staff отвечает из minimal served inbox, ответ наблюдаемо приходит гостю, а ticket проходит accepted lifecycle.
 - **Included IDs:** `PROD-001`, `NET-001`, `RBAC-006`, `SUP-001`, `SUP-002`, `SUP-004`, `SUP-005`, `COM-007`, `SEC-002`.
-- **Dependencies:** idempotent minimal Telegram user provisioning before `/ask`; existing `/ask`/club-selection code for a provisioned user; support persistence/list/reply/delivery primitives; minimal served staff inbox/detail/reply; staff role mapping; `DEC-025`; secure staff auth transport.
-- **Acceptance boundary:** полностью соответствует тринадцати пунктам first-slice boundary выше.
-- **Excluded scope:** calendar/operational-night truth, rich club detail, canonical guest shell redesign, booking/HOLD, payment/deposit, Night Pass, loyalty and AI.
-- **Staging smoke:** previously unknown Telegram user; first `/start` ensure/create; sequential repeated `/start` returns the same logical identity without a second row; two or more controlled concurrent/retry ensure calls for the same `telegram_user_id` leave exactly one user row, expose no uncaught unique-constraint/SQL error and return the same logical user or another safe idempotent outcome; then `/ask`; club selection; persisted ticket/message; authorized list/detail/reply; unauthorized list/reply denial; Telegram guest delivery; process restart; delivery failure observability/retry boundary.
-- **Decision prerequisites:** `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`.
+- **Dependencies:** production-owned idempotent minimal Telegram user provisioning before `/ask`; existing `/ask`/production club selection and persistence/list/reply/delivery primitives; exact category/status migration; minimal served staff inbox/detail/thread/actions; semantic permissions and secure staff auth transport; audit; truthful delivery design.
+- **Acceptance boundary:** canonical [Private Support Loop acceptance matrix](slices/PRIVATE_SUPPORT_LOOP.md#acceptance-matrix), включая complete previous-item crosswalk выше.
+- **Excluded scope:** exact [slice exclusions](slices/PRIVATE_SUPPORT_LOOP.md#explicit-exclusions); `DEC-028`–`DEC-035` capabilities не входят.
+- **Staging smoke:** exact bounded [slice smoke](slices/PRIVATE_SUPPORT_LOOP.md#staging-smoke): never-seen Telegram user; first `/start`; sequential repeated `/start`; controlled concurrent/retry `/start`; only then `/ask`; category/ticket/thread; allowed and denied roles/scopes/permissions; lifecycle; truthful delivery; restart; safe failure observability.
+- **Accepted authorities:** `DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-036`; product blockers для этого bounded slice сняты, implementation prerequisites остаются.
 
 ### Phase 2 — Deterministic booking core
 
@@ -180,7 +193,7 @@ Decision prerequisites: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-017`, `DEC-025`. S
 
 ## 4. Accepted decision placement in future phases
 
-Все placements ниже являются sequencing constraints для будущей работы. Они не меняют status или содержимое recommended first product slice, не означают начало implementation и не объявляют current code соответствующим accepted contract.
+Все placements ниже являются sequencing constraints для будущей работы. Они не меняют status или содержимое accepted Private Support Loop, не означают начало implementation и не объявляют current code соответствующим accepted contract.
 
 ### Booking lifecycle phase
 

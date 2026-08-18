@@ -5,11 +5,12 @@
 ## Порядок чтения
 
 1. [PRODUCT_SPEC.md](PRODUCT_SPEC.md) — нормализованный целевой контракт с устойчивыми requirement IDs.
-2. [AS_BUILT.md](AS_BUILT.md) — доказанное состояние production wiring на зафиксированном commit.
-3. [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md) — полная трассировка требований к коду, gaps и рекомендации.
-4. [OPEN_DECISIONS.md](OPEN_DECISIONS.md) — решения, которые нельзя принять от имени пользователя.
-5. [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) — dependency-aware последовательность, а не календарный план.
-6. [CONCEPT_SOURCE.md](CONCEPT_SOURCE.md) — неизменяемый первичный источник намерения.
+2. [OPEN_DECISIONS.md](OPEN_DECISIONS.md) — pending choices и явно принятые пользователем decision records.
+3. [AS_BUILT.md](AS_BUILT.md) — доказанное состояние production wiring на зафиксированном commit.
+4. [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md) — полная трассировка требований к коду, gaps и bounded evidence.
+5. [slices/PRIVATE_SUPPORT_LOOP.md](slices/PRIVATE_SUPPORT_LOOP.md) — canonical specification первого accepted product slice после прочтения target decisions и current/gap evidence.
+6. [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) — dependency-aware последовательность, а не календарный план.
+7. [CONCEPT_SOURCE.md](CONCEPT_SOURCE.md) — неизменяемый первичный источник намерения.
 
 ## Управление документами
 
@@ -23,6 +24,8 @@
 6. `AGENTS.md` служит короткой navigation/instruction map для repository, product docs, engineering rules и обязательных проверок, а не второй полной product spec.
 
 Initial eight repository/source conflict items классифицированы пользователем 2026-08-18: семь `AMEND`, один `DEFER`. Classification не означает `AS_BUILT`, соответствие текущего кода или завершённую implementation. [PRODUCT_SPEC.md](PRODUCT_SPEC.md) содержит отдельный accepted-decision overlay layer, не смешанный со 170 immutable-source requirement rows.
+
+Первый accepted product slice — [Private Support Loop](slices/PRIVATE_SUPPORT_LOOP.md), authority `DEC-036`, status `ACCEPTED_NOT_IMPLEMENTED`. Acceptance/classification задаёт target boundary и не является `AS_BUILT`: production code меняется только отдельной implementation-задачей с tests, review и обязательными delivery gates.
 
 Следующие baseline proposals не приняты `DEC-026` и остаются `DECISION_REQUIRED` там, где требуют выбора пользователя:
 
@@ -45,8 +48,9 @@ Initial eight repository/source conflict items классифицированы 
 | `UNKNOWN` | Repository не даёт достаточного доказательства. |
 | `DECISION_REQUIRED` | Нужен явный выбор пользователя. |
 | `ACCEPTED_DECISION` | Прямо принято пользователем и записано в decision record. |
+| `ACCEPTED_NOT_IMPLEMENTED` | Product slice принят как target boundary, но его end-to-end production implementation не выполнена. |
 
-Decision log содержит 35 records: 9 `ACCEPTED_DECISION` (`DEC-026`, `DEC-028`–`DEC-035`) и 26 `DECISION_REQUIRED`; `DEC-027` остаётся pending. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
+Decision log содержит 36 records: 16 `ACCEPTED_DECISION` (`DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-026`, `DEC-028`–`DEC-036`) и 20 `DECISION_REQUIRED`; `DEC-001`, `DEC-002`, `DEC-006` и `DEC-027` остаются pending. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
 
 ## Правила доказательности
 
