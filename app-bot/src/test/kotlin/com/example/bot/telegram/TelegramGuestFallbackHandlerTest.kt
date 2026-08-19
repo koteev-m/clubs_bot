@@ -6,6 +6,7 @@ import com.example.bot.booking.a3.BookingStatus
 import com.example.bot.clubs.Club
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.data.security.User
+import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.SupportService
@@ -28,38 +29,31 @@ import com.pengrad.telegrambot.request.SendMessage
 import com.pengrad.telegrambot.response.BaseResponse
 import io.mockk.every
 import io.mockk.mockk
+import java.sql.SQLException
 import java.time.Instant
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class TelegramGuestFallbackHandlerTest {
     @Test
-    fun `bare start welcomes unregistered user with exact mini app url without lookup`() =
+    fun `bare start provisions first identity and welcomes user with exact mini app url`() =
         runBlocking {
             val sender = FallbackRecordingTelegramSender()
-            var userLookups = 0
-            val unregisteredUserRepository =
-                object : UserRepository {
-                    override suspend fun getByTelegramId(id: Long): User? {
-                        userLookups++
-                        return null
-                    }
-
-                    override suspend fun getById(id: Long): User? {
-                        userLookups++
-                        return null
-                    }
-                }
+            val identities = InMemoryIdentityStore()
             val handler =
                 handler(
                     sender = sender,
                     now = TEST_NOW,
                     bookings = emptyList(),
-                    userRepository = unregisteredUserRepository,
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
                     botUsername = "NightConcierge_Bot",
                     miniAppUrl = TEST_MINI_APP_URL,
                 )
@@ -75,18 +69,117 @@ class TelegramGuestFallbackHandlerTest {
             assertEquals(1, buttons.size)
             assertEquals("Открыть Night Concierge", buttons.single().text)
             assertEquals(TEST_MINI_APP_URL, buttons.single().webApp?.url())
-            assertEquals(0, userLookups)
+            assertEquals(1, identities.ensureCalls)
+            assertEquals(1, identities.size)
+            assertEquals(101L, identities.getByTelegramId(101L)?.telegramId)
+        }
+
+    @Test
+    fun `repeated bare start reuses the same logical identity`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val identities = InMemoryIdentityStore()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
+                )
+
+            handler.handle(messageUpdate(text = "/start"))
+            val first = identities.getByTelegramId(101L)
+            handler.handle(messageUpdate(text = "/start"))
+            val second = identities.getByTelegramId(101L)
+
+            assertSame(first, second)
+            assertEquals(1, identities.size)
+            assertEquals(2, identities.ensureCalls)
+            assertEquals(2, sender.texts().count { it == "Добро пожаловать в Night Concierge!" })
+        }
+
+    @Test
+    fun `existing identity is left unchanged by bare start`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val existing = User(id = 77L, telegramId = 101L, username = "existing")
+            val identities = InMemoryIdentityStore(existing)
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
+                )
+
+            handler.handle(messageUpdate(text = "/start"))
+
+            assertSame(existing, identities.getByTelegramId(101L))
+            assertEquals(1, identities.size)
+        }
+
+    @Test
+    fun `persistence failure returns bounded response without success or sql details`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val rawDetail = "users_telegram_user_id_key INSERT INTO users constraint violation"
+            val failingProvisioner =
+                object : UserIdentityProvisioner {
+                    override suspend fun ensureMinimalIdentity(telegramUserId: Long): User =
+                        throw SQLException(rawDetail, "23505")
+                }
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userIdentityProvisioner = failingProvisioner,
+                )
+
+            handler.handle(messageUpdate(text = "/start"))
+
+            assertEquals(listOf("Не удалось начать работу. Попробуйте позже."), sender.texts())
+            assertFalse(sender.lastText().contains(rawDetail))
+            assertFalse(sender.lastText().contains("SQL", ignoreCase = true))
+            assertFalse(sender.lastText().contains("constraint", ignoreCase = true))
+            assertFalse(sender.lastText().contains("Добро пожаловать"))
+        }
+
+    @Test
+    fun `ask works after first start without pre-seeded identity`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val identities = InMemoryIdentityStore()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
+                )
+
+            handler.handle(messageUpdate(text = "/start"))
+            handler.handle(messageUpdate(text = "/ask"))
+
+            assertEquals(1, identities.size)
+            assertEquals("Выберите клуб для вопроса:", sender.lastText())
         }
 
     @Test
     fun `configured bot mention is accepted as bare start`() =
         runBlocking {
             val sender = FallbackRecordingTelegramSender()
+            val identities = InMemoryIdentityStore()
             val handler =
                 handler(
                     sender = sender,
                     now = TEST_NOW,
                     bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
                     botUsername = "NightConcierge_Bot",
                 )
 
@@ -94,17 +187,50 @@ class TelegramGuestFallbackHandlerTest {
 
             assertTrue(handled)
             assertEquals(1, sender.requests.filterIsInstance<SendMessage>().size)
+            assertEquals(1, identities.ensureCalls)
+            assertEquals(101L, identities.getByTelegramId(101L)?.telegramId)
+        }
+
+    @Test
+    fun `bare start provisions identity when mini app url is absent`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val identities = InMemoryIdentityStore()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
+                    miniAppUrl = null,
+                )
+
+            val handled = handler.handle(messageUpdate(text = "/start"))
+
+            assertTrue(handled)
+            assertEquals(1, identities.ensureCalls)
+            assertEquals(listOf("Добро пожаловать в Night Concierge!"), sender.texts())
+            assertFalse(
+                sender.requests
+                    .single()
+                    .parameters
+                    .containsKey("reply_markup"),
+            )
         }
 
     @Test
     fun `start payloads malformed prefixes and other bot mentions are not consumed`() =
         runBlocking {
             val sender = FallbackRecordingTelegramSender()
+            val identities = InMemoryIdentityStore()
             val handler =
                 handler(
                     sender = sender,
                     now = TEST_NOW,
                     bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
                     botUsername = "NightConcierge_Bot",
                 )
             val ignoredTexts =
@@ -124,18 +250,118 @@ class TelegramGuestFallbackHandlerTest {
             }
 
             assertTrue(sender.requests.isEmpty())
+            assertEquals(0, identities.ensureCalls)
+            assertEquals(0, identities.size)
         }
 
     @Test
     fun `bare start is ignored outside private chat`() =
         runBlocking {
             val sender = FallbackRecordingTelegramSender()
-            val handler = handler(sender = sender, now = TEST_NOW, bookings = emptyList())
+            val identities = InMemoryIdentityStore()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
+                )
 
             val handled = handler.handle(messageUpdate(text = "/start", chatType = "Group"))
 
             assertFalse(handled)
             assertTrue(sender.requests.isEmpty())
+            assertEquals(0, identities.ensureCalls)
+        }
+
+    @Test
+    fun `message from id is the only persisted telegram identity`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val identities = InMemoryIdentityStore()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
+                )
+
+            handler.handle(messageUpdate(text = "/start", telegramUserId = 303L, chatId = 909L))
+
+            assertEquals(303L, identities.getByTelegramId(303L)?.telegramId)
+            assertEquals(null, identities.getByTelegramId(909L))
+            assertEquals(1, identities.size)
+        }
+
+    @Test
+    fun `missing and non-positive telegram ids fail with bounded response`() =
+        runBlocking {
+            listOf<Long?>(null, 0L, -1L).forEach { telegramUserId ->
+                val sender = FallbackRecordingTelegramSender()
+                val provisioner = ValidatingIdentityProvisioner()
+                val handler =
+                    handler(
+                        sender = sender,
+                        now = TEST_NOW,
+                        bookings = emptyList(),
+                        userIdentityProvisioner = provisioner,
+                    )
+
+                val handled = handler.handle(messageUpdate(text = "/start", telegramUserId = telegramUserId))
+
+                assertTrue(handled)
+                assertEquals(listOf("Не удалось начать работу. Попробуйте позже."), sender.texts())
+                assertFalse(sender.lastText().contains("positive", ignoreCase = true))
+            }
+        }
+
+    @Test
+    fun `provisioning cancellation is rethrown without guest response`() {
+        val sender = FallbackRecordingTelegramSender()
+        val cancellation = CancellationException("cancel provisioning")
+        val handler =
+            handler(
+                sender = sender,
+                now = TEST_NOW,
+                bookings = emptyList(),
+                userIdentityProvisioner =
+                    object : UserIdentityProvisioner {
+                        override suspend fun ensureMinimalIdentity(telegramUserId: Long): User = throw cancellation
+                    },
+            )
+
+        val thrown =
+            assertThrows(CancellationException::class.java) {
+                runBlocking { handler.handle(messageUpdate(text = "/start")) }
+            }
+
+        assertSame(cancellation, thrown)
+        assertTrue(sender.requests.isEmpty())
+    }
+
+    @Test
+    fun `ask defensively rejects unknown identity without provisioning`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val identities = InMemoryIdentityStore()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    userRepository = identities,
+                    userIdentityProvisioner = identities,
+                )
+
+            val handled = handler.handle(messageUpdate(text = "/ask"))
+
+            assertTrue(handled)
+            assertEquals(0, identities.ensureCalls)
+            assertEquals(0, identities.size)
+            assertTrue(sender.lastText().contains("ещё не зарегистрированы"))
         }
 
     @Test
@@ -179,168 +405,182 @@ class TelegramGuestFallbackHandlerTest {
         }
 
     @Test
-    fun `qr command returns no booking message`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler =
-            handler(
-                sender = sender,
-                now = Instant.parse("2026-01-01T20:00:00Z"),
-                bookings = emptyList(),
+    fun `qr command returns no booking message`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = Instant.parse("2026-01-01T20:00:00Z"),
+                    bookings = emptyList(),
+                )
+
+            handler.handle(messageUpdate(text = "/qr"))
+
+            assertEquals("Активной брони нет. Оформите бронь через miniapp и попробуйте снова.", sender.lastText())
+        }
+
+    @Test
+    fun `qr command returns payload when booking exists`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val now = Instant.parse("2026-01-01T20:00:00Z")
+            val booking = bookedBooking(now = now, updatedAt = Instant.parse("2026-01-01T19:00:00Z"))
+            val handler = handler(sender = sender, now = now, bookings = listOf(booking), qrSecret = "top-secret")
+
+            handler.handle(messageUpdate(text = "/my_pass@ClubBot"))
+
+            val text = sender.lastText()
+            assertTrue(text.contains("Ваш пропуск:"))
+            assertTrue(text.contains("Покажите этот код на входе."))
+            assertFalse(text.contains("top-secret"))
+        }
+
+    @Test
+    fun `my command returns booking summary`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val now = Instant.parse("2026-01-01T20:00:00Z")
+            val booking = bookedBooking(now = now)
+            val handler = handler(sender = sender, now = now, bookings = listOf(booking))
+
+            handler.handle(messageUpdate(text = "/my"))
+
+            val text = sender.lastText()
+            assertTrue(text.contains("Ближайшая бронь"))
+            assertTrue(text.contains("Клуб: Club One"))
+            assertTrue(text.contains("Статус: BOOKED"))
+            assertTrue(text.contains("Инвайты: переходите по ссылке вида /start inv_<token>"))
+        }
+
+    @Test
+    fun `my command returns empty state`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = Instant.parse("2026-01-01T20:00:00Z"),
+                    bookings = emptyList(),
+                )
+
+            handler.handle(messageUpdate(text = "/next_booking"))
+
+            assertEquals("Ближайших активных броней нет.", sender.lastText())
+        }
+
+    @Test
+    fun `ask flow callback and reply creates support ticket`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val support = RecordingSupportService()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = Instant.parse("2026-01-01T20:00:00Z"),
+                    bookings = emptyList(),
+                    supportService = support,
+                )
+
+            handler.handle(messageUpdate(text = "/ask"))
+            handler.handle(askCallbackUpdate("ask:club:1"))
+            handler.handle(
+                messageUpdate(
+                    text = "Можно ли приехать после полуночи?",
+                    replyText = "Вы выбрали Club One. Ответьте на это сообщение вопросом. clubId:1",
+                ),
             )
 
-        handler.handle(messageUpdate(text = "/qr"))
-
-        assertEquals("Активной брони нет. Оформите бронь через miniapp и попробуйте снова.", sender.lastText())
-    }
-
-    @Test
-    fun `qr command returns payload when booking exists`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val now = Instant.parse("2026-01-01T20:00:00Z")
-        val booking = bookedBooking(now = now, updatedAt = Instant.parse("2026-01-01T19:00:00Z"))
-        val handler = handler(sender = sender, now = now, bookings = listOf(booking), qrSecret = "top-secret")
-
-        handler.handle(messageUpdate(text = "/my_pass@ClubBot"))
-
-        val text = sender.lastText()
-        assertTrue(text.contains("Ваш пропуск:"))
-        assertTrue(text.contains("Покажите этот код на входе."))
-        assertFalse(text.contains("top-secret"))
-    }
+            assertEquals(1, support.createCalls.size)
+            assertEquals(1L, support.createCalls.single().clubId)
+            assertEquals("Можно ли приехать после полуночи?", support.createCalls.single().text)
+            assertTrue(sender.texts().any { it.contains("Вопрос отправлен в клуб") })
+        }
 
     @Test
-    fun `my command returns booking summary`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val now = Instant.parse("2026-01-01T20:00:00Z")
-        val booking = bookedBooking(now = now)
-        val handler = handler(sender = sender, now = now, bookings = listOf(booking))
+    fun `ask callback without message still answers callback query`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
 
-        handler.handle(messageUpdate(text = "/my"))
+            val handled = handler.handle(askCallbackUpdateWithoutMessage("ask:club:1"))
 
-        val text = sender.lastText()
-        assertTrue(text.contains("Ближайшая бронь"))
-        assertTrue(text.contains("Клуб: Club One"))
-        assertTrue(text.contains("Статус: BOOKED"))
-        assertTrue(text.contains("Инвайты: переходите по ссылке вида /start inv_<token>"))
-    }
+            assertTrue(handled)
+            assertTrue(sender.requests.any { it is AnswerCallbackQuery })
+            assertTrue(sender.requests.none { it is SendMessage })
+        }
 
     @Test
-    fun `my command returns empty state`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler =
-            handler(
-                sender = sender,
-                now = Instant.parse("2026-01-01T20:00:00Z"),
-                bookings = emptyList(),
-            )
+    fun `ask reply without marker is not handled`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = Instant.parse("2026-01-01T20:00:00Z"),
+                    bookings = emptyList(),
+                )
 
-        handler.handle(messageUpdate(text = "/next_booking"))
+            val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение"))
 
-        assertEquals("Ближайших активных броней нет.", sender.lastText())
-    }
-
-    @Test
-    fun `ask flow callback and reply creates support ticket`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val support = RecordingSupportService()
-        val handler =
-            handler(
-                sender = sender,
-                now = Instant.parse("2026-01-01T20:00:00Z"),
-                bookings = emptyList(),
-                supportService = support,
-            )
-
-        handler.handle(messageUpdate(text = "/ask"))
-        handler.handle(askCallbackUpdate("ask:club:1"))
-        handler.handle(
-            messageUpdate(
-                text = "Можно ли приехать после полуночи?",
-                replyText = "Вы выбрали Club One. Ответьте на это сообщение вопросом. clubId:1",
-            ),
-        )
-
-        assertEquals(1, support.createCalls.size)
-        assertEquals(1L, support.createCalls.single().clubId)
-        assertEquals("Можно ли приехать после полуночи?", support.createCalls.single().text)
-        assertTrue(sender.texts().any { it.contains("Вопрос отправлен в клуб") })
-    }
+            assertFalse(handled)
+            assertTrue(sender.requests.isEmpty())
+        }
 
     @Test
-    fun `ask callback without message still answers callback query`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
+    fun `ask reply with malformed marker returns validation error`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = Instant.parse("2026-01-01T20:00:00Z"),
+                    bookings = emptyList(),
+                )
 
-        val handled = handler.handle(askCallbackUpdateWithoutMessage("ask:club:1"))
+            val handled =
+                handler.handle(
+                    messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение. clubId:abc"),
+                )
 
-        assertTrue(handled)
-        assertTrue(sender.requests.any { it is AnswerCallbackQuery })
-        assertTrue(sender.requests.none { it is SendMessage })
-    }
-
-    @Test
-    fun `ask reply without marker is not handled`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler =
-            handler(
-                sender = sender,
-                now = Instant.parse("2026-01-01T20:00:00Z"),
-                bookings = emptyList(),
-            )
-
-        val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение"))
-
-        assertFalse(handled)
-        assertTrue(sender.requests.isEmpty())
-    }
+            assertTrue(handled)
+            assertEquals("Не удалось определить клуб. Начните заново через /ask.", sender.lastText())
+        }
 
     @Test
-    fun `ask reply with malformed marker returns validation error`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler =
-            handler(
-                sender = sender,
-                now = Instant.parse("2026-01-01T20:00:00Z"),
-                bookings = emptyList(),
-            )
+    fun `reply to non-ask message containing clubId is not handled`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
 
-        val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение. clubId:abc"))
+            val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Просто текст clubId:1"))
 
-        assertTrue(handled)
-        assertEquals("Не удалось определить клуб. Начните заново через /ask.", sender.lastText())
-    }
+            assertFalse(handled)
+            assertTrue(sender.requests.isEmpty())
+        }
 
     @Test
-    fun `reply to non-ask message containing clubId is not handled`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
+    fun `cancel command responds friendly`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
 
-        val handled = handler.handle(messageUpdate(text = "Вопрос", replyText = "Просто текст clubId:1"))
+            handler.handle(messageUpdate(text = "/cancel"))
 
-        assertFalse(handled)
-        assertTrue(sender.requests.isEmpty())
-    }
-
-    @Test
-    fun `cancel command responds friendly`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
-
-        handler.handle(messageUpdate(text = "/cancel"))
-
-        assertEquals("Ок, отменено. Когда будете готовы, используйте /ask.", sender.lastText())
-    }
+            assertEquals("Ок, отменено. Когда будете готовы, используйте /ask.", sender.lastText())
+        }
 
     @Test
-    fun `private commands are ignored in group chat`() = runBlocking {
-        val sender = FallbackRecordingTelegramSender()
-        val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
+    fun `private commands are ignored in group chat`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler = handler(sender = sender, now = Instant.parse("2026-01-01T20:00:00Z"), bookings = emptyList())
 
-        handler.handle(messageUpdate(text = "/qr", chatType = "Group"))
-        handler.handle(messageUpdate(text = "/my", chatType = "Group"))
+            handler.handle(messageUpdate(text = "/qr", chatType = "Group"))
+            handler.handle(messageUpdate(text = "/my", chatType = "Group"))
 
-        assertTrue(sender.requests.isEmpty())
-    }
+            assertTrue(sender.requests.isEmpty())
+        }
 
     private fun handler(
         sender: FallbackRecordingTelegramSender,
@@ -349,17 +589,19 @@ class TelegramGuestFallbackHandlerTest {
         qrSecret: String = "qr-secret",
         supportService: SupportService = RecordingSupportService(),
         userRepository: UserRepository = RegisteredFallbackUserRepository,
+        userIdentityProvisioner: UserIdentityProvisioner = RegisteredFallbackIdentityProvisioner,
         botUsername: String? = "clubbot",
-        miniAppUrl: String = TEST_MINI_APP_URL,
+        miniAppUrl: String? = TEST_MINI_APP_URL,
     ): TelegramGuestFallbackHandler {
         val bookingState = mockk<BookingState>()
         every { bookingState.now() } returns now
-        every { bookingState.findUserBookings(55L) } returns bookings
+        every { bookingState.findUserBookings(any()) } returns bookings
         return TelegramGuestFallbackHandler(
             send = sender::send,
             bookingState = bookingState,
             clubsRepository = StaticClubsRepository(),
             userRepository = userRepository,
+            userIdentityProvisioner = userIdentityProvisioner,
             supportService = supportService,
             botUsername = botUsername,
             miniAppUrl = miniAppUrl,
@@ -372,6 +614,41 @@ private object RegisteredFallbackUserRepository : UserRepository {
     override suspend fun getByTelegramId(id: Long): User? = if (id == 101L) User(55L, 101L, "guest") else null
 
     override suspend fun getById(id: Long): User? = null
+}
+
+private object RegisteredFallbackIdentityProvisioner : UserIdentityProvisioner {
+    override suspend fun ensureMinimalIdentity(telegramUserId: Long): User =
+        User(id = 55L, telegramId = telegramUserId, username = "guest")
+}
+
+private class ValidatingIdentityProvisioner : UserIdentityProvisioner {
+    override suspend fun ensureMinimalIdentity(telegramUserId: Long): User {
+        require(telegramUserId > 0) { "telegramUserId must be positive" }
+        return User(id = 55L, telegramId = telegramUserId, username = null)
+    }
+}
+
+private class InMemoryIdentityStore(
+    existing: User? = null,
+) : UserRepository,
+    UserIdentityProvisioner {
+    private val users = existing?.let { mutableMapOf(it.telegramId to it) } ?: mutableMapOf()
+    var ensureCalls: Int = 0
+        private set
+
+    val size: Int
+        get() = users.size
+
+    override suspend fun ensureMinimalIdentity(telegramUserId: Long): User {
+        ensureCalls += 1
+        return users.getOrPut(telegramUserId) {
+            User(id = users.size + 1L, telegramId = telegramUserId, username = null)
+        }
+    }
+
+    override suspend fun getByTelegramId(id: Long): User? = users[id]
+
+    override suspend fun getById(id: Long): User? = users.values.firstOrNull { it.id == id }
 }
 
 private data class CreateTicketCall(
@@ -405,10 +682,15 @@ private class RecordingSupportService : SupportService {
         attachments: String?,
     ): SupportServiceResult<TicketMessage> = throw UnsupportedOperationException()
 
-    override suspend fun listTicketsForClub(clubId: Long, status: TicketStatus?): List<TicketSummary> = emptyList()
+    override suspend fun listTicketsForClub(
+        clubId: Long,
+        status: TicketStatus?,
+    ): List<TicketSummary> = emptyList()
 
-    override suspend fun assign(ticketId: Long, agentUserId: Long): SupportServiceResult<Ticket> =
-        throw UnsupportedOperationException()
+    override suspend fun assign(
+        ticketId: Long,
+        agentUserId: Long,
+    ): SupportServiceResult<Ticket> = throw UnsupportedOperationException()
 
     override suspend fun setStatus(
         ticketId: Long,
@@ -488,21 +770,25 @@ private fun messageUpdate(
     text: String,
     chatType: String = "Private",
     replyText: String? = null,
+    telegramUserId: Long? = 101L,
+    chatId: Long = 42L,
 ): Update {
     val update = mockk<Update>()
     val message = mockk<Message>()
     val chat = mockk<Chat>()
     val type = mockk<Chat.Type>()
-    val from = mockk<TelegramUser>()
     every { update.preCheckoutQuery() } returns null
     every { update.callbackQuery() } returns null
     every { update.message() } returns message
     every { message.successfulPayment() } returns null
     every { message.text() } returns text
     every { message.chat() } returns chat
+    val from = telegramUserId?.let { mockk<TelegramUser>() }
     every { message.from() } returns from
-    every { from.id() } returns 101L
-    every { chat.id() } returns 42L
+    if (from != null) {
+        every { from.id() } returns telegramUserId
+    }
+    every { chat.id() } returns chatId
     every { chat.type() } returns type
     every { type.name } returns chatType
     if (replyText != null) {

@@ -6,7 +6,9 @@ import com.example.bot.booking.a3.BookingStatus
 import com.example.bot.booking.a3.QrBookingCodec
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.data.security.User
+import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
+import com.example.bot.logging.errorSqlSafe
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.TicketTopic
@@ -22,14 +24,17 @@ import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.SendMessage
 import com.pengrad.telegrambot.response.BaseResponse
+import org.slf4j.LoggerFactory
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.coroutines.cancellation.CancellationException
 
 class TelegramGuestFallbackHandler(
     private val send: suspend (BaseRequest<*, *>) -> BaseResponse,
     private val bookingState: BookingState,
     private val clubsRepository: ClubsRepository,
     private val userRepository: UserRepository,
+    private val userIdentityProvisioner: UserIdentityProvisioner,
     private val supportService: SupportService,
     private val botUsername: String?,
     private val miniAppUrl: String?,
@@ -37,6 +42,7 @@ class TelegramGuestFallbackHandler(
     private val zoneId: ZoneId = ZoneId.systemDefault(),
 ) {
     private val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(zoneId)
+    private val logger = LoggerFactory.getLogger("TelegramGuestFallbackHandler")
 
     suspend fun handle(update: Update): Boolean {
         if (handleAskCallback(update.callbackQuery())) {
@@ -47,8 +53,7 @@ class TelegramGuestFallbackHandler(
         val privateChat = isPrivateChat(message.chat())
 
         if (privateChat && isBareStart(text)) {
-            val configuredMiniAppUrl = miniAppUrl ?: return false
-            handleBareStart(message, configuredMiniAppUrl)
+            handleBareStart(message)
             return true
         }
 
@@ -88,18 +93,37 @@ class TelegramGuestFallbackHandler(
         return false
     }
 
-    private suspend fun handleBareStart(
-        message: Message,
-        configuredMiniAppUrl: String,
-    ) {
-        val keyboard =
-            InlineKeyboardMarkup(
-                arrayOf(
-                    InlineKeyboardButton(OPEN_MINI_APP_BUTTON_TEXT)
-                        .webApp(WebAppInfo(configuredMiniAppUrl)),
-                ),
+    private suspend fun handleBareStart(message: Message) {
+        val telegramUserId = message.from()?.id()
+        if (telegramUserId == null) {
+            sendToMessage(message, IDENTITY_PROVISIONING_FAILURE_TEXT)
+            return
+        }
+        try {
+            userIdentityProvisioner.ensureMinimalIdentity(telegramUserId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            logger.errorSqlSafe(
+                "telegram identity provisioning failed category={}",
+                "persistence",
+                error,
             )
-        val request = SendMessage(message.chat().id(), WELCOME_TEXT).replyMarkup(keyboard)
+            sendToMessage(message, IDENTITY_PROVISIONING_FAILURE_TEXT)
+            return
+        }
+
+        val request = SendMessage(message.chat().id(), WELCOME_TEXT)
+        miniAppUrl?.let { configuredMiniAppUrl ->
+            val keyboard =
+                InlineKeyboardMarkup(
+                    arrayOf(
+                        InlineKeyboardButton(OPEN_MINI_APP_BUTTON_TEXT)
+                            .webApp(WebAppInfo(configuredMiniAppUrl)),
+                    ),
+                )
+            request.replyMarkup(keyboard)
+        }
         applyThread(request, message.threadIdOrNull())
         send(request)
     }
@@ -138,7 +162,11 @@ class TelegramGuestFallbackHandler(
                 appendLine("Ближайшая бронь")
                 appendLine("Клуб: $clubName")
                 appendLine("Дата: ${dateFormatter.format(booking.arrivalWindow.first)}")
-                appendLine("Окно прибытия: ${dateFormatter.format(booking.arrivalWindow.first)} — ${dateFormatter.format(booking.arrivalWindow.second)}")
+                appendLine(
+                    "Окно прибытия: ${dateFormatter.format(
+                        booking.arrivalWindow.first,
+                    )} — ${dateFormatter.format(booking.arrivalWindow.second)}",
+                )
                 appendLine("Стол: #${booking.tableId}")
                 appendLine("Статус: ${booking.status.name}")
                 append("Инвайты: переходите по ссылке вида /start inv_<token>")
@@ -170,11 +198,14 @@ class TelegramGuestFallbackHandler(
             sendToMessage(message, "Сейчас недоступен список клубов. Попробуйте позже.")
             return
         }
-        val rows = clubs.map { club ->
-            arrayOf(InlineKeyboardButton(club.name).callbackData("ask:club:${club.id}"))
-        }.toTypedArray()
-        val request = SendMessage(message.chat().id(), "Выберите клуб для вопроса:")
-            .replyMarkup(InlineKeyboardMarkup(*rows))
+        val rows =
+            clubs
+                .map { club ->
+                    arrayOf(InlineKeyboardButton(club.name).callbackData("ask:club:${club.id}"))
+                }.toTypedArray()
+        val request =
+            SendMessage(message.chat().id(), "Выберите клуб для вопроса:")
+                .replyMarkup(InlineKeyboardMarkup(*rows))
         applyThread(request, message.threadIdOrNull())
         send(request)
     }
@@ -254,13 +285,19 @@ class TelegramGuestFallbackHandler(
         return true
     }
 
-    private suspend fun sendForceReply(message: Message, text: String) {
+    private suspend fun sendForceReply(
+        message: Message,
+        text: String,
+    ) {
         val request = SendMessage(message.chat().id(), text).replyMarkup(ForceReply())
         applyThread(request, message.threadIdOrNull())
         send(request)
     }
 
-    private suspend fun sendToMessage(message: Message, text: String) {
+    private suspend fun sendToMessage(
+        message: Message,
+        text: String,
+    ) {
         val request = SendMessage(message.chat().id(), text)
         applyThread(request, message.threadIdOrNull())
         send(request)
@@ -327,10 +364,9 @@ class TelegramGuestFallbackHandler(
         return id?.toLongOrNull()
     }
 
-    private fun isAskMarkerText(text: String): Boolean {
-        return text.contains("Ответьте на это сообщение", ignoreCase = true) &&
+    private fun isAskMarkerText(text: String): Boolean =
+        text.contains("Ответьте на это сообщение", ignoreCase = true) &&
             text.contains("clubId:", ignoreCase = true)
-    }
 
     private fun applyThread(
         request: SendMessage,
@@ -344,6 +380,7 @@ class TelegramGuestFallbackHandler(
 
 private const val WELCOME_TEXT = "Добро пожаловать в Night Concierge!"
 private const val OPEN_MINI_APP_BUTTON_TEXT = "Открыть Night Concierge"
+private const val IDENTITY_PROVISIONING_FAILURE_TEXT = "Не удалось начать работу. Попробуйте позже."
 
 @Suppress("DEPRECATION")
 private fun Message.threadIdOrNull(): Int? = runCatching { messageThreadId() }.getOrNull()

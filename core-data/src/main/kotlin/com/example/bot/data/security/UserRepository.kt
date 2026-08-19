@@ -14,3 +14,12 @@ interface UserRepository {
      */
     suspend fun getById(id: Long): User?
 }
+
+/**
+ * Creates or returns the minimal application identity for a Telegram user.
+ *
+ * Implementations must use database-enforced uniqueness for concurrent callers.
+ */
+interface UserIdentityProvisioner {
+    suspend fun ensureMinimalIdentity(telegramUserId: Long): User
+}
