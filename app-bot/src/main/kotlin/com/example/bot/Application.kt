@@ -13,6 +13,7 @@ import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
+import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
@@ -162,8 +163,10 @@ import kotlin.coroutines.cancellation.CancellationException
 @Suppress("unused")
 fun Application.module() {
     val isDev: Boolean =
-        environment.config.propertyOrNull("ktor.deployment.development")
-            ?.getString()?.toBooleanStrictOrNull()
+        environment.config
+            .propertyOrNull("ktor.deployment.development")
+            ?.getString()
+            ?.toBooleanStrictOrNull()
             ?: System.getProperty("io.ktor.development")?.toBoolean() ?: false
     bootstrapPlatformPlugins()
     bootstrapPersistence()
@@ -183,7 +186,6 @@ fun Application.module() {
     if (isDev) {
         installDiagTime()
     }
-
 
     // 6) Инжект сервисов
     val guestListRepository by inject<GuestListRepository>()
@@ -243,6 +245,7 @@ fun Application.module() {
     val guestGamificationService by inject<com.example.bot.gamification.GuestGamificationService>()
     val opsChatConfigRepository by inject<ClubOpsChatConfigRepository>()
     val userRepository by inject<UserRepository>()
+    val userIdentityProvisioner by inject<UserIdentityProvisioner>()
     val suspiciousIpRepository by inject<SuspiciousIpRepository>()
     val webhookUpdateDedupRepository by inject<WebhookUpdateDedupRepository>()
     val telegramWebhookIngressRepository by inject<TelegramWebhookIngressRepository>()
@@ -258,8 +261,10 @@ fun Application.module() {
             waitlistRepository = waitlistRepository,
             bookingProvider =
                 object : BookingProvider {
-                    override fun findBookingsForEvent(clubId: Long, eventId: Long): List<Booking> =
-                        bookingState.findBookingsForEvent(clubId, eventId)
+                    override fun findBookingsForEvent(
+                        clubId: Long,
+                        eventId: Long,
+                    ): List<Booking> = bookingState.findBookingsForEvent(clubId, eventId)
                 },
             eventsRepository = eventsRepository,
         )
@@ -268,7 +273,9 @@ fun Application.module() {
 
     // 7) Метрики
     val registry = Metrics.globalRegistry
-    val rotationConfig = com.example.bot.metrics.QrRotationConfig.fromEnv()
+    val rotationConfig =
+        com.example.bot.metrics.QrRotationConfig
+            .fromEnv()
     UiCheckinMetrics.bind(registry, rotationConfig)
     UiWaitlistMetrics.bind(registry)
 
@@ -292,6 +299,7 @@ fun Application.module() {
             bookingState = bookingState,
             clubsRepository = clubsRepository,
             userRepository = userRepository,
+            userIdentityProvisioner = userIdentityProvisioner,
             supportService = supportService,
             botUsername = config.bot.username,
             miniAppUrl = config.miniAppUrl,
@@ -334,7 +342,11 @@ fun Application.module() {
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
     errorCodesRoutes()
     pingRoute()
-    guestListRoutes(repository = guestListRepository, parser = guestListCsvParser, auditLogRepository = auditLogRepository)
+    guestListRoutes(
+        repository = guestListRepository,
+        parser = guestListCsvParser,
+        auditLogRepository = auditLogRepository,
+    )
     adminPrivacyRoutes(privacyService = privacyService)
     bookingA3Routes(
         bookingState = bookingState,
@@ -509,7 +521,6 @@ fun Application.module() {
 
 private val opsNotificationLogger = LoggerFactory.getLogger("OpsNotificationService")
 
-
 private fun Application.bootstrapPlatformPlugins() {
     configureLoggingAndRequestId()
     installAppConfig()
@@ -546,7 +557,12 @@ private fun Application.bootstrapSecurity() {
 
 private fun Application.bootstrapKoin() {
     val isDev =
-        (environment.config.propertyOrNull("ktor.deployment.development")?.getString()?.toBooleanStrictOrNull())
+        (
+            environment.config
+                .propertyOrNull("ktor.deployment.development")
+                ?.getString()
+                ?.toBooleanStrictOrNull()
+        )
             ?: System.getProperty("io.ktor.development")?.toBoolean() ?: false
     val modules = appModules()
     install(Koin) {

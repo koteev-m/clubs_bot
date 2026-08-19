@@ -66,6 +66,7 @@ import com.example.bot.data.promo.PromoAttributionRepositoryImpl
 import com.example.bot.data.promo.PromoLinkRepositoryImpl
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
+import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.tables.DefaultGuestQrResolver
@@ -236,11 +237,23 @@ val bookingModule =
         single<PromoAttributionRepository> { PromoAttributionRepositoryImpl(get()) }
         single<BookingTemplateRepository> { BookingTemplateRepositoryImpl(get()) }
 
-        single<UserRepository> { ExposedUserRepository(get()) }
+        single { ExposedUserRepository(get()) }
+        single<UserRepository> { get<ExposedUserRepository>() }
+        single<UserIdentityProvisioner> { get<ExposedUserRepository>() }
         single<UserRoleRepository> { ExposedUserRoleRepository(get()) }
 
         single { MyBookingsMetrics(runCatching { get<MeterRegistry>() }.getOrNull()) }
-        single { MyBookingsService(get(), get(), get(), get(), get(), get<OpsNotificationPublisher>(), availabilityCacheInvalidator = get()) }
+        single {
+            MyBookingsService(
+                get(),
+                get(),
+                get(),
+                get(),
+                get(),
+                get<OpsNotificationPublisher>(),
+                availabilityCacheInvalidator = get(),
+            )
+        }
 
         single<PromoAttributionStore> { InMemoryPromoAttributionStore() }
 

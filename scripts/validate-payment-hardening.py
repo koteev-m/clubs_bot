@@ -1928,6 +1928,10 @@ SQL_SAFE_CALLER_BINDINGS: dict[str, tuple[str, str]] = {
     "app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt": ("KotlinLogging", "logger"),
     "app-bot/src/main/kotlin/com/example/bot/routes/PaymentsFinalizeRoutes.kt": ("KotlinLogging", "logger"),
     "app-bot/src/main/kotlin/com/example/bot/plugins/JsonErrorPages.kt": ("LoggerFactory", "getLogger"),
+    "app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt": (
+        "LoggerFactory",
+        "getLogger",
+    ),
 }
 
 
