@@ -22,6 +22,7 @@ import com.pengrad.telegrambot.model.Chat
 import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.model.User as TelegramUser
+import com.pengrad.telegrambot.model.request.ForceReply
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
@@ -470,34 +471,6 @@ class TelegramGuestFallbackHandlerTest {
         }
 
     @Test
-    fun `ask flow callback and reply creates support ticket`() =
-        runBlocking {
-            val sender = FallbackRecordingTelegramSender()
-            val support = RecordingSupportService()
-            val handler =
-                handler(
-                    sender = sender,
-                    now = Instant.parse("2026-01-01T20:00:00Z"),
-                    bookings = emptyList(),
-                    supportService = support,
-                )
-
-            handler.handle(messageUpdate(text = "/ask"))
-            handler.handle(askCallbackUpdate("ask:club:1"))
-            handler.handle(
-                messageUpdate(
-                    text = "Можно ли приехать после полуночи?",
-                    replyText = "Вы выбрали Club One. Ответьте на это сообщение вопросом. clubId:1",
-                ),
-            )
-
-            assertEquals(1, support.createCalls.size)
-            assertEquals(1L, support.createCalls.single().clubId)
-            assertEquals("Можно ли приехать после полуночи?", support.createCalls.single().text)
-            assertTrue(sender.texts().any { it.contains("Вопрос отправлен в клуб") })
-        }
-
-    @Test
     fun `ask callback without message still answers callback query`() =
         runBlocking {
             val sender = FallbackRecordingTelegramSender()
@@ -525,26 +498,6 @@ class TelegramGuestFallbackHandlerTest {
 
             assertFalse(handled)
             assertTrue(sender.requests.isEmpty())
-        }
-
-    @Test
-    fun `ask reply with malformed marker returns validation error`() =
-        runBlocking {
-            val sender = FallbackRecordingTelegramSender()
-            val handler =
-                handler(
-                    sender = sender,
-                    now = Instant.parse("2026-01-01T20:00:00Z"),
-                    bookings = emptyList(),
-                )
-
-            val handled =
-                handler.handle(
-                    messageUpdate(text = "Вопрос", replyText = "Ответьте на это сообщение. clubId:abc"),
-                )
-
-            assertTrue(handled)
-            assertEquals("Не удалось определить клуб. Начните заново через /ask.", sender.lastText())
         }
 
     @Test
@@ -582,32 +535,88 @@ class TelegramGuestFallbackHandlerTest {
             assertTrue(sender.requests.isEmpty())
         }
 
-    private fun handler(
-        sender: FallbackRecordingTelegramSender,
-        now: Instant,
-        bookings: List<Booking>,
-        qrSecret: String = "qr-secret",
-        supportService: SupportService = RecordingSupportService(),
-        userRepository: UserRepository = RegisteredFallbackUserRepository,
-        userIdentityProvisioner: UserIdentityProvisioner = RegisteredFallbackIdentityProvisioner,
-        botUsername: String? = "clubbot",
-        miniAppUrl: String? = TEST_MINI_APP_URL,
-    ): TelegramGuestFallbackHandler {
-        val bookingState = mockk<BookingState>()
-        every { bookingState.now() } returns now
-        every { bookingState.findUserBookings(any()) } returns bookings
-        return TelegramGuestFallbackHandler(
-            send = sender::send,
-            bookingState = bookingState,
-            clubsRepository = StaticClubsRepository(),
-            userRepository = userRepository,
-            userIdentityProvisioner = userIdentityProvisioner,
-            supportService = supportService,
-            botUsername = botUsername,
-            miniAppUrl = miniAppUrl,
-            qrSecretProvider = { qrSecret },
-        )
-    }
+    @Test
+    fun `ask from a known guest shows the production backed club list`() =
+        runBlocking { verifyAskShowsProductionClubList() }
+
+    @Test
+    fun `ask with an active booking still requires explicit club selection`() =
+        runBlocking { verifyActiveBookingRequiresClubSelection() }
+
+    @Test
+    fun `Long MAX club callback shows seven literal categories with bounded payloads`() =
+        runBlocking { verifyClubCallbackShowsCategories() }
+
+    @Test
+    fun `category callback sends a bot authored force reply prompt without creating a ticket`() =
+        runBlocking { verifyCategoryCallbackPrompt() }
+
+    @Test
+    fun `each explicit category creates a ticket with the selected club and topic`() =
+        runBlocking { verifyEachCategoryCreatesSelectedTicket() }
+
+    @Test
+    fun `non canonical malformed and unknown callbacks are rejected without ticket creation`() =
+        runBlocking { verifyInvalidCallbacksDoNotCreateTickets() }
+
+    @Test
+    fun `exact canonical prompt is accepted only from configured current bot id`() =
+        runBlocking { verifyExactCurrentBotIdentityBoundary() }
+
+    @Test
+    fun `forwarded guest business inline and other provenance is rejected`() =
+        runBlocking { verifyDisallowedPromptProvenance() }
+
+    @Test
+    fun `bot id lookup failure is bounded and cancellation is rethrown`() = verifyBotIdentityLookupFailures()
+
+    @Test
+    fun `contradictory missing duplicated malformed and overflow contexts are rejected`() =
+        runBlocking { verifyInvalidReplyContexts() }
+
+    @Test
+    fun `all non canonical id forms are rejected in reply context`() = runBlocking { verifyNonCanonicalReplyClubIds() }
+
+    @Test
+    fun `canonical prompt supports newline and marker like persisted club name`() =
+        runBlocking { verifyMarkerLikeClubName() }
+
+    @Test
+    fun `unrelated current bot reply and human authored lookalike are not accepted`() =
+        runBlocking { verifyUnrelatedAndHumanReplyTargets() }
+
+    @Test
+    fun `blank ask reply is rejected without creating a ticket`() = runBlocking { verifyBlankAskReply() }
+}
+
+private fun handler(
+    sender: FallbackRecordingTelegramSender,
+    now: Instant,
+    bookings: List<Booking>,
+    qrSecret: String = "qr-secret",
+    supportService: SupportService = RecordingSupportService(),
+    clubsRepository: ClubsRepository = StaticClubsRepository(),
+    userRepository: UserRepository = RegisteredFallbackUserRepository,
+    userIdentityProvisioner: UserIdentityProvisioner = RegisteredFallbackIdentityProvisioner,
+    currentBotUserIdProvider: suspend () -> Long = { TEST_BOT_USER_ID },
+    botUsername: String? = "clubbot",
+    miniAppUrl: String? = TEST_MINI_APP_URL,
+): TelegramGuestFallbackHandler {
+    val bookingState = mockk<BookingState>()
+    every { bookingState.now() } returns now
+    every { bookingState.findUserBookings(any()) } returns bookings
+    return TelegramGuestFallbackHandler(
+        send = sender::send,
+        bookingState = bookingState,
+        clubsRepository = clubsRepository,
+        userRepository = userRepository,
+        userIdentityProvisioner = userIdentityProvisioner,
+        supportService = supportService,
+        currentBotUserIdProvider = currentBotUserIdProvider,
+        botUsername = botUsername,
+        miniAppUrl = miniAppUrl,
+        qrSecretProvider = { qrSecret },
+    )
 }
 
 private object RegisteredFallbackUserRepository : UserRepository {
@@ -654,7 +663,11 @@ private class InMemoryIdentityStore(
 private data class CreateTicketCall(
     val clubId: Long,
     val userId: Long,
+    val bookingId: UUID?,
+    val listEntryId: Long?,
+    val topic: TicketTopic,
     val text: String,
+    val attachments: String?,
 )
 
 private class RecordingSupportService : SupportService {
@@ -669,8 +682,17 @@ private class RecordingSupportService : SupportService {
         text: String,
         attachments: String?,
     ): SupportServiceResult<TicketWithMessage> {
-        createCalls += CreateTicketCall(clubId = clubId, userId = userId, text = text)
-        return SupportServiceResult.Success(sampleTicketWithMessage(clubId, userId))
+        createCalls +=
+            CreateTicketCall(
+                clubId = clubId,
+                userId = userId,
+                bookingId = bookingId,
+                listEntryId = listEntryId,
+                topic = topic,
+                text = text,
+                attachments = attachments,
+            )
+        return SupportServiceResult.Success(sampleTicketWithMessage(clubId, userId, topic))
     }
 
     override suspend fun listMyTickets(userId: Long): List<TicketSummary> = emptyList()
@@ -714,10 +736,19 @@ private class RecordingSupportService : SupportService {
     override suspend fun getTicket(ticketId: Long): Ticket? = null
 }
 
-private class StaticClubsRepository : ClubsRepository {
-    private val clubs = listOf(Club(1L, "Moscow", "Club One", genres = emptyList(), tags = emptyList(), logoUrl = null))
+private class StaticClubsRepository(
+    private val clubs: List<Club> =
+        listOf(Club(1L, "Moscow", "Club One", genres = emptyList(), tags = emptyList(), logoUrl = null)),
+) : ClubsRepository {
+    var listCalls: Int = 0
+        private set
+    var getByIdCalls: Int = 0
+        private set
 
-    override suspend fun getById(id: Long): Club? = clubs.firstOrNull { it.id == id }
+    override suspend fun getById(id: Long): Club? {
+        getByIdCalls += 1
+        return clubs.firstOrNull { it.id == id }
+    }
 
     override suspend fun list(
         city: String?,
@@ -726,7 +757,10 @@ private class StaticClubsRepository : ClubsRepository {
         genre: String?,
         offset: Int,
         limit: Int,
-    ): List<Club> = clubs
+    ): List<Club> {
+        listCalls += 1
+        return clubs
+    }
 
     override suspend fun lastUpdatedAt(): Instant? = null
 }
@@ -742,6 +776,13 @@ private class FallbackRecordingTelegramSender {
     fun texts(): List<String> = requests.filterIsInstance<SendMessage>().map { it.parameters["text"].toString() }
 
     fun lastText(): String = texts().last()
+
+    fun lastSendMessage(): SendMessage = requests.filterIsInstance<SendMessage>().last()
+
+    fun lastInlineButtons(): List<com.pengrad.telegrambot.model.request.InlineKeyboardButton> {
+        val markup = lastSendMessage().parameters["reply_markup"] as InlineKeyboardMarkup
+        return markup.inlineKeyboard().flatMap { it.asList() }
+    }
 }
 
 private fun bookedBooking(
@@ -770,6 +811,9 @@ private fun messageUpdate(
     text: String,
     chatType: String = "Private",
     replyText: String? = null,
+    replyFromBot: Boolean = true,
+    replyFromUserId: Long? = TEST_BOT_USER_ID,
+    replyProvenance: ReplyProvenance = ReplyProvenance(),
     telegramUserId: Long? = 101L,
     chatId: Long = 42L,
 ): Update {
@@ -793,13 +837,40 @@ private fun messageUpdate(
     every { type.name } returns chatType
     if (replyText != null) {
         val reply = mockk<Message>()
+        val replyFrom = replyFromUserId?.let { mockk<TelegramUser>() }
         every { message.replyToMessage() } returns reply
         every { reply.text() } returns replyText
+        every { reply.from() } returns replyFrom
+        if (replyFrom != null) {
+            every { replyFrom.isBot() } returns replyFromBot
+            every { replyFrom.id() } returns replyFromUserId
+        }
+        every { reply.forwardOrigin() } returns if (replyProvenance.forwarded) mockk() else null
+        every { reply.senderBusinessBot() } returns if (replyProvenance.senderBusinessBot) mockk() else null
+        every { reply.businessConnectionId() } returns replyProvenance.businessConnectionId
+        every { reply.viaBot() } returns if (replyProvenance.viaBot) mockk() else null
+        every { reply.senderChat() } returns if (replyProvenance.senderChat) mockk() else null
+        every { reply.isAutomaticForward() } returns replyProvenance.automaticForward
+        every { reply.isFromOffline() } returns replyProvenance.fromOffline
+        every { reply.directMessagesTopic() } returns if (replyProvenance.directMessagesTopic) mockk() else null
+        every { reply.externalReply() } returns if (replyProvenance.externalReply) mockk() else null
     } else {
         every { message.replyToMessage() } returns null
     }
     return update
 }
+
+private data class ReplyProvenance(
+    val forwarded: Boolean = false,
+    val senderBusinessBot: Boolean = false,
+    val businessConnectionId: String? = null,
+    val viaBot: Boolean = false,
+    val senderChat: Boolean = false,
+    val automaticForward: Boolean = false,
+    val fromOffline: Boolean = false,
+    val directMessagesTopic: Boolean = false,
+    val externalReply: Boolean = false,
+)
 
 private fun askCallbackUpdate(data: String): Update {
     val update = mockk<Update>()
@@ -837,6 +908,7 @@ private fun askCallbackUpdateWithoutMessage(data: String): Update {
 private fun sampleTicketWithMessage(
     clubId: Long,
     userId: Long,
+    topic: TicketTopic,
 ): TicketWithMessage {
     val ticket =
         Ticket(
@@ -845,7 +917,7 @@ private fun sampleTicketWithMessage(
             userId = userId,
             bookingId = null,
             listEntryId = null,
-            topic = TicketTopic.OTHER,
+            topic = topic,
             status = TicketStatus.OPENED,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
@@ -866,3 +938,602 @@ private fun sampleTicketWithMessage(
 
 private val TEST_NOW = Instant.parse("2026-01-01T20:00:00Z")
 private const val TEST_MINI_APP_URL = "https://night.example/app"
+private const val TEST_BOT_USER_ID = 7_770_001L
+private const val ASK_REPLY_INSTRUCTION = "Ответьте на это сообщение текстом вопроса."
+private const val ASK_CONTEXT_ERROR_TEXT = "Не удалось определить параметры вопроса. Начните заново через /ask."
+private const val BOT_IDENTITY_ERROR_TEXT = "Не удалось подтвердить сообщение бота. Начните заново через /ask."
+
+private data class ExpectedAskCategory(
+    val label: String,
+    val wire: String,
+    val topic: TicketTopic,
+)
+
+private val EXPECTED_ASK_CATEGORIES =
+    listOf(
+        ExpectedAskCategory("Адрес / как добраться", "address", TicketTopic.ADDRESS),
+        ExpectedAskCategory("Правила / дресс-код", "dresscode", TicketTopic.DRESSCODE),
+        ExpectedAskCategory("Списки / вход", "invite", TicketTopic.INVITE),
+        ExpectedAskCategory("Брони / депозит", "booking", TicketTopic.BOOKING),
+        ExpectedAskCategory("Потерял вещь", "lost_found", TicketTopic.LOST_FOUND),
+        ExpectedAskCategory("Жалоба / сервис", "complaint", TicketTopic.COMPLAINT),
+        ExpectedAskCategory("Другое", "other", TicketTopic.OTHER),
+    )
+
+private val LONG_MAX_CATEGORY_CALLBACKS =
+    listOf(
+        "ask:club:9223372036854775807:topic:address",
+        "ask:club:9223372036854775807:topic:dresscode",
+        "ask:club:9223372036854775807:topic:invite",
+        "ask:club:9223372036854775807:topic:booking",
+        "ask:club:9223372036854775807:topic:lost_found",
+        "ask:club:9223372036854775807:topic:complaint",
+        "ask:club:9223372036854775807:topic:other",
+    )
+
+private suspend fun verifyAskShowsProductionClubList() {
+    val sender = FallbackRecordingTelegramSender()
+    val clubs =
+        StaticClubsRepository(
+            listOf(
+                Club(1L, "Moscow", "Club One", genres = emptyList(), tags = emptyList(), logoUrl = null),
+                Club(2L, "Moscow", "Club Two", genres = emptyList(), tags = emptyList(), logoUrl = null),
+            ),
+        )
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            clubsRepository = clubs,
+        )
+
+    handler.handle(messageUpdate(text = "/ask"))
+
+    val buttons = sender.lastInlineButtons()
+    assertEquals(1, clubs.listCalls)
+    assertEquals(listOf("Club One", "Club Two"), buttons.map { it.text })
+    assertEquals(listOf("ask:club:1", "ask:club:2"), buttons.map { it.callbackData })
+}
+
+private suspend fun verifyActiveBookingRequiresClubSelection() {
+    val sender = FallbackRecordingTelegramSender()
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = listOf(bookedBooking(TEST_NOW)),
+        )
+
+    handler.handle(messageUpdate(text = "/ask"))
+
+    assertEquals("Выберите клуб для вопроса:", sender.lastText())
+    assertTrue(sender.lastSendMessage().parameters["reply_markup"] is InlineKeyboardMarkup)
+}
+
+private suspend fun verifyClubCallbackShowsCategories() {
+    val sender = FallbackRecordingTelegramSender()
+    val support = RecordingSupportService()
+    val clubs =
+        StaticClubsRepository(
+            listOf(
+                Club(
+                    Long.MAX_VALUE,
+                    "Moscow",
+                    "Maximum Club",
+                    genres = emptyList(),
+                    tags = emptyList(),
+                    logoUrl = null,
+                ),
+            ),
+        )
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = support,
+            clubsRepository = clubs,
+        )
+
+    handler.handle(askCallbackUpdate("ask:club:9223372036854775807"))
+
+    val buttons = sender.lastInlineButtons()
+    val callbacks = buttons.map { it.callbackData.orEmpty() }
+    assertEquals(7, buttons.size)
+    assertEquals(EXPECTED_ASK_CATEGORIES.map { it.label }, buttons.map { it.text })
+    assertEquals(LONG_MAX_CATEGORY_CALLBACKS, callbacks)
+    EXPECTED_ASK_CATEGORIES.forEach { category ->
+        assertEquals(category.topic, TicketTopic.fromWire(category.wire), category.wire)
+    }
+    callbacks.forEach { callback ->
+        assertTrue(callback.toByteArray(Charsets.UTF_8).size in 1..64, callback)
+    }
+    assertEquals(1, sender.requests.count { it is AnswerCallbackQuery })
+    assertTrue(support.createCalls.isEmpty())
+}
+
+private suspend fun verifyCategoryCallbackPrompt() {
+    val sender = FallbackRecordingTelegramSender()
+    val support = RecordingSupportService()
+    val handler = handler(sender = sender, now = TEST_NOW, bookings = emptyList(), supportService = support)
+
+    handler.handle(askCallbackUpdate("ask:club:1:topic:invite"))
+
+    val prompt = sender.lastSendMessage()
+    assertTrue(prompt.parameters["reply_markup"] is ForceReply)
+    assertEquals(
+        "Клуб: Club One\n" +
+            "Категория: Списки / вход\n" +
+            "$ASK_REPLY_INSTRUCTION\n" +
+            "askContext:v1:1:invite",
+        sender.lastText(),
+    )
+    assertEquals(1, sender.requests.count { it is AnswerCallbackQuery })
+    assertTrue(support.createCalls.isEmpty())
+}
+
+private suspend fun verifyEachCategoryCreatesSelectedTicket() {
+    EXPECTED_ASK_CATEGORIES.forEach { category ->
+        val sender = FallbackRecordingTelegramSender()
+        val support = RecordingSupportService()
+        val clubs =
+            StaticClubsRepository(
+                listOf(
+                    Club(
+                        2L,
+                        "Moscow",
+                        "Club Two",
+                        genres = emptyList(),
+                        tags = emptyList(),
+                        logoUrl = null,
+                    ),
+                ),
+            )
+        val handler =
+            handler(
+                sender = sender,
+                now = TEST_NOW,
+                bookings = emptyList(),
+                clubsRepository = clubs,
+                supportService = support,
+            )
+
+        val callback = "ask:club:2:topic:${category.wire}"
+        handler.handle(askCallbackUpdate(callback))
+        val prompt = sender.lastText()
+        handler.handle(
+            messageUpdate(
+                text = " \nВопрос: ${category.label}\t ",
+                replyText = prompt,
+                replyFromUserId = TEST_BOT_USER_ID,
+            ),
+        )
+
+        assertEquals(1, support.createCalls.size, category.topic.name)
+        assertEquals(
+            CreateTicketCall(
+                clubId = 2L,
+                userId = 55L,
+                bookingId = null,
+                listEntryId = null,
+                topic = category.topic,
+                text = "Вопрос: ${category.label}",
+                attachments = null,
+            ),
+            support.createCalls.single(),
+            category.wire,
+        )
+        assertEquals(category.topic, TicketTopic.fromWire(category.wire), category.wire)
+        assertEquals("Вопрос отправлен в клуб. Мы скоро ответим.", sender.lastText())
+    }
+}
+
+private suspend fun verifyInvalidCallbacksDoNotCreateTickets() {
+    val syntacticallyInvalidCallbacks =
+        listOf(
+            "ask:club:+1",
+            "ask:club:01",
+            "ask:club:0",
+            "ask:club:-1",
+            "ask:club:",
+            "ask:club: ",
+            "ask:club:1.0",
+            "ask:club:9223372036854775808",
+            "ask:club:999999999999999999999999999999999999999",
+            "ask:club:1:",
+            "ask:club:1:garbage",
+            "ask:club:1:topic",
+            "ask:club:+1:topic:other",
+            "ask:club:01:topic:other",
+            "ask:club:0:topic:other",
+            "ask:club:-1:topic:other",
+            "ask:club::topic:other",
+            "ask:club: :topic:other",
+            "ask:club:1.0:topic:other",
+            "ask:club:9223372036854775808:topic:other",
+            "ask:club:1:topic:",
+            "ask:club:1:topic:unknown",
+            "ask:club:1:topic:other:extra",
+            "ask:club:1:topic:other:topic:other",
+        )
+    syntacticallyInvalidCallbacks.forEach { callbackData ->
+        val sender = FallbackRecordingTelegramSender()
+        val support = RecordingSupportService()
+        val clubs = StaticClubsRepository()
+        var currentBotUserIdCalls = 0
+        val handler =
+            handler(
+                sender = sender,
+                now = TEST_NOW,
+                bookings = emptyList(),
+                supportService = support,
+                clubsRepository = clubs,
+                currentBotUserIdProvider = {
+                    currentBotUserIdCalls += 1
+                    TEST_BOT_USER_ID
+                },
+                userIdentityProvisioner =
+                    object : UserIdentityProvisioner {
+                        override suspend fun ensureMinimalIdentity(telegramUserId: Long): User =
+                            throw AssertionError("callbacks must not provision identity")
+                    },
+            )
+
+        assertTrue(handler.handle(askCallbackUpdate(callbackData)), callbackData)
+        assertEquals(1, sender.requests.count { it is AnswerCallbackQuery }, callbackData)
+        assertTrue(sender.requests.none { it is SendMessage }, callbackData)
+        assertTrue(support.createCalls.isEmpty(), callbackData)
+        assertEquals(0, clubs.getByIdCalls, callbackData)
+        assertEquals(0, currentBotUserIdCalls, callbackData)
+    }
+
+    listOf("ask:club:99", "ask:club:99:topic:other").forEach { callbackData ->
+        val sender = FallbackRecordingTelegramSender()
+        val support = RecordingSupportService()
+        val handler = handler(sender = sender, now = TEST_NOW, bookings = emptyList(), supportService = support)
+
+        assertTrue(handler.handle(askCallbackUpdate(callbackData)), callbackData)
+        assertEquals(1, sender.requests.count { it is AnswerCallbackQuery }, callbackData)
+        assertTrue(sender.requests.none { it is SendMessage }, callbackData)
+        assertTrue(support.createCalls.isEmpty(), callbackData)
+    }
+}
+
+private suspend fun verifyExactCurrentBotIdentityBoundary() {
+    val prompt = emittedAskPrompt(clubId = 1L, topicWire = "other")
+    val acceptedSender = FallbackRecordingTelegramSender()
+    val acceptedSupport = RecordingSupportService()
+    val acceptedHandler =
+        handler(
+            sender = acceptedSender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = acceptedSupport,
+        )
+
+    assertTrue(
+        acceptedHandler.handle(
+            messageUpdate(
+                text = "  Точный вопрос  ",
+                replyText = prompt,
+                replyFromUserId = TEST_BOT_USER_ID,
+            ),
+        ),
+    )
+    assertEquals(
+        CreateTicketCall(1L, 55L, null, null, TicketTopic.OTHER, "Точный вопрос", null),
+        acceptedSupport.createCalls.single(),
+    )
+
+    val otherBotSender = FallbackRecordingTelegramSender()
+    val otherBotSupport = RecordingSupportService()
+    val otherBotHandler =
+        handler(
+            sender = otherBotSender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = otherBotSupport,
+        )
+    assertFalse(
+        otherBotHandler.handle(
+            messageUpdate(
+                text = "Точный вопрос",
+                replyText = prompt,
+                replyFromUserId = TEST_BOT_USER_ID + 1L,
+            ),
+        ),
+    )
+    assertTrue(otherBotSender.requests.isEmpty())
+    assertTrue(otherBotSupport.createCalls.isEmpty())
+}
+
+private suspend fun verifyDisallowedPromptProvenance() {
+    val prompt = emittedAskPrompt(clubId = 1L, topicWire = "other")
+    val cases =
+        mapOf(
+            "forwarded" to ReplyProvenance(forwarded = true),
+            "guest business bot" to ReplyProvenance(senderBusinessBot = true),
+            "business connection" to ReplyProvenance(businessConnectionId = "business-connection"),
+            "inline via bot" to ReplyProvenance(viaBot = true),
+            "sender chat" to ReplyProvenance(senderChat = true),
+            "automatic forward" to ReplyProvenance(automaticForward = true),
+            "offline business delivery" to ReplyProvenance(fromOffline = true),
+            "direct messages topic" to ReplyProvenance(directMessagesTopic = true),
+            "external reply" to ReplyProvenance(externalReply = true),
+        )
+
+    cases.forEach { (caseName, provenance) ->
+        val sender = FallbackRecordingTelegramSender()
+        val support = RecordingSupportService()
+        val handler = handler(sender = sender, now = TEST_NOW, bookings = emptyList(), supportService = support)
+
+        assertFalse(
+            handler.handle(
+                messageUpdate(
+                    text = "Вопрос",
+                    replyText = prompt,
+                    replyFromUserId = TEST_BOT_USER_ID,
+                    replyProvenance = provenance,
+                ),
+            ),
+            caseName,
+        )
+        assertTrue(sender.requests.isEmpty(), caseName)
+        assertTrue(support.createCalls.isEmpty(), caseName)
+    }
+}
+
+private fun verifyBotIdentityLookupFailures() {
+    val prompt = runBlocking { emittedAskPrompt(clubId = 1L, topicWire = "other") }
+    val failureSender = FallbackRecordingTelegramSender()
+    val failureSupport = RecordingSupportService()
+    val failureHandler =
+        handler(
+            sender = failureSender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = failureSupport,
+            currentBotUserIdProvider = { throw IllegalStateException("raw getMe response and token detail") },
+        )
+
+    val handled =
+        runBlocking {
+            failureHandler.handle(
+                messageUpdate(text = "Вопрос", replyText = prompt, replyFromUserId = TEST_BOT_USER_ID),
+            )
+        }
+
+    assertTrue(handled)
+    assertEquals(listOf(BOT_IDENTITY_ERROR_TEXT), failureSender.texts())
+    assertFalse(failureSender.lastText().contains("raw getMe"))
+    assertTrue(failureSupport.createCalls.isEmpty())
+
+    val cancellation = CancellationException("cancel getMe")
+    val cancellationSender = FallbackRecordingTelegramSender()
+    val cancellationSupport = RecordingSupportService()
+    val cancellationHandler =
+        handler(
+            sender = cancellationSender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = cancellationSupport,
+            currentBotUserIdProvider = { throw cancellation },
+        )
+
+    val thrown =
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                cancellationHandler.handle(
+                    messageUpdate(text = "Вопрос", replyText = prompt, replyFromUserId = TEST_BOT_USER_ID),
+                )
+            }
+        }
+    assertSame(cancellation, thrown)
+    assertTrue(cancellationSender.requests.isEmpty())
+    assertTrue(cancellationSupport.createCalls.isEmpty())
+}
+
+private suspend fun verifyInvalidReplyContexts() {
+    val canonical = emittedAskPrompt(clubId = 1L, topicWire = "other")
+    val finalLine = canonical.substringAfterLast('\n')
+    val prefix = canonical.substringBeforeLast('\n')
+    val invalidPrompts =
+        listOf(
+            canonical.replaceFirst("Клуб: Club One", "Клуб: Contradicting Club"),
+            canonical.replaceFirst("Категория: Другое", "Категория: Жалоба / сервис"),
+            prefix,
+            "$canonical\n$finalLine",
+            "$prefix\naskContext:v2:1:other",
+            "$prefix\naskContext:v1:1:unknown",
+            "$prefix\naskContext:v1:1:other:extra",
+            "$prefix\naskContext:v1:1:topic:other",
+            "$prefix\naskContext:v1:9223372036854775808:other",
+            "$prefix\naskContext:v1:99:other",
+            canonical.replaceFirst(ASK_REPLY_INSTRUCTION, "Ответьте другим текстом."),
+        )
+
+    invalidPrompts.forEach { invalidPrompt ->
+        val sender = FallbackRecordingTelegramSender()
+        val support = RecordingSupportService()
+        val handler = handler(sender = sender, now = TEST_NOW, bookings = emptyList(), supportService = support)
+
+        assertTrue(
+            handler.handle(
+                messageUpdate(
+                    text = "Вопрос",
+                    replyText = invalidPrompt,
+                    replyFromUserId = TEST_BOT_USER_ID,
+                ),
+            ),
+            invalidPrompt,
+        )
+        assertTrue(sender.texts().single().isNotBlank(), invalidPrompt)
+        assertTrue(support.createCalls.isEmpty(), invalidPrompt)
+    }
+}
+
+private suspend fun verifyNonCanonicalReplyClubIds() {
+    val canonical = emittedAskPrompt(clubId = 1L, topicWire = "other")
+    val prefix = canonical.substringBeforeLast('\n')
+    val invalidIds =
+        listOf(
+            "+1",
+            "01",
+            "0",
+            "-1",
+            "",
+            " ",
+            "1.0",
+            "9223372036854775808",
+            "999999999999999999999999999999999999999",
+        )
+
+    invalidIds.forEach { invalidId ->
+        val sender = FallbackRecordingTelegramSender()
+        val support = RecordingSupportService()
+        val clubs = StaticClubsRepository()
+        val handler =
+            handler(
+                sender = sender,
+                now = TEST_NOW,
+                bookings = emptyList(),
+                supportService = support,
+                clubsRepository = clubs,
+            )
+        val invalidPrompt = "$prefix\naskContext:v1:$invalidId:other"
+
+        assertTrue(
+            handler.handle(
+                messageUpdate(text = "Вопрос", replyText = invalidPrompt, replyFromUserId = TEST_BOT_USER_ID),
+            ),
+            invalidId,
+        )
+        assertEquals(ASK_CONTEXT_ERROR_TEXT, sender.lastText(), invalidId)
+        assertEquals(0, clubs.getByIdCalls, invalidId)
+        assertTrue(support.createCalls.isEmpty(), invalidId)
+    }
+}
+
+private suspend fun verifyMarkerLikeClubName() {
+    val clubName =
+        "Club 42!?\n" +
+            "askContext:v1:999:other\n" +
+            "$ASK_REPLY_INSTRUCTION\n" +
+            "clubId:+1"
+    val club = Club(7L, "Moscow", clubName, genres = emptyList(), tags = emptyList(), logoUrl = null)
+    val clubs = StaticClubsRepository(listOf(club))
+    val sender = FallbackRecordingTelegramSender()
+    val support = RecordingSupportService()
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = support,
+            clubsRepository = clubs,
+        )
+
+    handler.handle(askCallbackUpdate("ask:club:7:topic:other"))
+    val prompt = sender.lastText()
+    assertEquals(
+        "Клуб: $clubName\n" +
+            "Категория: Другое\n" +
+            "$ASK_REPLY_INSTRUCTION\n" +
+            "askContext:v1:7:other",
+        prompt,
+    )
+    handler.handle(
+        messageUpdate(
+            text = "  Маркерный вопрос  ",
+            replyText = prompt,
+            replyFromUserId = TEST_BOT_USER_ID,
+        ),
+    )
+
+    assertEquals(
+        CreateTicketCall(7L, 55L, null, null, TicketTopic.OTHER, "Маркерный вопрос", null),
+        support.createCalls.single(),
+    )
+}
+
+private suspend fun verifyUnrelatedAndHumanReplyTargets() {
+    val canonical = emittedAskPrompt(clubId = 1L, topicWire = "other")
+    val unrelatedSender = FallbackRecordingTelegramSender()
+    val unrelatedSupport = RecordingSupportService()
+    var identityCalls = 0
+    val unrelatedHandler =
+        handler(
+            sender = unrelatedSender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = unrelatedSupport,
+            currentBotUserIdProvider = {
+                identityCalls += 1
+                TEST_BOT_USER_ID
+            },
+        )
+    assertFalse(
+        unrelatedHandler.handle(
+            messageUpdate(
+                text = "Вопрос",
+                replyText = "Системное уведомление от текущего бота",
+                replyFromUserId = TEST_BOT_USER_ID,
+            ),
+        ),
+    )
+    assertEquals(0, identityCalls)
+    assertTrue(unrelatedSender.requests.isEmpty())
+    assertTrue(unrelatedSupport.createCalls.isEmpty())
+
+    val humanSender = FallbackRecordingTelegramSender()
+    val humanSupport = RecordingSupportService()
+    val humanHandler =
+        handler(
+            sender = humanSender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = humanSupport,
+        )
+    assertFalse(
+        humanHandler.handle(
+            messageUpdate(
+                text = "Вопрос",
+                replyText = canonical,
+                replyFromBot = false,
+                replyFromUserId = TEST_BOT_USER_ID,
+            ),
+        ),
+    )
+    assertTrue(humanSender.requests.isEmpty())
+    assertTrue(humanSupport.createCalls.isEmpty())
+}
+
+private suspend fun emittedAskPrompt(
+    clubId: Long,
+    topicWire: String,
+    clubsRepository: ClubsRepository = StaticClubsRepository(),
+): String {
+    val sender = FallbackRecordingTelegramSender()
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            clubsRepository = clubsRepository,
+        )
+    assertTrue(handler.handle(askCallbackUpdate("ask:club:$clubId:topic:$topicWire")))
+    return sender.lastText()
+}
+
+private suspend fun verifyBlankAskReply() {
+    val sender = FallbackRecordingTelegramSender()
+    val support = RecordingSupportService()
+    val handler = handler(sender = sender, now = TEST_NOW, bookings = emptyList(), supportService = support)
+
+    handler.handle(askCallbackUpdate("ask:club:1:topic:complaint"))
+    handler.handle(messageUpdate(text = "  ", replyText = sender.lastText()))
+
+    assertEquals("Напишите текст вопроса одним сообщением.", sender.lastText())
+    assertTrue(support.createCalls.isEmpty())
+}

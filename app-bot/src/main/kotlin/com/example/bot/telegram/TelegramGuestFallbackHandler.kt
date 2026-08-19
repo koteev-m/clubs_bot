@@ -36,6 +36,7 @@ class TelegramGuestFallbackHandler(
     private val userRepository: UserRepository,
     private val userIdentityProvisioner: UserIdentityProvisioner,
     private val supportService: SupportService,
+    private val currentBotUserIdProvider: suspend () -> Long,
     private val botUsername: String?,
     private val miniAppUrl: String?,
     private val qrSecretProvider: () -> String,
@@ -182,18 +183,12 @@ class TelegramGuestFallbackHandler(
     }
 
     private suspend fun handleAskStart(message: Message) {
-        val user = resolveUser(message) ?: return
-        val booking = findNearestActiveBooking(user.id)
-        if (booking != null) {
-            val clubName = clubsRepository.getById(booking.clubId)?.name ?: "Клуб #${booking.clubId}"
-            sendForceReply(
-                message,
-                "Клуб: $clubName. Ответьте на это сообщение текстом вопроса. clubId:${booking.clubId}",
-            )
-            return
-        }
+        resolveUser(message) ?: return
 
-        val clubs = clubsRepository.list(city = null, query = null, tag = null, genre = null, offset = 0, limit = 8)
+        val clubs =
+            clubsRepository
+                .list(city = null, query = null, tag = null, genre = null, offset = 0, limit = 8)
+                .filter { it.id > 0L }
         if (clubs.isEmpty()) {
             sendToMessage(message, "Сейчас недоступен список клубов. Попробуйте позже.")
             return
@@ -201,7 +196,7 @@ class TelegramGuestFallbackHandler(
         val rows =
             clubs
                 .map { club ->
-                    arrayOf(InlineKeyboardButton(club.name).callbackData("ask:club:${club.id}"))
+                    arrayOf(InlineKeyboardButton(club.name).callbackData(clubCallbackData(club.id)))
                 }.toTypedArray()
         val request =
             SendMessage(message.chat().id(), "Выберите клуб для вопроса:")
@@ -227,33 +222,82 @@ class TelegramGuestFallbackHandler(
             send(AnswerCallbackQuery(callbackQuery.id()).text("Команда доступна только в личке с ботом."))
             return true
         }
-        val clubId = data.removePrefix("ask:club:").toLongOrNull()
-        if (clubId == null) {
-            send(AnswerCallbackQuery(callbackQuery.id()).text("Некорректный клуб."))
+        val selection = parseAskCallback(data)
+        if (selection == null) {
+            send(AnswerCallbackQuery(callbackQuery.id()).text("Некорректный выбор."))
             return true
         }
-        val clubName = clubsRepository.getById(clubId)?.name
-        if (clubName == null) {
+        val club = clubsRepository.getById(selection.clubId)
+        if (club == null) {
             send(AnswerCallbackQuery(callbackQuery.id()).text("Клуб не найден."))
             return true
         }
 
-        send(AnswerCallbackQuery(callbackQuery.id()).text("Клуб выбран."))
-        val request =
-            SendMessage(message.chat().id(), "Вы выбрали $clubName. Ответьте на это сообщение вопросом. clubId:$clubId")
-                .replyMarkup(ForceReply())
-        applyThread(request, message.threadIdOrNull())
-        send(request)
+        when (selection) {
+            is AskCallbackSelection.Club -> {
+                send(AnswerCallbackQuery(callbackQuery.id()).text("Клуб выбран."))
+                val rows =
+                    askCategories
+                        .map { category ->
+                            arrayOf(
+                                InlineKeyboardButton(category.label)
+                                    .callbackData(categoryCallbackData(selection.clubId, category.topic)),
+                            )
+                        }.toTypedArray()
+                val request =
+                    SendMessage(message.chat().id(), "Выберите категорию вопроса:")
+                        .replyMarkup(InlineKeyboardMarkup(*rows))
+                applyThread(request, message.threadIdOrNull())
+                send(request)
+            }
+            is AskCallbackSelection.Category -> {
+                val category = askCategories.firstOrNull { it.topic == selection.topic }
+                if (category == null) {
+                    send(AnswerCallbackQuery(callbackQuery.id()).text("Некорректная категория."))
+                    return true
+                }
+
+                send(AnswerCallbackQuery(callbackQuery.id()).text("Категория выбрана."))
+                val request =
+                    SendMessage(
+                        message.chat().id(),
+                        formatAskQuestionPrompt(
+                            clubName = club.name,
+                            clubId = selection.clubId,
+                            category = category,
+                        ),
+                    ).replyMarkup(ForceReply())
+                applyThread(request, message.threadIdOrNull())
+                send(request)
+            }
+        }
         return true
     }
 
     private suspend fun handleAskReply(message: Message): Boolean {
         if (!isPrivateChat(message.chat())) return false
-        val markerText = message.replyToMessage()?.text().orEmpty()
-        if (!isAskMarkerText(markerText)) return false
-        val clubId = parseClubIdMarker(markerText)
-        if (clubId == null) {
-            sendToMessage(message, "Не удалось определить клуб. Начните заново через /ask.")
+        val replyToMessage = message.replyToMessage() ?: return false
+        val markerText = replyToMessage.text().orEmpty()
+        if (!isPotentialAskPrompt(markerText)) return false
+        val promptAuthor = replyToMessage.from() ?: return false
+        if (promptAuthor.isBot() != true || replyToMessage.hasDisallowedAskPromptProvenance()) {
+            return false
+        }
+        val currentBotUserId =
+            try {
+                currentBotUserIdProvider().takeIf { it > 0L }
+                    ?: throw IllegalStateException("Telegram bot identity is unavailable")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                sendToMessage(message, BOT_IDENTITY_FAILURE_TEXT)
+                return true
+            }
+        if (promptAuthor.id() != currentBotUserId) return false
+
+        val context = parseAskReplyContext(markerText)
+        if (context == null) {
+            sendToMessage(message, "Не удалось определить параметры вопроса. Начните заново через /ask.")
             return true
         }
         val user = resolveUser(message) ?: return true
@@ -262,19 +306,32 @@ class TelegramGuestFallbackHandler(
             sendToMessage(message, "Напишите текст вопроса одним сообщением.")
             return true
         }
-        val club = clubsRepository.getById(clubId)
+        val club = clubsRepository.getById(context.clubId)
         if (club == null) {
             sendToMessage(message, "Выбранный клуб больше неактуален. Начните заново через /ask.")
+            return true
+        }
+        val category = askCategories.firstOrNull { it.topic == context.topic }
+        if (
+            category == null ||
+            markerText !=
+            formatAskQuestionPrompt(
+                clubName = club.name,
+                clubId = club.id,
+                category = category,
+            )
+        ) {
+            sendToMessage(message, "Не удалось определить параметры вопроса. Начните заново через /ask.")
             return true
         }
 
         when (
             supportService.createTicket(
-                clubId = clubId,
+                clubId = context.clubId,
                 userId = user.id,
                 bookingId = null,
                 listEntryId = null,
-                topic = TicketTopic.OTHER,
+                topic = context.topic,
                 text = question,
                 attachments = null,
             )
@@ -283,15 +340,6 @@ class TelegramGuestFallbackHandler(
             is SupportServiceResult.Failure -> sendToMessage(message, "Не удалось отправить вопрос. Попробуйте позже.")
         }
         return true
-    }
-
-    private suspend fun sendForceReply(
-        message: Message,
-        text: String,
-    ) {
-        val request = SendMessage(message.chat().id(), text).replyMarkup(ForceReply())
-        applyThread(request, message.threadIdOrNull())
-        send(request)
     }
 
     private suspend fun sendToMessage(
@@ -358,15 +406,56 @@ class TelegramGuestFallbackHandler(
             ?.let { text.equals("/start@$it", ignoreCase = true) }
             ?: false
 
-    private fun parseClubIdMarker(text: String): Long? {
-        val marker = Regex("clubId:(\\d+)")
-        val id = marker.find(text)?.groupValues?.getOrNull(1)
-        return id?.toLongOrNull()
+    private fun parseAskCallback(data: String): AskCallbackSelection? {
+        val fields = data.split(':')
+        return when (fields.size) {
+            ASK_CLUB_CALLBACK_FIELD_COUNT -> {
+                val fieldsIterator = fields.iterator()
+                val namespace = fieldsIterator.next()
+                val entity = fieldsIterator.next()
+                val clubIdText = fieldsIterator.next()
+                clubIdText
+                    .takeIf { namespace == "ask" && entity == "club" }
+                    ?.let(::parseCanonicalPositiveLong)
+                    ?.let(AskCallbackSelection::Club)
+            }
+            ASK_CATEGORY_CALLBACK_FIELD_COUNT -> {
+                val fieldsIterator = fields.iterator()
+                val namespace = fieldsIterator.next()
+                val entity = fieldsIterator.next()
+                val clubIdText = fieldsIterator.next()
+                val attribute = fieldsIterator.next()
+                val topicWire = fieldsIterator.next()
+                clubIdText
+                    .takeIf { namespace == "ask" && entity == "club" && attribute == "topic" }
+                    ?.let(::parseCanonicalPositiveLong)
+                    ?.let { clubId ->
+                        TicketTopic.fromWire(topicWire)?.let { topic ->
+                            AskCallbackSelection.Category(clubId, topic)
+                        }
+                    }
+            }
+            else -> null
+        }
     }
 
-    private fun isAskMarkerText(text: String): Boolean =
-        text.contains("Ответьте на это сообщение", ignoreCase = true) &&
-            text.contains("clubId:", ignoreCase = true)
+    private fun parseAskReplyContext(text: String): AskReplyContext? {
+        val fields = text.substringAfterLast('\n').split(':')
+        if (fields.size != ASK_CONTEXT_FIELD_COUNT) return null
+        val fieldsIterator = fields.iterator()
+        val marker = fieldsIterator.next()
+        val version = fieldsIterator.next()
+        val clubIdText = fieldsIterator.next()
+        val topicWire = fieldsIterator.next()
+        return clubIdText
+            .takeIf { marker == "askContext" && version == ASK_CONTEXT_VERSION }
+            ?.let(::parseCanonicalPositiveLong)
+            ?.let { clubId ->
+                TicketTopic.fromWire(topicWire)?.let { topic ->
+                    AskReplyContext(clubId, topic)
+                }
+            }
+    }
 
     private fun applyThread(
         request: SendMessage,
@@ -378,9 +467,100 @@ class TelegramGuestFallbackHandler(
     }
 }
 
+private sealed interface AskCallbackSelection {
+    val clubId: Long
+
+    data class Club(
+        override val clubId: Long,
+    ) : AskCallbackSelection
+
+    data class Category(
+        override val clubId: Long,
+        val topic: TicketTopic,
+    ) : AskCallbackSelection
+}
+
+private data class AskCategory(
+    val label: String,
+    val topic: TicketTopic,
+)
+
+private data class AskReplyContext(
+    val clubId: Long,
+    val topic: TicketTopic,
+)
+
+private val askCategories =
+    listOf(
+        AskCategory("Адрес / как добраться", TicketTopic.ADDRESS),
+        AskCategory("Правила / дресс-код", TicketTopic.DRESSCODE),
+        AskCategory("Списки / вход", TicketTopic.INVITE),
+        AskCategory("Брони / депозит", TicketTopic.BOOKING),
+        AskCategory("Потерял вещь", TicketTopic.LOST_FOUND),
+        AskCategory("Жалоба / сервис", TicketTopic.COMPLAINT),
+        AskCategory("Другое", TicketTopic.OTHER),
+    )
+
+private fun categoryCallbackData(
+    clubId: Long,
+    topic: TicketTopic,
+): String {
+    require(clubId > 0L)
+    return "$ASK_CLUB_CALLBACK_PREFIX$clubId$ASK_CATEGORY_CALLBACK_SUFFIX${topic.wire}"
+}
+
+private fun clubCallbackData(clubId: Long): String {
+    require(clubId > 0L)
+    return "$ASK_CLUB_CALLBACK_PREFIX$clubId"
+}
+
+private fun formatAskQuestionPrompt(
+    clubName: String,
+    clubId: Long,
+    category: AskCategory,
+): String {
+    require(clubId > 0L)
+    return "Клуб: $clubName\n" +
+        "Категория: ${category.label}\n" +
+        "$ASK_REPLY_INSTRUCTION\n" +
+        "askContext:$ASK_CONTEXT_VERSION:$clubId:${category.topic.wire}"
+}
+
+private fun parseCanonicalPositiveLong(value: String): Long? =
+    value
+        .takeIf { canonicalPositiveLongPattern.matches(it) }
+        ?.toLongOrNull()
+        ?.takeIf { it > 0L }
+
+private fun isPotentialAskPrompt(text: String): Boolean =
+    text.startsWith(ASK_PROMPT_CLUB_PREFIX) ||
+        text.substringAfterLast('\n').startsWith(ASK_CONTEXT_PREFIX)
+
+private fun Message.hasDisallowedAskPromptProvenance(): Boolean =
+    forwardOrigin() != null ||
+        senderBusinessBot() != null ||
+        businessConnectionId() != null ||
+        viaBot() != null ||
+        senderChat() != null ||
+        isAutomaticForward() == true ||
+        isFromOffline() == true ||
+        directMessagesTopic() != null ||
+        externalReply() != null
+
 private const val WELCOME_TEXT = "Добро пожаловать в Night Concierge!"
 private const val OPEN_MINI_APP_BUTTON_TEXT = "Открыть Night Concierge"
 private const val IDENTITY_PROVISIONING_FAILURE_TEXT = "Не удалось начать работу. Попробуйте позже."
+private const val BOT_IDENTITY_FAILURE_TEXT = "Не удалось подтвердить сообщение бота. Начните заново через /ask."
+private const val ASK_CLUB_CALLBACK_PREFIX = "ask:club:"
+private const val ASK_CATEGORY_CALLBACK_SUFFIX = ":topic:"
+private const val ASK_CLUB_CALLBACK_FIELD_COUNT = 3
+private const val ASK_CATEGORY_CALLBACK_FIELD_COUNT = 5
+private const val ASK_REPLY_INSTRUCTION = "Ответьте на это сообщение текстом вопроса."
+private const val ASK_CONTEXT_VERSION = "v1"
+private const val ASK_CONTEXT_PREFIX = "askContext:$ASK_CONTEXT_VERSION:"
+private const val ASK_CONTEXT_FIELD_COUNT = 4
+private const val ASK_PROMPT_CLUB_PREFIX = "Клуб: "
+private val canonicalPositiveLongPattern = Regex("[1-9][0-9]*")
 
 @Suppress("DEPRECATION")
 private fun Message.threadIdOrNull(): Int? = runCatching { messageThreadId() }.getOrNull()

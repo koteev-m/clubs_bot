@@ -301,6 +301,7 @@ fun Application.module() {
             userRepository = userRepository,
             userIdentityProvisioner = userIdentityProvisioner,
             supportService = supportService,
+            currentBotUserIdProvider = telegramClient::currentBotUserId,
             botUsername = config.bot.username,
             miniAppUrl = config.miniAppUrl,
             qrSecretProvider = { System.getenv("QR_SECRET") ?: "" },
