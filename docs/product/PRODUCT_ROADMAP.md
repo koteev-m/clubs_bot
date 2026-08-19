@@ -6,9 +6,9 @@ Roadmap задаёт последовательность проверяемых
 
 ## 1. Foundation already reusable
 
-Следующие части имеют доказанный production/test foundation и не требуют переписывания «с нуля»: Ktor/DB bootstrap, webhook ingress queue, initData HMAC validation, RBAC/club-scope primitives, audit/redaction primitives, club/event persistence, layout/tables repositories, GuestList/invitation/check-in services, user/night visit uniqueness, deposit operation ledger, finance templates/shift freeze, support persistence/list/reply/delivery primitives, music backend и deterministic analytics snapshot.
+Следующие части имеют доказанный production/test foundation и не требуют переписывания «с нуля»: Ktor/DB bootstrap, webhook ingress queue, initData HMAC validation, RBAC/club-scope primitives, audit/redaction primitives, club/event persistence, layout/tables repositories, GuestList/invitation/check-in services, user/night visit uniqueness, deposit operation ledger, finance templates/shift freeze, support persistence/list/reply/delivery primitives, private `/start` minimal identity provisioning, music backend и deterministic analytics snapshot.
 
-Reuse не означает keep-as-is: the secured DB HOLD branch is selected but its A3/React client contract is broken; query-string initData, incomplete role coverage, table-seating visit bypass, unwired availability/campaigns и canonical UI packaging должны быть разрешены до соответствующих slices. Private `/ask` code is reusable only after an application user exists; fresh Telegram user provisioning is not part of the current production foundation.
+Reuse не означает keep-as-is: the secured DB HOLD branch is selected but its A3/React client contract is broken; query-string initData, incomplete role coverage, table-seating visit bypass, unwired availability/campaigns и canonical UI packaging должны быть разрешены до соответствующих slices. Private `/start` minimal identity provisioning is production-wired and tested; `/ask` still defensively verifies that identity.
 
 ## 2. Accepted first product slice
 
@@ -20,19 +20,22 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 
 #### Reusable foundation
 
-- bare private Telegram `/start` response primitive, which does not look up or create an application user;
-- `/ask` command, Telegram club-selection callback and support ticket creation path for an already provisioned application user;
+- private bare Telegram `/start` and configured bot mention production path that ensures minimal application identity before welcome;
+- `/ask` command, Telegram club-selection callback and support ticket creation path that defensively verifies the provisioned application user;
 - support ticket/message persistence;
 - generic RBAC/club-scope and list/reply/status API/service primitives, которые ещё не соответствуют accepted support permissions/lifecycle;
 - guest Telegram delivery primitive.
 
+#### Completed bounded implementation
+
+- Merged PR #479 at merge commit `20aced05258ab8972b455c59b8038e9a4361f34e` completes bounded acceptance evidence `PSL-AC-01` through `PSL-AC-08`: private bare `/start`/configured mention provision one minimal identity keyed by Telegram user ID; sequential and controlled concurrent calls converge; failures are bounded; and a provisioned user reaches defensive private `/ask` verification.
+- Production implementation: `app-bot/src/main/kotlin/com/example/bot/Application.kt:296-320`, `app-bot/src/main/kotlin/com/example/bot/di/BookingModules.kt:240-243`, `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:47-128,184-210,306-320`, and `core-data/src/main/kotlin/com/example/bot/data/security/ExposedUserRepositories.kt:42-67`.
+- Evidence includes Telegram handler coverage, H2 sequential/minimal persistence and field-preservation tests, controlled PostgreSQL concurrency/failure integration tests, and the CI quality-gate self-check correction in `scripts/selfcheck-quality-gates.sh`/`scripts/validate-payment-hardening.py`.
+- This adds no financial identity, payment, ledger or Mini App purchase architecture; it is not the complete Private Support Loop.
+
 #### New implementation required
 
-- idempotent minimal Telegram user provisioning owned by private bare `/start`: ensure/create keyed by unique `telegram_user_id`, producing the database-generated `users.id` required by support; first, sequential repeated and controlled concurrent/retry `/start` processing converge to one logical identity and one row;
-- provisioning data boundary: `username`/`display_name` are optional and may be retained only when supplied and justified; phone, contact and rich profile fields are not required. Failure returns a bounded non-success outcome without raw unique/SQL/internal details; exact UI presentation, copy, button and retry affordance remain implementation design;
-- provisioning must use a production-owned path and must not depend on the disabled legacy booking WebApp writer. `/ask` may fail closed or defensively verify identity, but it is not an alternative primary provisioning trigger; this roadmap does not accept a broad registration/profile flow;
-- `ENGINEERING_VALIDATION`: DB write/transaction failure returns no success and leaves no partial identity, club/category/question, ticket or thread state; this is a correctness gate, not an additional user decision;
-- exact seven-category guest selection and mapping;
+- **Next bounded guest-flow outcome:** `PSL-AC-09` remains `PARTIAL`: production-backed club selection exists, but the current active-booking shortcut bypasses explicit selection (`TelegramGuestFallbackHandler.kt:184-194`). `PSL-AC-10` remains `GAP`: explicit selection of exactly one of the seven accepted support categories, with mapping to the existing or deliberately migrated topic model and no AI classification, must be implemented; ticket creation currently hardcodes `TicketTopic.OTHER` (`250-285`).
 - минимальный served staff inbox, ticket detail и thread;
 - staff reply/take/resolve/close actions поверх reusable primitives;
 - accepted `MANAGER`/`CLUB_ADMIN` CLUB-scope access through separate support view/reply/status permissions, с denial для `ENTRY_MANAGER`, role-only `OWNER` и foreign-club staff;
@@ -74,7 +77,7 @@ Canonical acceptance boundary: полная нумерованная [acceptance
 
 Accepted product authorities: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-036`. Они не являются unresolved blockers первого slice.
 
-Technical implementation prerequisites remain: production-owned provisioning writer and concurrency design; exact permission constants; category/status migration; bounded staff UI technology; delivery queue/outbox/retry design; Ktor/Postgres tests; successful staging smoke. Эти choices должны сохранять accepted contract и не меняют статус `ACCEPTED_NOT_IMPLEMENTED` сами по себе.
+Technical implementation prerequisites remain: explicit club/category mapping and accepted topic/status migration; exact permission constants; bounded staff UI technology; delivery queue/outbox/retry design; Ktor/Postgres tests for the remaining flow; successful staging smoke. Эти choices должны сохранять accepted contract и не меняют статус `ACCEPTED_NOT_IMPLEMENTED` сами по себе.
 
 ## 3. Phases
 
@@ -97,7 +100,7 @@ Technical implementation prerequisites remain: production-owned provisioning wri
 - **Status:** [`ACCEPTED_NOT_IMPLEMENTED`](slices/PRIVATE_SUPPORT_LOOP.md).
 - **User outcome:** fresh guest выбирает клуб и category в private Telegram flow, разрешённый staff отвечает из minimal served inbox, ответ наблюдаемо приходит гостю, а ticket проходит accepted lifecycle.
 - **Included IDs:** `PROD-001`, `NET-001`, `RBAC-006`, `SUP-001`, `SUP-002`, `SUP-004`, `SUP-005`, `COM-007`, `SEC-002`.
-- **Dependencies:** production-owned idempotent minimal Telegram user provisioning before `/ask`; existing `/ask`/production club selection and persistence/list/reply/delivery primitives; exact category/status migration; minimal served staff inbox/detail/thread/actions; semantic permissions and secure staff auth transport; audit; truthful delivery design.
+- **Dependencies:** completed private `/start` minimal identity provisioning before `/ask`; existing `/ask`/production club-selection and persistence/list/reply/delivery primitives; explicit club/category mapping and status migration; minimal served staff inbox/detail/thread/actions; semantic permissions and secure staff auth transport; audit; truthful delivery design.
 - **Acceptance boundary:** canonical [Private Support Loop acceptance matrix](slices/PRIVATE_SUPPORT_LOOP.md#acceptance-matrix), включая complete previous-item crosswalk выше.
 - **Excluded scope:** exact [slice exclusions](slices/PRIVATE_SUPPORT_LOOP.md#explicit-exclusions); `DEC-028`–`DEC-035` capabilities не входят.
 - **Staging smoke:** exact bounded [slice smoke](slices/PRIVATE_SUPPORT_LOOP.md#staging-smoke): never-seen Telegram user; first `/start`; sequential repeated `/start`; controlled concurrent/retry `/start`; only then `/ask`; category/ticket/thread; allowed and denied roles/scopes/permissions; lifecycle; truthful delivery; restart; safe failure observability.
