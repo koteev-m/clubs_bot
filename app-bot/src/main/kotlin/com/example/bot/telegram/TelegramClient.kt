@@ -4,6 +4,7 @@ import com.pengrad.telegrambot.TelegramBot
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.DeleteWebhook
+import com.pengrad.telegrambot.request.GetMe
 import com.pengrad.telegrambot.request.GetUpdates
 import com.pengrad.telegrambot.request.GetWebhookInfo
 import com.pengrad.telegrambot.request.SendMessage
@@ -12,6 +13,8 @@ import com.pengrad.telegrambot.response.BaseResponse
 import com.pengrad.telegrambot.response.GetWebhookInfoResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.slf4j.MDCContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -20,10 +23,17 @@ import kotlinx.coroutines.withContext
 class TelegramClient(
     private val bot: TelegramBot,
 ) {
+    @Volatile
+    private var cachedCurrentBotUserId: Long? = null
+    private val currentBotUserIdMutex = Mutex()
+
     constructor(token: String, apiUrl: String? = null) : this(createBot(token, apiUrl))
 
     private companion object {
-        fun createBot(token: String, apiUrl: String?): TelegramBot =
+        fun createBot(
+            token: String,
+            apiUrl: String?,
+        ): TelegramBot =
             TelegramBot
                 .Builder(token)
                 .apply {
@@ -36,6 +46,28 @@ class TelegramClient(
             @Suppress("UNCHECKED_CAST")
             bot.execute(request as BaseRequest<*, *>) as BaseResponse
         }
+
+    suspend fun currentBotUserId(): Long =
+        cachedCurrentBotUserId
+            ?: currentBotUserIdMutex.withLock {
+                cachedCurrentBotUserId
+                    ?: fetchCurrentBotUserId().also { currentBotUserId ->
+                        cachedCurrentBotUserId = currentBotUserId
+                    }
+            }
+
+    private suspend fun fetchCurrentBotUserId(): Long {
+        val response =
+            withContext(Dispatchers.IO + MDCContext()) {
+                bot.execute(GetMe())
+            }
+        return response
+            ?.takeIf { it.isOk }
+            ?.user()
+            ?.id()
+            ?.takeIf { it > 0L }
+            ?: throw IllegalStateException("Telegram bot identity is unavailable")
+    }
 
     suspend fun sendMessage(
         chatId: Long,
