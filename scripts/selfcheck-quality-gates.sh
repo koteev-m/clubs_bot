@@ -9244,6 +9244,7 @@ payment_hardening_files=(
   "app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt"
   "app-bot/src/main/kotlin/com/example/bot/routes/PaymentsFinalizeRoutes.kt"
   "app-bot/src/main/kotlin/com/example/bot/plugins/JsonErrorPages.kt"
+  "app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt"
   "app-bot/src/main/kotlin/com/example/bot/logging/SqlThrowableLogging.kt"
   "app-bot/src/main/kotlin/com/example/bot/logging/DenySensitiveTurboFilter.kt"
   "app-bot/src/main/resources/logback.xml"
@@ -9279,6 +9280,10 @@ copy_payment_hardening_fixture() {
   cp -R "$payment_hardening_fixture_base" "$fixture_root"
   printf '%s' "$fixture_root"
 }
+
+assert_payment_hardening_accepted \
+  "payment-reviewed-sql-safe-boundaries" \
+  "$payment_hardening_fixture_base"
 
 remove_payment_statement_once() {
   local file="$1"
@@ -9725,6 +9730,20 @@ assert_payment_hardening_rejected \
   "payment-raw-rbac-logger" \
   "PH-LOG-RAW-SINK" \
   "$payment_raw_rbac_logger"
+
+payment_telegram_logger_binding="$(copy_payment_hardening_fixture payment-telegram-logger-binding)"
+replace_payment_text_once \
+  "$payment_telegram_logger_binding/app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt" \
+  "import org.slf4j.LoggerFactory" \
+  "import org.slf4j.LoggerFactory as TelegramLoggerFactory"
+replace_payment_text_once \
+  "$payment_telegram_logger_binding/app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt" \
+  'private val logger = LoggerFactory.getLogger("TelegramGuestFallbackHandler")' \
+  'private val logger = TelegramLoggerFactory.getLogger("TelegramGuestFallbackHandler")'
+assert_payment_hardening_rejected \
+  "payment-telegram-logger-binding" \
+  "PH-SYMBOL-CONTRACT" \
+  "$payment_telegram_logger_binding"
 
 payment_raw_cancel_refund_logger="$(copy_payment_hardening_fixture payment-raw-cancel-refund-logger)"
 cat >> "$payment_raw_cancel_refund_logger/app-bot/src/main/kotlin/com/example/bot/routes/PaymentsCancelRefundRoutes.kt" <<'KOT'
