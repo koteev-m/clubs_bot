@@ -28,14 +28,16 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 
 #### Completed bounded implementation
 
-- Merged PR #479 at merge commit `20aced05258ab8972b455c59b8038e9a4361f34e` completes bounded acceptance evidence `PSL-AC-01` through `PSL-AC-08`: private bare `/start`/configured mention provision one minimal identity keyed by Telegram user ID; sequential and controlled concurrent calls converge; failures are bounded; and a provisioned user reaches defensive private `/ask` verification.
+- Merged PR #479 at merge commit `20aced05258ab8972b455c59b8038e9a4361f34e` completes bounded `AS_BUILT` acceptance evidence `PSL-AC-01` through `PSL-AC-08`: private bare `/start`/configured mention provision one minimal identity keyed by Telegram user ID; sequential and controlled concurrent calls converge; failures are bounded; and a provisioned user reaches defensive private `/ask` verification.
 - Production implementation: `app-bot/src/main/kotlin/com/example/bot/Application.kt:296-320`, `app-bot/src/main/kotlin/com/example/bot/di/BookingModules.kt:240-243`, `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:47-128,184-210,306-320`, and `core-data/src/main/kotlin/com/example/bot/data/security/ExposedUserRepositories.kt:42-67`.
 - Evidence includes Telegram handler coverage, H2 sequential/minimal persistence and field-preservation tests, controlled PostgreSQL concurrency/failure integration tests, and the CI quality-gate self-check correction in `scripts/selfcheck-quality-gates.sh`/`scripts/validate-payment-hardening.py`.
+- Merged PR #481 (feature commit `f625a1a1645edda5d7b6b7ab31972b9fea7af6ba`, merge commit `249dedc0c511ea27308bbe57ebf4612c0a68ed09`) completes bounded `AS_BUILT` acceptance evidence `PSL-AC-09` and `PSL-AC-10`: every private `/ask` path requires explicit production-backed club selection, removing the active-booking bypass; then the guest explicitly chooses one of seven accepted categories using the existing enum/wire mapping, without AI classification or a domain migration.
+- PR #481 also establishes the exact-current-bot prompt trust boundary: lazy cached `getMe` identity, rejection of another-bot/forwarded/business/unsupported-origin reply targets, canonical full-prompt reconstruction, and strict callback/context parsing (`app-bot/src/main/kotlin/com/example/bot/Application.kt:296-305`; `TelegramClient.kt:26-70`; `TelegramGuestFallbackHandler.kt:185-342,409-563`). Handler and TelegramClient tests cover literal wires, all seven resulting topics, `Long.MAX_VALUE` callback sizes, exact ticket arguments, provenance, marker-like club names and identity cache/concurrency/retry; the merged implementation also passed its full tests and quality gates.
 - This adds no financial identity, payment, ledger or Mini App purchase architecture; it is not the complete Private Support Loop.
 
 #### New implementation required
 
-- **Next bounded guest-flow outcome:** `PSL-AC-09` remains `PARTIAL`: production-backed club selection exists, but the current active-booking shortcut bypasses explicit selection (`TelegramGuestFallbackHandler.kt:184-194`). `PSL-AC-10` remains `GAP`: explicit selection of exactly one of the seven accepted support categories, with mapping to the existing or deliberately migrated topic model and no AI classification, must be implemented; ticket creation currently hardcodes `TicketTopic.OTHER` (`250-285`).
+- **Next bounded guest-flow outcome:** `PSL-AC-11`, with `PSL-AC-36` engineering-correctness evidence: the selected category and non-blank question must persist as a ticket plus initial message in accepted `NEW`. Reusable persistence exists, but the current status vocabulary and complete transaction-failure/restart proof must be evaluated separately; no status migration is designed or implemented by the completed selection work.
 - минимальный served staff inbox, ticket detail и thread;
 - staff reply/take/resolve/close actions поверх reusable primitives;
 - accepted `MANAGER`/`CLUB_ADMIN` CLUB-scope access through separate support view/reply/status permissions, с denial для `ENTRY_MANAGER`, role-only `OWNER` и foreign-club staff;
@@ -67,7 +69,7 @@ Canonical acceptance boundary: полная нумерованная [acceptance
 | 4 | Concurrent/retry обработка `/start` сходится к одной identity без raw unique/SQL error | `PSL-AC-04`–`PSL-AC-06` | `PASS` |
 | 5 | Гость вызывает private `/ask` | `PSL-AC-08` | `PASS` |
 | 6 | Гость выбирает клуб из production-backed list | `PSL-AC-09` | `PASS` |
-| 7 | Вопрос создаёт persisted ticket и initial message | `PSL-AC-10`, `PSL-AC-11` | `PASS` |
+| 7 | Вопрос создаёт persisted ticket и initial message | `PSL-AC-11` | `PASS` |
 | 8 | Разрешённый staff видит ticket в minimal served inbox | `PSL-AC-13`, `PSL-AC-16`, `PSL-AC-32` | `PASS` |
 | 9 | Staff открывает detail и отвечает | `PSL-AC-13`, `PSL-AC-14`, `PSL-AC-16`, `PSL-AC-21` | `PASS` |
 | 10 | Reply сохраняется и доставляется гостю | `PSL-AC-21`–`PSL-AC-24` | `PASS` |
@@ -77,7 +79,7 @@ Canonical acceptance boundary: полная нумерованная [acceptance
 
 Accepted product authorities: `DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-036`. Они не являются unresolved blockers первого slice.
 
-Technical implementation prerequisites remain: explicit club/category mapping and accepted topic/status migration; exact permission constants; bounded staff UI technology; delivery queue/outbox/retry design; Ktor/Postgres tests for the remaining flow; successful staging smoke. Эти choices должны сохранять accepted contract и не меняют статус `ACCEPTED_NOT_IMPLEMENTED` сами по себе.
+Technical implementation prerequisites remain: accepted status migration and `PSL-AC-11`/`PSL-AC-36` persistence-correctness proof; exact permission constants; bounded staff UI technology; delivery queue/outbox/retry design; Ktor/Postgres tests for the remaining flow; successful staging smoke. Эти choices должны сохранять accepted contract и не меняют статус `ACCEPTED_NOT_IMPLEMENTED` сами по себе.
 
 ## 3. Phases
 
@@ -100,7 +102,7 @@ Technical implementation prerequisites remain: explicit club/category mapping an
 - **Status:** [`ACCEPTED_NOT_IMPLEMENTED`](slices/PRIVATE_SUPPORT_LOOP.md).
 - **User outcome:** fresh guest выбирает клуб и category в private Telegram flow, разрешённый staff отвечает из minimal served inbox, ответ наблюдаемо приходит гостю, а ticket проходит accepted lifecycle.
 - **Included IDs:** `PROD-001`, `NET-001`, `RBAC-006`, `SUP-001`, `SUP-002`, `SUP-004`, `SUP-005`, `COM-007`, `SEC-002`.
-- **Dependencies:** completed private `/start` minimal identity provisioning before `/ask`; existing `/ask`/production club-selection and persistence/list/reply/delivery primitives; explicit club/category mapping and status migration; minimal served staff inbox/detail/thread/actions; semantic permissions and secure staff auth transport; audit; truthful delivery design.
+- **Dependencies:** completed private `/start` minimal identity provisioning and explicit production-backed club/category selection before guest submission; existing persistence/list/reply/delivery primitives; `PSL-AC-11`/`PSL-AC-36` proof and status migration; minimal served staff inbox/detail/thread/actions; semantic permissions and secure staff auth transport; audit; truthful delivery design.
 - **Acceptance boundary:** canonical [Private Support Loop acceptance matrix](slices/PRIVATE_SUPPORT_LOOP.md#acceptance-matrix), включая complete previous-item crosswalk выше.
 - **Excluded scope:** exact [slice exclusions](slices/PRIVATE_SUPPORT_LOOP.md#explicit-exclusions); `DEC-028`–`DEC-035` capabilities не входят.
 - **Staging smoke:** exact bounded [slice smoke](slices/PRIVATE_SUPPORT_LOOP.md#staging-smoke): never-seen Telegram user; first `/start`; sequential repeated `/start`; controlled concurrent/retry `/start`; only then `/ask`; category/ticket/thread; allowed and denied roles/scopes/permissions; lifecycle; truthful delivery; restart; safe failure observability.
