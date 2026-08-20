@@ -18,6 +18,7 @@ enum class TicketTopic(val wire: String) {
 }
 
 enum class TicketStatus(val wire: String) {
+    NEW("new"),
     OPENED("opened"),
     IN_PROGRESS("in_progress"),
     ANSWERED("answered"),
@@ -82,6 +83,10 @@ data class TicketSummary(
 )
 
 sealed interface SupportServiceError {
+    data object PersistenceFailure : SupportServiceError
+
+    data object InvalidState : SupportServiceError
+
     data object TicketNotFound : SupportServiceError
     data object TicketForbidden : SupportServiceError
     data object TicketClosed : SupportServiceError

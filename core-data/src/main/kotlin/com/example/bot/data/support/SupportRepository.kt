@@ -49,7 +49,7 @@ class SupportRepository(
                     it[TicketsTable.bookingId] = bookingId
                     it[TicketsTable.listEntryId] = listEntryId
                     it[TicketsTable.topic] = topic.wire
-                    it[TicketsTable.status] = TicketStatus.OPENED.wire
+                    it[TicketsTable.status] = TicketStatus.NEW.wire
                     it[TicketsTable.createdAt] = now
                     it[TicketsTable.updatedAt] = now
                     it[TicketsTable.lastAgentId] = null
@@ -71,7 +71,7 @@ class SupportRepository(
                     bookingId = bookingId,
                     listEntryId = listEntryId,
                     topic = topic,
-                    status = TicketStatus.OPENED,
+                    status = TicketStatus.NEW,
                     createdAt = now.toInstant(),
                     updatedAt = now.toInstant(),
                     lastAgentId = null,
@@ -192,46 +192,61 @@ class SupportRepository(
     suspend fun assign(
         ticketId: Long,
         agentUserId: Long,
-    ): Ticket? =
+    ): StaffMutationResult<Ticket> =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             val now = clock.instant().atOffset(ZoneOffset.UTC)
             val updated =
-                TicketsTable.update({ TicketsTable.id eq ticketId }) {
+                TicketsTable.update({
+                    (TicketsTable.id eq ticketId) and
+                        (TicketsTable.status neq TicketStatus.NEW.wire)
+                }) {
                     it[TicketsTable.status] = TicketStatus.IN_PROGRESS.wire
                     it[TicketsTable.lastAgentId] = agentUserId
                     it[TicketsTable.updatedAt] = now
                 }
             if (updated == 0) {
-                return@newSuspendedTransaction null
+                return@newSuspendedTransaction staffMutationFailure(ticketId)
             }
-            TicketsTable
-                .selectAll()
-                .where { TicketsTable.id eq ticketId }
-                .map { toTicket(it) }
-                .singleOrNull()
+            val ticket =
+                TicketsTable
+                    .selectAll()
+                    .where { TicketsTable.id eq ticketId }
+                    .map { toTicket(it) }
+                    .singleOrNull()
+                    ?: return@newSuspendedTransaction StaffMutationResult.Failure(StaffMutationFailure.NotFound)
+            StaffMutationResult.Success(ticket)
         }
 
     suspend fun setStatus(
         ticketId: Long,
         agentUserId: Long,
         status: TicketStatus,
-    ): Ticket? =
+    ): StaffMutationResult<Ticket> =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            if (status == TicketStatus.NEW) {
+                return@newSuspendedTransaction staffMutationFailure(ticketId)
+            }
             val now = clock.instant().atOffset(ZoneOffset.UTC)
             val updated =
-                TicketsTable.update({ TicketsTable.id eq ticketId }) {
+                TicketsTable.update({
+                    (TicketsTable.id eq ticketId) and
+                        (TicketsTable.status neq TicketStatus.NEW.wire)
+                }) {
                     it[TicketsTable.status] = status.wire
                     it[TicketsTable.lastAgentId] = agentUserId
                     it[TicketsTable.updatedAt] = now
                 }
             if (updated == 0) {
-                return@newSuspendedTransaction null
+                return@newSuspendedTransaction staffMutationFailure(ticketId)
             }
-            TicketsTable
-                .selectAll()
-                .where { TicketsTable.id eq ticketId }
-                .map { toTicket(it) }
-                .singleOrNull()
+            val ticket =
+                TicketsTable
+                    .selectAll()
+                    .where { TicketsTable.id eq ticketId }
+                    .map { toTicket(it) }
+                    .singleOrNull()
+                    ?: return@newSuspendedTransaction StaffMutationResult.Failure(StaffMutationFailure.NotFound)
+            StaffMutationResult.Success(ticket)
         }
 
     suspend fun reply(
@@ -239,15 +254,21 @@ class SupportRepository(
         agentUserId: Long,
         text: String,
         attachments: String?,
-    ): SupportReplyResult? =
+    ): StaffMutationResult<SupportReplyResult> =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            val ticketRow =
-                TicketsTable
-                    .selectAll()
-                    .where { TicketsTable.id eq ticketId }
-                    .singleOrNull()
-                    ?: return@newSuspendedTransaction null
             val now = clock.instant().atOffset(ZoneOffset.UTC)
+            val updated =
+                TicketsTable.update({
+                    (TicketsTable.id eq ticketId) and
+                        (TicketsTable.status neq TicketStatus.NEW.wire)
+                }) {
+                    it[TicketsTable.status] = TicketStatus.ANSWERED.wire
+                    it[TicketsTable.lastAgentId] = agentUserId
+                    it[TicketsTable.updatedAt] = now
+                }
+            if (updated == 0) {
+                return@newSuspendedTransaction staffMutationFailure(ticketId)
+            }
             val messageId =
                 TicketMessagesTable.insert {
                     it[TicketMessagesTable.ticketId] = ticketId
@@ -256,16 +277,13 @@ class SupportRepository(
                     it[TicketMessagesTable.attachments] = attachments
                     it[TicketMessagesTable.createdAt] = now
                 }[TicketMessagesTable.id]
-            TicketsTable.update({ TicketsTable.id eq ticketId }) {
-                it[TicketsTable.status] = TicketStatus.ANSWERED.wire
-                it[TicketsTable.lastAgentId] = agentUserId
-                it[TicketsTable.updatedAt] = now
-            }
-            val ticket = toTicket(ticketRow).copy(
-                status = TicketStatus.ANSWERED,
-                updatedAt = now.toInstant(),
-                lastAgentId = agentUserId,
-            )
+            val ticket =
+                TicketsTable
+                    .selectAll()
+                    .where { TicketsTable.id eq ticketId }
+                    .map { toTicket(it) }
+                    .singleOrNull()
+                    ?: return@newSuspendedTransaction StaffMutationResult.Failure(StaffMutationFailure.NotFound)
             val replyMessage =
                 TicketMessage(
                     id = messageId,
@@ -275,7 +293,7 @@ class SupportRepository(
                     attachments = attachments,
                     createdAt = now.toInstant(),
                 )
-            SupportReplyResult(ticket = ticket, replyMessage = replyMessage)
+            StaffMutationResult.Success(SupportReplyResult(ticket = ticket, replyMessage = replyMessage))
         }
 
     suspend fun setResolutionRating(
@@ -412,6 +430,21 @@ class SupportRepository(
             "Unknown sender type: ${row[TicketMessagesTable.senderType]}"
         }
 
+    private fun staffMutationFailure(ticketId: Long): StaffMutationResult.Failure {
+        val ticketExists =
+            TicketsTable
+                .selectAll()
+                .where { TicketsTable.id eq ticketId }
+                .any()
+        val reason =
+            if (ticketExists) {
+                StaffMutationFailure.InvalidState
+            } else {
+                StaffMutationFailure.NotFound
+            }
+        return StaffMutationResult.Failure(reason)
+    }
+
     private data class LastMessage(
         val text: String,
         val senderType: TicketSenderType,
@@ -428,6 +461,21 @@ enum class AddGuestMessageFailure {
     NotFound,
     Forbidden,
     Closed,
+}
+
+sealed class StaffMutationResult<out T> {
+    data class Success<T>(
+        val value: T,
+    ) : StaffMutationResult<T>()
+
+    data class Failure(
+        val reason: StaffMutationFailure,
+    ) : StaffMutationResult<Nothing>()
+}
+
+enum class StaffMutationFailure {
+    NotFound,
+    InvalidState,
 }
 
 sealed class SetResolutionRatingResult {
