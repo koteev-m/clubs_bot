@@ -15,6 +15,7 @@ import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
+import com.example.bot.data.security.UserRolePermissionRepository
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
 import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.data.security.webhook.TelegramWebhookIngressRepository
@@ -79,6 +80,7 @@ import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.support.SupportService
+import com.example.bot.support.StaffSupportReadService
 import com.example.bot.support.sanitizeClubName
 import com.example.bot.routes.bookingA3Routes
 import com.example.bot.routes.errorCodesRoutes
@@ -245,12 +247,14 @@ fun Application.module() {
     val guestGamificationService by inject<com.example.bot.gamification.GuestGamificationService>()
     val opsChatConfigRepository by inject<ClubOpsChatConfigRepository>()
     val userRepository by inject<UserRepository>()
+    val userRolePermissionRepository by inject<UserRolePermissionRepository>()
     val userIdentityProvisioner by inject<UserIdentityProvisioner>()
     val suspiciousIpRepository by inject<SuspiciousIpRepository>()
     val webhookUpdateDedupRepository by inject<WebhookUpdateDedupRepository>()
     val telegramWebhookIngressRepository by inject<TelegramWebhookIngressRepository>()
     val paymentsHandlers by inject<com.example.bot.telegram.PaymentsHandlers>()
     val supportService by inject<SupportService>()
+    val staffSupportReadService by inject<StaffSupportReadService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
     val telegramClient by inject<TelegramClient>()
@@ -462,7 +466,10 @@ fun Application.module() {
     val clubNameCache = ConcurrentHashMap<Long, String>()
     supportRoutes(
         supportService = supportService,
+        staffSupportReadService = staffSupportReadService,
         userRepository = userRepository,
+        userRolePermissionRepository = userRolePermissionRepository,
+        clubsRepository = clubsRepository,
         sendTelegram = telegramClient::send,
         opsPublisher = opsNotificationService,
         clubNameProvider = clubNameProvider@{ clubId ->

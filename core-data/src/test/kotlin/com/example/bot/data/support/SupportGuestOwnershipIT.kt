@@ -1,5 +1,9 @@
 package com.example.bot.data.support
 
+import com.example.bot.data.security.ExposedUserRolePermissionRepository
+import com.example.bot.data.security.PermissionCode
+import com.example.bot.data.security.PermissionCodes
+import com.example.bot.data.security.Role
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.TicketSenderType
@@ -206,6 +210,135 @@ class SupportGuestOwnershipIT {
             assertEquals(ownedResult, restartedRead)
         }
 
+    @Test
+    fun `persisted support permission scopes staff list and deterministic detail to one club`() =
+        kotlinx.coroutines.runBlocking {
+            val staffUserId = insertUser(telegramUserId = 8_800_720L, username = "staff_manager")
+            val guestUserId = insertUser(telegramUserId = 8_800_721L, username = "staff_guest")
+            val clubA = insertClub("Staff Permission Club A")
+            val clubB = insertClub("Staff Permission Club B")
+            val assignmentId = insertRoleAssignment(staffUserId, Role.MANAGER, clubA)
+            grantPermission(assignmentId, PermissionCodes.SUPPORT_VIEW)
+
+            val older =
+                createTicket(
+                    clock = clockAt(OLDER_TICKET_AT),
+                    clubId = clubA,
+                    userId = guestUserId,
+                    topic = TicketTopic.ADDRESS,
+                    text = "staff-club-a-older",
+                    attachments = null,
+                )
+            val opened =
+                createTicket(
+                    clock = clockAt(OWNED_TICKET_AT),
+                    clubId = clubA,
+                    userId = guestUserId,
+                    topic = TicketTopic.COMPLAINT,
+                    text = "staff-club-a-initial",
+                    attachments = "staff-club-a-attachment",
+                )
+            val foreign =
+                createTicket(
+                    clock = clockAt(FOREIGN_TICKET_AT),
+                    clubId = clubB,
+                    userId = guestUserId,
+                    topic = TicketTopic.LOST_FOUND,
+                    text = FOREIGN_INITIAL_TEXT,
+                    attachments = FOREIGN_INITIAL_ATTACHMENT,
+                )
+            updateTicketTimestamp(older.ticket.id, TIED_MESSAGE_AT)
+            updateTicketTimestamp(opened.ticket.id, TIED_MESSAGE_AT)
+            updateTicketTimestamp(foreign.ticket.id, FOREIGN_UPDATED_AT)
+
+            val tiedAgentMessageId =
+                insertMessage(
+                    ticketId = opened.ticket.id,
+                    senderType = TicketSenderType.AGENT,
+                    text = "staff-agent-tied",
+                    attachments = "staff-agent-attachment",
+                    createdAt = TIED_MESSAGE_AT,
+                )
+            val tiedGuestMessageId =
+                insertMessage(
+                    ticketId = opened.ticket.id,
+                    senderType = TicketSenderType.GUEST,
+                    text = "staff-guest-tied",
+                    attachments = null,
+                    createdAt = TIED_MESSAGE_AT,
+                )
+            insertMessage(
+                ticketId = foreign.ticket.id,
+                senderType = TicketSenderType.SYSTEM,
+                text = FOREIGN_THREAD_TEXT,
+                attachments = FOREIGN_THREAD_ATTACHMENT,
+                createdAt = TIED_MESSAGE_AT,
+            )
+
+            val permissionRepository = ExposedUserRolePermissionRepository(database)
+            assertTrue(
+                permissionRepository.hasClubPermission(
+                    userId = staffUserId,
+                    clubId = clubA,
+                    allowedRoles = setOf(Role.MANAGER, Role.CLUB_ADMIN),
+                    permission = PermissionCodes.SUPPORT_VIEW,
+                ),
+            )
+            assertFalse(
+                permissionRepository.hasClubPermission(
+                    userId = staffUserId,
+                    clubId = clubB,
+                    allowedRoles = setOf(Role.MANAGER, Role.CLUB_ADMIN),
+                    permission = PermissionCodes.SUPPORT_VIEW,
+                ),
+            )
+            val permittedClubIds =
+                permissionRepository.listClubIdsForPermission(
+                    userId = staffUserId,
+                    allowedRoles = setOf(Role.MANAGER, Role.CLUB_ADMIN),
+                    permission = PermissionCodes.SUPPORT_VIEW,
+                )
+            assertEquals(setOf(clubA), permittedClubIds)
+
+            val service = SupportServiceImpl(SupportRepository(database, clockAt(READ_AT)))
+            val listResult = service.listStaffTicketsForClub(clubA, status = null)
+            assertTrue(listResult is SupportServiceResult.Success)
+            val summaries = (listResult as SupportServiceResult.Success).value
+            assertEquals(listOf(opened.ticket.id, older.ticket.id), summaries.map { it.id })
+            assertTrue(summaries.all { it.clubId == clubA })
+            assertFalse(summaries.toString().contains(FOREIGN_INITIAL_TEXT))
+            assertFalse(summaries.toString().contains(FOREIGN_THREAD_TEXT))
+
+            val detailResult = service.getStaffTicket(opened.ticket.id, permittedClubIds)
+            assertTrue(detailResult is SupportServiceResult.Success)
+            val detail = (detailResult as SupportServiceResult.Success).value
+            assertEquals(clubA, detail.ticket.clubId)
+            assertEquals(
+                listOf(opened.initialMessage.id, tiedAgentMessageId, tiedGuestMessageId),
+                detail.messages.map { it.id },
+            )
+            assertFalse(detail.toString().contains(FOREIGN_INITIAL_TEXT))
+            assertFalse(detail.toString().contains(FOREIGN_THREAD_TEXT))
+            assertFalse(detail.toString().contains(FOREIGN_INITIAL_ATTACHMENT))
+            assertFalse(detail.toString().contains(FOREIGN_THREAD_ATTACHMENT))
+
+            val foreignRead = service.getStaffTicket(foreign.ticket.id, permittedClubIds)
+            val missingRead = service.getStaffTicket(Long.MAX_VALUE, permittedClubIds)
+            assertEquals(SupportServiceResult.Failure(SupportServiceError.TicketNotFound), foreignRead)
+            assertEquals(missingRead, foreignRead)
+
+            val restartedPermissions = ExposedUserRolePermissionRepository(database)
+            val restartedClubIds =
+                restartedPermissions.listClubIdsForPermission(
+                    userId = staffUserId,
+                    allowedRoles = setOf(Role.MANAGER, Role.CLUB_ADMIN),
+                    permission = PermissionCodes.SUPPORT_VIEW,
+                )
+            val restartedService = SupportServiceImpl(SupportRepository(database, clockAt(READ_AT)))
+            assertEquals(permittedClubIds, restartedClubIds)
+            assertEquals(detailResult, restartedService.getStaffTicket(opened.ticket.id, restartedClubIds))
+        }
+
     private suspend fun createTicket(
         clock: Clock,
         clubId: Long,
@@ -286,6 +419,32 @@ class SupportGuestOwnershipIT {
                 }[SupportGuestOwnershipClubsTable.id]
         }
 
+    private fun insertRoleAssignment(
+        userId: Long,
+        role: Role,
+        clubId: Long,
+    ): Long =
+        transaction(database) {
+            SupportGuestOwnershipUserRolesTable.insert {
+                it[SupportGuestOwnershipUserRolesTable.userId] = userId
+                it[SupportGuestOwnershipUserRolesTable.roleCode] = role.name
+                it[SupportGuestOwnershipUserRolesTable.scopeType] = "CLUB"
+                it[SupportGuestOwnershipUserRolesTable.scopeClubId] = clubId
+            }[SupportGuestOwnershipUserRolesTable.id]
+        }
+
+    private fun grantPermission(
+        userRoleId: Long,
+        permission: PermissionCode,
+    ) {
+        transaction(database) {
+            SupportGuestOwnershipUserRolePermissionsTable.insert {
+                it[SupportGuestOwnershipUserRolePermissionsTable.userRoleId] = userRoleId
+                it[SupportGuestOwnershipUserRolePermissionsTable.permissionCode] = permission.value
+            }
+        }
+    }
+
     private fun clockAt(instant: Instant): Clock = Clock.fixed(instant, ZoneOffset.UTC)
 
     companion object {
@@ -347,4 +506,19 @@ private object SupportGuestOwnershipUsersTable : Table("users") {
     val displayName = text("display_name").nullable()
     val phoneE164 = text("phone_e164").nullable()
     override val primaryKey = PrimaryKey(id)
+}
+
+private object SupportGuestOwnershipUserRolesTable : Table("user_roles") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val roleCode = text("role_code")
+    val scopeType = text("scope_type")
+    val scopeClubId = long("scope_club_id").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+private object SupportGuestOwnershipUserRolePermissionsTable : Table("user_role_permissions") {
+    val userRoleId = long("user_role_id")
+    val permissionCode = text("permission_code")
+    override val primaryKey = PrimaryKey(userRoleId, permissionCode)
 }

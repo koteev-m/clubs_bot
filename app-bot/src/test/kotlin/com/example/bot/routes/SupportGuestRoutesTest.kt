@@ -2,7 +2,9 @@ package com.example.bot.routes
 
 import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.audit.AuditLogRepositoryImpl
+import com.example.bot.data.clubs.ClubsDbRepository
 import com.example.bot.data.security.ExposedUserRepository
+import com.example.bot.data.security.ExposedUserRolePermissionRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.data.support.SupportRepository
@@ -633,7 +635,10 @@ class SupportGuestRoutesTest {
                 }
                 supportRoutes(
                     supportService = supportService,
+                    staffSupportReadService = supportService,
                     userRepository = userRepository,
+                    userRolePermissionRepository = ExposedUserRolePermissionRepository(setup.database),
+                    clubsRepository = ClubsDbRepository(setup.database),
                     sendTelegram = telegramSender::send,
                     opsPublisher = opsPublisher,
                     botTokenProvider = { TEST_BOT_TOKEN },

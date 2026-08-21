@@ -3,6 +3,9 @@ package com.example.bot.data.support
 import com.example.bot.support.GuestTicketDetails
 import com.example.bot.support.GuestTicketMessage
 import com.example.bot.support.GuestTicketThread
+import com.example.bot.support.StaffTicketDetails
+import com.example.bot.support.StaffTicketMessage
+import com.example.bot.support.StaffTicketThread
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.Ticket
 import com.example.bot.support.TicketMessage
@@ -19,8 +22,6 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.max
-import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -164,9 +165,67 @@ class SupportRepository(
                 }
             val ticketRows =
                 filtered
-                    .orderBy(TicketsTable.updatedAt to SortOrder.DESC)
+                    .orderBy(TicketsTable.updatedAt to SortOrder.DESC, TicketsTable.id to SortOrder.DESC)
                     .toList()
             buildSummaries(ticketRows)
+        }
+
+    suspend fun findStaffTicketThread(
+        ticketId: Long,
+        permittedClubIds: Set<Long>,
+    ): StaffTicketThread? =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            if (permittedClubIds.isEmpty()) {
+                return@newSuspendedTransaction null
+            }
+            val ticketRow =
+                TicketsTable
+                    .selectAll()
+                    .where {
+                        (TicketsTable.id eq ticketId) and
+                            (TicketsTable.clubId inList permittedClubIds)
+                    }.singleOrNull()
+                    ?: return@newSuspendedTransaction null
+            val messages =
+                TicketMessagesTable
+                    .selectAll()
+                    .where { TicketMessagesTable.ticketId eq ticketId }
+                    .orderBy(
+                        TicketMessagesTable.createdAt to SortOrder.ASC,
+                        TicketMessagesTable.id to SortOrder.ASC,
+                    ).map { toStaffTicketMessage(it) }
+            if (messages.isEmpty()) {
+                return@newSuspendedTransaction null
+            }
+            StaffTicketThread(
+                ticket =
+                    StaffTicketDetails(
+                        id = ticketRow[TicketsTable.id],
+                        clubId = ticketRow[TicketsTable.clubId],
+                        topic = toTopic(ticketRow),
+                        status = toStatus(ticketRow),
+                        createdAt = ticketRow[TicketsTable.createdAt].toInstant(),
+                        updatedAt = ticketRow[TicketsTable.updatedAt].toInstant(),
+                    ),
+                messages = messages,
+            )
+        }
+
+    suspend fun findTicketInClubs(
+        ticketId: Long,
+        permittedClubIds: Set<Long>,
+    ): Ticket? =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            if (permittedClubIds.isEmpty()) {
+                return@newSuspendedTransaction null
+            }
+            TicketsTable
+                .selectAll()
+                .where {
+                    (TicketsTable.id eq ticketId) and
+                        (TicketsTable.clubId inList permittedClubIds)
+                }.map { toTicket(it) }
+                .singleOrNull()
         }
 
     suspend fun addGuestMessage(
@@ -415,28 +474,25 @@ class SupportRepository(
         if (ticketIds.isEmpty()) {
             return emptyMap()
         }
-        val maxMessageId = TicketMessagesTable.id.max()
-        val latestIds =
-            TicketMessagesTable
-                .slice(maxMessageId)
-                .select { TicketMessagesTable.ticketId inList ticketIds }
-                .groupBy(TicketMessagesTable.ticketId)
-                .mapNotNull { it[maxMessageId] }
-        if (latestIds.isEmpty()) {
-            return emptyMap()
-        }
         val messages =
             TicketMessagesTable
                 .selectAll()
-                .where { TicketMessagesTable.id inList latestIds }
+                .where { TicketMessagesTable.ticketId inList ticketIds }
+                .orderBy(
+                    TicketMessagesTable.ticketId to SortOrder.ASC,
+                    TicketMessagesTable.createdAt to SortOrder.DESC,
+                    TicketMessagesTable.id to SortOrder.DESC,
+                )
         val result = LinkedHashMap<Long, LastMessage>()
         for (row in messages) {
             val ticketId = row[TicketMessagesTable.ticketId]
-            result[ticketId] =
+            result.putIfAbsent(
+                ticketId,
                 LastMessage(
                     text = row[TicketMessagesTable.text],
                     senderType = toSender(row),
-                )
+                ),
+            )
         }
         return result
     }
@@ -480,6 +536,15 @@ class SupportRepository(
             createdAt = row[TicketMessagesTable.createdAt].toInstant(),
         )
 
+    private fun toStaffTicketMessage(row: ResultRow): StaffTicketMessage =
+        StaffTicketMessage(
+            id = row[TicketMessagesTable.id],
+            senderType = toSender(row),
+            text = row[TicketMessagesTable.text],
+            attachments = row[TicketMessagesTable.attachments],
+            createdAt = row[TicketMessagesTable.createdAt].toInstant(),
+        )
+
     private fun staffMutationFailure(ticketId: Long): StaffMutationResult.Failure {
         val ticketExists =
             TicketsTable
@@ -502,9 +567,13 @@ class SupportRepository(
 }
 
 sealed class AddGuestMessageResult {
-    data class Success(val message: TicketMessage) : AddGuestMessageResult()
+    data class Success(
+        val message: TicketMessage,
+    ) : AddGuestMessageResult()
 
-    data class Failure(val reason: AddGuestMessageFailure) : AddGuestMessageResult()
+    data class Failure(
+        val reason: AddGuestMessageFailure,
+    ) : AddGuestMessageResult()
 }
 
 enum class AddGuestMessageFailure {
@@ -529,9 +598,13 @@ enum class StaffMutationFailure {
 }
 
 sealed class SetResolutionRatingResult {
-    data class Success(val ticket: Ticket) : SetResolutionRatingResult()
+    data class Success(
+        val ticket: Ticket,
+    ) : SetResolutionRatingResult()
 
-    data class Failure(val reason: SetResolutionRatingFailure) : SetResolutionRatingResult()
+    data class Failure(
+        val reason: SetResolutionRatingFailure,
+    ) : SetResolutionRatingResult()
 }
 
 enum class SetResolutionRatingFailure {

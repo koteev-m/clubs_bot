@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import GuestShell from '../modules/guest/pages/GuestShell';
 import EntryConsole from '../modules/entry/pages/EntryConsole';
 import { useInitData } from '../modules/auth/hooks/useInitData';
@@ -6,16 +6,19 @@ import MyNights from '../modules/mynights/pages/MyNights';
 import { setInitData } from '../shared/api/http';
 import AdminShell from '../modules/admin/pages/AdminShell';
 import PromoterShell from '../modules/promoter/pages/PromoterShell';
+import SupportShell from '../modules/support/pages/SupportShell';
 
 /**
  * Root application component deciding between Guest and Entry modes.
  */
 export default function App() {
   const { initData } = useInitData();
+  const [installedInitData, setInstalledInitData] = useState<string | null>(null);
   const mode = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     const value = params.get('mode');
     if (value === 'admin') return 'admin';
+    if (value === 'support') return 'support';
     if (value === 'promoter') return 'promoter';
     if (value === 'entry') return 'entry';
     if (value === 'my-nights') return 'my-nights';
@@ -24,6 +27,7 @@ export default function App() {
 
   useEffect(() => {
     setInitData(initData);
+    setInstalledInitData(initData);
   }, [initData]);
 
   if (mode === 'entry') {
@@ -34,6 +38,12 @@ export default function App() {
   }
   if (mode === 'admin') {
     return <AdminShell />;
+  }
+  if (mode === 'support') {
+    if (installedInitData !== initData) {
+      return <main aria-busy="true" aria-label="Loading support access" />;
+    }
+    return <SupportShell />;
   }
   if (mode === 'promoter') {
     return <PromoterShell />;

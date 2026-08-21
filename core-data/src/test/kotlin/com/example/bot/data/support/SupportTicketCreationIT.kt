@@ -79,6 +79,7 @@ class SupportTicketCreationIT {
                 .configure()
                 .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
                 .locations(*locations)
+                .target(EXPECTED_VERSION)
                 .load()
         migrationsExecuted = latestFlyway.migrate().migrationsExecuted
         currentMigrationVersion =
@@ -263,6 +264,7 @@ class SupportTicketCreationIT {
                 .configure()
                 .dataSource(driftJdbcUrl, postgres.username, postgres.password)
                 .locations(*locations)
+                .target(EXPECTED_VERSION)
                 .load()
         assertThrows(FlywayException::class.java) {
             latestFlyway.migrate()

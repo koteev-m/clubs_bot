@@ -65,9 +65,11 @@ import com.example.bot.data.promo.BookingTemplateRepositoryImpl
 import com.example.bot.data.promo.PromoAttributionRepositoryImpl
 import com.example.bot.data.promo.PromoLinkRepositoryImpl
 import com.example.bot.data.security.ExposedUserRepository
+import com.example.bot.data.security.ExposedUserRolePermissionRepository
 import com.example.bot.data.security.ExposedUserRoleRepository
 import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
+import com.example.bot.data.security.UserRolePermissionRepository
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.tables.DefaultGuestQrResolver
 import com.example.bot.tables.GuestQrResolver
@@ -241,6 +243,7 @@ val bookingModule =
         single<UserRepository> { get<ExposedUserRepository>() }
         single<UserIdentityProvisioner> { get<ExposedUserRepository>() }
         single<UserRoleRepository> { ExposedUserRoleRepository(get()) }
+        single<UserRolePermissionRepository> { ExposedUserRolePermissionRepository(get()) }
 
         single { MyBookingsMetrics(runCatching { get<MeterRegistry>() }.getOrNull()) }
         single {

@@ -199,6 +199,118 @@ class SupportGuestOwnershipH2Test {
         }
 
     @Test
+    fun `staff list and detail stay club scoped deterministic minimal and durable`() =
+        runBlocking {
+            val guestUserId = insertUser(username = "guest", displayName = "Guest")
+            val clubA = insertClub(name = "Club A")
+            val clubB = insertClub(name = "Club B")
+            val older = createTicket(guestUserId, clubA, "club-a-older")
+            val opened = createTicket(guestUserId, clubA, "club-a-initial")
+            val foreign = createTicket(guestUserId, clubB, "FOREIGN_MESSAGE_SENTINEL")
+            val tiedUpdatedAt = fixedInstant.plusSeconds(120)
+            seedTicketUpdatedAt(older.ticket.id, tiedUpdatedAt)
+            seedTicketUpdatedAt(opened.ticket.id, tiedUpdatedAt)
+            seedTicketUpdatedAt(foreign.ticket.id, tiedUpdatedAt.plusSeconds(60))
+            seedLegacyStatus(older.ticket.id, TicketStatus.OPENED)
+
+            val latestByTimeId =
+                insertMessage(
+                    ticketId = opened.ticket.id,
+                    senderType = TicketSenderType.AGENT,
+                    text = "latest-by-created-at",
+                    attachments = "latest-attachment",
+                    createdAt = fixedInstant.plusSeconds(60),
+                )
+            val higherIdButOlder =
+                insertMessage(
+                    ticketId = opened.ticket.id,
+                    senderType = TicketSenderType.GUEST,
+                    text = "higher-id-but-older",
+                    attachments = null,
+                    createdAt = fixedInstant.plusSeconds(30),
+                )
+            assertTrue(latestByTimeId < higherIdButOlder)
+
+            val listResult = service.listStaffTicketsForClub(clubA, status = null)
+            assertTrue(listResult is SupportServiceResult.Success)
+            val summaries = (listResult as SupportServiceResult.Success).value
+            assertEquals(listOf(opened.ticket.id, older.ticket.id), summaries.map { it.id })
+            assertEquals("latest-by-created-at", summaries.first().lastMessagePreview)
+            assertEquals(TicketSenderType.AGENT, summaries.first().lastSenderType)
+            assertFalse(summaries.toString().contains("FOREIGN_MESSAGE_SENTINEL"))
+
+            val filteredResult = service.listStaffTicketsForClub(clubA, TicketStatus.OPENED)
+            assertTrue(filteredResult is SupportServiceResult.Success)
+            assertEquals(
+                listOf(older.ticket.id),
+                (filteredResult as SupportServiceResult.Success).value.map { it.id },
+            )
+
+            val detailResult = service.getStaffTicket(opened.ticket.id, setOf(clubA))
+            assertTrue(detailResult is SupportServiceResult.Success)
+            val thread = (detailResult as SupportServiceResult.Success).value
+            assertEquals(opened.ticket.id, thread.ticket.id)
+            assertEquals(clubA, thread.ticket.clubId)
+            assertEquals(
+                listOf(opened.initialMessage.id, higherIdButOlder, latestByTimeId),
+                thread.messages.map { it.id },
+            )
+            assertEquals(
+                listOf("club-a-initial", "higher-id-but-older", "latest-by-created-at"),
+                thread.messages.map { it.text },
+            )
+            assertFalse(thread.toString().contains("FOREIGN_MESSAGE_SENTINEL"))
+
+            val foreignRead = service.getStaffTicket(foreign.ticket.id, setOf(clubA))
+            val missingRead = service.getStaffTicket(Long.MAX_VALUE, setOf(clubA))
+            assertTicketNotFound(foreignRead)
+            assertTicketNotFound(missingRead)
+            assertEquals(missingRead, foreignRead)
+
+            val foreignMutation = service.getStaffMutationTicket(foreign.ticket.id, setOf(clubA))
+            val missingMutation = service.getStaffMutationTicket(Long.MAX_VALUE, setOf(clubA))
+            assertTicketNotFound(foreignMutation)
+            assertTicketNotFound(missingMutation)
+            assertEquals(missingMutation, foreignMutation)
+
+            val restartedService = SupportServiceImpl(SupportRepository(database, fixedClock))
+            assertEquals(detailResult, restartedService.getStaffTicket(opened.ticket.id, setOf(clubA)))
+        }
+
+    @Test
+    fun `staff ticket reads rethrow cancellation`() {
+        val cancellingRepository = mockk<SupportRepository>()
+        val cancellation = CancellationException("cancel staff thread read")
+        coEvery { cancellingRepository.findStaffTicketThread(101L, setOf(202L)) } throws cancellation
+        val cancellingService = SupportServiceImpl(cancellingRepository)
+
+        val thrown =
+            assertThrows(CancellationException::class.java) {
+                runBlocking { cancellingService.getStaffTicket(ticketId = 101L, permittedClubIds = setOf(202L)) }
+            }
+
+        assertEquals(cancellation.message, thrown.message)
+    }
+
+    @Test
+    fun `staff ticket read failures return detail-free persistence failure`() =
+        runBlocking {
+            val failingRepository = mockk<SupportRepository>()
+            val rawDetail = "foreign-message-sentinel ticket_messages SQLState 23514"
+            coEvery { failingRepository.listTicketsByClub(303L, null) } throws
+                SQLException(rawDetail, "23514")
+            coEvery { failingRepository.findStaffTicketThread(404L, setOf(303L)) } throws
+                SQLException(rawDetail, "23514")
+            val failingService = SupportServiceImpl(failingRepository)
+
+            val listResult = failingService.listStaffTicketsForClub(clubId = 303L, status = null)
+            val detailResult = failingService.getStaffTicket(ticketId = 404L, permittedClubIds = setOf(303L))
+
+            assertPersistenceFailure(listResult, rawDetail, "ticket_messages", "23514")
+            assertPersistenceFailure(detailResult, rawDetail, "ticket_messages", "23514")
+        }
+
+    @Test
     fun `owned ticket without persisted messages is not returned as a partial thread`() =
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
@@ -305,6 +417,23 @@ class SupportGuestOwnershipH2Test {
             assertEquals(1, updated)
         }
     }
+
+    private fun insertMessage(
+        ticketId: Long,
+        senderType: TicketSenderType,
+        text: String,
+        attachments: String?,
+        createdAt: Instant,
+    ): Long =
+        transaction(database) {
+            TicketMessagesTable.insert {
+                it[TicketMessagesTable.ticketId] = ticketId
+                it[TicketMessagesTable.senderType] = senderType.wire
+                it[TicketMessagesTable.text] = text
+                it[TicketMessagesTable.attachments] = attachments
+                it[TicketMessagesTable.createdAt] = createdAt.atOffset(ZoneOffset.UTC)
+            }[TicketMessagesTable.id]
+        }
 
     private fun assertTicketNotFound(result: SupportServiceResult<*>) {
         assertTrue(result is SupportServiceResult.Failure)
