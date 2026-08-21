@@ -1,7 +1,9 @@
 package com.example.bot.routes
 
 import com.example.bot.data.audit.AuditLogRepositoryImpl
+import com.example.bot.data.clubs.ClubsDbRepository
 import com.example.bot.data.security.ExposedUserRepository
+import com.example.bot.data.security.ExposedUserRolePermissionRepository
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.data.support.SupportRepository
@@ -410,7 +412,10 @@ class SupportGuestOwnershipRoutesTest {
             }
             supportRoutes(
                 supportService = routedSupportService,
+                staffSupportReadService = realSupportService,
                 userRepository = userRepository,
+                userRolePermissionRepository = ExposedUserRolePermissionRepository(database),
+                clubsRepository = ClubsDbRepository(database),
                 sendTelegram = { mockk() },
                 opsPublisher = NoopOpsNotificationPublisher,
                 botTokenProvider = { TEST_BOT_TOKEN },

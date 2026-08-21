@@ -104,6 +104,28 @@ data class GuestTicketThread(
     val messages: List<GuestTicketMessage>,
 )
 
+data class StaffTicketDetails(
+    val id: Long,
+    val clubId: Long,
+    val topic: TicketTopic,
+    val status: TicketStatus,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+data class StaffTicketMessage(
+    val id: Long,
+    val senderType: TicketSenderType,
+    val text: String,
+    val attachments: String?,
+    val createdAt: Instant,
+)
+
+data class StaffTicketThread(
+    val ticket: StaffTicketDetails,
+    val messages: List<StaffTicketMessage>,
+)
+
 sealed interface SupportServiceError {
     data object PersistenceFailure : SupportServiceError
 
@@ -181,4 +203,21 @@ interface SupportService {
     suspend fun getTicket(
         ticketId: Long,
     ): Ticket?
+}
+
+interface StaffSupportReadService {
+    suspend fun listStaffTicketsForClub(
+        clubId: Long,
+        status: TicketStatus?,
+    ): SupportServiceResult<List<TicketSummary>>
+
+    suspend fun getStaffTicket(
+        ticketId: Long,
+        permittedClubIds: Set<Long>,
+    ): SupportServiceResult<StaffTicketThread>
+
+    suspend fun getStaffMutationTicket(
+        ticketId: Long,
+        permittedClubIds: Set<Long>,
+    ): SupportServiceResult<Ticket>
 }

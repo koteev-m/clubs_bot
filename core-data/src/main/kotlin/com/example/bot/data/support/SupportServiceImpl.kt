@@ -1,6 +1,8 @@
 package com.example.bot.data.support
 
 import com.example.bot.support.GuestTicketThread
+import com.example.bot.support.StaffSupportReadService
+import com.example.bot.support.StaffTicketThread
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
@@ -16,7 +18,8 @@ import kotlin.coroutines.cancellation.CancellationException
 
 class SupportServiceImpl(
     private val repository: SupportRepository,
-) : SupportService {
+) : SupportService,
+    StaffSupportReadService {
     override suspend fun createTicket(
         clubId: Long,
         userId: Long,
@@ -44,8 +47,7 @@ class SupportServiceImpl(
             SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
         }
 
-    override suspend fun listMyTickets(userId: Long): List<TicketSummary> =
-        repository.listTicketsByUser(userId)
+    override suspend fun listMyTickets(userId: Long): List<TicketSummary> = repository.listTicketsByUser(userId)
 
     override suspend fun getMyTicket(
         ticketId: Long,
@@ -66,8 +68,8 @@ class SupportServiceImpl(
         userId: Long,
         text: String,
         attachments: String?,
-    ): SupportServiceResult<TicketMessage> {
-        return when (
+    ): SupportServiceResult<TicketMessage> =
+        when (
             val result =
                 repository.addGuestMessage(
                     ticketId = ticketId,
@@ -87,13 +89,57 @@ class SupportServiceImpl(
                         SupportServiceResult.Failure(SupportServiceError.TicketClosed)
                 }
         }
-    }
 
     override suspend fun listTicketsForClub(
         clubId: Long,
         status: TicketStatus?,
-    ): List<TicketSummary> =
-        repository.listTicketsByClub(clubId = clubId, status = status)
+    ): List<TicketSummary> = repository.listTicketsByClub(clubId = clubId, status = status)
+
+    override suspend fun listStaffTicketsForClub(
+        clubId: Long,
+        status: TicketStatus?,
+    ): SupportServiceResult<List<TicketSummary>> =
+        readResult {
+            repository.listTicketsByClub(clubId = clubId, status = status)
+        }
+
+    override suspend fun getStaffTicket(
+        ticketId: Long,
+        permittedClubIds: Set<Long>,
+    ): SupportServiceResult<StaffTicketThread> =
+        readResult {
+            repository.findStaffTicketThread(
+                ticketId = ticketId,
+                permittedClubIds = permittedClubIds,
+            ) ?: return@readResult null
+        }.requireValueOrTicketNotFound()
+
+    override suspend fun getStaffMutationTicket(
+        ticketId: Long,
+        permittedClubIds: Set<Long>,
+    ): SupportServiceResult<Ticket> =
+        if (permittedClubIds.isEmpty()) {
+            SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
+        } else {
+            getStaffMutationTicketInPermittedClubs(ticketId, permittedClubIds)
+        }
+
+    private suspend fun getStaffMutationTicketInPermittedClubs(
+        ticketId: Long,
+        permittedClubIds: Set<Long>,
+    ): SupportServiceResult<Ticket> =
+        try {
+            repository
+                .findTicketInClubs(
+                    ticketId = ticketId,
+                    permittedClubIds = permittedClubIds,
+                )?.let { SupportServiceResult.Success(it) }
+                ?: SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
+        }
 
     override suspend fun assign(
         ticketId: Long,
@@ -171,8 +217,24 @@ class SupportServiceImpl(
         }
     }
 
-    override suspend fun getTicket(ticketId: Long): Ticket? =
-        repository.findTicket(ticketId)
+    override suspend fun getTicket(ticketId: Long): Ticket? = repository.findTicket(ticketId)
+
+    private suspend fun <T> readResult(block: suspend () -> T): SupportServiceResult<T> =
+        try {
+            SupportServiceResult.Success(block())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
+        }
+
+    private fun <T : Any> SupportServiceResult<T?>.requireValueOrTicketNotFound(): SupportServiceResult<T> =
+        when (this) {
+            is SupportServiceResult.Success ->
+                value?.let { SupportServiceResult.Success(it) }
+                    ?: SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
+            is SupportServiceResult.Failure -> this
+        }
 
     private fun StaffMutationFailure.toServiceError(): SupportServiceError =
         when (this) {

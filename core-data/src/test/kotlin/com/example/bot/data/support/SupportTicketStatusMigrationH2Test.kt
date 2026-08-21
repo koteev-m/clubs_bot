@@ -47,6 +47,7 @@ class SupportTicketStatusMigrationH2Test {
                     .configure()
                     .dataSource(jdbcUrl, H2_USER, H2_PASSWORD)
                     .locations(*locations)
+                    .target(EXPECTED_VERSION)
                     .load()
             assertEquals(1, latestFlyway.migrate().migrationsExecuted)
             val currentVersion =
