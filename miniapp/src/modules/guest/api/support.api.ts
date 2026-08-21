@@ -42,6 +42,31 @@ export interface SupportTicketSummary {
   lastSenderType?: string | null;
 }
 
+export const ticketSenderTypes = ['guest', 'agent', 'system'] as const;
+export type TicketSenderType = (typeof ticketSenderTypes)[number];
+
+export interface GuestSupportTicketDetails {
+  id: number;
+  clubId: number;
+  topic: TicketTopic;
+  status: TicketStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GuestSupportTicketMessage {
+  id: number;
+  senderType: TicketSenderType;
+  text: string;
+  attachments: string | null;
+  createdAt: string;
+}
+
+export interface GuestSupportTicketThread {
+  ticket: GuestSupportTicketDetails;
+  messages: GuestSupportTicketMessage[];
+}
+
 export interface CreateSupportTicketParams {
   clubId: number;
   topic: TicketTopic;
@@ -54,4 +79,8 @@ export function createSupportTicket(params: CreateSupportTicketParams) {
 
 export function getMySupportTickets() {
   return http.get<SupportTicketSummary[]>('/api/support/tickets/my');
+}
+
+export function getMySupportTicket(ticketId: number) {
+  return http.get<GuestSupportTicketThread>(`/api/support/tickets/my/${ticketId}`);
 }

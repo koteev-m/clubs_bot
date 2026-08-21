@@ -1,5 +1,6 @@
 package com.example.bot.data.support
 
+import com.example.bot.support.GuestTicketThread
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
@@ -45,6 +46,20 @@ class SupportServiceImpl(
 
     override suspend fun listMyTickets(userId: Long): List<TicketSummary> =
         repository.listTicketsByUser(userId)
+
+    override suspend fun getMyTicket(
+        ticketId: Long,
+        userId: Long,
+    ): SupportServiceResult<GuestTicketThread> =
+        try {
+            repository.findTicketThreadByUser(ticketId = ticketId, userId = userId)?.let {
+                SupportServiceResult.Success(it)
+            } ?: SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
+        }
 
     override suspend fun addGuestMessage(
         ticketId: Long,

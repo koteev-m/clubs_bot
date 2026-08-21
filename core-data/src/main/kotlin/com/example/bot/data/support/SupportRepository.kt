@@ -1,5 +1,8 @@
 package com.example.bot.data.support
 
+import com.example.bot.support.GuestTicketDetails
+import com.example.bot.support.GuestTicketMessage
+import com.example.bot.support.GuestTicketThread
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.Ticket
 import com.example.bot.support.TicketMessage
@@ -104,9 +107,47 @@ class SupportRepository(
                 TicketsTable
                     .selectAll()
                     .where { TicketsTable.userId eq userId }
-                    .orderBy(TicketsTable.updatedAt to SortOrder.DESC)
+                    .orderBy(TicketsTable.updatedAt to SortOrder.DESC, TicketsTable.id to SortOrder.DESC)
                     .toList()
             buildSummaries(ticketRows)
+        }
+
+    suspend fun findTicketThreadByUser(
+        ticketId: Long,
+        userId: Long,
+    ): GuestTicketThread? =
+        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            val ticketRow =
+                TicketsTable
+                    .selectAll()
+                    .where {
+                        (TicketsTable.id eq ticketId) and
+                            (TicketsTable.userId eq userId)
+                    }.singleOrNull()
+                    ?: return@newSuspendedTransaction null
+            val messages =
+                TicketMessagesTable
+                    .selectAll()
+                    .where { TicketMessagesTable.ticketId eq ticketId }
+                    .orderBy(
+                        TicketMessagesTable.createdAt to SortOrder.ASC,
+                        TicketMessagesTable.id to SortOrder.ASC,
+                    ).map { toGuestTicketMessage(it) }
+            if (messages.isEmpty()) {
+                return@newSuspendedTransaction null
+            }
+            GuestTicketThread(
+                ticket =
+                    GuestTicketDetails(
+                        id = ticketRow[TicketsTable.id],
+                        clubId = ticketRow[TicketsTable.clubId],
+                        topic = toTopic(ticketRow),
+                        status = toStatus(ticketRow),
+                        createdAt = ticketRow[TicketsTable.createdAt].toInstant(),
+                        updatedAt = ticketRow[TicketsTable.updatedAt].toInstant(),
+                    ),
+                messages = messages,
+            )
         }
 
     suspend fun listTicketsByClub(
@@ -429,6 +470,15 @@ class SupportRepository(
         requireNotNull(TicketSenderType.fromWire(row[TicketMessagesTable.senderType])) {
             "Unknown sender type: ${row[TicketMessagesTable.senderType]}"
         }
+
+    private fun toGuestTicketMessage(row: ResultRow): GuestTicketMessage =
+        GuestTicketMessage(
+            id = row[TicketMessagesTable.id],
+            senderType = toSender(row),
+            text = row[TicketMessagesTable.text],
+            attachments = row[TicketMessagesTable.attachments],
+            createdAt = row[TicketMessagesTable.createdAt].toInstant(),
+        )
 
     private fun staffMutationFailure(ticketId: Long): StaffMutationResult.Failure {
         val ticketExists =
