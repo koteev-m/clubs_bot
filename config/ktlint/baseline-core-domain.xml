@@ -414,18 +414,18 @@
         <error line="32" column="29" source="standard:class-signature" />
         <error line="32" column="45" source="standard:class-signature" />
         <error line="35" column="21" source="standard:trailing-comma-on-declaration-site" />
-        <error line="91" column="5" source="standard:blank-line-before-declaration" />
-        <error line="92" column="5" source="standard:blank-line-before-declaration" />
-        <error line="93" column="5" source="standard:blank-line-before-declaration" />
-        <error line="94" column="5" source="standard:blank-line-before-declaration" />
-        <error line="98" column="27" source="standard:class-signature" />
-        <error line="98" column="39" source="standard:class-signature" />
-        <error line="100" column="24" source="standard:class-signature" />
-        <error line="100" column="54" source="standard:class-signature" />
-        <error line="115" column="9" source="standard:function-signature" />
-        <error line="115" column="22" source="standard:function-signature" />
-        <error line="155" column="9" source="standard:function-signature" />
-        <error line="155" column="24" source="standard:function-signature" />
+        <error line="113" column="5" source="standard:blank-line-before-declaration" />
+        <error line="114" column="5" source="standard:blank-line-before-declaration" />
+        <error line="115" column="5" source="standard:blank-line-before-declaration" />
+        <error line="116" column="5" source="standard:blank-line-before-declaration" />
+        <error line="120" column="27" source="standard:class-signature" />
+        <error line="120" column="39" source="standard:class-signature" />
+        <error line="122" column="24" source="standard:class-signature" />
+        <error line="122" column="54" source="standard:class-signature" />
+        <error line="137" column="9" source="standard:function-signature" />
+        <error line="137" column="22" source="standard:function-signature" />
+        <error line="182" column="9" source="standard:function-signature" />
+        <error line="182" column="24" source="standard:function-signature" />
     </file>
     <file name="src/test/kotlin/com/example/bot/audit/AuditLoggerTest.kt">
         <error line="12" column="60" source="standard:multiline-expression-wrapping" />

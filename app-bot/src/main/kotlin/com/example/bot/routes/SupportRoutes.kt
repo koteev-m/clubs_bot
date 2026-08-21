@@ -10,6 +10,7 @@ import com.example.bot.plugins.miniAppBotTokenProvider
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
+import com.example.bot.support.GuestTicketThread
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
@@ -49,6 +50,7 @@ import org.slf4j.LoggerFactory
 import kotlin.coroutines.cancellation.CancellationException
 
 private val logger = LoggerFactory.getLogger("SupportRoutes")
+private val canonicalPositiveTicketId = Regex("[1-9][0-9]*")
 @Serializable
 internal data class CreateTicketRequest(
     val clubId: Long? = null,
@@ -75,6 +77,31 @@ private data class TicketSummaryResponse(
     val updatedAt: String,
     val lastMessagePreview: String? = null,
     val lastSenderType: String? = null,
+)
+
+@Serializable
+private data class GuestTicketThreadResponse(
+    val ticket: GuestTicketDetailsResponse,
+    val messages: List<GuestTicketMessageResponse>,
+)
+
+@Serializable
+private data class GuestTicketDetailsResponse(
+    val id: Long,
+    val clubId: Long,
+    val topic: String,
+    val status: String,
+    val createdAt: String,
+    val updatedAt: String,
+)
+
+@Serializable
+private data class GuestTicketMessageResponse(
+    val id: Long,
+    val senderType: String,
+    val text: String,
+    val attachments: String?,
+    val createdAt: String,
 )
 
 @Serializable
@@ -195,6 +222,31 @@ fun Application.supportRoutes(
                     ?: return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                 val tickets = supportService.listMyTickets(userId)
                 call.respond(HttpStatusCode.OK, tickets.map { it.toResponse() })
+            }
+
+            get("/tickets/my/{ticketId}") {
+                val ticketId = call.parseGuestTicketIdOrRespond() ?: return@get
+                val userId =
+                    call.userIdOrNull(userRepository)
+                        ?: return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+
+                when (val result = supportService.getMyTicket(ticketId = ticketId, userId = userId)) {
+                    is SupportServiceResult.Success ->
+                        call.respond(HttpStatusCode.OK, result.value.toResponse())
+
+                    is SupportServiceResult.Failure ->
+                        when (result.error) {
+                            SupportServiceError.TicketNotFound -> {
+                                logger.info("support.ticket.my.detail not_found ticket_id={}", ticketId)
+                                call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
+                            }
+
+                            else -> {
+                                logger.warn("support.ticket.my.detail internal_error ticket_id={}", ticketId)
+                                call.respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
+                            }
+                        }
+                }
             }
 
             post("/tickets/{id}/messages") {
@@ -420,6 +472,20 @@ private suspend fun ApplicationCall.parseTicketIdOrRespond(action: String): Long
     return ticketId
 }
 
+private suspend fun ApplicationCall.parseGuestTicketIdOrRespond(): Long? {
+    val rawTicketId = parameters["ticketId"]
+    val ticketId =
+        rawTicketId
+            ?.takeIf(canonicalPositiveTicketId::matches)
+            ?.toLongOrNull()
+    if (ticketId == null) {
+        logger.warn("support.ticket.my.detail validation_error")
+        respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+        return null
+    }
+    return ticketId
+}
+
 private fun normalizeText(text: String?): String? {
     val trimmed = text?.trim() ?: return null
     if (trimmed.isBlank() || trimmed.length > 2000) {
@@ -437,6 +503,29 @@ private fun TicketSummary.toResponse(): TicketSummaryResponse =
         updatedAt = updatedAt.toString(),
         lastMessagePreview = lastMessagePreview,
         lastSenderType = lastSenderType?.wire,
+    )
+
+private fun GuestTicketThread.toResponse(): GuestTicketThreadResponse =
+    GuestTicketThreadResponse(
+        ticket =
+            GuestTicketDetailsResponse(
+                id = ticket.id,
+                clubId = ticket.clubId,
+                topic = ticket.topic.wire,
+                status = ticket.status.wire,
+                createdAt = ticket.createdAt.toString(),
+                updatedAt = ticket.updatedAt.toString(),
+            ),
+        messages =
+            messages.map { message ->
+                GuestTicketMessageResponse(
+                    id = message.id,
+                    senderType = message.senderType.wire,
+                    text = message.text,
+                    attachments = message.attachments,
+                    createdAt = message.createdAt.toString(),
+                )
+            },
     )
 
 private fun Ticket.toResponse(): TicketResponse =
