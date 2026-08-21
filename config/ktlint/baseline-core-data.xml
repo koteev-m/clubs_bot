@@ -732,22 +732,22 @@
     </file>
     <file name="src/main/kotlin/com/example/bot/data/support/SupportRepository.kt">
         <error line="264" column="26" source="standard:multiline-expression-wrapping" />
-        <error line="422" column="24" source="standard:class-signature" />
-        <error line="422" column="50" source="standard:class-signature" />
-        <error line="424" column="24" source="standard:class-signature" />
-        <error line="424" column="58" source="standard:class-signature" />
-        <error line="434" column="24" source="standard:class-signature" />
-        <error line="434" column="42" source="standard:class-signature" />
-        <error line="436" column="24" source="standard:class-signature" />
-        <error line="436" column="62" source="standard:class-signature" />
+        <error line="455" column="24" source="standard:class-signature" />
+        <error line="455" column="50" source="standard:class-signature" />
+        <error line="457" column="24" source="standard:class-signature" />
+        <error line="457" column="58" source="standard:class-signature" />
+        <error line="482" column="24" source="standard:class-signature" />
+        <error line="482" column="42" source="standard:class-signature" />
+        <error line="484" column="24" source="standard:class-signature" />
+        <error line="484" column="62" source="standard:class-signature" />
     </file>
     <file name="src/main/kotlin/com/example/bot/data/support/SupportServiceImpl.kt">
-        <error line="39" column="76" source="standard:function-signature" />
-        <error line="47" column="44" source="standard:function-expression-body" />
-        <error line="73" column="29" source="standard:function-signature" />
-        <error line="80" column="23" source="standard:multiline-expression-wrapping" />
-        <error line="96" column="1" source="standard:indent" />
-        <error line="147" column="62" source="standard:function-signature" />
+        <error line="46" column="76" source="standard:function-signature" />
+        <error line="54" column="44" source="standard:function-expression-body" />
+        <error line="80" column="29" source="standard:function-signature" />
+        <error line="87" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="103" column="1" source="standard:indent" />
+        <error line="159" column="62" source="standard:function-signature" />
     </file>
     <file name="src/main/kotlin/com/example/bot/data/visits/VisitRepositories.kt">
         <error line="194" column="14" source="standard:function-signature" />

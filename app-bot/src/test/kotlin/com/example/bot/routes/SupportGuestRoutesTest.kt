@@ -7,6 +7,7 @@ import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.data.support.SupportRepository
 import com.example.bot.data.support.SupportServiceImpl
+import com.example.bot.data.support.TicketsTable
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
@@ -46,9 +47,11 @@ import kotlinx.serialization.json.long
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.update
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -82,7 +85,7 @@ class SupportGuestRoutesTest {
         assertNotNull(payload["id"]?.jsonPrimitive?.long)
         assertEquals(clubId, payload["clubId"]!!.jsonPrimitive.long)
         assertEquals("booking", payload["topic"]!!.jsonPrimitive.content)
-        assertEquals("opened", payload["status"]!!.jsonPrimitive.content)
+        assertEquals("new", payload["status"]!!.jsonPrimitive.content)
         assertTrue(payload["updatedAt"]!!.jsonPrimitive.content.isNotBlank())
         assertEquals(1, context.opsPublisher.notifications.size)
         val notification = context.opsPublisher.notifications.single()
@@ -256,9 +259,7 @@ class SupportGuestRoutesTest {
     @Test
     fun `closed ticket blocks guest message`() = withSupportApp { context ->
         val telegramId = 505L
-        val agentTelegramId = 506L
         insertUser(context.database, telegramId, "guest")
-        val agentId = insertUser(context.database, agentTelegramId, "agent")
         val clubId = insertClub(context.database, "Test Club")
 
         val create =
@@ -275,8 +276,7 @@ class SupportGuestRoutesTest {
             }
         val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
 
-        val closed = context.supportService.setStatus(ticketId, agentId, TicketStatus.CLOSED)
-        assertTrue(closed is com.example.bot.support.SupportServiceResult.Success)
+        seedTicketStatus(context.database, ticketId, TicketStatus.CLOSED)
 
         val response =
             client.post("/api/support/tickets/$ticketId/messages") {
@@ -693,6 +693,20 @@ class SupportGuestRoutesTest {
                 }.resultedValues!!
                 .single()[ClubsTable.id]
         }
+
+    private fun seedTicketStatus(
+        database: Database,
+        ticketId: Long,
+        status: TicketStatus,
+    ) {
+        transaction(database) {
+            val updated =
+                TicketsTable.update({ TicketsTable.id eq ticketId }) {
+                    it[TicketsTable.status] = status.wire
+                }
+            assertEquals(1, updated)
+        }
+    }
 
     private object UsersTable : Table("users") {
         val id = long("id").autoIncrement()

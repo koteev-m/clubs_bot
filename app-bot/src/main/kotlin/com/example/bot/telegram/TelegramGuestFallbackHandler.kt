@@ -325,17 +325,38 @@ class TelegramGuestFallbackHandler(
             return true
         }
 
-        when (
-            supportService.createTicket(
-                clubId = context.clubId,
-                userId = user.id,
-                bookingId = null,
-                listEntryId = null,
-                topic = context.topic,
-                text = question,
-                attachments = null,
-            )
-        ) {
+        return createTicketAndRespond(
+            message = message,
+            context = context,
+            userId = user.id,
+            question = question,
+        )
+    }
+
+    private suspend fun createTicketAndRespond(
+        message: Message,
+        context: AskReplyContext,
+        userId: Long,
+        question: String,
+    ): Boolean {
+        val result =
+            try {
+                supportService.createTicket(
+                    clubId = context.clubId,
+                    userId = userId,
+                    bookingId = null,
+                    listEntryId = null,
+                    topic = context.topic,
+                    text = question,
+                    attachments = null,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                sendToMessage(message, "Не удалось отправить вопрос. Попробуйте позже.")
+                return true
+            }
+        when (result) {
             is SupportServiceResult.Success -> sendToMessage(message, "Вопрос отправлен в клуб. Мы скоро ответим.")
             is SupportServiceResult.Failure -> sendToMessage(message, "Не удалось отправить вопрос. Попробуйте позже.")
         }

@@ -8,8 +8,13 @@ import com.example.bot.clubs.ClubsRepository
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
+import com.example.bot.data.support.SupportRepository
+import com.example.bot.data.support.SupportServiceImpl
+import com.example.bot.data.support.TicketMessagesTable
+import com.example.bot.data.support.TicketsTable
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.SupportService
+import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.Ticket
 import com.example.bot.support.TicketMessage
@@ -31,10 +36,17 @@ import com.pengrad.telegrambot.response.BaseResponse
 import io.mockk.every
 import io.mockk.mockk
 import java.sql.SQLException
+import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.runBlocking
+import org.flywaydb.core.Flyway
+import org.h2.jdbcx.JdbcDataSource
+import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
@@ -556,6 +568,17 @@ class TelegramGuestFallbackHandlerTest {
         runBlocking { verifyEachCategoryCreatesSelectedTicket() }
 
     @Test
+    fun `selected club category and normalized question persist as NEW through real service`() =
+        runBlocking { verifyRealServiceTicketPersistence() }
+
+    @Test
+    fun `ticket persistence failures are bounded without success or raw details`() =
+        runBlocking { verifyTicketCreationFailuresAreBounded() }
+
+    @Test
+    fun `ticket persistence cancellation is rethrown without guest response`() = verifyTicketCreationCancellation()
+
+    @Test
     fun `non canonical malformed and unknown callbacks are rejected without ticket creation`() =
         runBlocking { verifyInvalidCallbacksDoNotCreateTickets() }
 
@@ -670,7 +693,11 @@ private data class CreateTicketCall(
     val attachments: String?,
 )
 
-private class RecordingSupportService : SupportService {
+private class RecordingSupportService(
+    private val createResult: suspend (CreateTicketCall) -> SupportServiceResult<TicketWithMessage> = { call ->
+        SupportServiceResult.Success(sampleTicketWithMessage(call.clubId, call.userId, call.topic))
+    },
+) : SupportService {
     val createCalls = mutableListOf<CreateTicketCall>()
 
     override suspend fun createTicket(
@@ -682,7 +709,7 @@ private class RecordingSupportService : SupportService {
         text: String,
         attachments: String?,
     ): SupportServiceResult<TicketWithMessage> {
-        createCalls +=
+        val call =
             CreateTicketCall(
                 clubId = clubId,
                 userId = userId,
@@ -692,7 +719,8 @@ private class RecordingSupportService : SupportService {
                 text = text,
                 attachments = attachments,
             )
-        return SupportServiceResult.Success(sampleTicketWithMessage(clubId, userId, topic))
+        createCalls += call
+        return createResult(call)
     }
 
     override suspend fun listMyTickets(userId: Long): List<TicketSummary> = emptyList()
@@ -918,7 +946,7 @@ private fun sampleTicketWithMessage(
             bookingId = null,
             listEntryId = null,
             topic = topic,
-            status = TicketStatus.OPENED,
+            status = TicketStatus.NEW,
             createdAt = Instant.EPOCH,
             updatedAt = Instant.EPOCH,
             lastAgentId = null,
@@ -942,6 +970,7 @@ private const val TEST_BOT_USER_ID = 7_770_001L
 private const val ASK_REPLY_INSTRUCTION = "Ответьте на это сообщение текстом вопроса."
 private const val ASK_CONTEXT_ERROR_TEXT = "Не удалось определить параметры вопроса. Начните заново через /ask."
 private const val BOT_IDENTITY_ERROR_TEXT = "Не удалось подтвердить сообщение бота. Начните заново через /ask."
+private const val ASK_CREATE_FAILURE_TEXT = "Не удалось отправить вопрос. Попробуйте позже."
 
 private data class ExpectedAskCategory(
     val label: String,
@@ -1127,6 +1156,158 @@ private suspend fun verifyEachCategoryCreatesSelectedTicket() {
         assertEquals(category.topic, TicketTopic.fromWire(category.wire), category.wire)
         assertEquals("Вопрос отправлен в клуб. Мы скоро ответим.", sender.lastText())
     }
+}
+
+private suspend fun verifyRealServiceTicketPersistence() {
+    val selectedClubId = 9_002L
+    val database = prepareRealSupportDatabase()
+    transaction(database) {
+        exec("INSERT INTO clubs (id, name, timezone) VALUES ($selectedClubId, 'Club Two', 'Europe/Moscow')")
+        exec("INSERT INTO users (id, telegram_user_id, username) VALUES (55, 101, 'guest')")
+    }
+    val supportService =
+        SupportServiceImpl(
+            SupportRepository(database, Clock.fixed(TEST_NOW, ZoneOffset.UTC)),
+        )
+    val clubs =
+        StaticClubsRepository(
+            listOf(
+                Club(selectedClubId, "Moscow", "Club Two", genres = emptyList(), tags = emptyList(), logoUrl = null),
+            ),
+        )
+    val sender = FallbackRecordingTelegramSender()
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = supportService,
+            clubsRepository = clubs,
+        )
+
+    handler.handle(askCallbackUpdate("ask:club:$selectedClubId:topic:complaint"))
+    val prompt = sender.lastText()
+    handler.handle(
+        messageUpdate(
+            text = "  The exact normalized question  ",
+            replyText = prompt,
+            replyFromUserId = TEST_BOT_USER_ID,
+        ),
+    )
+
+    assertEquals("Вопрос отправлен в клуб. Мы скоро ответим.", sender.lastText())
+    val ticketId =
+        transaction(database) {
+            assertEquals(1L, TicketsTable.selectAll().count())
+            assertEquals(1L, TicketMessagesTable.selectAll().count())
+            val ticket = TicketsTable.selectAll().single()
+            val message = TicketMessagesTable.selectAll().single()
+            assertEquals(selectedClubId, ticket[TicketsTable.clubId])
+            assertEquals(55L, ticket[TicketsTable.userId])
+            assertEquals(TicketTopic.COMPLAINT.wire, ticket[TicketsTable.topic])
+            assertEquals(TicketStatus.NEW.wire, ticket[TicketsTable.status])
+            assertEquals(ticket[TicketsTable.id], message[TicketMessagesTable.ticketId])
+            assertEquals("guest", message[TicketMessagesTable.senderType])
+            assertEquals("The exact normalized question", message[TicketMessagesTable.text])
+            assertEquals(TEST_NOW, ticket[TicketsTable.createdAt].toInstant())
+            assertEquals(TEST_NOW, ticket[TicketsTable.updatedAt].toInstant())
+            assertEquals(TEST_NOW, message[TicketMessagesTable.createdAt].toInstant())
+            ticket[TicketsTable.id]
+        }
+    val restartedService = SupportServiceImpl(SupportRepository(database))
+    val reloaded = restartedService.getTicket(ticketId)
+    assertEquals(selectedClubId, reloaded?.clubId)
+    assertEquals(55L, reloaded?.userId)
+    assertEquals(TicketTopic.COMPLAINT, reloaded?.topic)
+    assertEquals(TicketStatus.NEW, reloaded?.status)
+}
+
+private suspend fun verifyTicketCreationFailuresAreBounded() {
+    val prompt = emittedAskPrompt(clubId = 1L, topicWire = "other")
+
+    suspend fun verifyBoundedFailure(
+        supportService: RecordingSupportService,
+        vararg forbiddenDetails: String,
+    ) {
+        val sender = FallbackRecordingTelegramSender()
+        val handler =
+            handler(
+                sender = sender,
+                now = TEST_NOW,
+                bookings = emptyList(),
+                supportService = supportService,
+            )
+
+        assertTrue(
+            handler.handle(
+                messageUpdate(
+                    text = "Question",
+                    replyText = prompt,
+                    replyFromUserId = TEST_BOT_USER_ID,
+                ),
+            ),
+        )
+
+        assertEquals(listOf(ASK_CREATE_FAILURE_TEXT), sender.texts())
+        assertFalse(sender.lastText().contains("Вопрос отправлен"))
+        forbiddenDetails.forEach { detail ->
+            assertFalse(sender.lastText().contains(detail, ignoreCase = true), sender.lastText())
+        }
+        assertEquals(1, supportService.createCalls.size)
+    }
+
+    val typedFailure =
+        RecordingSupportService {
+            SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
+        }
+    verifyBoundedFailure(
+        typedFailure,
+        "INSERT INTO ticket_messages",
+        "tickets_status_check",
+        "SQLState",
+    )
+
+    val rawDetail = "INSERT INTO ticket_messages tickets_status_check SQLState 23514 sentinel-db-detail"
+    val unexpectedFailure = RecordingSupportService { throw SQLException(rawDetail, "23514") }
+    verifyBoundedFailure(
+        unexpectedFailure,
+        rawDetail,
+        "ticket_messages",
+        "tickets_status_check",
+        "23514",
+        "sentinel-db-detail",
+    )
+}
+
+private fun verifyTicketCreationCancellation() {
+    val prompt = runBlocking { emittedAskPrompt(clubId = 1L, topicWire = "other") }
+    val cancellation = CancellationException("cancel ticket persistence")
+    val sender = FallbackRecordingTelegramSender()
+    val supportService = RecordingSupportService { throw cancellation }
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = supportService,
+        )
+
+    val thrown =
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                handler.handle(
+                    messageUpdate(
+                        text = "Question",
+                        replyText = prompt,
+                        replyFromUserId = TEST_BOT_USER_ID,
+                    ),
+                )
+            }
+        }
+
+    assertSame(cancellation, thrown)
+    assertTrue(sender.requests.isEmpty())
+    assertEquals(1, supportService.createCalls.size)
 }
 
 private suspend fun verifyInvalidCallbacksDoNotCreateTickets() {
@@ -1524,6 +1705,25 @@ private suspend fun emittedAskPrompt(
         )
     assertTrue(handler.handle(askCallbackUpdate("ask:club:$clubId:topic:$topicWire")))
     return sender.lastText()
+}
+
+private fun prepareRealSupportDatabase(): Database {
+    val dataSource =
+        JdbcDataSource().apply {
+            setURL(
+                "jdbc:h2:mem:telegram_support_${UUID.randomUUID()};" +
+                    "MODE=PostgreSQL;DATABASE_TO_UPPER=false;DB_CLOSE_DELAY=-1",
+            )
+            user = "sa"
+            password = ""
+        }
+    Flyway
+        .configure()
+        .dataSource(dataSource)
+        .locations("classpath:db/migration/common", "classpath:db/migration/h2")
+        .load()
+        .migrate()
+    return Database.connect(dataSource)
 }
 
 private suspend fun verifyBlankAskReply() {

@@ -8,11 +8,14 @@ import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.support.SupportRepository
 import com.example.bot.data.support.SupportServiceImpl
+import com.example.bot.data.support.TicketMessagesTable
+import com.example.bot.data.support.TicketsTable
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceResult
+import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketTopic
 import com.example.bot.testing.createInitData
 import com.example.bot.testing.withInitData
@@ -36,6 +39,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import java.util.UUID
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -45,11 +49,15 @@ import kotlinx.serialization.json.long
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.update
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -102,6 +110,7 @@ class SupportAdminRoutesTest {
 
         val ownerUserId = insertUser(context.database, context.userRepository, 402L, "guest")
         val ticketId = createTicket(context, clubId, ownerUserId)
+        seedTicketStatus(context.database, ticketId, TicketStatus.OPENED)
 
         val assignResponse =
             client.post("/api/support/tickets/$ticketId/assign") {
@@ -142,6 +151,63 @@ class SupportAdminRoutesTest {
         assertEquals("answered", replyPayload["ticketStatus"]!!.jsonPrimitive.content)
         assertNotNull(replyPayload["replyMessageId"]?.jsonPrimitive?.long)
         assertTrue(replyPayload["replyCreatedAt"]!!.jsonPrimitive.content.isNotBlank())
+    }
+
+    @Test
+    fun `legacy staff endpoints reject NEW with generic invalid state`() {
+        withSupportAdminApp { context ->
+            val adminTelegramId = 431L
+            val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
+            val clubId = insertClub(context.database, "Contained Support Club")
+            context.userRoleRepository.setRoles(adminUserId, setOf(Role.OWNER), clubIds = emptySet())
+
+            val ownerUserId = insertUser(context.database, context.userRepository, 432L, "guest")
+            val assignId = createTicket(context, clubId, ownerUserId)
+            val replyId = createTicket(context, clubId, ownerUserId)
+            val fromNewId = createTicket(context, clubId, ownerUserId)
+            val toNewId = createTicket(context, clubId, ownerUserId)
+            seedTicketStatus(context.database, toNewId, TicketStatus.OPENED)
+            val ticketsBefore =
+                listOf(assignId, replyId, fromNewId, toNewId).associateWith { ticketId ->
+                    context.supportService.getTicket(ticketId)
+                }
+
+            val assignResponse =
+                client.post("/api/support/tickets/$assignId/assign") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                }
+            assignResponse.assertGenericInvalidState()
+
+            val replyResponse =
+                client.post("/api/support/tickets/$replyId/reply") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Reply","attachments":"[]"}""")
+                }
+            replyResponse.assertGenericInvalidState()
+
+            val fromNewResponse =
+                client.post("/api/support/tickets/$fromNewId/status") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"status":"closed"}""")
+                }
+            fromNewResponse.assertGenericInvalidState()
+
+            val toNewResponse =
+                client.post("/api/support/tickets/$toNewId/status") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"status":"new"}""")
+                }
+            toNewResponse.assertGenericInvalidState()
+
+            ticketsBefore.forEach { (ticketId, ticketBefore) ->
+                assertEquals(ticketBefore, context.supportService.getTicket(ticketId))
+                assertEquals(1L, messageCount(context.database, ticketId))
+            }
+            assertTrue(context.telegramSender.requests.isEmpty())
+        }
     }
 
     @Test
@@ -289,6 +355,7 @@ class SupportAdminRoutesTest {
         val supportService: SupportService,
         val userRepository: TestUserRepository,
         val userRoleRepository: TestUserRoleRepository,
+        val telegramSender: RecordingTelegramSender,
     )
 
     private fun withSupportAdminApp(block: suspend ApplicationTestBuilder.(TestContext) -> Unit) =
@@ -321,7 +388,7 @@ class SupportAdminRoutesTest {
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
             }
-            block(TestContext(setup.database, supportService, userRepository, userRoleRepository))
+            block(TestContext(setup.database, supportService, userRepository, userRoleRepository, telegramSender))
         }
 
     private fun prepareDatabase(): DbSetup {
@@ -360,6 +427,32 @@ class SupportAdminRoutesTest {
         assertTrue(result is SupportServiceResult.Success)
         return result.value.ticket.id
     }
+
+    private fun seedTicketStatus(
+        database: Database,
+        ticketId: Long,
+        status: TicketStatus,
+    ) {
+        require(status != TicketStatus.NEW)
+        transaction(database) {
+            val updated =
+                TicketsTable.update({ TicketsTable.id eq ticketId }) {
+                    it[TicketsTable.status] = status.wire
+                }
+            assertEquals(1, updated)
+        }
+    }
+
+    private fun messageCount(
+        database: Database,
+        ticketId: Long,
+    ): Long =
+        transaction(database) {
+            TicketMessagesTable
+                .selectAll()
+                .where { TicketMessagesTable.ticketId eq ticketId }
+                .count()
+        }
 
     private fun insertUser(
         database: Database,
@@ -426,6 +519,19 @@ class SupportAdminRoutesTest {
         val parsed = runCatching { Json.parseToJsonElement(raw).jsonObject.errorCodeOrNull() }.getOrNull()
         val extracted = Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(raw)?.groupValues?.getOrNull(1)
         return parsed ?: extracted ?: raw
+    }
+
+    private suspend fun HttpResponse.assertGenericInvalidState() {
+        assertEquals(HttpStatusCode.Conflict, status)
+        assertNoStoreHeaders()
+        val raw = bodyAsText()
+        val payload = json.parseToJsonElement(raw).jsonObject
+        assertEquals("invalid_state", payload["code"]!!.jsonPrimitive.content)
+        assertEquals("409", payload["status"]!!.jsonPrimitive.content)
+        assertTrue(payload["message"] == null || payload["message"] == JsonNull)
+        assertTrue(payload["details"] == null || payload["details"] == JsonNull)
+        assertFalse(raw.contains("InvalidState"))
+        assertFalse(raw.contains("TicketStatus"))
     }
 
     private fun JsonObject.errorCodeOrNull(): String? {

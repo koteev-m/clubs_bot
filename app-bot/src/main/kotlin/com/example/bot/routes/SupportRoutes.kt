@@ -50,7 +50,7 @@ import kotlin.coroutines.cancellation.CancellationException
 
 private val logger = LoggerFactory.getLogger("SupportRoutes")
 @Serializable
-private data class CreateTicketRequest(
+internal data class CreateTicketRequest(
     val clubId: Long? = null,
     val topic: String? = null,
     val text: String? = null,
@@ -130,7 +130,7 @@ fun Application.supportRoutes(
 
             post("/tickets") {
                 val request =
-                    runCatching { call.receive<CreateTicketRequest>() }.getOrElse {
+                    receiveCreateTicketRequestOrNull { call.receive<CreateTicketRequest>() } ?: run {
                         logger.warn("support.ticket.create invalid_json")
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
                     }
@@ -509,6 +509,7 @@ private fun buildSupportRatingKeyboard(ticketId: Long): InlineKeyboardMarkup? {
 
 private fun mapSupportAdminError(error: SupportServiceError): Pair<HttpStatusCode, String> =
     when (error) {
+        SupportServiceError.InvalidState -> HttpStatusCode.Conflict to ErrorCodes.invalid_state
         SupportServiceError.TicketNotFound -> HttpStatusCode.NotFound to ErrorCodes.support_ticket_not_found
         SupportServiceError.TicketForbidden -> HttpStatusCode.Forbidden to ErrorCodes.support_ticket_forbidden
         else -> HttpStatusCode.InternalServerError to ErrorCodes.internal_error
@@ -516,6 +517,8 @@ private fun mapSupportAdminError(error: SupportServiceError): Pair<HttpStatusCod
 
 private fun mapSupportError(error: SupportServiceError): Pair<HttpStatusCode, String> =
     when (error) {
+        SupportServiceError.PersistenceFailure -> HttpStatusCode.InternalServerError to ErrorCodes.internal_error
+        SupportServiceError.InvalidState -> HttpStatusCode.Conflict to ErrorCodes.invalid_state
         SupportServiceError.TicketNotFound -> HttpStatusCode.NotFound to ErrorCodes.support_ticket_not_found
         SupportServiceError.TicketForbidden -> HttpStatusCode.Forbidden to ErrorCodes.support_ticket_forbidden
         SupportServiceError.TicketClosed -> HttpStatusCode.Conflict to ErrorCodes.support_ticket_closed
@@ -548,3 +551,14 @@ private fun Route.supportAdminAuthorize(block: Route.() -> Unit) {
         block = block,
     )
 }
+
+internal suspend fun receiveCreateTicketRequestOrNull(
+    receive: suspend () -> CreateTicketRequest,
+): CreateTicketRequest? =
+    try {
+        receive()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
+    }

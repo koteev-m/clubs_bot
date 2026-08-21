@@ -11,6 +11,7 @@ import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
 import com.example.bot.support.TicketWithMessage
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 class SupportServiceImpl(
     private val repository: SupportRepository,
@@ -24,17 +25,23 @@ class SupportServiceImpl(
         text: String,
         attachments: String?,
     ): SupportServiceResult<TicketWithMessage> =
-        SupportServiceResult.Success(
-            repository.createTicket(
-                clubId = clubId,
-                userId = userId,
-                bookingId = bookingId,
-                listEntryId = listEntryId,
-                topic = topic,
-                text = text,
-                attachments = attachments,
-            ),
-        )
+        try {
+            SupportServiceResult.Success(
+                repository.createTicket(
+                    clubId = clubId,
+                    userId = userId,
+                    bookingId = bookingId,
+                    listEntryId = listEntryId,
+                    topic = topic,
+                    text = text,
+                    attachments = attachments,
+                ),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
+        }
 
     override suspend fun listMyTickets(userId: Long): List<TicketSummary> =
         repository.listTicketsByUser(userId)
@@ -76,42 +83,47 @@ class SupportServiceImpl(
     override suspend fun assign(
         ticketId: Long,
         agentUserId: Long,
-    ): SupportServiceResult<Ticket> {
-        val updated = repository.assign(ticketId = ticketId, agentUserId = agentUserId)
-            ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        return SupportServiceResult.Success(updated)
-    }
+    ): SupportServiceResult<Ticket> =
+        when (val result = repository.assign(ticketId = ticketId, agentUserId = agentUserId)) {
+            is StaffMutationResult.Success -> SupportServiceResult.Success(result.value)
+            is StaffMutationResult.Failure -> SupportServiceResult.Failure(result.reason.toServiceError())
+        }
 
     override suspend fun setStatus(
         ticketId: Long,
         agentUserId: Long,
         status: TicketStatus,
-    ): SupportServiceResult<Ticket> {
-        val updated =
-            repository.setStatus(
-                ticketId = ticketId,
-                agentUserId = agentUserId,
-                status = status,
-            )
-            ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        return SupportServiceResult.Success(updated)
-    }
+    ): SupportServiceResult<Ticket> =
+        when (
+            val result =
+                repository.setStatus(
+                    ticketId = ticketId,
+                    agentUserId = agentUserId,
+                    status = status,
+                )
+        ) {
+            is StaffMutationResult.Success -> SupportServiceResult.Success(result.value)
+            is StaffMutationResult.Failure -> SupportServiceResult.Failure(result.reason.toServiceError())
+        }
 
     override suspend fun reply(
         ticketId: Long,
         agentUserId: Long,
         text: String,
         attachments: String?,
-    ): SupportServiceResult<SupportReplyResult> {
-        val result =
-            repository.reply(
-                ticketId = ticketId,
-                agentUserId = agentUserId,
-                text = text,
-                attachments = attachments,
-            ) ?: return SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-        return SupportServiceResult.Success(result)
-    }
+    ): SupportServiceResult<SupportReplyResult> =
+        when (
+            val result =
+                repository.reply(
+                    ticketId = ticketId,
+                    agentUserId = agentUserId,
+                    text = text,
+                    attachments = attachments,
+                )
+        ) {
+            is StaffMutationResult.Success -> SupportServiceResult.Success(result.value)
+            is StaffMutationResult.Failure -> SupportServiceResult.Failure(result.reason.toServiceError())
+        }
 
     override suspend fun setResolutionRating(
         ticketId: Long,
@@ -146,4 +158,10 @@ class SupportServiceImpl(
 
     override suspend fun getTicket(ticketId: Long): Ticket? =
         repository.findTicket(ticketId)
+
+    private fun StaffMutationFailure.toServiceError(): SupportServiceError =
+        when (this) {
+            StaffMutationFailure.NotFound -> SupportServiceError.TicketNotFound
+            StaffMutationFailure.InvalidState -> SupportServiceError.InvalidState
+        }
 }
