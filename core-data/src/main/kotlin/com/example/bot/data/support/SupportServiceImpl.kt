@@ -117,7 +117,7 @@ class SupportServiceImpl(
     override suspend fun getStaffMutationTicket(
         ticketId: Long,
         permittedClubIds: Set<Long>,
-    ): SupportServiceResult<Ticket> =
+    ): SupportServiceResult<Long> =
         if (permittedClubIds.isEmpty()) {
             SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
         } else {
@@ -127,10 +127,10 @@ class SupportServiceImpl(
     private suspend fun getStaffMutationTicketInPermittedClubs(
         ticketId: Long,
         permittedClubIds: Set<Long>,
-    ): SupportServiceResult<Ticket> =
+    ): SupportServiceResult<Long> =
         try {
             repository
-                .findTicketInClubs(
+                .findTicketClubIdInClubs(
                     ticketId = ticketId,
                     permittedClubIds = permittedClubIds,
                 )?.let { SupportServiceResult.Success(it) }
@@ -145,9 +145,8 @@ class SupportServiceImpl(
         ticketId: Long,
         agentUserId: Long,
     ): SupportServiceResult<Ticket> =
-        when (val result = repository.assign(ticketId = ticketId, agentUserId = agentUserId)) {
-            is StaffMutationResult.Success -> SupportServiceResult.Success(result.value)
-            is StaffMutationResult.Failure -> SupportServiceResult.Failure(result.reason.toServiceError())
+        staffMutationResult {
+            repository.assign(ticketId = ticketId, agentUserId = agentUserId)
         }
 
     override suspend fun setStatus(
@@ -155,16 +154,12 @@ class SupportServiceImpl(
         agentUserId: Long,
         status: TicketStatus,
     ): SupportServiceResult<Ticket> =
-        when (
-            val result =
-                repository.setStatus(
-                    ticketId = ticketId,
-                    agentUserId = agentUserId,
-                    status = status,
-                )
-        ) {
-            is StaffMutationResult.Success -> SupportServiceResult.Success(result.value)
-            is StaffMutationResult.Failure -> SupportServiceResult.Failure(result.reason.toServiceError())
+        staffMutationResult {
+            repository.setStatus(
+                ticketId = ticketId,
+                agentUserId = agentUserId,
+                status = status,
+            )
         }
 
     override suspend fun reply(
@@ -173,17 +168,13 @@ class SupportServiceImpl(
         text: String,
         attachments: String?,
     ): SupportServiceResult<SupportReplyResult> =
-        when (
-            val result =
-                repository.reply(
-                    ticketId = ticketId,
-                    agentUserId = agentUserId,
-                    text = text,
-                    attachments = attachments,
-                )
-        ) {
-            is StaffMutationResult.Success -> SupportServiceResult.Success(result.value)
-            is StaffMutationResult.Failure -> SupportServiceResult.Failure(result.reason.toServiceError())
+        staffMutationResult {
+            repository.reply(
+                ticketId = ticketId,
+                agentUserId = agentUserId,
+                text = text,
+                attachments = attachments,
+            )
         }
 
     override suspend fun setResolutionRating(
@@ -228,6 +219,18 @@ class SupportServiceImpl(
             SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
         }
 
+    private suspend fun <T> staffMutationResult(block: suspend () -> StaffMutationResult<T>): SupportServiceResult<T> =
+        try {
+            when (val result = block()) {
+                is StaffMutationResult.Success -> SupportServiceResult.Success(result.value)
+                is StaffMutationResult.Failure -> SupportServiceResult.Failure(result.reason.toServiceError())
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
+        }
+
     private fun <T : Any> SupportServiceResult<T?>.requireValueOrTicketNotFound(): SupportServiceResult<T> =
         when (this) {
             is SupportServiceResult.Success ->
@@ -239,6 +242,7 @@ class SupportServiceImpl(
     private fun StaffMutationFailure.toServiceError(): SupportServiceError =
         when (this) {
             StaffMutationFailure.NotFound -> SupportServiceError.TicketNotFound
+            StaffMutationFailure.Forbidden -> SupportServiceError.TicketForbidden
             StaffMutationFailure.InvalidState -> SupportServiceError.InvalidState
         }
 }

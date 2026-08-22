@@ -65,6 +65,7 @@ enum class StandardAuditEntityType(override val value: String) : AuditEntityType
     TABLE_SESSION("TABLE_SESSION"),
     SHIFT_REPORT("SHIFT_REPORT"),
     ROLE_ASSIGNMENT("ROLE_ASSIGNMENT"),
+    SUPPORT_TICKET("SUPPORT_TICKET"),
     HTTP_ACCESS("HTTP_ACCESS"),
     LEGACY("LEGACY"),
     ;
@@ -94,6 +95,8 @@ enum class StandardAuditAction(override val value: String) : AuditAction {
     REDEEM("REDEEM"),
     ACCESS_GRANTED("ACCESS_GRANTED"),
     ACCESS_DENIED("ACCESS_DENIED"),
+    SUPPORT_REPLY("SUPPORT_REPLY"),
+    SUPPORT_STATUS_CHANGE("SUPPORT_STATUS_CHANGE"),
     LEGACY("LEGACY"),
     ;
 

@@ -219,5 +219,5 @@ interface StaffSupportReadService {
     suspend fun getStaffMutationTicket(
         ticketId: Long,
         permittedClubIds: Set<Long>,
-    ): SupportServiceResult<Ticket>
+    ): SupportServiceResult<Long>
 }

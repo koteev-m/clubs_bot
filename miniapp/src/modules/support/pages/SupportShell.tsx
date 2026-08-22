@@ -4,15 +4,19 @@ import {
   isSupportRequestCanceled,
   listPermittedSupportClubs,
   listSupportTickets,
+  replyToSupportTicket,
+  SUPPORT_REPLY_MAX_LENGTH,
   SupportApiError,
   SupportClub,
   SupportTicketStatus,
   SupportTicketSummary,
   SupportTicketThread,
   supportTicketStatuses,
+  takeSupportTicketInWork,
 } from '../api/support.api';
 
 type RequestStatus = 'idle' | 'loading' | 'ready' | 'error';
+type MutationAction = 'take' | 'reply';
 
 const statusLabels: Record<SupportTicketStatus, string> = {
   new: 'Новое',
@@ -57,7 +61,7 @@ function removeSupportMode() {
   window.location.assign(url.toString());
 }
 
-/** Read-only operational support surface. Server responses are the only source of authorization scope. */
+/** Operational support surface. Server responses are the only source of authorization scope. */
 export default function SupportShell() {
   const [clubs, setClubs] = useState<SupportClub[]>([]);
   const [clubsStatus, setClubsStatus] = useState<RequestStatus>('loading');
@@ -76,11 +80,17 @@ export default function SupportShell() {
   const [threadStatus, setThreadStatus] = useState<RequestStatus>('idle');
   const [threadError, setThreadError] = useState<string | null>(null);
   const [threadRefresh, setThreadRefresh] = useState(0);
+  const [ticketNotice, setTicketNotice] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [mutationAction, setMutationAction] = useState<MutationAction | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [mutationSuccess, setMutationSuccess] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
 
   const clubsRequestId = useRef(0);
   const ticketsRequestId = useRef(0);
   const threadRequestId = useRef(0);
+  const mutationInFlight = useRef(false);
 
   const clearThread = useCallback(() => {
     threadRequestId.current += 1;
@@ -88,6 +98,10 @@ export default function SupportShell() {
     setThread(null);
     setThreadStatus('idle');
     setThreadError(null);
+    setTicketNotice(null);
+    setReplyText('');
+    setMutationError(null);
+    setMutationSuccess(null);
   }, []);
 
   const clearTicketsAndThread = useCallback(() => {
@@ -113,6 +127,12 @@ export default function SupportShell() {
     setThread(null);
     setThreadStatus('idle');
     setThreadError(null);
+    setTicketNotice(null);
+    setReplyText('');
+    setMutationAction(null);
+    setMutationError(null);
+    setMutationSuccess(null);
+    mutationInFlight.current = false;
     setForbidden(true);
   }, []);
 
@@ -143,6 +163,13 @@ export default function SupportShell() {
 
     return () => controller.abort();
   }, [clubsRefresh, forbidden, handleForbidden]);
+
+  useEffect(() => {
+    if (clubsStatus !== 'ready' || selectedClubId === null) return;
+    if (clubs.some((club) => club.id === selectedClubId)) return;
+    clearTicketsAndThread();
+    setSelectedClubId(null);
+  }, [clearTicketsAndThread, clubs, clubsStatus, selectedClubId]);
 
   useEffect(() => {
     if (forbidden || selectedClubId === null) return;
@@ -227,9 +254,113 @@ export default function SupportShell() {
     setThread(null);
     setThreadStatus('loading');
     setThreadError(null);
+    setTicketNotice(null);
+    setReplyText('');
+    setMutationError(null);
+    setMutationSuccess(null);
     setSelectedTicketId(ticketId);
     window.scrollTo(0, 0);
   }, []);
+
+  const refreshSelectedTicketAndList = useCallback(() => {
+    setTicketsRefresh((value) => value + 1);
+    setThreadRefresh((value) => value + 1);
+  }, []);
+
+  const handleMutationForbidden = useCallback(() => {
+    setReplyText('');
+    setMutationSuccess(null);
+    setMutationError('Права доступа изменились. Доступные действия обновляются.');
+    setClubsRefresh((value) => value + 1);
+  }, []);
+
+  const handleMutationNotFound = useCallback(() => {
+    threadRequestId.current += 1;
+    setSelectedTicketId(null);
+    setThread(null);
+    setThreadStatus('idle');
+    setThreadError(null);
+    setReplyText('');
+    setMutationError(null);
+    setMutationSuccess(null);
+    setTicketNotice('Обращение не найдено');
+    setTicketsRefresh((value) => value + 1);
+  }, []);
+
+  const handleMutationFailure = useCallback(
+    (action: MutationAction, error: unknown) => {
+      if (isSupportRequestCanceled(error)) return;
+      const apiError = error instanceof SupportApiError ? error : null;
+      if (apiError?.status === 403) {
+        handleMutationForbidden();
+        return;
+      }
+      if (apiError?.status === 404) {
+        handleMutationNotFound();
+        return;
+      }
+      if (apiError?.status === 409) {
+        setMutationSuccess(null);
+        setMutationError('Состояние обращения изменилось. Данные обновляются.');
+        refreshSelectedTicketAndList();
+        return;
+      }
+      setMutationSuccess(null);
+      setMutationError(
+        action === 'reply' ? 'Не удалось сохранить ответ' : 'Не удалось взять обращение в работу',
+      );
+    },
+    [handleMutationForbidden, handleMutationNotFound, refreshSelectedTicketAndList],
+  );
+
+  const selectedTicketClub = thread
+    ? clubs.find((club) => club.id === thread.ticket.clubId)
+    : undefined;
+  const canTakeInWork =
+    thread?.ticket.status === 'new' && selectedTicketClub?.canTakeInWork === true;
+  const canReply =
+    (thread?.ticket.status === 'new' || thread?.ticket.status === 'in_progress') &&
+    selectedTicketClub?.canReply === true;
+  const trimmedReplyText = replyText.trim();
+  const isReplyValid =
+    trimmedReplyText.length > 0 && trimmedReplyText.length <= SUPPORT_REPLY_MAX_LENGTH;
+
+  const handleTakeInWork = useCallback(async () => {
+    if (mutationInFlight.current || !thread || !canTakeInWork) return;
+    mutationInFlight.current = true;
+    setMutationAction('take');
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      await takeSupportTicketInWork(thread.ticket.id);
+      setMutationSuccess('Обращение взято в работу');
+      refreshSelectedTicketAndList();
+    } catch (error) {
+      handleMutationFailure('take', error);
+    } finally {
+      mutationInFlight.current = false;
+      setMutationAction(null);
+    }
+  }, [canTakeInWork, handleMutationFailure, refreshSelectedTicketAndList, thread]);
+
+  const handleReply = useCallback(async () => {
+    if (mutationInFlight.current || !thread || !canReply || !isReplyValid) return;
+    mutationInFlight.current = true;
+    setMutationAction('reply');
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      await replyToSupportTicket(thread.ticket.id, trimmedReplyText);
+      setReplyText('');
+      setMutationSuccess('Ответ сохранён');
+      refreshSelectedTicketAndList();
+    } catch (error) {
+      handleMutationFailure('reply', error);
+    } finally {
+      mutationInFlight.current = false;
+      setMutationAction(null);
+    }
+  }, [canReply, handleMutationFailure, isReplyValid, refreshSelectedTicketAndList, thread, trimmedReplyText]);
 
   if (forbidden) {
     return (
@@ -306,6 +437,11 @@ export default function SupportShell() {
                 Обновить
               </button>
             </div>
+            {ticketNotice && (
+              <p className="mt-3 text-sm text-red-600" role="status">
+                {ticketNotice}
+              </p>
+            )}
             <label className="mt-3 block text-sm text-gray-600" htmlFor="support-status">
               Статус
               <select
@@ -361,9 +497,25 @@ export default function SupportShell() {
 
         {selectedTicketId !== null && (
           <section className="rounded-lg bg-white p-4 shadow-sm">
-            <button type="button" className="text-sm text-blue-600" onClick={clearThread}>
+            <button
+              type="button"
+              className="text-sm text-blue-600 disabled:opacity-50"
+              disabled={mutationAction !== null}
+              onClick={clearThread}
+            >
               ← К обращениям
             </button>
+
+            {mutationSuccess && (
+              <p className="mt-4 text-sm text-green-700" role="status">
+                {mutationSuccess}
+              </p>
+            )}
+            {mutationError && (
+              <p className="mt-4 text-sm text-red-600" role="alert">
+                {mutationError}
+              </p>
+            )}
 
             {threadStatus === 'loading' && <p className="mt-4 text-sm text-gray-500">Загрузка обращения...</p>}
             {threadStatus === 'error' && (
@@ -392,6 +544,59 @@ export default function SupportShell() {
                   <p className="mt-2 text-xs text-gray-500">Создано: {formatDate(thread.ticket.createdAt)}</p>
                   <p className="mt-1 text-xs text-gray-500">Обновлено: {formatDate(thread.ticket.updatedAt)}</p>
                 </div>
+
+                {(canTakeInWork || canReply) && (
+                  <div className="mt-4 space-y-4 border-b border-gray-100 pb-4">
+                    {canTakeInWork && (
+                      <button
+                        type="button"
+                        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                        disabled={mutationAction !== null}
+                        onClick={() => void handleTakeInWork()}
+                      >
+                        {mutationAction === 'take' ? 'Сохранение...' : 'Взять в работу'}
+                      </button>
+                    )}
+                    {canReply && (
+                      <form
+                        className="space-y-2"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void handleReply();
+                        }}
+                      >
+                        <label className="block text-sm text-gray-600" htmlFor="support-reply">
+                          Ответ
+                          <textarea
+                            id="support-reply"
+                            className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm text-gray-900"
+                            rows={4}
+                            maxLength={SUPPORT_REPLY_MAX_LENGTH}
+                            value={replyText}
+                            disabled={mutationAction !== null}
+                            onChange={(event) => {
+                              setReplyText(event.target.value);
+                              setMutationError(null);
+                              setMutationSuccess(null);
+                            }}
+                          />
+                        </label>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs text-gray-500">
+                            {replyText.length}/{SUPPORT_REPLY_MAX_LENGTH}
+                          </span>
+                          <button
+                            type="submit"
+                            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                            disabled={!isReplyValid || mutationAction !== null}
+                          >
+                            {mutationAction === 'reply' ? 'Сохранение...' : 'Сохранить ответ'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-4 space-y-3" aria-label="Переписка">
                   {thread.messages.length === 0 && <p className="text-sm text-gray-500">Сообщений нет.</p>}

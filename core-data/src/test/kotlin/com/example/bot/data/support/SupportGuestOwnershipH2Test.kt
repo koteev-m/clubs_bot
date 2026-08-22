@@ -82,7 +82,6 @@ class SupportGuestOwnershipH2Test {
         runBlocking {
             val ownerUserId = insertUser(username = "owner", displayName = "Owner")
             val otherUserId = insertUser(username = "other", displayName = "Other")
-            val agentUserId = insertUser(username = "agent", displayName = "Agent")
             val clubId = insertClub(name = "Aurora")
             val foreignText = "foreign-message-sentinel"
             val foreignAttachments = """[{"name":"foreign-attachment-sentinel.txt"}]"""
@@ -129,17 +128,16 @@ class SupportGuestOwnershipH2Test {
             assertTrue(laterGuestResult is SupportServiceResult.Success)
             val laterGuestMessage = (laterGuestResult as SupportServiceResult.Success).value
 
-            seedLegacyStatus(ownedThreadCreated.ticket.id, TicketStatus.OPENED)
             val agentAttachments = """[{"name":"owned-agent.txt"}]"""
-            val replyResult =
-                service.reply(
+            val agentMessageId =
+                insertMessage(
                     ticketId = ownedThreadCreated.ticket.id,
-                    agentUserId = agentUserId,
+                    senderType = TicketSenderType.AGENT,
                     text = "owned agent reply",
                     attachments = agentAttachments,
+                    createdAt = fixedInstant,
                 )
-            assertTrue(replyResult is SupportServiceResult.Success)
-            val agentMessage = (replyResult as SupportServiceResult.Success).value.replyMessage
+            seedLegacyStatus(ownedThreadCreated.ticket.id, TicketStatus.ANSWERED)
 
             val summaries = service.listMyTickets(ownerUserId)
             assertEquals(
@@ -163,7 +161,7 @@ class SupportGuestOwnershipH2Test {
                 listOf(
                     ownedThreadCreated.initialMessage.id,
                     laterGuestMessage.id,
-                    agentMessage.id,
+                    agentMessageId,
                 ),
                 ownedThread.messages.map { it.id },
             )
