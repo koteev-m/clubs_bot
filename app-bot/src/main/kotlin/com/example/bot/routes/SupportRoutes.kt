@@ -114,6 +114,8 @@ private data class GuestTicketMessageResponse(
 private data class SupportStaffClubResponse(
     val id: Long,
     val name: String,
+    val canReply: Boolean,
+    val canTakeInWork: Boolean,
 )
 
 @Serializable
@@ -148,11 +150,6 @@ private data class AddMessageRequest(
 )
 
 @Serializable
-private data class UpdateStatusRequest(
-    val status: String? = null,
-)
-
-@Serializable
 private data class ReplyRequest(
     val text: String? = null,
     val attachments: String? = null,
@@ -170,7 +167,6 @@ private data class MessageResponse(
 private data class SupportReplyResponse(
     val ticketId: Long,
     val clubId: Long,
-    val ownerUserId: Long,
     val replyMessageId: Long,
     val replyCreatedAt: String,
     val ticketStatus: String,
@@ -345,10 +341,26 @@ fun Application.supportRoutes(
                             permission = PermissionCodes.SUPPORT_VIEW,
                             action = "clubs",
                         ) ?: return@get
+                    val replyClubIds =
+                        call.listPermittedSupportClubIdsOrRespond(
+                            repository = userRolePermissionRepository,
+                            userId = userId,
+                            permission = PermissionCodes.SUPPORT_REPLY,
+                            action = "clubs_reply_capabilities",
+                        ) ?: return@get
+                    val takeClubIds =
+                        call.listPermittedSupportClubIdsOrRespond(
+                            repository = userRolePermissionRepository,
+                            userId = userId,
+                            permission = PermissionCodes.SUPPORT_STATUS_MANAGE,
+                            action = "clubs_take_capabilities",
+                        ) ?: return@get
                     val clubs =
                         call.loadPermittedSupportClubsOrRespond(
                             repository = clubsRepository,
                             clubIds = permittedClubIds,
+                            replyClubIds = replyClubIds,
+                            takeClubIds = takeClubIds,
                         ) ?: return@get
                     call.respond(HttpStatusCode.OK, clubs)
                 }
@@ -413,7 +425,7 @@ fun Application.supportRoutes(
 
                 post("/assign") {
                     val ticketId = call.parseTicketIdOrRespond("assign") ?: return@post
-                    val ticket =
+                    val ticketClubId =
                         call.loadStaffMutationTicketOrRespond(
                             staffSupportReadService = staffSupportReadService,
                             permissionRepository = userRolePermissionRepository,
@@ -424,7 +436,7 @@ fun Application.supportRoutes(
 
                     when (val result = supportService.assign(ticketId = ticketId, agentUserId = call.supportUserId())) {
                         is SupportServiceResult.Success -> {
-                            logger.info("support.ticket.assign ticket_id={} club_id={}", ticketId, ticket.clubId)
+                            logger.info("support.ticket.assign ticket_id={} club_id={}", ticketId, ticketClubId)
                             call.respond(HttpStatusCode.OK, result.value.toResponse())
                         }
                         is SupportServiceResult.Failure -> {
@@ -436,44 +448,15 @@ fun Application.supportRoutes(
 
                 post("/status") {
                     val ticketId = call.parseTicketIdOrRespond("status") ?: return@post
-                    val ticket =
-                        call.loadStaffMutationTicketOrRespond(
-                            staffSupportReadService = staffSupportReadService,
-                            permissionRepository = userRolePermissionRepository,
-                            ticketId = ticketId,
-                            permission = PermissionCodes.SUPPORT_STATUS_MANAGE,
-                            action = "status",
-                        ) ?: return@post
+                    call.loadStaffMutationTicketOrRespond(
+                        staffSupportReadService = staffSupportReadService,
+                        permissionRepository = userRolePermissionRepository,
+                        ticketId = ticketId,
+                        permission = PermissionCodes.SUPPORT_STATUS_MANAGE,
+                        action = "status",
+                    ) ?: return@post
 
-                    val request =
-                        receiveSupportRequestOrNull { call.receive<UpdateStatusRequest>() } ?: run {
-                            logger.warn("support.ticket.status invalid_json ticket_id={}", ticketId)
-                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-                        }
-
-                    val status = request.status?.let { TicketStatus.fromWire(it) }
-                    if (status == null) {
-                        logger.warn("support.ticket.status validation_error ticket_id={}", ticketId)
-                        return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
-                    }
-
-                    when (
-                        val result =
-                            supportService.setStatus(
-                                ticketId = ticketId,
-                                agentUserId = call.supportUserId(),
-                                status = status,
-                            )
-                    ) {
-                        is SupportServiceResult.Success -> {
-                            logger.info("support.ticket.status ticket_id={} club_id={}", ticketId, ticket.clubId)
-                            call.respond(HttpStatusCode.OK, result.value.toResponse())
-                        }
-                        is SupportServiceResult.Failure -> {
-                            val (statusCode, code) = mapSupportAdminError(result.error)
-                            call.respondError(statusCode, code)
-                        }
-                    }
+                    call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
                 }
 
                 post("/reply") {
@@ -515,7 +498,6 @@ fun Application.supportRoutes(
                                 SupportReplyResponse(
                                     ticketId = reply.ticket.id,
                                     clubId = reply.ticket.clubId,
-                                    ownerUserId = reply.ticket.userId,
                                     replyMessageId = reply.replyMessage.id,
                                     replyCreatedAt = reply.replyMessage.createdAt.toString(),
                                     ticketStatus = reply.ticket.status.wire,
@@ -813,12 +795,20 @@ private suspend fun ApplicationCall.listPermittedSupportClubIdsOrRespond(
 private suspend fun ApplicationCall.loadPermittedSupportClubsOrRespond(
     repository: ClubsRepository,
     clubIds: Set<Long>,
+    replyClubIds: Set<Long>,
+    takeClubIds: Set<Long>,
 ): List<SupportStaffClubResponse>? =
     try {
         val clubs = mutableListOf<SupportStaffClubResponse>()
         for (clubId in clubIds.sorted()) {
             val club = repository.getById(clubId) ?: continue
-            clubs += SupportStaffClubResponse(id = club.id, name = club.name)
+            clubs +=
+                SupportStaffClubResponse(
+                    id = club.id,
+                    name = club.name,
+                    canReply = club.id in replyClubIds,
+                    canTakeInWork = club.id in takeClubIds,
+                )
         }
         clubs.sortedWith(
             compareBy(String.CASE_INSENSITIVE_ORDER, SupportStaffClubResponse::name)
@@ -838,7 +828,7 @@ private suspend fun ApplicationCall.loadStaffMutationTicketOrRespond(
     ticketId: Long,
     permission: PermissionCode,
     action: String,
-): Ticket? {
+): Long? {
     val permittedClubIds =
         listPermittedSupportClubIdsOrRespond(
             repository = permissionRepository,

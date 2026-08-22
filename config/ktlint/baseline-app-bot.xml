@@ -2113,9 +2113,9 @@
         <error line="3" column="1" source="standard:import-ordering" />
         <error line="60" column="1" source="standard:blank-line-before-declaration" />
         <error line="60" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="212" column="30" source="standard:multiline-expression-wrapping" />
-        <error line="260" column="30" source="standard:multiline-expression-wrapping" />
-        <error line="310" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="208" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="256" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="306" column="30" source="standard:multiline-expression-wrapping" />
         <error line="304" column="35" source="standard:chain-method-continuation" />
         <error line="304" column="41" source="standard:argument-list-wrapping" />
         <error line="304" column="92" source="standard:argument-list-wrapping" />
@@ -5706,28 +5706,28 @@
         <error line="7" column="1" source="standard:no-unused-imports" />
         <error line="83" column="37" source="standard:multiline-expression-wrapping" />
         <error line="83" column="37" source="standard:function-signature" />
-        <error line="281" column="54" source="standard:multiline-expression-wrapping" />
-        <error line="281" column="54" source="standard:function-signature" />
-        <error line="297" column="52" source="standard:multiline-expression-wrapping" />
-        <error line="297" column="52" source="standard:function-signature" />
-        <error line="410" column="74" source="standard:multiline-expression-wrapping" />
-        <error line="410" column="74" source="standard:function-signature" />
-        <error line="433" column="81" source="standard:multiline-expression-wrapping" />
-        <error line="433" column="81" source="standard:function-signature" />
-        <error line="464" column="63" source="standard:multiline-expression-wrapping" />
-        <error line="464" column="63" source="standard:function-signature" />
-        <error line="519" column="49" source="standard:multiline-expression-wrapping" />
-        <error line="519" column="49" source="standard:function-signature" />
-        <error line="628" column="81" source="standard:multiline-expression-wrapping" />
-        <error line="628" column="81" source="standard:function-signature" />
-        <error line="895" column="1" source="standard:indent" />
-        <error line="896" column="1" source="standard:indent" />
+        <error line="279" column="54" source="standard:multiline-expression-wrapping" />
+        <error line="279" column="54" source="standard:function-signature" />
+        <error line="295" column="52" source="standard:multiline-expression-wrapping" />
+        <error line="295" column="52" source="standard:function-signature" />
+        <error line="407" column="74" source="standard:multiline-expression-wrapping" />
+        <error line="407" column="74" source="standard:function-signature" />
+        <error line="431" column="81" source="standard:multiline-expression-wrapping" />
+        <error line="431" column="81" source="standard:function-signature" />
+        <error line="462" column="63" source="standard:multiline-expression-wrapping" />
+        <error line="462" column="63" source="standard:function-signature" />
+        <error line="517" column="49" source="standard:multiline-expression-wrapping" />
+        <error line="517" column="49" source="standard:function-signature" />
+        <error line="626" column="81" source="standard:multiline-expression-wrapping" />
+        <error line="626" column="81" source="standard:function-signature" />
         <error line="897" column="1" source="standard:indent" />
         <error line="898" column="1" source="standard:indent" />
         <error line="899" column="1" source="standard:indent" />
         <error line="900" column="1" source="standard:indent" />
         <error line="901" column="1" source="standard:indent" />
         <error line="902" column="1" source="standard:indent" />
+        <error line="903" column="1" source="standard:indent" />
+        <error line="904" column="1" source="standard:indent" />
     </file>
     <file name="src/test/kotlin/com/example/bot/routes/SupportGuestRoutesTest.kt">
         <error line="3" column="1" source="standard:import-ordering" />

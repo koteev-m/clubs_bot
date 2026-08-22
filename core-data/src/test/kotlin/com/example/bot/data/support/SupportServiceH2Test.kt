@@ -1,5 +1,8 @@
 package com.example.bot.data.support
 
+import com.example.bot.data.security.PermissionCode
+import com.example.bot.data.security.PermissionCodes
+import com.example.bot.data.security.Role
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.TicketSenderType
@@ -154,7 +157,7 @@ class SupportServiceH2Test {
         }
 
     @Test
-    fun `legacy staff mutations reject NEW without changing tickets or messages`() =
+    fun `staff mutations without an accepted assignment are forbidden without writes`() =
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
             val agentId = insertUser(username = "agent", displayName = "Agent")
@@ -163,7 +166,7 @@ class SupportServiceH2Test {
             val assignId = createTicket(userId = userId, clubId = clubId, text = "Assign NEW").ticket.id
             val assignBefore = service.getTicket(assignId)
             val assignResult = service.assign(ticketId = assignId, agentUserId = agentId)
-            assertInvalidState(assignResult)
+            assertTicketForbidden(assignResult)
             assertEquals(assignBefore, service.getTicket(assignId))
             assertEquals(1L, messageCount(assignId))
 
@@ -176,14 +179,14 @@ class SupportServiceH2Test {
                     text = "Legacy reply",
                     attachments = "[]",
                 )
-            assertInvalidState(replyResult)
+            assertTicketForbidden(replyResult)
             assertEquals(replyBefore, service.getTicket(replyId))
             assertEquals(1L, messageCount(replyId))
 
             val fromNewId = createTicket(userId = userId, clubId = clubId, text = "Status from NEW").ticket.id
             val fromNewBefore = service.getTicket(fromNewId)
             val fromNewResult = service.setStatus(fromNewId, agentId, TicketStatus.CLOSED)
-            assertInvalidState(fromNewResult)
+            assertTicketForbidden(fromNewResult)
             assertEquals(fromNewBefore, service.getTicket(fromNewId))
             assertEquals(1L, messageCount(fromNewId))
 
@@ -191,59 +194,57 @@ class SupportServiceH2Test {
             seedLegacyStatus(toNewId, TicketStatus.OPENED)
             val toNewBefore = service.getTicket(toNewId)
             val toNewResult = service.setStatus(toNewId, agentId, TicketStatus.NEW)
-            assertInvalidState(toNewResult)
+            assertTicketForbidden(toNewResult)
             assertEquals(toNewBefore, service.getTicket(toNewId))
             assertEquals(1L, messageCount(toNewId))
         }
 
     @Test
-    fun `legacy staff mutations preserve behavior for every legacy status`() =
+    fun `accepted staff mutations reject every legacy status without writes`() =
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
             val agentId = insertUser(username = "agent", displayName = "Agent")
             val clubId = insertClub(name = "Aurora")
-            val legacyTargets =
-                mapOf(
-                    TicketStatus.OPENED to TicketStatus.IN_PROGRESS,
-                    TicketStatus.IN_PROGRESS to TicketStatus.ANSWERED,
-                    TicketStatus.ANSWERED to TicketStatus.CLOSED,
-                    TicketStatus.CLOSED to TicketStatus.OPENED,
-                )
+            grantStaffPermissions(
+                agentId,
+                clubId,
+                listOf(PermissionCodes.SUPPORT_REPLY, PermissionCodes.SUPPORT_STATUS_MANAGE),
+            )
+            val legacyTargets = listOf(TicketStatus.OPENED, TicketStatus.ANSWERED, TicketStatus.CLOSED)
 
-            legacyTargets.forEach { (currentStatus, targetStatus) ->
+            legacyTargets.forEach { currentStatus ->
                 val assignId = createTicket(userId, clubId, "Assign $currentStatus").ticket.id
                 seedLegacyStatus(assignId, currentStatus)
-                assertEquals(currentStatus, service.getTicket(assignId)?.status)
                 val assignResult = service.assign(assignId, agentId)
-                assertTrue(assignResult is SupportServiceResult.Success)
-                val assignedTicket = (assignResult as SupportServiceResult.Success).value
-                assertEquals(TicketStatus.IN_PROGRESS, assignedTicket.status)
-                assertEquals(agentId, assignedTicket.lastAgentId)
+                assertInvalidState(assignResult)
+                assertEquals(currentStatus, service.getTicket(assignId)?.status)
 
                 val replyId = createTicket(userId, clubId, "Reply $currentStatus").ticket.id
                 seedLegacyStatus(replyId, currentStatus)
                 val messageCountBefore = messageCount(replyId)
                 val replyResult = service.reply(replyId, agentId, "Reply", null)
-                assertTrue(replyResult is SupportServiceResult.Success)
-                val reply = (replyResult as SupportServiceResult.Success).value
-                assertEquals(TicketStatus.ANSWERED, reply.ticket.status)
-                assertEquals(agentId, reply.ticket.lastAgentId)
-                assertEquals(messageCountBefore + 1, messageCount(replyId))
+                assertInvalidState(replyResult)
+                assertEquals(currentStatus, service.getTicket(replyId)?.status)
+                assertEquals(messageCountBefore, messageCount(replyId))
 
                 val statusId = createTicket(userId, clubId, "Status $currentStatus").ticket.id
                 seedLegacyStatus(statusId, currentStatus)
-                val statusResult = service.setStatus(statusId, agentId, targetStatus)
-                assertTrue(statusResult is SupportServiceResult.Success)
-                val updatedTicket = (statusResult as SupportServiceResult.Success).value
-                assertEquals(targetStatus, updatedTicket.status)
-                assertEquals(agentId, updatedTicket.lastAgentId)
+                val statusResult = service.setStatus(statusId, agentId, TicketStatus.IN_PROGRESS)
+                assertInvalidState(statusResult)
+                assertEquals(currentStatus, service.getTicket(statusId)?.status)
             }
         }
 
     @Test
-    fun `legacy staff mutations distinguish missing tickets from invalid NEW state`() =
+    fun `missing staff mutation tickets stay not found for an actor permitted elsewhere`() =
         runBlocking {
             val agentId = insertUser(username = "agent", displayName = "Agent")
+            val clubId = insertClub(name = "Permitted Elsewhere")
+            grantStaffPermissions(
+                agentId,
+                clubId,
+                listOf(PermissionCodes.SUPPORT_REPLY, PermissionCodes.SUPPORT_STATUS_MANAGE),
+            )
             val missingTicketId = Long.MAX_VALUE
 
             assertTicketNotFound(service.assign(missingTicketId, agentId))
@@ -342,6 +343,11 @@ class SupportServiceH2Test {
             val userId = insertUser(username = "guest", displayName = "Guest")
             val agentId = insertUser(username = "agent", displayName = "Agent")
             val clubId = insertClub(name = "Aurora")
+            grantStaffPermissions(
+                agentId,
+                clubId,
+                listOf(PermissionCodes.SUPPORT_REPLY, PermissionCodes.SUPPORT_STATUS_MANAGE),
+            )
 
             val created =
                 service.createTicket(
@@ -363,7 +369,6 @@ class SupportServiceH2Test {
                 )
             assertTrue(guestMessage is SupportServiceResult.Success)
 
-            seedLegacyStatus(created.value.ticket.id, TicketStatus.OPENED)
             val assigned = service.assign(ticketId = created.value.ticket.id, agentUserId = agentId)
             assertTrue(assigned is SupportServiceResult.Success)
             val assignedTicket = (assigned as SupportServiceResult.Success).value
@@ -381,7 +386,7 @@ class SupportServiceH2Test {
             val summary = summaries.first()
             assertTrue(summary.lastMessagePreview?.contains("resolved") == true)
             assertEquals(TicketSenderType.AGENT, summary.lastSenderType)
-            assertEquals(TicketStatus.ANSWERED, summary.status)
+            assertEquals(TicketStatus.IN_PROGRESS, summary.status)
         }
 
     @Test
@@ -451,7 +456,6 @@ class SupportServiceH2Test {
     fun `rating not allowed for open or in progress tickets`() =
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
-            val agentId = insertUser(username = "agent", displayName = "Agent")
             val clubId = insertClub(name = "Aurora")
 
             val created =
@@ -470,8 +474,7 @@ class SupportServiceH2Test {
             assertTrue(openedRating is SupportServiceResult.Failure)
             assertEquals(SupportServiceError.RatingNotAllowed, (openedRating as SupportServiceResult.Failure).error)
 
-            val assigned = service.assign(ticketId = created.value.ticket.id, agentUserId = agentId)
-            assertTrue(assigned is SupportServiceResult.Success)
+            seedLegacyStatus(created.value.ticket.id, TicketStatus.IN_PROGRESS)
 
             val inProgressRating = service.setResolutionRating(created.value.ticket.id, userId, 1)
             assertTrue(inProgressRating is SupportServiceResult.Failure)
@@ -483,7 +486,6 @@ class SupportServiceH2Test {
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
             val otherUserId = insertUser(username = "other", displayName = "Other")
-            val agentId = insertUser(username = "agent", displayName = "Agent")
             val clubId = insertClub(name = "Aurora")
 
             val created =
@@ -497,13 +499,7 @@ class SupportServiceH2Test {
                     attachments = null,
                 ) as SupportServiceResult.Success
 
-            seedLegacyStatus(created.value.ticket.id, TicketStatus.OPENED)
-            service.reply(
-                ticketId = created.value.ticket.id,
-                agentUserId = agentId,
-                text = "Resolved",
-                attachments = null,
-            )
+            seedLegacyStatus(created.value.ticket.id, TicketStatus.ANSWERED)
 
             val firstRating = service.setResolutionRating(created.value.ticket.id, userId, 1)
             assertTrue(firstRating is SupportServiceResult.Success)
@@ -521,7 +517,6 @@ class SupportServiceH2Test {
     fun `rating update is atomic`() =
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
-            val agentId = insertUser(username = "agent", displayName = "Agent")
             val clubId = insertClub(name = "Aurora")
 
             val created =
@@ -535,13 +530,7 @@ class SupportServiceH2Test {
                     attachments = null,
                 ) as SupportServiceResult.Success
 
-            seedLegacyStatus(created.value.ticket.id, TicketStatus.OPENED)
-            service.reply(
-                ticketId = created.value.ticket.id,
-                agentUserId = agentId,
-                text = "Resolved",
-                attachments = null,
-            )
+            seedLegacyStatus(created.value.ticket.id, TicketStatus.ANSWERED)
 
             val first = service.setResolutionRating(created.value.ticket.id, userId, 1)
             assertTrue(first is SupportServiceResult.Success)
@@ -605,6 +594,14 @@ class SupportServiceH2Test {
         )
     }
 
+    private fun assertTicketForbidden(result: SupportServiceResult<*>) {
+        assertTrue(result is SupportServiceResult.Failure)
+        assertEquals(
+            SupportServiceError.TicketForbidden,
+            (result as SupportServiceResult.Failure).error,
+        )
+    }
+
     private fun assertPersistenceFailure(
         result: SupportServiceResult<*>,
         vararg forbiddenDetails: String,
@@ -657,6 +654,29 @@ class SupportServiceH2Test {
                     it[TestClubsTable.qaTopicId] = null
                 } get TestClubsTable.id
         }
+
+    private fun grantStaffPermissions(
+        userId: Long,
+        clubId: Long,
+        permissions: Collection<PermissionCode>,
+    ) {
+        transaction(database) {
+            val assignmentId =
+                TestUserRolesTable
+                    .insert {
+                        it[TestUserRolesTable.userId] = userId
+                        it[TestUserRolesTable.roleCode] = Role.MANAGER.name
+                        it[TestUserRolesTable.scopeType] = "CLUB"
+                        it[TestUserRolesTable.scopeClubId] = clubId
+                    } get TestUserRolesTable.id
+            permissions.forEach { permission ->
+                TestUserRolePermissionsTable.insert {
+                    it[TestUserRolePermissionsTable.userRoleId] = assignmentId
+                    it[TestUserRolePermissionsTable.permissionCode] = permission.value
+                }
+            }
+        }
+    }
 }
 
 private object TestClubsTable : Table("clubs") {
@@ -678,4 +698,19 @@ private object TestUsersTable : Table("users") {
     val displayName = text("display_name").nullable()
     val phoneE164 = text("phone_e164").nullable()
     override val primaryKey = PrimaryKey(id)
+}
+
+private object TestUserRolesTable : Table("user_roles") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val roleCode = text("role_code")
+    val scopeType = text("scope_type")
+    val scopeClubId = long("scope_club_id").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+private object TestUserRolePermissionsTable : Table("user_role_permissions") {
+    val userRoleId = long("user_role_id")
+    val permissionCode = text("permission_code")
+    override val primaryKey = PrimaryKey(userRoleId, permissionCode)
 }

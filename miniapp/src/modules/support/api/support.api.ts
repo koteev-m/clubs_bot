@@ -3,10 +3,13 @@ import { http } from '../../../shared/api/http';
 
 export const supportTicketStatuses = ['new', 'opened', 'in_progress', 'answered', 'closed'] as const;
 export type SupportTicketStatus = (typeof supportTicketStatuses)[number];
+export const SUPPORT_REPLY_MAX_LENGTH = 2000;
 
 export type SupportClub = {
   id: number;
   name: string;
+  canReply: boolean;
+  canTakeInWork: boolean;
 };
 
 export type SupportTicketSummary = {
@@ -39,6 +42,22 @@ export type SupportTicketMessage = {
 export type SupportTicketThread = {
   ticket: SupportTicket;
   messages: SupportTicketMessage[];
+};
+
+export type SupportTakeInWorkResponse = {
+  id: number;
+  clubId: number;
+  topic: string;
+  status: SupportTicketStatus;
+  updatedAt: string;
+};
+
+export type SupportReplyResponse = {
+  ticketId: number;
+  clubId: number;
+  replyMessageId: number;
+  replyCreatedAt: string;
+  ticketStatus: SupportTicketStatus;
 };
 
 type ApiErrorPayload = {
@@ -123,6 +142,39 @@ export async function listSupportTickets(
 export async function getSupportTicket(ticketId: number, signal?: AbortSignal): Promise<SupportTicketThread> {
   try {
     const response = await http.get<SupportTicketThread>(`/api/support/tickets/${ticketId}`, { signal });
+    return response.data;
+  } catch (error) {
+    throw normalizeSupportError(error);
+  }
+}
+
+export async function takeSupportTicketInWork(
+  ticketId: number,
+  signal?: AbortSignal,
+): Promise<SupportTakeInWorkResponse> {
+  try {
+    const response = await http.post<SupportTakeInWorkResponse>(
+      `/api/support/tickets/${ticketId}/assign`,
+      undefined,
+      { signal },
+    );
+    return response.data;
+  } catch (error) {
+    throw normalizeSupportError(error);
+  }
+}
+
+export async function replyToSupportTicket(
+  ticketId: number,
+  text: string,
+  signal?: AbortSignal,
+): Promise<SupportReplyResponse> {
+  try {
+    const response = await http.post<SupportReplyResponse>(
+      `/api/support/tickets/${ticketId}/reply`,
+      { text },
+      { signal },
+    );
     return response.data;
   } catch (error) {
     throw normalizeSupportError(error);

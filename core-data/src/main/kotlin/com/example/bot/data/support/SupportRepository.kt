@@ -34,7 +34,18 @@ private const val PREVIEW_LIMIT = 140
 class SupportRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
+    private val auditFingerprintFactory: (String, Long) -> String = { action, ticketId ->
+        "SUPPORT_TICKET:$action:$ticketId:${UUID.randomUUID()}"
+    },
 ) {
+    private val staffMutations =
+        SupportMutationPersistence(
+            db = db,
+            clock = clock,
+            auditFingerprintFactory = auditFingerprintFactory,
+            transactionContext = Dispatchers.IO,
+        )
+
     suspend fun createTicket(
         clubId: Long,
         userId: Long,
@@ -211,21 +222,21 @@ class SupportRepository(
             )
         }
 
-    suspend fun findTicketInClubs(
+    suspend fun findTicketClubIdInClubs(
         ticketId: Long,
         permittedClubIds: Set<Long>,
-    ): Ticket? =
+    ): Long? =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             if (permittedClubIds.isEmpty()) {
                 return@newSuspendedTransaction null
             }
             TicketsTable
-                .selectAll()
+                .select(TicketsTable.clubId)
                 .where {
                     (TicketsTable.id eq ticketId) and
                         (TicketsTable.clubId inList permittedClubIds)
-                }.map { toTicket(it) }
-                .singleOrNull()
+                }.singleOrNull()
+                ?.get(TicketsTable.clubId)
         }
 
     suspend fun addGuestMessage(
@@ -292,109 +303,20 @@ class SupportRepository(
     suspend fun assign(
         ticketId: Long,
         agentUserId: Long,
-    ): StaffMutationResult<Ticket> =
-        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            val now = clock.instant().atOffset(ZoneOffset.UTC)
-            val updated =
-                TicketsTable.update({
-                    (TicketsTable.id eq ticketId) and
-                        (TicketsTable.status neq TicketStatus.NEW.wire)
-                }) {
-                    it[TicketsTable.status] = TicketStatus.IN_PROGRESS.wire
-                    it[TicketsTable.lastAgentId] = agentUserId
-                    it[TicketsTable.updatedAt] = now
-                }
-            if (updated == 0) {
-                return@newSuspendedTransaction staffMutationFailure(ticketId)
-            }
-            val ticket =
-                TicketsTable
-                    .selectAll()
-                    .where { TicketsTable.id eq ticketId }
-                    .map { toTicket(it) }
-                    .singleOrNull()
-                    ?: return@newSuspendedTransaction StaffMutationResult.Failure(StaffMutationFailure.NotFound)
-            StaffMutationResult.Success(ticket)
-        }
+    ): StaffMutationResult<Ticket> = staffMutations.assign(ticketId, agentUserId)
 
     suspend fun setStatus(
         ticketId: Long,
         agentUserId: Long,
         status: TicketStatus,
-    ): StaffMutationResult<Ticket> =
-        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            if (status == TicketStatus.NEW) {
-                return@newSuspendedTransaction staffMutationFailure(ticketId)
-            }
-            val now = clock.instant().atOffset(ZoneOffset.UTC)
-            val updated =
-                TicketsTable.update({
-                    (TicketsTable.id eq ticketId) and
-                        (TicketsTable.status neq TicketStatus.NEW.wire)
-                }) {
-                    it[TicketsTable.status] = status.wire
-                    it[TicketsTable.lastAgentId] = agentUserId
-                    it[TicketsTable.updatedAt] = now
-                }
-            if (updated == 0) {
-                return@newSuspendedTransaction staffMutationFailure(ticketId)
-            }
-            val ticket =
-                TicketsTable
-                    .selectAll()
-                    .where { TicketsTable.id eq ticketId }
-                    .map { toTicket(it) }
-                    .singleOrNull()
-                    ?: return@newSuspendedTransaction StaffMutationResult.Failure(StaffMutationFailure.NotFound)
-            StaffMutationResult.Success(ticket)
-        }
+    ): StaffMutationResult<Ticket> = staffMutations.setStatus(ticketId, agentUserId, status)
 
     suspend fun reply(
         ticketId: Long,
         agentUserId: Long,
         text: String,
         attachments: String?,
-    ): StaffMutationResult<SupportReplyResult> =
-        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            val now = clock.instant().atOffset(ZoneOffset.UTC)
-            val updated =
-                TicketsTable.update({
-                    (TicketsTable.id eq ticketId) and
-                        (TicketsTable.status neq TicketStatus.NEW.wire)
-                }) {
-                    it[TicketsTable.status] = TicketStatus.ANSWERED.wire
-                    it[TicketsTable.lastAgentId] = agentUserId
-                    it[TicketsTable.updatedAt] = now
-                }
-            if (updated == 0) {
-                return@newSuspendedTransaction staffMutationFailure(ticketId)
-            }
-            val messageId =
-                TicketMessagesTable.insert {
-                    it[TicketMessagesTable.ticketId] = ticketId
-                    it[TicketMessagesTable.senderType] = TicketSenderType.AGENT.wire
-                    it[TicketMessagesTable.text] = text
-                    it[TicketMessagesTable.attachments] = attachments
-                    it[TicketMessagesTable.createdAt] = now
-                }[TicketMessagesTable.id]
-            val ticket =
-                TicketsTable
-                    .selectAll()
-                    .where { TicketsTable.id eq ticketId }
-                    .map { toTicket(it) }
-                    .singleOrNull()
-                    ?: return@newSuspendedTransaction StaffMutationResult.Failure(StaffMutationFailure.NotFound)
-            val replyMessage =
-                TicketMessage(
-                    id = messageId,
-                    ticketId = ticketId,
-                    senderType = TicketSenderType.AGENT,
-                    text = text,
-                    attachments = attachments,
-                    createdAt = now.toInstant(),
-                )
-            StaffMutationResult.Success(SupportReplyResult(ticket = ticket, replyMessage = replyMessage))
-        }
+    ): StaffMutationResult<SupportReplyResult> = staffMutations.reply(ticketId, agentUserId, text, attachments)
 
     suspend fun setResolutionRating(
         ticketId: Long,
@@ -545,21 +467,6 @@ class SupportRepository(
             createdAt = row[TicketMessagesTable.createdAt].toInstant(),
         )
 
-    private fun staffMutationFailure(ticketId: Long): StaffMutationResult.Failure {
-        val ticketExists =
-            TicketsTable
-                .selectAll()
-                .where { TicketsTable.id eq ticketId }
-                .any()
-        val reason =
-            if (ticketExists) {
-                StaffMutationFailure.InvalidState
-            } else {
-                StaffMutationFailure.NotFound
-            }
-        return StaffMutationResult.Failure(reason)
-    }
-
     private data class LastMessage(
         val text: String,
         val senderType: TicketSenderType,
@@ -594,6 +501,7 @@ sealed class StaffMutationResult<out T> {
 
 enum class StaffMutationFailure {
     NotFound,
+    Forbidden,
     InvalidState,
 }
 
