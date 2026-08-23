@@ -1,15 +1,19 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { http } from '../../../../shared/api/http';
 import SupportShell from '../SupportShell';
 import {
+  closeSupportTicket,
   getSupportTicket,
   listPermittedSupportClubs,
   listSupportTickets,
   replyToSupportTicket,
+  resolveSupportTicket,
   SUPPORT_REPLY_MAX_LENGTH,
   SupportApiError,
   SupportClub,
   SupportReplyResponse,
+  SupportStatusMutationResponse,
   SupportTicketStatus,
   SupportTicketSummary,
   SupportTicketThread,
@@ -20,30 +24,32 @@ vi.mock('../../api/support.api', async () => {
   const actual = await vi.importActual<typeof import('../../api/support.api')>('../../api/support.api');
   return {
     ...actual,
+    closeSupportTicket: vi.fn(),
     listPermittedSupportClubs: vi.fn(),
     listSupportTickets: vi.fn(),
     getSupportTicket: vi.fn(),
     takeSupportTicketInWork: vi.fn(),
     replyToSupportTicket: vi.fn(),
+    resolveSupportTicket: vi.fn(),
   };
 });
 
 const viewOnlyClubs: SupportClub[] = [
-  { id: 1, name: 'Club A', canReply: false, canTakeInWork: false },
-  { id: 2, name: 'Club B', canReply: false, canTakeInWork: false },
+  { id: 1, name: 'Club A', canReply: false, canTakeInWork: false, canManageStatus: false },
+  { id: 2, name: 'Club B', canReply: false, canTakeInWork: false, canManageStatus: false },
 ];
 
 const fullAccessClubs: SupportClub[] = [
-  { id: 1, name: 'Club A', canReply: true, canTakeInWork: true },
-  { id: 2, name: 'Club B', canReply: false, canTakeInWork: false },
+  { id: 1, name: 'Club A', canReply: true, canTakeInWork: true, canManageStatus: true },
+  { id: 2, name: 'Club B', canReply: false, canTakeInWork: false, canManageStatus: false },
 ];
 
 const replyOnlyClubs: SupportClub[] = [
-  { id: 1, name: 'Club A', canReply: true, canTakeInWork: false },
+  { id: 1, name: 'Club A', canReply: true, canTakeInWork: false, canManageStatus: false },
 ];
 
 const takeOnlyClubs: SupportClub[] = [
-  { id: 1, name: 'Club A', canReply: false, canTakeInWork: true },
+  { id: 1, name: 'Club A', canReply: false, canTakeInWork: true, canManageStatus: true },
 ];
 
 const ticket: SupportTicketSummary = {
@@ -103,6 +109,19 @@ const replyResponse: SupportReplyResponse = {
   ticketStatus: 'in_progress',
 };
 
+function statusMutationResponse(status: 'resolved' | 'closed'): SupportStatusMutationResponse {
+  return {
+    id: 41,
+    clubId: 1,
+    topic: 'booking',
+    status,
+    updatedAt: status === 'resolved' ? '2026-08-21T10:02:00Z' : '2026-08-21T10:03:00Z',
+  };
+}
+
+const resolveResponse = statusMutationResponse('resolved');
+const closeResponse = statusMutationResponse('closed');
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((promiseResolve) => {
@@ -126,6 +145,8 @@ describe('SupportShell', () => {
     vi.mocked(getSupportTicket).mockResolvedValue(thread);
     vi.mocked(takeSupportTicketInWork).mockResolvedValue(takeResponse);
     vi.mocked(replyToSupportTicket).mockResolvedValue(replyResponse);
+    vi.mocked(resolveSupportTicket).mockResolvedValue(resolveResponse);
+    vi.mocked(closeSupportTicket).mockResolvedValue(closeResponse);
   });
 
   it('loads permitted clubs and renders filtered list, detail, and complete thread', async () => {
@@ -141,6 +162,7 @@ describe('SupportShell', () => {
 
     fireEvent.change(screen.getByLabelText('Клуб'), { target: { value: '1' } });
     expect(await screen.findByText('Нужна помощь с бронью')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Решено' })).toBeTruthy();
     expect(listSupportTickets).toHaveBeenLastCalledWith({ clubId: 1 }, expect.any(AbortSignal));
 
     fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'new' } });
@@ -191,7 +213,7 @@ describe('SupportShell', () => {
     expect(screen.queryByLabelText('Ответ')).toBeNull();
   });
 
-  it('shows reply but not take for IN_PROGRESS when the server permits both actions', async () => {
+  it('shows reply and resolve but not take for IN_PROGRESS when the server permits both actions', async () => {
     vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
     vi.mocked(getSupportTicket).mockResolvedValue(threadWithStatus('in_progress'));
 
@@ -200,7 +222,96 @@ describe('SupportShell', () => {
 
     expect(screen.queryByRole('button', { name: 'Взять в работу' })).toBeNull();
     expect(screen.getByLabelText('Ответ')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Решить обращение' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Закрыть обращение' })).toBeNull();
   });
+
+  it('does not combine status management from one club with a RESOLVED ticket from another club', async () => {
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
+    vi.mocked(getSupportTicket).mockResolvedValue(threadWithStatus('resolved', 2));
+
+    render(<SupportShell />);
+    await openTicket();
+
+    expect(screen.queryByRole('button', { name: 'Закрыть обращение' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Решить обращение' })).toBeNull();
+    expect(screen.queryByLabelText('Ответ')).toBeNull();
+  });
+
+  it('requires a separate resolve confirmation and refreshes detail and list after success', async () => {
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
+    vi.mocked(getSupportTicket)
+      .mockResolvedValueOnce(threadWithStatus('in_progress'))
+      .mockResolvedValueOnce(threadWithStatus('resolved'));
+
+    render(<SupportShell />);
+    await openTicket();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Решить обращение' }));
+    expect(resolveSupportTicket).toHaveBeenCalledTimes(0);
+    expect(screen.getByRole('group', { name: 'Подтверждение решения обращения' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Подтвердить' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+    expect(screen.queryByRole('group', { name: 'Подтверждение решения обращения' })).toBeNull();
+    expect(resolveSupportTicket).toHaveBeenCalledTimes(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Решить обращение' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить' }));
+
+    expect(await screen.findByText('Обращение решено.')).toBeTruthy();
+    expect(resolveSupportTicket).toHaveBeenCalledTimes(1);
+    expect(resolveSupportTicket).toHaveBeenCalledWith(41);
+    await waitFor(() => {
+      expect(getSupportTicket).toHaveBeenCalledTimes(2);
+      expect(listSupportTickets).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByRole('button', { name: 'Закрыть обращение' })).toBeTruthy();
+    expect(screen.queryByLabelText('Ответ')).toBeNull();
+    expect(screen.queryByText(/доставлен/i)).toBeNull();
+  });
+
+  it('closes RESOLVED directly and leaves the refreshed CLOSED ticket without controls', async () => {
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
+    vi.mocked(getSupportTicket)
+      .mockResolvedValueOnce(threadWithStatus('resolved'))
+      .mockResolvedValueOnce(threadWithStatus('closed'));
+
+    render(<SupportShell />);
+    await openTicket();
+
+    expect(screen.queryByRole('group', { name: 'Подтверждение решения обращения' })).toBeNull();
+    expect(screen.queryByLabelText('Ответ')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть обращение' }));
+
+    expect(await screen.findByText('Обращение закрыто.')).toBeTruthy();
+    expect(closeSupportTicket).toHaveBeenCalledTimes(1);
+    expect(closeSupportTicket).toHaveBeenCalledWith(41);
+    await waitFor(() => {
+      expect(getSupportTicket).toHaveBeenCalledTimes(2);
+      expect(listSupportTickets).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByRole('button', { name: /взять|решить|закрыть/i })).toBeNull();
+    expect(screen.queryByLabelText('Ответ')).toBeNull();
+    expect(screen.queryByText(/доставлен/i)).toBeNull();
+  });
+
+  it.each(['in_progress', 'resolved'] as const)(
+    'does not expose resolve or close for %s without the server status-management capability',
+    async (status) => {
+      vi.mocked(listPermittedSupportClubs).mockResolvedValue(replyOnlyClubs);
+      vi.mocked(getSupportTicket).mockResolvedValue(threadWithStatus(status));
+
+      render(<SupportShell />);
+      await openTicket();
+
+      if (status === 'in_progress') {
+        expect(screen.getByLabelText('Ответ')).toBeTruthy();
+      } else {
+        expect(screen.queryByLabelText('Ответ')).toBeNull();
+      }
+      expect(screen.queryByRole('button', { name: /решить|закрыть/i })).toBeNull();
+    },
+  );
 
   it.each(['opened', 'answered', 'closed'] as const)(
     'keeps %s tickets read-only even when the server returns mutation capabilities',
@@ -285,6 +396,47 @@ describe('SupportShell', () => {
     expect(await screen.findByText('Ответ сохранён')).toBeTruthy();
   });
 
+  it('prevents duplicate resolve submission while the confirmed request is pending', async () => {
+    const request = createDeferred<SupportStatusMutationResponse>();
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
+    vi.mocked(getSupportTicket)
+      .mockResolvedValueOnce(threadWithStatus('in_progress'))
+      .mockResolvedValueOnce(threadWithStatus('resolved'));
+    vi.mocked(resolveSupportTicket).mockReturnValue(request.promise);
+
+    render(<SupportShell />);
+    await openTicket();
+    fireEvent.click(screen.getByRole('button', { name: 'Решить обращение' }));
+    const confirm = screen.getByRole('button', { name: 'Подтвердить' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(resolveSupportTicket).toHaveBeenCalledTimes(1);
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => request.resolve(resolveResponse));
+    expect(await screen.findByText('Обращение решено.')).toBeTruthy();
+  });
+
+  it('prevents duplicate close submission while the request is pending', async () => {
+    const request = createDeferred<SupportStatusMutationResponse>();
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
+    vi.mocked(getSupportTicket)
+      .mockResolvedValueOnce(threadWithStatus('resolved'))
+      .mockResolvedValueOnce(threadWithStatus('closed'));
+    vi.mocked(closeSupportTicket).mockReturnValue(request.promise);
+
+    render(<SupportShell />);
+    await openTicket();
+    const close = screen.getByRole('button', { name: 'Закрыть обращение' });
+    fireEvent.click(close);
+    fireEvent.click(close);
+
+    expect(closeSupportTicket).toHaveBeenCalledTimes(1);
+    expect((close as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => request.resolve(closeResponse));
+    expect(await screen.findByText('Обращение закрыто.')).toBeTruthy();
+  });
+
   it('clears reply state and refetches server capabilities after a mutation 403', async () => {
     vi.mocked(listPermittedSupportClubs)
       .mockResolvedValueOnce(replyOnlyClubs)
@@ -309,6 +461,58 @@ describe('SupportShell', () => {
     expect(screen.getByText('Первое сообщение')).toBeTruthy();
   });
 
+  it('clears resolve confirmation and pending state then refetches capabilities after a 403', async () => {
+    vi.mocked(listPermittedSupportClubs)
+      .mockResolvedValueOnce(fullAccessClubs)
+      .mockResolvedValueOnce(replyOnlyClubs);
+    vi.mocked(getSupportTicket).mockResolvedValue(threadWithStatus('in_progress'));
+    vi.mocked(resolveSupportTicket).mockRejectedValue(
+      new SupportApiError('raw status permission detail', {
+        status: 403,
+        code: 'support_ticket_forbidden',
+      }),
+    );
+
+    render(<SupportShell />);
+    await openTicket();
+    fireEvent.click(screen.getByRole('button', { name: 'Решить обращение' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить' }));
+
+    expect(await screen.findByText('Права доступа изменились. Доступные действия обновляются.')).toBeTruthy();
+    await waitFor(() => expect(listPermittedSupportClubs).toHaveBeenCalledTimes(2));
+    expect(await screen.findByLabelText('Ответ')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Подтверждение решения обращения' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Решить обращение' })).toBeNull();
+    expect(screen.queryByText(/raw status permission detail/i)).toBeNull();
+  });
+
+  it('clears resolve confirmation and refreshes stale lifecycle data after a 409', async () => {
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
+    vi.mocked(getSupportTicket)
+      .mockResolvedValueOnce(threadWithStatus('in_progress'))
+      .mockResolvedValueOnce(threadWithStatus('resolved'));
+    vi.mocked(resolveSupportTicket).mockRejectedValue(
+      new SupportApiError('raw invalid transition detail', {
+        status: 409,
+        code: 'invalid_state',
+      }),
+    );
+
+    render(<SupportShell />);
+    await openTicket();
+    fireEvent.click(screen.getByRole('button', { name: 'Решить обращение' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Подтвердить' }));
+
+    expect(await screen.findByText('Состояние обращения изменилось. Данные обновляются.')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Подтверждение решения обращения' })).toBeNull();
+    await waitFor(() => {
+      expect(getSupportTicket).toHaveBeenCalledTimes(2);
+      expect(listSupportTickets).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByRole('button', { name: 'Закрыть обращение' })).toBeTruthy();
+    expect(screen.queryByText(/raw invalid transition detail/i)).toBeNull();
+  });
+
   it('clears a foreign or missing ticket and shows the bounded not-found state after mutation 404', async () => {
     vi.mocked(listPermittedSupportClubs).mockResolvedValue(replyOnlyClubs);
     vi.mocked(replyToSupportTicket).mockRejectedValue(
@@ -327,6 +531,27 @@ describe('SupportShell', () => {
     expect(screen.queryByText('Первое сообщение')).toBeNull();
     expect(screen.queryByLabelText('Ответ')).toBeNull();
     expect(screen.queryByText(/another club|ticket 41/i)).toBeNull();
+    await waitFor(() => expect(listSupportTickets).toHaveBeenCalledTimes(2));
+  });
+
+  it('clears a RESOLVED ticket after close returns an indistinguishable 404', async () => {
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(fullAccessClubs);
+    vi.mocked(getSupportTicket).mockResolvedValue(threadWithStatus('resolved'));
+    vi.mocked(closeSupportTicket).mockRejectedValue(
+      new SupportApiError('foreign ticket 41 in club 9000', {
+        status: 404,
+        code: 'support_ticket_not_found',
+      }),
+    );
+
+    render(<SupportShell />);
+    await openTicket();
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть обращение' }));
+
+    expect(await screen.findByText('Обращение не найдено')).toBeTruthy();
+    expect(screen.queryByText('Первое сообщение')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Закрыть обращение' })).toBeNull();
+    expect(screen.queryByText(/foreign ticket|club 9000/i)).toBeNull();
     await waitFor(() => expect(listSupportTickets).toHaveBeenCalledTimes(2));
   });
 
@@ -392,5 +617,35 @@ describe('SupportShell', () => {
 
     expect(await screen.findByText('Не удалось загрузить обращения')).toBeTruthy();
     expect(screen.queryByText(/secret_body|SQL:/)).toBeNull();
+  });
+});
+
+describe('support lifecycle API contract', () => {
+  it('sends only explicit confirmation for resolve and no request body for close', async () => {
+    const actual = await vi.importActual<typeof import('../../api/support.api')>('../../api/support.api');
+    const post = vi
+      .spyOn(http, 'post')
+      .mockResolvedValueOnce({ data: resolveResponse } as never)
+      .mockResolvedValueOnce({ data: closeResponse } as never);
+
+    try {
+      await actual.resolveSupportTicket(41);
+      await actual.closeSupportTicket(41);
+
+      expect(post).toHaveBeenNthCalledWith(
+        1,
+        '/api/support/tickets/41/resolve',
+        { confirmed: true },
+        { signal: undefined },
+      );
+      expect(post).toHaveBeenNthCalledWith(
+        2,
+        '/api/support/tickets/41/close',
+        undefined,
+        { signal: undefined },
+      );
+    } finally {
+      post.mockRestore();
+    }
   });
 });

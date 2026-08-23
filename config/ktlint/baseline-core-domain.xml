@@ -61,9 +61,9 @@
         <error line="85" column="47" source="standard:function-signature" />
         <error line="90" column="32" source="standard:class-signature" />
         <error line="90" column="58" source="standard:class-signature" />
-        <error line="104" column="56" source="standard:function-signature" />
-        <error line="109" column="30" source="standard:class-signature" />
-        <error line="109" column="56" source="standard:class-signature" />
+        <error line="105" column="56" source="standard:function-signature" />
+        <error line="110" column="30" source="standard:class-signature" />
+        <error line="110" column="56" source="standard:class-signature" />
     </file>
     <file name="src/main/kotlin/com/example/bot/audit/AuditLogger.kt">
         <error line="26" column="39" source="standard:argument-list-wrapping" />
@@ -410,22 +410,22 @@
         <error line="13" column="19" source="standard:trailing-comma-on-declaration-site" />
         <error line="20" column="25" source="standard:class-signature" />
         <error line="20" column="41" source="standard:class-signature" />
-        <error line="25" column="21" source="standard:trailing-comma-on-declaration-site" />
-        <error line="32" column="29" source="standard:class-signature" />
-        <error line="32" column="45" source="standard:class-signature" />
-        <error line="35" column="21" source="standard:trailing-comma-on-declaration-site" />
-        <error line="135" column="5" source="standard:blank-line-before-declaration" />
+        <error line="26" column="21" source="standard:trailing-comma-on-declaration-site" />
+        <error line="33" column="29" source="standard:class-signature" />
+        <error line="33" column="45" source="standard:class-signature" />
+        <error line="36" column="21" source="standard:trailing-comma-on-declaration-site" />
         <error line="136" column="5" source="standard:blank-line-before-declaration" />
         <error line="137" column="5" source="standard:blank-line-before-declaration" />
         <error line="138" column="5" source="standard:blank-line-before-declaration" />
-        <error line="142" column="27" source="standard:class-signature" />
-        <error line="142" column="39" source="standard:class-signature" />
-        <error line="144" column="24" source="standard:class-signature" />
-        <error line="144" column="54" source="standard:class-signature" />
-        <error line="159" column="9" source="standard:function-signature" />
-        <error line="159" column="22" source="standard:function-signature" />
-        <error line="204" column="9" source="standard:function-signature" />
-        <error line="204" column="24" source="standard:function-signature" />
+        <error line="139" column="5" source="standard:blank-line-before-declaration" />
+        <error line="143" column="27" source="standard:class-signature" />
+        <error line="143" column="39" source="standard:class-signature" />
+        <error line="145" column="24" source="standard:class-signature" />
+        <error line="145" column="54" source="standard:class-signature" />
+        <error line="160" column="9" source="standard:function-signature" />
+        <error line="160" column="22" source="standard:function-signature" />
+        <error line="205" column="9" source="standard:function-signature" />
+        <error line="205" column="24" source="standard:function-signature" />
     </file>
     <file name="src/test/kotlin/com/example/bot/audit/AuditLoggerTest.kt">
         <error line="12" column="60" source="standard:multiline-expression-wrapping" />

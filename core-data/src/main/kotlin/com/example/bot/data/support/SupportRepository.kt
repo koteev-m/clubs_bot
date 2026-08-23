@@ -244,66 +244,22 @@ class SupportRepository(
         userId: Long,
         text: String,
         attachments: String?,
-    ): AddGuestMessageResult =
-        newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            val now = clock.instant().atOffset(ZoneOffset.UTC)
-            val answeredUpdated =
-                TicketsTable.update({
-                    (TicketsTable.id eq ticketId) and
-                        (TicketsTable.userId eq userId) and
-                        (TicketsTable.status eq TicketStatus.ANSWERED.wire)
-                }) {
-                    it[TicketsTable.status] = TicketStatus.OPENED.wire
-                    it[TicketsTable.updatedAt] = now
-                }
-            val updatedAtOnly =
-                TicketsTable.update({
-                    (TicketsTable.id eq ticketId) and
-                        (TicketsTable.userId eq userId) and
-                        (TicketsTable.status neq TicketStatus.CLOSED.wire) and
-                        (TicketsTable.status neq TicketStatus.ANSWERED.wire)
-                }) {
-                    it[TicketsTable.updatedAt] = now
-                }
-            if (answeredUpdated + updatedAtOnly == 0) {
-                val ticketRow =
-                    TicketsTable
-                        .selectAll()
-                        .where { TicketsTable.id eq ticketId }
-                        .singleOrNull()
-                        ?: return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.NotFound)
-                if (ticketRow[TicketsTable.userId] != userId) {
-                    return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.Forbidden)
-                }
-                if (toStatus(ticketRow) == TicketStatus.CLOSED) {
-                    return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.Closed)
-                }
-                return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.Closed)
-            }
-            val messageId =
-                TicketMessagesTable.insert {
-                    it[TicketMessagesTable.ticketId] = ticketId
-                    it[TicketMessagesTable.senderType] = TicketSenderType.GUEST.wire
-                    it[TicketMessagesTable.text] = text
-                    it[TicketMessagesTable.attachments] = attachments
-                    it[TicketMessagesTable.createdAt] = now
-                }[TicketMessagesTable.id]
-            AddGuestMessageResult.Success(
-                TicketMessage(
-                    id = messageId,
-                    ticketId = ticketId,
-                    senderType = TicketSenderType.GUEST,
-                    text = text,
-                    attachments = attachments,
-                    createdAt = now.toInstant(),
-                ),
-            )
-        }
+    ): AddGuestMessageResult = staffMutations.addGuestMessage(ticketId, userId, text, attachments)
 
     suspend fun assign(
         ticketId: Long,
         agentUserId: Long,
     ): StaffMutationResult<Ticket> = staffMutations.assign(ticketId, agentUserId)
+
+    suspend fun resolve(
+        ticketId: Long,
+        agentUserId: Long,
+    ): StaffMutationResult<Ticket> = staffMutations.resolve(ticketId, agentUserId)
+
+    suspend fun close(
+        ticketId: Long,
+        agentUserId: Long,
+    ): StaffMutationResult<Ticket> = staffMutations.close(ticketId, agentUserId)
 
     suspend fun setStatus(
         ticketId: Long,
@@ -487,6 +443,7 @@ enum class AddGuestMessageFailure {
     NotFound,
     Forbidden,
     Closed,
+    InvalidState,
 }
 
 sealed class StaffMutationResult<out T> {

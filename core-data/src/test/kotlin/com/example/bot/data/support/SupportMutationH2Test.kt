@@ -33,7 +33,6 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -41,7 +40,6 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
-import kotlin.coroutines.cancellation.CancellationException
 
 class SupportMutationH2Test {
     private lateinit var fixture: SupportMutationH2Fixture
@@ -110,6 +108,7 @@ class SupportMutationH2Test {
                 TicketStatus.IN_PROGRESS,
                 TicketStatus.OPENED,
                 TicketStatus.ANSWERED,
+                TicketStatus.RESOLVED,
                 TicketStatus.CLOSED,
             ).forEach { status ->
                 val ticketId = fixture.createTicket(clubId, guestId, "take-$status").ticket.id
@@ -220,7 +219,12 @@ class SupportMutationH2Test {
             val clubId = fixture.insertClub("Reply state guard")
             val guestId = fixture.insertUser("reply-state-guest")
             val actorId = fixture.insertAuthorizedActor(Role.CLUB_ADMIN, clubId, PermissionCodes.SUPPORT_REPLY)
-            listOf(TicketStatus.OPENED, TicketStatus.ANSWERED, TicketStatus.CLOSED).forEach { status ->
+            listOf(
+                TicketStatus.OPENED,
+                TicketStatus.ANSWERED,
+                TicketStatus.RESOLVED,
+                TicketStatus.CLOSED,
+            ).forEach { status ->
                 val ticketId = fixture.createTicket(clubId, guestId, "reply-$status").ticket.id
                 fixture.seedStatus(ticketId, status)
                 val before = fixture.snapshot(ticketId)
@@ -245,6 +249,266 @@ class SupportMutationH2Test {
         }
 
     @Test
+    fun `manager and club admin resolve IN PROGRESS with one exact status audit and durable state`() =
+        runBlocking {
+            listOf(Role.MANAGER, Role.CLUB_ADMIN).forEach { role ->
+                val clubId = fixture.insertClub("Resolve $role")
+                val guestId = fixture.insertUser("resolve-guest-$role")
+                val actorId = fixture.insertAuthorizedActor(role, clubId, PermissionCodes.SUPPORT_STATUS_MANAGE)
+                val created = fixture.createTicket(clubId, guestId, "resolve-question-$role")
+                fixture.seedStatus(created.ticket.id, TicketStatus.IN_PROGRESS)
+
+                val result = fixture.mutationService().resolve(created.ticket.id, actorId)
+
+                val ticket = result.successValue()
+                assertEquals(TicketStatus.RESOLVED, ticket.status)
+                assertEquals(actorId, ticket.lastAgentId)
+                assertTrue(ticket.updatedAt.isAfter(created.ticket.updatedAt))
+                assertEquals(1L, fixture.messageCount(ticket.id))
+                val audits = fixture.supportAudits(ticket.id)
+                assertEquals(1, audits.size)
+                fixture.assertStatusAudit(
+                    audit = audits.single(),
+                    clubId = clubId,
+                    actorId = actorId,
+                    actorRole = role,
+                    oldStatus = TicketStatus.IN_PROGRESS,
+                    newStatus = TicketStatus.RESOLVED,
+                )
+                assertEquals(ticket, fixture.freshService().getTicket(ticket.id))
+            }
+        }
+
+    @Test
+    fun `resolve rejects every status except IN PROGRESS and unsupported without writes`() =
+        runBlocking {
+            val clubId = fixture.insertClub("Resolve state guard")
+            val guestId = fixture.insertUser("resolve-state-guest")
+            val actorId =
+                fixture.insertAuthorizedActor(
+                    Role.MANAGER,
+                    clubId,
+                    PermissionCodes.SUPPORT_STATUS_MANAGE,
+                )
+            listOf(
+                TicketStatus.NEW,
+                TicketStatus.OPENED,
+                TicketStatus.ANSWERED,
+                TicketStatus.RESOLVED,
+                TicketStatus.CLOSED,
+            ).forEach { status ->
+                val ticketId = fixture.createTicket(clubId, guestId, "resolve-$status").ticket.id
+                fixture.seedStatus(ticketId, status)
+                val before = fixture.snapshot(ticketId)
+
+                fixture.mutationService().resolve(ticketId, actorId).assertFailure(SupportServiceError.InvalidState)
+
+                assertEquals(before, fixture.snapshot(ticketId))
+            }
+
+            fixture.allowUnsupportedTicketStatus()
+            val unsupportedId = fixture.createTicket(clubId, guestId, "resolve-unsupported").ticket.id
+            fixture.seedRawStatus(unsupportedId, "unsupported")
+            val unsupportedBefore = fixture.snapshot(unsupportedId)
+
+            fixture.mutationService().resolve(unsupportedId, actorId).assertFailure(
+                SupportServiceError.InvalidState,
+            )
+
+            assertEquals(unsupportedBefore, fixture.snapshot(unsupportedId))
+        }
+
+    @Test
+    fun `guest messages preserve NEW and IN PROGRESS without status audits`() =
+        runBlocking {
+            val clubId = fixture.insertClub("Guest active messages")
+            val guestId = fixture.insertUser("guest-active-owner")
+            listOf(TicketStatus.NEW, TicketStatus.IN_PROGRESS).forEach { status ->
+                val created = fixture.createTicket(clubId, guestId, "guest-active-$status")
+                val ticketId = created.ticket.id
+                fixture.seedStatus(ticketId, status)
+
+                val result =
+                    fixture.mutationService().addGuestMessage(
+                        ticketId = ticketId,
+                        userId = guestId,
+                        text = "guest-follow-up-$status",
+                        attachments = "guest-attachment-$status",
+                    )
+
+                val message = result.successValue()
+                assertEquals(TicketSenderType.GUEST, message.senderType)
+                assertEquals(ticketId, message.ticketId)
+                val freshTicket = fixture.freshService().getTicket(ticketId)
+                assertEquals(status, freshTicket?.status)
+                assertTrue(requireNotNull(freshTicket).updatedAt.isAfter(created.ticket.updatedAt))
+                assertEquals(2L, fixture.messageCount(ticketId))
+                assertEquals(0L, fixture.supportAuditCount(ticketId))
+            }
+        }
+
+    @Test
+    fun `owner message resumes RESOLVED with one private exact guest status audit and durable thread`() =
+        runBlocking {
+            val clubId = fixture.insertClub("Guest resume")
+            val guestId = fixture.insertUser("guest-resume-owner")
+            val created = fixture.createTicket(clubId, guestId, "guest-resume-question")
+            fixture.seedStatus(created.ticket.id, TicketStatus.RESOLVED)
+            val body = "private-resume-body"
+            val attachments = "private-resume-attachments"
+
+            val result =
+                fixture.mutationService().addGuestMessage(
+                    ticketId = created.ticket.id,
+                    userId = guestId,
+                    text = body,
+                    attachments = attachments,
+                )
+
+            val message = result.successValue()
+            assertEquals(TicketSenderType.GUEST, message.senderType)
+            assertEquals(body, message.text)
+            assertEquals(attachments, message.attachments)
+            val ticket = fixture.freshService().getTicket(created.ticket.id)
+            assertEquals(TicketStatus.IN_PROGRESS, ticket?.status)
+            assertTrue(requireNotNull(ticket).updatedAt.isAfter(created.ticket.updatedAt))
+            val messages = fixture.messages(created.ticket.id)
+            assertEquals(2, messages.size)
+            assertEquals(body, messages.last().text)
+            assertEquals(attachments, messages.last().attachments)
+            val audits = fixture.supportAudits(created.ticket.id)
+            assertEquals(1, audits.size)
+            fixture.assertStatusAudit(
+                audit = audits.single(),
+                clubId = clubId,
+                actorId = guestId,
+                actorRole = Role.GUEST,
+                oldStatus = TicketStatus.RESOLVED,
+                newStatus = TicketStatus.IN_PROGRESS,
+            )
+            val renderedAudit = audits.single().metadataJson
+            assertFalse(renderedAudit.contains(body))
+            assertFalse(renderedAudit.contains(attachments))
+        }
+
+    @Test
+    fun `guest message rejects CLOSED legacy unsupported and wrong owner without writes`() =
+        runBlocking {
+            val clubId = fixture.insertClub("Guest state guard")
+            val guestId = fixture.insertUser("guest-state-owner")
+            val otherGuestId = fixture.insertUser("guest-state-other")
+
+            val closedId = fixture.createTicket(clubId, guestId, "guest-closed").ticket.id
+            fixture.seedStatus(closedId, TicketStatus.CLOSED)
+            val closedBefore = fixture.snapshot(closedId)
+            fixture.mutationService().addGuestMessage(closedId, guestId, "denied", "denied").assertFailure(
+                SupportServiceError.TicketClosed,
+            )
+            assertEquals(closedBefore, fixture.snapshot(closedId))
+
+            listOf(TicketStatus.OPENED, TicketStatus.ANSWERED).forEach { status ->
+                val ticketId = fixture.createTicket(clubId, guestId, "guest-$status").ticket.id
+                fixture.seedStatus(ticketId, status)
+                val before = fixture.snapshot(ticketId)
+                fixture.mutationService().addGuestMessage(ticketId, guestId, "denied", null).assertFailure(
+                    SupportServiceError.InvalidState,
+                )
+                assertEquals(before, fixture.snapshot(ticketId))
+            }
+
+            val ownedId = fixture.createTicket(clubId, guestId, "guest-wrong-owner").ticket.id
+            fixture.seedStatus(ownedId, TicketStatus.RESOLVED)
+            val ownedBefore = fixture.snapshot(ownedId)
+            fixture.mutationService().addGuestMessage(ownedId, otherGuestId, "denied", null).assertFailure(
+                SupportServiceError.TicketForbidden,
+            )
+            assertEquals(ownedBefore, fixture.snapshot(ownedId))
+
+            fixture.allowUnsupportedTicketStatus()
+            val unsupportedId = fixture.createTicket(clubId, guestId, "guest-unsupported").ticket.id
+            fixture.seedRawStatus(unsupportedId, "unsupported")
+            val unsupportedBefore = fixture.snapshot(unsupportedId)
+            fixture.mutationService().addGuestMessage(unsupportedId, guestId, "denied", null).assertFailure(
+                SupportServiceError.InvalidState,
+            )
+            assertEquals(unsupportedBefore, fixture.snapshot(unsupportedId))
+        }
+
+    @Test
+    fun `manager and club admin close RESOLVED with one close and one exact status audit`() =
+        runBlocking {
+            listOf(Role.MANAGER, Role.CLUB_ADMIN).forEach { role ->
+                val clubId = fixture.insertClub("Close $role")
+                val guestId = fixture.insertUser("close-guest-$role")
+                val actorId = fixture.insertAuthorizedActor(role, clubId, PermissionCodes.SUPPORT_STATUS_MANAGE)
+                val created = fixture.createTicket(clubId, guestId, "close-question-$role")
+                fixture.seedStatus(created.ticket.id, TicketStatus.RESOLVED)
+
+                val result = fixture.mutationService().close(created.ticket.id, actorId)
+
+                val ticket = result.successValue()
+                assertEquals(TicketStatus.CLOSED, ticket.status)
+                assertEquals(actorId, ticket.lastAgentId)
+                assertTrue(ticket.updatedAt.isAfter(created.ticket.updatedAt))
+                assertEquals(1L, fixture.messageCount(ticket.id))
+                val audits = fixture.supportAudits(ticket.id)
+                assertEquals(2, audits.size)
+                fixture.assertCloseAudit(
+                    audit = audits.single { it.action == StandardAuditAction.SUPPORT_CLOSE.value },
+                    clubId = clubId,
+                    actorId = actorId,
+                    actorRole = role,
+                )
+                fixture.assertStatusAudit(
+                    audit = audits.single { it.action == StandardAuditAction.SUPPORT_STATUS_CHANGE.value },
+                    clubId = clubId,
+                    actorId = actorId,
+                    actorRole = role,
+                    oldStatus = TicketStatus.RESOLVED,
+                    newStatus = TicketStatus.CLOSED,
+                )
+                assertEquals(ticket, fixture.freshService().getTicket(ticket.id))
+            }
+        }
+
+    @Test
+    fun `close rejects every status except RESOLVED and unsupported without writes`() =
+        runBlocking {
+            val clubId = fixture.insertClub("Close state guard")
+            val guestId = fixture.insertUser("close-state-guest")
+            val actorId =
+                fixture.insertAuthorizedActor(
+                    Role.CLUB_ADMIN,
+                    clubId,
+                    PermissionCodes.SUPPORT_STATUS_MANAGE,
+                )
+            listOf(
+                TicketStatus.NEW,
+                TicketStatus.OPENED,
+                TicketStatus.IN_PROGRESS,
+                TicketStatus.ANSWERED,
+                TicketStatus.CLOSED,
+            ).forEach { status ->
+                val ticketId = fixture.createTicket(clubId, guestId, "close-$status").ticket.id
+                fixture.seedStatus(ticketId, status)
+                val before = fixture.snapshot(ticketId)
+
+                fixture.mutationService().close(ticketId, actorId).assertFailure(SupportServiceError.InvalidState)
+
+                assertEquals(before, fixture.snapshot(ticketId))
+            }
+
+            fixture.allowUnsupportedTicketStatus()
+            val unsupportedId = fixture.createTicket(clubId, guestId, "close-unsupported").ticket.id
+            fixture.seedRawStatus(unsupportedId, "unsupported")
+            val unsupportedBefore = fixture.snapshot(unsupportedId)
+            fixture.mutationService().close(unsupportedId, actorId).assertFailure(
+                SupportServiceError.InvalidState,
+            )
+            assertEquals(unsupportedBefore, fixture.snapshot(unsupportedId))
+        }
+
+    @Test
     fun `mutation permissions stay independent and exact assignment scoped`() =
         runBlocking {
             val clubId = fixture.insertClub("Permission separation")
@@ -257,6 +521,12 @@ class SupportMutationH2Test {
             val replyActor = fixture.insertAuthorizedActor(Role.MANAGER, clubId, PermissionCodes.SUPPORT_REPLY)
             fixture.mutationService().assign(ticketId, replyActor).assertFailure(SupportServiceError.TicketForbidden)
             fixture.mutationService().setStatus(ticketId, replyActor, TicketStatus.CLOSED).assertFailure(
+                SupportServiceError.TicketForbidden,
+            )
+            fixture.mutationService().resolve(ticketId, replyActor).assertFailure(
+                SupportServiceError.TicketForbidden,
+            )
+            fixture.mutationService().close(ticketId, replyActor).assertFailure(
                 SupportServiceError.TicketForbidden,
             )
 
@@ -353,6 +623,14 @@ class SupportMutationH2Test {
                 fixture.mutationService().setStatus(missingId, actorId, TicketStatus.CLOSED),
                 fixture.mutationService().setStatus(foreignTicketId, actorId, TicketStatus.CLOSED),
             )
+            assertEquals(
+                fixture.mutationService().resolve(missingId, actorId),
+                fixture.mutationService().resolve(foreignTicketId, actorId),
+            )
+            assertEquals(
+                fixture.mutationService().close(missingId, actorId),
+                fixture.mutationService().close(foreignTicketId, actorId),
+            )
             fixture.mutationService().assign(foreignTicketId, actorId).assertFailure(
                 SupportServiceError.TicketNotFound,
             )
@@ -381,80 +659,9 @@ class SupportMutationH2Test {
 
             assertEquals(before, fixture.snapshot(ticketId))
         }
-
-    @Test
-    fun `audit failure rolls back take and first reply with detail free persistence errors`() =
-        runBlocking {
-            val clubId = fixture.insertClub("Audit rollback")
-            val guestId = fixture.insertUser("audit-rollback-guest")
-            val takeActor =
-                fixture.insertAuthorizedActor(
-                    Role.MANAGER,
-                    clubId,
-                    PermissionCodes.SUPPORT_STATUS_MANAGE,
-                )
-            val replyActor = fixture.insertAuthorizedActor(Role.CLUB_ADMIN, clubId, PermissionCodes.SUPPORT_REPLY)
-            val takeId = fixture.createTicket(clubId, guestId, "take-audit-failure").ticket.id
-            val replyId = fixture.createTicket(clubId, guestId, "reply-audit-failure").ticket.id
-            val takeBefore = fixture.snapshot(takeId)
-            val replyBefore = fixture.snapshot(replyId)
-            fixture.rejectStatusAuditInserts()
-
-            val takeResult = fixture.mutationService().assign(takeId, takeActor)
-            val replyResult =
-                fixture.mutationService().reply(
-                    ticketId = replyId,
-                    agentUserId = replyActor,
-                    text = "rollback-private-body",
-                    attachments = "rollback-private-attachments",
-                )
-
-            takeResult.assertDetailFreePersistenceFailure()
-            replyResult.assertDetailFreePersistenceFailure()
-            assertEquals(takeBefore, fixture.snapshot(takeId))
-            assertEquals(replyBefore, fixture.snapshot(replyId))
-            assertEquals(0L, fixture.supportAuditCount(takeId))
-            assertEquals(0L, fixture.supportAuditCount(replyId))
-        }
-
-    @Test
-    fun `staff mutation rethrows cancellation and does not swallow JVM errors`() {
-        val clubId = fixture.insertClub("Mutation cancellation")
-        val guestId = fixture.insertUser("cancellation-guest")
-        val actorId =
-            fixture.insertAuthorizedActor(
-                Role.MANAGER,
-                clubId,
-                PermissionCodes.SUPPORT_STATUS_MANAGE,
-            )
-        val cancellationTicket = runBlocking { fixture.createTicket(clubId, guestId, "cancel-take") }.ticket.id
-        val errorTicket = runBlocking { fixture.createTicket(clubId, guestId, "error-take") }.ticket.id
-        val cancellationBefore = fixture.snapshot(cancellationTicket)
-        val errorBefore = fixture.snapshot(errorTicket)
-        val cancellation = CancellationException("cancel-support-mutation")
-
-        val thrownCancellation =
-            assertThrows(CancellationException::class.java) {
-                runBlocking {
-                    fixture.serviceWithClock(ThrowingClock(cancellation)).assign(cancellationTicket, actorId)
-                }
-            }
-        assertEquals(cancellation.message, thrownCancellation.message)
-
-        val fatal = AssertionError("fatal-support-mutation")
-        val thrownError =
-            assertThrows(AssertionError::class.java) {
-                runBlocking {
-                    fixture.serviceWithClock(ThrowingClock(fatal)).assign(errorTicket, actorId)
-                }
-            }
-        assertEquals(fatal.message, thrownError.message)
-        assertEquals(cancellationBefore, fixture.snapshot(cancellationTicket))
-        assertEquals(errorBefore, fixture.snapshot(errorTicket))
-    }
 }
 
-private class SupportMutationH2Fixture : AutoCloseable {
+internal class SupportMutationH2Fixture : AutoCloseable {
     private val testDatabase = TestDatabase()
     val database: Database = testDatabase.database
     private var telegramUserId = 9_100_000L
@@ -676,6 +883,16 @@ private class SupportMutationH2Fixture : AutoCloseable {
         )
     }
 
+    fun assertCloseAudit(
+        audit: StoredAudit,
+        clubId: Long,
+        actorId: Long,
+        actorRole: Role,
+    ) {
+        assertAuditTopLevel(audit, clubId, actorId, actorRole, StandardAuditAction.SUPPORT_CLOSE)
+        assertTrue(audit.metadata().isEmpty())
+    }
+
     fun assertPersistedReply(
         reply: SupportReplyResult,
         actorId: Long,
@@ -701,6 +918,8 @@ private class SupportMutationH2Fixture : AutoCloseable {
         mutationService().setStatus(ticketId, actorId, TicketStatus.CLOSED).assertFailure(
             SupportServiceError.TicketForbidden,
         )
+        mutationService().resolve(ticketId, actorId).assertFailure(SupportServiceError.TicketForbidden)
+        mutationService().close(ticketId, actorId).assertFailure(SupportServiceError.TicketForbidden)
     }
 
     override fun close() {
@@ -742,7 +961,7 @@ private class SupportMutationH2Fixture : AutoCloseable {
     }
 }
 
-private data class MutationSnapshot(
+internal data class MutationSnapshot(
     val status: String,
     val lastAgentId: Long?,
     val updatedAt: Instant,
@@ -750,14 +969,14 @@ private data class MutationSnapshot(
     val auditCount: Long,
 )
 
-private data class StoredMessage(
+internal data class StoredMessage(
     val id: Long,
     val senderType: String,
     val text: String,
     val attachments: String?,
 )
 
-private data class StoredAudit(
+internal data class StoredAudit(
     val clubId: Long?,
     val actorUserId: Long?,
     val actorRole: String?,
@@ -770,7 +989,7 @@ private data class StoredAudit(
     fun metadata(): JsonObject = Json.parseToJsonElement(metadataJson).jsonObject
 }
 
-private class ThrowingClock(
+internal class ThrowingClock(
     private val failure: Throwable,
 ) : Clock() {
     override fun getZone(): ZoneId = ZoneOffset.UTC
@@ -780,17 +999,17 @@ private class ThrowingClock(
     override fun instant(): Instant = throw failure
 }
 
-private fun <T> SupportServiceResult<T>.successValue(): T {
+internal fun <T> SupportServiceResult<T>.successValue(): T {
     assertTrue(this is SupportServiceResult.Success, toString())
     return (this as SupportServiceResult.Success).value
 }
 
-private fun SupportServiceResult<*>.assertFailure(expected: SupportServiceError) {
+internal fun SupportServiceResult<*>.assertFailure(expected: SupportServiceError) {
     assertTrue(this is SupportServiceResult.Failure, toString())
     assertEquals(expected, (this as SupportServiceResult.Failure).error)
 }
 
-private fun SupportServiceResult<*>.assertDetailFreePersistenceFailure() {
+internal fun SupportServiceResult<*>.assertDetailFreePersistenceFailure() {
     assertFailure(SupportServiceError.PersistenceFailure)
     val rendered = toString()
     assertFalse(rendered.contains("support_mutation_test_reject_status_audit", ignoreCase = true))

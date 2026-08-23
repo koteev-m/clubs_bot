@@ -22,6 +22,7 @@ enum class TicketStatus(val wire: String) {
     OPENED("opened"),
     IN_PROGRESS("in_progress"),
     ANSWERED("answered"),
+    RESOLVED("resolved"),
     CLOSED("closed");
 
     companion object {
@@ -144,7 +145,7 @@ sealed interface SupportServiceResult<out T> {
     data class Failure(val error: SupportServiceError) : SupportServiceResult<Nothing>
 }
 
-interface SupportService {
+interface SupportService : SupportLifecycleService {
     suspend fun createTicket(
         clubId: Long,
         userId: Long,

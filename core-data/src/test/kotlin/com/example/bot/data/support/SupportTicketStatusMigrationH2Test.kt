@@ -126,6 +126,164 @@ class SupportTicketStatusMigrationH2Test {
         }
     }
 
+    @Test
+    fun `V059 preserves every V058 status and adds only RESOLVED`() {
+        val jdbcUrl =
+            "jdbc:h2:mem:support-resolved-status-upgrade-${UUID.randomUUID()};" +
+                "MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false"
+        val locations = arrayOf("classpath:db/migration/common", "classpath:db/migration/h2")
+        val v058Flyway =
+            Flyway
+                .configure()
+                .dataSource(jdbcUrl, H2_USER, H2_PASSWORD)
+                .locations(*locations)
+                .target(PRE_RESOLVED_VERSION)
+                .cleanDisabled(false)
+                .load()
+        v058Flyway.clean()
+        v058Flyway.migrate()
+        assertEquals(
+            EXPECTED_PRE_RESOLVED_VERSION,
+            v058Flyway
+                .info()
+                .current()
+                ?.version
+                ?.toString(),
+        )
+
+        DriverManager.getConnection(jdbcUrl, H2_USER, H2_PASSWORD).use { connection ->
+            val fixture = insertLegacyFixture(connection)
+            val ticketIds =
+                listOf(
+                    TicketStatus.NEW.wire to
+                        insertTicket(
+                            connection = connection,
+                            clubId = fixture.clubId,
+                            userId = fixture.userId,
+                            topic = TicketTopic.OTHER.wire,
+                            status = TicketStatus.NEW.wire,
+                            createdAt = FIXED_INSTANT.plusSeconds(120),
+                        ),
+                    TicketStatus.OPENED.wire to fixture.openedTicketId,
+                    TicketStatus.IN_PROGRESS.wire to
+                        insertTicket(
+                            connection = connection,
+                            clubId = fixture.clubId,
+                            userId = fixture.userId,
+                            topic = TicketTopic.INVITE.wire,
+                            status = TicketStatus.IN_PROGRESS.wire,
+                            createdAt = FIXED_INSTANT.plusSeconds(180),
+                        ),
+                    TicketStatus.ANSWERED.wire to fixture.answeredTicketId,
+                    TicketStatus.CLOSED.wire to
+                        insertTicket(
+                            connection = connection,
+                            clubId = fixture.clubId,
+                            userId = fixture.userId,
+                            topic = TicketTopic.BOOKING.wire,
+                            status = TicketStatus.CLOSED.wire,
+                            createdAt = FIXED_INSTANT.plusSeconds(240),
+                        ),
+                )
+            val rowsBeforeMigration = ticketIds.map { (_, ticketId) -> readTicketRow(connection, ticketId) }
+            val messageBeforeMigration = readMessage(connection, fixture.messageId)
+
+            val v059Flyway =
+                Flyway
+                    .configure()
+                    .dataSource(jdbcUrl, H2_USER, H2_PASSWORD)
+                    .locations(*locations)
+                    .target(RESOLVED_VERSION)
+                    .load()
+            assertEquals(1, v059Flyway.migrate().migrationsExecuted)
+            assertEquals(
+                EXPECTED_RESOLVED_VERSION,
+                v059Flyway
+                    .info()
+                    .current()
+                    ?.version
+                    ?.toString(),
+            )
+
+            assertEquals(
+                rowsBeforeMigration,
+                ticketIds.map { (_, ticketId) -> readTicketRow(connection, ticketId) },
+            )
+            assertEquals(messageBeforeMigration, readMessage(connection, fixture.messageId))
+            assertEquals(
+                ticketIds.map { it.first },
+                ticketIds.map { (_, ticketId) -> readTicketStatus(connection, ticketId) },
+            )
+            assertStatusConstraintAllowsExactly(connection, V059_ALLOWED_STATUSES)
+            assertStatusColumnRemainsNotNull(connection)
+            assertClubStatusUpdatedIndexRemains(connection)
+            assertSupportIndexInventoryRemains(connection)
+
+            val resolvedTicketId =
+                insertTicket(
+                    connection = connection,
+                    clubId = fixture.clubId,
+                    userId = fixture.userId,
+                    topic = TicketTopic.OTHER.wire,
+                    status = RESOLVED_STATUS,
+                    createdAt = FIXED_INSTANT.plusSeconds(300),
+                )
+            assertEquals(RESOLVED_STATUS, readTicketStatus(connection, resolvedTicketId))
+
+            listOf(WAITING_STATUS, "unsupported").forEachIndexed { index, rejectedStatus ->
+                assertThrows(SQLException::class.java) {
+                    insertTicket(
+                        connection = connection,
+                        clubId = fixture.clubId,
+                        userId = fixture.userId,
+                        topic = TicketTopic.OTHER.wire,
+                        status = rejectedStatus,
+                        createdAt = FIXED_INSTANT.plusSeconds(360L + index),
+                    )
+                }
+            }
+            assertThrows(SQLException::class.java) {
+                insertTicket(
+                    connection = connection,
+                    clubId = fixture.clubId,
+                    userId = fixture.userId,
+                    topic = TicketTopic.OTHER.wire,
+                    status = null,
+                    createdAt = FIXED_INSTANT.plusSeconds(362),
+                )
+            }
+            assertThrows(SQLException::class.java) {
+                insertTicket(
+                    connection = connection,
+                    clubId = fixture.clubId,
+                    userId = fixture.userId,
+                    topic = "unsupported",
+                    status = RESOLVED_STATUS,
+                    createdAt = FIXED_INSTANT.plusSeconds(363),
+                )
+            }
+            assertThrows(SQLException::class.java) {
+                insertTicket(
+                    connection = connection,
+                    clubId = Long.MAX_VALUE,
+                    userId = fixture.userId,
+                    topic = TicketTopic.OTHER.wire,
+                    status = RESOLVED_STATUS,
+                    createdAt = FIXED_INSTANT.plusSeconds(364),
+                )
+            }
+            assertThrows(SQLException::class.java) {
+                insertMessage(
+                    connection = connection,
+                    ticketId = Long.MAX_VALUE,
+                    senderType = TicketSenderType.GUEST.wire,
+                    text = "orphan message must fail after V059",
+                    createdAt = FIXED_INSTANT.plusSeconds(365),
+                )
+            }
+        }
+    }
+
     private fun insertLegacyFixture(connection: Connection): LegacyFixture {
         val clubId =
             connection
@@ -325,6 +483,59 @@ class SupportTicketStatusMigrationH2Test {
                 }
             }
 
+    private fun readTicketRow(
+        connection: Connection,
+        ticketId: Long,
+    ): LegacyTicketRow =
+        connection
+            .prepareStatement(
+                """
+                SELECT id, club_id, user_id, topic, status, created_at, updated_at
+                FROM tickets
+                WHERE id = ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setLong(1, ticketId)
+                statement.executeQuery().use { resultSet ->
+                    assertTrue(resultSet.next())
+                    LegacyTicketRow(
+                        id = resultSet.getLong("id"),
+                        clubId = resultSet.getLong("club_id"),
+                        userId = resultSet.getLong("user_id"),
+                        topic = resultSet.getString("topic"),
+                        status = resultSet.getString("status"),
+                        createdAt = resultSet.getObject("created_at").toString(),
+                        updatedAt = resultSet.getObject("updated_at").toString(),
+                    ).also { assertFalse(resultSet.next()) }
+                }
+            }
+
+    private fun assertStatusConstraintAllowsExactly(
+        connection: Connection,
+        expectedStatuses: List<String>,
+    ) {
+        val checkClause =
+            connection
+                .prepareStatement(
+                    """
+                    SELECT CHECK_CLAUSE
+                    FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
+                    WHERE lower(CONSTRAINT_NAME) = 'tickets_status_check'
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.executeQuery().use { resultSet ->
+                        assertTrue(resultSet.next())
+                        resultSet.getString("CHECK_CLAUSE").also { assertFalse(resultSet.next()) }
+                    }
+                }
+        val constrainedStatuses =
+            Regex("'([^']+)'")
+                .findAll(checkClause)
+                .map { match -> match.groupValues[1] }
+                .toList()
+        assertEquals(expectedStatuses, constrainedStatuses)
+    }
+
     private fun assertStatusColumnRemainsNotNull(connection: Connection) {
         connection
             .prepareStatement(
@@ -376,6 +587,34 @@ class SupportTicketStatusMigrationH2Test {
         )
     }
 
+    private fun assertSupportIndexInventoryRemains(connection: Connection) {
+        val indexNames =
+            connection
+                .prepareStatement(
+                    """
+                    SELECT lower(INDEX_NAME) AS INDEX_NAME
+                    FROM INFORMATION_SCHEMA.INDEXES
+                    WHERE lower(TABLE_NAME) IN ('tickets', 'ticket_messages')
+                      AND lower(INDEX_NAME) IN (
+                          'idx_tickets_user_updated_at',
+                          'idx_tickets_club_status_updated_at',
+                          'idx_ticket_messages_ticket_id_id',
+                          'idx_tickets_club_updated_at'
+                      )
+                    ORDER BY lower(INDEX_NAME)
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.executeQuery().use { resultSet ->
+                        buildList {
+                            while (resultSet.next()) {
+                                add(resultSet.getString("INDEX_NAME"))
+                            }
+                        }
+                    }
+                }
+        assertEquals(EXPECTED_SUPPORT_INDEXES.sorted(), indexNames)
+    }
+
     private data class LegacyFixture(
         val clubId: Long,
         val userId: Long,
@@ -408,7 +647,22 @@ class SupportTicketStatusMigrationH2Test {
         private const val H2_PASSWORD = ""
         private const val LEGACY_VERSION = "56"
         private const val EXPECTED_VERSION = "057"
+        private const val PRE_RESOLVED_VERSION = "58"
+        private const val EXPECTED_PRE_RESOLVED_VERSION = "058"
+        private const val RESOLVED_VERSION = "59"
+        private const val EXPECTED_RESOLVED_VERSION = "059"
+        private const val RESOLVED_STATUS = "resolved"
+        private const val WAITING_STATUS = "waiting"
         private const val LEGACY_MESSAGE_TEXT = "Legacy message survives V057"
+        private val V059_ALLOWED_STATUSES =
+            listOf("new", "opened", "in_progress", "answered", RESOLVED_STATUS, "closed")
+        private val EXPECTED_SUPPORT_INDEXES =
+            listOf(
+                "idx_tickets_user_updated_at",
+                "idx_tickets_club_status_updated_at",
+                "idx_ticket_messages_ticket_id_id",
+                "idx_tickets_club_updated_at",
+            )
         private val FIXED_INSTANT = Instant.parse("2024-05-01T10:00:00Z")
     }
 }

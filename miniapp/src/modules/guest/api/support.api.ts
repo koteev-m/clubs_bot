@@ -13,7 +13,7 @@ export const ticketTopicLabels: Record<TicketTopic, string> = {
   other: 'Другое',
 };
 
-export const ticketStatuses = ['new', 'opened', 'in_progress', 'answered', 'closed'] as const;
+export const ticketStatuses = ['new', 'opened', 'in_progress', 'answered', 'resolved', 'closed'] as const;
 export type TicketStatus = (typeof ticketStatuses)[number];
 
 export const ticketStatusLabels: Record<TicketStatus, string> = {
@@ -21,6 +21,7 @@ export const ticketStatusLabels: Record<TicketStatus, string> = {
   opened: 'Открыто',
   in_progress: 'В работе',
   answered: 'Отвечено',
+  resolved: 'Решено',
   closed: 'Закрыто',
 };
 

@@ -3,7 +3,6 @@ package com.example.bot.routes
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.example.bot.data.audit.AuditLogTable
 import com.example.bot.data.security.PermissionCodes
 import com.example.bot.data.security.Role
 import com.example.bot.data.support.TicketMessagesTable
@@ -34,7 +33,6 @@ import kotlinx.serialization.json.put
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
@@ -46,7 +44,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
+class SupportMutationRoutesTest : SupportLifecycleMutationRoutesFixture() {
     @Test
     fun `unsupported stored states return bounded invalid state without writes`() =
         withSupportAdminApp { context ->
@@ -59,9 +57,11 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
             val guestUserId = insertUser(context.database, context.userRepository, 9_902L, "unsupported-guest")
             val takeTicketId = createTicket(context, clubId, guestUserId)
             val replyTicketId = createTicket(context, clubId, guestUserId)
+            val resolveTicketId = createTicket(context, clubId, guestUserId)
+            val closeTicketId = createTicket(context, clubId, guestUserId)
             transaction(context.database) {
                 exec("ALTER TABLE tickets DROP CONSTRAINT tickets_status_check")
-                listOf(takeTicketId, replyTicketId).forEach { ticketId ->
+                listOf(takeTicketId, replyTicketId, resolveTicketId, closeTicketId).forEach { ticketId ->
                     TicketsTable.update({ TicketsTable.id eq ticketId }) {
                         it[TicketsTable.status] = "unsupported"
                     }
@@ -70,18 +70,20 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
 
             supportAssign(telegramId, takeTicketId).assertGenericInvalidState()
             supportReply(telegramId, replyTicketId).assertGenericInvalidState()
+            supportResolve(telegramId, resolveTicketId).assertGenericInvalidState()
+            supportClose(telegramId, closeTicketId).assertGenericInvalidState()
 
             transaction(context.database) {
-                listOf(takeTicketId, replyTicketId).forEach { ticketId ->
+                listOf(takeTicketId, replyTicketId, resolveTicketId, closeTicketId).forEach { ticketId ->
                     val row = TicketsTable.selectAll().where { TicketsTable.id eq ticketId }.single()
                     assertEquals("unsupported", row[TicketsTable.status])
                     assertEquals(null, row[TicketsTable.lastAgentId])
                 }
             }
-            assertEquals(1L, messageCount(context.database, takeTicketId))
-            assertEquals(1L, messageCount(context.database, replyTicketId))
-            assertEquals(0L, auditCount(context.database, takeTicketId))
-            assertEquals(0L, auditCount(context.database, replyTicketId))
+            listOf(takeTicketId, replyTicketId, resolveTicketId, closeTicketId).forEach { ticketId ->
+                assertEquals(1L, messageCount(context.database, ticketId))
+                assertEquals(0L, auditCount(context.database, ticketId))
+            }
         }
 
     @Test
@@ -137,6 +139,7 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
                         .jsonObject
                 assertTrue(capability.getValue("canReply").jsonPrimitive.boolean)
                 assertTrue(capability.getValue("canTakeInWork").jsonPrimitive.boolean)
+                assertTrue(capability.getValue("canManageStatus").jsonPrimitive.boolean)
                 val guestUserId =
                     insertUser(
                         context.database,
@@ -207,6 +210,8 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
             assertForbiddenMutation(supportAssign(viewTelegramId, viewTicketId))
             assertForbiddenMutation(supportReply(viewTelegramId, viewTicketId))
             assertForbiddenMutation(supportStatus(viewTelegramId, viewTicketId, "in_progress"))
+            assertForbiddenMutation(supportResolve(viewTelegramId, viewTicketId))
+            assertForbiddenMutation(supportClose(viewTelegramId, viewTicketId))
             assertEquals(TicketStatus.NEW, context.supportService.getTicket(viewTicketId)?.status)
             assertEquals(1L, messageCount(context.database, viewTicketId))
 
@@ -222,9 +227,13 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
                     .jsonArray
                     .single()
                     .jsonObject
-            assertEquals(setOf("id", "name", "canReply", "canTakeInWork"), capability.keys)
+            assertEquals(
+                setOf("id", "name", "canReply", "canTakeInWork", "canManageStatus"),
+                capability.keys,
+            )
             assertFalse(capability.getValue("canReply").jsonPrimitive.boolean)
             assertFalse(capability.getValue("canTakeInWork").jsonPrimitive.boolean)
+            assertFalse(capability.getValue("canManageStatus").jsonPrimitive.boolean)
 
             val replyTelegramId = 11_002L
             val replyUserId = insertUser(context.database, context.userRepository, replyTelegramId, "reply-only")
@@ -234,6 +243,8 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
             assertEquals(HttpStatusCode.OK, supportReply(replyTelegramId, replyTicketId).status)
             assertForbiddenMutation(supportAssign(replyTelegramId, replyTicketId))
             assertForbiddenMutation(supportStatus(replyTelegramId, replyTicketId, "closed"))
+            assertForbiddenMutation(supportResolve(replyTelegramId, replyTicketId))
+            assertForbiddenMutation(supportClose(replyTelegramId, replyTicketId))
 
             val statusTelegramId = 11_003L
             val statusUserId = insertUser(context.database, context.userRepository, statusTelegramId, "status-only")
@@ -328,7 +339,7 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
             val appender = ListAppender<ILoggingEvent>().apply { start() }
             supportLogger.addAppender(appender)
             try {
-                listOf("assign", "reply", "status").forEach { action ->
+                listOf("assign", "reply", "status", "resolve", "close").forEach { action ->
                     val foreignResponse = callMutation(action, telegramId, foreignTicketId)
                     val missingResponse = callMutation(action, telegramId, missingTicketId)
                     val foreignBody = foreignResponse.bodyAsText()
@@ -379,6 +390,34 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
                 assertEquals(1L, messageCount(context.database, ticketId), currentStatus.name)
                 assertEquals(0L, auditCount(context.database, ticketId), currentStatus.name)
             }
+        }
+
+    @Test
+    fun `closed is terminal for every staff mutation and generic status`() =
+        withSupportAdminApp { context ->
+            val telegramId = 14_500L
+            val actorUserId = insertUser(context.database, context.userRepository, telegramId, "terminal-actor")
+            val clubId = insertClub(context.database, "Terminal Club")
+            val assignmentId = insertRoleAssignment(context.database, actorUserId, Role.CLUB_ADMIN, clubId)
+            grantPermission(context.database, assignmentId, PermissionCodes.SUPPORT_REPLY)
+            grantPermission(context.database, assignmentId, PermissionCodes.SUPPORT_STATUS_MANAGE)
+            val guestUserId = insertUser(context.database, context.userRepository, 14_501L, "terminal-guest")
+            val ticketId = createTicket(context, clubId, guestUserId)
+            seedTicketStatus(context.database, ticketId, TicketStatus.RESOLVED)
+            assertEquals(HttpStatusCode.OK, supportClose(telegramId, ticketId).status)
+            val before = assertNotNull(context.supportService.getTicket(ticketId))
+            val beforeMessages = messageCount(context.database, ticketId)
+            val beforeAudits = auditCount(context.database, ticketId)
+
+            supportAssign(telegramId, ticketId).assertGenericInvalidState()
+            supportReply(telegramId, ticketId).assertGenericInvalidState()
+            supportResolve(telegramId, ticketId).assertGenericInvalidState()
+            supportClose(telegramId, ticketId).assertGenericInvalidState()
+            supportStatus(telegramId, ticketId, "resolved").assertGenericInvalidState()
+
+            assertEquals(before, context.supportService.getTicket(ticketId))
+            assertEquals(beforeMessages, messageCount(context.database, ticketId))
+            assertEquals(beforeAudits, auditCount(context.database, ticketId))
         }
 
     @Test
@@ -542,6 +581,8 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
             "assign" -> supportAssign(telegramId, ticketId)
             "reply" -> supportReply(telegramId, ticketId)
             "status" -> supportStatus(telegramId, ticketId, "closed")
+            "resolve" -> supportResolve(telegramId, ticketId)
+            "close" -> supportClose(telegramId, ticketId)
             else -> error("Unsupported test action: $action")
         }
 
@@ -552,6 +593,8 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
         assertForbiddenMutation(supportAssign(telegramId, ticketId))
         assertForbiddenMutation(supportReply(telegramId, ticketId))
         assertForbiddenMutation(supportStatus(telegramId, ticketId, "closed"))
+        assertForbiddenMutation(supportResolve(telegramId, ticketId))
+        assertForbiddenMutation(supportClose(telegramId, ticketId))
     }
 
     private suspend fun assertForbiddenMutation(response: HttpResponse) {
@@ -562,33 +605,6 @@ class SupportMutationRoutesTest : SupportAdminRoutesFixture() {
         assertFalse(body.contains("ticketId"))
         assertFalse(body.contains("clubId"))
     }
-
-    private suspend fun assertBoundedBadRequest(
-        response: HttpResponse,
-        expectedCode: String,
-    ) {
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        response.assertNoStoreHeaders()
-        val body = response.bodyAsText()
-        assertEquals(expectedCode, errorCode(body))
-        assertFalse(body.contains("TicketStatus"))
-        assertFalse(body.contains("Exception"))
-        assertFalse(body.contains("support_messages"))
-        assertFalse(body.contains("SQL", ignoreCase = true))
-    }
-
-    private fun auditCount(
-        database: Database,
-        ticketId: Long,
-    ): Long =
-        transaction(database) {
-            AuditLogTable
-                .selectAll()
-                .where {
-                    (AuditLogTable.entityType eq "SUPPORT_TICKET") and
-                        (AuditLogTable.entityId eq ticketId)
-                }.count()
-        }
 
     private fun storedMessages(
         database: Database,
