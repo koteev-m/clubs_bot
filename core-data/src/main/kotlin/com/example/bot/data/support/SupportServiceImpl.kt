@@ -3,6 +3,7 @@ package com.example.bot.data.support
 import com.example.bot.support.GuestTicketThread
 import com.example.bot.support.StaffSupportReadService
 import com.example.bot.support.StaffTicketThread
+import com.example.bot.support.SupportLifecycleMutation
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
@@ -69,25 +70,33 @@ class SupportServiceImpl(
         text: String,
         attachments: String?,
     ): SupportServiceResult<TicketMessage> =
-        when (
-            val result =
-                repository.addGuestMessage(
-                    ticketId = ticketId,
-                    userId = userId,
-                    text = text,
-                    attachments = attachments,
-                )
-        ) {
-            is AddGuestMessageResult.Success -> SupportServiceResult.Success(result.message)
-            is AddGuestMessageResult.Failure ->
-                when (result.reason) {
-                    AddGuestMessageFailure.NotFound ->
-                        SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
-                    AddGuestMessageFailure.Forbidden ->
-                        SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
-                    AddGuestMessageFailure.Closed ->
-                        SupportServiceResult.Failure(SupportServiceError.TicketClosed)
-                }
+        try {
+            when (
+                val result =
+                    repository.addGuestMessage(
+                        ticketId = ticketId,
+                        userId = userId,
+                        text = text,
+                        attachments = attachments,
+                    )
+            ) {
+                is AddGuestMessageResult.Success -> SupportServiceResult.Success(result.message)
+                is AddGuestMessageResult.Failure ->
+                    when (result.reason) {
+                        AddGuestMessageFailure.NotFound ->
+                            SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
+                        AddGuestMessageFailure.Forbidden ->
+                            SupportServiceResult.Failure(SupportServiceError.TicketForbidden)
+                        AddGuestMessageFailure.Closed ->
+                            SupportServiceResult.Failure(SupportServiceError.TicketClosed)
+                        AddGuestMessageFailure.InvalidState ->
+                            SupportServiceResult.Failure(SupportServiceError.InvalidState)
+                    }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
         }
 
     override suspend fun listTicketsForClub(
@@ -147,6 +156,20 @@ class SupportServiceImpl(
     ): SupportServiceResult<Ticket> =
         staffMutationResult {
             repository.assign(ticketId = ticketId, agentUserId = agentUserId)
+        }
+
+    override suspend fun mutateLifecycle(
+        ticketId: Long,
+        agentUserId: Long,
+        mutation: SupportLifecycleMutation,
+    ): SupportServiceResult<Ticket> =
+        staffMutationResult {
+            when (mutation) {
+                SupportLifecycleMutation.RESOLVE ->
+                    repository.resolve(ticketId = ticketId, agentUserId = agentUserId)
+                SupportLifecycleMutation.CLOSE ->
+                    repository.close(ticketId = ticketId, agentUserId = agentUserId)
+            }
         }
 
     override suspend fun setStatus(
@@ -238,11 +261,11 @@ class SupportServiceImpl(
                     ?: SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
             is SupportServiceResult.Failure -> this
         }
-
-    private fun StaffMutationFailure.toServiceError(): SupportServiceError =
-        when (this) {
-            StaffMutationFailure.NotFound -> SupportServiceError.TicketNotFound
-            StaffMutationFailure.Forbidden -> SupportServiceError.TicketForbidden
-            StaffMutationFailure.InvalidState -> SupportServiceError.InvalidState
-        }
 }
+
+private fun StaffMutationFailure.toServiceError(): SupportServiceError =
+    when (this) {
+        StaffMutationFailure.NotFound -> SupportServiceError.TicketNotFound
+        StaffMutationFailure.Forbidden -> SupportServiceError.TicketForbidden
+        StaffMutationFailure.InvalidState -> SupportServiceError.InvalidState
+    }

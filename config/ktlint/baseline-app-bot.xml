@@ -2113,9 +2113,9 @@
         <error line="3" column="1" source="standard:import-ordering" />
         <error line="60" column="1" source="standard:blank-line-before-declaration" />
         <error line="60" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="208" column="30" source="standard:multiline-expression-wrapping" />
-        <error line="256" column="30" source="standard:multiline-expression-wrapping" />
-        <error line="306" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="214" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="262" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="312" column="30" source="standard:multiline-expression-wrapping" />
         <error line="304" column="35" source="standard:chain-method-continuation" />
         <error line="304" column="41" source="standard:argument-list-wrapping" />
         <error line="304" column="92" source="standard:argument-list-wrapping" />

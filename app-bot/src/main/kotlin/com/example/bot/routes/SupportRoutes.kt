@@ -116,6 +116,7 @@ private data class SupportStaffClubResponse(
     val name: String,
     val canReply: Boolean,
     val canTakeInWork: Boolean,
+    val canManageStatus: Boolean,
 )
 
 @Serializable
@@ -153,6 +154,11 @@ private data class AddMessageRequest(
 private data class ReplyRequest(
     val text: String? = null,
     val attachments: String? = null,
+)
+
+@Serializable
+private data class ResolveRequest(
+    val confirmed: Boolean? = null,
 )
 
 @Serializable
@@ -292,7 +298,7 @@ fun Application.supportRoutes(
                 }
 
                 val request =
-                    runCatching { call.receive<AddMessageRequest>() }.getOrElse {
+                    receiveSupportRequestOrNull { call.receive<AddMessageRequest>() } ?: run {
                         logger.warn("support.ticket.message invalid_json ticket_id={}", ticketId)
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
                     }
@@ -360,7 +366,7 @@ fun Application.supportRoutes(
                             repository = clubsRepository,
                             clubIds = permittedClubIds,
                             replyClubIds = replyClubIds,
-                            takeClubIds = takeClubIds,
+                            statusManageClubIds = takeClubIds,
                         ) ?: return@get
                     call.respond(HttpStatusCode.OK, clubs)
                 }
@@ -457,6 +463,73 @@ fun Application.supportRoutes(
                     ) ?: return@post
 
                     call.respondError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
+                }
+
+                post("/resolve") {
+                    val ticketId = call.parseTicketIdOrRespond("resolve") ?: return@post
+                    val ticketClubId =
+                        call.loadStaffMutationTicketOrRespond(
+                            staffSupportReadService = staffSupportReadService,
+                            permissionRepository = userRolePermissionRepository,
+                            ticketId = ticketId,
+                            permission = PermissionCodes.SUPPORT_STATUS_MANAGE,
+                            action = "resolve",
+                        ) ?: return@post
+                    val request =
+                        receiveSupportRequestOrNull { call.receive<ResolveRequest>() } ?: run {
+                            logger.warn("support.ticket.resolve invalid_json ticket_id={}", ticketId)
+                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        }
+                    if (request.confirmed != true) {
+                        logger.warn("support.ticket.resolve validation_error ticket_id={}", ticketId)
+                        return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    }
+
+                    when (
+                        val result =
+                            supportService.resolve(
+                                ticketId = ticketId,
+                                agentUserId = call.supportUserId(),
+                            )
+                    ) {
+                        is SupportServiceResult.Success -> {
+                            logger.info("support.ticket.resolve ticket_id={} club_id={}", ticketId, ticketClubId)
+                            call.respond(HttpStatusCode.OK, result.value.toResponse())
+                        }
+                        is SupportServiceResult.Failure -> {
+                            val (status, code) = mapSupportAdminError(result.error)
+                            call.respondError(status, code)
+                        }
+                    }
+                }
+
+                post("/close") {
+                    val ticketId = call.parseTicketIdOrRespond("close") ?: return@post
+                    val ticketClubId =
+                        call.loadStaffMutationTicketOrRespond(
+                            staffSupportReadService = staffSupportReadService,
+                            permissionRepository = userRolePermissionRepository,
+                            ticketId = ticketId,
+                            permission = PermissionCodes.SUPPORT_STATUS_MANAGE,
+                            action = "close",
+                        ) ?: return@post
+
+                    when (
+                        val result =
+                            supportService.close(
+                                ticketId = ticketId,
+                                agentUserId = call.supportUserId(),
+                            )
+                    ) {
+                        is SupportServiceResult.Success -> {
+                            logger.info("support.ticket.close ticket_id={} club_id={}", ticketId, ticketClubId)
+                            call.respond(HttpStatusCode.OK, result.value.toResponse())
+                        }
+                        is SupportServiceResult.Failure -> {
+                            val (status, code) = mapSupportAdminError(result.error)
+                            call.respondError(status, code)
+                        }
+                    }
                 }
 
                 post("/reply") {
@@ -796,7 +869,7 @@ private suspend fun ApplicationCall.loadPermittedSupportClubsOrRespond(
     repository: ClubsRepository,
     clubIds: Set<Long>,
     replyClubIds: Set<Long>,
-    takeClubIds: Set<Long>,
+    statusManageClubIds: Set<Long>,
 ): List<SupportStaffClubResponse>? =
     try {
         val clubs = mutableListOf<SupportStaffClubResponse>()
@@ -807,7 +880,8 @@ private suspend fun ApplicationCall.loadPermittedSupportClubsOrRespond(
                     id = club.id,
                     name = club.name,
                     canReply = club.id in replyClubIds,
-                    canTakeInWork = club.id in takeClubIds,
+                    canTakeInWork = club.id in statusManageClubIds,
+                    canManageStatus = club.id in statusManageClubIds,
                 )
         }
         clubs.sortedWith(
@@ -846,7 +920,7 @@ private suspend fun ApplicationCall.loadStaffMutationTicketOrRespond(
     }
 }
 
-private suspend fun <T> receiveSupportRequestOrNull(receive: suspend () -> T): T? =
+internal suspend fun <T> receiveSupportRequestOrNull(receive: suspend () -> T): T? =
     try {
         receive()
     } catch (error: CancellationException) {

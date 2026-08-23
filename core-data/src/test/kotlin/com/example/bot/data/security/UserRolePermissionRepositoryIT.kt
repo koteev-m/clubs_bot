@@ -69,6 +69,7 @@ class UserRolePermissionRepositoryIT {
                 .configure()
                 .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
                 .locations(*locations)
+                .target(EXPECTED_VERSION)
                 .load()
         migrationsExecuted = latestFlyway.migrate().migrationsExecuted
         currentMigrationVersion =

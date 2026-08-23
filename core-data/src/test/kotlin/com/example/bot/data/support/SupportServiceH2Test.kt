@@ -141,19 +141,22 @@ class SupportServiceH2Test {
         }
 
     @Test
-    fun `NEW coexists with readable legacy OPENED and ANSWERED statuses`() =
+    fun `accepted statuses coexist with readable legacy OPENED and ANSWERED statuses`() =
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
             val clubId = insertClub(name = "Aurora")
             val openedId = createTicket(userId = userId, clubId = clubId, text = "Legacy opened").ticket.id
             val answeredId = createTicket(userId = userId, clubId = clubId, text = "Legacy answered").ticket.id
+            val resolvedId = createTicket(userId = userId, clubId = clubId, text = "Accepted resolved").ticket.id
 
             seedLegacyStatus(openedId, TicketStatus.OPENED)
             seedLegacyStatus(answeredId, TicketStatus.ANSWERED)
+            seedLegacyStatus(resolvedId, TicketStatus.RESOLVED)
 
             val restartedService = SupportServiceImpl(SupportRepository(database, fixedClock))
             assertEquals(TicketStatus.OPENED, restartedService.getTicket(openedId)?.status)
             assertEquals(TicketStatus.ANSWERED, restartedService.getTicket(answeredId)?.status)
+            assertEquals(TicketStatus.RESOLVED, restartedService.getTicket(resolvedId)?.status)
         }
 
     @Test
@@ -197,10 +200,24 @@ class SupportServiceH2Test {
             assertTicketForbidden(toNewResult)
             assertEquals(toNewBefore, service.getTicket(toNewId))
             assertEquals(1L, messageCount(toNewId))
+
+            val resolveId = createTicket(userId = userId, clubId = clubId, text = "Resolve").ticket.id
+            seedLegacyStatus(resolveId, TicketStatus.IN_PROGRESS)
+            val resolveBefore = service.getTicket(resolveId)
+            assertTicketForbidden(service.resolve(resolveId, agentId))
+            assertEquals(resolveBefore, service.getTicket(resolveId))
+            assertEquals(1L, messageCount(resolveId))
+
+            val closeId = createTicket(userId = userId, clubId = clubId, text = "Close").ticket.id
+            seedLegacyStatus(closeId, TicketStatus.RESOLVED)
+            val closeBefore = service.getTicket(closeId)
+            assertTicketForbidden(service.close(closeId, agentId))
+            assertEquals(closeBefore, service.getTicket(closeId))
+            assertEquals(1L, messageCount(closeId))
         }
 
     @Test
-    fun `accepted staff mutations reject every legacy status without writes`() =
+    fun `take reply and generic status reject every unavailable source state without writes`() =
         runBlocking {
             val userId = insertUser(username = "guest", displayName = "Guest")
             val agentId = insertUser(username = "agent", displayName = "Agent")
@@ -210,7 +227,13 @@ class SupportServiceH2Test {
                 clubId,
                 listOf(PermissionCodes.SUPPORT_REPLY, PermissionCodes.SUPPORT_STATUS_MANAGE),
             )
-            val legacyTargets = listOf(TicketStatus.OPENED, TicketStatus.ANSWERED, TicketStatus.CLOSED)
+            val legacyTargets =
+                listOf(
+                    TicketStatus.OPENED,
+                    TicketStatus.ANSWERED,
+                    TicketStatus.RESOLVED,
+                    TicketStatus.CLOSED,
+                )
 
             legacyTargets.forEach { currentStatus ->
                 val assignId = createTicket(userId, clubId, "Assign $currentStatus").ticket.id
@@ -251,6 +274,8 @@ class SupportServiceH2Test {
             assertTicketNotFound(service.reply(missingTicketId, agentId, "Reply", null))
             assertTicketNotFound(service.setStatus(missingTicketId, agentId, TicketStatus.CLOSED))
             assertTicketNotFound(service.setStatus(missingTicketId, agentId, TicketStatus.NEW))
+            assertTicketNotFound(service.resolve(missingTicketId, agentId))
+            assertTicketNotFound(service.close(missingTicketId, agentId))
         }
 
     @Test
@@ -387,69 +412,6 @@ class SupportServiceH2Test {
             assertTrue(summary.lastMessagePreview?.contains("resolved") == true)
             assertEquals(TicketSenderType.AGENT, summary.lastSenderType)
             assertEquals(TicketStatus.IN_PROGRESS, summary.status)
-        }
-
-    @Test
-    fun `guest message reopens answered ticket`() =
-        runBlocking {
-            val userId = insertUser(username = "guest", displayName = "Guest")
-            val clubId = insertClub(name = "Aurora")
-
-            val created =
-                service.createTicket(
-                    clubId = clubId,
-                    userId = userId,
-                    bookingId = null,
-                    listEntryId = null,
-                    topic = TicketTopic.OTHER,
-                    text = "Need help",
-                    attachments = null,
-                ) as SupportServiceResult.Success
-
-            seedLegacyStatus(created.value.ticket.id, TicketStatus.ANSWERED)
-
-            val message =
-                service.addGuestMessage(
-                    ticketId = created.value.ticket.id,
-                    userId = userId,
-                    text = "It came back",
-                    attachments = null,
-                )
-            assertTrue(message is SupportServiceResult.Success)
-
-            val ticket = service.getTicket(created.value.ticket.id)
-            assertEquals(TicketStatus.OPENED, ticket?.status)
-        }
-
-    @Test
-    fun `closed ticket blocks guest message`() =
-        runBlocking {
-            val userId = insertUser(username = "guest", displayName = "Guest")
-            val clubId = insertClub(name = "Aurora")
-
-            val created =
-                service.createTicket(
-                    clubId = clubId,
-                    userId = userId,
-                    bookingId = null,
-                    listEntryId = null,
-                    topic = TicketTopic.OTHER,
-                    text = "Need help",
-                    attachments = null,
-                ) as SupportServiceResult.Success
-
-            seedLegacyStatus(created.value.ticket.id, TicketStatus.CLOSED)
-
-            val result =
-                service.addGuestMessage(
-                    ticketId = created.value.ticket.id,
-                    userId = userId,
-                    text = "Trying to reopen",
-                    attachments = null,
-                )
-
-            assertTrue(result is SupportServiceResult.Failure)
-            assertEquals(SupportServiceError.TicketClosed, (result as SupportServiceResult.Failure).error)
         }
 
     @Test

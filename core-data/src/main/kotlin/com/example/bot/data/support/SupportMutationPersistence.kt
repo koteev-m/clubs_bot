@@ -67,6 +67,107 @@ internal class SupportMutationPersistence(
             }
         }
 
+    suspend fun resolve(
+        ticketId: Long,
+        agentUserId: Long,
+    ): StaffMutationResult<Ticket> =
+        newSuspendedTransaction(
+            context = transactionContext,
+            db = db,
+            transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
+        ) {
+            repetitionAttempts = 1
+            when (
+                val authorization =
+                    authorizeStaffMutation(
+                        ticketId = ticketId,
+                        agentUserId = agentUserId,
+                        permission = PermissionCodes.SUPPORT_STATUS_MANAGE,
+                    )
+            ) {
+                is StaffMutationAuthorization.Failure -> StaffMutationResult.Failure(authorization.reason)
+                is StaffMutationAuthorization.Success -> resolveTicket(authorization, agentUserId)
+            }
+        }
+
+    suspend fun close(
+        ticketId: Long,
+        agentUserId: Long,
+    ): StaffMutationResult<Ticket> =
+        newSuspendedTransaction(
+            context = transactionContext,
+            db = db,
+            transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
+        ) {
+            repetitionAttempts = 1
+            when (
+                val authorization =
+                    authorizeStaffMutation(
+                        ticketId = ticketId,
+                        agentUserId = agentUserId,
+                        permission = PermissionCodes.SUPPORT_STATUS_MANAGE,
+                    )
+            ) {
+                is StaffMutationAuthorization.Failure -> StaffMutationResult.Failure(authorization.reason)
+                is StaffMutationAuthorization.Success -> closeTicket(authorization, agentUserId)
+            }
+        }
+
+    suspend fun addGuestMessage(
+        ticketId: Long,
+        userId: Long,
+        text: String,
+        attachments: String?,
+    ): AddGuestMessageResult =
+        newSuspendedTransaction(
+            context = transactionContext,
+            db = db,
+            transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
+        ) {
+            repetitionAttempts = 1
+            val ticketRow =
+                TicketsTable
+                    .selectAll()
+                    .where { TicketsTable.id eq ticketId }
+                    .forUpdate()
+                    .singleOrNull()
+                    ?: return@newSuspendedTransaction AddGuestMessageResult.Failure(
+                        AddGuestMessageFailure.NotFound,
+                    )
+            if (ticketRow[TicketsTable.userId] != userId) {
+                return@newSuspendedTransaction AddGuestMessageResult.Failure(AddGuestMessageFailure.Forbidden)
+            }
+            when (TicketStatus.fromWire(ticketRow[TicketsTable.status])) {
+                TicketStatus.NEW,
+                TicketStatus.IN_PROGRESS,
+                ->
+                    persistGuestMessage(
+                        ticketRow = ticketRow,
+                        ticketId = ticketId,
+                        userId = userId,
+                        text = text,
+                        attachments = attachments,
+                        resumed = false,
+                    )
+
+                TicketStatus.RESOLVED ->
+                    persistGuestMessage(
+                        ticketRow = ticketRow,
+                        ticketId = ticketId,
+                        userId = userId,
+                        text = text,
+                        attachments = attachments,
+                        resumed = true,
+                    )
+
+                TicketStatus.CLOSED -> AddGuestMessageResult.Failure(AddGuestMessageFailure.Closed)
+                TicketStatus.OPENED,
+                TicketStatus.ANSWERED,
+                null,
+                -> AddGuestMessageResult.Failure(AddGuestMessageFailure.InvalidState)
+            }
+        }
+
     suspend fun setStatus(
         ticketId: Long,
         agentUserId: Long,
@@ -128,6 +229,7 @@ internal class SupportMutationPersistence(
             TicketStatus.OPENED,
             TicketStatus.IN_PROGRESS,
             TicketStatus.ANSWERED,
+            TicketStatus.RESOLVED,
             TicketStatus.CLOSED,
             -> StaffMutationResult.Failure(StaffMutationFailure.InvalidState)
         }
@@ -142,6 +244,65 @@ internal class SupportMutationPersistence(
         } else {
             StaffMutationResult.Failure(StaffMutationFailure.InvalidState)
         }
+    }
+
+    private fun resolveTicket(
+        authorization: StaffMutationAuthorization.Success,
+        agentUserId: Long,
+    ): StaffMutationResult<Ticket> =
+        transitionStaffTicket(
+            authorization = authorization,
+            agentUserId = agentUserId,
+            expectedStatus = TicketStatus.IN_PROGRESS,
+            newStatus = TicketStatus.RESOLVED,
+            appendCloseAudit = false,
+        )
+
+    private fun closeTicket(
+        authorization: StaffMutationAuthorization.Success,
+        agentUserId: Long,
+    ): StaffMutationResult<Ticket> =
+        transitionStaffTicket(
+            authorization = authorization,
+            agentUserId = agentUserId,
+            expectedStatus = TicketStatus.RESOLVED,
+            newStatus = TicketStatus.CLOSED,
+            appendCloseAudit = true,
+        )
+
+    private fun transitionStaffTicket(
+        authorization: StaffMutationAuthorization.Success,
+        agentUserId: Long,
+        expectedStatus: TicketStatus,
+        newStatus: TicketStatus,
+        appendCloseAudit: Boolean,
+    ): StaffMutationResult<Ticket> {
+        val oldStatus = TicketStatus.fromWire(authorization.ticketRow[TicketsTable.status])
+        if (oldStatus != expectedStatus) {
+            return StaffMutationResult.Failure(StaffMutationFailure.InvalidState)
+        }
+        val occurredAt = nextMutationTimestamp(authorization.ticketRow)
+        updateStaffTicket(
+            ticketId = authorization.ticketId,
+            agentUserId = agentUserId,
+            status = newStatus,
+            occurredAt = occurredAt,
+        )
+        if (appendCloseAudit) {
+            auditWriter.appendClose(
+                authorization = authorization,
+                agentUserId = agentUserId,
+                occurredAt = occurredAt,
+            )
+        }
+        auditWriter.appendStatusChange(
+            authorization = authorization,
+            agentUserId = agentUserId,
+            oldStatus = oldStatus,
+            newStatus = newStatus,
+            occurredAt = occurredAt,
+        )
+        return StaffMutationResult.Success(loadTicket(authorization.ticketId))
     }
 
     private fun persistTakeInWork(
@@ -233,6 +394,58 @@ internal class SupportMutationPersistence(
                 createdAt = occurredAt.toInstant(),
             )
         return StaffMutationResult.Success(SupportReplyResult(ticket = ticket, replyMessage = message))
+    }
+
+    private fun persistGuestMessage(
+        ticketRow: ResultRow,
+        ticketId: Long,
+        userId: Long,
+        text: String,
+        attachments: String?,
+        resumed: Boolean,
+    ): AddGuestMessageResult.Success {
+        val occurredAt =
+            if (resumed) {
+                nextMutationTimestamp(ticketRow)
+            } else {
+                clock.instant().atOffset(ZoneOffset.UTC)
+            }
+        val updated =
+            TicketsTable.update({ TicketsTable.id eq ticketId }) {
+                if (resumed) {
+                    it[TicketsTable.status] = TicketStatus.IN_PROGRESS.wire
+                }
+                it[TicketsTable.updatedAt] = occurredAt
+            }
+        check(updated == 1) { "Support guest message did not update exactly one ticket" }
+        val messageId =
+            TicketMessagesTable.insert {
+                it[TicketMessagesTable.ticketId] = ticketId
+                it[TicketMessagesTable.senderType] = TicketSenderType.GUEST.wire
+                it[TicketMessagesTable.text] = text
+                it[TicketMessagesTable.attachments] = attachments
+                it[TicketMessagesTable.createdAt] = occurredAt
+            }[TicketMessagesTable.id]
+        if (resumed) {
+            auditWriter.appendGuestStatusChange(
+                ticketId = ticketId,
+                clubId = ticketRow[TicketsTable.clubId],
+                userId = userId,
+                oldStatus = TicketStatus.RESOLVED,
+                newStatus = TicketStatus.IN_PROGRESS,
+                occurredAt = occurredAt,
+            )
+        }
+        return AddGuestMessageResult.Success(
+            TicketMessage(
+                id = messageId,
+                ticketId = ticketId,
+                senderType = TicketSenderType.GUEST,
+                text = text,
+                attachments = attachments,
+                createdAt = occurredAt.toInstant(),
+            ),
+        )
     }
 
     private fun authorizeStaffMutation(
@@ -368,8 +581,10 @@ private class SupportMutationAuditWriter(
         occurredAt: OffsetDateTime,
     ) {
         append(
-            authorization = authorization,
-            agentUserId = agentUserId,
+            ticketId = authorization.ticketId,
+            clubId = authorization.clubId,
+            actorUserId = agentUserId,
+            actorRole = authorization.actorRole.name,
             action = StandardAuditAction.SUPPORT_REPLY,
             occurredAt = occurredAt,
             metadataJson =
@@ -387,39 +602,83 @@ private class SupportMutationAuditWriter(
         occurredAt: OffsetDateTime,
     ) {
         append(
-            authorization = authorization,
-            agentUserId = agentUserId,
+            ticketId = authorization.ticketId,
+            clubId = authorization.clubId,
+            actorUserId = agentUserId,
+            actorRole = authorization.actorRole.name,
             action = StandardAuditAction.SUPPORT_STATUS_CHANGE,
             occurredAt = occurredAt,
-            metadataJson =
-                buildJsonObject {
-                    put("old_status", oldStatus.wire)
-                    put("new_status", newStatus.wire)
-                }.toString(),
+            metadataJson = statusMetadata(oldStatus, newStatus),
+        )
+    }
+
+    fun appendGuestStatusChange(
+        ticketId: Long,
+        clubId: Long,
+        userId: Long,
+        oldStatus: TicketStatus,
+        newStatus: TicketStatus,
+        occurredAt: OffsetDateTime,
+    ) {
+        append(
+            ticketId = ticketId,
+            clubId = clubId,
+            actorUserId = userId,
+            actorRole = Role.GUEST.name,
+            action = StandardAuditAction.SUPPORT_STATUS_CHANGE,
+            occurredAt = occurredAt,
+            metadataJson = statusMetadata(oldStatus, newStatus),
+        )
+    }
+
+    fun appendClose(
+        authorization: StaffMutationAuthorization.Success,
+        agentUserId: Long,
+        occurredAt: OffsetDateTime,
+    ) {
+        append(
+            ticketId = authorization.ticketId,
+            clubId = authorization.clubId,
+            actorUserId = agentUserId,
+            actorRole = authorization.actorRole.name,
+            action = StandardAuditAction.SUPPORT_CLOSE,
+            occurredAt = occurredAt,
+            metadataJson = buildJsonObject {}.toString(),
         )
     }
 
     private fun append(
-        authorization: StaffMutationAuthorization.Success,
-        agentUserId: Long,
+        ticketId: Long,
+        clubId: Long,
+        actorUserId: Long,
+        actorRole: String,
         action: StandardAuditAction,
         occurredAt: OffsetDateTime,
         metadataJson: String,
     ) {
         AuditLogTable.insert {
             it[AuditLogTable.createdAt] = occurredAt
-            it[AuditLogTable.clubId] = authorization.clubId
+            it[AuditLogTable.clubId] = clubId
             it[AuditLogTable.nightId] = null
-            it[AuditLogTable.actorUserId] = agentUserId
-            it[AuditLogTable.actorRole] = authorization.actorRole.name
+            it[AuditLogTable.actorUserId] = actorUserId
+            it[AuditLogTable.actorRole] = actorRole
             it[AuditLogTable.subjectUserId] = null
             it[AuditLogTable.entityType] = StandardAuditEntityType.SUPPORT_TICKET.value
-            it[AuditLogTable.entityId] = authorization.ticketId
+            it[AuditLogTable.entityId] = ticketId
             it[AuditLogTable.action] = action.value
-            it[AuditLogTable.fingerprint] = auditFingerprintFactory(action.value, authorization.ticketId)
+            it[AuditLogTable.fingerprint] = auditFingerprintFactory(action.value, ticketId)
             it[AuditLogTable.metadataJson] = metadataJson
         }
     }
+
+    private fun statusMetadata(
+        oldStatus: TicketStatus,
+        newStatus: TicketStatus,
+    ): String =
+        buildJsonObject {
+            put("old_status", oldStatus.wire)
+            put("new_status", newStatus.wire)
+        }.toString()
 }
 
 private data class AuthorizedSupportAssignment(

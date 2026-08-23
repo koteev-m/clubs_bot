@@ -97,6 +97,7 @@ enum class StandardAuditAction(override val value: String) : AuditAction {
     ACCESS_DENIED("ACCESS_DENIED"),
     SUPPORT_REPLY("SUPPORT_REPLY"),
     SUPPORT_STATUS_CHANGE("SUPPORT_STATUS_CHANGE"),
+    SUPPORT_CLOSE("SUPPORT_CLOSE"),
     LEGACY("LEGACY"),
     ;
 

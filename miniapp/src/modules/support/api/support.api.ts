@@ -1,7 +1,14 @@
 import axios from 'axios';
 import { http } from '../../../shared/api/http';
 
-export const supportTicketStatuses = ['new', 'opened', 'in_progress', 'answered', 'closed'] as const;
+export const supportTicketStatuses = [
+  'new',
+  'opened',
+  'in_progress',
+  'answered',
+  'resolved',
+  'closed',
+] as const;
 export type SupportTicketStatus = (typeof supportTicketStatuses)[number];
 export const SUPPORT_REPLY_MAX_LENGTH = 2000;
 
@@ -10,6 +17,7 @@ export type SupportClub = {
   name: string;
   canReply: boolean;
   canTakeInWork: boolean;
+  canManageStatus: boolean;
 };
 
 export type SupportTicketSummary = {
@@ -45,6 +53,14 @@ export type SupportTicketThread = {
 };
 
 export type SupportTakeInWorkResponse = {
+  id: number;
+  clubId: number;
+  topic: string;
+  status: SupportTicketStatus;
+  updatedAt: string;
+};
+
+export type SupportStatusMutationResponse = {
   id: number;
   clubId: number;
   topic: string;
@@ -173,6 +189,38 @@ export async function replyToSupportTicket(
     const response = await http.post<SupportReplyResponse>(
       `/api/support/tickets/${ticketId}/reply`,
       { text },
+      { signal },
+    );
+    return response.data;
+  } catch (error) {
+    throw normalizeSupportError(error);
+  }
+}
+
+export async function resolveSupportTicket(
+  ticketId: number,
+  signal?: AbortSignal,
+): Promise<SupportStatusMutationResponse> {
+  try {
+    const response = await http.post<SupportStatusMutationResponse>(
+      `/api/support/tickets/${ticketId}/resolve`,
+      { confirmed: true },
+      { signal },
+    );
+    return response.data;
+  } catch (error) {
+    throw normalizeSupportError(error);
+  }
+}
+
+export async function closeSupportTicket(
+  ticketId: number,
+  signal?: AbortSignal,
+): Promise<SupportStatusMutationResponse> {
+  try {
+    const response = await http.post<SupportStatusMutationResponse>(
+      `/api/support/tickets/${ticketId}/close`,
+      undefined,
       { signal },
     );
     return response.data;

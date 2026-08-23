@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  closeSupportTicket,
   getSupportTicket,
   isSupportRequestCanceled,
   listPermittedSupportClubs,
   listSupportTickets,
   replyToSupportTicket,
+  resolveSupportTicket,
   SUPPORT_REPLY_MAX_LENGTH,
   SupportApiError,
   SupportClub,
+  SupportStatusMutationResponse,
   SupportTicketStatus,
   SupportTicketSummary,
   SupportTicketThread,
@@ -16,14 +19,22 @@ import {
 } from '../api/support.api';
 
 type RequestStatus = 'idle' | 'loading' | 'ready' | 'error';
-type MutationAction = 'take' | 'reply';
+type MutationAction = 'take' | 'reply' | 'resolve' | 'close';
 
 const statusLabels: Record<SupportTicketStatus, string> = {
   new: 'Новое',
   opened: 'Открыто',
   in_progress: 'В работе',
   answered: 'Отвечено',
+  resolved: 'Решено',
   closed: 'Закрыто',
+};
+
+const mutationFailureMessages: Record<MutationAction, string> = {
+  take: 'Не удалось взять обращение в работу',
+  reply: 'Не удалось сохранить ответ',
+  resolve: 'Не удалось решить обращение',
+  close: 'Не удалось закрыть обращение',
 };
 
 const topicLabels: Record<string, string> = {
@@ -82,6 +93,7 @@ export default function SupportShell() {
   const [threadRefresh, setThreadRefresh] = useState(0);
   const [ticketNotice, setTicketNotice] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [resolveConfirmationTicketId, setResolveConfirmationTicketId] = useState<number | null>(null);
   const [mutationAction, setMutationAction] = useState<MutationAction | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [mutationSuccess, setMutationSuccess] = useState<string | null>(null);
@@ -100,6 +112,7 @@ export default function SupportShell() {
     setThreadError(null);
     setTicketNotice(null);
     setReplyText('');
+    setResolveConfirmationTicketId(null);
     setMutationError(null);
     setMutationSuccess(null);
   }, []);
@@ -129,6 +142,7 @@ export default function SupportShell() {
     setThreadError(null);
     setTicketNotice(null);
     setReplyText('');
+    setResolveConfirmationTicketId(null);
     setMutationAction(null);
     setMutationError(null);
     setMutationSuccess(null);
@@ -256,6 +270,7 @@ export default function SupportShell() {
     setThreadError(null);
     setTicketNotice(null);
     setReplyText('');
+    setResolveConfirmationTicketId(null);
     setMutationError(null);
     setMutationSuccess(null);
     setSelectedTicketId(ticketId);
@@ -268,9 +283,14 @@ export default function SupportShell() {
   }, []);
 
   const handleMutationForbidden = useCallback(() => {
+    setClubs([]);
+    setClubsStatus('loading');
     setReplyText('');
+    setResolveConfirmationTicketId(null);
+    setMutationAction(null);
     setMutationSuccess(null);
     setMutationError('Права доступа изменились. Доступные действия обновляются.');
+    mutationInFlight.current = false;
     setClubsRefresh((value) => value + 1);
   }, []);
 
@@ -281,8 +301,11 @@ export default function SupportShell() {
     setThreadStatus('idle');
     setThreadError(null);
     setReplyText('');
+    setResolveConfirmationTicketId(null);
+    setMutationAction(null);
     setMutationError(null);
     setMutationSuccess(null);
+    mutationInFlight.current = false;
     setTicketNotice('Обращение не найдено');
     setTicketsRefresh((value) => value + 1);
   }, []);
@@ -300,15 +323,14 @@ export default function SupportShell() {
         return;
       }
       if (apiError?.status === 409) {
+        setResolveConfirmationTicketId(null);
         setMutationSuccess(null);
         setMutationError('Состояние обращения изменилось. Данные обновляются.');
         refreshSelectedTicketAndList();
         return;
       }
       setMutationSuccess(null);
-      setMutationError(
-        action === 'reply' ? 'Не удалось сохранить ответ' : 'Не удалось взять обращение в работу',
-      );
+      setMutationError(mutationFailureMessages[action]);
     },
     [handleMutationForbidden, handleMutationNotFound, refreshSelectedTicketAndList],
   );
@@ -321,9 +343,29 @@ export default function SupportShell() {
   const canReply =
     (thread?.ticket.status === 'new' || thread?.ticket.status === 'in_progress') &&
     selectedTicketClub?.canReply === true;
+  const canResolve =
+    thread?.ticket.status === 'in_progress' && selectedTicketClub?.canManageStatus === true;
+  const canClose =
+    thread?.ticket.status === 'resolved' && selectedTicketClub?.canManageStatus === true;
+  const resolveConfirmationOpen =
+    thread !== null && resolveConfirmationTicketId === thread.ticket.id;
   const trimmedReplyText = replyText.trim();
   const isReplyValid =
     trimmedReplyText.length > 0 && trimmedReplyText.length <= SUPPORT_REPLY_MAX_LENGTH;
+
+  const applyStatusMutation = useCallback((updatedTicket: SupportStatusMutationResponse) => {
+    setThread((current) => {
+      if (!current || current.ticket.id !== updatedTicket.id) return current;
+      return {
+        ...current,
+        ticket: {
+          ...current.ticket,
+          status: updatedTicket.status,
+          updatedAt: updatedTicket.updatedAt,
+        },
+      };
+    });
+  }, []);
 
   const handleTakeInWork = useCallback(async () => {
     if (mutationInFlight.current || !thread || !canTakeInWork) return;
@@ -361,6 +403,66 @@ export default function SupportShell() {
       setMutationAction(null);
     }
   }, [canReply, handleMutationFailure, isReplyValid, refreshSelectedTicketAndList, thread, trimmedReplyText]);
+
+  const handleShowResolveConfirmation = useCallback(() => {
+    if (mutationInFlight.current || !thread || !canResolve) return;
+    setMutationError(null);
+    setMutationSuccess(null);
+    setResolveConfirmationTicketId(thread.ticket.id);
+  }, [canResolve, thread]);
+
+  const handleResolve = useCallback(async () => {
+    if (
+      mutationInFlight.current ||
+      !thread ||
+      !canResolve ||
+      resolveConfirmationTicketId !== thread.ticket.id
+    ) {
+      return;
+    }
+    mutationInFlight.current = true;
+    setMutationAction('resolve');
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      const updatedTicket = await resolveSupportTicket(thread.ticket.id);
+      setResolveConfirmationTicketId(null);
+      applyStatusMutation(updatedTicket);
+      setMutationSuccess('Обращение решено.');
+      refreshSelectedTicketAndList();
+    } catch (error) {
+      handleMutationFailure('resolve', error);
+    } finally {
+      mutationInFlight.current = false;
+      setMutationAction(null);
+    }
+  }, [
+    applyStatusMutation,
+    canResolve,
+    handleMutationFailure,
+    refreshSelectedTicketAndList,
+    resolveConfirmationTicketId,
+    thread,
+  ]);
+
+  const handleClose = useCallback(async () => {
+    if (mutationInFlight.current || !thread || !canClose) return;
+    mutationInFlight.current = true;
+    setMutationAction('close');
+    setMutationError(null);
+    setMutationSuccess(null);
+    try {
+      const updatedTicket = await closeSupportTicket(thread.ticket.id);
+      applyStatusMutation(updatedTicket);
+      setMutationSuccess('Обращение закрыто.');
+      refreshSelectedTicketAndList();
+    } catch (error) {
+      handleMutationFailure('close', error);
+    } finally {
+      mutationInFlight.current = false;
+      setMutationAction(null);
+    }
+  }, [applyStatusMutation, canClose, handleMutationFailure, refreshSelectedTicketAndList, thread]);
 
   if (forbidden) {
     return (
@@ -545,7 +647,7 @@ export default function SupportShell() {
                   <p className="mt-1 text-xs text-gray-500">Обновлено: {formatDate(thread.ticket.updatedAt)}</p>
                 </div>
 
-                {(canTakeInWork || canReply) && (
+                {(canTakeInWork || canReply || canResolve || canClose) && (
                   <div className="mt-4 space-y-4 border-b border-gray-100 pb-4">
                     {canTakeInWork && (
                       <button
@@ -594,6 +696,53 @@ export default function SupportShell() {
                           </button>
                         </div>
                       </form>
+                    )}
+                    {canResolve && !resolveConfirmationOpen && (
+                      <button
+                        type="button"
+                        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                        disabled={mutationAction !== null}
+                        onClick={handleShowResolveConfirmation}
+                      >
+                        Решить обращение
+                      </button>
+                    )}
+                    {canResolve && resolveConfirmationOpen && (
+                      <div
+                        className="space-y-3 rounded border border-gray-200 p-3"
+                        role="group"
+                        aria-label="Подтверждение решения обращения"
+                      >
+                        <p className="text-sm text-gray-700">Подтвердите, что обращение решено.</p>
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            className="rounded px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
+                            disabled={mutationAction !== null}
+                            onClick={() => setResolveConfirmationTicketId(null)}
+                          >
+                            Отмена
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                            disabled={mutationAction !== null}
+                            onClick={() => void handleResolve()}
+                          >
+                            {mutationAction === 'resolve' ? 'Сохранение...' : 'Подтвердить'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {canClose && (
+                      <button
+                        type="button"
+                        className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                        disabled={mutationAction !== null}
+                        onClick={() => void handleClose()}
+                      >
+                        {mutationAction === 'close' ? 'Сохранение...' : 'Закрыть обращение'}
+                      </button>
                     )}
                   </div>
                 )}

@@ -661,7 +661,7 @@ open class SupportAdminRoutesFixture {
         val clubs = json.parseToJsonElement(clubsResponse.bodyAsText()).jsonArray
         assertEquals(1, clubs.size)
         val permittedClub = clubs.single().jsonObject
-        assertEquals(setOf("id", "name", "canReply", "canTakeInWork"), permittedClub.keys)
+        assertEquals(setOf("id", "name", "canReply", "canTakeInWork", "canManageStatus"), permittedClub.keys)
         assertEquals(clubId, permittedClub["id"]!!.jsonPrimitive.long)
         assertFalse(permittedClub["canReply"]!!.jsonPrimitive.content.toBoolean())
         assertFalse(permittedClub["canTakeInWork"]!!.jsonPrimitive.content.toBoolean())
