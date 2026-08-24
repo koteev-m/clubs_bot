@@ -18,7 +18,7 @@ data class ErrorCodesPayload(
 )
 
 object ErrorRegistry {
-    const val version: Int = 9
+    const val version: Int = 10
     val etag: String = "\"error-codes-v$version\""
     const val cacheControl: String = "public, max-age=300, stale-while-revalidate=30, stale-if-error=86400"
 
@@ -82,6 +82,8 @@ object ErrorRegistry {
     ).sortedBy { it.code }
 
     val support: List<ErrorCodeInfo> = listOf(
+        ErrorCodeInfo(ErrorCodes.SUPPORT_DELIVERY_FAILED, HttpStatusCode.BadGateway.value),
+        ErrorCodeInfo(ErrorCodes.SUPPORT_DELIVERY_UNCONFIRMED, HttpStatusCode.BadGateway.value),
         ErrorCodeInfo(ErrorCodes.support_ticket_not_found, HttpStatusCode.NotFound.value),
         ErrorCodeInfo(ErrorCodes.support_ticket_forbidden, HttpStatusCode.Forbidden.value),
         ErrorCodeInfo(ErrorCodes.support_ticket_closed, HttpStatusCode.Conflict.value),

@@ -37,6 +37,8 @@ object ErrorCodes {
     const val support_ticket_not_found: String = "support_ticket_not_found"
     const val support_ticket_forbidden: String = "support_ticket_forbidden"
     const val support_ticket_closed: String = "support_ticket_closed"
+    const val SUPPORT_DELIVERY_FAILED: String = "support_delivery_failed"
+    const val SUPPORT_DELIVERY_UNCONFIRMED: String = "support_delivery_unconfirmed"
 
     const val checkin_forbidden: String = "checkin_forbidden"
     const val checkin_invalid_payload: String = "checkin_invalid_payload"

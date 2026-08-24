@@ -8,6 +8,7 @@ import com.example.bot.data.security.PermissionCodes
 import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRolePermissionsTable
 import com.example.bot.data.security.UserRolesTable
+import com.example.bot.support.SupportReplyDeliveryStatus
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.Ticket
 import com.example.bot.support.TicketMessage
@@ -383,6 +384,19 @@ internal class SupportMutationPersistence(
                 occurredAt = occurredAt,
             )
         }
+        val deliveryId =
+            SupportReplyDeliveriesTable.insert {
+                it[SupportReplyDeliveriesTable.replyMessageId] = messageId
+                it[SupportReplyDeliveriesTable.ticketId] = authorization.ticketId
+                it[SupportReplyDeliveriesTable.recipientUserId] = authorization.ticketRow[TicketsTable.userId]
+                it[SupportReplyDeliveriesTable.actingStaffUserId] = agentUserId
+                it[SupportReplyDeliveriesTable.actingRole] = authorization.actorRole.name
+                it[SupportReplyDeliveriesTable.status] = SupportReplyDeliveryStatus.PENDING.wire
+                it[SupportReplyDeliveriesTable.failureCode] = null
+                it[SupportReplyDeliveriesTable.createdAt] = occurredAt
+                it[SupportReplyDeliveriesTable.updatedAt] = occurredAt
+                it[SupportReplyDeliveriesTable.completedAt] = null
+            }[SupportReplyDeliveriesTable.id]
         val ticket = loadTicket(authorization.ticketId)
         val message =
             TicketMessage(
@@ -393,7 +407,14 @@ internal class SupportMutationPersistence(
                 attachments = attachments,
                 createdAt = occurredAt.toInstant(),
             )
-        return StaffMutationResult.Success(SupportReplyResult(ticket = ticket, replyMessage = message))
+        return StaffMutationResult.Success(
+            SupportReplyResult(
+                ticket = ticket,
+                replyMessage = message,
+                deliveryId = deliveryId,
+                deliveryStatus = SupportReplyDeliveryStatus.PENDING,
+            ),
+        )
     }
 
     private fun persistGuestMessage(

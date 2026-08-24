@@ -15,6 +15,8 @@ import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.support.GuestTicketThread
 import com.example.bot.support.StaffTicketThread
 import com.example.bot.support.StaffSupportReadService
+import com.example.bot.support.SupportReplyDeliveryOutcome
+import com.example.bot.support.SupportReplyDeliveryService
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
@@ -23,17 +25,10 @@ import com.example.bot.support.TicketMessage
 import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
-import com.example.bot.support.buildSupportReplyMessage
-import com.example.bot.telegram.SupportCallbacks
 import com.example.bot.opschat.NoopOpsNotificationPublisher
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationEvent
 import com.example.bot.opschat.OpsNotificationPublisher
-import com.pengrad.telegrambot.model.request.InlineKeyboardButton
-import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
-import com.pengrad.telegrambot.request.BaseRequest
-import com.pengrad.telegrambot.request.SendMessage
-import com.pengrad.telegrambot.response.BaseResponse
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -48,8 +43,6 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.util.AttributeKey
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import kotlin.coroutines.cancellation.CancellationException
@@ -142,6 +135,7 @@ private data class StaffTicketMessageResponse(
     val text: String,
     val attachments: String?,
     val createdAt: String,
+    val deliveryStatus: String?,
 )
 
 @Serializable
@@ -176,6 +170,7 @@ private data class SupportReplyResponse(
     val replyMessageId: Long,
     val replyCreatedAt: String,
     val ticketStatus: String,
+    val deliveryStatus: String,
 )
 
 private val operationalSupportRoles = setOf(Role.MANAGER, Role.CLUB_ADMIN)
@@ -186,8 +181,7 @@ fun Application.supportRoutes(
     userRepository: UserRepository,
     userRolePermissionRepository: UserRolePermissionRepository,
     clubsRepository: ClubsRepository,
-    sendTelegram: suspend (BaseRequest<*, *>) -> BaseResponse,
-    clubNameProvider: suspend (clubId: Long) -> String? = { null },
+    supportReplyDeliveryService: SupportReplyDeliveryService,
     opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
@@ -566,24 +560,52 @@ fun Application.supportRoutes(
                         is SupportServiceResult.Success -> {
                             val reply = result.value
                             logger.info("support.ticket.reply ticket_id={} club_id={}", ticketId, reply.ticket.clubId)
-                            call.respond(
-                                HttpStatusCode.OK,
-                                SupportReplyResponse(
-                                    ticketId = reply.ticket.id,
-                                    clubId = reply.ticket.clubId,
-                                    replyMessageId = reply.replyMessage.id,
-                                    replyCreatedAt = reply.replyMessage.createdAt.toString(),
-                                    ticketStatus = reply.ticket.status.wire,
-                                ),
-                            )
-                            call.application.launch(MDCContext()) {
-                                sendSupportReplyNotification(
-                                    sendTelegram = sendTelegram,
-                                    userRepository = userRepository,
-                                    ticket = reply.ticket,
-                                    replyText = text,
-                                    clubNameProvider = clubNameProvider,
-                                )
+                            when (supportReplyDeliveryService.deliver(reply.deliveryId)) {
+                                SupportReplyDeliveryOutcome.Delivered ->
+                                    call.respond(
+                                        HttpStatusCode.OK,
+                                        SupportReplyResponse(
+                                            ticketId = reply.ticket.id,
+                                            clubId = reply.ticket.clubId,
+                                            replyMessageId = reply.replyMessage.id,
+                                            replyCreatedAt = reply.replyMessage.createdAt.toString(),
+                                            ticketStatus = reply.ticket.status.wire,
+                                            deliveryStatus = "delivered",
+                                        ),
+                                    )
+
+                                SupportReplyDeliveryOutcome.Failed -> {
+                                    logger.warn(
+                                        "support.ticket.reply delivery_failed ticket_id={} club_id={}",
+                                        ticketId,
+                                        reply.ticket.clubId,
+                                    )
+                                    call.respondError(
+                                        HttpStatusCode.BadGateway,
+                                        ErrorCodes.SUPPORT_DELIVERY_FAILED,
+                                    )
+                                }
+
+                                SupportReplyDeliveryOutcome.Unconfirmed -> {
+                                    logger.warn(
+                                        "support.ticket.reply delivery_unconfirmed ticket_id={} club_id={}",
+                                        ticketId,
+                                        reply.ticket.clubId,
+                                    )
+                                    call.respondError(
+                                        HttpStatusCode.BadGateway,
+                                        ErrorCodes.SUPPORT_DELIVERY_UNCONFIRMED,
+                                    )
+                                }
+
+                                SupportReplyDeliveryOutcome.PersistenceFailure -> {
+                                    logger.warn(
+                                        "support.ticket.reply delivery_persistence_failure ticket_id={} club_id={}",
+                                        ticketId,
+                                        reply.ticket.clubId,
+                                    )
+                                    call.respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
+                                }
                             }
                         }
                         is SupportServiceResult.Failure -> {
@@ -710,6 +732,7 @@ private fun StaffTicketThread.toResponse(): StaffTicketThreadResponse =
                     text = message.text,
                     attachments = message.attachments,
                     createdAt = message.createdAt.toString(),
+                    deliveryStatus = message.deliveryStatus?.wire,
                 )
             },
     )
@@ -730,57 +753,6 @@ private fun TicketMessage.toResponse(): MessageResponse =
         senderType = senderType.wire,
         createdAt = createdAt.toString(),
     )
-
-private suspend fun sendSupportReplyNotification(
-    sendTelegram: suspend (BaseRequest<*, *>) -> BaseResponse,
-    userRepository: UserRepository,
-    ticket: Ticket,
-    replyText: String,
-    clubNameProvider: suspend (clubId: Long) -> String? = { null },
-) {
-    try {
-        val user = userRepository.getById(ticket.userId) ?: return
-        val telegramUserId = user.telegramId
-        val clubName =
-            try {
-                clubNameProvider(ticket.clubId)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                null
-            }
-        val message = buildSupportReplyMessage(clubName, replyText)
-        val keyboard = buildSupportRatingKeyboard(ticket.id)
-        val request = SendMessage(telegramUserId, message)
-        if (keyboard != null) {
-            request.replyMarkup(keyboard)
-        }
-        sendTelegram(request)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        logger.warn(
-            "support.ticket.reply.notify_failed ticket_id={} club_id={} error={}",
-            ticket.id,
-            ticket.clubId,
-            e::class.java.simpleName,
-        )
-    }
-}
-
-private fun buildSupportRatingKeyboard(ticketId: Long): InlineKeyboardMarkup? {
-    val up = SupportCallbacks.buildRate(ticketId, up = true)
-    val down = SupportCallbacks.buildRate(ticketId, up = false)
-    if (!SupportCallbacks.fits(up) || !SupportCallbacks.fits(down)) {
-        return null
-    }
-    return InlineKeyboardMarkup(
-        arrayOf(
-            InlineKeyboardButton("👍").callbackData(up),
-            InlineKeyboardButton("👎").callbackData(down),
-        ),
-    )
-}
 
 private fun mapSupportAdminError(error: SupportServiceError): Pair<HttpStatusCode, String> =
     when (error) {

@@ -27,3 +27,24 @@ object TicketMessagesTable : Table("ticket_messages") {
     val createdAt = timestampWithTimeZone("created_at")
     override val primaryKey = PrimaryKey(id)
 }
+
+object SupportReplyDeliveriesTable : Table("support_reply_deliveries") {
+    val id = long("id").autoIncrement()
+    val replyMessageId = long("reply_message_id")
+    val ticketId = long("ticket_id")
+    val recipientUserId = long("recipient_user_id")
+    val actingStaffUserId = long("acting_staff_user_id")
+    val actingRole = text("acting_role")
+    val status = text("status")
+    val failureCode = text("failure_code").nullable()
+    val createdAt = timestampWithTimeZone("created_at")
+    val updatedAt = timestampWithTimeZone("updated_at")
+    val completedAt = timestampWithTimeZone("completed_at").nullable()
+
+    init {
+        uniqueIndex("uq_support_reply_deliveries_reply_message", replyMessageId)
+        index("idx_support_reply_deliveries_ticket_id", false, ticketId)
+    }
+
+    override val primaryKey = PrimaryKey(id)
+}

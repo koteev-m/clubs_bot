@@ -731,7 +731,7 @@
         <error line="343" column="65" source="standard:chain-method-continuation" />
     </file>
     <file name="src/main/kotlin/com/example/bot/data/support/SupportRepository.kt">
-        <error line="305" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="321" column="26" source="standard:multiline-expression-wrapping" />
         <error line="505" column="24" source="standard:class-signature" />
         <error line="505" column="50" source="standard:class-signature" />
         <error line="507" column="24" source="standard:class-signature" />

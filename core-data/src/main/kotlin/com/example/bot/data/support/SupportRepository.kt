@@ -6,6 +6,8 @@ import com.example.bot.support.GuestTicketThread
 import com.example.bot.support.StaffTicketDetails
 import com.example.bot.support.StaffTicketMessage
 import com.example.bot.support.StaffTicketThread
+import com.example.bot.support.SupportReplyDeliveryFailureCode
+import com.example.bot.support.SupportReplyDeliveryStatus
 import com.example.bot.support.SupportReplyResult
 import com.example.bot.support.Ticket
 import com.example.bot.support.TicketMessage
@@ -43,6 +45,12 @@ class SupportRepository(
             db = db,
             clock = clock,
             auditFingerprintFactory = auditFingerprintFactory,
+            transactionContext = Dispatchers.IO,
+        )
+    internal val replyDeliveries =
+        SupportReplyDeliveryPersistence(
+            db = db,
+            clock = clock,
             transactionContext = Dispatchers.IO,
         )
 
@@ -197,17 +205,25 @@ class SupportRepository(
                             (TicketsTable.clubId inList permittedClubIds)
                     }.singleOrNull()
                     ?: return@newSuspendedTransaction null
-            val messages =
+            val messageRows =
                 TicketMessagesTable
                     .selectAll()
                     .where { TicketMessagesTable.ticketId eq ticketId }
                     .orderBy(
                         TicketMessagesTable.createdAt to SortOrder.ASC,
                         TicketMessagesTable.id to SortOrder.ASC,
-                    ).map { toStaffTicketMessage(it) }
-            if (messages.isEmpty()) {
+                    ).toList()
+            if (messageRows.isEmpty()) {
                 return@newSuspendedTransaction null
             }
+            val deliveryStatuses = loadDeliveryStatuses(ticketId, messageRows)
+            val messages =
+                messageRows.map { row ->
+                    toStaffTicketMessage(
+                        row = row,
+                        deliveryStatus = deliveryStatuses[row[TicketMessagesTable.id]],
+                    )
+                }
             StaffTicketThread(
                 ticket =
                     StaffTicketDetails(
@@ -414,18 +430,69 @@ class SupportRepository(
             createdAt = row[TicketMessagesTable.createdAt].toInstant(),
         )
 
-    private fun toStaffTicketMessage(row: ResultRow): StaffTicketMessage =
-        StaffTicketMessage(
-            id = row[TicketMessagesTable.id],
-            senderType = toSender(row),
-            text = row[TicketMessagesTable.text],
-            attachments = row[TicketMessagesTable.attachments],
-            createdAt = row[TicketMessagesTable.createdAt].toInstant(),
-        )
-
     private data class LastMessage(
         val text: String,
         val senderType: TicketSenderType,
+    )
+}
+
+suspend fun SupportRepository.claimReplyDelivery(deliveryId: Long): SupportReplyDeliveryClaimResult =
+    replyDeliveries.claim(deliveryId)
+
+suspend fun SupportRepository.finalizeReplyDelivery(
+    deliveryId: Long,
+    resultStatus: SupportReplyDeliveryStatus,
+    failureCode: SupportReplyDeliveryFailureCode?,
+): SupportReplyDeliveryFinalizationResult =
+    replyDeliveries.finalize(
+        deliveryId = deliveryId,
+        resultStatus = resultStatus,
+        failureCode = failureCode,
+    )
+
+suspend fun SupportRepository.findReplyDelivery(deliveryId: Long): SupportReplyDeliveryRecord? =
+    replyDeliveries.find(deliveryId)
+
+private fun loadDeliveryStatuses(
+    ticketId: Long,
+    messageRows: List<ResultRow>,
+): Map<Long, SupportReplyDeliveryStatus> {
+    val agentMessageIds =
+        messageRows
+            .filter { row -> row[TicketMessagesTable.senderType] == TicketSenderType.AGENT.wire }
+            .map { row -> row[TicketMessagesTable.id] }
+    if (agentMessageIds.isEmpty()) {
+        return emptyMap()
+    }
+    return SupportReplyDeliveriesTable
+        .selectAll()
+        .where {
+            (SupportReplyDeliveriesTable.ticketId eq ticketId) and
+                (SupportReplyDeliveriesTable.replyMessageId inList agentMessageIds)
+        }.associate { row ->
+            val statusWire = row[SupportReplyDeliveriesTable.status]
+            row[SupportReplyDeliveriesTable.replyMessageId] to
+                requireNotNull(SupportReplyDeliveryStatus.fromWire(statusWire)) {
+                    "Unknown support reply delivery status"
+                }
+        }
+}
+
+private fun toStaffTicketMessage(
+    row: ResultRow,
+    deliveryStatus: SupportReplyDeliveryStatus?,
+): StaffTicketMessage {
+    val senderType =
+        requireNotNull(TicketSenderType.fromWire(row[TicketMessagesTable.senderType])) {
+            "Unknown support ticket message sender type"
+        }
+    return StaffTicketMessage(
+        id = row[TicketMessagesTable.id],
+        senderType = senderType,
+        text = row[TicketMessagesTable.text],
+        attachments = row[TicketMessagesTable.attachments],
+        createdAt = row[TicketMessagesTable.createdAt].toInstant(),
+        deliveryStatus = if (senderType == TicketSenderType.AGENT) deliveryStatus else null,
     )
 }
 

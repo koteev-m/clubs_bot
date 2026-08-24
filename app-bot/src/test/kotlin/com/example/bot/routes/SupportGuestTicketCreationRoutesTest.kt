@@ -14,6 +14,8 @@ import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
+import com.example.bot.support.SupportReplyDeliveryOutcome
+import com.example.bot.support.SupportReplyDeliveryService
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
@@ -203,7 +205,8 @@ class SupportGuestTicketCreationRoutesTest {
                 userRepository = userRepository,
                 userRolePermissionRepository = ExposedUserRolePermissionRepository(database),
                 clubsRepository = ClubsDbRepository(database),
-                sendTelegram = { mockk() },
+                supportReplyDeliveryService =
+                    SupportReplyDeliveryService { SupportReplyDeliveryOutcome.PersistenceFailure },
                 opsPublisher = opsPublisher,
                 botTokenProvider = { TEST_BOT_TOKEN },
             )

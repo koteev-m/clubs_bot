@@ -12,6 +12,7 @@ import {
   SUPPORT_REPLY_MAX_LENGTH,
   SupportApiError,
   SupportClub,
+  SupportDeliveryStatus,
   SupportReplyResponse,
   SupportStatusMutationResponse,
   SupportTicketStatus,
@@ -79,6 +80,7 @@ function threadWithStatus(status: SupportTicketStatus, clubId = 1): SupportTicke
         text: 'Первое сообщение',
         attachments: null,
         createdAt: '2026-08-21T09:00:00Z',
+        deliveryStatus: null,
       },
       {
         id: 102,
@@ -86,12 +88,55 @@ function threadWithStatus(status: SupportTicketStatus, clubId = 1): SupportTicke
         text: 'Второе сообщение',
         attachments: '[{"name":"answer.txt"}]',
         createdAt: '2026-08-21T10:00:00Z',
+        deliveryStatus: null,
       },
     ],
   };
 }
 
 const thread = threadWithStatus('new');
+
+function threadWithAgentDeliveryStatus(
+  deliveryStatus: SupportDeliveryStatus | null,
+): SupportTicketThread {
+  const value = threadWithStatus('in_progress');
+  return {
+    ...value,
+    messages: value.messages.map((message) =>
+      message.id === 102 ? { ...message, deliveryStatus } : message,
+    ),
+  };
+}
+
+function threadWithPersistedReply(
+  deliveryStatus: SupportDeliveryStatus,
+  text: string,
+): SupportTicketThread {
+  const value = threadWithStatus('in_progress');
+  return {
+    ...value,
+    messages: [
+      ...value.messages,
+      {
+        id: 103,
+        senderType: 'agent',
+        text,
+        attachments: null,
+        createdAt: '2026-08-21T10:01:00Z',
+        deliveryStatus,
+      },
+    ],
+  };
+}
+
+const deliveryBadgeCases: Array<[SupportDeliveryStatus | null, string, string]> = [
+  ['delivered', 'Доставлено', 'text-green-700'],
+  ['failed', 'Не доставлено', 'text-red-700'],
+  ['unconfirmed', 'Результат доставки не подтверждён', 'text-amber-800'],
+  ['pending', 'Доставка выполняется', 'text-blue-700'],
+  ['sending', 'Доставка выполняется', 'text-blue-700'],
+  [null, 'Статус доставки не зафиксирован', 'text-gray-700'],
+];
 
 const takeResponse = {
   id: 41,
@@ -107,6 +152,7 @@ const replyResponse: SupportReplyResponse = {
   replyMessageId: 103,
   replyCreatedAt: '2026-08-21T10:01:00Z',
   ticketStatus: 'in_progress',
+  deliveryStatus: 'delivered',
 };
 
 function statusMutationResponse(status: 'resolved' | 'closed'): SupportStatusMutationResponse {
@@ -189,6 +235,46 @@ describe('SupportShell', () => {
     fireEvent.click(screen.getByRole('button', { name: '← К обращениям' }));
     expect(await screen.findByText('Нужна помощь с бронью')).toBeTruthy();
     expect(screen.queryByText('Первое сообщение')).toBeNull();
+  });
+
+  it.each(deliveryBadgeCases)(
+    'renders the server delivery status %s for a staff reply',
+    async (deliveryStatus, label, expectedClass) => {
+      vi.mocked(getSupportTicket).mockResolvedValue(threadWithAgentDeliveryStatus(deliveryStatus));
+
+      render(<SupportShell />);
+      await openTicket();
+
+      const messages = screen.getAllByTestId('support-message');
+      const badge = within(messages[1]).getByTestId('support-delivery-status');
+      expect(badge.textContent).toBe(label);
+      expect(badge.className).toContain(expectedClass);
+    },
+  );
+
+  it('does not render internal delivery status for guest or system messages', async () => {
+    const value = threadWithStatus('in_progress');
+    vi.mocked(getSupportTicket).mockResolvedValue({
+      ...value,
+      messages: [
+        value.messages[0],
+        {
+          id: 104,
+          senderType: 'system',
+          text: 'Системное сообщение',
+          attachments: null,
+          createdAt: '2026-08-21T10:02:00Z',
+          deliveryStatus: null,
+        },
+      ],
+    });
+
+    render(<SupportShell />);
+    await openTicket();
+
+    const messages = screen.getAllByTestId('support-message');
+    expect(within(messages[0]).queryByTestId('support-delivery-status')).toBeNull();
+    expect(within(messages[1]).queryByTestId('support-delivery-status')).toBeNull();
   });
 
   it('uses only server capabilities and ticket status to expose take and reply controls', async () => {
@@ -349,11 +435,11 @@ describe('SupportShell', () => {
     });
   });
 
-  it('submits one trimmed reply, reports persistence, and refreshes the thread and list', async () => {
+  it('submits one trimmed reply and reports success only for confirmed delivery', async () => {
     vi.mocked(listPermittedSupportClubs).mockResolvedValue(replyOnlyClubs);
     vi.mocked(getSupportTicket)
       .mockResolvedValueOnce(thread)
-      .mockResolvedValueOnce(threadWithStatus('in_progress'));
+      .mockResolvedValueOnce(threadWithPersistedReply('delivered', 'Сохраняем ответ'));
 
     render(<SupportShell />);
     await openTicket();
@@ -367,7 +453,7 @@ describe('SupportShell', () => {
     fireEvent.change(input, { target: { value: '  Сохраняем ответ  ' } });
     fireEvent.click(submit);
 
-    expect(await screen.findByText('Ответ сохранён')).toBeTruthy();
+    expect(await screen.findByText('Ответ доставлен')).toBeTruthy();
     expect(replyToSupportTicket).toHaveBeenCalledTimes(1);
     expect(replyToSupportTicket).toHaveBeenCalledWith(41, 'Сохраняем ответ');
     await waitFor(() => {
@@ -375,7 +461,9 @@ describe('SupportShell', () => {
       expect(listSupportTickets).toHaveBeenCalledTimes(2);
     });
     expect(((await screen.findByLabelText('Ответ')) as HTMLTextAreaElement).value).toBe('');
-    expect(screen.queryByText(/доставлен/i)).toBeNull();
+    expect(screen.getByText('Сохраняем ответ')).toBeTruthy();
+    expect(screen.getByText('Доставлено')).toBeTruthy();
+    expect(screen.queryByText('Ответ сохранён')).toBeNull();
   });
 
   it('prevents duplicate reply submission while the first request is pending', async () => {
@@ -392,8 +480,90 @@ describe('SupportShell', () => {
 
     expect(replyToSupportTicket).toHaveBeenCalledTimes(1);
     expect((submit as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('Ответ доставлен')).toBeNull();
     await act(async () => request.resolve(replyResponse));
-    expect(await screen.findByText('Ответ сохранён')).toBeTruthy();
+    expect(await screen.findByText('Ответ доставлен')).toBeTruthy();
+  });
+
+  it.each([
+    [
+      'support_delivery_failed',
+      'failed',
+      'Ответ с отклонённой доставкой',
+      'Ответ сохранён, но не доставлен',
+      'Не доставлено',
+    ],
+    [
+      'support_delivery_unconfirmed',
+      'unconfirmed',
+      'Ответ с неподтверждённой доставкой',
+      'Ответ сохранён, результат доставки не подтверждён',
+      'Результат доставки не подтверждён',
+    ],
+  ] as const)(
+    'refreshes persisted reply after bounded delivery error %s without success or retry controls',
+    async (code, deliveryStatus, replyText, expectedMessage, expectedBadge) => {
+      vi.mocked(listPermittedSupportClubs).mockResolvedValue(replyOnlyClubs);
+      vi.mocked(getSupportTicket)
+        .mockResolvedValueOnce(thread)
+        .mockResolvedValueOnce(threadWithPersistedReply(deliveryStatus, replyText));
+      vi.mocked(replyToSupportTicket).mockRejectedValue(
+        new SupportApiError('raw Telegram response must stay private', {
+          status: 502,
+          code,
+        }),
+      );
+
+      render(<SupportShell />);
+      await openTicket();
+      fireEvent.change(screen.getByLabelText('Ответ'), { target: { value: replyText } });
+      fireEvent.click(screen.getByRole('button', { name: 'Сохранить ответ' }));
+
+      const outcome = await screen.findByText(expectedMessage);
+      expect(outcome.className).toContain('text-red-600');
+      await waitFor(() => {
+        expect(getSupportTicket).toHaveBeenCalledTimes(2);
+        expect(listSupportTickets).toHaveBeenCalledTimes(2);
+      });
+      expect(await screen.findByText(replyText)).toBeTruthy();
+      expect(screen.getByText(expectedBadge)).toBeTruthy();
+      expect(((await screen.findByLabelText('Ответ')) as HTMLTextAreaElement).value).toBe('');
+      expect(screen.queryByText('Ответ доставлен')).toBeNull();
+      expect(screen.queryByText(/raw Telegram response/i)).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: /повторить доставку|доставить повторно|отправить повторно/i }),
+      ).toBeNull();
+    },
+  );
+
+  it('does not show delivery success for a fulfilled but non-delivered reply result', async () => {
+    vi.mocked(listPermittedSupportClubs).mockResolvedValue(replyOnlyClubs);
+    vi.mocked(getSupportTicket)
+      .mockResolvedValueOnce(thread)
+      .mockResolvedValueOnce(threadWithPersistedReply('failed', 'Ответ с некорректным результатом'));
+    vi.mocked(replyToSupportTicket).mockResolvedValue({
+      ...replyResponse,
+      deliveryStatus: 'failed',
+    } as unknown as SupportReplyResponse);
+
+    render(<SupportShell />);
+    await openTicket();
+    fireEvent.change(screen.getByLabelText('Ответ'), {
+      target: { value: 'Ответ с некорректным результатом' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить ответ' }));
+
+    expect(
+      await screen.findByText('Не удалось подтвердить результат отправки. Данные обновляются.'),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(getSupportTicket).toHaveBeenCalledTimes(2);
+      expect(listSupportTickets).toHaveBeenCalledTimes(2);
+    });
+    const messages = await screen.findAllByTestId('support-message');
+    expect(within(messages[messages.length - 1]).getByText('Ответ с некорректным результатом')).toBeTruthy();
+    expect(screen.getByText('Не доставлено')).toBeTruthy();
+    expect(screen.queryByText('Ответ доставлен')).toBeNull();
   });
 
   it('prevents duplicate resolve submission while the confirmed request is pending', async () => {
@@ -456,7 +626,7 @@ describe('SupportShell', () => {
     expect(await screen.findByText('Права доступа изменились. Доступные действия обновляются.')).toBeTruthy();
     await waitFor(() => expect(listPermittedSupportClubs).toHaveBeenCalledTimes(2));
     expect(((await screen.findByLabelText('Ответ')) as HTMLTextAreaElement).value).toBe('');
-    expect(screen.queryByText('Ответ сохранён')).toBeNull();
+    expect(screen.queryByText('Ответ доставлен')).toBeNull();
     expect(screen.queryByText(/raw forbidden detail/i)).toBeNull();
     expect(screen.getByText('Первое сообщение')).toBeTruthy();
   });
@@ -555,8 +725,11 @@ describe('SupportShell', () => {
     await waitFor(() => expect(listSupportTickets).toHaveBeenCalledTimes(2));
   });
 
-  it('renders bounded mutation failures without exposing raw server details', async () => {
+  it('refreshes after a generic reply failure without exposing raw server details or claiming delivery', async () => {
     vi.mocked(listPermittedSupportClubs).mockResolvedValue(replyOnlyClubs);
+    vi.mocked(getSupportTicket)
+      .mockResolvedValueOnce(thread)
+      .mockResolvedValueOnce(threadWithPersistedReply('sending', 'Ответ'));
     vi.mocked(replyToSupportTicket).mockRejectedValue(
       new SupportApiError('SQL: insert into support_messages secret reply body', {
         status: 500,
@@ -569,9 +742,16 @@ describe('SupportShell', () => {
     fireEvent.change(screen.getByLabelText('Ответ'), { target: { value: 'Ответ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить ответ' }));
 
-    expect(await screen.findByText('Не удалось сохранить ответ')).toBeTruthy();
+    expect(
+      await screen.findByText('Не удалось подтвердить результат отправки. Данные обновляются.'),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(getSupportTicket).toHaveBeenCalledTimes(2);
+      expect(listSupportTickets).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('Доставка выполняется')).toBeTruthy();
     expect(screen.queryByText(/SQL:|secret reply body/)).toBeNull();
-    expect(screen.queryByText('Ответ сохранён')).toBeNull();
+    expect(screen.queryByText('Ответ доставлен')).toBeNull();
   });
 
   it('clears the previous ticket and thread when the club changes', async () => {
@@ -621,6 +801,39 @@ describe('SupportShell', () => {
 });
 
 describe('support lifecycle API contract', () => {
+  it('sends only persisted reply text and accepts only HTTP 200 with delivered status', async () => {
+    const actual = await vi.importActual<typeof import('../../api/support.api')>('../../api/support.api');
+    const post = vi
+      .spyOn(http, 'post')
+      .mockResolvedValueOnce({ status: 200, data: replyResponse } as never)
+      .mockResolvedValueOnce({ status: 201, data: replyResponse } as never)
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { ...replyResponse, deliveryStatus: 'failed' },
+      } as never);
+
+    try {
+      await expect(actual.replyToSupportTicket(41, 'Только текст ответа')).resolves.toEqual(replyResponse);
+      expect(post).toHaveBeenNthCalledWith(
+        1,
+        '/api/support/tickets/41/reply',
+        { text: 'Только текст ответа' },
+        { signal: undefined },
+      );
+
+      await expect(actual.replyToSupportTicket(41, 'Не считать 201 успехом')).rejects.toMatchObject({
+        status: 201,
+        code: 'invalid_delivery_response',
+      });
+      await expect(actual.replyToSupportTicket(41, 'Не считать failed успехом')).rejects.toMatchObject({
+        status: 200,
+        code: 'invalid_delivery_response',
+      });
+    } finally {
+      post.mockRestore();
+    }
+  });
+
   it('sends only explicit confirmation for resolve and no request body for close', async () => {
     const actual = await vi.importActual<typeof import('../../api/support.api')>('../../api/support.api');
     const post = vi

@@ -10,6 +10,7 @@ export const supportTicketStatuses = [
   'closed',
 ] as const;
 export type SupportTicketStatus = (typeof supportTicketStatuses)[number];
+export type SupportDeliveryStatus = 'pending' | 'sending' | 'delivered' | 'failed' | 'unconfirmed';
 export const SUPPORT_REPLY_MAX_LENGTH = 2000;
 
 export type SupportClub = {
@@ -45,6 +46,7 @@ export type SupportTicketMessage = {
   text: string;
   attachments: string | null;
   createdAt: string;
+  deliveryStatus: SupportDeliveryStatus | null;
 };
 
 export type SupportTicketThread = {
@@ -74,6 +76,7 @@ export type SupportReplyResponse = {
   replyMessageId: number;
   replyCreatedAt: string;
   ticketStatus: SupportTicketStatus;
+  deliveryStatus: 'delivered';
 };
 
 type ApiErrorPayload = {
@@ -191,6 +194,12 @@ export async function replyToSupportTicket(
       { text },
       { signal },
     );
+    if (response.status !== 200 || response.data.deliveryStatus !== 'delivered') {
+      throw new SupportApiError('Результат доставки не подтверждён', {
+        status: response.status,
+        code: 'invalid_delivery_response',
+      });
+    }
     return response.data;
   } catch (error) {
     throw normalizeSupportError(error);

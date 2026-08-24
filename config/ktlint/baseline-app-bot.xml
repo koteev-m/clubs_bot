@@ -2,23 +2,23 @@
 <baseline version="1.0">
     <file name="src/main/kotlin/com/example/bot/Application.kt">
         <error line="3" column="1" source="standard:import-ordering" />
-        <error line="165" column="27" source="standard:chain-method-continuation" />
-        <error line="166" column="26" source="standard:chain-method-continuation" />
-        <error line="187" column="1" source="standard:no-consecutive-blank-lines" />
-        <error line="261" column="55" source="standard:function-signature" />
-        <error line="261" column="69" source="standard:function-signature" />
-        <error line="261" column="82" source="standard:function-signature" />
-        <error line="261" column="100" source="standard:function-signature" />
-        <error line="271" column="66" source="standard:chain-method-continuation" />
-        <error line="337" column="21" source="standard:argument-list-wrapping" />
-        <error line="337" column="55" source="standard:argument-list-wrapping" />
-        <error line="337" column="84" source="standard:argument-list-wrapping" />
-        <error line="337" column="121" source="standard:max-line-length" />
-        <error line="337" column="123" source="standard:argument-list-wrapping" />
-        <error line="512" column="1" source="standard:no-consecutive-blank-lines" />
-        <error line="549" column="28" source="standard:chain-method-continuation" />
-        <error line="549" column="74" source="standard:chain-method-continuation" />
-        <error line="549" column="87" source="standard:chain-method-continuation" />
+        <error line="163" column="27" source="standard:chain-method-continuation" />
+        <error line="164" column="26" source="standard:chain-method-continuation" />
+        <error line="185" column="1" source="standard:no-consecutive-blank-lines" />
+        <error line="260" column="55" source="standard:function-signature" />
+        <error line="260" column="69" source="standard:function-signature" />
+        <error line="260" column="82" source="standard:function-signature" />
+        <error line="260" column="100" source="standard:function-signature" />
+        <error line="270" column="66" source="standard:chain-method-continuation" />
+        <error line="336" column="21" source="standard:argument-list-wrapping" />
+        <error line="336" column="55" source="standard:argument-list-wrapping" />
+        <error line="336" column="84" source="standard:argument-list-wrapping" />
+        <error line="336" column="121" source="standard:max-line-length" />
+        <error line="336" column="123" source="standard:argument-list-wrapping" />
+        <error line="493" column="1" source="standard:no-consecutive-blank-lines" />
+        <error line="530" column="28" source="standard:chain-method-continuation" />
+        <error line="530" column="74" source="standard:chain-method-continuation" />
+        <error line="530" column="87" source="standard:chain-method-continuation" />
     </file>
     <file name="src/main/kotlin/com/example/bot/analytics/AdminAnalyticsSnapshotService.kt">
         <error line="3" column="1" source="standard:import-ordering" />
@@ -442,13 +442,11 @@
         <error line="37" column="15" source="standard:property-naming" />
         <error line="38" column="15" source="standard:property-naming" />
         <error line="39" column="15" source="standard:property-naming" />
-        <error line="41" column="15" source="standard:property-naming" />
-        <error line="42" column="15" source="standard:property-naming" />
         <error line="43" column="15" source="standard:property-naming" />
         <error line="44" column="15" source="standard:property-naming" />
         <error line="45" column="15" source="standard:property-naming" />
-        <error line="48" column="15" source="standard:property-naming" />
-        <error line="49" column="15" source="standard:property-naming" />
+        <error line="46" column="15" source="standard:property-naming" />
+        <error line="47" column="15" source="standard:property-naming" />
         <error line="50" column="15" source="standard:property-naming" />
         <error line="51" column="15" source="standard:property-naming" />
         <error line="52" column="15" source="standard:property-naming" />
@@ -457,14 +455,16 @@
         <error line="55" column="15" source="standard:property-naming" />
         <error line="56" column="15" source="standard:property-naming" />
         <error line="57" column="15" source="standard:property-naming" />
+        <error line="58" column="15" source="standard:property-naming" />
         <error line="59" column="15" source="standard:property-naming" />
-        <error line="60" column="15" source="standard:property-naming" />
         <error line="61" column="15" source="standard:property-naming" />
         <error line="62" column="15" source="standard:property-naming" />
         <error line="63" column="15" source="standard:property-naming" />
         <error line="64" column="15" source="standard:property-naming" />
         <error line="65" column="15" source="standard:property-naming" />
         <error line="66" column="15" source="standard:property-naming" />
+        <error line="67" column="15" source="standard:property-naming" />
+        <error line="68" column="15" source="standard:property-naming" />
     </file>
     <file name="src/main/kotlin/com/example/bot/http/ErrorRegistry.kt">
         <error line="21" column="15" source="standard:property-naming" />
@@ -475,8 +475,8 @@
         <error line="69" column="43" source="standard:multiline-expression-wrapping" />
         <error line="76" column="44" source="standard:multiline-expression-wrapping" />
         <error line="84" column="40" source="standard:multiline-expression-wrapping" />
-        <error line="90" column="38" source="standard:multiline-expression-wrapping" />
-        <error line="104" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="92" column="38" source="standard:multiline-expression-wrapping" />
+        <error line="106" column="30" source="standard:multiline-expression-wrapping" />
     </file>
     <file name="src/main/kotlin/com/example/bot/http/Etag.kt">
         <error line="13" column="13" source="standard:function-signature" />
@@ -2111,47 +2111,47 @@
     </file>
     <file name="src/main/kotlin/com/example/bot/routes/SupportRoutes.kt">
         <error line="3" column="1" source="standard:import-ordering" />
-        <error line="60" column="1" source="standard:blank-line-before-declaration" />
-        <error line="60" column="1" source="standard:spacing-between-declarations-with-annotations" />
-        <error line="214" column="30" source="standard:multiline-expression-wrapping" />
-        <error line="262" column="30" source="standard:multiline-expression-wrapping" />
-        <error line="312" column="30" source="standard:multiline-expression-wrapping" />
-        <error line="304" column="35" source="standard:chain-method-continuation" />
-        <error line="304" column="41" source="standard:argument-list-wrapping" />
-        <error line="304" column="92" source="standard:argument-list-wrapping" />
-        <error line="304" column="121" source="standard:max-line-length" />
-        <error line="304" column="130" source="standard:argument-list-wrapping" />
-        <error line="331" column="38" source="standard:multiline-expression-wrapping" />
-        <error line="332" column="48" source="standard:chain-method-continuation" />
-        <error line="332" column="62" source="standard:argument-list-wrapping" />
-        <error line="332" column="87" source="standard:argument-list-wrapping" />
-        <error line="332" column="121" source="standard:max-line-length" />
-        <error line="332" column="122" source="standard:argument-list-wrapping" />
-        <error line="337" column="58" source="standard:chain-method-continuation" />
-        <error line="337" column="66" source="standard:argument-list-wrapping" />
-        <error line="337" column="87" source="standard:argument-list-wrapping" />
-        <error line="337" column="105" source="standard:chain-method-continuation" />
-        <error line="337" column="119" source="standard:chain-method-continuation" />
-        <error line="337" column="120" source="standard:max-line-length" />
-        <error line="337" column="127" source="standard:argument-list-wrapping" />
-        <error line="352" column="38" source="standard:multiline-expression-wrapping" />
-        <error line="353" column="48" source="standard:chain-method-continuation" />
-        <error line="353" column="62" source="standard:argument-list-wrapping" />
-        <error line="353" column="87" source="standard:argument-list-wrapping" />
-        <error line="353" column="121" source="standard:max-line-length" />
-        <error line="353" column="122" source="standard:argument-list-wrapping" />
-        <error line="392" column="38" source="standard:multiline-expression-wrapping" />
-        <error line="393" column="48" source="standard:chain-method-continuation" />
-        <error line="393" column="62" source="standard:argument-list-wrapping" />
-        <error line="393" column="87" source="standard:argument-list-wrapping" />
-        <error line="393" column="121" source="standard:max-line-length" />
-        <error line="393" column="122" source="standard:argument-list-wrapping" />
-        <error line="421" column="39" source="standard:chain-method-continuation" />
-        <error line="421" column="45" source="standard:argument-list-wrapping" />
-        <error line="421" column="93" source="standard:argument-list-wrapping" />
-        <error line="421" column="103" source="standard:argument-list-wrapping" />
-        <error line="421" column="121" source="standard:max-line-length" />
-        <error line="421" column="122" source="standard:argument-list-wrapping" />
+        <error line="53" column="1" source="standard:blank-line-before-declaration" />
+        <error line="53" column="1" source="standard:spacing-between-declarations-with-annotations" />
+        <error line="208" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="256" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="306" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="298" column="35" source="standard:chain-method-continuation" />
+        <error line="298" column="41" source="standard:argument-list-wrapping" />
+        <error line="298" column="92" source="standard:argument-list-wrapping" />
+        <error line="298" column="121" source="standard:max-line-length" />
+        <error line="298" column="130" source="standard:argument-list-wrapping" />
+        <error line="325" column="38" source="standard:multiline-expression-wrapping" />
+        <error line="326" column="48" source="standard:chain-method-continuation" />
+        <error line="326" column="62" source="standard:argument-list-wrapping" />
+        <error line="326" column="87" source="standard:argument-list-wrapping" />
+        <error line="326" column="121" source="standard:max-line-length" />
+        <error line="326" column="122" source="standard:argument-list-wrapping" />
+        <error line="331" column="58" source="standard:chain-method-continuation" />
+        <error line="331" column="66" source="standard:argument-list-wrapping" />
+        <error line="331" column="87" source="standard:argument-list-wrapping" />
+        <error line="331" column="105" source="standard:chain-method-continuation" />
+        <error line="331" column="119" source="standard:chain-method-continuation" />
+        <error line="331" column="120" source="standard:max-line-length" />
+        <error line="331" column="127" source="standard:argument-list-wrapping" />
+        <error line="346" column="38" source="standard:multiline-expression-wrapping" />
+        <error line="347" column="48" source="standard:chain-method-continuation" />
+        <error line="347" column="62" source="standard:argument-list-wrapping" />
+        <error line="347" column="87" source="standard:argument-list-wrapping" />
+        <error line="347" column="121" source="standard:max-line-length" />
+        <error line="347" column="122" source="standard:argument-list-wrapping" />
+        <error line="386" column="38" source="standard:multiline-expression-wrapping" />
+        <error line="387" column="48" source="standard:chain-method-continuation" />
+        <error line="387" column="62" source="standard:argument-list-wrapping" />
+        <error line="387" column="87" source="standard:argument-list-wrapping" />
+        <error line="387" column="121" source="standard:max-line-length" />
+        <error line="387" column="122" source="standard:argument-list-wrapping" />
+        <error line="415" column="39" source="standard:chain-method-continuation" />
+        <error line="415" column="45" source="standard:argument-list-wrapping" />
+        <error line="415" column="93" source="standard:argument-list-wrapping" />
+        <error line="415" column="103" source="standard:argument-list-wrapping" />
+        <error line="415" column="121" source="standard:max-line-length" />
+        <error line="415" column="122" source="standard:argument-list-wrapping" />
     </file>
     <file name="src/main/kotlin/com/example/bot/routes/TelegramWebhookRoutes.kt">
         <error line="3" column="1" source="standard:import-ordering" />
@@ -5704,100 +5704,100 @@
     <file name="src/test/kotlin/com/example/bot/routes/SupportAdminRoutesTest.kt">
         <error line="3" column="1" source="standard:import-ordering" />
         <error line="7" column="1" source="standard:no-unused-imports" />
-        <error line="83" column="37" source="standard:multiline-expression-wrapping" />
-        <error line="83" column="37" source="standard:function-signature" />
-        <error line="279" column="54" source="standard:multiline-expression-wrapping" />
-        <error line="279" column="54" source="standard:function-signature" />
-        <error line="295" column="52" source="standard:multiline-expression-wrapping" />
-        <error line="295" column="52" source="standard:function-signature" />
-        <error line="407" column="74" source="standard:multiline-expression-wrapping" />
-        <error line="407" column="74" source="standard:function-signature" />
-        <error line="431" column="81" source="standard:multiline-expression-wrapping" />
-        <error line="431" column="81" source="standard:function-signature" />
-        <error line="462" column="63" source="standard:multiline-expression-wrapping" />
-        <error line="462" column="63" source="standard:function-signature" />
-        <error line="517" column="49" source="standard:multiline-expression-wrapping" />
-        <error line="517" column="49" source="standard:function-signature" />
-        <error line="626" column="81" source="standard:multiline-expression-wrapping" />
-        <error line="626" column="81" source="standard:function-signature" />
-        <error line="897" column="1" source="standard:indent" />
-        <error line="898" column="1" source="standard:indent" />
-        <error line="899" column="1" source="standard:indent" />
-        <error line="900" column="1" source="standard:indent" />
-        <error line="901" column="1" source="standard:indent" />
-        <error line="902" column="1" source="standard:indent" />
-        <error line="903" column="1" source="standard:indent" />
-        <error line="904" column="1" source="standard:indent" />
+        <error line="86" column="37" source="standard:multiline-expression-wrapping" />
+        <error line="86" column="37" source="standard:function-signature" />
+        <error line="282" column="54" source="standard:multiline-expression-wrapping" />
+        <error line="282" column="54" source="standard:function-signature" />
+        <error line="298" column="52" source="standard:multiline-expression-wrapping" />
+        <error line="298" column="52" source="standard:function-signature" />
+        <error line="410" column="74" source="standard:multiline-expression-wrapping" />
+        <error line="410" column="74" source="standard:function-signature" />
+        <error line="434" column="81" source="standard:multiline-expression-wrapping" />
+        <error line="434" column="81" source="standard:function-signature" />
+        <error line="465" column="63" source="standard:multiline-expression-wrapping" />
+        <error line="465" column="63" source="standard:function-signature" />
+        <error line="520" column="49" source="standard:multiline-expression-wrapping" />
+        <error line="520" column="49" source="standard:function-signature" />
+        <error line="629" column="81" source="standard:multiline-expression-wrapping" />
+        <error line="629" column="81" source="standard:function-signature" />
+        <error line="918" column="1" source="standard:indent" />
+        <error line="919" column="1" source="standard:indent" />
+        <error line="920" column="1" source="standard:indent" />
+        <error line="921" column="1" source="standard:indent" />
+        <error line="922" column="1" source="standard:indent" />
+        <error line="923" column="1" source="standard:indent" />
+        <error line="924" column="1" source="standard:indent" />
+        <error line="925" column="1" source="standard:indent" />
     </file>
     <file name="src/test/kotlin/com/example/bot/routes/SupportGuestRoutesTest.kt">
         <error line="3" column="1" source="standard:import-ordering" />
         <error line="3" column="1" source="standard:no-unused-imports" />
-        <error line="66" column="62" source="standard:multiline-expression-wrapping" />
-        <error line="66" column="62" source="standard:function-signature" />
-        <error line="99" column="67" source="standard:multiline-expression-wrapping" />
-        <error line="99" column="67" source="standard:function-signature" />
-        <error line="116" column="28" source="standard:chain-method-continuation" />
-        <error line="116" column="68" source="standard:chain-method-continuation" />
-        <error line="116" column="87" source="standard:chain-method-continuation" />
-        <error line="130" column="77" source="standard:multiline-expression-wrapping" />
-        <error line="130" column="77" source="standard:function-signature" />
-        <error line="144" column="60" source="standard:multiline-expression-wrapping" />
-        <error line="144" column="60" source="standard:function-signature" />
-        <error line="161" column="28" source="standard:chain-method-continuation" />
-        <error line="161" column="68" source="standard:chain-method-continuation" />
-        <error line="161" column="87" source="standard:chain-method-continuation" />
-        <error line="178" column="73" source="standard:multiline-expression-wrapping" />
-        <error line="178" column="73" source="standard:function-signature" />
-        <error line="196" column="28" source="standard:chain-method-continuation" />
-        <error line="196" column="68" source="standard:chain-method-continuation" />
-        <error line="196" column="87" source="standard:chain-method-continuation" />
-        <error line="211" column="78" source="standard:multiline-expression-wrapping" />
-        <error line="211" column="78" source="standard:function-signature" />
-        <error line="228" column="45" source="standard:multiline-expression-wrapping" />
-        <error line="228" column="45" source="standard:function-signature" />
-        <error line="247" column="28" source="standard:chain-method-continuation" />
-        <error line="247" column="68" source="standard:chain-method-continuation" />
-        <error line="247" column="87" source="standard:chain-method-continuation" />
-        <error line="262" column="50" source="standard:multiline-expression-wrapping" />
-        <error line="262" column="50" source="standard:function-signature" />
-        <error line="279" column="28" source="standard:chain-method-continuation" />
-        <error line="279" column="68" source="standard:chain-method-continuation" />
-        <error line="279" column="87" source="standard:chain-method-continuation" />
-        <error line="296" column="75" source="standard:multiline-expression-wrapping" />
-        <error line="296" column="75" source="standard:function-signature" />
-        <error line="319" column="50" source="standard:multiline-expression-wrapping" />
-        <error line="319" column="50" source="standard:function-signature" />
-        <error line="336" column="48" source="standard:multiline-expression-wrapping" />
-        <error line="336" column="48" source="standard:function-signature" />
-        <error line="353" column="28" source="standard:chain-method-continuation" />
-        <error line="353" column="68" source="standard:chain-method-continuation" />
-        <error line="353" column="87" source="standard:chain-method-continuation" />
-        <error line="368" column="58" source="standard:multiline-expression-wrapping" />
-        <error line="368" column="58" source="standard:function-signature" />
-        <error line="396" column="56" source="standard:multiline-expression-wrapping" />
-        <error line="396" column="56" source="standard:function-signature" />
-        <error line="413" column="28" source="standard:chain-method-continuation" />
-        <error line="413" column="68" source="standard:chain-method-continuation" />
-        <error line="413" column="87" source="standard:chain-method-continuation" />
-        <error line="436" column="55" source="standard:multiline-expression-wrapping" />
-        <error line="436" column="55" source="standard:function-signature" />
-        <error line="463" column="52" source="standard:multiline-expression-wrapping" />
-        <error line="463" column="52" source="standard:function-signature" />
-        <error line="480" column="28" source="standard:chain-method-continuation" />
-        <error line="480" column="68" source="standard:chain-method-continuation" />
-        <error line="480" column="87" source="standard:chain-method-continuation" />
-        <error line="495" column="64" source="standard:multiline-expression-wrapping" />
-        <error line="495" column="64" source="standard:function-signature" />
-        <error line="511" column="66" source="standard:multiline-expression-wrapping" />
-        <error line="511" column="66" source="standard:function-signature" />
-        <error line="534" column="82" source="standard:multiline-expression-wrapping" />
-        <error line="534" column="82" source="standard:function-signature" />
-        <error line="543" column="78" source="standard:multiline-expression-wrapping" />
-        <error line="543" column="78" source="standard:function-signature" />
-        <error line="556" column="78" source="standard:multiline-expression-wrapping" />
-        <error line="556" column="78" source="standard:function-signature" />
-        <error line="576" column="78" source="standard:multiline-expression-wrapping" />
-        <error line="576" column="78" source="standard:function-signature" />
+        <error line="65" column="62" source="standard:multiline-expression-wrapping" />
+        <error line="65" column="62" source="standard:function-signature" />
+        <error line="98" column="67" source="standard:multiline-expression-wrapping" />
+        <error line="98" column="67" source="standard:function-signature" />
+        <error line="115" column="28" source="standard:chain-method-continuation" />
+        <error line="115" column="68" source="standard:chain-method-continuation" />
+        <error line="115" column="87" source="standard:chain-method-continuation" />
+        <error line="129" column="77" source="standard:multiline-expression-wrapping" />
+        <error line="129" column="77" source="standard:function-signature" />
+        <error line="143" column="60" source="standard:multiline-expression-wrapping" />
+        <error line="143" column="60" source="standard:function-signature" />
+        <error line="160" column="28" source="standard:chain-method-continuation" />
+        <error line="160" column="68" source="standard:chain-method-continuation" />
+        <error line="160" column="87" source="standard:chain-method-continuation" />
+        <error line="177" column="73" source="standard:multiline-expression-wrapping" />
+        <error line="177" column="73" source="standard:function-signature" />
+        <error line="195" column="28" source="standard:chain-method-continuation" />
+        <error line="195" column="68" source="standard:chain-method-continuation" />
+        <error line="195" column="87" source="standard:chain-method-continuation" />
+        <error line="210" column="78" source="standard:multiline-expression-wrapping" />
+        <error line="210" column="78" source="standard:function-signature" />
+        <error line="227" column="45" source="standard:multiline-expression-wrapping" />
+        <error line="227" column="45" source="standard:function-signature" />
+        <error line="246" column="28" source="standard:chain-method-continuation" />
+        <error line="246" column="68" source="standard:chain-method-continuation" />
+        <error line="246" column="87" source="standard:chain-method-continuation" />
+        <error line="261" column="50" source="standard:multiline-expression-wrapping" />
+        <error line="261" column="50" source="standard:function-signature" />
+        <error line="278" column="28" source="standard:chain-method-continuation" />
+        <error line="278" column="68" source="standard:chain-method-continuation" />
+        <error line="278" column="87" source="standard:chain-method-continuation" />
+        <error line="295" column="75" source="standard:multiline-expression-wrapping" />
+        <error line="295" column="75" source="standard:function-signature" />
+        <error line="318" column="50" source="standard:multiline-expression-wrapping" />
+        <error line="318" column="50" source="standard:function-signature" />
+        <error line="335" column="48" source="standard:multiline-expression-wrapping" />
+        <error line="335" column="48" source="standard:function-signature" />
+        <error line="352" column="28" source="standard:chain-method-continuation" />
+        <error line="352" column="68" source="standard:chain-method-continuation" />
+        <error line="352" column="87" source="standard:chain-method-continuation" />
+        <error line="367" column="58" source="standard:multiline-expression-wrapping" />
+        <error line="367" column="58" source="standard:function-signature" />
+        <error line="395" column="56" source="standard:multiline-expression-wrapping" />
+        <error line="395" column="56" source="standard:function-signature" />
+        <error line="412" column="28" source="standard:chain-method-continuation" />
+        <error line="412" column="68" source="standard:chain-method-continuation" />
+        <error line="412" column="87" source="standard:chain-method-continuation" />
+        <error line="435" column="55" source="standard:multiline-expression-wrapping" />
+        <error line="435" column="55" source="standard:function-signature" />
+        <error line="462" column="52" source="standard:multiline-expression-wrapping" />
+        <error line="462" column="52" source="standard:function-signature" />
+        <error line="479" column="28" source="standard:chain-method-continuation" />
+        <error line="479" column="68" source="standard:chain-method-continuation" />
+        <error line="479" column="87" source="standard:chain-method-continuation" />
+        <error line="494" column="64" source="standard:multiline-expression-wrapping" />
+        <error line="494" column="64" source="standard:function-signature" />
+        <error line="510" column="66" source="standard:multiline-expression-wrapping" />
+        <error line="510" column="66" source="standard:function-signature" />
+        <error line="533" column="82" source="standard:multiline-expression-wrapping" />
+        <error line="533" column="82" source="standard:function-signature" />
+        <error line="542" column="78" source="standard:multiline-expression-wrapping" />
+        <error line="542" column="78" source="standard:function-signature" />
+        <error line="555" column="78" source="standard:multiline-expression-wrapping" />
+        <error line="555" column="78" source="standard:function-signature" />
+        <error line="575" column="78" source="standard:multiline-expression-wrapping" />
+        <error line="575" column="78" source="standard:function-signature" />
     </file>
     <file name="src/test/kotlin/com/example/bot/routes/TelegramWebhookRoutesTest.kt">
         <error line="3" column="1" source="standard:import-ordering" />

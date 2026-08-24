@@ -98,6 +98,7 @@ enum class StandardAuditAction(override val value: String) : AuditAction {
     SUPPORT_REPLY("SUPPORT_REPLY"),
     SUPPORT_STATUS_CHANGE("SUPPORT_STATUS_CHANGE"),
     SUPPORT_CLOSE("SUPPORT_CLOSE"),
+    SUPPORT_DELIVERY_RESULT("SUPPORT_DELIVERY_RESULT"),
     LEGACY("LEGACY"),
     ;
 

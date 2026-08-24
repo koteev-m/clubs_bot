@@ -81,7 +81,7 @@ import com.example.bot.promoter.rating.PromoterRatingService
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.support.SupportService
 import com.example.bot.support.StaffSupportReadService
-import com.example.bot.support.sanitizeClubName
+import com.example.bot.support.SupportReplyDeliveryService
 import com.example.bot.routes.bookingA3Routes
 import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestListInviteRoutes
@@ -154,13 +154,11 @@ import org.koin.core.logger.Level
 import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
-import java.util.concurrent.ConcurrentHashMap
 import java.time.Clock
 import java.time.ZoneId
 import com.example.bot.host.ShiftChecklistService
 import com.example.bot.data.privacy.PrivacyConfig
 import org.slf4j.LoggerFactory
-import kotlin.coroutines.cancellation.CancellationException
 
 @Suppress("unused")
 fun Application.module() {
@@ -255,6 +253,7 @@ fun Application.module() {
     val paymentsHandlers by inject<com.example.bot.telegram.PaymentsHandlers>()
     val supportService by inject<SupportService>()
     val staffSupportReadService by inject<StaffSupportReadService>()
+    val supportReplyDeliveryService by inject<SupportReplyDeliveryService>()
     val appClock = Clock.systemUTC()
     val notificationService: NotificationService = LoggingNotificationService()
     val telegramClient by inject<TelegramClient>()
@@ -463,32 +462,14 @@ fun Application.module() {
     )
     guestListInviteRoutes(repository = guestListRepository)
     invitationRoutes(invitationService = invitationService)
-    val clubNameCache = ConcurrentHashMap<Long, String>()
     supportRoutes(
         supportService = supportService,
         staffSupportReadService = staffSupportReadService,
         userRepository = userRepository,
         userRolePermissionRepository = userRolePermissionRepository,
         clubsRepository = clubsRepository,
-        sendTelegram = telegramClient::send,
+        supportReplyDeliveryService = supportReplyDeliveryService,
         opsPublisher = opsNotificationService,
-        clubNameProvider = clubNameProvider@{ clubId ->
-            clubNameCache[clubId]?.let { return@clubNameProvider it }
-            try {
-                val clubName = sanitizeClubName(clubsRepository.getById(clubId)?.name)
-                if (clubName != null) {
-                    if (clubNameCache.size > 1000) {
-                        clubNameCache.clear()
-                    }
-                    clubNameCache[clubId] = clubName
-                }
-                clubName
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Throwable) {
-                null
-            }
-        },
     )
     telegramWebhookRoutes(
         expectedSecret = config.webhook.secretToken,
