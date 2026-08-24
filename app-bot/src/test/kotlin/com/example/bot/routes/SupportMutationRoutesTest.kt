@@ -167,7 +167,14 @@ class SupportMutationRoutesTest : SupportLifecycleMutationRoutesFixture() {
                 val replyRaw = replyResponse.bodyAsText()
                 val replyPayload = json.parseToJsonElement(replyRaw).jsonObject
                 assertEquals(
-                    setOf("ticketId", "clubId", "replyMessageId", "replyCreatedAt", "ticketStatus"),
+                    setOf(
+                        "ticketId",
+                        "clubId",
+                        "replyMessageId",
+                        "replyCreatedAt",
+                        "ticketStatus",
+                        "deliveryStatus",
+                    ),
                     replyPayload.keys,
                 )
                 assertEquals(replyTicketId, replyPayload.getValue("ticketId").jsonPrimitive.long)
@@ -181,6 +188,7 @@ class SupportMutationRoutesTest : SupportLifecycleMutationRoutesFixture() {
                         .isNotBlank(),
                 )
                 assertEquals("in_progress", replyPayload.getValue("ticketStatus").jsonPrimitive.content)
+                assertEquals("delivered", replyPayload.getValue("deliveryStatus").jsonPrimitive.content)
                 assertFalse(replyRaw.contains("ownerUserId"))
                 assertFalse(replyRaw.contains("Persisted staff reply"))
                 assertFalse(replyRaw.contains("attachments"))

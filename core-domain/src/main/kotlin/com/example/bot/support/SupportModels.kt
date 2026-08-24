@@ -40,6 +40,37 @@ enum class TicketSenderType(val wire: String) {
     }
 }
 
+enum class SupportReplyDeliveryStatus(
+    val wire: String,
+) {
+    PENDING("pending"),
+    SENDING("sending"),
+    DELIVERED("delivered"),
+    FAILED("failed"),
+    UNCONFIRMED("unconfirmed"),
+    ;
+
+    companion object {
+        fun fromWire(value: String): SupportReplyDeliveryStatus? = entries.firstOrNull { it.wire == value }
+    }
+}
+
+enum class SupportReplyDeliveryFailureCode(
+    val wire: String,
+) {
+    RECIPIENT_UNAVAILABLE("recipient_unavailable"),
+    CLIENT_UNAVAILABLE("client_unavailable"),
+    TELEGRAM_REJECTED("telegram_rejected"),
+    TIMEOUT("timeout"),
+    TRANSPORT_ERROR("transport_error"),
+    CANCELED("canceled"),
+    ;
+
+    companion object {
+        fun fromWire(value: String): SupportReplyDeliveryFailureCode? = entries.firstOrNull { it.wire == value }
+    }
+}
+
 data class Ticket(
     val id: Long,
     val clubId: Long,
@@ -71,6 +102,8 @@ data class TicketWithMessage(
 data class SupportReplyResult(
     val ticket: Ticket,
     val replyMessage: TicketMessage,
+    val deliveryId: Long,
+    val deliveryStatus: SupportReplyDeliveryStatus,
 )
 
 data class TicketSummary(
@@ -120,12 +153,27 @@ data class StaffTicketMessage(
     val text: String,
     val attachments: String?,
     val createdAt: Instant,
+    val deliveryStatus: SupportReplyDeliveryStatus?,
 )
 
 data class StaffTicketThread(
     val ticket: StaffTicketDetails,
     val messages: List<StaffTicketMessage>,
 )
+
+sealed interface SupportReplyDeliveryOutcome {
+    data object Delivered : SupportReplyDeliveryOutcome
+
+    data object Failed : SupportReplyDeliveryOutcome
+
+    data object Unconfirmed : SupportReplyDeliveryOutcome
+
+    data object PersistenceFailure : SupportReplyDeliveryOutcome
+}
+
+fun interface SupportReplyDeliveryService {
+    suspend fun deliver(deliveryId: Long): SupportReplyDeliveryOutcome
+}
 
 sealed interface SupportServiceError {
     data object PersistenceFailure : SupportServiceError

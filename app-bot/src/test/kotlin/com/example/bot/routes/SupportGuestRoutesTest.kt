@@ -13,6 +13,8 @@ import com.example.bot.data.support.TicketsTable
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
+import com.example.bot.support.SupportReplyDeliveryOutcome
+import com.example.bot.support.SupportReplyDeliveryService
 import com.example.bot.support.SupportService
 import com.example.bot.support.TicketStatus
 import com.example.bot.testing.createInitData
@@ -21,9 +23,6 @@ import com.example.bot.webapp.TEST_BOT_TOKEN
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationEvent
 import com.example.bot.opschat.OpsNotificationPublisher
-import com.pengrad.telegrambot.request.BaseRequest
-import com.pengrad.telegrambot.response.BaseResponse
-import io.mockk.mockk
 import io.ktor.client.request.post
 import io.ktor.client.request.get
 import io.ktor.client.request.setBody
@@ -616,7 +615,6 @@ class SupportGuestRoutesTest {
             val supportService = SupportServiceImpl(supportRepository)
             val userRepository = ExposedUserRepository(setup.database)
             val userRoleRepository = StubUserRoleRepository()
-            val telegramSender = RecordingTelegramSender()
             val opsPublisher = RecordingOpsPublisher()
             application {
                 install(ContentNegotiation) { json() }
@@ -639,7 +637,8 @@ class SupportGuestRoutesTest {
                     userRepository = userRepository,
                     userRolePermissionRepository = ExposedUserRolePermissionRepository(setup.database),
                     clubsRepository = ClubsDbRepository(setup.database),
-                    sendTelegram = telegramSender::send,
+                    supportReplyDeliveryService =
+                        SupportReplyDeliveryService { SupportReplyDeliveryOutcome.PersistenceFailure },
                     opsPublisher = opsPublisher,
                     botTokenProvider = { TEST_BOT_TOKEN },
                 )
@@ -761,15 +760,6 @@ class SupportGuestRoutesTest {
         override suspend fun listRoles(userId: Long): Set<Role> = emptySet()
 
         override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
-    }
-
-    private class RecordingTelegramSender {
-        val requests = mutableListOf<BaseRequest<*, *>>()
-
-        suspend fun send(request: BaseRequest<*, *>): BaseResponse {
-            requests += request
-            return mockk()
-        }
     }
 
     private class RecordingOpsPublisher : OpsNotificationPublisher {

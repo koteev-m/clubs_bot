@@ -21,6 +21,8 @@ import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.support.StaffSupportReadService
+import com.example.bot.support.SupportReplyDeliveryServiceImpl
+import com.example.bot.support.SupportReplyTelegramGateway
 import com.example.bot.support.SupportService
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
@@ -49,6 +51,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
 import java.util.UUID
 import kotlinx.serialization.json.Json
@@ -690,8 +693,12 @@ open class SupportAdminRoutesFixture {
         val messages = payload.getValue("messages").jsonArray
         assertEquals(1, messages.size)
         val initialMessage = messages.single().jsonObject
-        assertEquals(setOf("id", "senderType", "text", "attachments", "createdAt"), initialMessage.keys)
+        assertEquals(
+            setOf("id", "senderType", "text", "attachments", "createdAt", "deliveryStatus"),
+            initialMessage.keys,
+        )
         assertEquals("complete-thread-$role", initialMessage["text"]!!.jsonPrimitive.content)
+        assertEquals(JsonNull, initialMessage["deliveryStatus"])
     }
 
     protected suspend fun ApplicationTestBuilder.assertSupportListDenied(
@@ -784,6 +791,13 @@ open class SupportAdminRoutesFixture {
         val userRoleRepository = ExposedUserRoleRepository(setup.database)
         val userRolePermissionRepository = ExposedUserRolePermissionRepository(setup.database)
         val telegramSender = RecordingTelegramSender()
+        val clubsRepository = ClubsDbRepository(setup.database)
+        val supportReplyDeliveryService =
+            SupportReplyDeliveryServiceImpl(
+                repository = supportRepository,
+                clubsRepository = clubsRepository,
+                telegramGateway = telegramSender,
+            )
         application {
             install(ContentNegotiation) { json() }
             if (installCancellationMarker) {
@@ -814,12 +828,19 @@ open class SupportAdminRoutesFixture {
                 staffSupportReadService = routedStaffSupportReadService,
                 userRepository = userRepository,
                 userRolePermissionRepository = userRolePermissionRepository,
-                clubsRepository = ClubsDbRepository(setup.database),
-                sendTelegram = telegramSender.send,
+                clubsRepository = clubsRepository,
+                supportReplyDeliveryService = supportReplyDeliveryService,
                 botTokenProvider = { TEST_BOT_TOKEN },
             )
         }
-        block(TestContext(setup.database, realSupportService, userRepository, telegramSender))
+        block(
+            TestContext(
+                database = setup.database,
+                supportService = realSupportService,
+                userRepository = userRepository,
+                telegramSender = telegramSender,
+            ),
+        )
     }
 
     private fun prepareDatabase(): DbSetup {
@@ -1063,12 +1084,15 @@ open class SupportAdminRoutesFixture {
         override suspend fun getById(id: Long): User? = usersById[id]
     }
 
-    protected class RecordingTelegramSender {
+    protected class RecordingTelegramSender : SupportReplyTelegramGateway {
+        override var isConfigured: Boolean = true
         val requests = mutableListOf<BaseRequest<*, *>>()
+        var response: BaseResponse = mockk { every { isOk } returns true }
+        var sendBehavior: suspend (BaseRequest<*, *>) -> BaseResponse = { response }
 
-        val send: suspend (BaseRequest<*, *>) -> BaseResponse = { request ->
+        override suspend fun send(request: BaseRequest<*, *>): BaseResponse {
             requests += request
-            mockk()
+            return sendBehavior(request)
         }
     }
 }

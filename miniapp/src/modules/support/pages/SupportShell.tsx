@@ -10,7 +10,9 @@ import {
   SUPPORT_REPLY_MAX_LENGTH,
   SupportApiError,
   SupportClub,
+  SupportDeliveryStatus,
   SupportStatusMutationResponse,
+  SupportTicketMessage,
   SupportTicketStatus,
   SupportTicketSummary,
   SupportTicketThread,
@@ -37,6 +39,10 @@ const mutationFailureMessages: Record<MutationAction, string> = {
   close: 'Не удалось закрыть обращение',
 };
 
+const deliveryFailedMessage = 'Ответ сохранён, но не доставлен';
+const deliveryUnconfirmedMessage = 'Ответ сохранён, результат доставки не подтверждён';
+const replyGenericFailureMessage = 'Не удалось подтвердить результат отправки. Данные обновляются.';
+
 const topicLabels: Record<string, string> = {
   address: 'Адрес',
   dresscode: 'Дресс-код',
@@ -52,6 +58,48 @@ const senderLabels: Record<string, string> = {
   agent: 'Поддержка',
   system: 'Система',
 };
+
+type DeliveryStatusPresentation = {
+  label: string;
+  className: string;
+};
+
+function deliveryStatusPresentation(
+  status: SupportDeliveryStatus | null | undefined,
+): DeliveryStatusPresentation {
+  switch (status) {
+    case 'delivered':
+      return { label: 'Доставлено', className: 'bg-green-50 text-green-700' };
+    case 'failed':
+      return { label: 'Не доставлено', className: 'bg-red-50 text-red-700' };
+    case 'unconfirmed':
+      return {
+        label: 'Результат доставки не подтверждён',
+        className: 'bg-amber-50 text-amber-800',
+      };
+    case 'pending':
+    case 'sending':
+      return { label: 'Доставка выполняется', className: 'bg-blue-50 text-blue-700' };
+    default:
+      return {
+        label: 'Статус доставки не зафиксирован',
+        className: 'bg-gray-100 text-gray-700',
+      };
+  }
+}
+
+function StaffReplyDeliveryBadge({ message }: { message: SupportTicketMessage }) {
+  if (message.senderType !== 'agent') return null;
+  const presentation = deliveryStatusPresentation(message.deliveryStatus);
+  return (
+    <span
+      className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs ${presentation.className}`}
+      data-testid="support-delivery-status"
+    >
+      {presentation.label}
+    </span>
+  );
+}
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -329,6 +377,24 @@ export default function SupportShell() {
         refreshSelectedTicketAndList();
         return;
       }
+      if (action === 'reply') {
+        setMutationSuccess(null);
+        if (apiError?.status === 502 && apiError.code === 'support_delivery_failed') {
+          setReplyText('');
+          setMutationError(deliveryFailedMessage);
+          refreshSelectedTicketAndList();
+          return;
+        }
+        if (apiError?.status === 502 && apiError.code === 'support_delivery_unconfirmed') {
+          setReplyText('');
+          setMutationError(deliveryUnconfirmedMessage);
+          refreshSelectedTicketAndList();
+          return;
+        }
+        setMutationError(replyGenericFailureMessage);
+        refreshSelectedTicketAndList();
+        return;
+      }
       setMutationSuccess(null);
       setMutationError(mutationFailureMessages[action]);
     },
@@ -392,9 +458,14 @@ export default function SupportShell() {
     setMutationError(null);
     setMutationSuccess(null);
     try {
-      await replyToSupportTicket(thread.ticket.id, trimmedReplyText);
+      const result = await replyToSupportTicket(thread.ticket.id, trimmedReplyText);
+      if (result.deliveryStatus !== 'delivered') {
+        setMutationError(replyGenericFailureMessage);
+        refreshSelectedTicketAndList();
+        return;
+      }
       setReplyText('');
-      setMutationSuccess('Ответ сохранён');
+      setMutationSuccess('Ответ доставлен');
       refreshSelectedTicketAndList();
     } catch (error) {
       handleMutationFailure('reply', error);
@@ -756,6 +827,7 @@ export default function SupportShell() {
                         <time dateTime={message.createdAt}>{formatDate(message.createdAt)}</time>
                       </div>
                       <p className="mt-2 whitespace-pre-wrap break-words text-sm text-gray-900">{message.text}</p>
+                      <StaffReplyDeliveryBadge message={message} />
                       {message.attachments && (
                         <div className="mt-2 break-words text-xs text-gray-600">
                           <span className="font-medium">Вложения: </span>
