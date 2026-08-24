@@ -43,8 +43,12 @@ fun Application.webAppRoutes() {
 }
 
 private suspend fun ApplicationCall.respondMiniAppIndex(classLoader: ClassLoader) {
-    val supportMode = request.queryParameters["mode"] == "support"
-    val resourcePath = if (supportMode) "webapp/app/react/index.html" else "webapp/app/index.html"
+    val isReactMode =
+        when (request.queryParameters["mode"]) {
+            "support", "guest-support" -> true
+            else -> false
+        }
+    val resourcePath = if (isReactMode) "webapp/app/react/index.html" else "webapp/app/index.html"
     respondMiniAppResource(classLoader, resourcePath, ContentType.Text.Html)
 }
 

@@ -31,7 +31,7 @@ class WebAppRoutesTest {
                 requireNotNull(WebAppRoutesTest::class.java.classLoader.getResource("webapp/app/index.html"))
                     .readText()
 
-            listOf("/app", "/app/").forEach { path ->
+            listOf("/app", "/app/", "/app?mode=guest", "/app?mode=admin").forEach { path ->
                 val indexResponse = client.get(path)
                 val html = indexResponse.bodyAsText()
 
@@ -117,8 +117,42 @@ class WebAppRoutesTest {
                 "/app/react/index.html",
                 "/app/react/index.html?mode=admin",
                 "/app/react/index.html?mode=promoter",
+                "/app/react/index.html?mode=guest-support",
             ).forEach { directEntryPath ->
                 assertEquals(HttpStatusCode.NotFound, client.get(directEntryPath).status)
+            }
+        }
+
+    @Test
+    fun `guest support mode serves the bounded React entry with isolated assets`() =
+        testApplication {
+            application {
+                install(DefaultHeaders)
+                install(Compression) { gzip() }
+                webAppRoutes()
+            }
+
+            val packagedGuestSupportIndex =
+                requireNotNull(WebAppRoutesTest::class.java.classLoader.getResource("webapp/app/react/index.html"))
+                    .readText()
+
+            listOf("/app?mode=guest-support", "/app/?mode=guest-support").forEach { path ->
+                val response = client.get(path)
+                val html = response.bodyAsText()
+
+                assertEquals(HttpStatusCode.OK, response.status)
+                assertTrue(response.contentType()?.match(ContentType.Text.Html) == true)
+                assertEquals(packagedGuestSupportIndex, html)
+                assertContains(html, "<div id=\"root\"></div>")
+
+                val assetReferences = assetReferencePattern.findAll(html).map { it.groupValues[1] }.toList()
+                assertTrue(assetReferences.any { it.endsWith(".css") })
+                assertTrue(assetReferences.any { it.endsWith(".js") })
+                assertTrue(assetReferences.all { it.startsWith("/app/react/assets/") })
+
+                assetReferences.forEach { assetPath ->
+                    assertEquals(HttpStatusCode.OK, client.get(assetPath).status)
+                }
             }
         }
 

@@ -568,7 +568,7 @@ class TelegramGuestFallbackHandlerTest {
         runBlocking { verifyEachCategoryCreatesSelectedTicket() }
 
     @Test
-    fun `selected club category and normalized question persist as NEW through real service`() =
+    fun `selected club category and normalized question persist as NEW with malformed mini app url`() =
         runBlocking { verifyRealServiceTicketPersistence() }
 
     @Test
@@ -610,6 +610,106 @@ class TelegramGuestFallbackHandlerTest {
 
     @Test
     fun `blank ask reply is rejected without creating a ticket`() = runBlocking { verifyBlankAskReply() }
+
+    @Test
+    fun `successful ask adds exact guest support WebApp button to valid mini app url without query`() =
+        runBlocking {
+            val confirmation = successfulAskConfirmation(TEST_MINI_APP_URL)
+
+            assertTicketCreatedConfirmation(confirmation)
+            assertGuestSupportButton(
+                confirmation,
+                "https://night.example/app?mode=guest-support",
+            )
+        }
+
+    @Test
+    fun `successful ask preserves configured query and fragment in guest support url`() =
+        runBlocking {
+            val confirmation =
+                successfulAskConfirmation(
+                    "https://night.example/app?source=telegram&locale=ru#tickets",
+                )
+
+            assertTicketCreatedConfirmation(confirmation)
+            assertGuestSupportButton(
+                confirmation,
+                "https://night.example/app?source=telegram&locale=ru&mode=guest-support#tickets",
+            )
+        }
+
+    @Test
+    fun `successful ask replaces configured mode while preserving other query and fragment`() =
+        runBlocking {
+            val confirmation =
+                successfulAskConfirmation(
+                    "https://night.example/app?source=telegram&%6Dode=legacy&Mode=support&mode=staff&locale=ru#tickets",
+                )
+
+            assertTicketCreatedConfirmation(confirmation)
+            assertGuestSupportButton(
+                confirmation,
+                "https://night.example/app?source=telegram&locale=ru&mode=guest-support#tickets",
+            )
+        }
+
+    @Test
+    fun `successful ask omits optional button when configured mini app url has invalid port`() =
+        runBlocking {
+            val confirmation = successfulAskConfirmation("https://night.example:99999/app")
+
+            assertTicketCreatedConfirmation(confirmation)
+            assertFalse(confirmation.parameters.containsKey("reply_markup"))
+        }
+
+    @Test
+    fun `successful ask omits optional button for parseable but unsafe mini app urls`() =
+        runBlocking {
+            listOf(
+                "",
+                "night.example/app",
+                "javascript:alert(1)",
+                "https://user:password@night.example/app",
+            ).forEach { miniAppUrl ->
+                val confirmation = successfulAskConfirmation(miniAppUrl)
+
+                assertTicketCreatedConfirmation(confirmation)
+                assertFalse(confirmation.parameters.containsKey("reply_markup"), miniAppUrl)
+            }
+        }
+
+    @Test
+    fun `successful ask omits optional button when query names contain sensitive authority data`() =
+        runBlocking {
+            listOf(
+                "user_id",
+                "TELEGRAM-ID",
+                "ticket.owner",
+                "clubAuthority",
+                "identity",
+                "init-data",
+                "access_token",
+                "clientSecret",
+                "init%44ata",
+            ).forEach { parameterName ->
+                val confirmation =
+                    successfulAskConfirmation(
+                        "https://night.example/app?$parameterName=sentinel#tickets",
+                    )
+
+                assertTicketCreatedConfirmation(confirmation)
+                assertFalse(confirmation.parameters.containsKey("reply_markup"), parameterName)
+            }
+        }
+
+    @Test
+    fun `successful ask remains successful without configured mini app url`() =
+        runBlocking {
+            val confirmation = successfulAskConfirmation(null)
+
+            assertTicketCreatedConfirmation(confirmation)
+            assertFalse(confirmation.parameters.containsKey("reply_markup"))
+        }
 }
 
 private fun handler(
@@ -1183,6 +1283,7 @@ private suspend fun verifyRealServiceTicketPersistence() {
             bookings = emptyList(),
             supportService = supportService,
             clubsRepository = clubs,
+            miniAppUrl = "https://night.example:99999/app",
         )
 
     handler.handle(askCallbackUpdate("ask:club:$selectedClubId:topic:complaint"))
@@ -1196,6 +1297,7 @@ private suspend fun verifyRealServiceTicketPersistence() {
     )
 
     assertEquals("Вопрос отправлен в клуб. Мы скоро ответим.", sender.lastText())
+    assertFalse(sender.lastSendMessage().parameters.containsKey("reply_markup"))
     val ticketId =
         transaction(database) {
             assertEquals(1L, TicketsTable.selectAll().count())
@@ -1250,6 +1352,7 @@ private suspend fun verifyTicketCreationFailuresAreBounded() {
 
         assertEquals(listOf(ASK_CREATE_FAILURE_TEXT), sender.texts())
         assertFalse(sender.lastText().contains("Вопрос отправлен"))
+        assertFalse(sender.lastSendMessage().parameters.containsKey("reply_markup"))
         forbiddenDetails.forEach { detail ->
             assertFalse(sender.lastText().contains(detail, ignoreCase = true), sender.lastText())
         }
@@ -1736,4 +1839,45 @@ private suspend fun verifyBlankAskReply() {
 
     assertEquals("Напишите текст вопроса одним сообщением.", sender.lastText())
     assertTrue(support.createCalls.isEmpty())
+}
+
+private suspend fun successfulAskConfirmation(miniAppUrl: String?): SendMessage {
+    val sender = FallbackRecordingTelegramSender()
+    val support = RecordingSupportService()
+    val handler =
+        handler(
+            sender = sender,
+            now = TEST_NOW,
+            bookings = emptyList(),
+            supportService = support,
+            miniAppUrl = miniAppUrl,
+        )
+
+    assertTrue(handler.handle(askCallbackUpdate("ask:club:1:topic:other")))
+    val prompt = sender.lastText()
+    assertTrue(
+        handler.handle(
+            messageUpdate(
+                text = "  Where is the entrance?  ",
+                replyText = prompt,
+                replyFromUserId = TEST_BOT_USER_ID,
+            ),
+        ),
+    )
+    assertEquals(1, support.createCalls.size)
+    return sender.lastSendMessage()
+}
+
+private fun assertTicketCreatedConfirmation(confirmation: SendMessage) {
+    assertEquals("Вопрос отправлен в клуб. Мы скоро ответим.", confirmation.parameters["text"])
+}
+
+private fun assertGuestSupportButton(
+    confirmation: SendMessage,
+    expectedUrl: String,
+) {
+    val markup = confirmation.parameters["reply_markup"] as InlineKeyboardMarkup
+    val button = markup.inlineKeyboard().single().single()
+    assertEquals("Мои обращения", button.text)
+    assertEquals(expectedUrl, button.webApp?.url())
 }

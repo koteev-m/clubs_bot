@@ -17,6 +17,7 @@ env.env
 !.env.example
 scripts/dev-env.local.sh
 miniapp/node_modules/
+miniapp/test-results/
 miniapp/src/assets/halls/*.png
 
 # local env/scripts

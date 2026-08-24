@@ -7,6 +7,7 @@ import { setInitData } from '../shared/api/http';
 import AdminShell from '../modules/admin/pages/AdminShell';
 import PromoterShell from '../modules/promoter/pages/PromoterShell';
 import SupportShell from '../modules/support/pages/SupportShell';
+import GuestSupportShell from '../modules/guest/pages/GuestSupportShell';
 
 /**
  * Root application component deciding between Guest and Entry modes.
@@ -19,6 +20,7 @@ export default function App() {
     const value = params.get('mode');
     if (value === 'admin') return 'admin';
     if (value === 'support') return 'support';
+    if (value === 'guest-support') return 'guest-support';
     if (value === 'promoter') return 'promoter';
     if (value === 'entry') return 'entry';
     if (value === 'my-nights') return 'my-nights';
@@ -39,11 +41,11 @@ export default function App() {
   if (mode === 'admin') {
     return <AdminShell />;
   }
-  if (mode === 'support') {
+  if (mode === 'support' || mode === 'guest-support') {
     if (installedInitData !== initData) {
       return <main aria-busy="true" aria-label="Loading support access" />;
     }
-    return <SupportShell />;
+    return mode === 'support' ? <SupportShell /> : <GuestSupportShell />;
   }
   if (mode === 'promoter') {
     return <PromoterShell />;
