@@ -357,7 +357,7 @@ class TelegramGuestFallbackHandler(
                 return true
             }
         when (result) {
-            is SupportServiceResult.Success -> sendToMessage(message, "Вопрос отправлен в клуб. Мы скоро ответим.")
+            is SupportServiceResult.Success -> sendTicketCreatedConfirmation(message)
             is SupportServiceResult.Failure -> sendToMessage(message, "Не удалось отправить вопрос. Попробуйте позже.")
         }
         return true
@@ -370,6 +370,83 @@ class TelegramGuestFallbackHandler(
         val request = SendMessage(message.chat().id(), text)
         applyThread(request, message.threadIdOrNull())
         send(request)
+    }
+
+    private suspend fun sendTicketCreatedConfirmation(message: Message) {
+        val request = SendMessage(message.chat().id(), TICKET_CREATED_TEXT)
+        miniAppUrl?.let(::guestSupportUrlOrNull)?.let { guestSupportUrl ->
+            request.replyMarkup(
+                InlineKeyboardMarkup(
+                    arrayOf(
+                        InlineKeyboardButton(MY_SUPPORT_TICKETS_BUTTON_TEXT)
+                            .webApp(WebAppInfo(guestSupportUrl)),
+                    ),
+                ),
+            )
+        }
+        applyThread(request, message.threadIdOrNull())
+        send(request)
+    }
+
+    private fun guestSupportUrlOrNull(configuredMiniAppUrl: String): String? {
+        val configuredUri = parseGuestSupportUriOrNull(configuredMiniAppUrl) ?: return null
+        return if (configuredUri.isSafeGuestSupportBase()) {
+            buildGuestSupportUrlOrNull(configuredMiniAppUrl)
+        } else {
+            null
+        }
+    }
+
+    private fun parseGuestSupportUriOrNull(configuredMiniAppUrl: String): java.net.URI? =
+        try {
+            java.net.URI(configuredMiniAppUrl)
+        } catch (_: java.net.URISyntaxException) {
+            null
+        }
+
+    private fun java.net.URI.isSafeGuestSupportBase(): Boolean =
+        when {
+            !isAbsolute -> false
+            !hasHttpScheme() -> false
+            host.isNullOrBlank() -> false
+            rawUserInfo != null -> false
+            port == 0 -> false
+            port > MAX_URL_PORT -> false
+            else -> true
+        }
+
+    private fun java.net.URI.hasHttpScheme(): Boolean =
+        scheme.equals("http", ignoreCase = true) || scheme.equals("https", ignoreCase = true)
+
+    private fun buildGuestSupportUrlOrNull(configuredMiniAppUrl: String): String? =
+        try {
+            val urlBuilder = io.ktor.http.URLBuilder(configuredMiniAppUrl)
+            val encodedParameterNames = urlBuilder.encodedParameters.names()
+            if (
+                encodedParameterNames.any { encodedName ->
+                    isSensitiveGuestSupportQueryParameter(decodeGuestSupportQueryParameterName(encodedName))
+                }
+            ) {
+                null
+            } else {
+                encodedParameterNames
+                    .filter { encodedName ->
+                        decodeGuestSupportQueryParameterName(encodedName)
+                            .equals(GUEST_SUPPORT_MODE_PARAMETER, ignoreCase = true)
+                    }.forEach(urlBuilder.encodedParameters::remove)
+                urlBuilder.parameters[GUEST_SUPPORT_MODE_PARAMETER] = GUEST_SUPPORT_MODE
+                urlBuilder.buildString()
+            }
+        } catch (_: io.ktor.http.URLParserException) {
+            null
+        }
+
+    private fun decodeGuestSupportQueryParameterName(encodedName: String): String =
+        java.net.URLDecoder.decode(encodedName, Charsets.UTF_8)
+
+    private fun isSensitiveGuestSupportQueryParameter(name: String): Boolean {
+        val normalizedName = name.lowercase().filter(Char::isLetterOrDigit)
+        return guestSupportSensitiveQueryMarkers.any(normalizedName::contains)
     }
 
     private suspend fun resolveUser(message: Message): User? {
@@ -570,6 +647,11 @@ private fun Message.hasDisallowedAskPromptProvenance(): Boolean =
 
 private const val WELCOME_TEXT = "Добро пожаловать в Night Concierge!"
 private const val OPEN_MINI_APP_BUTTON_TEXT = "Открыть Night Concierge"
+private const val TICKET_CREATED_TEXT = "Вопрос отправлен в клуб. Мы скоро ответим."
+private const val MY_SUPPORT_TICKETS_BUTTON_TEXT = "Мои обращения"
+private const val GUEST_SUPPORT_MODE_PARAMETER = "mode"
+private const val GUEST_SUPPORT_MODE = "guest-support"
+private const val MAX_URL_PORT = 65_535
 private const val IDENTITY_PROVISIONING_FAILURE_TEXT = "Не удалось начать работу. Попробуйте позже."
 private const val BOT_IDENTITY_FAILURE_TEXT = "Не удалось подтвердить сообщение бота. Начните заново через /ask."
 private const val ASK_CLUB_CALLBACK_PREFIX = "ask:club:"
@@ -582,6 +664,19 @@ private const val ASK_CONTEXT_PREFIX = "askContext:$ASK_CONTEXT_VERSION:"
 private const val ASK_CONTEXT_FIELD_COUNT = 4
 private const val ASK_PROMPT_CLUB_PREFIX = "Клуб: "
 private val canonicalPositiveLongPattern = Regex("[1-9][0-9]*")
+private val guestSupportSensitiveQueryMarkers =
+    listOf(
+        "user",
+        "telegram",
+        "owner",
+        "ticket",
+        "club",
+        "identity",
+        "authority",
+        "initdata",
+        "token",
+        "secret",
+    )
 
 @Suppress("DEPRECATION")
 private fun Message.threadIdOrNull(): Int? = runCatching { messageThreadId() }.getOrNull()

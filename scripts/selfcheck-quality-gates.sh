@@ -6852,6 +6852,10 @@ echo "quality-gate: Trivy workflow contract verified"
 validate_container_smoke_workflow "$container_smoke_workflow"
 echo "quality-gate: Container Smoke runtime/network contract verified"
 
+miniapp_dist_validator="$ROOT_DIR/scripts/validate-miniapp-dist.sh"
+bash "$miniapp_dist_validator" "$ROOT_DIR/miniapp/dist"
+echo "quality-gate: tracked React dist references verified"
+
 "$ROOT_DIR/gradlew" :app-bot:installDist --rerun-tasks --console=plain
 validate_packaged_launcher "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot"
 validate_packaged_launcher "$ROOT_DIR/app-bot/build/install/app-bot/bin/app-bot.bat"
@@ -6884,7 +6888,6 @@ tools/build
 tools/perf/build
 node_modules
 miniapp/node_modules
-miniapp/dist
 *.log
 *.tmp
 .env
@@ -6957,7 +6960,6 @@ for dockerignore_rule in \
   ".git" \
   "node_modules" \
   "miniapp/node_modules" \
-  "miniapp/dist" \
   ".env" \
   ".env.*" \
   "env.env" \
@@ -6988,6 +6990,14 @@ assert_validation_rejected \
   "dockerignore-wide-src-main" \
   validate_dockerignore_contract \
   "$dockerignore_wide_src_fixture"
+
+dockerignore_react_dist_fixture="$TMP_DIR/dockerignore-react-dist"
+cp "$dockerignore_file" "$dockerignore_react_dist_fixture"
+printf '\n%s\n' "miniapp/dist" >>"$dockerignore_react_dist_fixture"
+assert_validation_rejected \
+  "dockerignore-react-dist" \
+  validate_dockerignore_contract \
+  "$dockerignore_react_dist_fixture"
 
 workflow_capability_validator="$ROOT_DIR/scripts/validate-workflow-capabilities.rb"
 workflow_yaml_validator="$ROOT_DIR/scripts/validate-workflow-yaml.rb"
@@ -11484,11 +11494,15 @@ echo "quality-gate: quiesced deployment workflow contract verified"
 
 dockerfile="$ROOT_DIR/Dockerfile"
 copy_line="$(awk '$0 == "COPY . ." { print NR }' "$dockerfile")"
-placeholder_line="$(awk 'index($0, "mkdir -p miniapp/dist") { print NR }' "$dockerfile")"
+react_validator_line="$(awk 'index($0, "bash scripts/validate-miniapp-dist.sh miniapp/dist") { print NR }' "$dockerfile")"
 install_line="$(awk 'index($0, "./gradlew --no-daemon :app-bot:installDist -x test") { print NR }' "$dockerfile")"
-if [ -z "$copy_line" ] || [ -z "$placeholder_line" ] || [ -z "$install_line" ] ||
-  [ "$copy_line" -ge "$placeholder_line" ] || [ "$placeholder_line" -ge "$install_line" ]; then
+if [ -z "$copy_line" ] || [ -z "$react_validator_line" ] || [ -z "$install_line" ] ||
+  [ "$copy_line" -ge "$react_validator_line" ] || [ "$react_validator_line" -ge "$install_line" ]; then
   fail "Dockerfile COPY/installDist contract changed"
+fi
+
+if grep -Fq "mkdir -p miniapp/dist" "$dockerfile"; then
+  fail "Dockerfile must not mask missing tracked React assets with an empty dist directory"
 fi
 
 echo "quality-gate: Docker workflow/context contract verified"

@@ -26,7 +26,6 @@ tools/perf/build
 # Node / front
 node_modules
 miniapp/node_modules
-miniapp/dist
 
 # Logs / temp
 *.log
