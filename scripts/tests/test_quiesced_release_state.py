@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Any
@@ -3728,5 +3729,50 @@ class RunnerClassificationTest(unittest.TestCase):
             self.assert_redacted(result)
 
 
+STRICT_CI_ARGUMENT = "--strict-ci"
+EXPECTED_TEST_COUNT = 73
+
+
+def run_strict_ci_suite() -> int:
+    suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    outcome_counts = {
+        "testsRun": result.testsRun,
+        "failures": len(result.failures),
+        "errors": len(result.errors),
+        "skipped": len(result.skipped),
+        "expectedFailures": len(result.expectedFailures),
+        "unexpectedSuccesses": len(result.unexpectedSuccesses),
+    }
+    perfect = outcome_counts == {
+        "testsRun": EXPECTED_TEST_COUNT,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "expectedFailures": 0,
+        "unexpectedSuccesses": 0,
+    }
+    if not perfect:
+        print(
+            "release-state-suite: strict result rejected "
+            + " ".join(f"{key}={value}" for key, value in outcome_counts.items()),
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        "release-state-suite: 73/73 passed; failures=0 errors=0 skipped=0 "
+        "expectedFailures=0 unexpectedSuccesses=0"
+    )
+    return 0
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == [STRICT_CI_ARGUMENT]:
+        raise SystemExit(run_strict_ci_suite())
+    if STRICT_CI_ARGUMENT in sys.argv[1:]:
+        print(
+            f"usage: {Path(sys.argv[0]).name} [{STRICT_CI_ARGUMENT}]",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     unittest.main()
