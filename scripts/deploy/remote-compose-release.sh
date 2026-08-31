@@ -784,8 +784,8 @@ write_checkpoint() {
 
 ensure_result_dir() {
   if [ -e "$result_dir" ] || [ -L "$result_dir" ]; then
-    trusted_directory "$result_dir" 700
-    return
+    trusted_directory "$result_dir" 700 || return 1
+    return 0
   fi
   ensure_durable_directory "$result_dir" || {
     failure_category="durability_failure"

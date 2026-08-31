@@ -1182,6 +1182,15 @@ class RemoteHarness:
             if line
         ]
 
+    def rename_entries(self) -> list[tuple[Path, Path]]:
+        entries: list[tuple[Path, Path]] = []
+        for line in self.mv_log.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            source, target = line.split("\t", 1)
+            entries.append((Path(source), Path(target)))
+        return entries
+
     def lifecycle_commands(self) -> list[list[str]]:
         lifecycle: list[list[str]] = []
         for command in self.docker_commands():
@@ -3415,7 +3424,9 @@ prune_terminal_artifacts
     def test_atomic_filesystem_failure_suppresses_arbitrary_child_stderr(self) -> None:
         with RemoteHarness() as harness:
             harness.progress_to("prior_state_captured")
+            harness.clear_command_logs()
             harness.configure_mv_failure("/docker-compose.override.yml")
+            result_path = harness.result_dir / f"{OWNER}.result"
 
             result = harness.operation("publish")
 
@@ -3423,11 +3434,43 @@ prune_terminal_artifacts
             combined = result.stdout + result.stderr
             for forbidden in SENSITIVE_VALUES:
                 self.assertNotIn(forbidden, combined)
-            self.assertEqual("remote_failure", harness.result()["result"])
+            record = harness.result()
+            self.assertEqual("publish", record["requested_operation"])
+            self.assertEqual("prior_state_captured", record["checkpoint_before"])
+            self.assertEqual("prior_state_captured", record["checkpoint_after"])
+            self.assertEqual("remote_failure", record["result"])
+            self.assertEqual("override_invalid", record["failure_category"])
+            self.assertEqual(OWNER, record["owner"])
+            self.assertEqual(REVISION, record["expected_revision"])
+            self.assertEqual(DIGEST, record["image_digest"])
+            self.assertEqual(
+                hashlib.sha256(str(harness.compose_path).encode()).hexdigest(),
+                record["compose_path_hash"],
+            )
+            result_renames = [
+                (source, target)
+                for source, target in harness.rename_entries()
+                if target == result_path
+            ]
+            self.assertEqual(2, len(result_renames), result_renames)
+            self.assertTrue(
+                all(".result.tmp." in source.name for source, _ in result_renames),
+                result_renames,
+            )
+            terminal_inode = result_path.stat().st_ino
+            terminal_hash = hashlib.sha256(result_path.read_bytes()).hexdigest()
+            self.assertEqual({result_path}, set(harness.result_dir.glob(f"{OWNER}.result*")))
+            self.assertEqual(
+                [],
+                list(harness.volatile_root.glob(f".clubs-release-previous.{OWNER}.*")),
+            )
+            self.assertEqual(terminal_inode, result_path.stat().st_ino)
+            self.assertEqual(terminal_hash, hashlib.sha256(result_path.read_bytes()).hexdigest())
 
     def test_remote_child_exit_255_is_recorded_as_child_failure(self) -> None:
         with RemoteHarness() as harness:
             harness.progress_to("candidate_override_published")
+            harness.clear_command_logs()
             harness.fail_docker("compose_stop", 255)
             result = harness.operation("quiesce")
             self.assertEqual(255, result.returncode)
@@ -3435,6 +3478,56 @@ prune_terminal_artifacts
             self.assertEqual("remote_failure", record["result"])
             self.assertEqual("child_exit_255", record["failure_category"])
             self.assertEqual("app_stop_intent", record["checkpoint_after"])
+            stop_commands = [
+                command for command in harness.lifecycle_commands() if "stop" in command
+            ]
+            self.assertEqual(1, len(stop_commands), stop_commands)
+            self.assertEqual(0, harness.docker_state()["migration_invocations"])
+            self.assertEqual(0, harness.docker_state()["start_invocations"])
+            for forbidden in SENSITIVE_VALUES:
+                self.assertNotIn(forbidden, result.stdout + result.stderr)
+
+        with self.subTest(terminal_result_persistence="rename"), RemoteHarness() as harness:
+            harness.progress_to("candidate_override_published")
+            harness.clear_command_logs()
+            harness.configure_mv_failure(".result", match_at=2)
+            harness.fail_docker("compose_stop", 61)
+            result_path = harness.result_dir / f"{OWNER}.result"
+
+            result = harness.operation("quiesce")
+
+            self.assertEqual(61, result.returncode)
+            self.assertNotIn("result=success", result.stdout)
+            self.assertEqual(
+                {
+                    "result": "incomplete_unknown",
+                    "failure_category": "operation_in_progress",
+                    "checkpoint_after": "unavailable",
+                },
+                {
+                    key: harness.result()[key]
+                    for key in ("result", "failure_category", "checkpoint_after")
+                },
+            )
+            result_renames = [
+                (source, target)
+                for source, target in harness.rename_entries()
+                if target == result_path
+            ]
+            self.assertEqual(2, len(result_renames), result_renames)
+            stop_commands = [
+                command for command in harness.lifecycle_commands() if "stop" in command
+            ]
+            self.assertEqual(1, len(stop_commands), stop_commands)
+            self.assertEqual(0, harness.docker_state()["migration_invocations"])
+            self.assertEqual(0, harness.docker_state()["start_invocations"])
+            self.assertEqual({result_path}, set(harness.result_dir.glob(f"{OWNER}.result*")))
+            self.assertEqual(
+                [],
+                list(harness.volatile_root.glob(f".clubs-release-previous.{OWNER}.*")),
+            )
+            for forbidden in SENSITIVE_VALUES:
+                self.assertNotIn(forbidden, result.stdout + result.stderr)
 
 
 class RunnerClassificationTest(unittest.TestCase):
