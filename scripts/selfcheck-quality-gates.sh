@@ -3,6 +3,28 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW_YAML_VALIDATOR="$ROOT_DIR/scripts/validate-workflow-yaml.rb"
+
+usage() {
+  echo "usage: scripts/selfcheck-quality-gates.sh [--ci-delegated-release-state]" >&2
+}
+
+case "$#" in
+  0)
+    RELEASE_STATE_SELFCHECK_MODE="full"
+    ;;
+  1)
+    if [ "$1" != "--ci-delegated-release-state" ]; then
+      usage
+      exit 2
+    fi
+    RELEASE_STATE_SELFCHECK_MODE="ci-delegated"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
+
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/sha256-portable.sh"
 TMP_DIR="$(mktemp -d)"
@@ -8752,6 +8774,7 @@ validate_temporary_remote_docker_credentials() {
   local fake_bin="$fixture_root/bin"
   local fake_home="$fixture_root/home"
   local compose_path="$fixture_root/compose"
+  local release_state_root="$fixture_root/release-state"
   local docker_log="$fixture_root/docker.log"
   local stdout_file="$fixture_root/stdout.log"
   local stderr_file="$fixture_root/stderr.log"
@@ -8761,12 +8784,30 @@ validate_temporary_remote_docker_credentials() {
   local digest_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   local default_config="$fake_home/.docker/config.json"
   local default_before default_after default_mode_before default_mode_after
-  local case_name expected_status actual_status registry_config credential_path
+  local case_name case_state_root expected_status actual_status registry_config credential_path
 
-  mkdir -p "$fake_bin" "$fake_home/.docker" "$compose_path"
+  mkdir -p "$fake_bin" "$fake_home/.docker" "$compose_path" "$release_state_root"
+  compose_path="$(cd "$compose_path" && pwd -P)"
+  release_state_root="$(cd "$release_state_root" && pwd -P)"
   printf '%s\n' '{"auths":{"sentinel.invalid":{"auth":"unchanged"}}}' >"$default_config"
   chmod 600 "$default_config"
   printf '%s\n' 'services:' '  app:' '    image: local-only' >"$compose_path/docker-compose.yml"
+
+  cat >"$fake_bin/flock" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" = "2" ] && [ "$1" = "-n" ] && { [ "$2" = "7" ] || [ "$2" = "9" ]; }
+SH
+  chmod 700 "$fake_bin/flock"
+
+  cat >"$fake_bin/sync" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$#" = "1" ]
+[ -f "$1" ] || [ -d "$1" ]
+[ ! -L "$1" ]
+SH
+  chmod 700 "$fake_bin/sync"
 
   cat >"$fake_bin/docker" <<'SH'
 #!/usr/bin/env bash
@@ -8790,7 +8831,20 @@ record_config() {
 case "$command_name" in
   compose)
     printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
-    printf '%s\n' app
+    if [[ " $* " == *" ps -aq app "* ]]; then
+      printf '%064d\n' 1
+    else
+      printf '%s\n' app
+    fi
+    ;;
+  inspect)
+    if [[ "$*" == *"com.docker.compose.project"* ]]; then
+      printf '%s\n' fixture-project
+    elif [[ "$*" == *"com.docker.compose.service"* ]]; then
+      printf '%s\n' app
+    else
+      exit 94
+    fi
     ;;
   login)
     [ -n "$config_dir" ]
@@ -8836,6 +8890,10 @@ SH
   default_mode_before="$(stat -c '%a' "$default_config" 2>/dev/null || stat -f '%Lp' "$default_config")"
 
   for case_name in success login digest-pull; do
+    case_state_root="$release_state_root/$case_name"
+    mkdir "$case_state_root"
+    chmod 700 "$case_state_root"
+    case_state_root="$(cd "$case_state_root" && pwd -P)"
     : >"$docker_log"
     : >"$stdout_file"
     : >"$stderr_file"
@@ -8852,10 +8910,12 @@ SH
         FAKE_IMAGE_REPOSITORY="$repository" \
         FAKE_DIGEST_HASH="$digest_hash" \
         FAKE_FAILURE="$case_name" \
+        REMOTE_RELEASE_TESTING=enabled \
+        REMOTE_RELEASE_TEST_ROOT="$case_state_root" \
         bash "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" \
           preflight \
           123-1 \
-          stage \
+          test \
           "$compose_path" \
           "$repository" \
           fixture \
@@ -8889,7 +8949,7 @@ SH
       fail "registry token leaked into structural test output: $case_name"
     fi
     if [ "$case_name" = "success" ]; then
-      [ "$(cat "$stdout_file")" = "$repository@sha256:$digest_hash" ] ||
+      [ "$(cat "$stdout_file")" = "release-operation:v=1 result=success digest=$repository@sha256:$digest_hash" ] ||
         fail "temporary Docker credential success returned the wrong digest"
       [ "$(grep -c $'\tcommand=login$' "$docker_log")" = "1" ] ||
         fail "temporary Docker login count changed"
@@ -9393,8 +9453,10 @@ lint_job_if="$(copy_payment_hardening_fixture lint-payment-job-if)"
 replace_payment_text_once \
   "$lint_job_if/.github/workflows/lint.yml" \
   '  lint:
+    name: lint
     runs-on: ubuntu-latest' \
   '  lint:
+    name: lint
     if: always()
     runs-on: ubuntu-latest'
 assert_lint_payment_runtime_rejected "lint-payment-job-if" "$lint_job_if"
@@ -10748,623 +10810,456 @@ assert_required_runtime_rejected "payment-runtime-zero-tests" "zero" "$payment_r
 
 echo "quality-gate: payment hardening contract verified"
 
-quiesced_contract_validator="$ROOT_DIR/scripts/validate-quiesced-deployment.sh"
-"$quiesced_contract_validator" "$ROOT_DIR"
+validate_lint_release_state_contract() {
+  local workflow_file="$1"
+  ruby -I"$ROOT_DIR/scripts" -rvalidate-workflow-yaml \
+    - "$workflow_file" <<'RUBY'
+def reject_contract(message)
+  warn "lint-release-state-contract: #{message}"
+  exit 1
+end
 
-quiesced_fixture_base="$TMP_DIR/quiesced-deployment-base"
-mkdir -p \
-  "$quiesced_fixture_base/.github/workflows" \
-  "$quiesced_fixture_base/scripts/deploy" \
-  "$quiesced_fixture_base/app-bot/src/main/dist/bin" \
-  "$quiesced_fixture_base/app-bot/src/main/kotlin/com/example/bot/tools" \
-  "$quiesced_fixture_base/app-bot/src/main/resources" \
-  "$quiesced_fixture_base/app-bot/src/test/kotlin/com/example/bot/tools" \
-  "$quiesced_fixture_base/core-data/src/main/kotlin/com/example/bot/data/db"
-cp "$ROOT_DIR/.github/workflows/deploy-ssh.yml" "$quiesced_fixture_base/.github/workflows/"
-cp "$ROOT_DIR/.github/workflows/db-migrate.yml" "$quiesced_fixture_base/.github/workflows/"
-cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$quiesced_fixture_base/scripts/deploy/"
-cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$quiesced_fixture_base/scripts/deploy/"
-cp "$ROOT_DIR/Dockerfile" "$quiesced_fixture_base/"
-cp "$ROOT_DIR/docker-compose.yml" "$quiesced_fixture_base/"
-cp "$ROOT_DIR/app-bot/build.gradle.kts" "$quiesced_fixture_base/app-bot/"
-cp \
-  "$ROOT_DIR/app-bot/src/main/dist/bin/app-bot-migrate" \
-  "$quiesced_fixture_base/app-bot/src/main/dist/bin/"
-cp \
-  "$ROOT_DIR/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
-  "$quiesced_fixture_base/app-bot/src/main/kotlin/com/example/bot/tools/"
-cp \
-  "$ROOT_DIR/app-bot/src/main/resources/quiesced-migration-logback.xml" \
-  "$quiesced_fixture_base/app-bot/src/main/resources/"
-cp \
-  "$ROOT_DIR/app-bot/src/test/kotlin/com/example/bot/tools/QuiescedMigrateMainTest.kt" \
-  "$quiesced_fixture_base/app-bot/src/test/kotlin/com/example/bot/tools/"
-cp \
-  "$ROOT_DIR/core-data/src/main/kotlin/com/example/bot/data/db/DbConfig.kt" \
-  "$quiesced_fixture_base/core-data/src/main/kotlin/com/example/bot/data/db/"
+def reject_custom_shell_override(scope)
+  reject_contract("custom shell override is forbidden: #{scope}")
+end
 
-copy_quiesced_fixture() {
+path = ARGV.fetch(0)
+begin
+  workflow = WorkflowYamlSafety.safe_load_workflow(
+    File.binread(path),
+    ".github/workflows/lint.yml"
+  )
+rescue WorkflowYamlSafety::ModelError, Psych::SyntaxError, SystemCallError, ArgumentError => error
+  reject_contract("workflow is unreadable or malformed: #{error.message}")
+end
+
+reject_contract("workflow name changed") unless workflow["name"] == "Lint"
+reject_custom_shell_override("workflow defaults") if workflow.key?("defaults")
+reject_contract("workflow-level concurrency is forbidden") if workflow.key?("concurrency")
+triggers = workflow["on"] || workflow[true]
+reject_contract("workflow triggers must be a mapping") unless triggers.is_a?(Hash)
+reject_contract("pull_request trigger is missing") unless triggers.key?("pull_request")
+push = triggers["push"]
+unless push.is_a?(Hash) && push["branches"] == ["main"]
+  reject_contract("push trigger must target only main")
+end
+unless workflow["permissions"] == {"contents" => "read"}
+  reject_contract("permissions must be exactly contents: read")
+end
+
+jobs = workflow["jobs"]
+reject_contract("jobs must be a mapping") unless jobs.is_a?(Hash)
+unless jobs.keys == ["lint", "release-state"]
+  reject_contract("jobs must be exactly lint and release-state")
+end
+lint = jobs["lint"]
+release_state = jobs["release-state"]
+unless lint.is_a?(Hash) && release_state.is_a?(Hash)
+  reject_contract("lint and release-state jobs must be mappings")
+end
+unless lint["name"] == "lint" && release_state["name"] == "release-state"
+  reject_contract("stable job names changed")
+end
+unless lint["runs-on"] == "ubuntu-latest" && release_state["runs-on"] == "ubuntu-latest"
+  reject_contract("jobs must use the supported runner")
+end
+reject_contract("lint timeout changed") unless lint["timeout-minutes"] == 30
+reject_contract("release-state timeout must be exactly 50 minutes") unless release_state["timeout-minutes"] == 50
+
+[["lint", lint], ["release-state", release_state]].each do |job_name, job|
+  reject_custom_shell_override("#{job_name} job defaults") if job.key?("defaults")
+  reject_contract("job-level if is forbidden") if job.key?("if")
+  reject_contract("jobs must not depend on each other") if job.key?("needs")
+  reject_contract("job continues on error") if job.key?("continue-on-error")
+  reject_contract("job-level permissions must inherit the shared read-only boundary") if job.key?("permissions")
+end
+
+lint_concurrency = lint["concurrency"]
+unless lint_concurrency == {
+  "group" => "lint-${{ github.workflow }}-${{ github.ref }}",
+  "cancel-in-progress" => true,
+}
+  reject_contract("lint concurrency must remain ref-oriented and cancelling")
+end
+candidate_sha = "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+release_concurrency = release_state["concurrency"]
+unless release_concurrency == {
+  "group" => "release-state-#{candidate_sha}",
+  "cancel-in-progress" => false,
+}
+  reject_contract("release-state concurrency must be exact-SHA keyed and non-cancelling")
+end
+
+def checked_steps(job, job_name)
+  steps = job["steps"]
+  reject_contract("#{job_name} steps must be an array") unless steps.is_a?(Array)
+  unless steps.all? { |step| step.is_a?(Hash) && step["name"].is_a?(String) }
+    reject_contract("every #{job_name} step must be a named mapping")
+  end
+  names = steps.map { |step| step["name"] }
+  reject_contract("#{job_name} step names are duplicated") unless names.uniq.length == names.length
+  steps
+end
+
+def one_step(steps, name)
+  matches = steps.select { |step| step["name"] == name }
+  reject_contract("step #{name.inspect} must appear exactly once") unless matches.length == 1
+  matches.fetch(0)
+end
+
+lint_steps = checked_steps(lint, "lint")
+release_steps = checked_steps(release_state, "release-state")
+expected_lint_steps = [
+  "Checkout",
+  "Set up JDK 21",
+  "Gradle cache & setup",
+  "Payment hardening required runtime",
+  "Quality gate regression self-check",
+  "Run detekt gate (blocking, baseline-aware)",
+  "Run ktlint gate (baseline-aware; Kotlin changes only)",
+  "Upload lint reports",
+]
+expected_release_steps = [
+  "Checkout exact candidate",
+  "Verify Python 3.11+",
+  "Validate release-state structure",
+  "Run strict release-state suite",
+]
+unless lint_steps.map { |step| step["name"] } == expected_lint_steps
+  reject_contract("lint step inventory changed")
+end
+unless release_steps.map { |step| step["name"] } == expected_release_steps
+  reject_contract("release-state step inventory changed")
+end
+
+(lint_steps + release_steps).each do |step|
+  reject_contract("step continues on error") if step.key?("continue-on-error")
+  if step.key?("run") && step.key?("shell")
+    reject_custom_shell_override("run step")
+  end
+  run = step["run"]
+  reject_contract("step hides failure with || true") if run.is_a?(String) && run.include?("|| true")
+end
+
+checkout = one_step(release_steps, "Checkout exact candidate")
+reject_contract("release-state checkout is conditional") if checkout.key?("if")
+unless checkout["uses"] == "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332"
+  reject_contract("release-state checkout action pin changed")
+end
+unless checkout["with"] == {
+  "ref" => candidate_sha,
+  "fetch-depth" => 0,
+  "persist-credentials" => false,
+}
+  reject_contract("release-state checkout must use the exact candidate SHA")
+end
+
+python_check = one_step(release_steps, "Verify Python 3.11+")
+python_run = python_check["run"]
+unless python_run.is_a?(String) && python_run.include?("sys.version_info < (3, 11)") &&
+    python_run.include?("raise SystemExit")
+  reject_contract("release-state Python version check is not fail-closed")
+end
+reject_contract("Python version check is conditional") if python_check.key?("if")
+
+delegated = one_step(lint_steps, "Quality gate regression self-check")
+structural = one_step(release_steps, "Validate release-state structure")
+suite = one_step(release_steps, "Run strict release-state suite")
+[delegated, structural, suite].each do |step|
+  reject_contract("mandatory invocation is conditional") if step.key?("if")
+end
+unless delegated["run"] == "./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state"
+  reject_contract("lint must invoke the exact delegated selfcheck mode")
+end
+unless structural["run"] == "./scripts/validate-quiesced-deployment.sh ."
+  reject_contract("release-state structural validator command changed")
+end
+strict_command = "PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/test_quiesced_release_state.py --strict-ci"
+reject_contract("release-state strict suite command changed") unless suite["run"] == strict_command
+
+all_runs = (lint_steps + release_steps).each_with_object([]) do |step, runs|
+  runs << step["run"] if step["run"].is_a?(String)
+end
+unless all_runs.count { |run| run.include?("scripts/validate-quiesced-deployment.sh") } == 1
+  reject_contract("structural validator must be invoked exactly once")
+end
+unless all_runs.count { |run| run.include?("scripts/tests/test_quiesced_release_state.py") } == 1
+  reject_contract("full release-state suite must be invoked exactly once")
+end
+unless all_runs.count { |run| run.include?("--ci-delegated-release-state") } == 1
+  reject_contract("lint delegation mode must be invoked exactly once")
+end
+if lint_steps.any? { |step| step["run"].is_a?(String) && step["run"].include?("test_quiesced_release_state") }
+  reject_contract("lint delegated mode must not own the full release-state suite")
+end
+release_surface = release_steps.flat_map { |step| [step["uses"], step["run"]] }.compact.join("\n")
+if release_surface.match?(/setup-java|gradle|docker/i)
+  reject_contract("release-state gained unrelated JDK, Gradle, or Docker setup")
+end
+
+puts "quality-gate: lint/release-state delegation contract verified"
+RUBY
+}
+
+copy_lint_release_state_fixture() {
   local fixture_name="$1"
-  local fixture_root="$TMP_DIR/$fixture_name"
-  cp -R "$quiesced_fixture_base" "$fixture_root"
-  printf '%s' "$fixture_root"
+  local fixture_root="$TMP_DIR/lint-release-state-$fixture_name"
+  mkdir -p "$fixture_root/.github/workflows"
+  cp "$ROOT_DIR/.github/workflows/lint.yml" "$fixture_root/.github/workflows/lint.yml"
+  printf '%s\n' "$fixture_root"
 }
 
-quiesced_migration_before_stop="$(copy_quiesced_fixture quiesced-migration-before-stop)"
-python3 - "$quiesced_migration_before_stop/scripts/deploy/quiesced-release.sh" <<'PY'
+mutate_lint_release_state_fixture() {
+  local workflow_file="$1"
+  local fixture_case="$2"
+  python3 - "$workflow_file" "$fixture_case" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
+fixture_case = sys.argv[2]
 text = path.read_text(encoding="utf-8")
-old = """  preflight_remote_release
-  quiesce_remote_release
-  assert_remote_app_absent
-  run_database_migration
-"""
-new = """  run_database_migration
-  preflight_remote_release
-  quiesce_remote_release
-  assert_remote_app_absent
-"""
-if text.count(old) != 1:
-    raise SystemExit("migration-before-stop fixture source changed")
-path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def replace_once(old: str, replacement: str) -> None:
+    global text
+    if text.count(old) != 1:
+        raise SystemExit(f"lint release-state fixture source changed for {fixture_case}: {old!r}")
+    text = text.replace(old, replacement)
+
+
+candidate = "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+strict_command = "PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/test_quiesced_release_state.py --strict-ci"
+fail_open_shell = '''bash -c 'bash "$1" || true' -- {0}'''
+
+if fixture_case == "shell-workflow-default":
+    replace_once(
+        "jobs:\n",
+        f"defaults:\n  run:\n    shell: {fail_open_shell}\n\njobs:\n",
+    )
+elif fixture_case == "shell-lint-job-default":
+    replace_once(
+        "  lint:\n    name: lint\n",
+        f"  lint:\n    name: lint\n    defaults:\n      run:\n        shell: {fail_open_shell}\n",
+    )
+elif fixture_case == "shell-release-job-default":
+    replace_once(
+        "  release-state:\n    name: release-state\n",
+        f"  release-state:\n    name: release-state\n    defaults:\n      run:\n        shell: {fail_open_shell}\n",
+    )
+elif fixture_case == "shell-lint-delegated-step":
+    replace_once(
+        "      - name: Quality gate regression self-check\n        run:",
+        f"      - name: Quality gate regression self-check\n        shell: {fail_open_shell}\n        run:",
+    )
+elif fixture_case == "shell-release-structural-step":
+    replace_once(
+        "      - name: Validate release-state structure\n        run:",
+        f"      - name: Validate release-state structure\n        shell: {fail_open_shell}\n        run:",
+    )
+elif fixture_case == "shell-release-strict-step":
+    replace_once(
+        "      - name: Run strict release-state suite\n        run:",
+        f"      - name: Run strict release-state suite\n        shell: {fail_open_shell}\n        run:",
+    )
+elif fixture_case == "release-job-missing":
+    marker = "\n  release-state:\n"
+    if text.count(marker) != 1:
+        raise SystemExit("release-state job marker changed")
+    text = text.split(marker, 1)[0] + "\n"
+elif fixture_case == "release-job-duplicated":
+    marker = "\n  release-state:\n"
+    if text.count(marker) != 1:
+        raise SystemExit("release-state job marker changed")
+    block = text[text.index(marker) + 1 :]
+    text = text + "\n" + block
+elif fixture_case == "release-job-wrong-name":
+    replace_once("  release-state:\n", "  release-evidence:\n")
+elif fixture_case == "checkout-base-sha":
+    replace_once(f"          ref: {candidate}\n", "          ref: ${{ github.event.pull_request.base.sha }}\n")
+elif fixture_case == "checkout-implicit-merge-ref":
+    replace_once(f"          ref: {candidate}\n", "")
+elif fixture_case == "checkout-unconditional-github-sha":
+    replace_once(f"          ref: {candidate}\n", "          ref: ${{ github.sha }}\n")
+elif fixture_case == "checkout-mutable-branch":
+    replace_once(f"          ref: {candidate}\n", "          ref: ${{ github.head_ref }}\n")
+elif fixture_case == "checkout-conditional":
+    replace_once(
+        "      - name: Checkout exact candidate\n        uses:",
+        "      - name: Checkout exact candidate\n        if: ${{ github.event_name == 'push' }}\n        uses:",
+    )
+elif fixture_case == "release-concurrency-ref-only":
+    replace_once(f"      group: release-state-{candidate}\n", "      group: release-state-${{ github.ref }}\n")
+elif fixture_case == "release-concurrency-cancel-true":
+    replace_once("      cancel-in-progress: false\n", "      cancel-in-progress: true\n")
+elif fixture_case == "release-concurrency-duplicated":
+    block = (
+        "    concurrency:\n"
+        f"      group: release-state-{candidate}\n"
+        "      cancel-in-progress: false\n"
+    )
+    replace_once(block, block + block)
+elif fixture_case == "workflow-cancelling-concurrency":
+    replace_once(
+        "jobs:\n",
+        "concurrency:\n  group: lint-${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n",
+    )
+elif fixture_case == "suite-removed":
+    replace_once(f"        run: {strict_command}\n", "        run: echo release suite removed\n")
+elif fixture_case == "suite-duplicated":
+    replace_once(
+        f"        run: {strict_command}\n",
+        f"        run: |\n          {strict_command}\n          {strict_command}\n",
+    )
+elif fixture_case == "suite-reduced-selection":
+    replace_once(f"        run: {strict_command}\n", f"        run: {strict_command} RunnerClassificationTest\n")
+elif fixture_case == "structural-removed":
+    replace_once(
+        "        run: ./scripts/validate-quiesced-deployment.sh .\n",
+        "        run: echo structural validator removed\n",
+    )
+elif fixture_case == "structural-duplicated":
+    replace_once(
+        "        run: ./scripts/validate-quiesced-deployment.sh .\n",
+        "        run: |\n          ./scripts/validate-quiesced-deployment.sh .\n          ./scripts/validate-quiesced-deployment.sh .\n",
+    )
+elif fixture_case == "suite-conditional":
+    replace_once(
+        "      - name: Run strict release-state suite\n        run:",
+        "      - name: Run strict release-state suite\n        if: false\n        run:",
+    )
+elif fixture_case == "suite-fail-open":
+    replace_once(f"        run: {strict_command}\n", f"        run: {strict_command} || true\n")
+elif fixture_case == "lint-delegation-removed":
+    replace_once(
+        "        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n",
+        "        run: ./scripts/selfcheck-quality-gates.sh\n",
+    )
+elif fixture_case == "lint-delegation-unknown":
+    replace_once("--ci-delegated-release-state\n", "--ci-delegated-release-state-unknown\n")
+elif fixture_case == "lint-delegation-duplicated":
+    replace_once(
+        "        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n",
+        "        run: |\n          ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n          ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n",
+    )
+elif fixture_case == "jobs-dependent":
+    replace_once(
+        "  release-state:\n    name: release-state\n",
+        "  release-state:\n    name: release-state\n    needs: lint\n",
+    )
+elif fixture_case == "timeout-removed":
+    replace_once("    timeout-minutes: 50\n", "")
+elif fixture_case == "timeout-excessive":
+    replace_once("    timeout-minutes: 50\n", "    timeout-minutes: 65\n")
+else:
+    raise SystemExit(f"unknown lint release-state fixture case: {fixture_case}")
+
+path.write_text(text, encoding="utf-8")
 PY
-assert_validation_rejected \
-  "quiesced-migration-before-stop" \
-  "$quiesced_contract_validator" \
-  "$quiesced_migration_before_stop"
-
-quiesced_old_rollback="$(copy_quiesced_fixture quiesced-old-image-rollback)"
-printf '%s\n' 'previous_tag="pre-v056"' >> \
-  "$quiesced_old_rollback/scripts/deploy/quiesced-release.sh"
-assert_validation_rejected \
-  "quiesced-old-image-rollback" \
-  "$quiesced_contract_validator" \
-  "$quiesced_old_rollback"
-
-quiesced_missing_stop_verification="$(copy_quiesced_fixture quiesced-missing-stop-verification)"
-python3 - "$quiesced_missing_stop_verification/scripts/deploy/remote-compose-release.sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = """stop_and_remove_app() {
-  compose_command stop --timeout 60 app
-  compose_command rm -f app
-  assert_app_absent
 }
-"""
-new = """stop_and_remove_app() {
-  compose_command stop --timeout 60 app
-  compose_command rm -f app
+
+assert_lint_release_state_contract_rejected() {
+  local fixture_name="$1"
+  local expected_diagnostic="${2:-lint-release-state-contract:}"
+  local fixture_root
+  local fixture_log="$TMP_DIR/lint-release-state-$fixture_name.log"
+  local fixture_status
+  fixture_root="$(copy_lint_release_state_fixture "$fixture_name")"
+  mutate_lint_release_state_fixture \
+    "$fixture_root/.github/workflows/lint.yml" \
+    "$fixture_name"
+  if validate_lint_release_state_contract \
+    "$fixture_root/.github/workflows/lint.yml" >"$fixture_log" 2>&1; then
+    fail "lint release-state contract fixture unexpectedly passed: $fixture_name"
+  else
+    fixture_status=$?
+  fi
+  assert_eq "$fixture_status" "1"
+  assert_contains "$(cat "$fixture_log")" "$expected_diagnostic"
+  echo "quality-gate: lint/release-state fixture $fixture_name rejected"
 }
-"""
-if text.count(old) != 1:
-    raise SystemExit("stop-verification fixture source changed")
-path.write_text(text.replace(old, new), encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-missing-stop-verification" \
-  "$quiesced_contract_validator" \
-  "$quiesced_missing_stop_verification"
 
-quiesced_different_group="$(copy_quiesced_fixture quiesced-different-concurrency-group)"
-replace_exact_line_once \
-  "$quiesced_different_group/.github/workflows/db-migrate.yml" \
-  "$quiesced_different_group/.github/workflows/db-migrate.changed.yml" \
-  '  group: payments-schema-${{ github.event_name == '\''push'\'' && '\''prod'\'' || inputs.environment }}' \
-  '  group: unsafe-standalone-migration'
-mv \
-  "$quiesced_different_group/.github/workflows/db-migrate.changed.yml" \
-  "$quiesced_different_group/.github/workflows/db-migrate.yml"
-assert_validation_rejected \
-  "quiesced-different-concurrency-group" \
-  "$quiesced_contract_validator" \
-  "$quiesced_different_group"
+calibrate_lint_release_state_fail_open_shell() {
+  local probe="$TMP_DIR/lint-release-state-shell-probe.sh"
+  local direct_status
+  local wrapped_status
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 37' >"$probe"
+  chmod +x "$probe"
 
-quiesced_direct_migration="$(copy_quiesced_fixture quiesced-direct-db-migration)"
-replace_exact_line_once \
-  "$quiesced_direct_migration/.github/workflows/db-migrate.yml" \
-  "$quiesced_direct_migration/.github/workflows/db-migrate.changed.yml" \
-  '        run: scripts/deploy/quiesced-release.sh' \
-  '        run: ./gradlew flywayMigrate --no-parallel --console=plain'
-mv \
-  "$quiesced_direct_migration/.github/workflows/db-migrate.changed.yml" \
-  "$quiesced_direct_migration/.github/workflows/db-migrate.yml"
-assert_validation_rejected \
-  "quiesced-direct-db-migration" \
-  "$quiesced_contract_validator" \
-  "$quiesced_direct_migration"
+  if "$probe"; then
+    direct_status=0
+  else
+    direct_status=$?
+  fi
+  if bash -c 'bash "$1" || true' -- "$probe"; then
+    wrapped_status=0
+  else
+    wrapped_status=$?
+  fi
 
-quiesced_missing_revision="$(copy_quiesced_fixture quiesced-missing-revision-check)"
-python3 - "$quiesced_missing_revision/scripts/deploy/remote-compose-release.sh" <<'PY'
-from pathlib import Path
-import sys
+  assert_eq "$direct_status" "37"
+  assert_eq "$wrapped_status" "0"
+  echo "quality-gate: custom shell fail-open calibration verified (37 -> 0)"
+}
 
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = "org.opencontainers.image.revision"
-if old not in text:
-    raise SystemExit("revision fixture source changed")
-path.write_text(text.replace(old, "untrusted.image.revision"), encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-missing-revision-check" \
-  "$quiesced_contract_validator" \
-  "$quiesced_missing_revision"
+validate_lint_release_state_contract "$ROOT_DIR/.github/workflows/lint.yml"
+for lint_release_fixture in \
+  release-job-missing \
+  release-job-duplicated \
+  release-job-wrong-name \
+  checkout-base-sha \
+  checkout-implicit-merge-ref \
+  checkout-unconditional-github-sha \
+  checkout-mutable-branch \
+  checkout-conditional \
+  release-concurrency-ref-only \
+  release-concurrency-cancel-true \
+  release-concurrency-duplicated \
+  workflow-cancelling-concurrency \
+  suite-removed \
+  suite-duplicated \
+  suite-reduced-selection \
+  structural-removed \
+  structural-duplicated \
+  suite-conditional \
+  suite-fail-open \
+  lint-delegation-removed \
+  lint-delegation-unknown \
+  lint-delegation-duplicated \
+  jobs-dependent \
+  timeout-removed \
+  timeout-excessive; do
+  assert_lint_release_state_contract_rejected "$lint_release_fixture"
+done
 
-quiesced_missing_post_migration_check="$(copy_quiesced_fixture quiesced-missing-post-migration-check)"
-python3 - "$quiesced_missing_post_migration_check/scripts/deploy/quiesced-release.sh" <<'PY'
-from pathlib import Path
-import sys
+calibrate_lint_release_state_fail_open_shell
+for lint_release_shell_fixture in \
+  shell-workflow-default \
+  shell-lint-job-default \
+  shell-release-job-default \
+  shell-lint-delegated-step \
+  shell-release-structural-step \
+  shell-release-strict-step; do
+  assert_lint_release_state_contract_rejected \
+    "$lint_release_shell_fixture" \
+    "lint-release-state-contract: custom shell override is forbidden"
+done
 
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-needle = "  assert_remote_app_absent\n"
-first = text.find(needle, text.find("run_release()"))
-second = text.find(needle, first + len(needle))
-if first < 0 or second < 0:
-    raise SystemExit("post-migration fixture source changed")
-text = text[:second] + text[second + len(needle):]
-path.write_text(text, encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-missing-post-migration-check" \
-  "$quiesced_contract_validator" \
-  "$quiesced_missing_post_migration_check"
-
-quiesced_failure_cleanup="$(copy_quiesced_fixture quiesced-failure-releases-lock)"
-python3 - "$quiesced_failure_cleanup/scripts/deploy/quiesced-release.sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-needle = '    echo "quiesced-release: failure is fail-closed; maintenance lock owner=$remote_owner is retained" >&2\n'
-if text.count(needle) != 1:
-    raise SystemExit("failure-cleanup fixture source changed")
-text = text.replace(needle, needle + "    remote_command cleanup >/dev/null 2>&1 || true\n")
-path.write_text(text, encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-failure-releases-lock" \
-  "$quiesced_contract_validator" \
-  "$quiesced_failure_cleanup"
-
-quiesced_removes_durable_digest="$(copy_quiesced_fixture quiesced-removes-durable-digest)"
-python3 - "$quiesced_removes_durable_digest/scripts/deploy/remote-compose-release.sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-needle = '    rm -f "$lock_dir/docker-compose.release.yml"\n'
-if text.count(needle) != 1:
-    raise SystemExit("durable-digest fixture source changed")
-text = text.replace(needle, '    rm -f "$persistent_override"\n' + needle)
-path.write_text(text, encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-removes-durable-digest" \
-  "$quiesced_contract_validator" \
-  "$quiesced_removes_durable_digest"
-
-quiesced_late_digest_promotion="$(copy_quiesced_fixture quiesced-late-digest-promotion)"
-python3 - "$quiesced_late_digest_promotion/scripts/deploy/remote-compose-release.sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-quiesce = """    promote_persistent_override
-    stop_and_remove_app
-"""
-start = """  assert_app_absent
-  printf '%s' "starting" >"$lock_dir/phase"
-"""
-if text.count(quiesce) != 1 or text.count(start) != 1:
-    raise SystemExit("late-digest-promotion fixture source changed")
-text = text.replace(quiesce, "    stop_and_remove_app\n")
-text = text.replace(start, "  assert_app_absent\n  promote_persistent_override\n" + start.split("\n", 1)[1])
-path.write_text(text, encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-late-digest-promotion" \
-  "$quiesced_contract_validator" \
-  "$quiesced_late_digest_promotion"
-
-quiesced_confirmation_bypass="$(copy_quiesced_fixture quiesced-confirmation-bypass)"
-replace_exact_line_once \
-  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.yml" \
-  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.changed.yml" \
-  '        if: ${{ !inputs.confirm_quiesced_release }}' \
-  '        if: false'
-mv \
-  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.changed.yml" \
-  "$quiesced_confirmation_bypass/.github/workflows/db-migrate.yml"
-assert_validation_rejected \
-  "quiesced-confirmation-bypass" \
-  "$quiesced_contract_validator" \
-  "$quiesced_confirmation_bypass"
-
-quiesced_confirmation_no_exit="$(copy_quiesced_fixture quiesced-confirmation-no-exit)"
-python3 - "$quiesced_confirmation_no_exit/.github/workflows/db-migrate.yml" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-guard = """          echo "A standalone migration is forbidden; confirm the full quiesced release." >&2
-          exit 1
-"""
-if text.count(guard) != 1:
-    raise SystemExit("confirmation-no-exit fixture source changed")
-path.write_text(text.replace(guard, guard.splitlines(keepends=True)[0]), encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-confirmation-no-exit" \
-  "$quiesced_contract_validator" \
-  "$quiesced_confirmation_no_exit"
-
-quiesced_confirmation_default="$(copy_quiesced_fixture quiesced-confirmation-default-true)"
-replace_exact_line_once \
-  "$quiesced_confirmation_default/.github/workflows/db-migrate.yml" \
-  "$quiesced_confirmation_default/.github/workflows/db-migrate.changed.yml" \
-  '        default: false' \
-  '        default: true'
-mv \
-  "$quiesced_confirmation_default/.github/workflows/db-migrate.changed.yml" \
-  "$quiesced_confirmation_default/.github/workflows/db-migrate.yml"
-assert_validation_rejected \
-  "quiesced-confirmation-default-true" \
-  "$quiesced_contract_validator" \
-  "$quiesced_confirmation_default"
-
-quiesced_different_environment="$(copy_quiesced_fixture quiesced-different-environment)"
-replace_exact_line_once \
-  "$quiesced_different_environment/.github/workflows/db-migrate.yml" \
-  "$quiesced_different_environment/.github/workflows/db-migrate.changed.yml" \
-  '    environment: ${{ github.event_name == '\''push'\'' && '\''prod'\'' || inputs.environment }}' \
-  '    environment: unsafe-standalone'
-mv \
-  "$quiesced_different_environment/.github/workflows/db-migrate.changed.yml" \
-  "$quiesced_different_environment/.github/workflows/db-migrate.yml"
-assert_validation_rejected \
-  "quiesced-different-environment" \
-  "$quiesced_contract_validator" \
-  "$quiesced_different_environment"
-
-quiesced_runner_checkout_migration="$(copy_quiesced_fixture quiesced-runner-checkout-migration)"
-replace_exact_line_once \
-  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.sh" \
-  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.changed.sh" \
-  '  remote_command migrate' \
-  '  "$repository_root/gradlew" flywayMigrate --no-parallel --console=plain'
-mv \
-  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.changed.sh" \
-  "$quiesced_runner_checkout_migration/scripts/deploy/quiesced-release.sh"
-assert_validation_rejected \
-  "quiesced-runner-checkout-migration" \
-  "$quiesced_contract_validator" \
-  "$quiesced_runner_checkout_migration"
-
-quiesced_mutable_migration_image="$(copy_quiesced_fixture quiesced-mutable-migration-image)"
-python3 - "$quiesced_mutable_migration_image/scripts/deploy/remote-compose-release.sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-start = text.index("migrate_verified_image() {")
-old = '  digest="$(state_value image_digest)"\n'
-position = text.find(old, start)
-if position < 0:
-    raise SystemExit("mutable-migration-image fixture source changed")
-text = text[:position] + '  digest="nightconcierge/app-bot:latest"\n' + text[position + len(old):]
-path.write_text(text, encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-mutable-migration-image" \
-  "$quiesced_contract_validator" \
-  "$quiesced_mutable_migration_image"
-
-quiesced_different_final_digest="$(copy_quiesced_fixture quiesced-different-final-digest)"
-replace_exact_line_once \
-  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.changed.sh" \
-  '  if [ "$migration_digest" != "$digest" ]; then' \
-  '  if [ "$migration_digest" != "$migration_digest" ]; then'
-mv \
-  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_different_final_digest/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-different-final-digest" \
-  "$quiesced_contract_validator" \
-  "$quiesced_different_final_digest"
-
-quiesced_checkout_bind_mount="$(copy_quiesced_fixture quiesced-checkout-bind-mount)"
-replace_exact_line_once \
-  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.changed.sh" \
-  '      --no-deps \' \
-  '      --volume "$PWD:/opt/app" --no-deps \'
-mv \
-  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_checkout_bind_mount/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-checkout-bind-mount" \
-  "$quiesced_contract_validator" \
-  "$quiesced_checkout_bind_mount"
-
-quiesced_early_migrated_phase="$(copy_quiesced_fixture quiesced-early-migrated-phase)"
-python3 - "$quiesced_early_migrated_phase/scripts/deploy/remote-compose-release.sh" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-phase = '  printf \'%s\' "migrated" >"$lock_dir/phase"\n'
-wait = '  migration_exit_code="$(docker wait "$migration_container_id")"\n'
-if text.count(phase) != 1 or text.count(wait) != 1:
-    raise SystemExit("early-migrated fixture source changed")
-text = text.replace(phase, "")
-text = text.replace(wait, phase + wait)
-path.write_text(text, encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-early-migrated-phase" \
-  "$quiesced_contract_validator" \
-  "$quiesced_early_migrated_phase"
-
-quiesced_ignored_migration_exit="$(copy_quiesced_fixture quiesced-ignored-migration-exit)"
-replace_exact_line_once \
-  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.changed.sh" \
-  '  if [ "$migration_exit_code" != "0" ]; then' \
-  '  if false; then'
-mv \
-  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_ignored_migration_exit/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-ignored-migration-exit" \
-  "$quiesced_contract_validator" \
-  "$quiesced_ignored_migration_exit"
-
-quiesced_start_after_failure="$(copy_quiesced_fixture quiesced-start-after-migration-failure)"
-replace_exact_line_once \
-  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.sh" \
-  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.changed.sh" \
-  '  remote_command migrate' \
-  '  remote_command migrate || true'
-mv \
-  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.changed.sh" \
-  "$quiesced_start_after_failure/scripts/deploy/quiesced-release.sh"
-assert_validation_rejected \
-  "quiesced-start-after-migration-failure" \
-  "$quiesced_contract_validator" \
-  "$quiesced_start_after_failure"
-
-quiesced_full_app_migration="$(copy_quiesced_fixture quiesced-full-app-migration)"
-replace_exact_line_once \
-  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.changed.sh" \
-  '      --entrypoint /opt/app/bin/app-bot-migrate \' \
-  '      --entrypoint /opt/app/bin/app-bot \'
-mv \
-  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_full_app_migration/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-full-app-migration" \
-  "$quiesced_contract_validator" \
-  "$quiesced_full_app_migration"
-
-quiesced_private_launcher_bypass="$(copy_quiesced_fixture quiesced-private-launcher-bypass)"
-replace_exact_line_once \
-  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.changed.sh" \
-  '      --entrypoint /opt/app/bin/app-bot-migrate \' \
-  '      --entrypoint /opt/app/bin/app-bot-migrate-java \'
-mv \
-  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_private_launcher_bypass/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-private-launcher-bypass" \
-  "$quiesced_contract_validator" \
-  "$quiesced_private_launcher_bypass"
-
-quiesced_boundary_keeps_java_opts="$(copy_quiesced_fixture quiesced-boundary-keeps-java-opts)"
-replace_exact_line_once \
-  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate" \
-  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
-  'unset JAVA_TOOL_OPTIONS' \
-  ': JAVA_TOOL_OPTIONS is intentionally retained'
-mv \
-  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
-  "$quiesced_boundary_keeps_java_opts/app-bot/src/main/dist/bin/app-bot-migrate"
-assert_validation_rejected \
-  "quiesced-boundary-keeps-java-opts" \
-  "$quiesced_contract_validator" \
-  "$quiesced_boundary_keeps_java_opts"
-
-quiesced_boundary_forwards_args="$(copy_quiesced_fixture quiesced-boundary-forwards-args)"
-replace_exact_line_once \
-  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate" \
-  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
-  'exec "$private_launcher"' \
-  'exec "$private_launcher" "$@"'
-mv \
-  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate.changed" \
-  "$quiesced_boundary_forwards_args/app-bot/src/main/dist/bin/app-bot-migrate"
-assert_validation_rejected \
-  "quiesced-boundary-forwards-args" \
-  "$quiesced_contract_validator" \
-  "$quiesced_boundary_forwards_args"
-
-quiesced_remote_empty_java_opts="$(copy_quiesced_fixture quiesced-remote-empty-java-opts)"
-replace_exact_line_once \
-  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.changed.sh" \
-  '      -e QUIESCED_RELEASE_MIGRATION=required \' \
-  '      -e QUIESCED_RELEASE_MIGRATION=required -e JAVA_TOOL_OPTIONS= \'
-mv \
-  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_remote_empty_java_opts/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-remote-empty-java-opts" \
-  "$quiesced_contract_validator" \
-  "$quiesced_remote_empty_java_opts"
-
-quiesced_missing_image_entrypoint="$(copy_quiesced_fixture quiesced-missing-image-entrypoint)"
-replace_exact_line_once \
-  "$quiesced_missing_image_entrypoint/Dockerfile" \
-  "$quiesced_missing_image_entrypoint/Dockerfile.changed" \
-  ' && test -x /opt/app/bin/app-bot-migrate \' \
-  ' && test -x /opt/app/bin/app-bot \'
-mv "$quiesced_missing_image_entrypoint/Dockerfile.changed" "$quiesced_missing_image_entrypoint/Dockerfile"
-assert_validation_rejected \
-  "quiesced-missing-image-entrypoint" \
-  "$quiesced_contract_validator" \
-  "$quiesced_missing_image_entrypoint"
-
-quiesced_raw_migration_logs="$(copy_quiesced_fixture quiesced-raw-migration-logs)"
-replace_exact_line_once \
-  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.changed.sh" \
-  '  capture_and_forward_safe_migration_diagnostics "$migration_container_id" "$migration_exit_code"' \
-  '  docker logs "$migration_container_id" >&2'
-mv \
-  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_raw_migration_logs/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-raw-migration-logs" \
-  "$quiesced_contract_validator" \
-  "$quiesced_raw_migration_logs"
-
-quiesced_unanchored_safe_filter="$(copy_quiesced_fixture quiesced-unanchored-safe-filter)"
-replace_payment_text_once \
-  "$quiesced_unanchored_safe_filter/scripts/deploy/remote-compose-release.sh" \
-  '^migration-safe:v=1\ event=completed\ applied=(0|[1-9][0-9]{0,9})$' \
-  '^migration-safe:v=1\ event=completed\ applied=(.+)'
-assert_validation_rejected \
-  "quiesced-unanchored-safe-filter" \
-  "$quiesced_contract_validator" \
-  "$quiesced_unanchored_safe_filter"
-
-quiesced_forwards_unmatched_line="$(copy_quiesced_fixture quiesced-forwards-unmatched-line)"
-replace_exact_line_once \
-  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.sh" \
-  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.changed.sh" \
-  '  printf '\''%s\n'\'' "migration-safe:v=1 event=started" >&2' \
-  '  printf '\''%s\n'\'' "$line" >&2'
-mv \
-  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.changed.sh" \
-  "$quiesced_forwards_unmatched_line/scripts/deploy/remote-compose-release.sh"
-assert_validation_rejected \
-  "quiesced-forwards-unmatched-line" \
-  "$quiesced_contract_validator" \
-  "$quiesced_forwards_unmatched_line"
-
-quiesced_rethrows_migration_failure="$(copy_quiesced_fixture quiesced-rethrows-migration-failure)"
-replace_payment_text_once \
-  "$quiesced_rethrows_migration_failure/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
-  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))
-        EXIT_FAILURE' \
-  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))
-        throw failure'
-assert_validation_rejected \
-  "quiesced-rethrows-migration-failure" \
-  "$quiesced_contract_validator" \
-  "$quiesced_rethrows_migration_failure"
-
-quiesced_logs_migration_message="$(copy_quiesced_fixture quiesced-logs-migration-message)"
-replace_payment_text_once \
-  "$quiesced_logs_migration_message/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
-  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))' \
-  '        System.err.println(failure.message)
-        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))'
-assert_validation_rejected \
-  "quiesced-logs-migration-message" \
-  "$quiesced_contract_validator" \
-  "$quiesced_logs_migration_message"
-
-quiesced_logs_migration_throwable="$(copy_quiesced_fixture quiesced-logs-migration-throwable)"
-replace_payment_text_once \
-  "$quiesced_logs_migration_throwable/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
-  '        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))' \
-  '        val unsafeLogger = LoggerFactory.getLogger("UnsafeMigration")
-        unsafeLogger.error("migration failed", failure)
-        eventSink(MigrationSafeEvent.Failed(phase, classifyFailure(phase, failure)))'
-assert_validation_rejected \
-  "quiesced-logs-migration-throwable" \
-  "$quiesced_contract_validator" \
-  "$quiesced_logs_migration_throwable"
-
-quiesced_missing_log_config="$(copy_quiesced_fixture quiesced-missing-migration-log-config)"
-rm "$quiesced_missing_log_config/app-bot/src/main/resources/quiesced-migration-logback.xml"
-assert_validation_rejected \
-  "quiesced-missing-migration-log-config" \
-  "$quiesced_contract_validator" \
-  "$quiesced_missing_log_config"
-
-quiesced_flyway_logging="$(copy_quiesced_fixture quiesced-flyway-logging-enabled)"
-replace_payment_text_once \
-  "$quiesced_flyway_logging/app-bot/src/main/resources/quiesced-migration-logback.xml" \
-  '<logger name="org.flywaydb" level="OFF" additivity="false" />' \
-  '<logger name="org.flywaydb" level="INFO" additivity="false" />'
-assert_validation_rejected \
-  "quiesced-flyway-logging-enabled" \
-  "$quiesced_contract_validator" \
-  "$quiesced_flyway_logging"
-
-quiesced_main_uses_migration_logging="$(copy_quiesced_fixture quiesced-main-uses-migration-logging)"
-replace_payment_text_once \
-  "$quiesced_main_uses_migration_logging/app-bot/build.gradle.kts" \
-  '            "-XX:+ExitOnOutOfMemoryError",' \
-  '            "-XX:+ExitOnOutOfMemoryError",
-            "-Dlogback.configurationFile=$quiescedMigrationLogConfig",'
-assert_validation_rejected \
-  "quiesced-main-uses-migration-logging" \
-  "$quiesced_contract_validator" \
-  "$quiesced_main_uses_migration_logging"
-
-quiesced_failure_becomes_success="$(copy_quiesced_fixture quiesced-migration-failure-exit-zero)"
-replace_payment_text_once \
-  "$quiesced_failure_becomes_success/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" \
-  'private const val EXIT_FAILURE = 1' \
-  'private const val EXIT_FAILURE = 0'
-assert_validation_rejected \
-  "quiesced-migration-failure-exit-zero" \
-  "$quiesced_contract_validator" \
-  "$quiesced_failure_becomes_success"
-
-quiesced_early_completed_event="$(copy_quiesced_fixture quiesced-early-completed-event)"
-python3 - "$quiesced_early_completed_event/app-bot/src/main/kotlin/com/example/bot/tools/QuiescedMigrateMain.kt" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-run = "        val result = migration(::advance)\n"
-complete = "        eventSink(MigrationSafeEvent.Completed(result.migrationsExecuted))\n"
-if text.count(run) != 1 or text.count(complete) != 1:
-    raise SystemExit("early-completed-event fixture source changed")
-text = text.replace(
-    run + complete,
-    "        val result = QuiescedMigrationResult(0)\n" + complete + "        migration(::advance)\n",
-)
-path.write_text(text, encoding="utf-8")
-PY
-assert_validation_rejected \
-  "quiesced-early-completed-event" \
-  "$quiesced_contract_validator" \
-  "$quiesced_early_completed_event"
+quiesced_contract_validator="$ROOT_DIR/scripts/validate-quiesced-deployment.sh"
+[ "$(grep -c '^    def test_' "$ROOT_DIR/scripts/tests/test_quiesced_release_state.py")" = "73" ] ||
+  fail "quiesced release executable suite must contain exactly 73 tests"
+"$quiesced_contract_validator" "$ROOT_DIR"
+if [ "$RELEASE_STATE_SELFCHECK_MODE" = "full" ]; then
+  PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$ROOT_DIR/scripts/tests/test_quiesced_release_state.py" --strict-ci
+  echo "quality-gate: 73 executable durable quiesced release cases verified, including coherent mount records, collision-safe identity, seven persistent filesystems, zero-write status, exactly-once and retention"
+else
+  echo "release-state-suite: DELEGATED_TO_EXACT_HEAD_JOB"
+fi
 
 safe_filter_harness="$TMP_DIR/quiesced-safe-log-filter.sh"
 {
-  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'exec 3>&2'
   awk '
     /^emit_safe_migration_diagnostics\(\) \{/ { inside = 1 }
     inside { print }
@@ -11489,6 +11384,7 @@ while IFS=$'\t' read -r fixture_name migration_exit rejection_kind; do
   assert_eq "$(cat "$negative_output")" "$expected_rejection"
 done <"$safe_filter_negative_manifest"
 echo "quality-gate: strict migration diagnostic protocol fixtures verified"
+
 
 echo "quality-gate: quiesced deployment workflow contract verified"
 

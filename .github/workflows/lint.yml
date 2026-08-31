@@ -8,14 +8,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: lint-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   lint:
+    name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: lint-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - name: Checkout
@@ -47,7 +47,7 @@ jobs:
             .
 
       - name: Quality gate regression self-check
-        run: ./scripts/selfcheck-quality-gates.sh
+        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state
 
       - name: Run detekt gate (blocking, baseline-aware)
         run: ./gradlew detektGate --console=plain --stacktrace
@@ -67,3 +67,35 @@ jobs:
             **/build/reports/detekt/**
             **/build/reports/ktlint/**
           if-no-files-found: ignore
+
+  release-state:
+    name: release-state
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    concurrency:
+      group: release-state-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Python 3.11+
+        run: |
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info < (3, 11):
+              raise SystemExit(f"Python 3.11+ required; got {sys.version.split()[0]}")
+          print(f"release-state-python: {sys.version.split()[0]}")
+          PY
+
+      - name: Validate release-state structure
+        run: ./scripts/validate-quiesced-deployment.sh .
+
+      - name: Run strict release-state suite
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/test_quiesced_release_state.py --strict-ci

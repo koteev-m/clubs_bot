@@ -48,7 +48,20 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 
 #### Remaining first-slice execution work
 
-- The served guest-surface correction is complete. The next outcome, outside this documentation task, is: (1) push and merge the current feature branch; (2) repeat `CLB-04` staging preflight for the new candidate; (3) obtain controlled aliases and a read-only observer; and only then (4) separately authorize a controlled stage deploy/manual smoke. No deploy or smoke is designed or performed here.
+- Repository release-state resilience is complete as bounded evidence at implementation commit `b86f69dfea8715c9eec24214230fc837cf9a74fb` (`feat(deploy): harden release state resilience`), accepted by independent review as `PASS_TO_COMMIT`. It adds durable migration/release authority and does not itself merge, push or deploy the candidate.
+- The next integration sequence is:
+
+  1. documentation commit;
+  2. push the fallback feature branch;
+  3. combined Draft PR;
+  4. GitHub checks;
+  5. merge and cleanup;
+  6. separate controlled deploy approval;
+  7. post-deploy read-only observer;
+  8. controlled staging data setup;
+  9. manual smoke.
+
+- Staging runtime remains behind the candidate: it runs `df7685facb52a6e5731a520669dfa2c73f6ccf24` with old digest `sha256:236c11cad4015cd6817c04a9fea0a3155eab77eb72164ab6c554f0c870c55cb6`; public support surfaces serve the legacy bundle, schema permissions/delivery are unconfirmed, and staging smoke is still `NOT_RUN`.
 - The accepted staging smoke remains the only first-slice execution boundary. It must include the already implemented truthful-delivery and guest-surface behavior; it is validation work, not an automatic new feature. A production correction is required only if that smoke exposes a defect, which then becomes a separate bounded task.
 - Preserve the completed `DEC-025` `NEW → IN_PROGRESS → RESOLVED → CLOSED` graph, its confirmed resolve and terminal-state enforcement; do not use the disabled generic status route as a bypass.
 
