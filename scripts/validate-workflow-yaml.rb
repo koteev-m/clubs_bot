@@ -561,25 +561,62 @@ module WorkflowYamlSafety
     data
   end
 
-  def tracked_workflows(repository_root)
-    inventory, _git_error, git_status = Open3.capture3(
+  def visible_workflows(repository_root)
+    inventory, git_error, git_status = Open3.capture3(
       "git",
       "-C",
       repository_root.to_s,
       "ls-files",
       "-z",
+      "--cached",
+      "--others",
+      "--exclude-standard",
       "--",
-      ".github/workflows"
+      ":(glob).github/workflows/*.yml",
+      ":(glob).github/workflows/*.yaml"
     )
     unless git_status.success?
-      raise ModelError, "workflow-yaml: unable to inventory tracked workflow files"
+      detail = git_error.to_s.strip
+      suffix = detail.empty? ? "" : " (#{detail})"
+      raise ModelError, "workflow-yaml: unable to inventory visible workflow files#{suffix}"
     end
 
-    workflows = inventory.split("\0").select { |path| WORKFLOW_PATH.match?(path) }.sort
-    if workflows.empty?
-      raise ModelError, "workflow-yaml: no tracked workflow files found"
+    unless inventory.empty? || inventory.end_with?("\0")
+      raise ModelError, "workflow-yaml: visible workflow inventory is not NUL-terminated"
     end
-    workflows
+    workflows = inventory.split("\0", -1)
+    workflows.pop if workflows.last == ""
+    if workflows.empty?
+      raise ModelError, "workflow-yaml: no visible workflow files found"
+    end
+    unless workflows.uniq.length == workflows.length
+      raise ModelError, "workflow-yaml: visible workflow inventory contains duplicates"
+    end
+    workflows.each do |path|
+      unless WORKFLOW_PATH.match?(path)
+        raise ModelError, "workflow-yaml: unexpected visible workflow path: #{path}"
+      end
+    end
+    logical_names = workflows.map { |path| path.sub(/\.(?:yml|yaml)\z/, "").downcase }
+    unless logical_names.uniq.length == logical_names.length
+      raise ModelError, "workflow-yaml: visible workflow inventory is ambiguous"
+    end
+
+    unmerged, _unmerged_error, unmerged_status = Open3.capture3(
+      "git",
+      "-C",
+      repository_root.to_s,
+      "ls-files",
+      "-z",
+      "--unmerged",
+      "--",
+      ":(glob).github/workflows/*.yml",
+      ":(glob).github/workflows/*.yaml"
+    )
+    unless unmerged_status.success? && unmerged.empty?
+      raise ModelError, "workflow-yaml: visible workflow inventory has unmerged ambiguity"
+    end
+    workflows.sort
   end
 
   def run(repository_root)
@@ -589,7 +626,7 @@ module WorkflowYamlSafety
     end
 
     begin
-      workflows = tracked_workflows(repository_root)
+      workflows = visible_workflows(repository_root)
     rescue ModelError => error
       warn error.message
       return 1
@@ -601,7 +638,7 @@ module WorkflowYamlSafety
       begin
         file_status = File.lstat(absolute_path)
         unless file_status.file? && !file_status.symlink?
-          errors << "workflow-yaml: #{relative_path}: tracked workflow is not a regular file"
+          errors << "workflow-yaml: #{relative_path}: visible workflow is not a regular file"
           next
         end
         safe_load_workflow(File.binread(absolute_path), relative_path)
@@ -620,7 +657,7 @@ module WorkflowYamlSafety
       rescue SystemStackError
         errors << "workflow-yaml: #{relative_path}: depth: bounded YAML validation failed"
       rescue SystemCallError
-        errors << "workflow-yaml: #{relative_path}: tracked workflow is unreadable"
+        errors << "workflow-yaml: #{relative_path}: visible workflow is unreadable"
       end
     end
 
@@ -630,7 +667,7 @@ module WorkflowYamlSafety
     end
 
     puts "quality-gate: workflow YAML syntax verified " \
-         "(#{workflows.length} tracked files); unique mapping keys verified"
+         "(#{workflows.length} visible files); unique mapping keys verified"
     0
   end
 end

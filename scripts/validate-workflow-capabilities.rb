@@ -14,6 +14,7 @@ module WorkflowCapabilityPolicy
   PROVENANCE_VERIFIER_PATH = "scripts/verify-oci-provenance.py"
   GRADLE_VERIFICATION_METADATA_PATH = "gradle/verification-metadata.xml"
   DEPENDENCY_SUBMISSION_WORKFLOW = ".github/workflows/dependency-submission.yml"
+  RELEASE_STATUS_WORKFLOW = ".github/workflows/release-status.yml"
   DEPLOY_JOBS = {
     [".github/workflows/deploy-ssh.yml", "deploy"] =>
       "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
@@ -22,6 +23,9 @@ module WorkflowCapabilityPolicy
   }.freeze
   DEPLOY_SECRETS = Set.new(
     %w[COMPOSE_PATH SSH_HOST SSH_PORT SSH_PRIVATE_KEY SSH_USER]
+  ).freeze
+  RELEASE_STATUS_SECRETS = Set.new(
+    %w[COMPOSE_PATH SSH_HOST SSH_KNOWN_HOSTS SSH_PORT SSH_PRIVATE_KEY SSH_USER]
   ).freeze
   CHECKOUT_ACTION = "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332"
   SETUP_JAVA_ACTION = "actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73"
@@ -234,6 +238,12 @@ module WorkflowCapabilityPolicy
       "contents" => "read",
       "packages" => "read",
     },
+    [RELEASE_STATUS_WORKFLOW, "validate"] => {
+      "contents" => "read",
+    },
+    [RELEASE_STATUS_WORKFLOW, "status"] => {
+      "contents" => "read",
+    },
   }.freeze
 
   EXPECTED_TRIGGERS = {
@@ -300,6 +310,48 @@ module WorkflowCapabilityPolicy
             "required" => true,
             "default" => false,
             "type" => "boolean",
+          },
+        },
+      },
+    },
+    RELEASE_STATUS_WORKFLOW => {
+      "workflow_dispatch" => {
+        "inputs" => {
+          "environment" => {
+            "description" => "Target environment",
+            "required" => true,
+            "type" => "choice",
+            "options" => ["stage", "prod"],
+          },
+          "incident_tag" => {
+            "description" => "Exact incident tag to observe",
+            "required" => true,
+            "type" => "string",
+          },
+          "release_owner" => {
+            "description" => "Exact retained release owner",
+            "required" => true,
+            "type" => "string",
+          },
+          "expected_revision" => {
+            "description" => "Exact expected Git revision",
+            "required" => true,
+            "type" => "string",
+          },
+          "image_digest" => {
+            "description" => "Exact app-bot image digest",
+            "required" => true,
+            "type" => "string",
+          },
+          "requested_operation" => {
+            "description" => "Exact retained release operation",
+            "required" => true,
+            "type" => "choice",
+            "options" => %w[
+              preflight prepare publish quiesce migrate start cleanup abort
+              retention helper-cleanup resume-quiesce resume-migrate
+              resume-start resume-cleanup
+            ],
           },
         },
       },
@@ -508,25 +560,10 @@ module WorkflowCapabilityPolicy
     end
   end
 
-  def tracked_workflow_paths(root)
-    stdout, stderr, status = Open3.capture3(
-      "git", "-C", root.to_s, "ls-files", "-z", "--",
-      ":(glob).github/workflows/*.yml",
-      ":(glob).github/workflows/*.yaml"
-    )
-    reject("git ls-files failed: #{stderr.strip}") unless status.success?
-    reject("tracked workflow inventory is empty") if stdout.empty?
-    reject("tracked workflow inventory is not NUL-terminated") unless stdout.end_with?("\0")
-    paths = stdout.split("\0", -1)
-    paths.pop
-    reject("tracked workflow inventory is empty") if paths.empty?
-    reject("tracked workflow inventory contains duplicates") unless paths.uniq.length == paths.length
-    paths.each do |path|
-      unless path.match?(%r{\A\.github/workflows/[^/]+\.(?:yml|yaml)\z})
-        reject("unexpected tracked workflow path: #{path}")
-      end
-    end
-    paths.sort
+  def visible_workflow_paths(root)
+    WorkflowYamlSafety.visible_workflows(root)
+  rescue WorkflowYamlSafety::ModelError => error
+    reject(error.message.sub(/\Aworkflow-yaml: /, ""))
   end
 
   def ensure_regular_path(root, relative_path)
@@ -536,13 +573,13 @@ module WorkflowCapabilityPolicy
       status = File.lstat(current)
       reject("#{relative_path}: path contains a symlink") if status.symlink?
       if index == relative_path.split("/").length - 1
-        reject("#{relative_path}: tracked path is not a regular file") unless status.file?
+        reject("#{relative_path}: visible path is not a regular file") unless status.file?
       else
         reject("#{relative_path}: parent is not a directory") unless status.directory?
       end
     end
   rescue SystemCallError => error
-    reject("#{relative_path}: cannot inspect tracked path (#{error.class})")
+      reject("#{relative_path}: cannot inspect visible path (#{error.class})")
   end
 
   def validate_gradle_plugin_metadata(root)
@@ -1237,6 +1274,7 @@ module WorkflowCapabilityPolicy
   def expected_secret_names(path, job_name)
     key = [path, job_name]
     return DEPLOY_SECRETS if DEPLOY_JOBS.key?(key)
+    return RELEASE_STATUS_SECRETS if key == [RELEASE_STATUS_WORKFLOW, "status"]
     return Set.new(["GITHUB_TOKEN"]) if key == [".github/workflows/release.yml", "release"]
     Set.new
   end
@@ -1279,6 +1317,8 @@ module WorkflowCapabilityPolicy
     key = [path, job_name]
     environment = job["environment"]
     expected = DEPLOY_JOBS[key]
+    expected = "${{ needs.validate.outputs.environment }}" if
+      key == [RELEASE_STATUS_WORKFLOW, "status"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
     elsif !environment.nil?
@@ -1302,6 +1342,562 @@ module WorkflowCapabilityPolicy
         validate_exact_value(job[name], expected_value, "#{context}/#{name}")
       end
     end
+  end
+
+  def validate_release_status_exact_contract(path, workflow, jobs, raw)
+    top_keys = workflow.keys.map { |key| key == true ? "on" : key.to_s }
+    reject("#{path}: top-level workflow surface changed") unless
+      top_keys.sort == %w[concurrency jobs name on permissions].sort
+    concurrency = workflow["concurrency"]
+    reject("#{path}: concurrency must be a mapping") unless concurrency.is_a?(Hash)
+    reject("#{path}: shared environment concurrency group changed") unless
+      concurrency["group"] == "payments-schema-${{ inputs.environment }}"
+    reject("#{path}: status concurrency must not cancel") unless
+      concurrency["cancel-in-progress"] == false
+    reject("#{path}: concurrency surface changed") unless
+      concurrency.keys.sort == %w[cancel-in-progress group]
+    reject("#{path}: job inventory must be exactly validate and status") unless
+      jobs.keys.sort == %w[status validate]
+    reject("#{path}: live ssh-keyscan is forbidden") if raw.match?(/\bssh-keyscan\b/)
+    reject("#{path}: artifact publication is forbidden") if
+      raw.match?(/actions\/upload-artifact@|actions\/upload-pages-artifact@/)
+    reject("#{path}: registry login is forbidden") if
+      raw.match?(/docker\/login-action@|\bdocker\s+login\b/)
+    reject("#{path}: image pull is forbidden") if
+      raw.match?(/\bdocker\s+(?:image\s+)?pull\b/)
+    reject("#{path}: deploy runner invocation is forbidden") if
+      raw.include?("scripts/deploy/quiesced-release.sh")
+    reject("#{path}: scp transport is forbidden") if
+      raw.match?(/(^|[^[:alnum:]_-])scp(?:[[:space:]]|$)/)
+    reject("#{path}: hidden SSH invocation is forbidden") if
+      raw.match?(/(?:^|\n)\s*(?:command\s+)?ssh(?:\s|$)/)
+    runner_references = raw.scan(
+      %r{implementation/scripts/deploy/read-only-release-status\.sh}
+    ).length
+    reject("#{path}: status runner must be invoked exactly once") unless
+      runner_references == 1
+
+    validate_job = jobs.fetch("validate")
+    status_job = jobs.fetch("status")
+    reject("#{path}/validate: job must be a mapping") unless validate_job.is_a?(Hash)
+    reject("#{path}/status: job must be a mapping") unless status_job.is_a?(Hash)
+    reject("#{path}/validate: job-level continue-on-error is forbidden") if
+      validate_job.key?("continue-on-error")
+    reject("#{path}/status: job-level continue-on-error is forbidden") if
+      status_job.key?("continue-on-error")
+    reject("#{path}: status jobs must not use a job-level condition") if
+      validate_job.key?("if") || status_job.key?("if")
+    reject("#{path}/validate: environment use is forbidden") if validate_job.key?("environment")
+    reject("#{path}/status: needs must be exactly validate") unless
+      status_job["needs"] == "validate"
+    reject("#{path}/status: protected environment must use validated output") unless
+      status_job["environment"] == "${{ needs.validate.outputs.environment }}"
+
+    validate_steps = step_list(validate_job, "#{path}/validate")
+    status_steps = step_list(status_job, "#{path}/status")
+    unless validate_steps.first.is_a?(Hash) &&
+           validate_steps.first["name"] == "Require main dispatch"
+      reject("#{path}/validate: main/ref guard must be the first executable validation guard")
+    end
+    checkout_count = status_steps.count { |step| step["uses"] == CHECKOUT_ACTION }
+    reject("#{path}/status: must contain exactly two pinned checkouts") unless
+      checkout_count == 2
+    incident_execution = status_steps.map { |step| step["run"] }.
+      select { |run| run.is_a?(String) }.flat_map(&:lines).any? do |line|
+      stripped = line.strip
+      next false if stripped.empty? || stripped.start_with?("#")
+      stripped.match?(%r{(?:^|[[:space:]])(?:bash|sh|source|\.)[[:space:]]+[^\n]*incident/}) ||
+        stripped.match?(%r{(?:^|[[:space:]])incident/[^[:space:]]+})
+    end
+    reject("#{path}/status: incident checkout code execution is forbidden") if
+      incident_execution
+    reject("#{path}/validate: guard and sanitizer step inventory changed") unless
+      validate_steps.length == 2
+    reject("#{path}/status: mandatory seven-step inventory changed") unless
+      status_steps.length == 7
+    (validate_steps + status_steps).each do |step|
+      reject("#{path}: status channel must not continue on error") if
+        step.key?("continue-on-error")
+      reject("#{path}: mandatory steps must be unconditional") if step.key?("if")
+      if step.key?("shell") && step["shell"] != "bash"
+        reject("#{path}: mandatory run step shell must be exactly bash")
+      end
+    end
+    shell_source = (validate_steps + status_steps).map { |step| step["run"] }.
+      select { |run| run.is_a?(String) }.join("\n")
+    if shell_source.match?(/(?:^|\n)\s*set\s+\+e(?:\s|$)|\|\|\s*true(?:\s|$)|\bssh_exit=0\b/)
+      reject("#{path}: fail-open custom shell is forbidden")
+    end
+
+    expected_outputs = %w[
+      environment incident_tag release_owner expected_revision image_digest
+      requested_operation
+    ].to_h do |name|
+      [name, "${{ steps.sanitize.outputs.#{name} }}"]
+    end
+    expected_guard = {
+      "name" => "Require main dispatch",
+      "shell" => "bash",
+      "env" => {
+        "REPOSITORY_DEFAULT_BRANCH" => "${{ github.event.repository.default_branch }}",
+      },
+      "run" => <<~'BASH',
+        set -euo pipefail
+        test "$GITHUB_REF" = "refs/heads/main"
+        test "$GITHUB_REF_TYPE" = "branch"
+        test "$REPOSITORY_DEFAULT_BRANCH" = "main"
+      BASH
+    }
+    expected_sanitizer = {
+      "name" => "Validate and sanitize status inputs",
+      "id" => "sanitize",
+      "shell" => "bash",
+      "env" => {
+        "INPUT_ENVIRONMENT" => "${{ inputs.environment }}",
+        "INPUT_INCIDENT_TAG" => "${{ inputs.incident_tag }}",
+        "INPUT_RELEASE_OWNER" => "${{ inputs.release_owner }}",
+        "INPUT_EXPECTED_REVISION" => "${{ inputs.expected_revision }}",
+        "INPUT_IMAGE_DIGEST" => "${{ inputs.image_digest }}",
+        "INPUT_REQUESTED_OPERATION" => "${{ inputs.requested_operation }}",
+      },
+      "run" => <<~'BASH',
+        set -euo pipefail
+        reject() {
+          printf 'release-status-validation: invalid %s\n' "$1" >&2
+          exit 2
+        }
+        case "$INPUT_ENVIRONMENT" in
+          stage|prod) ;;
+          *) reject environment ;;
+        esac
+        [[ "$INPUT_INCIDENT_TAG" =~ ^deploy-(stage|prod)-[0-9a-f]{7,40}$ ]] || reject incident_tag
+        tag_environment="${BASH_REMATCH[1]}"
+        test "$tag_environment" = "$INPUT_ENVIRONMENT" || reject incident_tag_environment
+        [[ "$INPUT_RELEASE_OWNER" =~ ^[0-9]+-[0-9]+$ ]] || reject release_owner
+        [[ "$INPUT_EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || reject expected_revision
+        [[ "$INPUT_IMAGE_DIGEST" =~ ^ghcr\.io/koteev-m/clubs_bot/app-bot@sha256:[0-9a-f]{64}$ ]] || reject image_digest
+        case "$INPUT_REQUESTED_OPERATION" in
+          preflight|prepare|publish|quiesce|migrate|start|cleanup|abort|retention|helper-cleanup|resume-quiesce|resume-migrate|resume-start|resume-cleanup) ;;
+          *) reject requested_operation ;;
+        esac
+        {
+          printf 'environment=%s\n' "$INPUT_ENVIRONMENT"
+          printf 'incident_tag=%s\n' "$INPUT_INCIDENT_TAG"
+          printf 'release_owner=%s\n' "$INPUT_RELEASE_OWNER"
+          printf 'expected_revision=%s\n' "$INPUT_EXPECTED_REVISION"
+          printf 'image_digest=%s\n' "$INPUT_IMAGE_DIGEST"
+          printf 'requested_operation=%s\n' "$INPUT_REQUESTED_OPERATION"
+        } >>"$GITHUB_OUTPUT"
+      BASH
+    }
+    unless validate_steps.fetch(0) == expected_guard
+      reject("#{path}/validate: main/ref guard must be exact and fail closed")
+    end
+    unless validate_steps.fetch(1) == expected_sanitizer
+      reject("#{path}/validate: sanitizer must enforce the exact input grammar and sanitized outputs")
+    end
+
+    expected_status_steps = [
+      {
+        "name" => "Checkout implementation main",
+        "uses" => CHECKOUT_ACTION,
+        "with" => {
+          "ref" => "refs/heads/main",
+          "path" => "implementation",
+          "persist-credentials" => false,
+        },
+      },
+      {
+        "name" => "Verify implementation revision",
+        "shell" => "bash",
+        "run" => <<~'BASH',
+          set -euo pipefail
+          implementation_head="$(git -C implementation rev-parse HEAD)"
+          test "$implementation_head" = "$GITHUB_SHA"
+        BASH
+      },
+      {
+        "name" => "Checkout incident tag",
+        "uses" => CHECKOUT_ACTION,
+        "with" => {
+          "ref" => "refs/tags/${{ needs.validate.outputs.incident_tag }}",
+          "path" => "incident",
+          "persist-credentials" => false,
+        },
+      },
+      {
+        "name" => "Verify incident revision",
+        "shell" => "bash",
+        "env" => {
+          "EXPECTED_REVISION" => "${{ needs.validate.outputs.expected_revision }}",
+        },
+        "run" => <<~'BASH',
+          set -euo pipefail
+          incident_head="$(git -C incident rev-parse HEAD)"
+          test "$incident_head" = "$EXPECTED_REVISION"
+        BASH
+      },
+      {
+        "name" => "Derive retained helper SHA-256",
+        "id" => "helper",
+        "shell" => "bash",
+        "env" => {
+          "EXPECTED_REVISION" => "${{ needs.validate.outputs.expected_revision }}",
+        },
+        "run" => <<~'BASH',
+          set -euo pipefail
+          readonly helper_repository_path="scripts/deploy/remote-compose-release.sh"
+          readonly max_helper_blob_size=262144
+          readonly max_helper_tree_record_bytes=512
+
+          reject_helper() {
+            printf 'read-only status channel %s\n' "$1" >&2
+            exit 2
+          }
+
+          export GIT_NO_REPLACE_OBJECTS=1
+          export GIT_OPTIONAL_LOCKS=0
+          export GIT_LITERAL_PATHSPECS=1
+          export LC_ALL=C
+
+          parse_helper_tree_entry() {
+            local tree_record=""
+            local trailing_tree_data=""
+            local tree_metadata
+            local tree_path
+            local tree_metadata_pattern='^([0-9]{6}) ([a-z]+) ([0-9a-f]+)$'
+            local tree_mode
+            local tree_type
+            local blob_oid
+
+            if ! IFS= read -r -d '' -n "$max_helper_tree_record_bytes" tree_record; then
+              if [[ -z "$tree_record" ]]; then
+                return 40
+              fi
+              return 42
+            fi
+            if IFS= read -r -d '' -n 1 trailing_tree_data; then
+              return 42
+            fi
+            if [[ -n "$trailing_tree_data" ]] || [[ "$tree_record" != *$'\t'* ]]; then
+              return 42
+            fi
+
+            tree_metadata="${tree_record%%$'\t'*}"
+            tree_path="${tree_record#*$'\t'}"
+            if [[ "$tree_path" != "$helper_repository_path" ]] ||
+               [[ ! "$tree_metadata" =~ $tree_metadata_pattern ]]; then
+              return 42
+            fi
+
+            tree_mode="${BASH_REMATCH[1]}"
+            tree_type="${BASH_REMATCH[2]}"
+            blob_oid="${BASH_REMATCH[3]}"
+            if [[ "$tree_type" != "blob" ]] ||
+               [[ "$tree_mode" != "100644" && "$tree_mode" != "100755" ]]; then
+              return 41
+            fi
+            printf '%s %s %s\n' "$tree_mode" "$tree_type" "$blob_oid"
+          }
+
+          helper_tree_status=0
+          helper_tree_identity="$(
+            set -o pipefail
+            if git -C incident ls-tree --full-tree -z "$EXPECTED_REVISION" -- "$helper_repository_path" |
+                 parse_helper_tree_entry; then
+              helper_tree_pipeline_status=("${PIPESTATUS[@]}")
+            else
+              helper_tree_pipeline_status=("${PIPESTATUS[@]}")
+            fi
+            if (( ${#helper_tree_pipeline_status[@]} != 2 )) ||
+               (( helper_tree_pipeline_status[0] != 0 )); then
+              exit 42
+            fi
+            exit "${helper_tree_pipeline_status[1]}"
+          )" || helper_tree_status=$?
+          case "$helper_tree_status" in
+            0) ;;
+            40) reject_helper "incident helper tree entry missing" ;;
+            41) reject_helper "incident helper tree entry is not a regular blob" ;;
+            *) reject_helper "incident helper Git blob identity invalid" ;;
+          esac
+
+          helper_tree_identity_pattern='^(100644|100755) (blob) ([0-9a-f]+)$'
+          if [[ ! "$helper_tree_identity" =~ $helper_tree_identity_pattern ]]; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          helper_blob_oid="${BASH_REMATCH[3]}"
+
+          if ! git_object_format="$(git -C incident rev-parse --show-object-format=storage)"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          case "$git_object_format" in
+            sha1) expected_oid_length=40 ;;
+            sha256) expected_oid_length=64 ;;
+            *) reject_helper "incident helper Git blob identity invalid" ;;
+          esac
+          if [[ ! "$helper_blob_oid" =~ ^[0-9a-f]+$ ]] ||
+             (( ${#helper_blob_oid} != expected_oid_length )); then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+
+          if ! helper_blob_type="$(git -C incident cat-file -t "$helper_blob_oid")"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          if [[ "$helper_blob_type" != "blob" ]]; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          if ! helper_blob_size="$(git -C incident cat-file -s "$helper_blob_oid")"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          if [[ ! "$helper_blob_size" =~ ^[1-9][0-9]{0,6}$ ]] ||
+             (( 10#$helper_blob_size > max_helper_blob_size )); then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+
+          if ! helper_sha256_line="$(git -C incident cat-file blob "$helper_blob_oid" | sha256sum)"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          helper_sha256="${helper_sha256_line%% *}"
+          if [[ ! "$helper_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          printf 'sha256=%s\n' "$helper_sha256" >>"$GITHUB_OUTPUT"
+        BASH
+      },
+      {
+        "name" => "Setup deployment SSH principal",
+        "uses" => SSH_AGENT_ACTION,
+        "with" => {"ssh-private-key" => "${{ secrets.SSH_PRIVATE_KEY }}"},
+      },
+      {
+        "name" => "Read exact retained release status once",
+        "shell" => "bash",
+        "env" => {
+          "TMPDIR" => "${{ runner.temp }}",
+          "RUNNER_TEMP" => "${{ runner.temp }}",
+          "APP_ENV" => "${{ needs.validate.outputs.environment }}",
+          "INCIDENT_TAG" => "${{ needs.validate.outputs.incident_tag }}",
+          "RELEASE_OWNER" => "${{ needs.validate.outputs.release_owner }}",
+          "EXPECTED_REVISION" => "${{ needs.validate.outputs.expected_revision }}",
+          "IMAGE_DIGEST" => "${{ needs.validate.outputs.image_digest }}",
+          "REQUESTED_OPERATION" => "${{ needs.validate.outputs.requested_operation }}",
+          "EXPECTED_HELPER_SHA256" => "${{ steps.helper.outputs.sha256 }}",
+          "SSH_USER" => "${{ secrets.SSH_USER }}",
+          "SSH_HOST" => "${{ secrets.SSH_HOST }}",
+          "SSH_PORT" => "${{ secrets.SSH_PORT || '22' }}",
+          "COMPOSE_PATH" => "${{ secrets.COMPOSE_PATH }}",
+          "SSH_KNOWN_HOSTS" => "${{ secrets.SSH_KNOWN_HOSTS }}",
+        },
+        "run" => "implementation/scripts/deploy/read-only-release-status.sh",
+      },
+    ]
+
+    unless status_steps.fetch(0) == expected_status_steps.fetch(0)
+      reject("#{path}/status: implementation checkout contract changed")
+    end
+    unless status_steps.fetch(1) == expected_status_steps.fetch(1)
+      reject("#{path}/status: implementation HEAD must equal GITHUB_SHA")
+    end
+    unless status_steps.fetch(2) == expected_status_steps.fetch(2)
+      reject("#{path}/status: incident checkout must use validated incident tag")
+    end
+    unless status_steps.fetch(3) == expected_status_steps.fetch(3)
+      reject("#{path}/status: incident HEAD must equal validated expected revision")
+    end
+    helper_step = status_steps.fetch(4)
+    if helper_step["run"].to_s.match?(/[0-9a-f]{64}/)
+      reject("#{path}/status: constant helper SHA-256 is forbidden")
+    end
+    unless helper_step == expected_status_steps.fetch(4)
+      reject("#{path}/status: helper SHA-256 must be derived only from incident helper bytes")
+    end
+    unless status_steps.fetch(5) == expected_status_steps.fetch(5)
+      reject("#{path}/status: SSH agent input contract changed")
+    end
+    unless status_steps.fetch(6) == expected_status_steps.fetch(6)
+      runner_secrets, = scalar_inventory(status_steps.fetch(6), "#{path}/status/runner")
+      reject("#{path}/status: SSH_KNOWN_HOSTS is required") unless
+        runner_secrets.include?("SSH_KNOWN_HOSTS")
+      reject("#{path}/status: status runner environment contract changed")
+    end
+
+    early_status = status_job.reject { |key, _value| key == "steps" }.merge(
+      "steps" => status_steps.first(5)
+    )
+    early_secrets, early_token_refs = scalar_inventory(
+      early_status,
+      "#{path}/status/pre-privilege"
+    )
+    reject("#{path}/status: SSH secret referenced before both revision checks") unless
+      early_secrets.empty?
+    reject("#{path}/status: github.token use is forbidden") unless early_token_refs.zero?
+
+    expected_validate_job = {
+      "name" => "validate-status-request",
+      "runs-on" => "ubuntu-latest",
+      "timeout-minutes" => 5,
+      "permissions" => {"contents" => "read"},
+      "outputs" => expected_outputs,
+      "steps" => [expected_guard, expected_sanitizer],
+    }
+    expected_status_job = {
+      "name" => "deployment-principal-status",
+      "needs" => "validate",
+      "runs-on" => "ubuntu-latest",
+      "timeout-minutes" => 10,
+      "permissions" => {"contents" => "read"},
+      "environment" => "${{ needs.validate.outputs.environment }}",
+      "steps" => expected_status_steps,
+    }
+    validate_exact_value(validate_job, expected_validate_job, "#{path}/validate exact contract")
+    validate_exact_value(status_job, expected_status_job, "#{path}/status exact contract")
+  end
+
+  def validate_release_status_contract(path, workflow, triggers, jobs, raw)
+    return unless path == RELEASE_STATUS_WORKFLOW
+
+    validate_release_status_exact_contract(path, workflow, jobs, raw)
+
+    reject("#{path}: workflow display name changed") unless
+      workflow["name"] == "Release Status (read-only)"
+    reject("#{path}: workflow permissions must be exactly contents: read") unless
+      workflow["permissions"] == {"contents" => "read"}
+    reject("#{path}: shared environment concurrency group changed") unless
+      workflow["concurrency"] == {
+        "group" => "payments-schema-${{ inputs.environment }}",
+        "cancel-in-progress" => false,
+      }
+    reject("#{path}: job inventory must be exactly validate and status") unless
+      jobs.keys.sort == %w[status validate]
+    reject("#{path}: live ssh-keyscan is forbidden") if raw.match?(/\bssh-keyscan\b/)
+    reject("#{path}: artifact publication is forbidden") if
+      raw.match?(/actions\/upload-artifact@|actions\/upload-pages-artifact@/)
+    reject("#{path}: registry login is forbidden") if
+      raw.match?(/docker\/login-action@|\bdocker\s+login\b/)
+    reject("#{path}: image pull is forbidden") if raw.match?(/\bdocker\s+(?:image\s+)?pull\b/)
+    reject("#{path}: deploy runner invocation is forbidden") if
+      raw.include?("scripts/deploy/quiesced-release.sh")
+    reject("#{path}: scp transport is forbidden") if raw.match?(/(^|[^[:alnum:]_-])scp(?:[[:space:]]|$)/)
+
+    validate_job = jobs.fetch("validate")
+    status_job = jobs.fetch("status")
+    reject("#{path}/validate: job must be a mapping") unless validate_job.is_a?(Hash)
+    reject("#{path}/status: job must be a mapping") unless status_job.is_a?(Hash)
+    reject("#{path}/validate: permissions must be explicitly contents: read") unless
+      validate_job["permissions"] == {"contents" => "read"}
+    reject("#{path}/status: permissions must be explicitly contents: read") unless
+      status_job["permissions"] == {"contents" => "read"}
+    reject("#{path}/validate: environment use is forbidden") if validate_job.key?("environment")
+    reject("#{path}/status: protected environment must use validated output") unless
+      status_job["environment"] == "${{ needs.validate.outputs.environment }}"
+    reject("#{path}/status: needs must be exactly validate") unless status_job["needs"] == "validate"
+    reject("#{path}/validate: timeout must be at most 5 minutes") unless
+      validate_job["timeout-minutes"].is_a?(Integer) &&
+        validate_job["timeout-minutes"].between?(1, 5)
+    reject("#{path}/status: timeout must be at most 10 minutes") unless
+      status_job["timeout-minutes"].is_a?(Integer) &&
+        status_job["timeout-minutes"].between?(1, 10)
+    reject("#{path}: status jobs must use ubuntu-latest") unless
+      validate_job["runs-on"] == "ubuntu-latest" && status_job["runs-on"] == "ubuntu-latest"
+    reject("#{path}: status jobs must not use a job-level condition") if
+      validate_job.key?("if") || status_job.key?("if")
+
+    expected_outputs = %w[
+      environment incident_tag release_owner expected_revision image_digest
+      requested_operation
+    ].to_h do |name|
+      [name, "${{ steps.sanitize.outputs.#{name} }}"]
+    end
+    reject("#{path}/validate: sanitized output contract changed") unless
+      validate_job["outputs"] == expected_outputs
+
+    validate_steps = step_list(validate_job, "#{path}/validate")
+    status_steps = step_list(status_job, "#{path}/status")
+    reject("#{path}/validate: guard and sanitizer step inventory changed") unless
+      validate_steps.length == 2
+    reject("#{path}/status: mandatory seven-step inventory changed") unless
+      status_steps.length == 7
+    (validate_steps + status_steps).each do |step|
+      reject("#{path}: status channel must not continue on error") if
+        step.key?("continue-on-error")
+      reject("#{path}: mandatory steps must be unconditional") if step.key?("if")
+    end
+
+    first_guard = validate_steps.fetch(0)
+    reject("#{path}/validate: main/ref guard must be the first executable validation guard") unless
+      first_guard["name"] == "Require main dispatch" &&
+        first_guard["shell"] == "bash" &&
+        first_guard["run"].is_a?(String) &&
+        first_guard["run"].match?(
+          /\Aset -euo pipefail\n"?test \"\$GITHUB_REF\" = \"refs\/heads\/main\""?/
+        )
+    guard_source = first_guard["run"].to_s
+    %w[
+      test\ "$GITHUB_REF"\ =\ "refs/heads/main"
+      test\ "$GITHUB_REF_TYPE"\ =\ "branch"
+      test\ "$REPOSITORY_DEFAULT_BRANCH"\ =\ "main"
+    ].each do |guard|
+      reject("#{path}/validate: main/ref guard contract changed") unless guard_source.include?(guard)
+    end
+    validate_steps.each do |step|
+      reject("#{path}/validate: actions and checkouts are forbidden") if step.key?("uses")
+    end
+
+    expected_action_sequence = [
+      CHECKOUT_ACTION,
+      nil,
+      CHECKOUT_ACTION,
+      nil,
+      nil,
+      SSH_AGENT_ACTION,
+      nil,
+    ]
+    actual_action_sequence = status_steps.map { |step| step["uses"] }
+    reject("#{path}/status: action and privilege boundary changed") unless
+      actual_action_sequence == expected_action_sequence
+    first_checkout = status_steps.fetch(0)
+    incident_checkout = status_steps.fetch(2)
+    reject("#{path}/status: implementation checkout contract changed") unless
+      first_checkout["with"] == {
+        "ref" => "refs/heads/main",
+        "path" => "implementation",
+        "persist-credentials" => false,
+      }
+    reject("#{path}/status: incident checkout must use validated incident tag") unless
+      incident_checkout["with"] == {
+        "ref" => "refs/tags/${{ needs.validate.outputs.incident_tag }}",
+        "path" => "incident",
+        "persist-credentials" => false,
+      }
+    runner_calls = status_steps.count do |step|
+      step["run"] == "implementation/scripts/deploy/read-only-release-status.sh"
+    end
+    reject("#{path}/status: status runner must be invoked exactly once") unless runner_calls == 1
+
+    status_steps.first(5).each_with_index do |step, index|
+      secrets, token_refs = scalar_inventory(step, "#{path}/status/step-#{index + 1}")
+      reject("#{path}/status: SSH secret referenced before revision checks") unless secrets.empty?
+      reject("#{path}/status: github.token use is forbidden") unless token_refs.zero?
+    end
+    agent_secrets, = scalar_inventory(status_steps.fetch(5), "#{path}/status/ssh-agent")
+    reject("#{path}/status: SSH agent secret contract changed") unless
+      agent_secrets == Set.new(["SSH_PRIVATE_KEY"])
+    runner_secrets, runner_token_refs = scalar_inventory(
+      status_steps.fetch(6),
+      "#{path}/status/runner"
+    )
+    expected_runner_secrets = RELEASE_STATUS_SECRETS - Set.new(["SSH_PRIVATE_KEY"])
+    reject("#{path}/status: runner secret allowlist changed") unless
+      runner_secrets == expected_runner_secrets
+    reject("#{path}/status: github.token use is forbidden") unless runner_token_refs.zero?
+    reject("#{path}/status: SSH_KNOWN_HOSTS is required") unless
+      runner_secrets.include?("SSH_KNOWN_HOSTS")
+    validate_exact_value(
+      triggers,
+      EXPECTED_TRIGGERS.fetch(RELEASE_STATUS_WORKFLOW),
+      "#{path}: privileged trigger contract"
+    )
   end
 
   def validate_privileged_trigger(path, triggers, jobs)
@@ -1541,13 +2137,15 @@ module WorkflowCapabilityPolicy
   def run(root)
     ensure_regular_path(root, PROVENANCE_VERIFIER_PATH)
     validate_gradle_plugin_metadata(root)
-    paths = tracked_workflow_paths(root)
+    paths = visible_workflow_paths(root)
     workflows = {}
     paths.each do |path|
       workflow, raw = load_workflow(root, path)
       workflows[path] = [workflow, raw]
     end
     reject("canonical publisher workflow is missing") unless workflows.key?(CANONICAL_PUBLISHER)
+    reject("release-status workflow is missing from visible inventory") unless
+      workflows.key?(RELEASE_STATUS_WORKFLOW)
 
     observed_exact_jobs = Set.new
     workflows.each do |path, (workflow, raw)|
@@ -1570,6 +2168,7 @@ module WorkflowCapabilityPolicy
         end
       end
       validate_privileged_trigger(path, triggers, jobs)
+      validate_release_status_contract(path, workflow, triggers, jobs, raw)
       top_level = workflow.reject { |key, _value| key == "jobs" }
       trigger_key = workflow.key?("on") ? "on" : true
       if path == CANONICAL_PUBLISHER
@@ -1628,6 +2227,9 @@ module WorkflowCapabilityPolicy
         if DEPLOY_JOBS.key?([path, job_name]) && !job.key?("permissions")
           reject("#{context}: deployment jobs require job-level permission isolation")
         end
+        if path == RELEASE_STATUS_WORKFLOW && !job.key?("permissions")
+          reject("#{context}: release-status jobs require job-level permission isolation")
+        end
         if job.key?("steps") && job["runs-on"] != "ubuntu-latest"
           reject("#{context}: jobs with steps must use an ephemeral ubuntu-latest runner")
         end
@@ -1647,7 +2249,7 @@ module WorkflowCapabilityPolicy
     validate_rollout_documentation(root)
     puts(
       "quality-gate: capability policy enforces exact workflow privileges " \
-      "and structural verifier invocation (#{paths.length} tracked workflows); " \
+      "and structural verifier invocation (#{paths.length} visible workflows); " \
       "checked-out tests exercise Python behavior, while independent integrity " \
       "depends on external review/rulesets"
     )

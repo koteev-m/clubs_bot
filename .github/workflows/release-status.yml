@@ -1,0 +1,304 @@
+name: Release Status (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: ["stage", "prod"]
+      incident_tag:
+        description: "Exact incident tag to observe"
+        required: true
+        type: string
+      release_owner:
+        description: "Exact retained release owner"
+        required: true
+        type: string
+      expected_revision:
+        description: "Exact expected Git revision"
+        required: true
+        type: string
+      image_digest:
+        description: "Exact app-bot image digest"
+        required: true
+        type: string
+      requested_operation:
+        description: "Exact retained release operation"
+        required: true
+        type: choice
+        options:
+          - preflight
+          - prepare
+          - publish
+          - quiesce
+          - migrate
+          - start
+          - cleanup
+          - abort
+          - retention
+          - helper-cleanup
+          - resume-quiesce
+          - resume-migrate
+          - resume-start
+          - resume-cleanup
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payments-schema-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: validate-status-request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      environment: ${{ steps.sanitize.outputs.environment }}
+      incident_tag: ${{ steps.sanitize.outputs.incident_tag }}
+      release_owner: ${{ steps.sanitize.outputs.release_owner }}
+      expected_revision: ${{ steps.sanitize.outputs.expected_revision }}
+      image_digest: ${{ steps.sanitize.outputs.image_digest }}
+      requested_operation: ${{ steps.sanitize.outputs.requested_operation }}
+    steps:
+      - name: Require main dispatch
+        shell: bash
+        env:
+          REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_REF_TYPE" = "branch"
+          test "$REPOSITORY_DEFAULT_BRANCH" = "main"
+
+      - name: Validate and sanitize status inputs
+        id: sanitize
+        shell: bash
+        env:
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_INCIDENT_TAG: ${{ inputs.incident_tag }}
+          INPUT_RELEASE_OWNER: ${{ inputs.release_owner }}
+          INPUT_EXPECTED_REVISION: ${{ inputs.expected_revision }}
+          INPUT_IMAGE_DIGEST: ${{ inputs.image_digest }}
+          INPUT_REQUESTED_OPERATION: ${{ inputs.requested_operation }}
+        run: |
+          set -euo pipefail
+          reject() {
+            printf 'release-status-validation: invalid %s\n' "$1" >&2
+            exit 2
+          }
+          case "$INPUT_ENVIRONMENT" in
+            stage|prod) ;;
+            *) reject environment ;;
+          esac
+          [[ "$INPUT_INCIDENT_TAG" =~ ^deploy-(stage|prod)-[0-9a-f]{7,40}$ ]] || reject incident_tag
+          tag_environment="${BASH_REMATCH[1]}"
+          test "$tag_environment" = "$INPUT_ENVIRONMENT" || reject incident_tag_environment
+          [[ "$INPUT_RELEASE_OWNER" =~ ^[0-9]+-[0-9]+$ ]] || reject release_owner
+          [[ "$INPUT_EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || reject expected_revision
+          [[ "$INPUT_IMAGE_DIGEST" =~ ^ghcr\.io/koteev-m/clubs_bot/app-bot@sha256:[0-9a-f]{64}$ ]] || reject image_digest
+          case "$INPUT_REQUESTED_OPERATION" in
+            preflight|prepare|publish|quiesce|migrate|start|cleanup|abort|retention|helper-cleanup|resume-quiesce|resume-migrate|resume-start|resume-cleanup) ;;
+            *) reject requested_operation ;;
+          esac
+          {
+            printf 'environment=%s\n' "$INPUT_ENVIRONMENT"
+            printf 'incident_tag=%s\n' "$INPUT_INCIDENT_TAG"
+            printf 'release_owner=%s\n' "$INPUT_RELEASE_OWNER"
+            printf 'expected_revision=%s\n' "$INPUT_EXPECTED_REVISION"
+            printf 'image_digest=%s\n' "$INPUT_IMAGE_DIGEST"
+            printf 'requested_operation=%s\n' "$INPUT_REQUESTED_OPERATION"
+          } >>"$GITHUB_OUTPUT"
+
+  status:
+    name: deployment-principal-status
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment: ${{ needs.validate.outputs.environment }}
+    steps:
+      - name: Checkout implementation main
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          ref: refs/heads/main
+          path: implementation
+          persist-credentials: false
+
+      - name: Verify implementation revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          implementation_head="$(git -C implementation rev-parse HEAD)"
+          test "$implementation_head" = "$GITHUB_SHA"
+
+      - name: Checkout incident tag
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          ref: refs/tags/${{ needs.validate.outputs.incident_tag }}
+          path: incident
+          persist-credentials: false
+
+      - name: Verify incident revision
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ needs.validate.outputs.expected_revision }}
+        run: |
+          set -euo pipefail
+          incident_head="$(git -C incident rev-parse HEAD)"
+          test "$incident_head" = "$EXPECTED_REVISION"
+
+      - name: Derive retained helper SHA-256
+        id: helper
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ needs.validate.outputs.expected_revision }}
+        run: |
+          set -euo pipefail
+          readonly helper_repository_path="scripts/deploy/remote-compose-release.sh"
+          readonly max_helper_blob_size=262144
+          readonly max_helper_tree_record_bytes=512
+
+          reject_helper() {
+            printf 'read-only status channel %s\n' "$1" >&2
+            exit 2
+          }
+
+          export GIT_NO_REPLACE_OBJECTS=1
+          export GIT_OPTIONAL_LOCKS=0
+          export GIT_LITERAL_PATHSPECS=1
+          export LC_ALL=C
+
+          parse_helper_tree_entry() {
+            local tree_record=""
+            local trailing_tree_data=""
+            local tree_metadata
+            local tree_path
+            local tree_metadata_pattern='^([0-9]{6}) ([a-z]+) ([0-9a-f]+)$'
+            local tree_mode
+            local tree_type
+            local blob_oid
+
+            if ! IFS= read -r -d '' -n "$max_helper_tree_record_bytes" tree_record; then
+              if [[ -z "$tree_record" ]]; then
+                return 40
+              fi
+              return 42
+            fi
+            if IFS= read -r -d '' -n 1 trailing_tree_data; then
+              return 42
+            fi
+            if [[ -n "$trailing_tree_data" ]] || [[ "$tree_record" != *$'\t'* ]]; then
+              return 42
+            fi
+
+            tree_metadata="${tree_record%%$'\t'*}"
+            tree_path="${tree_record#*$'\t'}"
+            if [[ "$tree_path" != "$helper_repository_path" ]] ||
+               [[ ! "$tree_metadata" =~ $tree_metadata_pattern ]]; then
+              return 42
+            fi
+
+            tree_mode="${BASH_REMATCH[1]}"
+            tree_type="${BASH_REMATCH[2]}"
+            blob_oid="${BASH_REMATCH[3]}"
+            if [[ "$tree_type" != "blob" ]] ||
+               [[ "$tree_mode" != "100644" && "$tree_mode" != "100755" ]]; then
+              return 41
+            fi
+            printf '%s %s %s\n' "$tree_mode" "$tree_type" "$blob_oid"
+          }
+
+          helper_tree_status=0
+          helper_tree_identity="$(
+            set -o pipefail
+            if git -C incident ls-tree --full-tree -z "$EXPECTED_REVISION" -- "$helper_repository_path" |
+                 parse_helper_tree_entry; then
+              helper_tree_pipeline_status=("${PIPESTATUS[@]}")
+            else
+              helper_tree_pipeline_status=("${PIPESTATUS[@]}")
+            fi
+            if (( ${#helper_tree_pipeline_status[@]} != 2 )) ||
+               (( helper_tree_pipeline_status[0] != 0 )); then
+              exit 42
+            fi
+            exit "${helper_tree_pipeline_status[1]}"
+          )" || helper_tree_status=$?
+          case "$helper_tree_status" in
+            0) ;;
+            40) reject_helper "incident helper tree entry missing" ;;
+            41) reject_helper "incident helper tree entry is not a regular blob" ;;
+            *) reject_helper "incident helper Git blob identity invalid" ;;
+          esac
+
+          helper_tree_identity_pattern='^(100644|100755) (blob) ([0-9a-f]+)$'
+          if [[ ! "$helper_tree_identity" =~ $helper_tree_identity_pattern ]]; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          helper_blob_oid="${BASH_REMATCH[3]}"
+
+          if ! git_object_format="$(git -C incident rev-parse --show-object-format=storage)"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          case "$git_object_format" in
+            sha1) expected_oid_length=40 ;;
+            sha256) expected_oid_length=64 ;;
+            *) reject_helper "incident helper Git blob identity invalid" ;;
+          esac
+          if [[ ! "$helper_blob_oid" =~ ^[0-9a-f]+$ ]] ||
+             (( ${#helper_blob_oid} != expected_oid_length )); then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+
+          if ! helper_blob_type="$(git -C incident cat-file -t "$helper_blob_oid")"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          if [[ "$helper_blob_type" != "blob" ]]; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          if ! helper_blob_size="$(git -C incident cat-file -s "$helper_blob_oid")"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          if [[ ! "$helper_blob_size" =~ ^[1-9][0-9]{0,6}$ ]] ||
+             (( 10#$helper_blob_size > max_helper_blob_size )); then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+
+          if ! helper_sha256_line="$(git -C incident cat-file blob "$helper_blob_oid" | sha256sum)"; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          helper_sha256="${helper_sha256_line%% *}"
+          if [[ ! "$helper_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            reject_helper "incident helper Git blob identity invalid"
+          fi
+          printf 'sha256=%s\n' "$helper_sha256" >>"$GITHUB_OUTPUT"
+
+      - name: Setup deployment SSH principal
+        uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387 # v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Read exact retained release status once
+        shell: bash
+        env:
+          TMPDIR: ${{ runner.temp }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          APP_ENV: ${{ needs.validate.outputs.environment }}
+          INCIDENT_TAG: ${{ needs.validate.outputs.incident_tag }}
+          RELEASE_OWNER: ${{ needs.validate.outputs.release_owner }}
+          EXPECTED_REVISION: ${{ needs.validate.outputs.expected_revision }}
+          IMAGE_DIGEST: ${{ needs.validate.outputs.image_digest }}
+          REQUESTED_OPERATION: ${{ needs.validate.outputs.requested_operation }}
+          EXPECTED_HELPER_SHA256: ${{ steps.helper.outputs.sha256 }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          COMPOSE_PATH: ${{ secrets.COMPOSE_PATH }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: implementation/scripts/deploy/read-only-release-status.sh

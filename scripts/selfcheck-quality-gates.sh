@@ -2843,6 +2843,9 @@ validate_docker_workflow_contracts() {
     return 2
   fi
 
+  "$repository_root/scripts/validate-quiesced-deployment.sh" \
+    "$repository_root" --status-channel-only
+
   # Structured effective permissions and credential capabilities are the trust root.
   # The validator literal scan is bounded defense-in-depth; it does not claim
   # arbitrary shell/interpreter semantic analysis.
@@ -4122,7 +4125,99 @@ git init -q "$workflow_empty_fixture"
 assert_workflow_yaml_rejected \
   "workflow-yaml-empty-inventory" \
   "$workflow_empty_fixture" \
-  "workflow-yaml: no tracked workflow files found"
+  "workflow-yaml: no visible workflow files found"
+
+workflow_visible_untracked_fixture="$TMP_DIR/workflow-yaml-visible-untracked"
+git init -q "$workflow_visible_untracked_fixture"
+mkdir -p "$workflow_visible_untracked_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Visible untracked fixture' \
+  'on: [workflow_dispatch]' \
+  'jobs:' \
+  '  inspect:' \
+  '    runs-on: ubuntu-latest' \
+  '    steps:' \
+  '      - run: echo visible' \
+  >"$workflow_visible_untracked_fixture/.github/workflows/visible.yml"
+assert_eq \
+  "$(git -C "$workflow_visible_untracked_fixture" ls-files --others --exclude-standard -- '.github/workflows/*.yml')" \
+  ".github/workflows/visible.yml"
+workflow_visible_untracked_output="$(ruby "$WORKFLOW_YAML_VALIDATOR" "$workflow_visible_untracked_fixture")"
+assert_contains \
+  "$workflow_visible_untracked_output" \
+  "quality-gate: workflow YAML syntax verified (1 visible files)"
+
+workflow_malformed_untracked_fixture="$TMP_DIR/workflow-yaml-malformed-untracked"
+git init -q "$workflow_malformed_untracked_fixture"
+mkdir -p "$workflow_malformed_untracked_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Malformed untracked fixture' \
+  'on: [workflow_dispatch' \
+  >"$workflow_malformed_untracked_fixture/.github/workflows/malformed.yml"
+assert_workflow_yaml_rejected \
+  "workflow-yaml-malformed-visible-untracked" \
+  "$workflow_malformed_untracked_fixture" \
+  "workflow-yaml: .github/workflows/malformed.yml:2:"
+
+workflow_ignored_fixture="$TMP_DIR/workflow-yaml-ignored-omitted"
+git init -q "$workflow_ignored_fixture"
+mkdir -p "$workflow_ignored_fixture/.github/workflows"
+printf '%s\n' '.github/workflows/ignored.yml' >"$workflow_ignored_fixture/.gitignore"
+printf '%s\n' \
+  'name: Visible baseline' \
+  'on: [workflow_dispatch]' \
+  'jobs:' \
+  '  inspect:' \
+  '    runs-on: ubuntu-latest' \
+  '    steps:' \
+  '      - run: echo visible' \
+  >"$workflow_ignored_fixture/.github/workflows/visible.yml"
+printf '%s\n' \
+  'name: Ignored malformed workflow' \
+  'on: [workflow_dispatch' \
+  >"$workflow_ignored_fixture/.github/workflows/ignored.yml"
+git -C "$workflow_ignored_fixture" add .gitignore .github/workflows/visible.yml
+git -C "$workflow_ignored_fixture" check-ignore -q .github/workflows/ignored.yml ||
+  fail "workflow-yaml ignored fixture is not ignored"
+workflow_ignored_output="$(ruby "$WORKFLOW_YAML_VALIDATOR" "$workflow_ignored_fixture")"
+assert_contains \
+  "$workflow_ignored_output" \
+  "quality-gate: workflow YAML syntax verified (1 visible files)"
+
+workflow_ambiguous_fixture="$TMP_DIR/workflow-yaml-ambiguous-inventory"
+git init -q "$workflow_ambiguous_fixture"
+mkdir -p "$workflow_ambiguous_fixture/.github/workflows"
+printf '%s\n' \
+  'name: Ambiguous yml fixture' \
+  'on: [workflow_dispatch]' \
+  'jobs: {}' \
+  >"$workflow_ambiguous_fixture/.github/workflows/status.yml"
+printf '%s\n' \
+  'name: Ambiguous yaml fixture' \
+  'on: [workflow_dispatch]' \
+  'jobs: {}' \
+  >"$workflow_ambiguous_fixture/.github/workflows/status.yaml"
+git -C "$workflow_ambiguous_fixture" add .github/workflows/status.yml
+assert_workflow_yaml_rejected \
+  "workflow-yaml-ambiguous-visible-inventory" \
+  "$workflow_ambiguous_fixture" \
+  "workflow-yaml: visible workflow inventory is ambiguous"
+
+workflow_unmerged_fixture="$TMP_DIR/workflow-yaml-unmerged-inventory"
+git init -q "$workflow_unmerged_fixture"
+mkdir -p "$workflow_unmerged_fixture/.github/workflows"
+workflow_unmerged_base_blob="$(printf '%s\n' 'name: base' | git -C "$workflow_unmerged_fixture" hash-object -w --stdin)"
+workflow_unmerged_ours_blob="$(printf '%s\n' 'name: ours' | git -C "$workflow_unmerged_fixture" hash-object -w --stdin)"
+workflow_unmerged_theirs_blob="$(printf '%s\n' 'name: theirs' | git -C "$workflow_unmerged_fixture" hash-object -w --stdin)"
+printf '100644 %s 1\t.github/workflows/conflict.yml\n100644 %s 2\t.github/workflows/conflict.yml\n100644 %s 3\t.github/workflows/conflict.yml\n' \
+  "$workflow_unmerged_base_blob" \
+  "$workflow_unmerged_ours_blob" \
+  "$workflow_unmerged_theirs_blob" |
+  git -C "$workflow_unmerged_fixture" update-index --index-info
+assert_workflow_yaml_rejected \
+  "workflow-yaml-unmerged-visible-inventory" \
+  "$workflow_unmerged_fixture" \
+  "workflow-yaml: visible workflow inventory"
 
 workflow_positive_fixture="$TMP_DIR/workflow-yaml-positive-anchors"
 git init -q "$workflow_positive_fixture"
@@ -4169,8 +4264,8 @@ assert_eq \
 workflow_positive_output="$(ruby "$WORKFLOW_YAML_VALIDATOR" "$workflow_positive_fixture")"
 assert_contains \
   "$workflow_positive_output" \
-  "quality-gate: workflow YAML syntax verified (2 tracked files)"
-echo "quality-gate: tracked .yml/.yaml workflows, anchors, aliases, and quoted names accepted"
+  "quality-gate: workflow YAML syntax verified (2 visible files)"
+echo "quality-gate: tracked and visible-untracked .yml/.yaml workflows, anchors, aliases, and quoted names accepted"
 
 native_gradle_standard_fixture="$TMP_DIR/native-gradle-repositories-standard"
 write_native_gradle_repository_settings "$native_gradle_standard_fixture"
@@ -7036,7 +7131,7 @@ copy_workflow_capability_fixture() {
   while IFS= read -r -d '' workflow; do
     cp "$ROOT_DIR/$workflow" "$fixture_root/$workflow"
   done < <(
-    git -C "$ROOT_DIR" ls-files -z -- \
+    git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard -- \
       ':(glob).github/workflows/*.yml' \
       ':(glob).github/workflows/*.yaml'
   )
@@ -7045,12 +7140,16 @@ copy_workflow_capability_fixture() {
   cp "$ROOT_DIR/scripts/verify-oci-provenance.py" "$fixture_root/scripts/"
   cp "$ROOT_DIR/gradle/verification-metadata.xml" "$fixture_root/gradle/"
   cp "$ROOT_DIR/docs/ops/secrets-rotation.md" "$fixture_root/docs/ops/"
-  git -C "$fixture_root" add \
-    .github/workflows \
-    docs/ops \
-    gradle/verification-metadata.xml \
-    scripts/deploy \
-    scripts/verify-oci-provenance.py
+  git -C "$fixture_root" add -A -- . \
+    ':(exclude).github/workflows/release-status.yml'
+  if git -C "$fixture_root" ls-files --error-unmatch \
+    .github/workflows/release-status.yml >/dev/null 2>&1; then
+    fail "release-status capability fixture must remain untracked"
+  fi
+  git -C "$fixture_root" ls-files --others --exclude-standard -- \
+    .github/workflows/release-status.yml | grep -Fqx \
+    .github/workflows/release-status.yml ||
+    fail "release-status capability fixture is absent from visible inventory"
   printf '%s\n' "$fixture_root"
 }
 
@@ -7295,6 +7394,126 @@ valid_rollout_boundary_fixtures = {
 }.freeze
 
 case fixture_case
+when "release-status-workflow-write"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "permissions:\n  contents: read\n",
+    "permissions:\n  contents: write\n"
+  )
+when "release-status-validate-environment"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "  validate:\n    name: validate-status-request\n",
+    "  validate:\n    name: validate-status-request\n    environment: stage\n"
+  )
+when "release-status-missing-known-hosts"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}\n",
+    ""
+  )
+when "release-status-extra-secret"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}\n",
+    "          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}\n" \
+      "          EXTRA_SECRET: ${{ secrets.EXTRA_SECRET }}\n"
+  )
+when "release-status-stage-only-environment"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "    environment: ${{ needs.validate.outputs.environment }}\n",
+    "    environment: stage\n"
+  )
+when "release-status-extra-trigger"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "on:\n  workflow_dispatch:\n",
+    "on:\n  push:\n  workflow_dispatch:\n"
+  )
+when "release-status-live-keyscan"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "        run: implementation/scripts/deploy/read-only-release-status.sh\n",
+    "        run: ssh-keyscan stage.invalid\n"
+  )
+when "release-status-artifact-upload"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "        run: implementation/scripts/deploy/read-only-release-status.sh\n",
+    "        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882\n"
+  )
+when "release-status-registry-login"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "        run: implementation/scripts/deploy/read-only-release-status.sh\n",
+    "        run: docker login ghcr.io\n"
+  )
+when "release-status-deploy-runner"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "implementation/scripts/deploy/read-only-release-status.sh",
+    "scripts/deploy/quiesced-release.sh"
+  )
+when "release-status-sanitizer-no-validation"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "          [[ \"$INPUT_RELEASE_OWNER\" =~ ^[0-9]+-[0-9]+$ ]] || reject release_owner\n",
+    "          true\n"
+  )
+when "release-status-job-continue-on-error"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "    name: validate-status-request\n",
+    "    name: validate-status-request\n    continue-on-error: true\n"
+  )
+when "release-status-revision-noop"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "          test \"$implementation_head\" = \"$GITHUB_SHA\"\n",
+    "          true\n"
+  )
+when "release-status-helper-hash-constant"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "          if ! helper_sha256_line=\"$(git -C incident cat-file blob \"$helper_blob_oid\" | sha256sum)\"; then\n" \
+      "            reject_helper \"incident helper Git blob identity invalid\"\n" \
+      "          fi\n",
+    "          helper_sha256_line=\"#{'0' * 64}  -\"\n"
+  )
+when "release-status-fail-open-shell"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "      - name: Verify incident revision\n        shell: bash\n",
+    "      - name: Verify incident revision\n        shell: bash {0} || true\n"
+  )
+when "release-status-swapped-secrets"
+  swap_once(
+    workflows.join("release-status.yml"),
+    "${{ secrets.SSH_USER }}",
+    "${{ secrets.SSH_HOST }}"
+  )
+when "release-status-early-secret"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "    environment: ${{ needs.validate.outputs.environment }}\n",
+    "    environment: ${{ needs.validate.outputs.environment }}\n" \
+      "    env:\n      EARLY_HOST: ${{ secrets.SSH_HOST }}\n"
+  )
+when "release-status-hidden-second-runner"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "          test \"$incident_head\" = \"$EXPECTED_REVISION\"\n",
+    "          test \"$incident_head\" = \"$EXPECTED_REVISION\"\n" \
+      "          implementation/scripts/deploy/read-only-release-status.sh\n"
+  )
+when "release-status-incident-code-execution"
+  replace_once(
+    workflows.join("release-status.yml"),
+    "          test \"$incident_head\" = \"$EXPECTED_REVISION\"\n",
+    "          test \"$incident_head\" = \"$EXPECTED_REVISION\"\n" \
+      "          bash incident/scripts/deploy/remote-compose-release.sh status\n"
+  )
 when "alias-self-recursive"
   add_workflow(workflows, fixture_case, workflow_with_top_level(<<~YAML))
     env: &loop
@@ -8421,11 +8640,20 @@ else
   abort "unknown capability fixture: #{fixture_case}"
 end
 RUBY
-  git -C "$fixture_root" add -A
+  git -C "$fixture_root" add -A -- . \
+    ':(exclude).github/workflows/release-status.yml'
+  git -C "$fixture_root" ls-files --error-unmatch \
+    .github/workflows/release-status.yml >/dev/null 2>&1 &&
+    fail "release-status fixture must remain untracked"
+  git -C "$fixture_root" ls-files --others --exclude-standard -- \
+    .github/workflows/release-status.yml | grep -Fqx \
+    .github/workflows/release-status.yml ||
+    fail "release-status fixture is missing from visible untracked inventory"
 }
 
 assert_capability_fixture_invalid() {
   local fixture_name="$1"
+  local expected_diagnostic="${2:-workflow-capabilities:}"
   local fixture_root
   fixture_root="$(copy_workflow_capability_fixture "$fixture_name")"
   mutate_workflow_capability_fixture "$fixture_root" "$fixture_name"
@@ -8438,6 +8666,8 @@ assert_capability_fixture_invalid() {
   if ruby "$workflow_capability_validator" "$fixture_root" >"$TMP_DIR/$fixture_name.out" 2>&1; then
     fail "capability validator accepted invalid fixture: $fixture_name"
   fi
+  grep -Fq "$expected_diagnostic" "$TMP_DIR/$fixture_name.out" ||
+    fail "capability fixture failed for the wrong reason: $fixture_name (expected $expected_diagnostic)"
   echo "quality-gate: negative capability fixture $fixture_name rejected"
 }
 
@@ -8526,8 +8756,11 @@ assert_yaml_safety_fixture_valid() {
   assert_no_ruby_backtrace "$fixture_name" "$yaml_log" "$capability_log"
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
-      "$(git -C "$fixture_root" ls-files -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "20"
+      "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
+      "21"
+    assert_eq \
+      "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
+      ".github/workflows/release-status.yml"
     grep -Fqx '      - &checkout' "$fixture_root/.github/workflows/tests.yml" ||
       fail "current tests.yml anchor fixture is missing"
     grep -Fqx '      - *checkout' "$fixture_root/.github/workflows/tests.yml" ||
@@ -8725,6 +8958,64 @@ for capability_fixture in \
   self-hosted-runner; do
   assert_capability_fixture_invalid "$capability_fixture"
 done
+
+assert_capability_fixture_invalid \
+  "release-status-workflow-write" \
+  "workflow-capabilities: .github/workflows/release-status.yml: workflow permissions must be exactly contents: read"
+assert_capability_fixture_invalid \
+  "release-status-validate-environment" \
+  "workflow-capabilities: .github/workflows/release-status.yml/validate: environment use is forbidden"
+assert_capability_fixture_invalid \
+  "release-status-missing-known-hosts" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: SSH_KNOWN_HOSTS is required"
+assert_capability_fixture_invalid \
+  "release-status-extra-secret" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: status runner environment contract changed"
+assert_capability_fixture_invalid \
+  "release-status-stage-only-environment" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: protected environment must use validated output"
+assert_capability_fixture_invalid \
+  "release-status-extra-trigger" \
+  "workflow-capabilities: .github/workflows/release-status.yml: privileged trigger contract"
+assert_capability_fixture_invalid \
+  "release-status-live-keyscan" \
+  "workflow-capabilities: .github/workflows/release-status.yml: live ssh-keyscan is forbidden"
+assert_capability_fixture_invalid \
+  "release-status-artifact-upload" \
+  "workflow-capabilities: .github/workflows/release-status.yml: artifact publication is forbidden"
+assert_capability_fixture_invalid \
+  "release-status-registry-login" \
+  "workflow-capabilities: .github/workflows/release-status.yml: registry login is forbidden"
+assert_capability_fixture_invalid \
+  "release-status-deploy-runner" \
+  "workflow-capabilities: .github/workflows/release-status.yml: deploy runner invocation is forbidden"
+assert_capability_fixture_invalid \
+  "release-status-sanitizer-no-validation" \
+  "workflow-capabilities: .github/workflows/release-status.yml/validate: sanitizer must enforce the exact input grammar and sanitized outputs"
+assert_capability_fixture_invalid \
+  "release-status-job-continue-on-error" \
+  "workflow-capabilities: .github/workflows/release-status.yml/validate: job-level continue-on-error is forbidden"
+assert_capability_fixture_invalid \
+  "release-status-revision-noop" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: implementation HEAD must equal GITHUB_SHA"
+assert_capability_fixture_invalid \
+  "release-status-helper-hash-constant" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: constant helper SHA-256 is forbidden"
+assert_capability_fixture_invalid \
+  "release-status-fail-open-shell" \
+  "workflow-capabilities: .github/workflows/release-status.yml: mandatory run step shell must be exactly bash"
+assert_capability_fixture_invalid \
+  "release-status-swapped-secrets" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: status runner environment contract changed"
+assert_capability_fixture_invalid \
+  "release-status-early-secret" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: SSH secret referenced before both revision checks"
+assert_capability_fixture_invalid \
+  "release-status-hidden-second-runner" \
+  "workflow-capabilities: .github/workflows/release-status.yml: status runner must be invoked exactly once"
+assert_capability_fixture_invalid \
+  "release-status-incident-code-execution" \
+  "workflow-capabilities: .github/workflows/release-status.yml/status: incident checkout code execution is forbidden"
 
 
 for duplicate_fixture in \
@@ -11248,7 +11539,173 @@ done
 quiesced_contract_validator="$ROOT_DIR/scripts/validate-quiesced-deployment.sh"
 [ "$(grep -c '^    def test_' "$ROOT_DIR/scripts/tests/test_quiesced_release_state.py")" = "73" ] ||
   fail "quiesced release executable suite must contain exactly 73 tests"
+bash -n "$ROOT_DIR/scripts/deploy/read-only-release-status.sh" ||
+  fail "read-only release status runner is not valid Bash"
 "$quiesced_contract_validator" "$ROOT_DIR"
+for status_test_name in \
+  test_same_inode_overwrite_after_snapshot_executes_original_bytes \
+  test_runner_owned_temporary_root_resolution_is_fail_closed \
+  test_preexisting_private_names_fail_exclusive_creation_without_deletion \
+  test_signals_during_every_create_unlink_transition_are_deferred_and_cleaned \
+  test_term_ignoring_ssh_is_killed_within_bounded_cleanup_deadline \
+  test_every_valid_status_enum_value_is_accepted_by_the_real_parser \
+  test_each_invalid_enum_and_structural_parser_mutation_is_rejected \
+  test_identity_evil_mutation_calibrates_parser_tests_independent_of_hash_pins \
+  test_whitespace_mutation_calibrates_parser_tests_independent_of_hash_pins \
+  test_exact_incident_git_blob_hash_accepts_regular_file_modes \
+  test_incident_blob_hash_is_independent_of_implementation_checkout \
+  test_ancestor_symlink_bypasses_fail_before_secret_or_runner \
+  test_non_regular_or_missing_incident_entries_fail_closed \
+  test_empty_or_oversized_incident_blobs_fail_before_secret_or_runner \
+  test_malformed_duplicate_or_wrong_ls_tree_records_fail_closed \
+  test_helper_hash_binding_regressions_are_rejected \
+  test_strict_accounting_rejects_source_mutations_and_bad_summaries; do
+  grep -Fq "def ${status_test_name}(" "$ROOT_DIR/scripts/tests/test_read_only_release_status.py" ||
+    fail "read-only release status suite lacks $status_test_name"
+done
+
+release_status_expected_methods=80
+release_status_expected_subtests=322
+release_status_expected_summary="release-status-suite:v=1 methods=${release_status_expected_methods} subtests=${release_status_expected_subtests} failures=0 errors=0 skipped=0 expected_failures=0 unexpected_successes=0"
+release_status_expected_summary_file="$TMP_DIR/release-status-expected-summary"
+printf '%s\n' "$release_status_expected_summary" >"$release_status_expected_summary_file"
+release_status_expected_summary_bytes="$(wc -c <"$release_status_expected_summary_file" | tr -d ' ')"
+verify_release_status_summary() {
+  local summary_file="$1"
+  local actual_bytes
+  [ -f "$summary_file" ] && [ ! -L "$summary_file" ] || return 1
+  actual_bytes="$(wc -c <"$summary_file" | tr -d ' ')" || return 1
+  [[ "$actual_bytes" =~ ^[0-9]+$ ]] || return 1
+  [ "$actual_bytes" = "$release_status_expected_summary_bytes" ] || return 1
+  cmp -s "$summary_file" "$release_status_expected_summary_file"
+}
+
+status_summary_fixture="$TMP_DIR/release-status-summary-fixture"
+for accounting_fixture in \
+  missing duplicate skipped method-drift subtest-drift altered-count embedded-nul oversized; do
+  case "$accounting_fixture" in
+    missing)
+      : >"$status_summary_fixture"
+      ;;
+    duplicate)
+      printf '%s\n%s\n' \
+        "$release_status_expected_summary" "$release_status_expected_summary" \
+        >"$status_summary_fixture"
+      ;;
+    skipped)
+      printf '%s\n' \
+        "release-status-suite:v=1 methods=${release_status_expected_methods} subtests=${release_status_expected_subtests} failures=0 errors=0 skipped=1 expected_failures=0 unexpected_successes=0" \
+        >"$status_summary_fixture"
+      ;;
+    method-drift)
+      printf '%s\n' \
+        "release-status-suite:v=1 methods=$((release_status_expected_methods - 1)) subtests=${release_status_expected_subtests} failures=0 errors=0 skipped=0 expected_failures=0 unexpected_successes=0" \
+        >"$status_summary_fixture"
+      ;;
+    subtest-drift)
+      printf '%s\n' \
+        "release-status-suite:v=1 methods=${release_status_expected_methods} subtests=$((release_status_expected_subtests - 1)) failures=0 errors=0 skipped=0 expected_failures=0 unexpected_successes=0" \
+        >"$status_summary_fixture"
+      ;;
+    altered-count)
+      printf '%s\n' \
+        "release-status-suite:v=1 methods=$((release_status_expected_methods + 1)) subtests=${release_status_expected_subtests} failures=0 errors=0 skipped=0 expected_failures=0 unexpected_successes=0" \
+        >"$status_summary_fixture"
+      ;;
+    embedded-nul)
+      printf '%s\0\n' "$release_status_expected_summary" >"$status_summary_fixture"
+      ;;
+    oversized)
+      printf '%s' "$release_status_expected_summary" >"$status_summary_fixture"
+      dd if=/dev/zero bs=4096 count=1 2>/dev/null >>"$status_summary_fixture"
+      printf '\n' >>"$status_summary_fixture"
+      ;;
+  esac
+  if verify_release_status_summary "$status_summary_fixture"; then
+    fail "release status strict accounting accepted $accounting_fixture"
+  fi
+  if LC_ALL=C grep -aFq 'release-status-channel: OK' "$status_summary_fixture"; then
+    fail "release status strict accounting fixture exposed success marker"
+  fi
+done
+
+release_status_probe_expected_summary="release-status-suite:v=1 methods=2 subtests=2 failures=0 errors=0 skipped=0 expected_failures=0 unexpected_successes=0"
+release_status_probe_expected_file="$TMP_DIR/release-status-probe-expected"
+printf '%s\n' "$release_status_probe_expected_summary" >"$release_status_probe_expected_file"
+release_status_probe_expected_bytes="$(wc -c <"$release_status_probe_expected_file" | tr -d ' ')"
+verify_release_status_probe_summary() {
+  local summary_file="$1"
+  local actual_bytes
+  [ -f "$summary_file" ] && [ ! -L "$summary_file" ] || return 1
+  actual_bytes="$(wc -c <"$summary_file" | tr -d ' ')" || return 1
+  [[ "$actual_bytes" =~ ^[0-9]+$ ]] || return 1
+  [ "$actual_bytes" = "$release_status_probe_expected_bytes" ] || return 1
+  cmp -s "$summary_file" "$release_status_probe_expected_file"
+}
+
+status_accounting_mutation_dir="$TMP_DIR/release-status-accounting-mutations"
+mkdir -m 700 "$status_accounting_mutation_dir"
+if ! python3 - \
+  "$ROOT_DIR/scripts/tests/test_read_only_release_status.py" \
+  "$status_accounting_mutation_dir" <<'PY'; then
+from pathlib import Path
+import sys
+
+source_path = Path(sys.argv[1])
+target_directory = Path(sys.argv[2])
+source = source_path.read_text(encoding="utf-8")
+mutations = {
+    "skip-required-test": (
+        "self.assertTrue(True)  # ACCOUNTING_REQUIRED_ASSERTION",
+        'raise unittest.SkipTest("accounting calibration")',
+    ),
+    "remove-required-method": (
+        "def test_accounting_required_method(self) -> None:",
+        "def accounting_required_method(self) -> None:",
+    ),
+    "remove-required-subtest": (
+        'for value in ("alpha", "beta"):  # ACCOUNTING_REQUIRED_SUBTESTS',
+        'for value in ("alpha",):  # ACCOUNTING_REQUIRED_SUBTESTS',
+    ),
+}
+for name, (original, replacement) in mutations.items():
+    if source.count(original) != 1:
+        raise SystemExit(f"accounting calibration anchor changed: {name}")
+    (target_directory / f"{name}.py").write_text(
+        source.replace(original, replacement, 1), encoding="utf-8"
+    )
+PY
+  fail "release status accounting calibration fixtures could not be created"
+fi
+
+for accounting_mutation in \
+  skip-required-test remove-required-method remove-required-subtest; do
+  accounting_mutation_stdout="$TMP_DIR/${accounting_mutation}.stdout"
+  accounting_mutation_stderr="$TMP_DIR/${accounting_mutation}.stderr"
+  if PYTHONDONTWRITEBYTECODE=1 python3 \
+    "$status_accounting_mutation_dir/${accounting_mutation}.py" \
+    --strict-accounting-probe \
+    >"$accounting_mutation_stdout" 2>"$accounting_mutation_stderr"; then
+    fail "release status strict accounting accepted $accounting_mutation"
+  fi
+  if verify_release_status_probe_summary "$accounting_mutation_stdout"; then
+    fail "release status strict accounting reported canonical counts for $accounting_mutation"
+  fi
+  if LC_ALL=C grep -aFq 'release-status-channel: OK' \
+    "$accounting_mutation_stdout" "$accounting_mutation_stderr"; then
+    fail "release status strict accounting mutation exposed success marker"
+  fi
+done
+
+status_summary_file="$TMP_DIR/release-status-suite-summary"
+if ! PYTHONDONTWRITEBYTECODE=1 \
+  python3 "$ROOT_DIR/scripts/tests/test_read_only_release_status.py" --strict \
+  >"$status_summary_file"; then
+  fail "read-only release status strict suite failed"
+fi
+verify_release_status_summary "$status_summary_file" ||
+  fail "read-only release status strict summary changed"
+echo "release-status-channel: OK"
 if [ "$RELEASE_STATE_SELFCHECK_MODE" = "full" ]; then
   PYTHONDONTWRITEBYTECODE=1 \
     python3 "$ROOT_DIR/scripts/tests/test_quiesced_release_state.py" --strict-ci
