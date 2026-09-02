@@ -49,19 +49,22 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 #### Remaining first-slice execution work
 
 - Repository release-state resilience is complete as bounded evidence at implementation commit `b86f69dfea8715c9eec24214230fc837cf9a74fb` (`feat(deploy): harden release state resilience`), accepted by independent review as `PASS_TO_COMMIT`. It adds durable migration/release authority and does not itself merge, push or deploy the candidate.
+- Deployment-principal read-only status-channel implementation is complete as bounded repository work at local implementation commit `cfe7794df859a135c9825dcd251298ef920577ac` (`feat(deploy): add read-only release status channel`), with independent review `PASS_TO_COMMIT`. The manual-only channel has not been pushed, merged, observed in GitHub Actions or dispatched; it does not assert protected-environment `SSH_KNOWN_HOSTS` provisioning, trusted stage status, incident resolution or recovery authorization.
 - The next integration sequence is:
 
-  1. documentation commit;
-  2. push the fallback feature branch;
-  3. combined Draft PR;
-  4. GitHub checks;
-  5. merge and cleanup;
-  6. separate controlled deploy approval;
-  7. post-deploy read-only observer;
-  8. controlled staging data setup;
-  9. manual smoke.
+  1. product evidence reconciliation;
+  2. push the branch and create a Draft PR;
+  3. wait for all checks;
+  4. perform independent post-push workflow/security verification;
+  5. merge only after required checks;
+  6. complete post-merge cleanup;
+  7. provision and verify `SSH_KNOWN_HOSTS`;
+  8. obtain separate approval for one read-only status-workflow dispatch;
+  9. reconcile trusted release status;
+  10. resume candidate-start incident diagnosis;
+  11. separately authorize the selected recovery or forward-fix path.
 
-- Staging runtime remains behind the candidate: it runs `df7685facb52a6e5731a520669dfa2c73f6ccf24` with old digest `sha256:236c11cad4015cd6817c04a9fea0a3155eab77eb72164ab6c554f0c870c55cb6`; public support surfaces serve the legacy bundle, schema permissions/delivery are unconfirmed, and staging smoke is still `NOT_RUN`.
+- Staging runtime remains behind the candidate and in a fail-closed incident state: it runs `df7685facb52a6e5731a520669dfa2c73f6ccf24` with old digest `sha256:236c11cad4015cd6817c04a9fea0a3155eab77eb72164ab6c554f0c870c55cb6`; public support surfaces serve the legacy bundle, schema permissions/delivery are unconfirmed, the candidate-start root cause is unresolved, no trusted status has been received, and staging smoke is still `NOT_RUN`. Recovery is not authorized.
 - The accepted staging smoke remains the only first-slice execution boundary. It must include the already implemented truthful-delivery and guest-surface behavior; it is validation work, not an automatic new feature. A production correction is required only if that smoke exposes a defect, which then becomes a separate bounded task.
 - Preserve the completed `DEC-025` `NEW → IN_PROGRESS → RESOLVED → CLOSED` graph, its confirmed resolve and terminal-state enforcement; do not use the disabled generic status route as a bypass.
 
