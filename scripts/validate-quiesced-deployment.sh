@@ -2,11 +2,24 @@
 set -euo pipefail
 
 repository_root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+validation_mode="${2:-full}"
+case "$validation_mode" in
+  full|--status-channel-only) ;;
+  *)
+    echo "usage: scripts/validate-quiesced-deployment.sh [repository-root] [--status-channel-only]" >&2
+    exit 2
+    ;;
+esac
+validator_library_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 deploy_workflow="$repository_root/.github/workflows/deploy-ssh.yml"
 migrate_workflow="$repository_root/.github/workflows/db-migrate.yml"
+status_workflow="$repository_root/.github/workflows/release-status.yml"
 runner_script="$repository_root/scripts/deploy/quiesced-release.sh"
+status_runner="$repository_root/scripts/deploy/read-only-release-status.sh"
 remote_script="$repository_root/scripts/deploy/remote-compose-release.sh"
 state_test="$repository_root/scripts/tests/test_quiesced_release_state.py"
+status_test="$repository_root/scripts/tests/test_read_only_release_status.py"
+selfcheck_script="$repository_root/scripts/selfcheck-quality-gates.sh"
 dockerfile="$repository_root/Dockerfile"
 compose_file="$repository_root/docker-compose.yml"
 app_build="$repository_root/app-bot/build.gradle.kts"
@@ -20,6 +33,763 @@ fail() {
   echo "quiesced-deployment-contract: $1" >&2
   exit 1
 }
+
+fail_status_contract() {
+  echo "read-only-status-contract: $1" >&2
+  exit 1
+}
+
+validate_status_channel_contract() {
+  local required_file remote_wrapper strict_suite_line strict_verify_line strict_marker_line
+  for required_file in "$status_workflow" "$status_runner" "$status_test" "$selfcheck_script"; do
+    [ -f "$required_file" ] ||
+      fail_status_contract "missing ${required_file#"$repository_root/"}"
+  done
+  [ -x "$status_runner" ] || fail_status_contract "status runner is not executable"
+  [ -x "$status_test" ] || fail_status_contract "status executable test is not executable"
+  [ "$(grep -c '^    def test_' "$status_test")" = "80" ] ||
+    fail_status_contract "status executable method count must be exactly 80"
+  [ "$(grep -Fxc 'EXPECTED_METHOD_COUNT = 80' "$status_test")" = "1" ] ||
+    fail_status_contract "status strict method count changed"
+  [ "$(grep -Fxc 'EXPECTED_SUBTEST_COUNT = 322' "$status_test")" = "1" ] ||
+    fail_status_contract "status strict subtest count changed"
+  [ "$(grep -Fxc 'release_status_expected_methods=80' "$selfcheck_script")" = "1" ] ||
+    fail_status_contract "selfcheck strict method count changed"
+  [ "$(grep -Fxc 'release_status_expected_subtests=322' "$selfcheck_script")" = "1" ] ||
+    fail_status_contract "selfcheck strict subtest count changed"
+  [ "$(grep -Fc 'test_read_only_release_status.py" --strict \' "$selfcheck_script")" = "1" ] ||
+    fail_status_contract "selfcheck must invoke the status suite in strict mode exactly once"
+  strict_suite_line="$(grep -nF 'test_read_only_release_status.py" --strict \' "$selfcheck_script" | cut -d: -f1)"
+  strict_verify_line="$(grep -nF 'verify_release_status_summary "$status_summary_file"' "$selfcheck_script" | cut -d: -f1)"
+  strict_marker_line="$(grep -nFx 'echo "release-status-channel: OK"' "$selfcheck_script" | cut -d: -f1)"
+  [ -n "$strict_suite_line" ] && [ -n "$strict_verify_line" ] &&
+    [ -n "$strict_marker_line" ] && [ "$strict_suite_line" -lt "$strict_verify_line" ] &&
+    [ "$strict_verify_line" -lt "$strict_marker_line" ] ||
+    fail_status_contract "selfcheck strict verification must precede the success marker"
+  bash -n "$status_runner" || fail_status_contract "status runner is not valid Bash"
+
+  ruby -I"$validator_library_root" -rvalidate-workflow-yaml \
+    - "$status_workflow" <<'RUBY' || exit $?
+def reject_status_contract(message)
+  warn "read-only-status-contract: #{message}"
+  exit 1
+end
+
+path = ARGV.fetch(0)
+begin
+  workflow = WorkflowYamlSafety.safe_load_workflow(
+    File.binread(path),
+    ".github/workflows/release-status.yml"
+  )
+rescue WorkflowYamlSafety::ModelError, Psych::SyntaxError, SystemCallError, ArgumentError => error
+  reject_status_contract("workflow is unreadable or malformed: #{error.message}")
+end
+
+reject_status_contract("workflow root must be a mapping") unless workflow.is_a?(Hash)
+raw = File.binread(path)
+reject_status_contract("live ssh-keyscan is forbidden") if raw.match?(/\bssh-keyscan\b/)
+reject_status_contract("raw artifact publication is forbidden") if raw.match?(/actions\/upload-artifact@|actions\/upload-pages-artifact@/)
+reject_status_contract("registry login is forbidden") if raw.match?(/docker\/login-action@|\bdocker\s+login\b/)
+reject_status_contract("image pull is forbidden") if raw.match?(/\bdocker\s+(?:image\s+)?pull\b/)
+reject_status_contract("deploy runner invocation is forbidden") if raw.include?("scripts/deploy/quiesced-release.sh")
+if raw.match?(/(^|[^[:alnum:]_-])(?:scp|sftp)(?:[[:space:]]|$)/)
+  reject_status_contract("read-only status channel must not upload or replace retained helper")
+end
+reject_status_contract("hidden SSH invocation is forbidden") if
+  raw.match?(/(?:^|\n)\s*(?:command\s+)?ssh(?:\s|$)/)
+runner_count = raw.scan(%r{implementation/scripts/deploy/read-only-release-status\.sh}).length
+unless runner_count == 1
+  reject_status_contract("single retained status invocation changed")
+end
+top_level_keys = workflow.keys.map { |key| key == true ? "on" : key.to_s }
+unless top_level_keys.sort == %w[concurrency jobs name on permissions].sort
+  reject_status_contract("top-level workflow surface changed")
+end
+reject_status_contract("workflow display name changed") unless workflow["name"] == "Release Status (read-only)"
+triggers = workflow["on"] || workflow[true]
+unless triggers.is_a?(Hash) && triggers.keys == ["workflow_dispatch"]
+  reject_status_contract("workflow_dispatch must be the only trigger")
+end
+expected_operations = %w[
+  preflight prepare publish quiesce migrate start cleanup abort retention
+  helper-cleanup resume-quiesce resume-migrate resume-start resume-cleanup
+]
+expected_inputs = {
+  "environment" => {
+    "description" => "Target environment",
+    "required" => true,
+    "type" => "choice",
+    "options" => ["stage", "prod"],
+  },
+  "incident_tag" => {
+    "description" => "Exact incident tag to observe",
+    "required" => true,
+    "type" => "string",
+  },
+  "release_owner" => {
+    "description" => "Exact retained release owner",
+    "required" => true,
+    "type" => "string",
+  },
+  "expected_revision" => {
+    "description" => "Exact expected Git revision",
+    "required" => true,
+    "type" => "string",
+  },
+  "image_digest" => {
+    "description" => "Exact app-bot image digest",
+    "required" => true,
+    "type" => "string",
+  },
+  "requested_operation" => {
+    "description" => "Exact retained release operation",
+    "required" => true,
+    "type" => "choice",
+    "options" => expected_operations,
+  },
+}
+unless triggers["workflow_dispatch"] == {"inputs" => expected_inputs}
+  reject_status_contract("workflow_dispatch input contract changed")
+end
+unless workflow["permissions"] == {"contents" => "read"}
+  reject_status_contract("permissions must be exactly contents: read")
+end
+unless workflow["concurrency"] == {
+  "group" => "payments-schema-${{ inputs.environment }}",
+  "cancel-in-progress" => false,
+}
+  reject_status_contract("status must share the non-cancelling environment release lock")
+end
+
+jobs = workflow["jobs"]
+unless jobs.is_a?(Hash) && jobs.keys.sort == %w[status validate]
+  reject_status_contract("workflow must contain exactly validate and status jobs")
+end
+validate_job = jobs["validate"]
+status_job = jobs["status"]
+unless validate_job.is_a?(Hash) && status_job.is_a?(Hash)
+  reject_status_contract("status jobs must be mappings")
+end
+reject_status_contract("validate job-level continue-on-error is forbidden") if
+  validate_job.key?("continue-on-error")
+reject_status_contract("status job-level continue-on-error is forbidden") if
+  status_job.key?("continue-on-error")
+if validate_job.key?("environment")
+  reject_status_contract("validate job must not use a protected environment")
+end
+unless status_job["needs"] == "validate"
+  reject_status_contract("status job must require validate")
+end
+unless status_job["environment"] == "${{ needs.validate.outputs.environment }}"
+  reject_status_contract("status environment must use the validated environment")
+end
+unless validate_job["permissions"] == {"contents" => "read"} &&
+       status_job["permissions"] == {"contents" => "read"}
+  reject_status_contract("every job must explicitly use contents: read")
+end
+unless validate_job["timeout-minutes"].is_a?(Integer) && validate_job["timeout-minutes"].between?(1, 5)
+  reject_status_contract("validate timeout must be at most 5 minutes")
+end
+unless status_job["timeout-minutes"].is_a?(Integer) && status_job["timeout-minutes"].between?(1, 10)
+  reject_status_contract("status timeout must be at most 10 minutes")
+end
+unless validate_job.keys.sort == %w[name outputs permissions runs-on steps timeout-minutes].sort
+  reject_status_contract("validate job surface changed")
+end
+unless status_job.keys.sort == %w[environment name needs permissions runs-on steps timeout-minutes].sort
+  reject_status_contract("status job surface changed")
+end
+unless validate_job["permissions"] == {"contents" => "read"} &&
+       status_job["permissions"] == {"contents" => "read"}
+  reject_status_contract("every job must explicitly use contents: read")
+end
+if validate_job.key?("environment")
+  reject_status_contract("validate job must not use a protected environment")
+end
+unless status_job["needs"] == "validate"
+  reject_status_contract("status job must require validate")
+end
+unless status_job["environment"] == "${{ needs.validate.outputs.environment }}"
+  reject_status_contract("status environment must use the validated environment")
+end
+unless validate_job["runs-on"] == "ubuntu-latest" && status_job["runs-on"] == "ubuntu-latest"
+  reject_status_contract("status jobs must run on ubuntu-latest")
+end
+unless validate_job["timeout-minutes"].is_a?(Integer) && validate_job["timeout-minutes"].between?(1, 5)
+  reject_status_contract("validate timeout must be at most 5 minutes")
+end
+unless status_job["timeout-minutes"].is_a?(Integer) && status_job["timeout-minutes"].between?(1, 10)
+  reject_status_contract("status timeout must be at most 10 minutes")
+end
+if validate_job.key?("if") || status_job.key?("if")
+  reject_status_contract("status jobs must not be conditional")
+end
+
+expected_outputs = %w[
+  environment incident_tag release_owner expected_revision image_digest
+  requested_operation
+].to_h { |name| [name, "${{ steps.sanitize.outputs.#{name} }}"] }
+unless validate_job["outputs"] == expected_outputs
+  reject_status_contract("validate sanitized outputs changed")
+end
+
+validate_steps = validate_job["steps"]
+status_steps = status_job["steps"]
+if status_steps.is_a?(Array)
+  runner_step = status_steps.find do |step|
+    step.is_a?(Hash) && step["name"] == "Read exact retained release status once"
+  end
+  if runner_step
+    runner_env = runner_step["env"]
+    unless runner_env.is_a?(Hash) && runner_env["TMPDIR"] == "${{ runner.temp }}"
+      reject_status_contract("status runner TMPDIR must be exactly runner.temp")
+    end
+    unless runner_env["RUNNER_TEMP"] == "${{ runner.temp }}"
+      reject_status_contract("status runner RUNNER_TEMP must be exactly runner.temp")
+    end
+    unless runner_env["SSH_PORT"] == "${{ secrets.SSH_PORT || '22' }}"
+      reject_status_contract("status SSH_PORT must default empty secret to literal 22")
+    end
+  end
+end
+unless validate_steps.is_a?(Array) && validate_steps.first.is_a?(Hash) &&
+       validate_steps.first["name"] == "Require main dispatch"
+  reject_status_contract("main dispatch guard must be the first executable step")
+end
+unless validate_steps.is_a?(Array) && validate_steps.length == 2 &&
+       validate_steps.all? { |step| step.is_a?(Hash) }
+  reject_status_contract("validate must contain exactly the guard and sanitizer")
+end
+unless status_steps.is_a?(Array) && status_steps.length == 7 &&
+       status_steps.all? { |step| step.is_a?(Hash) }
+  reject_status_contract("status must contain exactly seven mandatory steps")
+end
+expected_names = [
+  "Checkout implementation main",
+  "Verify implementation revision",
+  "Checkout incident tag",
+  "Verify incident revision",
+  "Derive retained helper SHA-256",
+  "Setup deployment SSH principal",
+  "Read exact retained release status once",
+]
+unless status_steps.map { |step| step["name"] } == expected_names
+  reject_status_contract("status step inventory or order changed")
+end
+if (validate_steps + status_steps).any? { |step| step.key?("if") || step.key?("continue-on-error") }
+  reject_status_contract("status steps must remain unconditional and fail closed")
+end
+if (validate_steps + status_steps).any? { |step| step.key?("shell") && step["shell"] != "bash" }
+  reject_status_contract("status shell steps must use bash")
+end
+shell_source = (validate_steps + status_steps).map { |step| step["run"] }.compact.join("\n")
+if shell_source.match?(/(?:^|\n)\s*set\s+\+e(?:\s|$)|\|\|\s*true(?:\s|$)|\bssh_exit=0\b/)
+  reject_status_contract("fail-open custom shell is forbidden")
+end
+
+guard, sanitizer = validate_steps
+guard_checks = [
+  'test "$GITHUB_REF" = "refs/heads/main"',
+  'test "$GITHUB_REF_TYPE" = "branch"',
+  'test "$REPOSITORY_DEFAULT_BRANCH" = "main"',
+]
+unless guard["run"].start_with?("set -euo pipefail\n") &&
+       guard_checks.all? { |check| guard["run"].include?(check) }
+  reject_status_contract("main/ref/default-branch guard changed")
+end
+unless sanitizer["name"] == "Validate and sanitize status inputs" &&
+       sanitizer["id"] == "sanitize" && sanitizer["shell"] == "bash" &&
+       sanitizer["run"].is_a?(String) &&
+       sanitizer["run"].start_with?("set -euo pipefail\n")
+  reject_status_contract("input sanitizer contract changed")
+end
+required_sanitizer_fragments = [
+  '^deploy-(stage|prod)-[0-9a-f]{7,40}$',
+  'test "$tag_environment" = "$INPUT_ENVIRONMENT"',
+  '^[0-9]+-[0-9]+$',
+  '^[0-9a-f]{40}$',
+  '^ghcr\\.io/koteev-m/clubs_bot/app-bot@sha256:[0-9a-f]{64}$',
+  'preflight|prepare|publish|quiesce|migrate|start|cleanup|abort|retention|helper-cleanup|resume-quiesce|resume-migrate|resume-start|resume-cleanup',
+]
+unless required_sanitizer_fragments.all? { |fragment| sanitizer["run"].include?(fragment) }
+  reject_status_contract("input sanitizer validation grammar changed")
+end
+expected_input_env = %w[
+  ENVIRONMENT INCIDENT_TAG RELEASE_OWNER EXPECTED_REVISION IMAGE_DIGEST
+  REQUESTED_OPERATION
+].to_h { |name| ["INPUT_#{name}", "${{ inputs.#{name.downcase} }}"] }
+unless sanitizer["env"] == expected_input_env
+  reject_status_contract("sanitizer must consume exactly the raw dispatch inputs")
+end
+
+def scalar_strings(value, result = [])
+  case value
+  when Hash
+    value.each { |key, child| scalar_strings(key, result); scalar_strings(child, result) }
+  when Array
+    value.each { |child| scalar_strings(child, result) }
+  when String
+    result << value
+  end
+  result
+end
+validate_scalars = scalar_strings(validate_job)
+if validate_scalars.any? { |value| value.include?("secrets.") || value.include?("SSH_PRIVATE_KEY") || value.include?("SSH_KNOWN_HOSTS") }
+  reject_status_contract("validate job must not reference deployment secrets")
+end
+if validate_steps.any? { |step| step.key?("uses") }
+  reject_status_contract("validate job must not use actions or checkout credentials")
+end
+
+implementation_checkout, implementation_verify, incident_checkout,
+  incident_verify, helper_hash, agent, status = status_steps
+incident_path_execution = status_steps.map { |step| step["run"] }.select { |run| run.is_a?(String) }.flat_map(&:lines).any? do |line|
+  stripped = line.strip
+  next false if stripped.empty? || stripped.start_with?("#")
+  stripped.match?(%r{(?:^|[[:space:]])(?:bash|sh|source|\.)[[:space:]]+[^\n]*incident/}) ||
+    stripped.match?(%r{\A(?:command[[:space:]]+)?incident/[^[:space:]]+})
+end
+if incident_path_execution
+  reject_status_contract("incident checkout code execution is forbidden")
+end
+unless implementation_checkout == {
+  "name" => "Checkout implementation main",
+  "uses" => "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332",
+  "with" => {
+    "ref" => "refs/heads/main",
+    "path" => "implementation",
+    "persist-credentials" => false,
+  },
+}
+  reject_status_contract("implementation checkout must be pinned, main, isolated, and credential-free")
+end
+unless incident_checkout == {
+  "name" => "Checkout incident tag",
+  "uses" => "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332",
+  "with" => {
+    "ref" => "refs/tags/${{ needs.validate.outputs.incident_tag }}",
+    "path" => "incident",
+    "persist-credentials" => false,
+  },
+}
+  reject_status_contract("incident checkout must use only the validated incident tag")
+end
+unless implementation_verify["shell"] == "bash" &&
+       implementation_verify["run"].is_a?(String) &&
+       implementation_verify["run"].include?('git -C implementation rev-parse HEAD') &&
+       implementation_verify["run"].include?('test "$implementation_head" = "$GITHUB_SHA"')
+  reject_status_contract("implementation revision equality check changed")
+end
+expected_incident_verify_run = <<~'BASH'
+  set -euo pipefail
+  incident_head="$(git -C incident rev-parse HEAD)"
+  test "$incident_head" = "$EXPECTED_REVISION"
+BASH
+unless incident_verify["shell"] == "bash" &&
+       incident_verify["env"] == {"EXPECTED_REVISION" => "${{ needs.validate.outputs.expected_revision }}"} &&
+       incident_verify["run"] == expected_incident_verify_run
+  reject_status_contract("incident revision equality check changed")
+end
+unless helper_hash["id"] == "helper" && helper_hash["shell"] == "bash" &&
+       helper_hash["env"] == {
+         "EXPECTED_REVISION" => "${{ needs.validate.outputs.expected_revision }}",
+       } &&
+       helper_hash["run"].is_a?(String) &&
+       helper_hash["run"].start_with?("set -euo pipefail\n")
+  reject_status_contract("incident helper exact Git tree lookup changed")
+end
+
+helper_run = helper_hash["run"]
+helper_lines = helper_run.lines.map(&:strip).reject(&:empty?)
+def unique_helper_line_index(lines, exact_line)
+  matches = lines.each_index.select { |index| lines[index] == exact_line }
+  matches.one? ? matches.first : nil
+end
+
+incident_blob_execution =
+  helper_run.match?(/\bgit\s+-C\s+incident\s+cat-file\s+blob\b[^\n]*\|\s*(?:bash|sh)\b/) ||
+  helper_run.match?(/(?:\bbash\s+-c|\bsh\s+-c|\beval|\bsource|(?:^|[[:space:]])\.)[^\n]*\bgit\s+-C\s+incident\s+cat-file\s+blob\b/)
+if incident_blob_execution
+  reject_status_contract("incident checkout code execution is forbidden")
+end
+if helper_run.match?(/[0-9a-f]{64}/)
+  reject_status_contract("constant helper SHA is forbidden")
+end
+if helper_run.include?("--follow-symlinks")
+  reject_status_contract("incident helper exact Git tree lookup changed")
+end
+if helper_run.include?("--filters") || helper_run.include?("--textconv")
+  reject_status_contract("incident helper SHA must be derived from the exact raw Git blob")
+end
+if helper_run.match?(/\bgit\s+-C\s+implementation\b/)
+  reject_status_contract("incident helper object database must be incident")
+end
+if helper_run.match?(%r{(?:^|[[:space:]"'/])incident/}) ||
+   helper_run.match?(%r{(?:^|[[:space:]"'])implementation/scripts/deploy/remote-compose-release\.sh(?:[[:space:]"']|$)}) ||
+   helper_run.match?(/\bcd\s+[^\n]*\b(?:incident|implementation)\b/) ||
+   helper_run.match?(/\b(?:realpath|readlink|find|mktemp|tee)\b/) ||
+   helper_run.include?("tree_records_file") ||
+   helper_run.match?(/(?:\btest\s+|\[\[?[[:space:]]+)!?-(?:f|L|e)\b/) ||
+   helper_run.match?(/\bsha256sum\b[^\n]*(?:incident|implementation|\$helper_path)/) ||
+   helper_run.match?(/\bcat(?:[[:space:]]|$)[^\n]*(?:incident|implementation|\$helper)/)
+  reject_status_contract("incident helper filesystem-path authority is forbidden")
+end
+
+exact_tree_lookup = 'if git -C incident ls-tree --full-tree -z "$EXPECTED_REVISION" -- "$helper_repository_path" |'
+tree_lookup_contract = [
+  'readonly helper_repository_path="scripts/deploy/remote-compose-release.sh"',
+  'readonly max_helper_tree_record_bytes=512',
+  'reject_helper() {',
+  'printf \'read-only status channel %s\\n\' "$1" >&2',
+  'export GIT_NO_REPLACE_OBJECTS=1',
+  'export GIT_OPTIONAL_LOCKS=0',
+  'export GIT_LITERAL_PATHSPECS=1',
+  exact_tree_lookup,
+  'parse_helper_tree_entry; then',
+  '40) reject_helper "incident helper tree entry missing" ;;',
+]
+unless tree_lookup_contract.all? { |line| helper_lines.include?(line) } &&
+       helper_run.scan(/\bgit\s+-C\s+incident\s+ls-tree\b/).length == 1
+  reject_status_contract("incident helper exact Git tree lookup changed")
+end
+
+tree_identity_contract = [
+  'parse_helper_tree_entry() {',
+  'local tree_record=""',
+  'local trailing_tree_data=""',
+  "local tree_metadata_pattern='^([0-9]{6}) ([a-z]+) ([0-9a-f]+)$'",
+  'if ! IFS= read -r -d \'\' -n "$max_helper_tree_record_bytes" tree_record; then',
+  'if [[ -z "$tree_record" ]]; then',
+  'return 40',
+  'if IFS= read -r -d \'\' -n 1 trailing_tree_data; then',
+  'if [[ -n "$trailing_tree_data" ]] || [[ "$tree_record" != *$\'\\t\'* ]]; then',
+  'tree_metadata="${tree_record%%$\'\\t\'*}"',
+  'tree_path="${tree_record#*$\'\\t\'}"',
+  'if [[ "$tree_path" != "$helper_repository_path" ]] ||',
+  '[[ ! "$tree_metadata" =~ $tree_metadata_pattern ]]; then',
+  'tree_mode="${BASH_REMATCH[1]}"',
+  'tree_type="${BASH_REMATCH[2]}"',
+  'blob_oid="${BASH_REMATCH[3]}"',
+  'helper_tree_pipeline_status=("${PIPESTATUS[@]}")',
+  'if (( ${#helper_tree_pipeline_status[@]} != 2 )) ||',
+  '(( helper_tree_pipeline_status[0] != 0 )); then',
+  'exit "${helper_tree_pipeline_status[1]}"',
+  '40) reject_helper "incident helper tree entry missing" ;;',
+  '*) reject_helper "incident helper Git blob identity invalid" ;;',
+  "helper_tree_identity_pattern='^(100644|100755) (blob) ([0-9a-f]+)$'",
+  'if [[ ! "$helper_tree_identity" =~ $helper_tree_identity_pattern ]]; then',
+  'helper_blob_oid="${BASH_REMATCH[3]}"',
+]
+unless tree_identity_contract.all? { |line| helper_lines.include?(line) }
+  reject_status_contract("incident helper Git blob identity invalid")
+end
+
+regular_blob_contract = [
+  'if [[ "$tree_type" != "blob" ]] ||',
+  '[[ "$tree_mode" != "100644" && "$tree_mode" != "100755" ]]; then',
+  'return 41',
+  '41) reject_helper "incident helper tree entry is not a regular blob" ;;',
+  'printf \'%s %s %s\\n\' "$tree_mode" "$tree_type" "$blob_oid"',
+]
+unless regular_blob_contract.all? { |line| helper_lines.include?(line) }
+  reject_status_contract("incident helper tree entry is not a regular blob")
+end
+
+blob_identity_contract = [
+  'readonly max_helper_blob_size=262144',
+  'if ! git_object_format="$(git -C incident rev-parse --show-object-format=storage)"; then',
+  'sha1) expected_oid_length=40 ;;',
+  'sha256) expected_oid_length=64 ;;',
+  'if [[ ! "$helper_blob_oid" =~ ^[0-9a-f]+$ ]] ||',
+  '(( ${#helper_blob_oid} != expected_oid_length )); then',
+  'if ! helper_blob_type="$(git -C incident cat-file -t "$helper_blob_oid")"; then',
+  'if [[ "$helper_blob_type" != "blob" ]]; then',
+  'if ! helper_blob_size="$(git -C incident cat-file -s "$helper_blob_oid")"; then',
+  'if [[ ! "$helper_blob_size" =~ ^[1-9][0-9]{0,6}$ ]] ||',
+  '(( 10#$helper_blob_size > max_helper_blob_size )); then',
+  'reject_helper "incident helper Git blob identity invalid"',
+]
+unless blob_identity_contract.all? { |line| helper_lines.include?(line) } &&
+       helper_run.scan(/\bgit\s+-C\s+incident\s+cat-file\s+-t\b/).length == 1 &&
+       helper_run.scan(/\bgit\s+-C\s+incident\s+cat-file\s+-s\b/).length == 1
+  reject_status_contract("incident helper Git blob identity invalid")
+end
+
+exact_blob_hash = 'if ! helper_sha256_line="$(git -C incident cat-file blob "$helper_blob_oid" | sha256sum)"; then'
+raw_blob_hash_contract = [
+  exact_blob_hash,
+  'helper_sha256="${helper_sha256_line%% *}"',
+  'if [[ ! "$helper_sha256" =~ ^[0-9a-f]{64}$ ]]; then',
+  'printf \'sha256=%s\\n\' "$helper_sha256" >>"$GITHUB_OUTPUT"',
+]
+unless raw_blob_hash_contract.all? { |line| helper_lines.include?(line) } &&
+       helper_run.scan(/\bgit\s+-C\s+incident\s+cat-file\s+blob\b/).length == 1 &&
+       helper_run.scan(/\bsha256sum\b/).length == 1 &&
+       !helper_run.match?(/\bgit\s+show\b/)
+  reject_status_contract("incident helper SHA must be derived from the exact raw Git blob")
+end
+
+ordered_helper_lines = [
+  'export GIT_NO_REPLACE_OBJECTS=1',
+  'export GIT_OPTIONAL_LOCKS=0',
+  'export GIT_LITERAL_PATHSPECS=1',
+  'if [[ "$tree_path" != "$helper_repository_path" ]] ||',
+  'if [[ "$tree_type" != "blob" ]] ||',
+  exact_tree_lookup,
+  'if [[ ! "$helper_tree_identity" =~ $helper_tree_identity_pattern ]]; then',
+  'if ! helper_blob_type="$(git -C incident cat-file -t "$helper_blob_oid")"; then',
+  'if ! helper_blob_size="$(git -C incident cat-file -s "$helper_blob_oid")"; then',
+  exact_blob_hash,
+  'printf \'sha256=%s\\n\' "$helper_sha256" >>"$GITHUB_OUTPUT"',
+]
+ordered_helper_indices = ordered_helper_lines.map do |line|
+  unique_helper_line_index(helper_lines, line)
+end
+unless ordered_helper_indices.none?(&:nil?) &&
+       ordered_helper_indices.each_cons(2).all? { |left, right| left < right }
+  reject_status_contract("incident helper Git object validation order changed")
+end
+unless agent == {
+  "name" => "Setup deployment SSH principal",
+  "uses" => "webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387",
+  "with" => {"ssh-private-key" => "${{ secrets.SSH_PRIVATE_KEY }}"},
+}
+  reject_status_contract("deployment SSH principal setup changed")
+end
+unless status == {
+  "name" => "Read exact retained release status once",
+  "shell" => "bash",
+  "env" => {
+    "TMPDIR" => "${{ runner.temp }}",
+    "RUNNER_TEMP" => "${{ runner.temp }}",
+    "APP_ENV" => "${{ needs.validate.outputs.environment }}",
+    "INCIDENT_TAG" => "${{ needs.validate.outputs.incident_tag }}",
+    "RELEASE_OWNER" => "${{ needs.validate.outputs.release_owner }}",
+    "EXPECTED_REVISION" => "${{ needs.validate.outputs.expected_revision }}",
+    "IMAGE_DIGEST" => "${{ needs.validate.outputs.image_digest }}",
+    "REQUESTED_OPERATION" => "${{ needs.validate.outputs.requested_operation }}",
+    "EXPECTED_HELPER_SHA256" => "${{ steps.helper.outputs.sha256 }}",
+    "SSH_USER" => "${{ secrets.SSH_USER }}",
+    "SSH_HOST" => "${{ secrets.SSH_HOST }}",
+    "SSH_PORT" => "${{ secrets.SSH_PORT || '22' }}",
+    "COMPOSE_PATH" => "${{ secrets.COMPOSE_PATH }}",
+    "SSH_KNOWN_HOSTS" => "${{ secrets.SSH_KNOWN_HOSTS }}",
+  },
+  "run" => "implementation/scripts/deploy/read-only-release-status.sh",
+}
+  reject_status_contract("single retained status invocation changed")
+end
+
+early_scalars = scalar_strings(status_steps.first(5))
+if early_scalars.any? { |value| value.include?("secrets.") }
+  reject_status_contract("SSH secret referenced before both revision checks")
+end
+secret_names = scalar_strings(status_job).flat_map { |value| value.scan(/secrets\.([A-Z0-9_]+)/).flatten }.uniq.sort
+expected_secrets = %w[COMPOSE_PATH SSH_HOST SSH_KNOWN_HOSTS SSH_PORT SSH_PRIVATE_KEY SSH_USER].sort
+unless secret_names == expected_secrets
+  reject_status_contract("status environment secret allowlist changed")
+end
+
+puts "read-only-status-contract: workflow verified"
+RUBY
+
+  [ "$(sha256sum "$status_workflow" | awk '{print $1}')" = \
+    "1b4d9e0a69a8ad1f86857d4100e86f500376123bd972061f936b25bf5db0bb51" ] ||
+    fail_status_contract "workflow content SHA-256 changed outside the approved contract"
+
+  remote_wrapper="$(awk '/<<'\''REMOTE_STATUS'\''/ { inside = 1; next } inside && /^REMOTE_STATUS$/ { exit } inside { print }' "$status_runner")"
+  [ "$(grep -Ec '^[[:space:]]*ssh[[:space:]]+' "$status_runner")" = "1" ] &&
+    [ "$(grep -Ec '^[[:space:]]*ssh[[:space:]]+-p[[:space:]]+"\$SSH_PORT"' "$status_runner")" = "1" ] ||
+    fail_status_contract "runner must perform exactly one SSH operation"
+  if grep -Eq '(^|[[:space:]])(command[[:space:]]+ssh|eval|alias[[:space:]]+ssh|function[[:space:]]+ssh|ssh\(\))' "$status_runner"; then
+    fail_status_contract "runner contains hidden SSH execution machinery"
+  fi
+  for forbidden_transport in scp rsync sftp curl wget nc ncat socat; do
+    if grep -Eq "(^|[[:space:]])${forbidden_transport}([[:space:]]|$)" "$status_runner"; then
+      fail_status_contract "runner contains forbidden secondary transport: $forbidden_transport"
+    fi
+  done
+  for forbidden_command in docker docker-compose psql mysql flyway; do
+    if grep -Eq "^[[:space:]]*${forbidden_command}([[:space:]]|$)" "$status_runner"; then
+      fail_status_contract "runner contains forbidden deployment or database command: $forbidden_command"
+    fi
+  done
+  [ "$(grep -Fc 'bash -s -- status "$release_owner" "$app_env" "$compose_path" \' "$status_runner")" = "1" ] ||
+    fail_status_contract "runner must execute exactly one immutable helper snapshot in literal status mode"
+  if grep -Eq 'bash (-s -- )?(preflight|prepare|publish|quiesce|migrate|start|cleanup|abort|retention|helper-cleanup|resume)' "$status_runner"; then
+    fail_status_contract "runner can invoke a lifecycle helper mode"
+  fi
+  if grep -Eq 'bash[^\n]*"\$(REQUESTED_OPERATION|requested_operation)"' "$status_runner"; then
+    fail_status_contract "runner permits a variable helper mode"
+  fi
+  if grep -Eq 'bash[[:space:]]+("\$helper_path"|"\$helper_fd_path"|/proc/self/fd/|/dev/fd/)' <<<"$remote_wrapper"; then
+    fail_status_contract "remote wrapper executes the live helper path or descriptor"
+  fi
+  [ "$(grep -Fc '<&9' <<<"$remote_wrapper")" = "1" ] ||
+    fail_status_contract "retained helper must be captured from its opened descriptor exactly once"
+  if grep -Eq '644:1|helper_mode[^\n]*(==|=)[^\n]*644' <<<"$remote_wrapper"; then
+    fail_status_contract "helper mode must not depend on an exact 0644 uploader result"
+  fi
+  for runner_contract in \
+    'set -euo pipefail' \
+    'umask 077' \
+    'pending_signal_status=0' \
+    '[[ ! "$SSH_USER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]*$ ]]' \
+    'temporary_root="${TMPDIR:-}"' \
+    'temporary_root="${RUNNER_TEMP:-}"' \
+    'bootstrap_private_files "$temporary_root"' \
+    'exec python3 - "$0" "$private_root"' \
+    'os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW' \
+    'path != os.path.realpath(path)' \
+    'value.st_uid != os.geteuid()' \
+    'mode & 0o022' \
+    'os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW' \
+    'opened.append([descriptor, name, None, True])' \
+    'original = os.stat(descriptor)' \
+    'os.unlink(name, dir_fd=root_fd)' \
+    'os.fstat(descriptor).st_nlink != 0' \
+    'os.dup2(descriptor, target_fd, inheritable=True)' \
+    'os.dup2(root_fd, 7, inheritable=True)' \
+    '[ "$private_mode" != "600" ] || [ "$private_links" != "0" ]' \
+    'trap unexpected_exit EXIT' \
+    "trap 'record_initialization_signal 129' HUP" \
+    "trap 'record_initialization_signal 130' INT" \
+    "trap 'record_initialization_signal 143' TERM" \
+    'child_process = subprocess.Popen(' \
+    'if pending_signal != 0:' \
+    'stdout=subprocess.PIPE' \
+    'pass_fds=(7, 10, 11, 12)' \
+    'start_new_session=True' \
+    'os.killpg(child_process.pid, signum)' \
+    'signal.pthread_sigmask(signal.SIG_BLOCK, watched_signals)' \
+    "trap 'trap \"\" HUP INT TERM; handle_signal 129' HUP" \
+    "trap 'trap \"\" HUP INT TERM; handle_signal 130' INT" \
+    "trap 'trap \"\" HUP INT TERM; handle_signal 143' TERM" \
+    "trap '' HUP INT TERM" \
+    'os.ftruncate(descriptor, 0)' \
+    'private_fs scrub "$known_hosts_fd"' \
+    'private_fs scrub "$status_stdout_fd"' \
+    'private_fs scrub "$status_stderr_fd"' \
+    'terminate_ssh_bounded() {' \
+    'kill -KILL "$child_pid"' \
+    'Never enter an unbounded wait.' \
+    '-F /dev/null' \
+    '-o BatchMode=yes' \
+    '-o StrictHostKeyChecking=yes' \
+    '-o "UserKnownHostsFile=$known_hosts_file"' \
+    '-o GlobalKnownHostsFile=/dev/null' \
+    '-o KnownHostsCommand=none' \
+    '-o VerifyHostKeyDNS=no' \
+    '-o ProxyCommand=none' \
+    '-o ProxyJump=none' \
+    '-o PermitLocalCommand=no' \
+    '-o ConnectTimeout=15' \
+    '-o ConnectionAttempts=1' \
+    '-- "$ssh_target" "$quoted_command"' \
+    'exec 9<"$helper_path"' \
+    "stat -c '%a:%h:%d:%i:%s' -- \"\$helper_path\"" \
+    "stat -Lc '%a:%h:%d:%i:%s' -- \"\$helper_fd_path\"" \
+    '[ "$path_metadata" = "$helper_metadata" ]' \
+    'helper_mode_value=$((8#$helper_mode))' \
+    'if ((helper_mode_value & 07022)); then' \
+    'readonly max_helper_size=262144' \
+    'exec 9<&-' \
+    'readonly helper_snapshot_b64' \
+    'base64 -d | sha256sum' \
+    'bash -s -- status "$release_owner" "$app_env" "$compose_path" \' \
+    'status_newlines="$(LC_ALL=C tr -cd '\''\012'\'' <"$status_stdout" | wc -c | tr -d '\'' '\'')"' \
+    'status_last_byte="$(tail -c 1 "$status_stdout" | od -An -tu1 -v | tr -d '\''[:space:]'\'')"' \
+    'LC_ALL=C od -An -tu1 -v "$status_stdout"' \
+    'release-status:v=1 status_available=(yes|no)' \
+    'release-status-channel:v=1 result=%s category=%s'; do
+    grep -Fq -- "$runner_contract" "$status_runner" ||
+      fail_status_contract "runner contract lacks: $runner_contract"
+  done
+  snapshot_line="$(grep -n '^helper_snapshot_b64=' <<<"$remote_wrapper" | cut -d: -f1)"
+  close_helper_line="$(grep -n '^exec 9<&-$' <<<"$remote_wrapper" | cut -d: -f1)"
+  snapshot_hash_line="$(grep -n '^actual_helper_sha256=' <<<"$remote_wrapper" | head -1 | cut -d: -f1)"
+  snapshot_exec_line="$(grep -n '^  bash -s -- status ' <<<"$remote_wrapper" | cut -d: -f1)"
+  [ -n "$snapshot_line" ] && [ -n "$close_helper_line" ] &&
+    [ -n "$snapshot_hash_line" ] && [ -n "$snapshot_exec_line" ] &&
+    [ "$snapshot_line" -lt "$close_helper_line" ] &&
+    [ "$close_helper_line" -lt "$snapshot_hash_line" ] &&
+    [ "$snapshot_hash_line" -lt "$snapshot_exec_line" ] ||
+    fail_status_contract "immutable helper snapshot capture/hash/execute order changed"
+  if grep -Eq 'mktemp|helper_snapshot_(file|path)|tee[^\n]*helper_snapshot' <<<"$remote_wrapper"; then
+    fail_status_contract "helper snapshot must remain process-local and must not be written on stage"
+  fi
+  if grep -Eq 'mktemp|run_directory|known_hosts_linked|status_stdout_linked|status_stderr_linked' "$status_runner"; then
+    fail_status_contract "runner must not create or clean a pathname-based child run directory"
+  fi
+  if grep -Fq '${TMPDIR:-/tmp}' "$status_runner" ||
+    grep -Fq '${RUNNER_TEMP:-/tmp}' "$status_runner"; then
+    fail_status_contract "runner must not fall back to shared /tmp"
+  fi
+  if grep -Eq '(helper_owner|state_parent_owner|release_user_id|stat[^\n]*%u|\[[[:space:]]+-O[[:space:]]|test[[:space:]]+-O[[:space:]]|find[^\n]*-(user|uid)[[:space:]]|ls[[:space:]]+-n([[:space:]]|$)|chown[[:space:]]|chgrp[[:space:]])' <<<"$remote_wrapper"; then
+    fail_status_contract "remote wrapper contains a forbidden helper owner gate"
+  fi
+  if grep -Fq 'bash "$helper_path"' <<<"$remote_wrapper"; then
+    fail_status_contract "remote wrapper reopens the helper path for execution"
+  fi
+  if grep -Fq 'bash "$helper_fd_path"' <<<"$remote_wrapper"; then
+    fail_status_contract "remote wrapper executes the live opened helper after hashing"
+  fi
+  if grep -Eq '(^|[[:space:]])rm[[:space:]]+(-rf|-fr|-r|-f)([[:space:]]|$)|(^|[[:space:]])find[[:space:]].*(-delete|-exec)' "$status_runner"; then
+    fail_status_contract "runner contains path-based broad cleanup"
+  fi
+  for required_status_test in \
+    test_exact_incident_git_blob_hash_accepts_regular_file_modes \
+    test_incident_blob_hash_is_independent_of_implementation_checkout \
+    test_ancestor_symlink_bypasses_fail_before_secret_or_runner \
+    test_non_regular_or_missing_incident_entries_fail_closed \
+    test_malformed_duplicate_or_wrong_ls_tree_records_fail_closed \
+    test_empty_or_oversized_incident_blobs_fail_before_secret_or_runner \
+    test_helper_hash_binding_regressions_are_rejected \
+    test_same_inode_overwrite_after_snapshot_executes_original_bytes \
+    test_same_inode_overwrite_during_capture_rejects_without_execution \
+    test_runner_owned_temporary_root_resolution_is_fail_closed \
+    test_private_root_bootstrap_creates_no_nested_run_directory \
+    test_each_anonymous_private_file_creation_failure_leaves_no_residual \
+    test_fstat_failure_after_private_open_leaves_no_linked_residual \
+    test_preexisting_private_names_fail_exclusive_creation_without_deletion \
+    test_signals_during_every_create_unlink_transition_are_deferred_and_cleaned \
+    test_signal_at_bootstrap_supervisor_handoff_cannot_be_lost \
+    test_repeated_signals_cannot_reenter_cleanup_transition \
+    test_term_ignoring_ssh_is_killed_within_bounded_cleanup_deadline \
+    test_anchored_root_rebinding_cannot_delete_or_change_replacement_path \
+    test_replacement_private_names_are_never_deleted_by_descriptor_cleanup \
+    test_every_valid_status_enum_value_is_accepted_by_the_real_parser \
+    test_each_invalid_enum_and_structural_parser_mutation_is_rejected \
+    test_checkpoint_evil_mutation_calibrates_parser_tests_independent_of_hash_pins \
+    test_identity_evil_mutation_calibrates_parser_tests_independent_of_hash_pins \
+    test_whitespace_mutation_calibrates_parser_tests_independent_of_hash_pins; do
+    grep -Fq "def ${required_status_test}(" "$status_test" ||
+      fail_status_contract "status executable suite lacks: $required_status_test"
+  done
+  ssh_nonzero_line="$(grep -n '^if \[ "$ssh_exit" != "0" \]; then$' "$status_runner" | cut -d: -f1)"
+  parser_line="$(grep -n '^status_size=' "$status_runner" | cut -d: -f1)"
+  [ -n "$ssh_nonzero_line" ] && [ -n "$parser_line" ] && [ "$ssh_nonzero_line" -lt "$parser_line" ] ||
+    fail_status_contract "transport failure must be handled before status parsing"
+  transport_block="$(sed -n "${ssh_nonzero_line},${parser_line}p" "$status_runner")"
+  if grep -Eq '(cat|tee|printf)[^\n]*\$status_stdout|status_available=yes|ssh_exit=0' <<<"$transport_block"; then
+    fail_status_contract "transport nonzero path can expose or trust official stdout"
+  fi
+  if grep -Eq '(cat|tee)[[:space:]]+"\$status_stderr"|printf.*\$status_stderr' "$status_runner"; then
+    fail_status_contract "runner can expose raw SSH stderr"
+  fi
+  if grep -Fq 'ssh_exit=0' "$status_runner"; then
+    fail_status_contract "transport nonzero path can expose or trust official stdout"
+  fi
+  [ "$(sha256sum "$status_runner" | awk '{print $1}')" = \
+    "14c3dc1b5fe2b1c5acbb6ddf14de90571bf5ea43f3d38f91b97a823a860f75b3" ] ||
+    fail_status_contract "runner content SHA-256 changed outside the approved contract"
+}
+
+validate_status_channel_contract
+if [ "$validation_mode" = "--status-channel-only" ]; then
+  echo "read-only-status-contract: OK"
+  exit 0
+fi
 
 for required_file in \
   "$deploy_workflow" \

@@ -112,7 +112,7 @@ zero-count audit для `mkdir`, create/open-for-write, `chmod`, rename, unlink/
 allowlisted line, а `operation_result` относится к явно запрошенной operation:
 
 ```text
-release-status:v=1 status_available=<yes|no> owner_match=<yes|no> revision_match=<yes|no> digest_match=<yes|no> checkpoint=<checkpoint|none|unavailable> operation_result=<success|remote_failure|incomplete_unknown|unavailable|malformed> migration_evidence=<present|absent|unknown|migration_outcome_requires_incident_reconciliation> app_state=<old_running|absent|candidate_running|replaced|ambiguous|unknown> abort_permitted=<yes|no> resume_permitted=<yes|no> failure_category=<none|untrusted_state_root>
+release-status:v=1 status_available=<yes|no> owner_match=<yes|no> revision_match=<yes|no> digest_match=<yes|no> checkpoint=<none|maintenance_prepared|prior_state_captured|candidate_override_published|app_stop_intent|app_quiesced|migration_started|migration_completed|candidate_start_begun|candidate_healthy|cleanup_started|cleanup_completed|abort_started|abort_completed|unavailable> operation_result=<success|remote_failure|incomplete_unknown|unavailable|malformed> migration_evidence=<present|absent|unknown|migration_outcome_requires_incident_reconciliation> app_state=<old_running|absent|candidate_running|replaced|ambiguous|unknown> abort_permitted=<yes|no> resume_permitted=<yes|no> failure_category=<none|untrusted_state_root>
 ```
 
 Status не раскрывает paths, host/SSH target, container/image IDs, credentials, application data или logs. `abort_permitted`
@@ -124,6 +124,66 @@ permissions=`no`, не раскрывая path/stat/mount details и остав�
 metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
+
+### Deployment-principal read-only status channel
+
+`.github/workflows/release-status.yml` — отдельный manual-only канал наблюдения, а не deploy/recovery workflow.
+Диагностический observer principal отличается от deployment SSH principal: канал работает через deployment
+principal выбранного protected GitHub environment (`stage` или `prod`). Серверное ownership изменять не надо;
+owner retained helper не сравнивается с предполагаемым observer owner, и канал не выполняет ownership repair.
+
+Dispatch допускается только вручную с `main` и только после отдельного явного разрешения пользователя. Первый,
+непривилегированный job проверяет `refs/heads/main`, branch ref и default branch `main`, валидирует все inputs и
+передаёт только sanitized outputs. Привилегированный status job получает environment исключительно из этого
+результата. Общий non-cancelling lock `payments-schema-${{ inputs.environment }}` сериализует status со штатным
+deploy для того же environment.
+
+Implementation и incident проверяются независимо. Credential-free implementation checkout берёт
+`refs/heads/main`, и его HEAD обязан совпасть с `GITHUB_SHA`. Второй credential-free checkout берёт sanitized exact
+incident tag; его HEAD обязан совпасть с validated expected revision. После этой проверки incident checkout
+используется только как Git object database: `git ls-tree --full-tree -z` для exact expected revision
+должен вернуть ровно один exact path `scripts/deploy/remote-compose-release.sh` с type `blob`, mode `100644`
+или `100755` и full object ID. SHA-256 вычисляется только по raw bytes этого object через
+`git cat-file blob`; filesystem path, symlink любого ancestor component и implementation checkout не являются
+hash authority и не могут подменить incident helper. Код и blob bytes из incident checkout не исполняются.
+
+До будущего dispatch в каждом protected environment должен быть отдельно provisioned секрет
+`SSH_KNOWN_HOSTS` с заранее закреплёнными `known_hosts` entries. Repository не утверждает, что секрет уже настроен.
+Live `ssh-keyscan`, DNS-derived host trust и альтернативные known-host sources запрещены. Status job напрямую и
+без условия передаёт `TMPDIR` и `RUNNER_TEMP` из GitHub `runner.temp`; runner выбирает непустой `TMPDIR`, затем
+`RUNNER_TEMP`, а без них fail closed до SSH и никогда не использует shared `/tmp`. Уже существующий canonical
+runner-owned private root открывается один раз с no-follow semantics и закрепляется descriptor-ом; дочерняя run
+directory не создаётся и не удаляется. Fixed mode-`0600` captures эксклюзивно создаются относительно anchored root,
+сразу теряют pathname и дальше существуют только как проверенные descriptors. `SSH_KNOWN_HOSTS` передаётся OpenSSH
+только через retained descriptor с `StrictHostKeyChecking=yes` и `GlobalKnownHostsFile=/dev/null`; stdout/stderr
+также читаются и стираются только через retained descriptors. Supervisor передаёт только первый HUP/INT/TERM,
+cleanup bounded обнуляет и закрывает anonymous objects и не смотрит на replacement или neighboring paths.
+Пустой environment secret `SSH_PORT` нормализуется workflow к literal `22`, как в штатном deploy; runner всё равно
+принимает только явный numeric nonzero port.
+
+После проверок выполняется ровно один SSH call без retry и ровно один retained-helper mode — literal `status`.
+Helper не загружается и не заменяется. После открытия helper path повторно проверяется как regular non-symlink с
+link count `1`; opened-object mode не может содержать setuid/setgid/sticky, group-write или other-write bits, но
+безопасные uploader outcomes `0600`, `0644`, `0700` и repository source mode принимаются без owner coupling.
+Opened helper читается ровно один раз в bounded, non-exported process-local base64 snapshot, после чего live fd
+закрывается. Decoded size и SHA-256 проверяются по этому snapshot, и те же captured bytes подаются в
+`bash -s -- status ...`; последующие path replacement, same-inode overwrite, append или truncate не меняют execution.
+Нет deploy, `prepare`, `publish`, `quiesce`, `migrate`,
+`start`, `cleanup`, `abort`, resume, retention, helper cleanup, registry login или image pull.
+
+Успешный transport принимается только как весь bounded byte stream: одна printable-ASCII
+`release-status:v=1` line с единственным terminal LF. Trusted channel требует одновременно
+`status_available=yes`, `owner_match=yes`, `revision_match=yes` и `digest_match=yes`; `resume_permitted` не меняет
+trust канала. Trusted status — только evidence, не разрешение recovery. Canonical untrusted status печатается в
+безопасной форме и завершает job non-zero; malformed status не отражается в output. Любой transport failure также
+fail closed: official-looking stdout подавляется, raw stderr не печатается, и наружу выходит только fixed normalized
+category. Raw stdout/stderr captures и credentials не сохраняются.
+
+Фактические repository, merge и dispatch состояния устанавливаются по Git/GitHub evidence в момент операции и
+фиксируются в project journal; этот durable runbook описывает только protocol contract, а не rollout state.
+Наличие channel в repository не свидетельствует о dispatch или чтении stage. Каждый dispatch требует отдельного
+явного разрешения и не разрешает retry, recovery, lifecycle operation или ownership change; trusted status остаётся
+только evidence и сам по себе не разрешает resume или recovery. Raw evidence не retained.
 
 ## Runner classification и no-retry rule
 

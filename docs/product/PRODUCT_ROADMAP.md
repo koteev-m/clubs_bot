@@ -49,19 +49,22 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 #### Remaining first-slice execution work
 
 - Repository release-state resilience is complete as bounded evidence at implementation commit `b86f69dfea8715c9eec24214230fc837cf9a74fb` (`feat(deploy): harden release state resilience`), accepted by independent review as `PASS_TO_COMMIT`. It adds durable migration/release authority and does not itself merge, push or deploy the candidate.
+- Deployment-principal read-only status-channel repository implementation, product evidence reconciliation, feature-branch push, Draft PR creation and automatic exact-head checks for the implementation/test-fix head are complete as bounded repository work. Implementation commit `cfe7794df859a135c9825dcd251298ef920577ac` (`feat(deploy): add read-only release status channel`) is published on `codex/deployment-principal-read-only-status` in Draft PR #492, with independent review `PASS_TO_COMMIT`; all 15 automatically created GitHub workflow runs and both required checks passed at exact head `b5c4c3b0c830b2a3c782af4d5933b90735fc56b3`, and the strict status suite remains 80 methods / 322 runtime subtests with all non-pass counters at zero. The PR is not merged, and the manual `Release Status (read-only)` workflow has not been dispatched and has zero runs. Protected-environment and pinned `SSH_KNOWN_HOSTS` provisioning, trusted deployment-principal stage status, candidate-start incident resolution and recovery authorization remain unproven or unresolved. Repository implementation, ordinary PR CI, manual status-workflow execution and stage recovery authorization remain distinct boundaries.
 - The next integration sequence is:
 
-  1. documentation commit;
-  2. push the fallback feature branch;
-  3. combined Draft PR;
-  4. GitHub checks;
-  5. merge and cleanup;
-  6. separate controlled deploy approval;
-  7. post-deploy read-only observer;
-  8. controlled staging data setup;
-  9. manual smoke.
+  1. this bounded post-push evidence reconciliation;
+  2. automatic exact-head checks for its docs-only commit;
+  3. independent final PR review;
+  4. mark Ready for Review only after explicit approval;
+  5. merge only after required checks and review;
+  6. post-merge local/remote cleanup;
+  7. provision and verify protected-environment `SSH_KNOWN_HOSTS`;
+  8. obtain separate authorization for one manual read-only status-workflow dispatch;
+  9. reconcile trusted release status;
+  10. resume candidate-start incident diagnosis;
+  11. separately authorize the selected recovery or forward-fix path.
 
-- Staging runtime remains behind the candidate: it runs `df7685facb52a6e5731a520669dfa2c73f6ccf24` with old digest `sha256:236c11cad4015cd6817c04a9fea0a3155eab77eb72164ab6c554f0c870c55cb6`; public support surfaces serve the legacy bundle, schema permissions/delivery are unconfirmed, and staging smoke is still `NOT_RUN`.
+- Staging runtime remains behind the candidate and in a fail-closed incident state: it runs `df7685facb52a6e5731a520669dfa2c73f6ccf24` with old digest `sha256:236c11cad4015cd6817c04a9fea0a3155eab77eb72164ab6c554f0c870c55cb6`; public support surfaces serve the legacy bundle, schema permissions/delivery are unconfirmed, the candidate-start root cause and stage incident are unresolved, no trusted status has been received, and staging smoke is still `NOT_RUN`. Resume, rollback and recovery are not authorized; controlled setup and manual Telegram/Mini App smoke remain separate and unperformed.
 - The accepted staging smoke remains the only first-slice execution boundary. It must include the already implemented truthful-delivery and guest-surface behavior; it is validation work, not an automatic new feature. A production correction is required only if that smoke exposes a defect, which then becomes a separate bounded task.
 - Preserve the completed `DEC-025` `NEW → IN_PROGRESS → RESOLVED → CLOSED` graph, its confirmed resolve and terminal-state enforcement; do not use the disabled generic status route as a bypass.
 
