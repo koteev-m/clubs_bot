@@ -52,13 +52,13 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 - Deployment-principal read-only status-channel repository implementation, product evidence reconciliation, feature-branch push, Draft PR creation, independent final PR review, Ready for Review, merge, remote feature-branch deletion, local fast-forward and feature-branch cleanup, and post-merge CI verification are complete as bounded repository work. Implementation commit `cfe7794df859a135c9825dcd251298ef920577ac` (`feat(deploy): add read-only release status channel`) was merged through PR #492 into `main` at `b86dd3b35cde463193d8cfab3337cca5d4567559` (parents `44497dcd28139cef865c3f98ac3f2c4a5afac636` and `16f8d9142da3958f39813919522b13a8b3cbfc95`), which is the bounded PR #492 merge/post-merge CI evidence snapshot. The feature branch has been deleted remotely and locally. Automatic PR-head checks, including both required checks, passed before merge at implementation/test-fix head `b5c4c3b0c830b2a3c782af4d5933b90735fc56b3`; the strict status suite remains 80 methods / 322 runtime subtests with all non-pass counters at zero. The post-merge workflow set ultimately finished 15/15 successful. Tests #1461 (run `33729780140`) attempt 1 stopped during external HTTP 429 dependency resolution before integration tests, with no observed application test failure; Tests run #1461, attempt 2, completed successfully on the same merge SHA, so no post-merge code correction was required. That rerun was not a deployment, stage operation or `Release Status (read-only)` dispatch. The manual `Release Status (read-only)` workflow remains undispatched with zero runs. Protected-environment and pinned `SSH_KNOWN_HOSTS` provisioning, trusted deployment-principal stage status, candidate-start incident resolution and recovery authorization remain unproven or unresolved. Repository implementation and merge, ordinary CI, manual status-workflow execution, trusted stage evidence and stage recovery authorization remain distinct boundaries.
 - The remaining integration sequence is:
 
-  1. merge the accepted `DEC-037` stage protection policy;
-  2. apply that policy to the live GitHub Environment `stage`;
-  3. independently verify the live protection rules and exact `main` branch policy;
-  4. authenticate the staging server SSH host key through an independent provider/VNC control plane;
-  5. verify the authenticated fingerprint against the exact server/IP;
+  1. apply the accepted `DEC-037` policy to the live GitHub Environment `stage`;
+  2. independently verify the live protection rules and exact `main` branch policy;
+  3. authenticate the staging server SSH host key through an independent provider/VNC control plane;
+  4. verify the authenticated fingerprint against the exact server/IP;
+  5. read-only compare the complete set of repository-level secret names with the complete set of `stage` environment secret names, require zero overlapping names, and confirm that repository-level `SSH_KNOWN_HOSTS` is absent; do not read secret values, and fail closed by blocking provisioning on any overlap;
   6. construct and provision the canonical stage `SSH_KNOWN_HOSTS` payload;
-  7. independently verify the pinned host-key evidence and secret metadata;
+  7. independently verify the pinned host-key evidence and stage secret metadata, then independently repeat and verify the read-only zero-overlap comparison of complete repository-level and `stage` environment secret-name sets before dispatch authorization;
   8. obtain separate direct authorization for one manual `Release Status (read-only)` dispatch;
   9. run that workflow exactly once;
   10. reconcile the resulting trusted release-state evidence;

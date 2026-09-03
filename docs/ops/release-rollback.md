@@ -187,8 +187,8 @@ category. Raw stdout/stderr captures и credentials не сохраняются.
 
 ### Protected GitHub Environment contract for stage
 
-Accepted operational decision `DEC-037` задаёт exact contract для отдельной будущей настройки existing GitHub
-Environment `stage`:
+Accepted operational decision `DEC-037` задаёт постоянный exact contract для configuration и verification existing
+GitHub Environment `stage`:
 
 - required reviewer — live-verified GitHub user `koteev-m`, numeric ID `117291255`;
 - `prevent_self_review=false` — explicit temporary solo-maintainer exception, а не preferred multi-maintainer target;
@@ -202,11 +202,12 @@ Environment `stage`:
 - repository-level secrets не должны дублировать имена stage environment secrets;
 - environment `prod` этим contract или его documentation task не создаётся.
 
-Этот documentation change не доказывает, что live environment уже обновлён. Применение и independent verification
-policy являются отдельной operational mutation task после review и merge decision PR. Authenticity staging SSH host
-key, canonical `SSH_KNOWN_HOSTS` payload, provisioning и independent verification pinned evidence остаются отдельными
-последовательными gates. Environment protection не доказывает существование `SSH_KNOWN_HOSTS`, authentic host key,
-запуск Release Status или health staging и не предоставляет authority для deployment, resume, rollback или recovery.
+Documentation acceptance or merge не доказывают, что live environment удовлетворяет этому contract. Применение policy
+и его independent verification — отдельные operational tasks; завершение каждой требует отдельного live evidence.
+Authenticity staging SSH host key, canonical `SSH_KNOWN_HOSTS` payload, provisioning и independent verification pinned
+evidence остаются отдельными последовательными gates. Environment protection не доказывает существование
+`SSH_KNOWN_HOSTS`, authentic host key, запуск Release Status или health staging и не предоставляет authority для
+deployment, resume, rollback или recovery.
 Если появляется second trusted maintainer, temporary exception заменяется только отдельным accepted decision с
 independent required reviewer и `prevent_self_review=true`.
 
