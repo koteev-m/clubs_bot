@@ -50,7 +50,7 @@ Initial eight repository/source conflict items классифицированы 
 | `ACCEPTED_DECISION` | Прямо принято пользователем и записано в decision record. |
 | `ACCEPTED_NOT_IMPLEMENTED` | Product slice принят как target boundary, но его end-to-end production implementation не выполнена. |
 
-Decision log содержит 36 records: 16 `ACCEPTED_DECISION` (`DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-026`, `DEC-028`–`DEC-036`) и 20 `DECISION_REQUIRED`; `DEC-001`, `DEC-002`, `DEC-006` и `DEC-027` остаются pending. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
+Decision log содержит 37 records: 17 `ACCEPTED_DECISION` и 20 `DECISION_REQUIRED`; существующий список accepted product/governance decisions сохраняется без изменений (`DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-026`, `DEC-028`–`DEC-036`), а `DEC-001`, `DEC-002`, `DEC-006` и `DEC-027` остаются pending. `DEC-037` — seventeenth accepted decision и отдельное operational security/governance decision: оно не входит в product overlay `PRODUCT_SPEC.md` и не меняет ни этот overlay, ни 170 immutable source requirements. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
 
 ## Правила доказательности
 
