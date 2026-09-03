@@ -49,21 +49,19 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 #### Remaining first-slice execution work
 
 - Repository release-state resilience is complete as bounded evidence at implementation commit `b86f69dfea8715c9eec24214230fc837cf9a74fb` (`feat(deploy): harden release state resilience`), accepted by independent review as `PASS_TO_COMMIT`. It adds durable migration/release authority and does not itself merge, push or deploy the candidate.
-- Deployment-principal read-only status-channel repository implementation, product evidence reconciliation, feature-branch push, Draft PR creation, independent final PR review, Ready for Review, merge, remote feature-branch deletion, local fast-forward and feature-branch cleanup, and post-merge CI verification are complete as bounded repository work. Implementation commit `cfe7794df859a135c9825dcd251298ef920577ac` (`feat(deploy): add read-only release status channel`) was merged through PR #492 into `main` at `b86dd3b35cde463193d8cfab3337cca5d4567559` (parents `44497dcd28139cef865c3f98ac3f2c4a5afac636` and `16f8d9142da3958f39813919522b13a8b3cbfc95`), which is the current repository state. The feature branch has been deleted remotely and locally. Automatic PR-head checks, including both required checks, passed before merge at implementation/test-fix head `b5c4c3b0c830b2a3c782af4d5933b90735fc56b3`; the strict status suite remains 80 methods / 322 runtime subtests with all non-pass counters at zero. The post-merge workflow set ultimately finished 15/15 successful. Tests #1461 (run `33729780140`) attempt 1 stopped during external HTTP 429 dependency resolution before integration tests, with no observed application test failure; the user's one failed-only rerun completed attempt 2 successfully on the same merge SHA, so no post-merge code correction was required. That rerun was not a deployment, stage operation or `Release Status (read-only)` dispatch. The manual `Release Status (read-only)` workflow remains undispatched with zero runs. Protected-environment and pinned `SSH_KNOWN_HOSTS` provisioning, trusted deployment-principal stage status, candidate-start incident resolution and recovery authorization remain unproven or unresolved. Repository implementation and merge, ordinary CI, manual status-workflow execution, trusted stage evidence and stage recovery authorization remain distinct boundaries.
-- The next integration sequence is:
+- Deployment-principal read-only status-channel repository implementation, product evidence reconciliation, feature-branch push, Draft PR creation, independent final PR review, Ready for Review, merge, remote feature-branch deletion, local fast-forward and feature-branch cleanup, and post-merge CI verification are complete as bounded repository work. Implementation commit `cfe7794df859a135c9825dcd251298ef920577ac` (`feat(deploy): add read-only release status channel`) was merged through PR #492 into `main` at `b86dd3b35cde463193d8cfab3337cca5d4567559` (parents `44497dcd28139cef865c3f98ac3f2c4a5afac636` and `16f8d9142da3958f39813919522b13a8b3cbfc95`), which is the bounded PR #492 merge/post-merge CI evidence snapshot. The feature branch has been deleted remotely and locally. Automatic PR-head checks, including both required checks, passed before merge at implementation/test-fix head `b5c4c3b0c830b2a3c782af4d5933b90735fc56b3`; the strict status suite remains 80 methods / 322 runtime subtests with all non-pass counters at zero. The post-merge workflow set ultimately finished 15/15 successful. Tests #1461 (run `33729780140`) attempt 1 stopped during external HTTP 429 dependency resolution before integration tests, with no observed application test failure; Tests run #1461, attempt 2, completed successfully on the same merge SHA, so no post-merge code correction was required. That rerun was not a deployment, stage operation or `Release Status (read-only)` dispatch. The manual `Release Status (read-only)` workflow remains undispatched with zero runs. Protected-environment and pinned `SSH_KNOWN_HOSTS` provisioning, trusted deployment-principal stage status, candidate-start incident resolution and recovery authorization remain unproven or unresolved. Repository implementation and merge, ordinary CI, manual status-workflow execution, trusted stage evidence and stage recovery authorization remain distinct boundaries.
+- The remaining integration sequence is:
 
-  1. complete this post-merge evidence reconciliation;
-  2. publish and merge the docs-only reconciliation through the normal PR process;
-  3. provision `SSH_KNOWN_HOSTS` in the protected environments;
-  4. independently verify the pinned host-key evidence;
-  5. obtain separate direct authorization for one manual `Release Status (read-only)` dispatch;
-  6. run that workflow exactly once;
-  7. reconcile trusted release-state evidence;
-  8. resume candidate-start incident diagnosis;
-  9. select one recovery, resume or forward-fix strategy;
-  10. obtain separate mutation authorization;
-  11. execute and verify that one selected strategy;
-  12. continue controlled setup and smoke only after stage health is restored.
+  1. provision `SSH_KNOWN_HOSTS` in the protected environments;
+  2. independently verify the pinned host-key evidence;
+  3. obtain separate direct authorization for one manual `Release Status (read-only)` dispatch;
+  4. run that workflow exactly once;
+  5. reconcile trusted release-state evidence;
+  6. resume candidate-start incident diagnosis;
+  7. select one recovery, resume or forward-fix strategy;
+  8. obtain separate mutation authorization;
+  9. execute and verify that one selected strategy;
+  10. continue controlled setup and smoke only after stage health is restored.
 
 - Staging runtime remains behind the candidate and in a fail-closed incident state: it runs `df7685facb52a6e5731a520669dfa2c73f6ccf24` with old digest `sha256:236c11cad4015cd6817c04a9fea0a3155eab77eb72164ab6c554f0c870c55cb6`; public support surfaces serve the legacy bundle, schema permissions/delivery are unconfirmed, the candidate-start root cause and stage incident are unresolved, no trusted status has been received, and staging smoke is still `NOT_RUN`. Resume, rollback and recovery are not authorized; controlled setup and manual Telegram/Mini App smoke remain separate and unperformed.
 - The accepted staging smoke remains the only first-slice execution boundary. It must include the already implemented truthful-delivery and guest-surface behavior; it is validation work, not an automatic new feature. A production correction is required only if that smoke exposes a defect, which then becomes a separate bounded task.
