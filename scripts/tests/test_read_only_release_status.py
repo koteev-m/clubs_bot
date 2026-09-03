@@ -175,8 +175,9 @@ class RunnerHarness:
         ssh_exit: int = 0,
         ssh_mode: str = "execute",
     ) -> None:
+        temporary_parent = os.environ.get("RUNNER_TEMP") or None
         self.temporary = tempfile.TemporaryDirectory(
-            prefix="read-only-release-status-test-"
+            prefix="read-only-release-status-test-", dir=temporary_parent
         )
         self.root = Path(self.temporary.name).resolve()
         self.local_bin = self.root / "local-bin"
