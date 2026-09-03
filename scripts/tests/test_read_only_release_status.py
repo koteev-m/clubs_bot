@@ -464,7 +464,7 @@ done
 if [ -n \"$known_hosts_path\" ]; then
   printf '%s\\n' \"$known_hosts_path\" >\"$FAKE_KNOWN_HOSTS_PATH_FILE\"
   cp -- \"$known_hosts_path\" \"$FAKE_KNOWN_HOSTS_COPY\"
-  mode=\"$(stat -c '%a' \"$known_hosts_path\" 2>/dev/null || stat -f '%Lp' \"$known_hosts_path\")\"
+  mode=\"$(stat -L -c '%a' \"$known_hosts_path\" 2>/dev/null || stat -L -f '%Lp' \"$known_hosts_path\")\"
   printf '%s\\n' \"$mode\" >\"$FAKE_KNOWN_HOSTS_MODE_FILE\"
   if [ -d /proc/self/fd ]; then
     descriptor_root=/proc/self/fd
@@ -475,7 +475,7 @@ if [ -n \"$known_hosts_path\" ]; then
   for private_record in known_hosts:10 stdout:11 stderr:12; do
     private_name=\"${private_record%%:*}\"
     private_descriptor=\"${private_record##*:}\"
-    private_metadata=\"$(stat -c '%a:%h' \"$descriptor_root/$private_descriptor\" 2>/dev/null || stat -f '%Lp:%l' \"$descriptor_root/$private_descriptor\")\"
+    private_metadata=\"$(stat -L -c '%a:%h' \"$descriptor_root/$private_descriptor\" 2>/dev/null || stat -L -f '%Lp:%l' \"$descriptor_root/$private_descriptor\")\"
     printf '%s:%s\\n' \"$private_name\" \"$private_metadata\" >>\"$FAKE_PRIVATE_FILE_MODES\"
   done
 fi
@@ -1682,17 +1682,40 @@ class ReadOnlyReleaseStatusRunnerTest(unittest.TestCase):
                 replacement_hash = hashlib.sha256(
                     replacement_sentinel.read_bytes()
                 ).hexdigest()
+                unrelated_inode = harness.sentinel.stat().st_ino
+                unrelated_hash = hashlib.sha256(
+                    harness.sentinel.read_bytes()
+                ).hexdigest()
+                started = time.monotonic()
                 process.send_signal(signal_number)
                 stdout, stderr = process.communicate(timeout=5)
+                self.assertLess(time.monotonic() - started, 4)
                 self.assertNotEqual(0, process.returncode)
                 self.assertEqual(b"", stderr)
-                self.assertEqual(
-                    channel("unavailable", "LOCAL_FAILURE"), stdout
-                )
+                if signal_number == signal.SIGINT:
+                    self.assertIn(
+                        stdout,
+                        {
+                            channel("unavailable", "LOCAL_FAILURE"),
+                            channel("unavailable", "LOCAL_CLEANUP_FAILURE"),
+                        },
+                    )
+                else:
+                    self.assertEqual(
+                        channel("unavailable", "LOCAL_FAILURE"), stdout
+                    )
+                self.assertNotIn(TRUSTED_STATUS, stdout)
+                self.assertNotIn(UNTRUSTED_STATUS, stdout)
+                self.assertEqual(1, harness.ssh_count)
                 self.assertEqual(replacement_inode, replacement_sentinel.stat().st_ino)
                 self.assertEqual(
                     replacement_hash,
                     hashlib.sha256(replacement_sentinel.read_bytes()).hexdigest(),
+                )
+                self.assertEqual(unrelated_inode, harness.sentinel.stat().st_ino)
+                self.assertEqual(
+                    unrelated_hash,
+                    hashlib.sha256(harness.sentinel.read_bytes()).hexdigest(),
                 )
                 self.assertTrue(moved_directory.exists())
                 self.assertEqual([], list(moved_directory.iterdir()))
