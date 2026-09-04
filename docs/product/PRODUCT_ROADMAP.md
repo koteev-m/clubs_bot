@@ -51,22 +51,40 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 - Repository release-state resilience is complete as bounded evidence at implementation commit `b86f69dfea8715c9eec24214230fc837cf9a74fb` (`feat(deploy): harden release state resilience`), accepted by independent review as `PASS_TO_COMMIT`. It adds durable migration/release authority and does not itself merge, push or deploy the candidate.
 - Deployment-principal read-only status-channel repository implementation, product evidence reconciliation, feature-branch push, Draft PR creation, independent final PR review, Ready for Review, merge, remote feature-branch deletion, local fast-forward and feature-branch cleanup, and post-merge CI verification are complete as bounded repository work. Implementation commit `cfe7794df859a135c9825dcd251298ef920577ac` (`feat(deploy): add read-only release status channel`) was merged through PR #492 into `main` at `b86dd3b35cde463193d8cfab3337cca5d4567559` (parents `44497dcd28139cef865c3f98ac3f2c4a5afac636` and `16f8d9142da3958f39813919522b13a8b3cbfc95`), which is the bounded PR #492 merge/post-merge CI evidence snapshot. The feature branch has been deleted remotely and locally. Automatic PR-head checks, including both required checks, passed before merge at implementation/test-fix head `b5c4c3b0c830b2a3c782af4d5933b90735fc56b3`; the strict status suite remains 80 methods / 322 runtime subtests with all non-pass counters at zero. The post-merge workflow set ultimately finished 15/15 successful. Tests #1461 (run `33729780140`) attempt 1 stopped during external HTTP 429 dependency resolution before integration tests, with no observed application test failure; Tests run #1461, attempt 2, completed successfully on the same merge SHA, so no post-merge code correction was required. That rerun was not a deployment, stage operation or `Release Status (read-only)` dispatch. The manual `Release Status (read-only)` workflow remains undispatched with zero runs. Protected-environment and pinned `SSH_KNOWN_HOSTS` provisioning, trusted deployment-principal stage status, candidate-start incident resolution and recovery authorization remain unproven or unresolved. Repository implementation and merge, ordinary CI, manual status-workflow execution, trusted stage evidence and stage recovery authorization remain distinct boundaries.
 - The ordered gates below define permanent dependency and authority boundaries, not a live backlog. Before each
-  operation, classify every gate for the exact current lineage. `SATISFIED` means affirmative evidence valid for
-  the exact current lineage proves the gate requirement has been met; for a continuing condition, the evidence
-  must still prove that the condition remains valid. A mutation belonging to a `SATISFIED` gate is never repeated.
-  A one-use authorization, after its exact authorized action occurs, is retained only as consumed evidence and is
-  never reused. `UNSATISFIED` means the gate has not previously been established as complete for the current lineage
-  and its condition is not yet met or its operation has not yet occurred. Expected absence of completion evidence
-  for a never-executed gate is normal, requires no reconciliation, and does not make the gate `STALE`. `STALE` is
-  reserved for a gate previously classified or relied upon as `SATISFIED` when evidence required to preserve that
-  classification has expired, become contradictory, gone missing, or become unusable. A `STALE` gate blocks all
-  later gates. A privileged operation associated with a `STALE` gate is not repeated automatically. `STALE`
-  evidence is resolved only through a separately scoped reconciliation task. Missing evidence invokes `STALE` only
-  when the evidence was required to preserve a previous `SATISFIED` classification; it does not apply to the ordinary
-  expected lack of completion evidence for a never-executed `UNSATISFIED` gate. A later gate may execute only when
-  every earlier gate is `SATISFIED`. Continue only at the first `UNSATISFIED` gate and only with the separate authority
-  required for that gate. The roadmap text itself grants no workflow, environment, secret, deployment, SSH, rollback,
-  resume or recovery authority.
+  operation, classify every gate for the exact current lineage into exactly one of four mutually exclusive and
+  exhaustive states. Classification is fail-closed and operationally deterministic:
+  - `SATISFIED`: affirmative evidence valid for the exact current lineage proves that the gate requirement has been
+    met. For a continuing condition, current evidence must also prove that the condition remains valid. A mutation
+    belonging to a `SATISFIED` gate is never repeated. A one-use authorization whose exact authorized action has
+    occurred is retained only as consumed evidence and is never reused.
+  - `UNSATISFIED`: the gate has never been established as complete for the exact current lineage; available evidence
+    supports that no unresolved attempt is in progress or may already have produced an effect; and the condition
+    remains unmet or the operation has not occurred. Expected absence of completion evidence for genuinely
+    never-executed work is normal and requires no reconciliation. A proven terminal failure may be treated as
+    `UNSATISFIED` only when authoritative evidence proves that the required effect did not occur, no partial or
+    ambiguous mutation remains, and the applicable protocol allows a new separately authorized attempt.
+    `UNSATISFIED` never grants authority by itself.
+  - `AMBIGUOUS`: an operation is known to have been initiated, or initiation cannot be safely ruled out, but
+    authoritative evidence proves neither successful completion nor a terminal no-effect outcome that is safe to
+    treat as `UNSATISFIED`. This includes lost acknowledgement, an API or transport timeout after request submission,
+    process interruption, uncertain workflow dispatch, partial mutation, unknown terminal result, and inconsistent
+    evidence about whether execution occurred. A network or client error is not proof that the remote action did not
+    occur. An `AMBIGUOUS` gate is never treated as ordinary `UNSATISFIED`; it blocks every later gate, permits no
+    automatic retry or repetition, and permits no reuse of an earlier authorization. It requires authorized read-only
+    reconciliation through the applicable authoritative protocol where such a protocol exists; otherwise it requires
+    a separately scoped reconciliation task. It remains blocked when reconciliation is unavailable or inconclusive.
+    Read-only reconciliation is evidence gathering only and grants no mutation, redispatch, deployment, rollback,
+    resume, or recovery authority.
+  - `STALE`: the gate was previously classified or relied upon as `SATISFIED`, but evidence required to preserve that
+    classification has expired, become contradictory, gone missing, become unusable, or ceased to prove a continuing
+    condition. A `STALE` gate blocks every later gate, permits no automatic repetition of the earlier privileged
+    operation, requires a separately scoped reconciliation task, and remains distinct from an initiated-but-never-
+    proven `AMBIGUOUS` gate.
+  - Progression: a later gate may execute only when every earlier gate is `SATISFIED`. Continue only at the first
+    `UNSATISFIED` gate and only with the separate execution authority required for that gate. Any `AMBIGUOUS` or
+    `STALE` gate stops progression.
+  - Authority: the roadmap text itself grants no workflow, GitHub Environment, secret, deployment, SSH, rollback,
+    resume, or recovery authority.
 
   1. apply the accepted `DEC-037` policy to the live GitHub Environment `stage`;
   2. independently verify the live protection rules and exact `main` branch policy;
