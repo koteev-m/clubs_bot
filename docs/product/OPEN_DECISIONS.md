@@ -883,3 +883,44 @@
 - **Depends on:** `DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`.
 - **Blocks:** implementation первого slice до отдельной design/code/test/review задачи.
 - **Status:** `ACCEPTED_DECISION`.
+
+## DEC-037 — stage GitHub Environment protection policy
+
+- **Context:** CLB-57 подтвердил, что existing GitHub Environment `stage` используется jobs штатного stage deployment и `Release Status (read-only)`, но live protection rules и deployment branch policy отсутствуют, administrator bypass разрешён, а `SSH_KNOWN_HOSTS` не provisioned. Нужен exact protection contract до отдельной live mutation.
+- **Source tension:** immutable `CONCEPT_SOURCE.md` и 170 source requirements не задают GitHub Environment policy. Это operational security/governance decision, а не product capability или source requirement, поэтому оно не входит в accepted product overlay `PRODUCT_SPEC.md` и не меняет current product slice.
+- **Code/runtime tension:** workflow jobs уже могут ссылаться на environment `stage`, но repository wiring не доказывает live GitHub configuration, authenticity SSH host key, наличие `SSH_KNOWN_HOSTS`, execution Release Status или health staging. Live identity lookup 2026-09-03 подтвердил GitHub user `koteev-m` с numeric ID `117291255`; это bounded reviewer-identity evidence, не доказательство применённой protection policy.
+- **Options:**
+  - **Option A:** independent required reviewer, `prevent_self_review=true`, без temporary solo-maintainer exception.
+  - **Option B:** solo-maintainer compensated gate: required reviewer `koteev-m`, `prevent_self_review=false`, wait timer 5 minutes, administrator bypass disabled и exact branch `main` only.
+  - **Option C:** wait timer и branch restriction без required reviewer.
+- **Recommendation:** Option A остаётся preferred multi-maintainer target; Option B принимается как bounded temporary solo-maintainer exception до появления второго trusted maintainer.
+- **Selected option:** B.
+- **Accepted by:** user.
+- **Accepted at:** 2026-09-03.
+- **Accepted contract:**
+  - Scope — existing GitHub Environment с exact name `stage`.
+  - Required reviewer — GitHub user `koteev-m`; live-verified numeric user ID — `117291255`.
+  - `prevent_self_review=false`.
+  - Возможность self-review является explicit temporary solo-maintainer exception, а не preferred multi-maintainer target.
+  - Wait timer — exactly 5 minutes.
+  - Administrators may not bypass configured protection rules.
+  - Deployment refs ограничены custom deployment branch policy.
+  - Единственное разрешённое правило ref имеет type `branch` и exact name `main`.
+  - Ни один tag не разрешён для deploy в `stage`.
+  - Wildcard branch rules не разрешены.
+  - Policy применяется к каждому workflow job, который references environment `stage`, включая normal stage deployment и `Release Status (read-only)`.
+  - Existing environment `prod` не создаётся этим decision или task.
+  - Repository-level secrets не должны дублировать имена stage environment secrets.
+  - Environment protection не доказывает, что `SSH_KNOWN_HOSTS` существует, SSH host key authentic, Release Status был запущен, staging healthy либо deployment, resume, rollback или recovery authorized.
+  - Когда станет доступен second trusted maintainer, отдельное accepted decision должно заменить temporary exception на independent required reviewer и `prevent_self_review=true`.
+  - Это operational security/governance decision; оно не является product capability, частью 170 immutable source requirements, accepted product overlay в `PRODUCT_SPEC.md` или evidence уже настроенного live GitHub environment.
+  - Применение policy к GitHub является отдельной mutation task только после independent review и merge decision PR.
+  - Independent authentication staging server host key является отдельной task.
+  - Provisioning `SSH_KNOWN_HOSTS` остаётся blocked, пока одновременно не доказаны: applied and independently verified live environment policy и out-of-band authenticated server host key.
+- **Consequences:** будущая live настройка `stage` должна точно воспроизвести selected compensated gate для всех stage jobs; documentation acceptance не меняет environment, secrets, workflows, server или runtime и не предоставляет release/recovery authority.
+- **Depends on:** operationally on accepted first-slice authority `DEC-036`; this decision does not change the product slice.
+- **Blocks:**
+  - live stage-environment hardening до merge этого decision;
+  - `SSH_KNOWN_HOSTS` provisioning до separate proof live policy и host-key authenticity;
+  - Release Status dispatch до завершения всех prior roadmap gates и separate direct dispatch authorization.
+- **Status:** `ACCEPTED_DECISION`.

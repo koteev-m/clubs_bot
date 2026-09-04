@@ -46,22 +46,61 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 - This adds no financial identity, payment, ledger or Mini App purchase architecture; it is not the complete Private Support Loop.
 - Local implementation commit `b5680a4c992f6f6f25e05e850eac97a0b473f0a4` is completed bounded pre-PR evidence, with no PR, merge or documentation SHA claimed. It serves `/app?mode=guest-support` without changing legacy `/app`/`/app/`, separate staff `/app?mode=support`, direct React-index denial or authority semantics. The served guest surface provides own-ticket list/detail/complete ordered thread, loading/empty/bounded-error/retry/refresh and back states, guest sender labels, a duplicate-protected 2,000-character continuation, authoritative detail/list reload, visible `RESOLVED → IN_PROGRESS` resumption and `CLOSED` read-only behavior. A successful persisted `/ask` may show server-built `Мои обращения`; configured `MINI_APP_URL` is retained only when valid/safe, keeps safe query/fragment content and contains exactly `mode=guest-support`, while an invalid URL suppresses the button without cancelling confirmation. Validated initData, server-side identity, owner predicates, no-store/detail-free errors, `403`/`404` clearing, stale/cross-ticket isolation and guest privacy remain enforced. No staff lifecycle/permission/retry/manual-reopen/SLA/priority/assignment/escalation, booking/payments/loyalty/music/broadcasts/AI or staff/admin/promoter/entry navigation is added. Tracked React dist is in the production Docker context; the shared fail-closed validator runs before `installDist` and in self-check, rejects unsafe/stale assets, and the browser smoke passed through available Chrome (lack of bundled local Chromium is only an environment limitation). Kotlin/frontend/browser/build/validator evidence supports this bounded correction.
 
-#### Remaining first-slice execution work
+#### First-slice execution gate protocol
 
 - Repository release-state resilience is complete as bounded evidence at implementation commit `b86f69dfea8715c9eec24214230fc837cf9a74fb` (`feat(deploy): harden release state resilience`), accepted by independent review as `PASS_TO_COMMIT`. It adds durable migration/release authority and does not itself merge, push or deploy the candidate.
 - Deployment-principal read-only status-channel repository implementation, product evidence reconciliation, feature-branch push, Draft PR creation, independent final PR review, Ready for Review, merge, remote feature-branch deletion, local fast-forward and feature-branch cleanup, and post-merge CI verification are complete as bounded repository work. Implementation commit `cfe7794df859a135c9825dcd251298ef920577ac` (`feat(deploy): add read-only release status channel`) was merged through PR #492 into `main` at `b86dd3b35cde463193d8cfab3337cca5d4567559` (parents `44497dcd28139cef865c3f98ac3f2c4a5afac636` and `16f8d9142da3958f39813919522b13a8b3cbfc95`), which is the bounded PR #492 merge/post-merge CI evidence snapshot. The feature branch has been deleted remotely and locally. Automatic PR-head checks, including both required checks, passed before merge at implementation/test-fix head `b5c4c3b0c830b2a3c782af4d5933b90735fc56b3`; the strict status suite remains 80 methods / 322 runtime subtests with all non-pass counters at zero. The post-merge workflow set ultimately finished 15/15 successful. Tests #1461 (run `33729780140`) attempt 1 stopped during external HTTP 429 dependency resolution before integration tests, with no observed application test failure; Tests run #1461, attempt 2, completed successfully on the same merge SHA, so no post-merge code correction was required. That rerun was not a deployment, stage operation or `Release Status (read-only)` dispatch. The manual `Release Status (read-only)` workflow remains undispatched with zero runs. Protected-environment and pinned `SSH_KNOWN_HOSTS` provisioning, trusted deployment-principal stage status, candidate-start incident resolution and recovery authorization remain unproven or unresolved. Repository implementation and merge, ordinary CI, manual status-workflow execution, trusted stage evidence and stage recovery authorization remain distinct boundaries.
-- The remaining integration sequence is:
+- The ordered gates below define permanent dependency and authority boundaries, not a live backlog. Before each
+  operation, classify every gate for the exact current lineage into exactly one of four mutually exclusive and
+  exhaustive states. Classification is fail-closed and operationally deterministic:
+  - `SATISFIED`: affirmative evidence valid for the exact current lineage proves that the gate requirement has been
+    met. For a continuing condition, current evidence must also prove that the condition remains valid. A mutation
+    belonging to a `SATISFIED` gate is never repeated. A one-use authorization whose exact authorized action has
+    occurred is retained only as consumed evidence and is never reused.
+  - `UNSATISFIED`: the gate has never been established as complete for the exact current lineage; available evidence
+    supports that no unresolved attempt is in progress or may already have produced an effect; and the condition
+    remains unmet or the operation has not occurred. Expected absence of completion evidence for genuinely
+    never-executed work is normal and requires no reconciliation. A proven terminal failure may be treated as
+    `UNSATISFIED` only when authoritative evidence proves that the required effect did not occur, no partial or
+    ambiguous mutation remains, and the applicable protocol allows a new separately authorized attempt.
+    `UNSATISFIED` never grants authority by itself.
+  - `AMBIGUOUS`: an operation is known to have been initiated, or initiation cannot be safely ruled out, but
+    authoritative evidence proves neither successful completion nor a terminal no-effect outcome that is safe to
+    treat as `UNSATISFIED`. This includes lost acknowledgement, an API or transport timeout after request submission,
+    process interruption, uncertain workflow dispatch, partial mutation, unknown terminal result, and inconsistent
+    evidence about whether execution occurred. A network or client error is not proof that the remote action did not
+    occur. An `AMBIGUOUS` gate is never treated as ordinary `UNSATISFIED`; it blocks every later gate, permits no
+    automatic retry or repetition, and permits no reuse of an earlier authorization. It requires authorized read-only
+    reconciliation through the applicable authoritative protocol where such a protocol exists; otherwise it requires
+    a separately scoped reconciliation task. It remains blocked when reconciliation is unavailable or inconclusive.
+    Read-only reconciliation is evidence gathering only and grants no mutation, redispatch, deployment, rollback,
+    resume, or recovery authority.
+  - `STALE`: the gate was previously classified or relied upon as `SATISFIED`, but evidence required to preserve that
+    classification has expired, become contradictory, gone missing, become unusable, or ceased to prove a continuing
+    condition. A `STALE` gate blocks every later gate, permits no automatic repetition of the earlier privileged
+    operation, requires a separately scoped reconciliation task, and remains distinct from an initiated-but-never-
+    proven `AMBIGUOUS` gate.
+  - Progression: a later gate may execute only when every earlier gate is `SATISFIED`. Continue only at the first
+    `UNSATISFIED` gate and only with the separate execution authority required for that gate. Any `AMBIGUOUS` or
+    `STALE` gate stops progression.
+  - Authority: the roadmap text itself grants no workflow, GitHub Environment, secret, deployment, SSH, rollback,
+    resume, or recovery authority.
 
-  1. provision `SSH_KNOWN_HOSTS` in the protected environments;
-  2. independently verify the pinned host-key evidence;
-  3. obtain separate direct authorization for one manual `Release Status (read-only)` dispatch;
-  4. run that workflow exactly once;
-  5. reconcile trusted release-state evidence;
-  6. resume candidate-start incident diagnosis;
-  7. select one recovery, resume or forward-fix strategy;
-  8. obtain separate mutation authorization;
-  9. execute and verify that one selected strategy;
-  10. continue controlled setup and smoke only after stage health is restored.
+  1. apply the accepted `DEC-037` policy to the live GitHub Environment `stage`;
+  2. independently verify the live protection rules and exact `main` branch policy;
+  3. authenticate the staging server SSH host key through an independent provider/VNC control plane;
+  4. verify the authenticated fingerprint against the exact server/IP;
+  5. read-only compare the complete set of repository-level secret names with the complete set of `stage` environment secret names, require zero overlapping names, and confirm that repository-level `SSH_KNOWN_HOSTS` is absent; do not read secret values, and fail closed by blocking provisioning on any overlap;
+  6. construct and provision the canonical stage `SSH_KNOWN_HOSTS` payload;
+  7. independently verify the pinned host-key evidence and stage secret metadata, then independently repeat and verify the read-only zero-overlap comparison of complete repository-level and `stage` environment secret-name sets before dispatch authorization;
+  8. obtain separate direct authorization for one manual `Release Status (read-only)` dispatch;
+  9. run that workflow exactly once;
+  10. reconcile the resulting trusted release-state evidence;
+  11. resume candidate-start incident diagnosis;
+  12. select one recovery, resume or forward-fix strategy;
+  13. obtain separate mutation authorization;
+  14. execute and verify that one selected strategy;
+  15. continue controlled setup and smoke only after stage health is restored.
 
 - Staging runtime remains behind the candidate and in a fail-closed incident state: it runs `df7685facb52a6e5731a520669dfa2c73f6ccf24` with old digest `sha256:236c11cad4015cd6817c04a9fea0a3155eab77eb72164ab6c554f0c870c55cb6`; public support surfaces serve the legacy bundle, schema permissions/delivery are unconfirmed, the candidate-start root cause and stage incident are unresolved, no trusted status has been received, and staging smoke is still `NOT_RUN`. Resume, rollback and recovery are not authorized; controlled setup and manual Telegram/Mini App smoke remain separate and unperformed.
 - The accepted staging smoke remains the only first-slice execution boundary. It must include the already implemented truthful-delivery and guest-surface behavior; it is validation work, not an automatic new feature. A production correction is required only if that smoke exposes a defect, which then becomes a separate bounded task.

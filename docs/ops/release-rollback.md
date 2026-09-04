@@ -185,6 +185,32 @@ category. Raw stdout/stderr captures и credentials не сохраняются.
 явного разрешения и не разрешает retry, recovery, lifecycle operation или ownership change; trusted status остаётся
 только evidence и сам по себе не разрешает resume или recovery. Raw evidence не retained.
 
+### Protected GitHub Environment contract for stage
+
+Accepted operational decision `DEC-037` задаёт постоянный exact contract для configuration и verification existing
+GitHub Environment `stage`:
+
+- required reviewer — live-verified GitHub user `koteev-m`, numeric ID `117291255`;
+- `prevent_self_review=false` — explicit temporary solo-maintainer exception, а не preferred multi-maintainer target;
+- wait timer — exactly 5 minutes;
+- administrators may not bypass configured protection rules;
+- deployment refs используют custom deployment branch policy с единственным rule: type `branch`, exact name `main`;
+- tag rules и wildcard branch rules отсутствуют;
+- gate применяется ко всем jobs, которые reference environment `stage`, включая normal stage deployment и
+  `Release Status (read-only)`;
+- stage environment secrets недоступны job, пока protection gate не пройден;
+- repository-level secrets не должны дублировать имена stage environment secrets;
+- environment `prod` этим contract или его documentation task не создаётся.
+
+Documentation acceptance or merge не доказывают, что live environment удовлетворяет этому contract. Применение policy
+и его independent verification — отдельные operational tasks; завершение каждой требует отдельного live evidence.
+Authenticity staging SSH host key, canonical `SSH_KNOWN_HOSTS` payload, provisioning и independent verification pinned
+evidence остаются отдельными последовательными gates. Environment protection не доказывает существование
+`SSH_KNOWN_HOSTS`, authentic host key, запуск Release Status или health staging и не предоставляет authority для
+deployment, resume, rollback или recovery.
+Если появляется second trusted maintainer, temporary exception заменяется только отдельным accepted decision с
+independent required reviewer и `prevent_self_review=true`.
+
 ## Runner classification и no-retry rule
 
 Runner вызывает каждую mutating SSH operation не более одного раза и никогда не retry-ит её автоматически.
