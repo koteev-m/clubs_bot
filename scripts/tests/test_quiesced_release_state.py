@@ -110,6 +110,24 @@ def container_for(app_state):
     return ""
 
 
+def compose_app_container_ids(app_state):
+    explicit_ids = state.get("compose_ps_ids")
+    if explicit_ids is not None:
+        return explicit_ids
+    container_ids = []
+    if state.get("migration_exists", False):
+        container_ids.append(state["migration_container_id"])
+    if app_state == "ambiguous":
+        container_ids.extend(
+            (state["old_container_id"], state["replaced_container_id"])
+        )
+    else:
+        container = container_for(app_state)
+        if container:
+            container_ids.append(container)
+    return container_ids
+
+
 def inspect_value(output_format, target):
     if target == f"clubs-bot-migrate-{os.environ['FAKE_OWNER']}":
         target = state["migration_container_id"]
@@ -120,6 +138,9 @@ def inspect_value(output_format, target):
             "{{.Config.Image}}": state["old_digest"],
             '{{ index .Config.Labels "com.docker.compose.project" }}': state["compose_project"],
             '{{ index .Config.Labels "com.docker.compose.service" }}': "app",
+            '{{ index .Config.Labels "com.docker.compose.oneoff" }}': state.get(
+                "ordinary_oneoff_label", "False"
+            ),
             "{{.State.StartedAt}}": state["started_at"],
             "{{.RestartCount}}": str(state["restart_count"]),
         }
@@ -131,6 +152,9 @@ def inspect_value(output_format, target):
             "{{.Config.Image}}": state["digest"],
             '{{ index .Config.Labels "com.docker.compose.project" }}': state["compose_project"],
             '{{ index .Config.Labels "com.docker.compose.service" }}': "app",
+            '{{ index .Config.Labels "com.docker.compose.oneoff" }}': state.get(
+                "ordinary_oneoff_label", "False"
+            ),
             "{{.State.StartedAt}}": state["candidate_started_at"],
             "{{.RestartCount}}": "0",
         }
@@ -142,6 +166,9 @@ def inspect_value(output_format, target):
             "{{.Config.Image}}": state["replaced_digest"],
             '{{ index .Config.Labels "com.docker.compose.project" }}': state["compose_project"],
             '{{ index .Config.Labels "com.docker.compose.service" }}': "app",
+            '{{ index .Config.Labels "com.docker.compose.oneoff" }}': state.get(
+                "ordinary_oneoff_label", "False"
+            ),
             "{{.State.StartedAt}}": state["candidate_started_at"],
             "{{.RestartCount}}": "0",
         }
@@ -152,6 +179,11 @@ def inspect_value(output_format, target):
             "{{.Image}}": state["candidate_image_id"],
             "{{.State.Running}}": "true" if state.get("migration_running", False) else "false",
             "{{.State.ExitCode}}": str(state["migration_exit"]),
+            '{{ index .Config.Labels "com.docker.compose.project" }}': state["compose_project"],
+            '{{ index .Config.Labels "com.docker.compose.service" }}': "app",
+            '{{ index .Config.Labels "com.docker.compose.oneoff" }}': state.get(
+                "migration_oneoff_label", "True"
+            ),
         }
         return values.get(output_format)
     return None
@@ -221,13 +253,8 @@ if command == "compose":
     if action == "ps":
         fail("compose_ps")
         app_state = effective_app_state()
-        if app_state == "ambiguous":
-            print(state["old_container_id"])
-            print(state["replaced_container_id"])
-        else:
-            container = container_for(app_state)
-            if container:
-                print(container)
+        for container_id in compose_app_container_ids(app_state):
+            print(container_id)
         raise SystemExit(0)
     if action == "stop":
         fail("compose_stop")
@@ -274,6 +301,8 @@ if command == "inspect":
         if target == f"clubs-bot-migrate-{os.environ['FAKE_OWNER']}":
             raise SystemExit(0 if state.get("migration_exists", False) else 1)
         raise SystemExit(1)
+    if "com.docker.compose.oneoff" in output_format:
+        fail("inspect_oneoff")
     value = inspect_value(output_format, target)
     if value is None:
         raise SystemExit(1)
@@ -777,6 +806,7 @@ class RemoteHarness:
                 "candidate_revision": REVISION,
                 "candidate_started_at": "2026-08-27T00:05:00Z",
                 "compose_has_app": True,
+                "compose_ps_ids": None,
                 "compose_project": "clubs",
                 "configured_digest": True,
                 "digest": DIGEST,
@@ -792,11 +822,13 @@ class RemoteHarness:
                     "migration-safe:v=1 event=started\n"
                     "migration-safe:v=1 event=completed applied=0\n"
                 ),
+                "migration_oneoff_label": "True",
                 "migration_removals": 0,
                 "old_container_id": OLD_CONTAINER_ID,
                 "old_digest": OLD_DIGEST,
                 "old_image_id": OLD_IMAGE_ID,
                 "old_revision": OLD_REVISION,
+                "ordinary_oneoff_label": "False",
                 "ps_sequence": [],
                 "replaced_container_id": REPLACED_CONTAINER_ID,
                 "replaced_digest": f"{IMAGE_REPOSITORY}@sha256:{'8' * 64}",
@@ -1894,6 +1926,13 @@ class AbortAndResumeTest(unittest.TestCase):
             state = harness.docker_state()
             self.assertEqual({"stop": 1, "rm": 1}, state["lifecycle_counts"])
             self.assertEqual(0, state["migration_invocations"])
+            self.assertTrue(
+                any(
+                    command[-1] == OLD_CONTAINER_ID
+                    and "com.docker.compose.oneoff" in " ".join(command)
+                    for command in harness.docker_commands()
+                )
+            )
 
             harness.clear_command_logs()
             second = harness.resume("quiesce")
@@ -1944,17 +1983,71 @@ class AbortAndResumeTest(unittest.TestCase):
             self.assertEqual(0, harness.docker_state()["start_invocations"])
 
     def test_resume_start_and_cleanup_remain_migration_gated(self) -> None:
-        with RemoteHarness() as harness:
+        with self.subTest(case="retained-oneoff-production-incident"), RemoteHarness() as harness:
             harness.progress_to("migration_completed")
-            self.assertTrue(harness.docker_state()["migration_exists"])
+            migrated_state = harness.docker_state()
+            self.assertEqual("absent", migrated_state["app_state"])
+            self.assertTrue(migrated_state["migration_exists"])
+            self.assertEqual(1, migrated_state["migration_invocations"])
+            self.assertEqual(0, migrated_state["start_invocations"])
+            self.assertEqual(0, migrated_state["migration_removals"])
+
+            harness.clear_command_logs()
+            status = harness.status("migrate")
+            self.assertEqual(0, status.returncode, status.stderr)
+            self.assertIn("checkpoint=migration_completed", status.stdout)
+            self.assertIn("migration_evidence=present", status.stdout)
+            self.assertIn("app_state=absent", status.stdout)
+            self.assertIn("resume_permitted=yes", status.stdout)
+            self.assertEqual([], harness.lifecycle_commands())
+
             migrated_again = harness.resume("migrate")
             self.assertEqual(0, migrated_again.returncode, migrated_again.stderr)
             self.assertEqual(1, harness.docker_state()["migration_invocations"])
+
+            harness.clear_command_logs()
             started = harness.resume("start")
             self.assertEqual(0, started.returncode, started.stderr)
             self.assertEqual("candidate_healthy", harness.checkpoint())
-            self.assertEqual(1, harness.docker_state()["migration_invocations"])
-            self.assertEqual(1, harness.docker_state()["start_invocations"])
+            started_state = harness.docker_state()
+            self.assertEqual(1, started_state["migration_invocations"])
+            self.assertEqual(1, started_state["start_invocations"])
+            self.assertTrue(started_state["migration_exists"])
+            self.assertEqual(0, started_state["migration_removals"])
+            docker_commands = harness.docker_commands()
+            self.assertTrue(
+                any(
+                    command[-1] == MIGRATION_CONTAINER_ID
+                    and "com.docker.compose.oneoff" in " ".join(command)
+                    for command in docker_commands
+                )
+            )
+            self.assertFalse(
+                any(
+                    command[-1] == MIGRATION_CONTAINER_ID
+                    and "{{.State.Running}}" in command
+                    for command in docker_commands
+                )
+            )
+            health_urls = [
+                command[-1]
+                for command in docker_commands
+                if command[:1] == ["compose"] and "exec" in command
+            ]
+            self.assertEqual(
+                ["http://127.0.0.1:8080/ready", "http://127.0.0.1:8080/health"],
+                health_urls,
+            )
+            for forbidden in SENSITIVE_VALUES:
+                self.assertNotIn(forbidden, started.stdout + started.stderr)
+
+            harness.clear_command_logs()
+            running_status = harness.status("start")
+            self.assertEqual(0, running_status.returncode, running_status.stderr)
+            self.assertIn("migration_evidence=present", running_status.stdout)
+            self.assertIn("app_state=candidate_running", running_status.stdout)
+            self.assertEqual([], harness.lifecycle_commands())
+
             started_again = harness.resume("start")
             self.assertEqual(0, started_again.returncode, started_again.stderr)
             self.assertEqual(1, harness.docker_state()["start_invocations"])
@@ -1967,6 +2060,64 @@ class AbortAndResumeTest(unittest.TestCase):
             self.assertEqual(0, cleaned_again.returncode, cleaned_again.stderr)
             self.assertEqual("release-operation:v=1 result=already_clean\n", cleaned_again.stdout)
             self.assertEqual(1, harness.docker_state()["migration_removals"])
+
+        identity_failures = (
+            ("multiple-ordinary-containers", {"app_state": "ambiguous"}),
+            (
+                "duplicate-ordinary-container-id",
+                {
+                    "compose_ps_ids": [
+                        MIGRATION_CONTAINER_ID,
+                        CANDIDATE_CONTAINER_ID,
+                        CANDIDATE_CONTAINER_ID,
+                    ]
+                },
+            ),
+            (
+                "malformed-container-id",
+                {"compose_ps_ids": [MIGRATION_CONTAINER_ID, "A" * 64]},
+            ),
+            ("absent-oneoff-label", {"migration_oneoff_label": "<no value>"}),
+            ("unknown-oneoff-label", {"migration_oneoff_label": "unknown"}),
+        )
+        for case_name, docker_updates in identity_failures:
+            with self.subTest(case=case_name), RemoteHarness() as harness:
+                harness.progress_to("migration_completed")
+                harness.update_docker_state(**docker_updates)
+                harness.clear_command_logs()
+
+                result = harness.resume("start")
+
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual("migration_completed", harness.checkpoint())
+                self.assertEqual("app_identity_mismatch", harness.result()["failure_category"])
+                state = harness.docker_state()
+                self.assertEqual(1, state["migration_invocations"])
+                self.assertEqual(0, state["start_invocations"])
+                self.assertTrue(state["migration_exists"])
+                self.assertEqual(0, state["migration_removals"])
+                self.assertEqual([], harness.lifecycle_commands())
+                for forbidden in SENSITIVE_VALUES:
+                    self.assertNotIn(forbidden, result.stdout + result.stderr)
+
+        with self.subTest(case="oneoff-label-inspect-failure"), RemoteHarness() as harness:
+            harness.progress_to("migration_completed")
+            harness.fail_docker("inspect_oneoff")
+            harness.clear_command_logs()
+
+            result = harness.resume("start")
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertEqual("migration_completed", harness.checkpoint())
+            self.assertEqual("app_identity_mismatch", harness.result()["failure_category"])
+            state = harness.docker_state()
+            self.assertEqual(1, state["migration_invocations"])
+            self.assertEqual(0, state["start_invocations"])
+            self.assertTrue(state["migration_exists"])
+            self.assertEqual(0, state["migration_removals"])
+            self.assertEqual([], harness.lifecycle_commands())
+            for forbidden in SENSITIVE_VALUES:
+                self.assertNotIn(forbidden, result.stdout + result.stderr)
 
     def test_cleanup_rejects_changed_migration_image_correlation(self) -> None:
         with RemoteHarness() as harness:

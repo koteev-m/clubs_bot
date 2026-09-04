@@ -1429,14 +1429,35 @@ image_digest() {
 
 current_compose_container_id() {
   local compose_path="$1"
-  local ids
+  local ids container_id oneoff_label
+  local -a container_ids=()
+  local ordinary_container_id=""
+  local ordinary_container_count=0
   ids="$(compose_base_command "$compose_path" ps -aq app 2>/dev/null)" || return 1
-  if [ -z "$ids" ]; then
-    return 0
+  while IFS= read -r container_id; do
+    [ -n "$container_id" ] || continue
+    [[ "$container_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+    container_ids+=("$container_id")
+  done <<<"$ids"
+  for container_id in "${container_ids[@]}"; do
+    oneoff_label="$(
+      inspect_container_value \
+        '{{ index .Config.Labels "com.docker.compose.oneoff" }}' \
+        "$container_id"
+    )" || return 1
+    case "$oneoff_label" in
+      True) ;;
+      False)
+        ordinary_container_count=$((ordinary_container_count + 1))
+        ordinary_container_id="$container_id"
+        ;;
+      *) return 1 ;;
+    esac
+  done
+  [ "$ordinary_container_count" -le 1 ] || return 1
+  if [ "$ordinary_container_count" = "1" ]; then
+    printf '%s' "$ordinary_container_id"
   fi
-  [ "$(printf '%s\n' "$ids" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ] || return 1
-  [[ "$ids" =~ ^[0-9a-f]{64}$ ]] || return 1
-  printf '%s' "$ids"
 }
 
 inspect_container_value() {
