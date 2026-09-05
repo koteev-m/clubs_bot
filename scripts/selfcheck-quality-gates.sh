@@ -9075,11 +9075,12 @@ validate_temporary_remote_docker_credentials() {
   local digest_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   local default_config="$fake_home/.docker/config.json"
   local default_before default_after default_mode_before default_mode_after
-  local case_name case_state_root expected_status actual_status registry_config credential_path
+  local case_name case_state_root expected_status actual_status registry_config credential_path ordinary_container_id
 
   mkdir -p "$fake_bin" "$fake_home/.docker" "$compose_path" "$release_state_root"
   compose_path="$(cd "$compose_path" && pwd -P)"
   release_state_root="$(cd "$release_state_root" && pwd -P)"
+  printf -v ordinary_container_id '%064d' 1
   printf '%s\n' '{"auths":{"sentinel.invalid":{"auth":"unchanged"}}}' >"$default_config"
   chmod 600 "$default_config"
   printf '%s\n' 'services:' '  app:' '    image: local-only' >"$compose_path/docker-compose.yml"
@@ -9129,7 +9130,10 @@ case "$command_name" in
     fi
     ;;
   inspect)
-    if [[ "$*" == *"com.docker.compose.project"* ]]; then
+    printf 'inspect=%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+    if [[ "$*" == *"com.docker.compose.oneoff"* ]]; then
+      printf '%s\n' False
+    elif [[ "$*" == *"com.docker.compose.project"* ]]; then
       printf '%s\n' fixture-project
     elif [[ "$*" == *"com.docker.compose.service"* ]]; then
       printf '%s\n' app
@@ -9246,6 +9250,10 @@ SH
         fail "temporary Docker login count changed"
       [ "$(grep -c $'\tcommand=pull$' "$docker_log")" = "2" ] ||
         fail "temporary Docker tag/digest pull count changed"
+      grep -Fq \
+        "inspect=--format={{ index .Config.Labels \"com.docker.compose.oneoff\" }} $ordinary_container_id" \
+        "$docker_log" ||
+        fail "temporary Docker one-off label lookup was not observed for the ordinary app container"
     fi
   done
 
