@@ -127,7 +127,7 @@ jobs:
       - name: Checkout implementation main
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
-          ref: refs/heads/main
+          ref: ${{ github.sha }}
           path: implementation
           persist-credentials: false
 
@@ -287,6 +287,8 @@ jobs:
       - name: Read exact retained release status once
         shell: bash
         env:
+          STATUS_PROVENANCE: 'yes'
+          PYTHONDONTWRITEBYTECODE: '1'
           TMPDIR: ${{ runner.temp }}
           RUNNER_TEMP: ${{ runner.temp }}
           APP_ENV: ${{ needs.validate.outputs.environment }}

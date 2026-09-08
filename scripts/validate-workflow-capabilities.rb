@@ -5,6 +5,7 @@ require "pathname"
 require "set"
 require "yaml"
 require_relative "validate-workflow-yaml"
+require_relative "validate-corrected-stage-workflow"
 
 module WorkflowCapabilityPolicy
   module_function
@@ -1275,6 +1276,8 @@ module WorkflowCapabilityPolicy
     key = [path, job_name]
     return DEPLOY_SECRETS if DEPLOY_JOBS.key?(key)
     return RELEASE_STATUS_SECRETS if key == [RELEASE_STATUS_WORKFLOW, "status"]
+    return RELEASE_STATUS_SECRETS | Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "execute"]
+    return Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "validate"]
     return Set.new(["GITHUB_TOKEN"]) if key == [".github/workflows/release.yml", "release"]
     Set.new
   end
@@ -1319,6 +1322,7 @@ module WorkflowCapabilityPolicy
     expected = DEPLOY_JOBS[key]
     expected = "${{ needs.validate.outputs.environment }}" if
       key == [RELEASE_STATUS_WORKFLOW, "status"]
+    expected = "stage" if key == [CorrectedStageWorkflow::PATH, "execute"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
     elsif !environment.nil?
@@ -1502,7 +1506,7 @@ module WorkflowCapabilityPolicy
         "name" => "Checkout implementation main",
         "uses" => CHECKOUT_ACTION,
         "with" => {
-          "ref" => "refs/heads/main",
+          "ref" => "${{ github.sha }}",
           "path" => "implementation",
           "persist-credentials" => false,
         },
@@ -1674,6 +1678,8 @@ module WorkflowCapabilityPolicy
         "name" => "Read exact retained release status once",
         "shell" => "bash",
         "env" => {
+          "STATUS_PROVENANCE" => "yes",
+          "PYTHONDONTWRITEBYTECODE" => "1",
           "TMPDIR" => "${{ runner.temp }}",
           "RUNNER_TEMP" => "${{ runner.temp }}",
           "APP_ENV" => "${{ needs.validate.outputs.environment }}",
@@ -1860,7 +1866,7 @@ module WorkflowCapabilityPolicy
     incident_checkout = status_steps.fetch(2)
     reject("#{path}/status: implementation checkout contract changed") unless
       first_checkout["with"] == {
-        "ref" => "refs/heads/main",
+        "ref" => "${{ github.sha }}",
         "path" => "implementation",
         "persist-credentials" => false,
       }
@@ -2147,6 +2153,8 @@ module WorkflowCapabilityPolicy
     reject("release-status workflow is missing from visible inventory") unless
       workflows.key?(RELEASE_STATUS_WORKFLOW)
 
+    reject("corrected-stage workflow is missing from visible inventory") unless workflows.key?(CorrectedStageWorkflow::PATH)
+
     observed_exact_jobs = Set.new
     workflows.each do |path, (workflow, raw)|
       triggers = workflow_triggers(workflow, path)
@@ -2167,6 +2175,7 @@ module WorkflowCapabilityPolicy
           reject("#{path}: canonical workflow baseline must be contents: read")
         end
       end
+      CorrectedStageWorkflow.validate(self, workflow) if path == CorrectedStageWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
       validate_release_status_contract(path, workflow, triggers, jobs, raw)
       top_level = workflow.reject { |key, _value| key == "jobs" }
@@ -2217,6 +2226,7 @@ module WorkflowCapabilityPolicy
                       workflow_permissions
                     end
         expected = EXPECTED_EFFECTIVE_PERMISSIONS[[path, job_name]] || {"contents" => "read"}
+        expected = {"contents" => "read", "actions" => "read"} if path == CorrectedStageWorkflow::PATH
         reject("#{context}: effective permissions changed; expected #{expected.inspect}, got #{effective.inspect}") unless
           effective == expected
         observed_exact_jobs << [path, job_name] if EXPECTED_EFFECTIVE_PERMISSIONS.key?([path, job_name])

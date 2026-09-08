@@ -1,0 +1,179 @@
+---
+name: Corrected Stage Release (manual)
+'on':
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Exact incident environment
+        required: true
+        default: stage
+        type: choice
+        options:
+        - stage
+      incident_tag:
+        description: Exact incident incident_tag
+        required: true
+        default: deploy-stage-44497dc
+        type: string
+      release_owner:
+        description: Exact incident release_owner
+        required: true
+        default: 33468965282-1
+        type: string
+      expected_revision:
+        description: Exact incident expected_revision
+        required: true
+        default: 44497dcd28139cef865c3f98ac3f2c4a5afac636
+        type: string
+      image_digest:
+        description: Exact incident image_digest
+        required: true
+        default: ghcr.io/koteev-m/clubs_bot/app-bot@sha256:ddf5486e02835855178cc3b30bd2f22899335131e6dc388def20feac328016fe
+        type: string
+      implementation:
+        description: Separately approved bound implementation revision:blob:sha256
+        required: true
+        default: ''
+        type: string
+      action:
+        description: Read-only inspect or separately authorized one-shot resume-start
+        required: true
+        default: inspect
+        type: choice
+        options:
+        - inspect
+        - resume-start
+      prior_status:
+        description: Original Release Status run_id:attempt:head_sha evidence reference
+        default: ''
+        required: true
+        type: string
+      authorization:
+        description: Exact action authorization from runbook, bound to this workflow
+          run number, implementation and protected root-binding digest
+        required: false
+        default: ''
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: payments-schema-stage
+  cancel-in-progress: false
+jobs:
+  validate:
+    name: validate-corrected-stage-request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      APP_ENV: "${{ steps.validate.outputs.APP_ENV }}"
+      INCIDENT_TAG: "${{ steps.validate.outputs.INCIDENT_TAG }}"
+      RELEASE_OWNER: "${{ steps.validate.outputs.RELEASE_OWNER }}"
+      EXPECTED_REVISION: "${{ steps.validate.outputs.EXPECTED_REVISION }}"
+      IMAGE_DIGEST: "${{ steps.validate.outputs.IMAGE_DIGEST }}"
+      IMPLEMENTATION: "${{ steps.validate.outputs.IMPLEMENTATION }}"
+      ACTION: "${{ steps.validate.outputs.ACTION }}"
+      AUTHORIZATION: "${{ steps.validate.outputs.AUTHORIZATION }}"
+      PRIOR_STATUS: "${{ steps.validate.outputs.PRIOR_STATUS }}"
+    steps:
+    - name: Checkout exact workflow revision
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        ref: "${{ github.sha }}"
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Validate exact request before secrets
+      id: validate
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        PYTHONDONTWRITEBYTECODE: '1'
+        APP_ENV: "${{ inputs.environment }}"
+        INCIDENT_TAG: "${{ inputs.incident_tag }}"
+        RELEASE_OWNER: "${{ inputs.release_owner }}"
+        EXPECTED_REVISION: "${{ inputs.expected_revision }}"
+        IMAGE_DIGEST: "${{ inputs.image_digest }}"
+        IMPLEMENTATION: "${{ inputs.implementation }}"
+        ACTION: "${{ inputs.action }}"
+        AUTHORIZATION: "${{ inputs.authorization }}"
+        PRIOR_STATUS: "${{ inputs.prior_status }}"
+      run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --validate
+    - name: Verify original status evidence through GitHub
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        PYTHONDONTWRITEBYTECODE: '1'
+        GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        APP_ENV: "${{ steps.validate.outputs.APP_ENV }}"
+        INCIDENT_TAG: "${{ steps.validate.outputs.INCIDENT_TAG }}"
+        RELEASE_OWNER: "${{ steps.validate.outputs.RELEASE_OWNER }}"
+        EXPECTED_REVISION: "${{ steps.validate.outputs.EXPECTED_REVISION }}"
+        IMAGE_DIGEST: "${{ steps.validate.outputs.IMAGE_DIGEST }}"
+        IMPLEMENTATION: "${{ steps.validate.outputs.IMPLEMENTATION }}"
+        ACTION: "${{ steps.validate.outputs.ACTION }}"
+        AUTHORIZATION: "${{ steps.validate.outputs.AUTHORIZATION }}"
+        PRIOR_STATUS: "${{ steps.validate.outputs.PRIOR_STATUS }}"
+      run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --verify-prior
+  execute:
+    name: deployment-principal-corrected-stage
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    environment: stage
+    steps:
+    - name: Checkout exact workflow revision
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        ref: "${{ github.sha }}"
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Revalidate attempt before SSH credentials
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        PYTHONDONTWRITEBYTECODE: '1'
+        APP_ENV: "${{ needs.validate.outputs.APP_ENV }}"
+        INCIDENT_TAG: "${{ needs.validate.outputs.INCIDENT_TAG }}"
+        RELEASE_OWNER: "${{ needs.validate.outputs.RELEASE_OWNER }}"
+        EXPECTED_REVISION: "${{ needs.validate.outputs.EXPECTED_REVISION }}"
+        IMAGE_DIGEST: "${{ needs.validate.outputs.IMAGE_DIGEST }}"
+        IMPLEMENTATION: "${{ needs.validate.outputs.IMPLEMENTATION }}"
+        ACTION: "${{ needs.validate.outputs.ACTION }}"
+        AUTHORIZATION: "${{ needs.validate.outputs.AUTHORIZATION }}"
+        PRIOR_STATUS: "${{ needs.validate.outputs.PRIOR_STATUS }}"
+        CLB82_APPROVED_IMPLEMENTATION: "${{ vars.CLB82_APPROVED_IMPLEMENTATION }}"
+        CLB82_AUTHORIZED_ROOT_BINDING: "${{ vars.CLB82_AUTHORIZED_ROOT_BINDING }}"
+      run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --validate-execution
+    - name: Setup deployment SSH principal
+      uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387
+      with:
+        ssh-private-key: "${{ secrets.SSH_PRIVATE_KEY }}"
+    - name: Execute bounded corrected helper
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        PYTHONDONTWRITEBYTECODE: '1'
+        APP_ENV: "${{ needs.validate.outputs.APP_ENV }}"
+        INCIDENT_TAG: "${{ needs.validate.outputs.INCIDENT_TAG }}"
+        RELEASE_OWNER: "${{ needs.validate.outputs.RELEASE_OWNER }}"
+        EXPECTED_REVISION: "${{ needs.validate.outputs.EXPECTED_REVISION }}"
+        IMAGE_DIGEST: "${{ needs.validate.outputs.IMAGE_DIGEST }}"
+        IMPLEMENTATION: "${{ needs.validate.outputs.IMPLEMENTATION }}"
+        ACTION: "${{ needs.validate.outputs.ACTION }}"
+        AUTHORIZATION: "${{ needs.validate.outputs.AUTHORIZATION }}"
+        PRIOR_STATUS: "${{ needs.validate.outputs.PRIOR_STATUS }}"
+        GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        TMPDIR: "${{ runner.temp }}"
+        SSH_USER: "${{ secrets.SSH_USER }}"
+        SSH_HOST: "${{ secrets.SSH_HOST }}"
+        SSH_PORT: "${{ secrets.SSH_PORT || '22' }}"
+        COMPOSE_PATH: "${{ secrets.COMPOSE_PATH }}"
+        SSH_KNOWN_HOSTS: "${{ secrets.SSH_KNOWN_HOSTS }}"
+        CLB82_APPROVED_IMPLEMENTATION: "${{ vars.CLB82_APPROVED_IMPLEMENTATION }}"
+        CLB82_AUTHORIZED_ROOT_BINDING: "${{ vars.CLB82_AUTHORIZED_ROOT_BINDING }}"
+      run: python3 -I -S -B scripts/deploy/corrected-stage-release.py

@@ -14,7 +14,7 @@ ssh_pid=""
 exec 2>/dev/null
 
 private_fs() {
-  python3 - "$@" <<'PRIVATE_FS'
+  python3 -I -S -B - "$@" <<'PRIVATE_FS'
 import os
 import stat
 import sys
@@ -56,7 +56,7 @@ PRIVATE_FS
 
 bootstrap_private_files() {
   local private_root="$1"
-  exec python3 - "$0" "$private_root" <<'PRIVATE_BOOTSTRAP'
+  exec python3 -I -S -B - "$0" "$private_root" <<'PRIVATE_BOOTSTRAP'
 import os
 import signal
 import stat
@@ -149,45 +149,14 @@ def stop(category=CHANNEL_LOCAL_FAILURE, exit_status=1):
         os._exit(exit_status)
 
 
-def require_safe_directory(value, *, selected=False):
-    mode = stat.S_IMODE(value.st_mode)
-    if not stat.S_ISDIR(value.st_mode) or mode & 0o022:
-        raise RuntimeError("unsafe temporary root chain")
-    if value.st_uid not in {0, os.geteuid()}:
-        raise RuntimeError("untrusted temporary root owner")
-    if selected and (value.st_uid != os.geteuid() or mode & 0o700 != 0o700):
-        raise RuntimeError("temporary root is not runner-owned and accessible")
-
-
-def open_canonical_root(path):
-    if (
-        not path
-        or not os.path.isabs(path)
-        or path != os.path.normpath(path)
-        or path != os.path.realpath(path)
-    ):
-        raise RuntimeError("temporary root is not canonical")
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    descriptor = os.open("/", flags)
-    try:
-        require_safe_directory(os.fstat(descriptor))
-        components = [component for component in path.split("/") if component]
-        for index, component in enumerate(components):
-            next_descriptor = os.open(component, flags, dir_fd=descriptor)
-            os.close(descriptor)
-            descriptor = next_descriptor
-            require_safe_directory(
-                os.fstat(descriptor), selected=index == len(components) - 1
-            )
-        if not components:
-            require_safe_directory(os.fstat(descriptor), selected=True)
-        return descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
-
-
 try:
+    # Compile the exact verified source, bypassing checkout imports and .pyc.
+    module_path = os.path.join(os.path.dirname(os.path.realpath(sys.argv[1])), "release_private_root.py")
+    module_fd = os.open(module_path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(module_fd, "rb") as module_source:
+        module = {"__file__": module_path, "__name__": "release_private_root"}
+        exec(compile(module_source.read(), module_path, "exec"), module)
+    open_canonical_root = module["open_canonical_root"]
     if len(sys.argv) != 3 or not hasattr(os, "O_NOFOLLOW"):
         raise RuntimeError("private bootstrap contract")
     script_path = os.path.realpath(os.path.abspath(sys.argv[1]))
@@ -753,7 +722,9 @@ fi
 private_fs rewind "$status_stdout_fd"
 IFS= read -r status_line <"$status_stdout"
 
-readonly official_status_pattern='^release-status:v=1 status_available=(yes|no) owner_match=(yes|no) revision_match=(yes|no) digest_match=(yes|no) checkpoint=(none|maintenance_prepared|prior_state_captured|candidate_override_published|app_stop_intent|app_quiesced|migration_started|migration_completed|candidate_start_begun|candidate_healthy|cleanup_started|cleanup_completed|abort_started|abort_completed|unavailable) operation_result=(success|remote_failure|incomplete_unknown|unavailable|malformed) migration_evidence=(present|absent|unknown|migration_outcome_requires_incident_reconciliation) app_state=(old_running|absent|candidate_running|replaced|ambiguous|unknown) abort_permitted=(yes|no) resume_permitted=(yes|no) failure_category=(none|untrusted_state_root)$'
+official_status_pattern="$(cat "$(dirname "$0")/release-status.pattern")" ||\
+  finalize 1 unavailable LOCAL_FAILURE
+readonly official_status_pattern
 if [[ ! "$status_line" =~ $official_status_pattern ]]; then
   finalize 1 unavailable STATUS_MALFORMED
 fi
@@ -764,6 +735,10 @@ revision_match="${BASH_REMATCH[3]}"
 digest_match="${BASH_REMATCH[4]}"
 if [ "$status_available" = "yes" ] && [ "$owner_match" = "yes" ] &&
   [ "$revision_match" = "yes" ] && [ "$digest_match" = "yes" ]; then
+  if [ "${STATUS_PROVENANCE:-}" = "yes" ]; then
+    python3 -I -S -B "$(dirname "$0")/release_authority.py" produce "$status_line" ||\
+      finalize 1 unavailable LOCAL_FAILURE
+  fi
   finalize 0 trusted STATUS_TRUSTED "$status_line"
 fi
 finalize 1 untrusted STATUS_UNTRUSTED "$status_line"

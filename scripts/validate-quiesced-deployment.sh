@@ -356,7 +356,7 @@ unless implementation_checkout == {
   "name" => "Checkout implementation main",
   "uses" => "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332",
   "with" => {
-    "ref" => "refs/heads/main",
+    "ref" => "${{ github.sha }}",
     "path" => "implementation",
     "persist-credentials" => false,
   },
@@ -560,6 +560,8 @@ unless status == {
   "name" => "Read exact retained release status once",
   "shell" => "bash",
   "env" => {
+    "STATUS_PROVENANCE" => "yes",
+    "PYTHONDONTWRITEBYTECODE" => "1",
     "TMPDIR" => "${{ runner.temp }}",
     "RUNNER_TEMP" => "${{ runner.temp }}",
     "APP_ENV" => "${{ needs.validate.outputs.environment }}",
@@ -594,7 +596,7 @@ puts "read-only-status-contract: workflow verified"
 RUBY
 
   [ "$(sha256sum "$status_workflow" | awk '{print $1}')" = \
-    "1b4d9e0a69a8ad1f86857d4100e86f500376123bd972061f936b25bf5db0bb51" ] ||
+    "9447edff259b1fce562b256531a6557ca6318b0625af27e7562f6beec3a822db" ] ||
     fail_status_contract "workflow content SHA-256 changed outside the approved contract"
 
   remote_wrapper="$(awk '/<<'\''REMOTE_STATUS'\''/ { inside = 1; next } inside && /^REMOTE_STATUS$/ { exit } inside { print }' "$status_runner")"
@@ -630,7 +632,20 @@ RUBY
   if grep -Eq '644:1|helper_mode[^\n]*(==|=)[^\n]*644' <<<"$remote_wrapper"; then
     fail_status_contract "helper mode must not depend on an exact 0644 uploader result"
   fi
+  for shared_file in release_private_root.py release-status.pattern; do
+    shared_path="$repository_root/scripts/deploy/$shared_file"
+    [ -f "$shared_path" ] && [ ! -L "$shared_path" ] ||
+      fail_status_contract "shared status dependency missing or unsafe"
+  done
+  for shared_contract in \
+    'os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW' \
+    'path != os.path.realpath(path)' \
+    'mode & 0o022'; do
+    grep -Fq "$shared_contract" "$repository_root/scripts/deploy/release_private_root.py" ||
+      fail_status_contract "shared private root contract changed"
+  done
   for runner_contract in \
+    'open_canonical_root = module["open_canonical_root"]' \
     'set -euo pipefail' \
     'umask 077' \
     'pending_signal_status=0' \
@@ -638,11 +653,8 @@ RUBY
     'temporary_root="${TMPDIR:-}"' \
     'temporary_root="${RUNNER_TEMP:-}"' \
     'bootstrap_private_files "$temporary_root"' \
-    'exec python3 - "$0" "$private_root"' \
-    'os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW' \
-    'path != os.path.realpath(path)' \
+    'exec python3 -I -S -B - "$0" "$private_root"' \
     'value.st_uid != os.geteuid()' \
-    'mode & 0o022' \
     'os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW' \
     'opened.append([descriptor, name, None, True])' \
     'original = os.stat(descriptor)' \
@@ -700,7 +712,7 @@ RUBY
     'status_newlines="$(LC_ALL=C tr -cd '\''\012'\'' <"$status_stdout" | wc -c | tr -d '\'' '\'')"' \
     'status_last_byte="$(tail -c 1 "$status_stdout" | od -An -tu1 -v | tr -d '\''[:space:]'\'')"' \
     'LC_ALL=C od -An -tu1 -v "$status_stdout"' \
-    'release-status:v=1 status_available=(yes|no)' \
+    'official_status_pattern="$(cat "$(dirname "$0")/release-status.pattern")"' \
     'release-status-channel:v=1 result=%s category=%s'; do
     grep -Fq -- "$runner_contract" "$status_runner" ||
       fail_status_contract "runner contract lacks: $runner_contract"
@@ -781,8 +793,12 @@ RUBY
     fail_status_contract "transport nonzero path can expose or trust official stdout"
   fi
   [ "$(sha256sum "$status_runner" | awk '{print $1}')" = \
-    "14c3dc1b5fe2b1c5acbb6ddf14de90571bf5ea43f3d38f91b97a823a860f75b3" ] ||
+    "3d9d97a439bb43df754387e880e7d414790f29be6ca5833349d383d2540f53ef" ] ||
     fail_status_contract "runner content SHA-256 changed outside the approved contract"
+  [ "$(sha256sum "$repository_root/scripts/deploy/release-status.pattern" | awk '{print $1}')" = \
+    "e867e9fc33e49664228112a42ff81d72c8ece8fc4cb4263f8b9dd019bc812daa" ] || fail_status_contract "shared status dependency content changed"
+  [ "$(sha256sum "$repository_root/scripts/deploy/release_private_root.py" | awk '{print $1}')" = \
+    "250d359d114779ddcc12c38bc64dc7015d5679f0ffce12a859f007810726cdba" ] || fail_status_contract "shared status dependency content changed"
 }
 
 validate_status_channel_contract
