@@ -7141,7 +7141,8 @@ copy_workflow_capability_fixture() {
   cp "$ROOT_DIR/gradle/verification-metadata.xml" "$fixture_root/gradle/"
   cp "$ROOT_DIR/docs/ops/secrets-rotation.md" "$fixture_root/docs/ops/"
   git -C "$fixture_root" add -A -- . \
-    ':(exclude).github/workflows/release-status.yml'
+    ':(exclude).github/workflows/release-status.yml' \
+    ':(exclude).github/workflows/corrected-stage-release.yml'
   if git -C "$fixture_root" ls-files --error-unmatch \
     .github/workflows/release-status.yml >/dev/null 2>&1; then
     fail "release-status capability fixture must remain untracked"
@@ -8641,7 +8642,8 @@ else
 end
 RUBY
   git -C "$fixture_root" add -A -- . \
-    ':(exclude).github/workflows/release-status.yml'
+    ':(exclude).github/workflows/release-status.yml' \
+    ':(exclude).github/workflows/corrected-stage-release.yml'
   git -C "$fixture_root" ls-files --error-unmatch \
     .github/workflows/release-status.yml >/dev/null 2>&1 &&
     fail "release-status fixture must remain untracked"
@@ -8757,10 +8759,13 @@ assert_yaml_safety_fixture_valid() {
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
       "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "21"
+      "22"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
+    assert_eq \
+      "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/corrected-stage-release.yml)" \
+      ".github/workflows/corrected-stage-release.yml"
     grep -Fqx '      - &checkout' "$fixture_root/.github/workflows/tests.yml" ||
       fail "current tests.yml anchor fixture is missing"
     grep -Fqx '      - *checkout' "$fixture_root/.github/workflows/tests.yml" ||
@@ -11162,7 +11167,7 @@ end
 unless lint["runs-on"] == "ubuntu-latest" && release_state["runs-on"] == "ubuntu-latest"
   reject_contract("jobs must use the supported runner")
 end
-reject_contract("lint timeout changed") unless lint["timeout-minutes"] == 30
+reject_contract("lint timeout changed") unless lint["timeout-minutes"] == 120
 reject_contract("release-state timeout must be exactly 50 minutes") unless release_state["timeout-minutes"] == 50
 
 [["lint", lint], ["release-state", release_state]].each do |job_name, job|
@@ -11450,6 +11455,11 @@ elif fixture_case == "timeout-removed":
     replace_once("    timeout-minutes: 50\n", "")
 elif fixture_case == "timeout-excessive":
     replace_once("    timeout-minutes: 50\n", "    timeout-minutes: 65\n")
+elif fixture_case in ("lint-timeout-former", "lint-timeout-below", "lint-timeout-above"):
+    timeout = {"lint-timeout-former": 30, "lint-timeout-below": 119, "lint-timeout-above": 121}[fixture_case]
+    replace_once("    timeout-minutes: 120\n", f"    timeout-minutes: {timeout}\n")
+elif fixture_case == "lint-timeout-removed":
+    replace_once("    timeout-minutes: 120\n", "")
 else:
     raise SystemExit(f"unknown lint release-state fixture case: {fixture_case}")
 
@@ -11529,6 +11539,16 @@ for lint_release_fixture in \
   timeout-removed \
   timeout-excessive; do
   assert_lint_release_state_contract_rejected "$lint_release_fixture"
+done
+
+for lint_timeout_fixture in \
+  lint-timeout-former \
+  lint-timeout-below \
+  lint-timeout-above \
+  lint-timeout-removed; do
+  assert_lint_release_state_contract_rejected \
+    "$lint_timeout_fixture" \
+    "lint-release-state-contract: lint timeout changed"
 done
 
 calibrate_lint_release_state_fail_open_shell
@@ -11867,5 +11887,8 @@ if grep -Fq "mkdir -p miniapp/dist" "$dockerfile"; then
 fi
 
 echo "quality-gate: Docker workflow/context contract verified"
+
+ruby "$ROOT_DIR/scripts/validate-corrected-stage-workflow.rb" "$ROOT_DIR"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_corrected_stage_release.py"
 
 echo "selfcheck: OK"

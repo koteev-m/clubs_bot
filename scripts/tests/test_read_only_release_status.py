@@ -610,7 +610,7 @@ os.execv(os.environ["REAL_PYTHON3"], [os.environ["REAL_PYTHON3"], *sys.argv[1:]]
         site_directory = self.root / "bootstrap-probe"
         site_directory.mkdir()
         done_file = self.root / "bootstrap-probe-done"
-        (site_directory / "sitecustomize.py").write_text(
+        (site_directory / "bootstrap_probe.py").write_text(
             """import os
 from pathlib import Path
 import subprocess
@@ -688,7 +688,7 @@ subprocess.Popen = guarded_popen
         )
         self.environment.update(
             {
-                "PYTHONPATH": str(site_directory),
+                "BOOTSTRAP_PROBE_SOURCE": str(site_directory / "bootstrap_probe.py"),
                 "BOOTSTRAP_PROBE_DONE": str(done_file),
                 "BOOTSTRAP_SIGNAL_POINT": signal_point or "",
                 "BOOTSTRAP_SIGNAL_NUMBER": str(signal_number),
@@ -696,6 +696,32 @@ subprocess.Popen = guarded_popen
                 "BOOTSTRAP_FAIL_FSTAT_NAME": fail_fstat_name or "",
             }
         )
+        # Production -I -S must ignore PYTHONPATH/sitecustomize. Inject these
+        # fixture-only faults explicitly at the fake interpreter boundary while
+        # preserving the production flags, argv, original code and descriptor IO.
+        fake_python = self.local_bin / "python3"
+        fake_python.write_text(
+            f"#!/usr/bin/env -S {self.real_python3} -I -S -B\n" +
+            """import os
+from pathlib import Path
+import sys
+import tempfile
+
+arguments = sys.argv[1:]
+if arguments[:4] == ["-I", "-S", "-B", "-"]:
+    source = sys.stdin.buffer.read()
+    if b"PRIVATE_NAMES = (" in source:
+        source = Path(os.environ["BOOTSTRAP_PROBE_SOURCE"]).read_bytes() + b"\\n" + source
+    with tempfile.TemporaryFile() as capture:
+        capture.write(source)
+        capture.seek(0)
+        os.dup2(capture.fileno(), 0)
+        os.execv(os.environ["REAL_PYTHON3"], [os.environ["REAL_PYTHON3"], *arguments])
+os.execv(os.environ["REAL_PYTHON3"], [os.environ["REAL_PYTHON3"], *arguments])
+""",
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o755)
         return done_file
 
     def close(self) -> None:
@@ -1364,7 +1390,7 @@ class ReadOnlyReleaseStatusRunnerTest(unittest.TestCase):
                 self.assert_parser_malformed(response)
 
     def test_checkpoint_evil_mutation_calibrates_parser_tests_independent_of_hash_pins(self) -> None:
-        canonical_source = RUNNER.read_text(encoding="utf-8")
+        canonical_source = RUNNER.with_name("release-status.pattern").read_text(encoding="utf-8")
         mutated_source = canonical_source.replace(
             "checkpoint=(none|maintenance_prepared",
             "checkpoint=(evil|none|maintenance_prepared",
@@ -1374,7 +1400,9 @@ class ReadOnlyReleaseStatusRunnerTest(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="status-parser-mutation-")
         self.addCleanup(temporary.cleanup)
         mutated_runner = Path(temporary.name) / "read-only-release-status.sh"
-        mutated_runner.write_text(mutated_source, encoding="utf-8")
+        mutated_runner.write_text(RUNNER.read_text(encoding="utf-8"), encoding="utf-8")
+        mutated_runner.with_name("release-status.pattern").write_text(mutated_source, encoding="utf-8")
+        shutil.copy2(RUNNER.with_name("release_private_root.py"), mutated_runner.parent)
         mutated_runner.chmod(0o700)
         with self.assertRaises(AssertionError):
             self.assert_parser_malformed(
@@ -1382,7 +1410,7 @@ class ReadOnlyReleaseStatusRunnerTest(unittest.TestCase):
             )
 
     def test_identity_evil_mutation_calibrates_parser_tests_independent_of_hash_pins(self) -> None:
-        canonical_source = RUNNER.read_text(encoding="utf-8")
+        canonical_source = RUNNER.with_name("release-status.pattern").read_text(encoding="utf-8")
         mutated_source = canonical_source.replace(
             "status_available=(yes|no)",
             "status_available=(evil|yes|no)",
@@ -1392,7 +1420,9 @@ class ReadOnlyReleaseStatusRunnerTest(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="status-identity-mutation-")
         self.addCleanup(temporary.cleanup)
         mutated_runner = Path(temporary.name) / "read-only-release-status.sh"
-        mutated_runner.write_text(mutated_source, encoding="utf-8")
+        mutated_runner.write_text(RUNNER.read_text(encoding="utf-8"), encoding="utf-8")
+        mutated_runner.with_name("release-status.pattern").write_text(mutated_source, encoding="utf-8")
+        shutil.copy2(RUNNER.with_name("release_private_root.py"), mutated_runner.parent)
         mutated_runner.chmod(0o700)
         with self.assertRaises(AssertionError):
             self.assert_parser_malformed(
@@ -1400,7 +1430,7 @@ class ReadOnlyReleaseStatusRunnerTest(unittest.TestCase):
             )
 
     def test_whitespace_mutation_calibrates_parser_tests_independent_of_hash_pins(self) -> None:
-        canonical_source = RUNNER.read_text(encoding="utf-8")
+        canonical_source = RUNNER.with_name("release-status.pattern").read_text(encoding="utf-8")
         mutated_source = canonical_source.replace(
             "^release-status:v=1 status_available=",
             "^release-status:v=1[[:space:]]+status_available=",
@@ -1410,7 +1440,9 @@ class ReadOnlyReleaseStatusRunnerTest(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="status-whitespace-mutation-")
         self.addCleanup(temporary.cleanup)
         mutated_runner = Path(temporary.name) / "read-only-release-status.sh"
-        mutated_runner.write_text(mutated_source, encoding="utf-8")
+        mutated_runner.write_text(RUNNER.read_text(encoding="utf-8"), encoding="utf-8")
+        mutated_runner.with_name("release-status.pattern").write_text(mutated_source, encoding="utf-8")
+        shutil.copy2(RUNNER.with_name("release_private_root.py"), mutated_runner.parent)
         mutated_runner.chmod(0o700)
         with self.assertRaises(AssertionError):
             self.assert_parser_malformed(
@@ -2453,6 +2485,8 @@ class ReleaseStatusWorkflowContractTest(unittest.TestCase):
         for relative in (
             ".github/workflows/release-status.yml",
             "scripts/deploy/read-only-release-status.sh",
+            "scripts/deploy/release-status.pattern",
+            "scripts/deploy/release_private_root.py",
             "scripts/tests/test_read_only_release_status.py",
             "scripts/selfcheck-quality-gates.sh",
         ):
@@ -2587,7 +2621,7 @@ class ReleaseStatusWorkflowContractTest(unittest.TestCase):
         canonical = WORKFLOW.read_text(encoding="utf-8")
         variants = (
             (canonical.replace("      - name: Checkout incident tag\n        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7\n", "      - name: Checkout incident tag\n        shell: bash\n        run: true\n", 1), "incident checkout must use only the validated incident tag"),
-            (canonical.replace("          ref: refs/heads/main\n", "          ref: ${{ github.ref }}\n", 1), "implementation checkout must be pinned, main, isolated, and credential-free"),
+            (canonical.replace("          ref: ${{ github.sha }}\n", "          ref: ${{ github.ref }}\n", 1), "implementation checkout must be pinned, main, isolated, and credential-free"),
             (canonical.replace("          ref: refs/tags/${{ needs.validate.outputs.incident_tag }}\n", "          ref: refs/tags/${{ inputs.incident_tag }}\n", 1), "incident checkout must use only the validated incident tag"),
             (canonical.replace('          test "$incident_head" = "$EXPECTED_REVISION"\n', "          true\n", 1), "incident revision equality check changed"),
         )

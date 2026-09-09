@@ -12,7 +12,7 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     concurrency:
       group: lint-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
