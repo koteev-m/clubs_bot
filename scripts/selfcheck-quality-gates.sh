@@ -11167,7 +11167,7 @@ end
 unless lint["runs-on"] == "ubuntu-latest" && release_state["runs-on"] == "ubuntu-latest"
   reject_contract("jobs must use the supported runner")
 end
-reject_contract("lint timeout changed") unless lint["timeout-minutes"] == 30
+reject_contract("lint timeout changed") unless lint["timeout-minutes"] == 120
 reject_contract("release-state timeout must be exactly 50 minutes") unless release_state["timeout-minutes"] == 50
 
 [["lint", lint], ["release-state", release_state]].each do |job_name, job|
@@ -11455,6 +11455,11 @@ elif fixture_case == "timeout-removed":
     replace_once("    timeout-minutes: 50\n", "")
 elif fixture_case == "timeout-excessive":
     replace_once("    timeout-minutes: 50\n", "    timeout-minutes: 65\n")
+elif fixture_case in ("lint-timeout-former", "lint-timeout-below", "lint-timeout-above"):
+    timeout = {"lint-timeout-former": 30, "lint-timeout-below": 119, "lint-timeout-above": 121}[fixture_case]
+    replace_once("    timeout-minutes: 120\n", f"    timeout-minutes: {timeout}\n")
+elif fixture_case == "lint-timeout-removed":
+    replace_once("    timeout-minutes: 120\n", "")
 else:
     raise SystemExit(f"unknown lint release-state fixture case: {fixture_case}")
 
@@ -11534,6 +11539,16 @@ for lint_release_fixture in \
   timeout-removed \
   timeout-excessive; do
   assert_lint_release_state_contract_rejected "$lint_release_fixture"
+done
+
+for lint_timeout_fixture in \
+  lint-timeout-former \
+  lint-timeout-below \
+  lint-timeout-above \
+  lint-timeout-removed; do
+  assert_lint_release_state_contract_rejected \
+    "$lint_timeout_fixture" \
+    "lint-release-state-contract: lint timeout changed"
 done
 
 calibrate_lint_release_state_fail_open_shell
