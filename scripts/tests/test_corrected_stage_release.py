@@ -38,7 +38,16 @@ WORKFLOW = ROOT / '.github/workflows/corrected-stage-release.yml'
 
 # These Git objects exist only in a disposable repository, without touching the
 # actual checkout index/refs. CLI source and approved helper are the working bytes.
-_fixture_git = tempfile.TemporaryDirectory(prefix='clb82-implementation-', dir='/private/tmp')
+def external_git_fixture(prefix):
+    # Resolve macOS /tmp aliases and custom TMPDIR before creating/copying any
+    # fixture or Git objects. A checkout-local TMPDIR is not an external root.
+    parent = Path(tempfile.gettempdir()).resolve(strict=True)
+    if parent.is_relative_to(ROOT):
+        raise RuntimeError('disposable Git fixture temp root must be outside checkout')
+    return tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
+
+
+_fixture_git = external_git_fixture('clb82-implementation-')
 atexit.register(_fixture_git.cleanup)
 FIXTURE_REPO = Path(_fixture_git.name)
 subprocess.run(['git', 'init', '--bare', '-q', str(FIXTURE_REPO/'.git')], check=True)
@@ -205,6 +214,89 @@ def configure_bound_docker(harness):
                        FAKE_BOUND_PARSER_ERRORS=str(harness.root/'bound-parser-error.log'))
 
 
+class FixtureBootstrapTest(unittest.TestCase):
+    # Execute module initialization in a fresh interpreter, including actual
+    # disposable Git object creation. No suite recursion or production mocks.
+    PROBE = r'''
+import errno,json,os,runpy,stat,sys,tempfile
+from pathlib import Path
+if sys.argv[2] == 'missing-macos-parent':
+    def absent_parent(event,args):
+        if event == 'os.mkdir':
+            target=Path(args[0])
+            if target.parent == Path('/private/tmp') and target.name.startswith('clb82-implementation-'):
+                raise FileNotFoundError(errno.ENOENT,os.strerror(errno.ENOENT),str(target))
+    sys.addaudithook(absent_parent)
+module=runpy.run_path(sys.argv[1],run_name='fixture_bootstrap')
+root=module['FIXTURE_REPO']
+assert (root/'.git/objects').is_dir()
+assert module['executor'].helper_snapshot() == (module['ROOT']/module['executor'].HELPER_PATH).read_bytes()
+with module['external_git_fixture']('clb82-replace-') as second:
+    other=Path(second)
+    assert other != root and other.parent == root.parent
+    assert stat.S_IMODE(other.stat().st_mode) == 0o700
+print('bootstrap-result:'+json.dumps(dict(root=str(root),other=str(other),
+    temp_root=str(Path(tempfile.gettempdir()).resolve()),mode=stat.S_IMODE(root.stat().st_mode))))
+'''
+
+    def bootstrap(self, temp_root=None, fault='none'):
+        env = {k:v for k,v in os.environ.items() if k not in ('TMPDIR', 'TEMP', 'TMP')}
+        if temp_root is not None:
+            env['TMPDIR'] = str(temp_root)
+        return subprocess.run([sys.executable, '-I', '-S', '-B', '-c', self.PROBE,
+                               str(Path(__file__).resolve()), fault],
+                              cwd=ROOT, env=env, capture_output=True, timeout=30)
+
+    def assert_bootstrapped_and_cleaned(self, result, expected_parent=None):
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+        lines = [line for line in result.stdout.decode().splitlines() if line.startswith('bootstrap-result:')]
+        self.assertEqual(1, len(lines))
+        value = json.loads(lines[0].removeprefix('bootstrap-result:'))
+        root = Path(value['root'])
+        self.assertEqual(root, root.resolve())
+        self.assertEqual(Path(value['temp_root']), root.parent)
+        if expected_parent is not None:
+            self.assertEqual(expected_parent.resolve(), root.parent)
+        self.assertFalse(root.is_relative_to(ROOT))
+        self.assertEqual(0o700, value['mode'])
+        self.assertFalse(root.exists(), 'module Git fixture survived child exit')
+        self.assertFalse(Path(value['other']).exists(), 'secondary Git fixture survived context exit')
+
+    def test_git_fixture_bootstrap_default_custom_and_symlink_temp_roots(self):
+        self.assert_bootstrapped_and_cleaned(self.bootstrap())
+        with external_git_fixture('clb82-bootstrap-') as temporary:
+            parent = Path(temporary)
+            custom = parent/'custom'; custom.mkdir(mode=0o700)
+            alias = parent/'alias'; alias.symlink_to(custom, target_is_directory=True)
+            for selected in (custom, alias):
+                with self.subTest(selected=selected.name):
+                    self.assert_bootstrapped_and_cleaned(self.bootstrap(selected), custom)
+        # Git's macOS launcher may cache xcrun_db in TMPDIR. The owned outer
+        # directory must also be cleaned, including such subprocess caches.
+        self.assertFalse(parent.exists())
+
+    def test_git_fixture_bootstrap_without_macos_temp_parent(self):
+        # On macOS emulate only the hosted ENOENT; Linux also runs the complete
+        # suite with /private/tmp genuinely absent. Leave the fault active.
+        with external_git_fixture('clb82-bootstrap-') as temporary:
+            self.assert_bootstrapped_and_cleaned(
+                self.bootstrap(temporary, 'missing-macos-parent'), Path(temporary))
+        self.assertFalse(Path(temporary).exists())
+
+    def test_git_fixture_rejects_checkout_temp_root_before_setup(self):
+        with tempfile.TemporaryDirectory(prefix='.clb82-temp-root-', dir=ROOT) as inside, \
+                external_git_fixture('clb82-bootstrap-') as outside:
+            alias = Path(outside)/'checkout-alias'
+            alias.symlink_to(inside, target_is_directory=True)
+            for selected in (ROOT, Path(inside), alias):
+                with self.subTest(selected=str(selected)):
+                    result = self.bootstrap(selected)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn(b'disposable Git fixture temp root must be outside checkout', result.stderr)
+                    self.assertNotIn(b'corrected-executor-snapshot:', result.stdout)
+                    self.assertEqual([], list(Path(inside).iterdir()))
+
+
 class CorrectedExecutorTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -337,7 +429,7 @@ class CorrectedExecutorTest(unittest.TestCase):
 
     def test_real_git_replace_object_cannot_substitute_approved_blob(self):
         # Object/ref writes belong solely to an isolated synthetic Git database.
-        with tempfile.TemporaryDirectory() as temporary:
+        with external_git_fixture('clb82-replace-') as temporary:
             repo=Path(temporary)
             subprocess.run(['git','init','--bare','-q',str(repo)],check=True,capture_output=True)
             objects=subprocess.check_output(['git','-C',str(FIXTURE_REPO),'rev-parse','--path-format=absolute','--git-path','objects']).decode().strip()
