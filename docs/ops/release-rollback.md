@@ -197,10 +197,13 @@ stage-only manual executor для incident owner `33468965282-1`. Наличие
 публикацию workflow, dispatch, восстановление stage или разрешение на исполнение. Применяется ordered gate
 protocol из [PRODUCT_ROADMAP.md](../product/PRODUCT_ROADMAP.md#first-slice-execution-gate-protocol).
 
-**Предшествующий gate остаётся отдельным:** сначала independent provider/VNC authentication exact host key,
-проверка fingerprint, live `DEC-037` protection/main-only policy и отсутствия overlap repository/stage secret names,
-provisioning/verification pinned stage `SSH_KNOWN_HOSTS`, отдельное разрешение и один исходный
-`Release Status (read-only)` dispatch, затем проверка его полного результата под deployment principal.
+**Предшествующий gate остаётся отдельным:** в порядке [PRODUCT_ROADMAP.md](../product/PRODUCT_ROADMAP.md#first-slice-execution-gate-protocol)
+сначала применяются и независимо проверяются live `DEC-037` protection/main-only policy; затем устанавливается основание
+доверия для exact host key и проверяется его привязка по fingerprint: по умолчанию independent provider/VNC authentication, либо только в exact
+scope accepted `DEC-038` retained Ed25519 trust basis. Далее остаются read-only comparison complete repository/stage
+secret names без overlap, provisioning/independent verification pinned stage `SSH_KNOWN_HOSTS`, отдельное разрешение и
+один исходный `Release Status (read-only)` dispatch, затем проверка его полного результата под deployment principal;
+subsequent execution authority остаётся отдельной.
 Исходный status проверяет retained incident helper SHA-256
 `8d8321d325d6ca25f48bcfdd7d9fb0eeb6f80af9c26f136ea06953cf1c2b914e`, Git blob
 `430595929a09566ff29ad6fe58bd19fa4f0c7ca4`; expected hash этого канала не заменяется новым.
@@ -445,8 +448,10 @@ GitHub Environment `stage`:
 
 Documentation acceptance or merge не доказывают, что live environment удовлетворяет этому contract. Применение policy
 и его independent verification — отдельные operational tasks; завершение каждой требует отдельного live evidence.
-Authenticity staging SSH host key, canonical `SSH_KNOWN_HOSTS` payload, provisioning и independent verification pinned
-evidence остаются отдельными последовательными gates. Environment protection не доказывает существование
+Authenticity staging SSH host key остаётся отдельным последовательным gate: по умолчанию это independent provider/VNC
+authentication, а только exact scope `DEC-038` использует принятое retained-key basis без заявления independent
+authentication или первоначального происхождения ключа. Canonical `SSH_KNOWN_HOSTS` payload, provisioning и independent
+verification pinned evidence остаются отдельными последовательными gates. Environment protection не доказывает существование
 `SSH_KNOWN_HOSTS`, authentic host key, запуск Release Status или health staging и не предоставляет authority для
 deployment, resume, rollback или recovery.
 Если появляется second trusted maintainer, temporary exception заменяется только отдельным accepted decision с
