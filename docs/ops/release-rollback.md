@@ -303,12 +303,22 @@ action, run ID/number/attempt и hash выбранного principal. Provenance
 Historical CLB-81 compatibility evidence хранится отдельно в [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 **Prior-status authority (F1).** `scripts/deploy/release_authority.py` содержит проверку prior status и bounded
-producer provenance v2. Прежний standalone Python claim удалён; расход разрешения принадлежит новому helper path.
+producer provenance v3. Прежний standalone Python claim удалён; расход разрешения принадлежит новому helper path.
 
 F1: исходный protected status job с `STATUS_PROVENANCE=yes` выдаёт одну строку
-`release-status-evidence:v=2 {…}` после проверки полного SSH stream старым runner. В ней только canonical trusted
-status, incident tuple, requested operation, incident helper hash, GitHub repository/workflow/ref/event/run/attempt/
-executed revision и hashes principal/Compose path. Raw captures, SSH credentials и произвольные логи не публикуются.
+`release-status-evidence:v=3 {…}` после проверки полного SSH stream старым runner. В ней canonical trusted
+status, environment/tag/owner/revision, requested operation, incident helper hash, GitHub repository/workflow/ref/event/run/attempt/
+executed revision, hashes principal/Compose path и boolean `exact_incident`. Raw `IMAGE_DIGEST` и его hash
+не публикуются как provenance authority: GitHub secret masking может изменить даже несекретный digest в persisted log.
+Producer сам вычисляет `exact_incident=true` только при совпадении фактических inputs с immutable `INCIDENT`
+в `release_authority.py`: `stage`, `deploy-stage-44497dc`, owner `33468965282-1`, revision
+`44497dcd28139cef865c3f98ac3f2c4a5afac636`, exact accepted digest
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:ddf5486e02835855178cc3b30bd2f22899335131e6dc388def20feac328016fe`,
+плюс `ORIGINAL_OPERATION=start` и `INCIDENT_HELPER_SHA256` выше. Caller не задаёт attestation.
+`corrected-stage-release.py` использует тот же immutable mapping из уже изолированно загруженного модуля;
+consumer независимо проверяет собственный current incident tuple по этому mapping. Другой допустимый incident,
+digest, operation или helper даёт `exact_incident=false`; generic trusted read-only status остаётся успешным,
+но такая запись не является execution authority. Raw captures, SSH credentials и произвольные логи не публикуются.
 Server-side канал по-прежнему read-only и исполняет retained incident bytes. Failure transport, malformed status
 или cleanup failure не могут стать успешным verified evidence; общий job должен завершиться успешно.
 
@@ -317,13 +327,30 @@ workflow identity, конкретный run attempt, его полный спи�
 run/attempt/job/step success и связи с `head_sha`, `main`, `workflow_dispatch`, stage и точным incident/start.
 Через Contents API на exact `head_sha` сверяются bytes producer workflow, старого runner и трёх его dependencies
 с доверенным checkout consumer. Старый код без provenance или иная producer revision с отличающимися bytes не
-принимаются. Job log ограничен 1 MiB в памяти; принимается ровно одна bounded evidence line, остальной log не
+принимаются. Attestation принимается только после authentication run/job/step и всех producer bytes, только
+с JSON boolean `true` (не `1`, string, missing или false), при exact field inventory. Только v3 получает authority;
+v1/v2, mixed versions, duplicate records/JSON keys и malformed evidence fail closed. Masking любого оставшегося
+обязательного поля также блокирует authority; v3 устраняет зависимость от raw digest, а не обходит masking вообще.
+Job log ограничен 1 MiB в памяти; принимается ровно одна bounded evidence line, остальной log не
 выводится и не сохраняется. Полный canonical result обязателен: одних conclusion или произвольного JSON недостаточно.
+Требуются availability/owner/revision/digest=`yes`, `failure_category=none`, `checkpoint=migration_completed`,
+`migration_evidence=present`, `operation_result=remote_failure` именно для `start`, canonical Compose path hash
+и principal binding; positive attestation не заменяет эти predicates.
 `resume_permitted=no` старого selector принимается; corrected readiness и explicit authorization остаются отдельными
 gates. Основной CLI заново проверяет evidence, включая совпадение principal hash, перед любым SSH, поэтому обход
 workflow validation не открывает executor. Отсутствие/удаление logs, API failure, oversized/malformed или смешанные
 attempts блокируют execution. Child environment не наследует debug/credentials settings; `gh` update notifier и
 telemetry явно отключены. Отдельных artifacts, PAT, write permissions или нового сервиса нет.
+
+**CLB-90 historical observation и masking defect.** Run [34437951351](https://github.com/koteev-m/clubs_bot/actions/runs/34437951351),
+attempt 1, implementation `3f8a5d978ff5d0d17f0d57736ef819376895a13c`, завершился success
+2026-09-10 и вернул trusted channel для `requested_operation=resume-start`: `migration_completed`,
+`migration_evidence=present`, `app_state=ambiguous`, `operation_result=unavailable`, оба permissions=`no`.
+Это historical trusted observation, не usable execution-authority `PRIOR_STATUS`: persisted v2 provenance
+содержит замаскированный raw digest, а requested operation/result также не соответствуют требуемому `start/remote_failure`.
+V3 исправляет producer/verifier contract локально; historical log не исправляется и v2 fallback отсутствует.
+Corrective `Release Status requested_operation=start` остаётся blocked до review/merge нового producer contract,
+fresh ordered gates и отдельного dispatch authorization. Этот документ не разрешает dispatch или recovery.
 
 REST interfaces: [run attempt](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run-attempt),
 [attempt jobs и job logs](https://docs.github.com/en/rest/actions/workflow-jobs),
@@ -419,7 +446,7 @@ Bare `python3 corrected-stage-release.py` не является supported execut
 
 Own dependency closure producer — workflow, read-only shell runner, `release_authority.py`,
 `release_private_root.py`, canonical pattern. Workflow checkout теперь exact `github.sha` с прежней проверкой
-равенства HEAD. Consumer проверяет эти exact GitHub sources; version 1 и прежний уязвимый producer отвергаются.
+равенства HEAD. Consumer проверяет эти exact GitHub sources; versions 1/2 и прежние уязвимые producers отвергаются.
 Bootstrap компилирует точный `release_private_root.py`; corrected runner загружает два собственных
 модуля относительно canonical script path, включая запуск через symlink entrypoint. Directory не возвращается в `sys.path`, `.pyc` не читается, extra checkout modules не становятся
 зависимостями. Старый helper/hash, trusted canonical output, prior attempt/job/incident/principal checks и

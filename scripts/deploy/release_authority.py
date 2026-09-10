@@ -1,7 +1,7 @@
 """CLB-82 authority: authenticated prior status and a persistent one-use claim."""
 import sys
 if __name__ == "__main__" and not (sys.flags.isolated and sys.flags.no_site):
-    raise SystemExit("release-status-evidence:v=2 unavailable")
+    raise SystemExit("release-status-evidence:v=3 unavailable")
 
 import base64
 import hashlib
@@ -9,18 +9,29 @@ import json
 import os
 from pathlib import Path
 import re
+from types import MappingProxyType
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "koteev-m/clubs_bot"
 WORKFLOW = ".github/workflows/release-status.yml"
 STEP = "Read exact retained release status once"
-PREFIX = "release-status-evidence:v=2 "
+PREFIX = "release-status-evidence:v=3 "
 PRODUCER_PATHS = (WORKFLOW, "scripts/deploy/read-only-release-status.sh",
                   "scripts/deploy/release_private_root.py", "scripts/deploy/release-status.pattern",
                   "scripts/deploy/release_authority.py")
 NUMBER = r"[1-9][0-9]{0,19}"
 REFERENCE = rf"({NUMBER}):({NUMBER}):([0-9a-f]{{40}})"
 INCIDENT_HELPER_SHA256 = "8d8321d325d6ca25f48bcfdd7d9fb0eeb6f80af9c26f136ea06953cf1c2b914e"
+# Single source for the producer, verifier and corrected executor. This module
+# is part of the authenticated producer source chain, never caller input.
+INCIDENT = MappingProxyType({
+    "APP_ENV": "stage",
+    "INCIDENT_TAG": "deploy-stage-44497dc",
+    "RELEASE_OWNER": "33468965282-1",
+    "EXPECTED_REVISION": "44497dcd28139cef865c3f98ac3f2c4a5afac636",
+    "IMAGE_DIGEST": "ghcr.io/koteev-m/clubs_bot/app-bot@sha256:ddf5486e02835855178cc3b30bd2f22899335131e6dc388def20feac328016fe",
+})
+ORIGINAL_OPERATION = "start"
 
 
 class AuthorityError(Exception):
@@ -69,8 +80,15 @@ def produce(env, line):
     check(env["SSH_USER"] not in {"root", "hookah-staging"})
     value = {key: env[key] for key in ("GITHUB_REPOSITORY", "GITHUB_EVENT_NAME", "GITHUB_REF", "GITHUB_JOB",
              "GITHUB_WORKFLOW_REF", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SHA", "APP_ENV", "INCIDENT_TAG",
-             "RELEASE_OWNER", "EXPECTED_REVISION", "IMAGE_DIGEST", "REQUESTED_OPERATION", "EXPECTED_HELPER_SHA256")}
-    value.update(principal_sha256=hashlib.sha256(env["SSH_USER"].encode()).hexdigest(),
+             "RELEASE_OWNER", "EXPECTED_REVISION", "REQUESTED_OPERATION", "EXPECTED_HELPER_SHA256")}
+    # GitHub masks persisted logs, including substrings of a public digest.
+    # Attest the semantic tuple here; neither a raw digest nor its hash is log
+    # authority. A generic trusted status can legitimately be ineligible.
+    exact_incident = (all(env.get(k) == v for k, v in INCIDENT.items())
+                      and env["REQUESTED_OPERATION"] == ORIGINAL_OPERATION
+                      and env["EXPECTED_HELPER_SHA256"] == INCIDENT_HELPER_SHA256)
+    value.update(exact_incident=exact_incident,
+                 principal_sha256=hashlib.sha256(env["SSH_USER"].encode()).hexdigest(),
                  compose_path_sha256=hashlib.sha256(env["COMPOSE_PATH"].encode()).hexdigest(), status=line)
     serialized = json.dumps(value, sort_keys=True, separators=(",", ":"))
     check(len(serialized) <= 4096)
@@ -78,6 +96,9 @@ def produce(env, line):
 
 
 def verify_prior(env, capture):
+    # Independent of validate_request(): direct verifier callers cannot select
+    # another incident and reuse a positive attestation for the bounded one.
+    check(all(env.get(k) == v for k, v in INCIDENT.items()))
     match = re.fullmatch(REFERENCE, env.get("PRIOR_STATUS", ""))
     check(match, "PRIOR_STATUS_REFERENCE_REQUIRED")
     run_id, attempt, revision = match.groups()
@@ -109,7 +130,7 @@ def verify_prior(env, capture):
     # The approved workflow checks out github.sha and launches -I -S; its
     # bootstrap compiles the one own dependency directly, ignoring .pyc.
     # Extra checkout modules are neither dependencies nor import candidates.
-    # Old vulnerable producer bytes and v1 evidence are not accepted.
+    # Old vulnerable producer bytes and v1/v2 evidence are not accepted.
     # Authenticate the exact producer code at that run's revision. An arbitrary
     # successful workflow or copied log line cannot stand in for this producer.
     for path in PRODUCER_PATHS:
@@ -134,17 +155,20 @@ def verify_prior(env, capture):
     lines = []
     for line in log.decode("utf-8").splitlines():
         line = re.sub(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ", "", line)
-        if line.startswith(PREFIX):
+        if line.startswith("release-status-evidence:"):
+            check(line.startswith(PREFIX))
             lines.append(line[len(PREFIX):])
     check(len(lines) == 1 and len(lines[0]) <= 4096)
     value = json.loads(lines[0], object_pairs_hook=unique_object)
     expected = {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_EVENT_NAME": "workflow_dispatch",
                 "GITHUB_REF": "refs/heads/main", "GITHUB_JOB": "status",
                 "GITHUB_WORKFLOW_REF": f"{REPOSITORY}/{WORKFLOW}@refs/heads/main", "GITHUB_RUN_ID": run_id,
-                "GITHUB_RUN_ATTEMPT": attempt, "GITHUB_SHA": revision, "REQUESTED_OPERATION": "start",
+                "GITHUB_RUN_ATTEMPT": attempt, "GITHUB_SHA": revision, "REQUESTED_OPERATION": ORIGINAL_OPERATION,
                 "EXPECTED_HELPER_SHA256": INCIDENT_HELPER_SHA256,
-                **{k: env[k] for k in ("APP_ENV", "INCIDENT_TAG", "RELEASE_OWNER", "EXPECTED_REVISION", "IMAGE_DIGEST")}}
-    check(set(value) == set(expected) | {"principal_sha256", "compose_path_sha256", "status"}
+                **{k: v for k, v in INCIDENT.items() if k != "IMAGE_DIGEST"}}
+    check(isinstance(value, dict)
+          and set(value) == set(expected) | {"exact_incident", "principal_sha256", "compose_path_sha256", "status"}
+          and value["exact_incident"] is True
           and all(value[k] == v for k, v in expected.items()))
     check(re.fullmatch(r"[0-9a-f]{64}", value["principal_sha256"])
           and value["compose_path_sha256"] == hashlib.sha256(b"/opt/clubs-bot-stage").hexdigest())
@@ -166,5 +190,5 @@ if __name__ == "__main__":
         check(len(sys.argv) == 3 and sys.argv[1] == "produce")
         produce(os.environ, sys.argv[2])
     except BaseException:
-        print("release-status-evidence:v=2 unavailable")
+        print("release-status-evidence:v=3 unavailable")
         sys.exit(1)
