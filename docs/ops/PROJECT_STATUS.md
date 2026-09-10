@@ -2,7 +2,7 @@
 
 ## Scope and validity
 
-Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`). Current task: CLB-85 — Dependencies — Netty CVE-2026-75595 Patch & Verification. CLB-84 Git integration/cleanup is complete; CLB-81/82/83 preparation and candidate evidence remain historical below. This checkpoint is not a product specification, external ChatGPT journal, deployment record, or runtime migration checkpoint.
+Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`). Current task: CLB-86 — Stage Access — Host Trust Exception Documentation. CLB-85 is complete; CLB-84 Git integration/cleanup is complete; CLB-81/82/83 preparation and candidate evidence remain historical below. This checkpoint is not a product specification, external ChatGPT journal, deployment record, or runtime migration checkpoint.
 
 ## Task history: CLB-76–80
 
@@ -153,3 +153,13 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 - Evidence: `/private/tmp/clb85-netty-qrkem3no/` contains trusted-source checksums, command/cwd/exit/time records, inventories/SARIF, test XML/counts, runtime/image manifests, complete final patch and hashes. Final diff/whitespace, scope, metadata preservation and local checkpoint links passed; no general documentation validator applies. Only source diff, local candidate image, build/test/scan caches and evidence remain; no unfinished mutation or test remains.
 - No add/commit/push/PR/merge, workflow cancel/rerun/dispatch, publishing/signing, remote image changes, settings/secrets/pins, SSH/provider/server/real-data access, deployment, migration on shared environments, rollback/resume/recovery or global-config edits occurred. Old incident owner/revision/digest and runtime pins are unchanged. Independent host trust, protected stage configuration, pinned SSH_KNOWN_HOSTS, trusted original deployment-principal status, reviewed implementation/root pin and separate exact execution authority remain LIVE prerequisites.
 - One next step: hand the local repair and evidence to ChatGPT for review before publication; stop after local verification.
+
+## Current CLB-86: host-trust exception documentation
+
+- Result: `CLB_86_HOST_TRUST_DOCS_REPAIRED`. No Goal, branch, worktree or subagents. Direct user decision accepted 2026-09-09 is recorded as `DEC-038`: only `koteev-m/clubs_bot` / `stage` / `178.20.209.5:22` / `ssh-ed25519` / `SHA256:Li2AIDm9/OG8CHWQw16qhDfzbRM7E9uLNjPeKOZ9ST0` may use the retained key as its trust basis instead of a separate provider/VNC prerequisite.
+- Evidence is deliberately bounded: CLB-86 had the existing local Ed25519 `known_hosts` entry; the user then supplied user-operated SSH continuity output at `2026-09-09T18:01:24Z` for `afraid-amber.ptr.network`, user `root`, with the same Ed25519 fingerprint. It is not independent provider evidence, proof of original key provenance or a fresh separate handshake-algorithm verification.
+- Scope failure remains fail-closed: RSA/ECDSA, another Ed25519 key, host, port or environment, an absent key, fingerprint mismatch or changed endpoint does not inherit this exception and cannot update trust automatically. Strict checking remains mandatory; no `accept-new`, disabled checking, keyscan or fallback is accepted.
+- `DEC-037` live stage policy, secret-scope checks, protected deployment principal, implementation/root pins, incident owner/revision/digest, migration evidence, pin provisioning/verification, manual status dispatch and separate one-use execution authority remain distinct LIVE gates. The decision proves neither a provisioned pin, successful status, healthy stage nor any deployment/recovery authority; root observer is not the deployment principal.
+- Repair records the roadmap gate order explicitly: live `DEC-037` application and independent verification precede establishment and endpoint binding of the host-trust basis. `DEC-038` has no undefined option label; product README calls it the eighteenth accepted record and a separate operational security/governance decision.
+- Local scope is only the decision register, roadmap, release runbook, this checkpoint and product-readme count/reconciliation. No code/workflow/test/configuration/known-host change, provider/browser/SSH operation, Git/GitHub mutation, secret/pin provisioning, dispatch, deployment, recovery or Google-journal write occurred.
+- One next step: hand the local documentation diff to ChatGPT for review.

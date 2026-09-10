@@ -88,8 +88,8 @@ Reuse не означает keep-as-is: the secured DB HOLD branch is selected b
 
   1. apply the accepted `DEC-037` policy to the live GitHub Environment `stage`;
   2. independently verify the live protection rules and exact `main` branch policy;
-  3. authenticate the staging server SSH host key through an independent provider/VNC control plane;
-  4. verify the authenticated fingerprint against the exact server/IP;
+  3. establish the stage SSH host-key trust basis: the default is authentication through an independent provider/VNC control plane; only the exact `stage` / `178.20.209.5:22` / `ssh-ed25519` / `SHA256:Li2AIDm9/OG8CHWQw16qhDfzbRM7E9uLNjPeKOZ9ST0` scope may instead use the accepted retained-key basis in `DEC-038`;
+  4. bind that basis to the exact endpoint: the default requires the independently authenticated fingerprint against the exact server/IP; `DEC-038` records only matching user-operated SSH continuity evidence for its exact scope, not independent provider authentication or proof of the key's original provenance;
   5. read-only compare the complete set of repository-level secret names with the complete set of `stage` environment secret names, require zero overlapping names, and confirm that repository-level `SSH_KNOWN_HOSTS` is absent; do not read secret values, and fail closed by blocking provisioning on any overlap;
   6. construct and provision the canonical stage `SSH_KNOWN_HOSTS` payload;
   7. independently verify the pinned host-key evidence and stage secret metadata, then independently repeat and verify the read-only zero-overlap comparison of complete repository-level and `stage` environment secret-name sets before dispatch authorization;

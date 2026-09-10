@@ -923,4 +923,31 @@
   - live stage-environment hardening до merge этого decision;
   - `SSH_KNOWN_HOSTS` provisioning до separate proof live policy и host-key authenticity;
   - Release Status dispatch до завершения всех prior roadmap gates и separate direct dispatch authorization.
+- **Subsequent scoped exception:** `DEC-038` is the only accepted exception to the provider/VNC host-authentication prerequisite, and only for its exact `stage` endpoint, algorithm and fingerprint. It does not rewrite the historical content or any other contract of this record.
+- **Status:** `ACCEPTED_DECISION`.
+
+## DEC-038 — stage SSH host-trust exception for one exact retained Ed25519 key
+
+- **Context:** CLB-86 could not obtain independent provider/VNC evidence. The user therefore explicitly accepted a narrowly scoped retained-key trust basis instead of that prerequisite, while preserving strict host-key checking and every later execution gate.
+- **Source tension:** immutable `CONCEPT_SOURCE.md` and the 170 source requirements do not define SSH host trust. This is an operational security/governance decision, not a product capability or source requirement; it does not alter `PRODUCT_SPEC.md` or the accepted product slice.
+- **Code/runtime tension:** repository/runbook wiring requires a canonical pinned `SSH_KNOWN_HOSTS` payload with strict checking, but it neither proves that a pin is provisioned nor that a status workflow has run. This record changes no executable guard, workflow, server, secret or runtime state.
+- **Accepted decision:** retained-key trust exception for the exact scope below, explicitly accepted by the user.
+- **Accepted by:** user.
+- **Accepted at:** 2026-09-09.
+- **Accepted contract:**
+  - Scope is only repository `koteev-m/clubs_bot`, environment `stage`, endpoint `178.20.209.5:22`, algorithm `ssh-ed25519`, and fingerprint `SHA256:Li2AIDm9/OG8CHWQw16qhDfzbRM7E9uLNjPeKOZ9ST0`.
+  - Within that exact scope, the retained Ed25519 key is the accepted trust basis in place of a separate provider/VNC control-plane authentication step.
+  - The matching user-operated SSH continuity evidence was supplied at `2026-09-09T18:01:24Z`: `afraid-amber.ptr.network`, user `root`, and `256 SHA256:Li2AIDm9/OG8CHWQw16qhDfzbRM7E9uLNjPeKOZ9ST0 afraid-amber.ptr.network (ED25519)`.
+  - That continuity evidence is not independent provider evidence, does not prove the key's original provenance, and does not reconstruct a separate algorithm-handshake verification.
+  - RSA, ECDSA, another Ed25519 key, another host, port or environment are outside scope. Missing or changed key material, a fingerprint mismatch, or a changed endpoint stops the process; none permits automatic replacement, renewed acceptance or fallback.
+  - Strict checking remains required. `accept-new`, disabled checking, keyscan, automatic trust updates and fallback to another key remain prohibited.
+  - `DEC-037` otherwise remains unchanged: live stage policy, secret-scope checks, deployment principal, implementation/root pins, incident owner/revision/digest, migration evidence and one-use execution authority remain separate gates. A root observer does not become the deployment principal.
+  - This decision is documentary acceptance only. It neither proves an `SSH_KNOWN_HOSTS` pin has been provisioned nor proves a Release Status dispatch, trusted status result, staging health, deployment, resume, rollback or recovery.
+- **Residual risk:** the original out-of-band provenance of the retained Ed25519 key is unverified and remains explicitly accepted only for this exact scope.
+- **Consequences:** the default provider/VNC requirement remains in force for every scope outside this record. For the exact scope, a future authorized pinning task may rely only on this accepted key basis while still completing every other ordered gate and obtaining its own authority.
+- **Depends on:** `DEC-037`; this decision narrows only its host-authentication prerequisite and does not modify its GitHub Environment contract.
+- **Blocks:**
+  - any automatic acceptance or replacement of a different key;
+  - `SSH_KNOWN_HOSTS` provisioning until the separately required live policy and secret-scope gates are satisfied and a distinct provisioning authority exists;
+  - Release Status dispatch, deployment, resume, rollback and recovery until all ordered gates and their separate authorities are satisfied.
 - **Status:** `ACCEPTED_DECISION`.
