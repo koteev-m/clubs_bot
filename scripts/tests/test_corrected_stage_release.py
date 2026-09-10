@@ -1000,6 +1000,188 @@ os.execv(REAL_PYTHON,[REAL_PYTHON,*arguments])
         return {**{key:entries.count(key) for key in ('claim_attempt','claim_ack','resume','status','transport','helper')}, 'claim':entries.count('claim_durable')}
 
 
+class V3EvidenceTest(unittest.TestCase):
+    """Real isolated producer -> persisted-log boundary -> independent verifier.
+
+    Only GitHub GET responses are synthetic; no SSH or helper execution.
+    """
+    def setUp(self):
+        temporary = external_git_fixture('clb90-v3-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        bin_path = self.root / 'bin'
+        bin_path.mkdir()
+        self.env = {**request(), 'PATH': str(bin_path) + os.pathsep + os.environ['PATH']}
+        self.api = PriorApiFixture(self.root, bin_path, self.env)
+
+    def produce(self, overrides=None, status=None):
+        run, attempt, sha = self.env['PRIOR_STATUS'].split(':')
+        env = {**os.environ, **self.env, 'GITHUB_RUN_ID': run, 'GITHUB_RUN_ATTEMPT': attempt,
+               'GITHUB_SHA': sha, 'GITHUB_JOB': 'status',
+               'GITHUB_WORKFLOW_REF': f'{authority.REPOSITORY}/{authority.WORKFLOW}@refs/heads/main',
+               'REQUESTED_OPERATION': 'start', 'EXPECTED_HELPER_SHA256': authority.INCIDENT_HELPER_SHA256,
+               **(overrides or {})}
+        return subprocess.run([sys.executable, '-I', '-S', '-B', str(ROOT/'scripts/deploy/release_authority.py'),
+                               'produce', status or self.api.value['status']],
+                              env=env, capture_output=True, timeout=10)
+
+    def verify(self, overrides=None):
+        return authority.verify_prior({**self.env, **(overrides or {})}, executor.capture)
+
+    def test_exact_positive_and_single_immutable_incident_source(self):
+        self.assertIs(executor.INCIDENT, executor._authority.INCIDENT)
+        self.assertEqual(dict(authority.INCIDENT), dict(executor.INCIDENT))
+        with self.assertRaises(TypeError):
+            executor.INCIDENT['IMAGE_DIGEST'] = 'substitution'
+        result = self.produce({'exact_incident': 'false'})
+        self.assertEqual(0, result.returncode, result.stdout)
+        value = json.loads(result.stdout.decode().removeprefix(authority.PREFIX))
+        self.assertIs(value['exact_incident'], True)
+        self.assertNotIn('IMAGE_DIGEST', value)
+        self.assertNotIn(authority.INCIDENT['IMAGE_DIGEST'].encode(), result.stdout)
+        self.assertNotIn(hashlib.sha256(authority.INCIDENT['IMAGE_DIGEST'].encode()).hexdigest().encode(), result.stdout)
+        self.api.write(result.stdout.decode())
+        self.assertEqual(333, self.verify()['job_id'])
+
+    def test_persisted_log_digest_masking_preserves_positive_v3(self):
+        produced = self.produce()
+        self.assertEqual(0, produced.returncode)
+        digest = authority.INCIDENT['IMAGE_DIGEST']
+        # Simulate GitHub rewriting a public digest (whole or substring), with
+        # actual producer stdout and unrelated step text in the persisted log.
+        original = '2026-09-10T00:00:00Z input image=' + digest + '\n' + produced.stdout.decode()
+        for mask in (digest, digest.split(':')[-1][8:20]):
+            with self.subTest(mask_length=len(mask)):
+                masked = original.replace(mask, '***')
+                self.assertNotEqual(original, masked)
+                self.assertNotIn(digest, masked)
+                self.api.write(masked)
+                self.assertEqual(333, self.verify()['job_id'])
+
+    def test_other_valid_inputs_cannot_attest_even_with_caller_true(self):
+        cases = [{'IMAGE_DIGEST': 'ghcr.io/koteev-m/clubs_bot/app-bot@sha256:' + 'a'*64},
+                 {'APP_ENV': 'prod', 'INCIDENT_TAG': 'deploy-prod-deadbee'},
+                 {'INCIDENT_TAG': 'deploy-stage-deadbee'}, {'RELEASE_OWNER': '112233-1'},
+                 {'EXPECTED_REVISION': 'c'*40}, {'REQUESTED_OPERATION': 'resume-start'},
+                 {'EXPECTED_HELPER_SHA256': executor.IMPLEMENTATION_SHA256}]
+        for overrides in cases:
+            with self.subTest(overrides=overrides):
+                produced = self.produce({**overrides, 'exact_incident': 'true'})
+                self.assertEqual(0, produced.returncode, produced.stdout)
+                value = json.loads(produced.stdout.decode().removeprefix(authority.PREFIX))
+                self.assertIs(value['exact_incident'], False)
+                self.assertNotIn('IMAGE_DIGEST', value)
+                self.api.write(produced.stdout.decode())
+                with self.assertRaises(authority.AuthorityError):
+                    self.verify()
+
+    def test_verifier_independently_rejects_own_incident_substitution(self):
+        for key, value in authority.INCIDENT.items():
+            replacement = ('ghcr.io/koteev-m/clubs_bot/app-bot@sha256:' + 'a'*64
+                           if key == 'IMAGE_DIGEST' else value + '0')
+            with self.subTest(key=key):
+                # Keep the authenticated positive producer output unchanged.
+                with self.assertRaises(authority.AuthorityError), patch.object(executor, 'capture') as capture:
+                    authority.verify_prior({**self.env, key: replacement}, capture)
+                capture.assert_not_called()
+
+    def test_attestation_false_missing_wrong_type_and_malformed_fail_closed(self):
+        original = self.api.value.copy()
+        for attestation in (False, None, 0, 1, 'true', 'false', [], {}, {'exact': True}):
+            with self.subTest(attestation=attestation):
+                self.api.value = {**original, 'exact_incident': attestation}
+                self.api.write()
+                with self.assertRaises(authority.AuthorityError):
+                    self.verify()
+        self.api.value = {k: v for k, v in original.items() if k != 'exact_incident'}
+        self.api.write()
+        with self.assertRaises(authority.AuthorityError):
+            self.verify()
+        self.api.write(authority.PREFIX + '{"exact_incident":tru}\n')
+        with self.assertRaises(json.JSONDecodeError):
+            self.verify()
+
+    def test_v2_masked_unmasked_and_mixed_records_have_no_authority(self):
+        v2 = {k: v for k, v in self.api.value.items() if k != 'exact_incident'}
+        v2['IMAGE_DIGEST'] = authority.INCIDENT['IMAGE_DIGEST']
+        old = 'release-status-evidence:v=2 ' + json.dumps(v2) + '\n'
+        positive = self.api.responses[self.api.logs_path]
+        for log in (old, old.replace(v2['IMAGE_DIGEST'], '***'), old + positive):
+            with self.subTest(masked='***' in log, mixed=positive in log):
+                self.api.write(log)
+                with self.assertRaises(authority.AuthorityError):
+                    self.verify()
+
+    def test_duplicate_spoofed_or_masked_v3_records_fail_closed(self):
+        original = self.api.responses[self.api.logs_path]
+        duplicate_key = original.replace('"exact_incident": true', '"exact_incident": false,"exact_incident": true')
+        for log in (original*2, duplicate_key, authority.PREFIX+'{}\n',
+                    original.replace('"exact_incident": true', '"exact_incident": "***"'),
+                    original + 'release-status-evidence:v=3 unavailable\n'):
+            with self.subTest(log_length=len(log)):
+                self.api.write(log)
+                with self.assertRaises((authority.AuthorityError, json.JSONDecodeError)):
+                    self.verify()
+
+    def test_positive_attestation_does_not_bypass_run_job_or_source_authentication(self):
+        original = json.loads(json.dumps(self.api.responses))
+        mutations = [('run', 'id', 99), ('run', 'run_attempt', 2), ('run', 'head_sha', 'a'*40),
+                     ('run', 'head_repository', {'full_name': 'attacker/repo'}),
+                     ('run', 'status', 'in_progress'), ('job', 'head_sha', 'c'*40),
+                     ('job', 'conclusion', 'failure'), ('job', 'head_branch', 'feature'),
+                     ('job', 'name', 'copied-status')]
+        for target, key, replacement in mutations:
+            with self.subTest(target=target, key=key):
+                self.api.responses = json.loads(json.dumps(original))
+                selected = (self.api.responses[self.api.run_path] if target == 'run'
+                            else self.api.responses[self.api.jobs_path]['jobs'][1])
+                selected[key] = replacement
+                self.api.write()
+                with self.assertRaises(authority.AuthorityError):
+                    self.verify()
+        for fault in ('failed-step', 'duplicate-step', *authority.PRODUCER_PATHS):
+            with self.subTest(fault=fault):
+                self.api.responses = json.loads(json.dumps(original))
+                steps = self.api.responses[self.api.jobs_path]['jobs'][1]['steps']
+                if fault == 'failed-step':
+                    steps[0]['conclusion'] = 'failure'
+                elif fault == 'duplicate-step':
+                    steps.append(steps[0].copy())
+                else:
+                    source = self.api.responses[f'contents/{fault}?ref=' + 'b'*40]
+                    changed = base64.b64decode(source['content']) + b'\n# substituted producer\n'
+                    source.update(content=base64.b64encode(changed).decode(), size=len(changed),
+                                  sha=hashlib.sha1(f'blob {len(changed)}\0'.encode()+changed).hexdigest())
+                self.api.write()
+                with self.assertRaises(authority.AuthorityError):
+                    self.verify()
+
+    def test_trust_state_and_principal_path_guards_remain_required(self):
+        original = self.api.value.copy()
+        for key, replacement in [('status_available', 'no'), ('owner_match', 'no'),
+                                 ('revision_match', 'no'), ('digest_match', 'no'),
+                                 ('failure_category', 'untrusted_state_root'),
+                                 ('checkpoint', 'candidate_start_begun'), ('migration_evidence', 'absent'),
+                                 ('operation_result', 'unavailable')]:
+            with self.subTest(key=key):
+                fields = dict(part.split('=', 1) for part in original['status'].split()[1:])
+                fields[key] = replacement
+                line = 'release-status:v=1 ' + ' '.join(f'{k}={v}' for k, v in fields.items())
+                self.api.value = {**original, 'status': line}
+                self.api.write()
+                with self.assertRaises(authority.AuthorityError):
+                    self.verify()
+                if key in ('status_available', 'owner_match', 'revision_match', 'digest_match', 'failure_category'):
+                    produced = self.produce(status=line)
+                    self.assertNotEqual(0, produced.returncode)
+                    self.assertEqual(b'release-status-evidence:v=3 unavailable\n', produced.stdout)
+        for key in ('principal_sha256', 'compose_path_sha256'):
+            self.api.value = {**original, key: 'f'*64}
+            self.api.write()
+            with self.assertRaises(authority.AuthorityError):
+                self.verify()
+
+
 class AuthorityRegressionTest(unittest.TestCase):
     def assert_blocked(self, fixture, result):
         self.assertNotEqual(0,result.returncode,result.stdout)
@@ -1038,6 +1220,8 @@ class AuthorityRegressionTest(unittest.TestCase):
                         self.assertEqual(response.decode().strip(),value['status'])
                         self.assertEqual(h.helper_hash,value['EXPECTED_HELPER_SHA256'])
                         self.assertEqual(h.release_owner,value['RELEASE_OWNER'])
+                        self.assertIs(value['exact_incident'], False)
+                        self.assertNotIn('IMAGE_DIGEST', value)
                     self.assertNotIn(b'private malformed',result.stdout+result.stderr)
                     self.assertNotIn(h.environment['SSH_KNOWN_HOSTS'].encode(),result.stdout+result.stderr)
                     h.assert_cleaned(self)
