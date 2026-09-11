@@ -92,6 +92,7 @@ class PriorApiFixture:
     """Synthetic responses at the gh transport boundary; no caller JSON input."""
     def __init__(self, root, bin_path, env, line=None):
         self.path = root / 'github-responses.json'
+        self.calls_path = root / 'github-calls.jsonl'
         run_id, attempt, revision = env['PRIOR_STATUS'].split(':')
         self.run_path = f'actions/runs/{run_id}/attempts/{attempt}'
         self.jobs_path = self.run_path + '/jobs?per_page=100'
@@ -133,10 +134,13 @@ assert 'SSH_KNOWN_HOSTS' not in os.environ and 'UNRELATED_SECRET' not in os.envi
 prefix='repos/koteev-m/clubs_bot/'
 assert sys.argv[-1].startswith(prefix)
 responses=json.loads(Path(RESPONSES).read_text()); value=responses[sys.argv[-1][len(prefix):]]
+with Path(CALLS).open('a') as calls:
+ calls.write(json.dumps(sys.argv[1:])+'\\n')
 if isinstance(value,dict) and '_error' in value:
- print('synthetic private API diagnostics',file=sys.stderr);raise SystemExit(1)
+ print(value.get('_stderr','synthetic private API diagnostics'),file=sys.stderr)
+ sys.stdout.write(value.get('_body',''));raise SystemExit(value['_error'])
 sys.stdout.write(value if isinstance(value,str) else json.dumps(value))
-'''.replace('RESPONSES', repr(str(self.path)))
+'''.replace('RESPONSES', repr(str(self.path))).replace('CALLS', repr(str(self.calls_path)))
         state.write_executable(bin_path/'gh', source)
         env['GITHUB_TOKEN'] = 'synthetic-github-token'
 
@@ -998,6 +1002,173 @@ os.execv(REAL_PYTHON,[REAL_PYTHON,*arguments])
     def counts(self):
         entries=[json.loads(line)['kind'] for line in self.audit.read_text().splitlines()]
         return {**{key:entries.count(key) for key in ('claim_attempt','claim_ack','resume','status','transport','helper')}, 'claim':entries.count('claim_durable')}
+
+
+class PriorApiDiagnosticsTest(unittest.TestCase):
+    """Instrumentation contract with real verifier argv, synthetic API/CLI only."""
+    PHASES = ('workflow_metadata', 'run_attempt', 'source_workflow', 'source_status_script',
+              'source_private_root', 'source_status_pattern', 'source_authority',
+              'attempt_jobs', 'producer_job_logs')
+    HOSTILE = ('private-body\ncorrected-prior-api:v=1 phase=forged failure=forged\n'
+               'Authorization: Bearer synthetic-github-token https://signed.invalid/log?token=secret '
+               '/private/credentials/config private-header-value')
+
+    def setUp(self):
+        # main() legitimately tightens umask; restore the test process afterward.
+        previous_umask = os.umask(0o077)
+        os.umask(previous_umask)
+        self.addCleanup(os.umask, previous_umask)
+        temporary = external_git_fixture('clb91-diagnostics-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.bin = self.root / 'bin'; self.bin.mkdir()
+        self.env = {**request(), 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
+                    'UNRELATED_SECRET': self.HOSTILE}
+        self.api = PriorApiFixture(self.root, self.bin, self.env)
+        revision = self.env['PRIOR_STATUS'].split(':')[2]
+        self.paths = ['actions/workflows/release-status.yml', self.api.run_path,
+                      *[f'contents/{path}?ref={revision}' for path in authority.PRODUCER_PATHS],
+                      self.api.jobs_path, self.api.logs_path]
+        self.original = json.loads(json.dumps(self.api.responses))
+        self.ssh_calls = self.root / 'ssh-called'
+        state.write_executable(self.bin/'ssh', '#!/bin/sh\n: > ' + shlex.quote(str(self.ssh_calls)) + '\nexit 99\n')
+
+    def inject(self, index, code=1):
+        responses = json.loads(json.dumps(self.original))
+        responses[self.paths[index]] = {'_error': code, '_stderr': self.HOSTILE, '_body': self.HOSTILE}
+        self.api.path.write_text(json.dumps(responses))
+        self.api.calls_path.unlink(missing_ok=True)
+
+    def cli(self, *args):
+        return subprocess.run([sys.executable, '-I', '-S', '-B', str(RUNNER), *args],
+                              env=self.env, capture_output=True, timeout=15)
+
+    def assert_terminal(self, result, phase, failure, category='PRIOR_STATUS_UNAVAILABLE'):
+        self.assertEqual(1, result.returncode)
+        self.assertEqual('', result.stderr.decode())
+        self.assertEqual(f'corrected-prior-api:v=1 phase={phase} failure={failure}\n'
+                         f'corrected-stage:v=1 result=blocked category={category}\n', result.stdout.decode())
+        for private in (self.HOSTILE, 'synthetic-github-token', 'Authorization', 'https://', '/private/credentials'):
+            self.assertNotIn(private, (result.stdout + result.stderr).decode())
+        self.assertFalse(self.ssh_calls.exists())
+
+    def test_positive_real_verifier_contract_and_result_unchanged(self):
+        seen = []
+        original_capture = executor.capture
+        def recording(argv, **kwargs):
+            seen.append((argv, kwargs))
+            return original_capture(argv, **kwargs)
+        with patch.object(executor, 'capture', side_effect=recording), contextlib.redirect_stdout(io.StringIO()) as output:
+            actual = executor.verify_prior(self.env, executor.prior_api_capture)
+        self.assertEqual('', output.getvalue())
+        expected = authority.verify_prior(self.env, original_capture)
+        self.assertEqual(expected, actual)
+        self.assertEqual({'reference', 'job_id', 'evidence_sha256'}, set(actual))
+        self.assertEqual(self.env['PRIOR_STATUS'], actual['reference'])
+        self.assertEqual(333, actual['job_id'])
+        self.assertRegex(actual['evidence_sha256'], r'^[0-9a-f]{64}$')
+        self.assertEqual(9, len(seen))
+        self.assertEqual(self.PHASES, tuple(name for name, _ in executor.PRIOR_API_PHASES))
+        for index, (argv, kwargs) in enumerate(seen):
+            self.assertEqual(['gh', 'api', '--hostname', 'github.com', '--method', 'GET', '-H',
+                              'X-GitHub-Api-Version: 2026-03-10', 'repos/koteev-m/clubs_bot/' + self.paths[index]], argv)
+            self.assertEqual(30, kwargs['timeout'])
+            self.assertEqual(1048576 if index == 8 else 262144, kwargs['limit'])
+            self.assertEqual({'PATH': self.env['PATH'], 'GH_TOKEN': self.env['GITHUB_TOKEN'],
+                              'GH_PROMPT_DISABLED': '1', 'GH_NO_UPDATE_NOTIFIER': '1',
+                              'GH_TELEMETRY': '0', 'LC_ALL': 'C'}, kwargs['env'])
+        result = self.cli('--verify-prior')
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(b'corrected-stage:v=1 result=ok category=PRIOR_STATUS_VERIFIED\n', result.stdout)
+        self.assertEqual(b'', result.stderr)
+
+    def test_every_phase_fails_closed_in_both_production_call_sites(self):
+        for args in (('--verify-prior',), ()):
+            for index, phase in enumerate(self.PHASES):
+                with self.subTest(args=args, phase=phase):
+                    self.inject(index)
+                    self.assert_terminal(self.cli(*args), phase, 'command_failed')
+                    calls = [json.loads(line) for line in self.api.calls_path.read_text().splitlines()]
+                    self.assertEqual(['repos/koteev-m/clubs_bot/' + p for p in self.paths[:index+1]],
+                                     [argv[-1] for argv in calls])
+                    # Real main and verifier, with no disabled validation predicate.
+                    # Prove even snapshot/helper setup cannot run after rejection.
+                    with patch.dict(os.environ, self.env, clear=True), patch.object(sys, 'argv', [str(RUNNER), *args]), \
+                            patch.object(executor, 'helper_snapshot') as snapshot, \
+                            patch.object(executor, 'pinned_hosts') as hosts, patch.object(executor, 'execute') as execute, \
+                            patch.object(executor.signal, 'signal'), contextlib.redirect_stdout(io.StringIO()) as output:
+                        with self.assertRaisesRegex(executor.AuthorityError, '^PRIOR_STATUS_UNAVAILABLE$'):
+                            executor.main()
+                        self.assertEqual(f'corrected-prior-api:v=1 phase={phase} failure=command_failed\n', output.getvalue())
+                        snapshot.assert_not_called(); hosts.assert_not_called(); execute.assert_not_called()
+
+    def test_capture_sentinel_classes_in_both_call_sites(self):
+        for code, failure in ((124, 'timeout'), (125, 'output_limit')):
+            for args in (('--verify-prior',), ()):
+                with self.subTest(code=code, args=args):
+                    self.inject(8, code)
+                    self.assert_terminal(self.cli(*args), 'producer_job_logs', failure)
+                    self.assertEqual(9, len(self.api.calls_path.read_text().splitlines()))
+
+    def test_real_spawn_oserror_preserves_local_failure(self):
+        # Missing executable in an isolated PATH fails inside Popen. No fallback
+        # to an installed gh, shell interpreter or real GitHub endpoint is possible.
+        (self.bin/'gh').unlink()
+        self.env['PATH'] = str(self.bin)
+        for args in (('--verify-prior',), ()):
+            with self.subTest(args=args):
+                self.assert_terminal(self.cli(*args), 'workflow_metadata', 'spawn_failed', 'LOCAL_FAILURE')
+                self.assertFalse(self.api.calls_path.exists())
+
+    def test_spawn_exception_identity_and_internal_errors_are_not_reclassified(self):
+        argv = ['gh', 'api', '--hostname', 'github.com', '--method', 'GET', '-H',
+                'X-GitHub-Api-Version: 2026-03-10', 'repos/koteev-m/clubs_bot/' + self.paths[0]]
+        for target, exception, marker in (
+                ('subprocess.Popen', OSError(self.HOSTILE), True),
+                ('subprocess.Popen', ValueError(self.HOSTILE), False),
+                ('os.set_blocking', OSError(self.HOSTILE), False)):
+            with self.subTest(target=target, exception=type(exception).__name__):
+                owner, attribute = target.split('.')
+                with patch.object(getattr(executor, owner), attribute, side_effect=exception), \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    with self.assertRaises(type(exception)) as caught:
+                        executor.prior_api_capture(argv, timeout=30, limit=262144, env=self.env)
+                    self.assertIs(exception, caught.exception)
+                self.assertEqual('corrected-prior-api:v=1 phase=workflow_metadata failure=spawn_failed\n'
+                                 if marker else '', output.getvalue())
+
+    def test_unknown_contract_fails_before_capture_without_echo(self):
+        good = ['gh', 'api', '--hostname', 'github.com', '--method', 'GET', '-H',
+                'X-GitHub-Api-Version: 2026-03-10', 'repos/koteev-m/clubs_bot/' + self.paths[0]]
+        cases = [(good + [self.HOSTILE], 30, 262144), (good[:-1] + [self.HOSTILE], 30, 262144),
+                 (['curl'] + good[1:], 30, 262144), (good[:5] + ['POST'] + good[6:], 30, 262144),
+                 (good, 31, 262144), (good, 30, 1048576)]
+        for endpoint in ('actions/runs/1/attempts/0', 'actions/runs/1/jobs?per_page=100',
+                         'actions/jobs/333/logs?token=secret', 'contents/scripts/deploy/other.py?ref=' + 'b'*40,
+                         'actions/workflows/release-status.yml\n', 'actions/workflows/release-status.yml/extra'):
+            cases.append((good[:-1] + ['repos/koteev-m/clubs_bot/' + endpoint], 30, 262144))
+        for argv, timeout, limit in cases:
+            with self.subTest(argv=argv, timeout=timeout, limit=limit), \
+                    patch.object(executor, 'capture') as capture, contextlib.redirect_stdout(io.StringIO()) as output:
+                with self.assertRaisesRegex(executor.Rejected, '^PRIOR_API_CONTRACT_INVALID$'):
+                    executor.prior_api_capture(argv, timeout=timeout, limit=limit, env=self.env)
+                capture.assert_not_called()
+                self.assertEqual('', output.getvalue())
+
+    def test_internal_programming_exception_keeps_terminal_local_failure(self):
+        launcher = ('import runpy, sys\nfrom unittest.mock import patch\n'
+                    'runner = sys.argv.pop(1)\n'
+                    'with patch("subprocess.Popen", side_effect=ValueError("private internal detail")):\n'
+                    '    runpy.run_path(runner, run_name="__main__")\n')
+        for args in (('--verify-prior',), ()):
+            with self.subTest(args=args):
+                result = subprocess.run([sys.executable, '-I', '-S', '-B', '-c', launcher, str(RUNNER), *args],
+                                        env=self.env, capture_output=True, timeout=15)
+                self.assertEqual(1, result.returncode)
+                self.assertEqual(b'corrected-stage:v=1 result=blocked category=LOCAL_FAILURE\n', result.stdout)
+                self.assertEqual(b'', result.stderr)
+                self.assertFalse(self.api.calls_path.exists())
+                self.assertFalse(self.ssh_calls.exists())
 
 
 class V3EvidenceTest(unittest.TestCase):

@@ -91,11 +91,16 @@ def validate_request(env):
         require(not env.get("AUTHORIZATION"), "INSPECT_AUTHORIZATION_INVALID")
 
 
-def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=()):
+def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
     """No named stdout/stderr captures; bounded memory and bounded process lifetime."""
-    child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds,
-                             start_new_session=True)
+    try:
+        child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds,
+                                 start_new_session=True)
+    except OSError:
+        if spawn_failed is not None:
+            spawn_failed()
+        raise
     output = bytearray()
     offset = 0
     deadline = time.monotonic() + timeout
@@ -138,6 +143,45 @@ def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=()
             child.wait(timeout=2)
         child.stdin.close()
         child.stdout.close()
+
+
+# Fixed transport contract only; authority/source/response verification stays in
+# release_authority.py, whose bytes authenticate the existing v3 prior status.
+PRIOR_API_PHASES = (
+    ("workflow_metadata", r"actions/workflows/release-status\.yml"),
+    ("run_attempt", rf"actions/runs/{_authority.NUMBER}/attempts/{_authority.NUMBER}"),
+    ("source_workflow", r"contents/\.github/workflows/release-status\.yml\?ref=[0-9a-f]{40}"),
+    ("source_status_script", r"contents/scripts/deploy/read-only-release-status\.sh\?ref=[0-9a-f]{40}"),
+    ("source_private_root", r"contents/scripts/deploy/release_private_root\.py\?ref=[0-9a-f]{40}"),
+    ("source_status_pattern", r"contents/scripts/deploy/release-status\.pattern\?ref=[0-9a-f]{40}"),
+    ("source_authority", r"contents/scripts/deploy/release_authority\.py\?ref=[0-9a-f]{40}"),
+    ("attempt_jobs", rf"actions/runs/{_authority.NUMBER}/attempts/{_authority.NUMBER}/jobs\?per_page=100"),
+    ("producer_job_logs", rf"actions/jobs/{_authority.NUMBER}/logs"),
+)
+
+
+def prior_api_capture(argv, *, timeout, limit, env):
+    """One unchanged bounded capture; public diagnostics contain fixed tokens only."""
+    prefix = ["gh", "api", "--hostname", "github.com", "--method", "GET",
+              "-H", "X-GitHub-Api-Version: 2026-03-10"]
+    require(isinstance(argv, list) and len(argv) == 9 and argv[:8] == prefix
+            and isinstance(argv[8], str) and len(argv[8]) <= 256, "PRIOR_API_CONTRACT_INVALID")
+    phase = next((name for name, pattern in PRIOR_API_PHASES
+                  if re.fullmatch(r"repos/koteev-m/clubs_bot/" + pattern, argv[8])), None)
+    require(phase is not None and timeout == 30
+            and limit == (1048576 if phase == "producer_job_logs" else 262144),
+            "PRIOR_API_CONTRACT_INVALID")
+
+    def marker(failure):
+        print(f"corrected-prior-api:v=1 phase={phase} failure={failure}", flush=True)
+
+    # Only Popen's OSError is a spawn failure. Re-raise it unchanged so the CLI
+    # still ends in LOCAL_FAILURE; internal exceptions must not become authority errors.
+    code, data = capture(argv, timeout=timeout, limit=limit, env=env,
+                         spawn_failed=lambda: marker("spawn_failed"))
+    if code != 0:
+        marker({124: "timeout", 125: "output_limit"}.get(code, "command_failed"))
+    return code, data
 
 
 def helper_snapshot(env=None):
@@ -368,7 +412,7 @@ def main():
         binding_control({**env, "SSH_USER": ""}, snapshot)
         return "EXECUTION_AUTHORITY_VALIDATED"
     if sys.argv[1:] == ["--verify-prior"]:
-        verify_prior(env, capture)
+        verify_prior(env, prior_api_capture)
         return "PRIOR_STATUS_VERIFIED"
     require(env.get("COMPOSE_PATH") == COMPOSE_PATH, "COMPOSE_PATH_INVALID")
     require(re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9._-]*", env.get("SSH_USER", ""))
@@ -376,7 +420,7 @@ def main():
     require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]*", env.get("SSH_HOST", ""))
             and re.fullmatch(r"[0-9]{1,5}", env.get("SSH_PORT", ""))
             and 1 <= int(env["SSH_PORT"]) <= 65535, "SSH_TARGET_INVALID")
-    prior = verify_prior(env, capture)
+    prior = verify_prior(env, prior_api_capture)
     snapshot = helper_snapshot(env)
     control = binding_control(env, snapshot)
     with pinned_hosts(env) as (descriptor, reference):
