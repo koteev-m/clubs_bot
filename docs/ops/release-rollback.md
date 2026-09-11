@@ -389,6 +389,59 @@ Patch предназначен для следующего отдельно ра
 в этой local continuation нового inspect dispatch, Environment approval или SSH execution не было.
 Synthetic tests проверяют instrumentation contract, а не real HTTP/TLS/hosted-token behavior.
 
+**CLB-91 — producer job-log escape compatibility (local continuation, 2026-09-11).**
+Следующий hosted run [34617555667](https://github.com/koteev-m/clubs_bot/actions/runs/34617555667)
+локализовал отказ: `corrected-prior-api:v=1 phase=producer_job_logs failure=command_failed`.
+По user handoff локальная диагностика exact endpoint/bytes воспроизвела несовместимость:
+`gh 2.82.1` PASS, `gh 2.100.0` default FAIL после download, modern CLI с
+`--allow-escape-sequences` PASS; `302` → signed download `200`, без Authorization на втором hop.
+Historical hosted stderr/HTTP hops не сохранены: этот mechanism сужает root cause,
+но не является полным ретроспективным доказательством причины hosted failure.
+
+Official availability boundary — `gh api` в `v2.97.0`: flag отсутствует в
+[v2.96.0 source](https://github.com/cli/cli/blob/v2.96.0/pkg/cmd/api/api.go),
+добавлен вместе с non-JSON escape guard в
+[v2.97.0 source](https://github.com/cli/cli/blob/v2.97.0/pkg/cmd/api/api.go).
+[Release notes](https://github.com/cli/cli/releases/tag/v2.97.0) и
+[GHSA-3m3g-3wcr-px46](https://github.com/cli/cli/security/advisories/GHSA-3m3g-3wcr-px46)
+объясняют terminal-injection boundary. Production adapter использует capability, не version comparison.
+
+Только перед `producer_job_logs` corrected executor выполняет offline `gh api --help`:
+private capture, timeout `5 s`, output limit `32768`, credential-free environment и временный
+пустой config directory с mode `0700`, удаляемый после probe. Это необходимо, поскольку CLI
+загружает config даже для help; child-only `GH_CONFIG_DIR` исключает чтение saved credentials.
+Installed CLI/config/PATH не меняются. API request, token read, pager и network update check
+в probe отсутствуют. Корректный `USAGE`/`FLAGS` без нового flag сохраняет old CLI argv;
+opt-out добавляется только при объявлении exact flag в `FLAGS`, не по example/substring.
+Failed/malformed probe останавливает retrieval, не считается legacy capability и не запускает
+log request. Сохраняются девять phases и четыре fixed failure classes; probe failures относятся
+к `producer_job_logs`, malformed help — `command_failed`. Ошибки local setup остаются `LOCAL_FAILURE`.
+
+Opt-out безопасен в этой границе: stdout дочернего процесса идёт только в bounded private pipe/memory,
+stderr отбрасывается; raw log, ANSI content, token, headers и signed URL не печатаются. ANSI bytes
+не попадают в terminal/pager и не используются как shell/code. Unchanged verifier получает exact
+downloaded bytes, извлекает только fixed evidence после run/attempt/job/source authentication и
+применяет прежние semantic predicates. Strip/normalize log и новая acceptance predicate отсутствуют.
+Для самого log capture остаются `30 s` и `1048576` bytes; probe добавляет отдельные bounded `5 s`,
+не увеличивая API timeout. Другие восемь API calls, redirect/auth semantics, endpoint, credentials,
+permissions, helper/workflow/producer bytes неизменны. Retries, fallback credentials и alternative
+endpoint отсутствуют. Оба production call sites (`--verify-prior`, normal execution до helper/SSH)
+используют этот adapter.
+
+Fresh independent local probe после regression tests: disposable official macOS arm64 `gh 2.100.0`
+скачан заново, archive SHA-256 проверен по official release checksums; installed `gh 2.82.1` сохранён.
+В обоих случаях production `verify_prior()` с production adapter/capture PASS для usable prior
+`34510160767:1:b8bcd3029f9397963be5d2b92839b5e0f132933a`, producer job `102982071336`.
+Probe выбирает absolute executable только на process-launch boundary, без изменения PATH/validator;
+каждый путь выполнил девять read-only API requests и один offline help probe.
+Log: `36630` bytes, `250` ESC bytes,
+SHA-256 `1ce46d4e6383ece60483ccf4d1216a148b504e5007547859ab35e6ecab4e5207`;
+evidence SHA-256 `704e919ff3d4d97c6afcb7270693dfad77ea7eef8a9fca84d4a824d59ae470d5`.
+Public raw-log output отсутствует. Это local macOS/current-credential evidence, не hosted Linux/token
+verification. Hosted verification после fix ещё не было; нового inspect, stage access, publication
+или recovery authority нет. Пять `PRODUCER_PATHS`, включая `release_authority.py`, остаются
+byte-for-byte source-compatible с существующим usable prior.
+
 REST interfaces: [run attempt](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run-attempt),
 [attempt jobs и job logs](https://docs.github.com/en/rest/actions/workflow-jobs),
 [repository contents](https://docs.github.com/en/rest/repos/contents#get-repository-content).
