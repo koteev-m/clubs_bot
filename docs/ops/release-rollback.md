@@ -352,6 +352,43 @@ V3 исправляет producer/verifier contract локально; historical 
 Corrective `Release Status requested_operation=start` остаётся blocked до review/merge нового producer contract,
 fresh ordered gates и отдельного dispatch authorization. Этот документ не разрешает dispatch или recovery.
 
+**CLB-91 — corrected-side phase diagnostics (local continuation, 2026-09-10).**
+По подтверждённому user handoff usable v3 `PRIOR_STATUS` теперь
+`34510160767:1:b8bcd3029f9397963be5d2b92839b5e0f132933a`.
+Corrected run [34514548987](https://github.com/koteev-m/clubs_bot/actions/runs/34514548987)
+завершился `corrected-stage:v=1 result=blocked category=PRIOR_STATUS_UNAVAILABLE` в validate job,
+до Environment gate и SSH. Actions/Contents/Metadata read permissions и непустой masked `GITHUB_TOKEN`
+были present. Локальный verifier выполнял все девять reads; exact hosted failing endpoint, HTTP status
+и transport root cause остаются unresolved. Это handoff evidence, не новый hosted diagnostic run.
+`CLB82_APPROVED_IMPLEMENTATION` уже provisioned; `CLB82_AUTHORIZED_ROOT_BINDING` всё ещё отсутствует.
+Эти сведения уточняют historical CLB-82/90 gate snapshots выше, не переписывая их evidence.
+
+Локальный adapter в corrected executor применяется и в `--verify-prior`, и перед SSH в обычном execution path.
+Он принимает только current fixed `gh api` argv contract и выводит при capture failure ровно один marker:
+
+```text
+corrected-prior-api:v=1 phase=<fixed_phase> failure=<fixed_failure>
+```
+
+Allowlist фаз: `workflow_metadata`, `run_attempt`, `source_workflow`, `source_status_script`,
+`source_private_root`, `source_status_pattern`, `source_authority`, `attempt_jobs`, `producer_job_logs`.
+Failure classes: обычный ненулевой CLI exit → `command_failed`, capture code `124` → `timeout`,
+`125` → `output_limit`, `OSError` непосредственно при process spawn → `spawn_failed`.
+Success marker отсутствует. Unknown argv/timeout/limit contract блокируется до capture фиксированной
+категорией `PRIOR_API_CONTRACT_INVALID` без echo неизвестного argv. Marker содержит только fixed tokens:
+без stderr/stdout/body, HTTP status, argv, headers, environment, token, URL и credential/config paths;
+GitHub response body для диагностики не разбирается.
+
+Nonzero capture без изменений возвращается verifier и заканчивается `PRIOR_STATUS_UNAVAILABLE`;
+spawn exception повторно выбрасывается и сохраняет terminal `LOCAL_FAILURE`. Internal/programming exceptions
+не превращаются в `PRIOR_STATUS_UNAVAILABLE` и не маскируются как spawn failure.
+Retries, fallback, credential/endpoint/permission changes и увеличение timeout/output limit отсутствуют.
+Authenticated `PRODUCER_PATHS`, включая `release_authority.py`, helper bytes/pins и workflows неизменны:
+существующий usable v3 source snapshot остаётся совместимым. Diagnostics не дают inspect/recovery authority.
+Patch предназначен для следующего отдельно разрешённого hosted прохода после review/publication;
+в этой local continuation нового inspect dispatch, Environment approval или SSH execution не было.
+Synthetic tests проверяют instrumentation contract, а не real HTTP/TLS/hosted-token behavior.
+
 REST interfaces: [run attempt](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run-attempt),
 [attempt jobs и job logs](https://docs.github.com/en/rest/actions/workflow-jobs),
 [repository contents](https://docs.github.com/en/rest/repos/contents#get-repository-content).
