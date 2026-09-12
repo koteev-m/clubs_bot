@@ -15,6 +15,7 @@ import shlex
 import signal
 import stat
 import subprocess
+import tempfile
 import time
 import uuid
 import secrets
@@ -161,7 +162,7 @@ PRIOR_API_PHASES = (
 
 
 def prior_api_capture(argv, *, timeout, limit, env):
-    """One unchanged bounded capture; public diagnostics contain fixed tokens only."""
+    """Bounded private retrieval; public diagnostics contain fixed tokens only."""
     prefix = ["gh", "api", "--hostname", "github.com", "--method", "GET",
               "-H", "X-GitHub-Api-Version: 2026-03-10"]
     require(isinstance(argv, list) and len(argv) == 9 and argv[:8] == prefix
@@ -174,6 +175,30 @@ def prior_api_capture(argv, *, timeout, limit, env):
 
     def marker(failure):
         print(f"corrected-prior-api:v=1 phase={phase} failure={failure}", flush=True)
+
+    if phase == "producer_job_logs":
+        # gh >=2.97 guards non-JSON escape bytes even in pipes. Detect the
+        # capability offline, without credentials or a version assumption.
+        # Failed/malformed help is not evidence of an older CLI: stop closed.
+        probe_env = {"PATH": env.get("PATH", os.defpath), "LC_ALL": "C",
+                     "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1", "GH_TELEMETRY": "0"}
+        # gh loads config even for help. An empty private directory prevents
+        # reading saved credentials; it changes no installed CLI configuration.
+        with tempfile.TemporaryDirectory(prefix="clb91-gh-help-") as config_dir:
+            probe_env["GH_CONFIG_DIR"] = config_dir
+            code, help_data = capture(["gh", "api", "--help"], timeout=5, limit=32768, env=probe_env,
+                                      spawn_failed=lambda: marker("spawn_failed"))
+        if code == 0:
+            flags = re.search(rb"\nFLAGS\n([^\n]+(?:\n[^\n]+)*)\n\n", help_data)
+            if b"\nUSAGE\n  gh api <endpoint> [flags]\n" not in help_data or flags is None:
+                code = 1
+        if code != 0:
+            marker({124: "timeout", 125: "output_limit"}.get(code, "command_failed"))
+            return code, b""
+        if re.search(rb"(?m)^ +--allow-escape-sequences +[^\r\n]+$", flags[1]):
+            # Only this authenticated job's raw log enters bounded private
+            # memory, never a terminal/shell. Preserve every byte for verifier.
+            argv = [*argv[:-1], "--allow-escape-sequences", argv[-1]]
 
     # Only Popen's OSError is a spawn failure. Re-raise it unchanged so the CLI
     # still ends in LOCAL_FAILURE; internal exceptions must not become authority errors.

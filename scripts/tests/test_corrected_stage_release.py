@@ -90,6 +90,9 @@ def request(action='inspect'):
 
 class PriorApiFixture:
     """Synthetic responses at the gh transport boundary; no caller JSON input."""
+    OLD_HELP = '\nUSAGE\n  gh api <endpoint> [flags]\n\nFLAGS\n  -X, --method string   The HTTP method\n\n'
+    MODERN_HELP = OLD_HELP.replace('FLAGS\n', 'FLAGS\n      --allow-escape-sequences   Allow printing terminal escape sequences\n')
+
     def __init__(self, root, bin_path, env, line=None):
         self.path = root / 'github-responses.json'
         self.calls_path = root / 'github-calls.jsonl'
@@ -107,6 +110,7 @@ class PriorApiFixture:
                                   env=producer_env, capture_output=True, check=True)
         self.value = json.loads(produced.stdout.decode().removeprefix(authority.PREFIX))
         self.responses = {
+            '_cli': {'help': self.OLD_HELP, 'modern': False},
             'actions/workflows/release-status.yml': {'id': 222, 'path': authority.WORKFLOW, 'name': 'Release Status (read-only)'},
             self.run_path: {'id': int(run_id), 'run_attempt': int(attempt), 'head_sha': revision, 'head_branch': 'main',
                            'event': 'workflow_dispatch', 'status': 'completed', 'conclusion': 'success', 'workflow_id': 222,
@@ -127,15 +131,30 @@ class PriorApiFixture:
         source = '''#!/usr/bin/env -S python3 -I -S -B
 import json,os,sys
 from pathlib import Path
+responses=json.loads(Path(RESPONSES).read_text()); cli=responses['_cli']
+if sys.argv[1:]==['api','--help']:
+ assert set(os.environ)<= {'PATH','LC_ALL','GH_PROMPT_DISABLED','GH_NO_UPDATE_NOTIFIER','GH_TELEMETRY','GH_CONFIG_DIR','__CF_USER_TEXT_ENCODING'}
+ assert 'GH_TOKEN' not in os.environ and 'GITHUB_TOKEN' not in os.environ
+ config=Path(os.environ['GH_CONFIG_DIR'])
+ assert config.is_dir() and not list(config.iterdir()) and config.stat().st_mode & 0o777 == 0o700
+ with Path(CALLS+'.help').open('a') as calls:
+  calls.write(json.dumps(sys.argv[1:])+'\\n')
+ sys.stdout.write(cli['help']);print(cli.get('stderr',''),file=sys.stderr)
+ raise SystemExit(cli.get('code',0))
 assert sys.argv[1:8]==['api','--hostname','github.com','--method','GET','-H','X-GitHub-Api-Version: 2026-03-10']
 assert os.environ.get('GH_TOKEN')=='synthetic-github-token'
 assert os.environ.get('GH_NO_UPDATE_NOTIFIER')=='1' and os.environ.get('GH_TELEMETRY')=='0'
 assert 'SSH_KNOWN_HOSTS' not in os.environ and 'UNRELATED_SECRET' not in os.environ
 prefix='repos/koteev-m/clubs_bot/'
 assert sys.argv[-1].startswith(prefix)
-responses=json.loads(Path(RESPONSES).read_text()); value=responses[sys.argv[-1][len(prefix):]]
+value=responses[sys.argv[-1][len(prefix):]]
 with Path(CALLS).open('a') as calls:
  calls.write(json.dumps(sys.argv[1:])+'\\n')
+opted_in=sys.argv[8:-1]==['--allow-escape-sequences']
+assert sys.argv[8:-1] in ([],['--allow-escape-sequences'])
+assert not opted_in or (cli['modern'] and sys.argv[-1].endswith('/logs'))
+if cli['modern'] and sys.argv[-1].endswith('/logs') and not opted_in:
+ print('private ANSI guard failure',file=sys.stderr);raise SystemExit(1)
 if isinstance(value,dict) and '_error' in value:
  print(value.get('_stderr','synthetic private API diagnostics'),file=sys.stderr)
  sys.stdout.write(value.get('_body',''));raise SystemExit(value['_error'])
@@ -1067,7 +1086,15 @@ class PriorApiDiagnosticsTest(unittest.TestCase):
         self.assertEqual(self.env['PRIOR_STATUS'], actual['reference'])
         self.assertEqual(333, actual['job_id'])
         self.assertRegex(actual['evidence_sha256'], r'^[0-9a-f]{64}$')
-        self.assertEqual(9, len(seen))
+        self.assertEqual(10, len(seen))
+        probe_argv, probe_kwargs = seen.pop(8)
+        self.assertEqual(['gh', 'api', '--help'], probe_argv)
+        self.assertEqual(5, probe_kwargs['timeout'])
+        self.assertEqual(32768, probe_kwargs['limit'])
+        config_dir = probe_kwargs['env'].pop('GH_CONFIG_DIR')
+        self.assertFalse(Path(config_dir).exists())
+        self.assertEqual({'PATH': self.env['PATH'], 'LC_ALL': 'C', 'GH_PROMPT_DISABLED': '1',
+                          'GH_NO_UPDATE_NOTIFIER': '1', 'GH_TELEMETRY': '0'}, probe_kwargs['env'])
         self.assertEqual(self.PHASES, tuple(name for name, _ in executor.PRIOR_API_PHASES))
         for index, (argv, kwargs) in enumerate(seen):
             self.assertEqual(['gh', 'api', '--hostname', 'github.com', '--method', 'GET', '-H',
@@ -1168,6 +1195,155 @@ class PriorApiDiagnosticsTest(unittest.TestCase):
                 self.assertEqual(b'corrected-stage:v=1 result=blocked category=LOCAL_FAILURE\n', result.stdout)
                 self.assertEqual(b'', result.stderr)
                 self.assertFalse(self.api.calls_path.exists())
+                self.assertFalse(self.ssh_calls.exists())
+
+
+class ProducerLogEscapeCompatibilityTest(unittest.TestCase):
+    """Modern/legacy CLI emulation at the real bounded process boundary."""
+    setUp = PriorApiDiagnosticsTest.setUp
+    cli = PriorApiDiagnosticsTest.cli
+    assert_terminal = PriorApiDiagnosticsTest.assert_terminal
+    HOSTILE = '\x1b[31m' + PriorApiDiagnosticsTest.HOSTILE + '\x1b[0m'
+
+    def configure(self, modern=True, **probe):
+        self.api.responses['_cli'] = {
+            'help': self.api.MODERN_HELP if modern else self.api.OLD_HELP,
+            'modern': modern, **probe}
+        original = self.original[self.api.logs_path]
+        self.raw = (self.HOSTILE + '\n' + original + '\x1b[2Ktail\n').encode()
+        self.api.write(self.raw.decode())
+        self.api.calls_path.unlink(missing_ok=True)
+
+    def test_modern_guard_requires_scoped_flag_and_preserves_exact_bytes(self):
+        self.configure()
+        with self.assertRaisesRegex(authority.AuthorityError, '^PRIOR_STATUS_UNAVAILABLE$'):
+            authority.verify_prior(self.env, executor.capture)
+        self.api.calls_path.unlink()
+        original_capture = executor.capture
+        retrieved = []
+        def at_verifier_boundary(argv, **kwargs):
+            result = executor.prior_api_capture(argv, **kwargs)
+            if argv[-1].endswith('/logs'):
+                retrieved.append(result)
+            return result
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            actual = authority.verify_prior(self.env, at_verifier_boundary)
+        self.assertEqual('', output.getvalue())
+        self.assertEqual([(0, self.raw)], retrieved)
+        self.assertIn(b'\x1b', retrieved[0][1])
+        expected = hashlib.sha256(self.original[self.api.logs_path].split(authority.PREFIX)[1].strip().encode()).hexdigest()
+        self.assertEqual(expected, actual['evidence_sha256'])
+        calls = [json.loads(line) for line in self.api.calls_path.read_text().splitlines()]
+        self.assertEqual(9, len(calls))
+        for index, argv in enumerate(calls):
+            self.assertEqual(['--allow-escape-sequences'] if index == 8 else [], argv[7:-1])
+            self.assertEqual('repos/koteev-m/clubs_bot/' + self.paths[index], argv[-1])
+        self.assertIs(executor.capture, original_capture)
+
+    def test_both_call_sites_modern_and_old_pass_prior_before_helper_or_ssh(self):
+        for modern in (True, False):
+            with self.subTest(modern=modern):
+                self.configure(modern)
+                self.env['CLB82_APPROVED_IMPLEMENTATION'] = ''
+                for args, category, code in ((('--verify-prior',), 'PRIOR_STATUS_VERIFIED', 0),
+                                              ((), 'IMPLEMENTATION_NOT_APPROVED', 1)):
+                    result = self.cli(*args)
+                    self.assertEqual(code, result.returncode)
+                    verdict = 'ok' if code == 0 else 'blocked'
+                    self.assertEqual(f'corrected-stage:v=1 result={verdict} category={category}\n'.encode(), result.stdout)
+                    self.assertEqual(b'', result.stderr)
+                    self.assertFalse(self.ssh_calls.exists())
+                calls = [json.loads(line) for line in self.api.calls_path.read_text().splitlines()]
+                self.assertEqual(18, len(calls))
+                for argv in calls:
+                    self.assertEqual(modern and argv[-1].endswith('/logs'), '--allow-escape-sequences' in argv)
+
+    def test_probe_failures_stop_before_log_and_never_leak_in_both_call_sites(self):
+        for code, failure in ((1, 'command_failed'), (124, 'timeout'), (125, 'output_limit')):
+            for args in (('--verify-prior',), ()):
+                with self.subTest(code=code, args=args):
+                    self.configure(code=code, help=self.HOSTILE, stderr=self.HOSTILE)
+                    self.assert_terminal(self.cli(*args), 'producer_job_logs', failure)
+                    self.assertEqual(8, len(self.api.calls_path.read_text().splitlines()))
+
+    def test_help_must_be_valid_and_flag_must_be_declared_in_flags(self):
+        for help_data in ('', self.HOSTILE, 'FLAGS\n  --allow-escape-sequences   allowed\n\n',
+                          self.api.OLD_HELP.replace('FLAGS', 'OTHER')):
+            with self.subTest(help=repr(help_data)):
+                self.configure(help=help_data)
+                self.assert_terminal(self.cli('--verify-prior'), 'producer_job_logs', 'command_failed')
+                self.assertEqual(8, len(self.api.calls_path.read_text().splitlines()))
+        for help_data in (self.api.OLD_HELP + '\nEXAMPLES\n  gh api --allow-escape-sequences\n',
+                          self.api.OLD_HELP.replace('--method', '--allow-escape-sequences-extra')):
+            with self.subTest(help=repr(help_data)):
+                self.configure(False, help=help_data)
+                self.assertEqual(0, self.cli('--verify-prior').returncode)
+                self.assertNotIn('--allow-escape-sequences"', self.api.calls_path.read_text())
+
+    def test_real_probe_timeout_output_limit_and_spawn_failure(self):
+        for body, failure, category in (
+                ('import time; time.sleep(10)', 'timeout', 'PRIOR_STATUS_UNAVAILABLE'),
+                ('import sys; sys.stdout.write("x"*32769)', 'output_limit', 'PRIOR_STATUS_UNAVAILABLE'),
+                (None, 'spawn_failed', 'LOCAL_FAILURE')):
+            with self.subTest(failure=failure):
+                self.configure()
+                gh = self.bin / 'gh'
+                source = gh.read_text()
+                if body is None:
+                    # The eighth successful API process removes this fixture
+                    # executable before the help process is spawned.
+                    source = source.replace('value=responses[',
+                        'if sys.argv[-1].endswith("jobs?per_page=100"): Path(sys.argv[0]).unlink()\nvalue=responses[')
+                    self.env['PATH'] = str(self.bin)
+                    (self.bin/'python3').symlink_to(sys.executable)
+                else:
+                    source = source.replace("assert set(os.environ)<=", body + '\n assert set(os.environ)<=')
+                gh.write_text(source)
+                self.assert_terminal(self.cli('--verify-prior'), 'producer_job_logs', failure, category)
+                self.assertEqual(8, len(self.api.calls_path.read_text().splitlines()))
+                # Restore the fixture for the next independent case.
+                self.api = PriorApiFixture(self.root, self.bin, self.env)
+
+    def test_modern_transport_failure_and_real_log_limit_remain_closed(self):
+        for response, failure in (({'_error': 1, '_body': self.HOSTILE, '_stderr': self.HOSTILE}, 'command_failed'),
+                                  (self.HOSTILE + 'x'*1048576, 'output_limit')):
+            for args in (('--verify-prior',), ()):
+                with self.subTest(failure=failure, args=args):
+                    self.configure()
+                    self.api.responses[self.api.logs_path] = response
+                    self.api.path.write_text(json.dumps(self.api.responses))
+                    self.assert_terminal(self.cli(*args), 'producer_job_logs', failure)
+                    self.assertEqual(9, len(self.api.calls_path.read_text().splitlines()))
+
+    def test_modern_opt_out_does_not_bypass_evidence_or_source_authentication(self):
+        cases = [('malformed', None, None), ('duplicate', None, None),
+                 ('evidence_run', 'GITHUB_RUN_ID', '1'), ('evidence_attempt', 'GITHUB_RUN_ATTEMPT', '2'),
+                 ('evidence_sha', 'GITHUB_SHA', 'a'*40), ('evidence_job', 'GITHUB_JOB', 'validate'), ('source', None, None),
+                 ('run', 'id', 1), ('run', 'run_attempt', 2), ('run', 'head_sha', 'a'*40),
+                 ('job', 'run_id', 1), ('job', 'head_sha', 'a'*40)]
+        for kind, key, value in cases:
+            with self.subTest(kind=kind, key=key):
+                self.api.responses = json.loads(json.dumps(self.original))
+                self.configure()
+                if kind == 'malformed':
+                    self.api.responses[self.api.logs_path] = authority.PREFIX + '{invalid}\n'
+                elif kind == 'duplicate':
+                    self.api.responses[self.api.logs_path] *= 2
+                elif kind.startswith('evidence_'):
+                    evidence = {**self.api.value, key: value}
+                    self.api.responses[self.api.logs_path] = self.HOSTILE + '\n' + authority.PREFIX + json.dumps(evidence) + '\n'
+                elif kind == 'source':
+                    self.api.responses[self.paths[2]]['sha'] = 'a'*40
+                elif kind == 'run':
+                    self.api.responses[self.api.run_path][key] = value
+                else:
+                    self.api.responses[self.api.jobs_path]['jobs'][1][key] = value
+                self.api.path.write_text(json.dumps(self.api.responses))
+                result = self.cli('--verify-prior')
+                self.assertEqual(1, result.returncode)
+                category = 'LOCAL_FAILURE' if kind == 'malformed' else 'PRIOR_STATUS_INVALID'
+                self.assertEqual(f'corrected-stage:v=1 result=blocked category={category}\n'.encode(), result.stdout)
+                self.assertEqual(b'', result.stderr)
                 self.assertFalse(self.ssh_calls.exists())
 
 
