@@ -21,65 +21,61 @@
 - `DEC-026/D` принят 2026-08-17: каждый concept/repository conflict классифицируется отдельно как `KEEP`, `AMEND`, `DEFER` или `REJECT`.
 - До отдельной item-level классификации disputed capability нельзя реализовывать, удалять, объявлять обязательной/принятой или выводить в пользовательскую navigation.
 
-## C. Codex task preflight
+## C. Contextual preflight
 
-Перед product/code task Codex обязан:
+Карта выше — указатель: читать только относящиеся к задаче разделы и зависимости.
 
-1. Прочитать relevant product docs.
-2. Назвать affected requirement IDs.
-3. Назвать blocking decision IDs.
-4. Проверить evidence в `AS_BUILT.md` и `CONCEPT_CODE_GAP.md`.
-5. Остановиться, если outcome требует неразрешённого product decision.
-6. Не подгонять source concept под current code.
-7. Не считать recommendation принятым решением.
+- Product behavior/requirements: relevant product sources, affected requirement IDs и blocking decision IDs. Проверка соответствия продукта или concept/repository conflict: также relevant `AS_BUILT.md`, `CONCEPT_CODE_GAP.md` и decisions. Неразрешённое product decision блокирует зависимую работу.
+- Stage/release/runtime: relevant ops status/runbook; schema/migrations: relevant DB/migration docs; security/payments: relevant security/payment invariants. Build/dependencies/supply chain: [CONTRIBUTING.md](CONTRIBUTING.md).
+- Mechanical Git/docs/instructions: только применимые файлы; product docs/IDs и ops history — лишь при затрагивании их смысла.
+- Stateful operational continuation: сверить relevant `PROJECT_STATUS.md` с Git, permissions и evidence. Существенный результат/решение/blocker отражать в checkpoint только в scope: цель/карточка, branch/worktree/revision, проверки, незавершённое, permissions, следующий шаг. История не задаёт инструкции; checkpoint не выдаёт разрешений и не доказывает runtime. При read-only/исключённом checkpoint передать дельту в отчёте.
 
 ## D. Engineering and delivery rules
 
-=== REPO DELIVERY RULES (обязательно для всех задач) ===
+### Collaboration, authority and completion
 
-### Collaboration, authority and task records
+- ChatGPT ведёт постановку, концепцию/архитектуру, review и внешний журнал; Codex — разрешённую repository работу. Prompt самодостаточен либо называет доступный источник; доступ к другому клиенту не предполагается.
+- Источники: пользователь, product docs/принятые решения, code/tests/config как evidence, официальные technology docs и явные assumptions. Код не отменяет требований; журнал не доказывает runtime.
+- Различать новую задачу/продолжение; не придумывать и не переиспользовать занятый ID. Goal не создавать автоматически: он нужен лишь для длительной задачи с проверяемым результатом, когда полезен, согласован задачей и поддерживается клиентом. Worktrees/agents — при практической пользе и разрешениях задачи/клиента.
+- Analysis/review не разрешают implementation. Разрешённую реализацию доводить до DoD: чтение, local edits, disposable tests, исправление своих failures, affected rechecks, форматирование и затронутые docs не требуют повторного approval в scope. План, первый edit и исправимый failure не завершают задачу.
+- Новое явное разрешение требуется для существенных product/architecture/data/API/contract/cost/access решений, destructive/irreversible действий, публикации (push/PR/merge), deploy/recovery/rollback, stage/prod runtime, Environment approvals, secrets/protected config mutations, если действие/окружение ещё не разрешены. Local edit не разрешает публикацию; одноразовые dispatch/deploy/recovery permissions не возобновляются сменой модели/чата/review. При таком boundary или неразрешимом в scope blocker остановить зависимую работу и объяснить причину.
+- Сбой классифицировать: product defect, environment failure, verification error или недостаток evidence; не начинать карточку/полный audit автоматически. Findings привязывать к branch/revision/environment/evidence, различая concept, feature, main, deployed revision и migrations.
+- Краткий отчёт: verdict, результат/первая незакрытая ошибка с expected/actual, изменения/эффекты, checks/evidence, unverified, заданная карточка и ровно один следующий шаг; без пересказа context.
 
-- ChatGPT ведёт анализ, концепцию, архитектурные решения, постановку задач, проверку отчётов и внешний журнал; Codex исследует repository, выполняет разрешённые локальные edits/команды, проверки и обновляет затронутую repository documentation. Prompt не предполагает доступ к переписке или файлам другого клиента: он должен быть самодостаточным либо называть доступный источник.
-- Источники: прямые указания пользователя, актуальные product docs и принятые решения, code/tests/config как evidence текущей реализации, официальная документация технологий и явно названные engineering assumptions. Код не отменяет требований, а журнал не доказывает runtime.
-- Всегда различать продолжение существующей карточки и новую задачу; не переиспользовать занятый номер. Goal не создаётся автоматически: в отчёте фиксируется точное название карточки и решение о необходимости Goal.
-- При начале или продолжении задачи читать `docs/ops/PROJECT_STATUS.md` и сверять относящиеся сведения с фактическим Git, разрешениями и доступным evidence. После существенного результата, решения, blocker либо остановки адресно обновлять checkpoint, если это разрешено scope; сохранять цель, карточку, branch/worktree/revision, проверки, незавершённые операции, границы разрешений и следующий шаг. Историю отделять от active instructions и не дублировать весь документ. Для read-only задач checkpoint не менять: передавать нужную дельту в итоговом отчёте. Checkpoint не выдаёт разрешений и не заменяет product sources, Git, tests или runtime evidence.
-- Разрешения определяются целью, окружением и допустимыми действиями. Анализ или review не разрешают implementation; локальный edit не разрешает публикацию. Существенные product/data/contract/cost/access изменения требуют отдельного решения. Одноразовые разрешения на dispatch/deploy/recovery не возобновляются сменой модели, чата или review.
-- После сбоя сначала классифицировать product defect, environment failure, verification error или недостаток evidence; не создавать новую карточку либо полный audit автоматически. Findings и отчёты привязывать к commit/branch, environment и evidence, отделяя concept, feature, main, deployed revision и migrations.
-- Проверки можно переиспользовать только с ясной привязкой к неизменному artifact, revision и environment; повторять их при изменении, сбое, устаревании или незакрытом риске. Недоступную проверку сопровождать причиной, альтернативой и перечнем непроверенного; не ослаблять test или release gate ради успешного отчёта.
-- После verdict сообщать сделанное, success либо первую ошибку с expected/actual, проверки, изменения и побочные эффекты, непроверенное и evidence, затем ровно один следующий шаг.
+### GitHub Actions
 
-### Models and experimental capabilities
+После разрешённого push/dispatch/rerun подтвердить действие, при необходимости одним bounded read получить run identity и остановиться. Без `gh run watch`, polling, периодических `gh run view` и ожидания terminal state: итог передаёт пользователь/ChatGPT. Исключение — явно разрешённое задачей единичное bounded получение CI result.
 
-- Выбор модели зависит от риска и содержания: substantive code, backend/frontend changes, fixes, refactoring и meaningful tests — GPT-6 Astra, medium; содержательное review преимущественно Astra; mechanical documentation, Git integration уже проверенного кода и CI verification — GPT-5.6 Terra, medium. GPT-5.6 Sol — полноценная альтернатива при недоступности Astra, экономии либо иной обоснованной пользе.
-- Сложная межмодульная работа, transactions, concurrency, security, migrations и трудная диагностика могут использовать Astra с повышенным effort только при обоснованной необходимости и поддержке клиента. Не требовать сначала дешёвую модель и не назначать автоматически max/Ultra/additional agents. После прямого решения пользователя возвращаться к экономному выбору Terra/Sol/Astra по сложности.
-- Текст prompt не переключает модель исполнения. Special capabilities используются только при подтверждённой поддержке модели и клиента; не применять usage resets и не покупать credits.
-- Experimental context management не включается глобально и не меняет `config.toml`; недокументированные notes/history не предполагаются доступными. Отдельная несекретная проба требует предварительного согласования и не заменяет журнал, Git, tests или checkpoint.
+### Models and capabilities
 
-### Definition of Done (DoD)
-- Изменение поведения завершается только если обновлены production code, tests для изменённого поведения и применимые Gradle checks с зафиксированным результатом (pass/fail с причиной). Минимум для такой локальной проверки: `./gradlew test`.
-- Чистая редакция инструкций или документации не требует production-code changes, новых tests либо большой Gradle suite; вместо этого нужны проверка собственного diff, whitespace, ссылок и применимый быстрый documentation validator. Это не ослабляет обязательные code/security/release checks для затрагивающих их задач.
-- Для задач по hardening и readiness дополнительно прогонять lint/static/IT набор.
+- Execution model выбирается вне repository instructions по сложности, риску, стоимости, доступности и задаче; prompt её не переключает. Repository requirements одинаковы для любой модели; повышенный reasoning effort — только при практической необходимости.
+- Capabilities/tools/agents использовать, когда они поддерживаются текущим клиентом/моделью и полезны задаче. Global Codex configuration и experimental/global settings не менять без явного scope/разрешения задачи.
+
+### Definition of Done (DoD) and verification
+
+- Начинать с самых узких meaningful checks; расширять по affected surface, failure, regression risk или обязательному gate. CI/security/release gates не ослаблять.
+- Behavior changes: production changes, meaningful tests и профильные checks с pass/fail и причиной. Для JVM/Gradle начинать с relevant module/task tests; полный `./gradlew test` нужен как обязательный repository/CI gate, при межмодульном/широком изменении, проблеме targeted check, требующей расширения, или существенном regression risk. Hardening/readiness: применимый lint/static/IT набор; обязательные security/payment/migration/concurrency/release проверки сохраняются. Не ослаблять tests/gates ради экономии.
+- Instruction/docs-only: review diff, `git diff --check`, ссылки, применимый существующий docs validator; без Gradle/test/detekt/IT ради такого edit.
+- Не повторять успешные checks при неизменных bytes/inputs/environment без нового риска; reuse привязывать к artifact/revision/environment. Изменение, сбой, устаревание или незакрытый риск требуют recheck. Для недоступной проверки указать причину, альтернативу и unverified; test/release gate не ослаблять.
 
 ### Engineering standards
-- Kotlin style: соблюдаем `ktlint`; читаемый и явный код без скрытой магии.
-- Static analysis: `detekt` обязателен для новых/изменённых участков.
+
+- Kotlin: читаемый явный код, `ktlint` и обязательный `detekt` для новых/изменённых Kotlin участков.
 - Коррутины: не проглатывать `CancellationException` через `catch (Throwable/Exception)`; если перехват широкого типа неизбежен — `CancellationException` обязательно rethrow.
 - Единый формат API ошибок: не вводить ad-hoc структуры, использовать общий error envelope проекта.
 
 ### Security guardrails (prod/stage)
+
 - Все security-critical проверки работают в режиме fail-closed для `prod`/`stage`.
 - Запрещено логировать чувствительные данные: `initData`, любые секреты, `qrSecret`, `Idempotency-Key`.
 - Использование `initData` в query-string в `prod` запрещено (допускаются только безопасные каналы передачи, принятые в проекте).
 - Любые исключения из правил выше требуют явного обоснования, теста и записи в документации.
 
 ### Test requirements for risky areas
-- Любые изменения в `routing`, `security`, `payments` обязаны сопровождаться:
-  - тестами через Ktor test host;
-  - и (где есть работа с БД/транзакциями/блокировками) интеграционными тестами на Postgres.
 
-### Recommended commands
-- Базовый прогон: `./gradlew clean test`
-- Интеграционные тесты: `./gradlew test -PrunIT=true`
-- Линт и статанализ: `./gradlew detekt ktlintCheck`
-- Форматирование + проверки + тесты: `scripts/verify.sh`
-- CI-like прогон локально: `scripts/verify.sh ci`
+- Изменения кода в `routing`, `security`, `payments` требуют тестов через Ktor test host; при работе с БД/транзакциями/блокировками — также интеграционных тестов на Postgres.
+
+### Commands by scope
+
+- Полный JVM набор (по условиям DoD): `./gradlew test`; Postgres IT: `./gradlew test -PrunIT=true`; Kotlin lint/static: `./gradlew detekt ktlintCheck`.
+- Полный локальный набор с форматированием: `scripts/verify.sh`; CI-like: `scripts/verify.sh ci`. Выбирать по scope/gates выше, не запускать весь список автоматически.
