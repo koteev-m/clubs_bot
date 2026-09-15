@@ -5,19 +5,29 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW_YAML_VALIDATOR="$ROOT_DIR/scripts/validate-workflow-yaml.rb"
 
 usage() {
-  echo "usage: scripts/selfcheck-quality-gates.sh [--ci-delegated-release-state]" >&2
+  echo "usage: scripts/selfcheck-quality-gates.sh [--ci-delegated-release-state|--ci-delegated-release-state-and-corrected-stage]" >&2
 }
 
 case "$#" in
   0)
     RELEASE_STATE_SELFCHECK_MODE="full"
+    CORRECTED_STAGE_SELFCHECK_MODE="full"
     ;;
   1)
-    if [ "$1" != "--ci-delegated-release-state" ]; then
-      usage
-      exit 2
-    fi
-    RELEASE_STATE_SELFCHECK_MODE="ci-delegated"
+    case "$1" in
+      --ci-delegated-release-state)
+        RELEASE_STATE_SELFCHECK_MODE="ci-delegated"
+        CORRECTED_STAGE_SELFCHECK_MODE="full"
+        ;;
+      --ci-delegated-release-state-and-corrected-stage)
+        RELEASE_STATE_SELFCHECK_MODE="ci-delegated"
+        CORRECTED_STAGE_SELFCHECK_MODE="ci-delegated"
+        ;;
+      *)
+        usage
+        exit 2
+        ;;
+    esac
     ;;
   *)
     usage
@@ -9520,7 +9530,7 @@ reject_contract("push trigger must target main") unless push.is_a?(Hash) && push
 reject_contract("permissions must be exactly contents: read") unless workflow["permissions"] == {"contents" => "read"}
 
 jobs = workflow["jobs"]
-lint = jobs.is_a?(Hash) ? jobs["lint"] : nil
+lint = jobs.is_a?(Hash) ? jobs["lint-core"] : nil
 reject_contract("lint job is missing") unless lint.is_a?(Hash)
 reject_contract("lint job must not have if") if lint.key?("if")
 reject_contract("lint job must not continue on error") if lint["continue-on-error"]
@@ -9756,11 +9766,11 @@ assert_lint_payment_runtime_rejected "lint-payment-step-if-always" "$lint_step_i
 lint_job_if="$(copy_payment_hardening_fixture lint-payment-job-if)"
 replace_payment_text_once \
   "$lint_job_if/.github/workflows/lint.yml" \
-  '  lint:
-    name: lint
+  '  lint-core:
+    name: lint-core
     runs-on: ubuntu-latest' \
-  '  lint:
-    name: lint
+  '  lint-core:
+    name: lint-core
     if: always()
     runs-on: ubuntu-latest'
 assert_lint_payment_runtime_rejected "lint-payment-job-if" "$lint_job_if"
@@ -11116,193 +11126,7 @@ echo "quality-gate: payment hardening contract verified"
 
 validate_lint_release_state_contract() {
   local workflow_file="$1"
-  ruby -I"$ROOT_DIR/scripts" -rvalidate-workflow-yaml \
-    - "$workflow_file" <<'RUBY'
-def reject_contract(message)
-  warn "lint-release-state-contract: #{message}"
-  exit 1
-end
-
-def reject_custom_shell_override(scope)
-  reject_contract("custom shell override is forbidden: #{scope}")
-end
-
-path = ARGV.fetch(0)
-begin
-  workflow = WorkflowYamlSafety.safe_load_workflow(
-    File.binread(path),
-    ".github/workflows/lint.yml"
-  )
-rescue WorkflowYamlSafety::ModelError, Psych::SyntaxError, SystemCallError, ArgumentError => error
-  reject_contract("workflow is unreadable or malformed: #{error.message}")
-end
-
-reject_contract("workflow name changed") unless workflow["name"] == "Lint"
-reject_custom_shell_override("workflow defaults") if workflow.key?("defaults")
-reject_contract("workflow-level concurrency is forbidden") if workflow.key?("concurrency")
-triggers = workflow["on"] || workflow[true]
-reject_contract("workflow triggers must be a mapping") unless triggers.is_a?(Hash)
-reject_contract("pull_request trigger is missing") unless triggers.key?("pull_request")
-push = triggers["push"]
-unless push.is_a?(Hash) && push["branches"] == ["main"]
-  reject_contract("push trigger must target only main")
-end
-unless workflow["permissions"] == {"contents" => "read"}
-  reject_contract("permissions must be exactly contents: read")
-end
-
-jobs = workflow["jobs"]
-reject_contract("jobs must be a mapping") unless jobs.is_a?(Hash)
-unless jobs.keys == ["lint", "release-state"]
-  reject_contract("jobs must be exactly lint and release-state")
-end
-lint = jobs["lint"]
-release_state = jobs["release-state"]
-unless lint.is_a?(Hash) && release_state.is_a?(Hash)
-  reject_contract("lint and release-state jobs must be mappings")
-end
-unless lint["name"] == "lint" && release_state["name"] == "release-state"
-  reject_contract("stable job names changed")
-end
-unless lint["runs-on"] == "ubuntu-latest" && release_state["runs-on"] == "ubuntu-latest"
-  reject_contract("jobs must use the supported runner")
-end
-reject_contract("lint timeout changed") unless lint["timeout-minutes"] == 120
-reject_contract("release-state timeout must be exactly 50 minutes") unless release_state["timeout-minutes"] == 50
-
-[["lint", lint], ["release-state", release_state]].each do |job_name, job|
-  reject_custom_shell_override("#{job_name} job defaults") if job.key?("defaults")
-  reject_contract("job-level if is forbidden") if job.key?("if")
-  reject_contract("jobs must not depend on each other") if job.key?("needs")
-  reject_contract("job continues on error") if job.key?("continue-on-error")
-  reject_contract("job-level permissions must inherit the shared read-only boundary") if job.key?("permissions")
-end
-
-lint_concurrency = lint["concurrency"]
-unless lint_concurrency == {
-  "group" => "lint-${{ github.workflow }}-${{ github.ref }}",
-  "cancel-in-progress" => true,
-}
-  reject_contract("lint concurrency must remain ref-oriented and cancelling")
-end
-candidate_sha = "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
-release_concurrency = release_state["concurrency"]
-unless release_concurrency == {
-  "group" => "release-state-#{candidate_sha}",
-  "cancel-in-progress" => false,
-}
-  reject_contract("release-state concurrency must be exact-SHA keyed and non-cancelling")
-end
-
-def checked_steps(job, job_name)
-  steps = job["steps"]
-  reject_contract("#{job_name} steps must be an array") unless steps.is_a?(Array)
-  unless steps.all? { |step| step.is_a?(Hash) && step["name"].is_a?(String) }
-    reject_contract("every #{job_name} step must be a named mapping")
-  end
-  names = steps.map { |step| step["name"] }
-  reject_contract("#{job_name} step names are duplicated") unless names.uniq.length == names.length
-  steps
-end
-
-def one_step(steps, name)
-  matches = steps.select { |step| step["name"] == name }
-  reject_contract("step #{name.inspect} must appear exactly once") unless matches.length == 1
-  matches.fetch(0)
-end
-
-lint_steps = checked_steps(lint, "lint")
-release_steps = checked_steps(release_state, "release-state")
-expected_lint_steps = [
-  "Checkout",
-  "Set up JDK 21",
-  "Gradle cache & setup",
-  "Payment hardening required runtime",
-  "Quality gate regression self-check",
-  "Run detekt gate (blocking, baseline-aware)",
-  "Run ktlint gate (baseline-aware; Kotlin changes only)",
-  "Upload lint reports",
-]
-expected_release_steps = [
-  "Checkout exact candidate",
-  "Verify Python 3.11+",
-  "Validate release-state structure",
-  "Run strict release-state suite",
-]
-unless lint_steps.map { |step| step["name"] } == expected_lint_steps
-  reject_contract("lint step inventory changed")
-end
-unless release_steps.map { |step| step["name"] } == expected_release_steps
-  reject_contract("release-state step inventory changed")
-end
-
-(lint_steps + release_steps).each do |step|
-  reject_contract("step continues on error") if step.key?("continue-on-error")
-  if step.key?("run") && step.key?("shell")
-    reject_custom_shell_override("run step")
-  end
-  run = step["run"]
-  reject_contract("step hides failure with || true") if run.is_a?(String) && run.include?("|| true")
-end
-
-checkout = one_step(release_steps, "Checkout exact candidate")
-reject_contract("release-state checkout is conditional") if checkout.key?("if")
-unless checkout["uses"] == "actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332"
-  reject_contract("release-state checkout action pin changed")
-end
-unless checkout["with"] == {
-  "ref" => candidate_sha,
-  "fetch-depth" => 0,
-  "persist-credentials" => false,
-}
-  reject_contract("release-state checkout must use the exact candidate SHA")
-end
-
-python_check = one_step(release_steps, "Verify Python 3.11+")
-python_run = python_check["run"]
-unless python_run.is_a?(String) && python_run.include?("sys.version_info < (3, 11)") &&
-    python_run.include?("raise SystemExit")
-  reject_contract("release-state Python version check is not fail-closed")
-end
-reject_contract("Python version check is conditional") if python_check.key?("if")
-
-delegated = one_step(lint_steps, "Quality gate regression self-check")
-structural = one_step(release_steps, "Validate release-state structure")
-suite = one_step(release_steps, "Run strict release-state suite")
-[delegated, structural, suite].each do |step|
-  reject_contract("mandatory invocation is conditional") if step.key?("if")
-end
-unless delegated["run"] == "./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state"
-  reject_contract("lint must invoke the exact delegated selfcheck mode")
-end
-unless structural["run"] == "./scripts/validate-quiesced-deployment.sh ."
-  reject_contract("release-state structural validator command changed")
-end
-strict_command = "PYTHONDONTWRITEBYTECODE=1 python3 scripts/tests/test_quiesced_release_state.py --strict-ci"
-reject_contract("release-state strict suite command changed") unless suite["run"] == strict_command
-
-all_runs = (lint_steps + release_steps).each_with_object([]) do |step, runs|
-  runs << step["run"] if step["run"].is_a?(String)
-end
-unless all_runs.count { |run| run.include?("scripts/validate-quiesced-deployment.sh") } == 1
-  reject_contract("structural validator must be invoked exactly once")
-end
-unless all_runs.count { |run| run.include?("scripts/tests/test_quiesced_release_state.py") } == 1
-  reject_contract("full release-state suite must be invoked exactly once")
-end
-unless all_runs.count { |run| run.include?("--ci-delegated-release-state") } == 1
-  reject_contract("lint delegation mode must be invoked exactly once")
-end
-if lint_steps.any? { |step| step["run"].is_a?(String) && step["run"].include?("test_quiesced_release_state") }
-  reject_contract("lint delegated mode must not own the full release-state suite")
-end
-release_surface = release_steps.flat_map { |step| [step["uses"], step["run"]] }.compact.join("\n")
-if release_surface.match?(/setup-java|gradle|docker/i)
-  reject_contract("release-state gained unrelated JDK, Gradle, or Docker setup")
-end
-
-puts "quality-gate: lint/release-state delegation contract verified"
-RUBY
+  ruby "$ROOT_DIR/scripts/validate-lint-workflow.rb" "$workflow_file"
 }
 
 copy_lint_release_state_fixture() {
@@ -11343,8 +11167,8 @@ if fixture_case == "shell-workflow-default":
     )
 elif fixture_case == "shell-lint-job-default":
     replace_once(
-        "  lint:\n    name: lint\n",
-        f"  lint:\n    name: lint\n    defaults:\n      run:\n        shell: {fail_open_shell}\n",
+        "  lint-core:\n    name: lint-core\n",
+        f"  lint-core:\n    name: lint-core\n    defaults:\n      run:\n        shell: {fail_open_shell}\n",
     )
 elif fixture_case == "shell-release-job-default":
     replace_once(
@@ -11436,15 +11260,15 @@ elif fixture_case == "suite-fail-open":
     replace_once(f"        run: {strict_command}\n", f"        run: {strict_command} || true\n")
 elif fixture_case == "lint-delegation-removed":
     replace_once(
-        "        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n",
+        "        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage\n",
         "        run: ./scripts/selfcheck-quality-gates.sh\n",
     )
 elif fixture_case == "lint-delegation-unknown":
-    replace_once("--ci-delegated-release-state\n", "--ci-delegated-release-state-unknown\n")
+    replace_once("--ci-delegated-release-state-and-corrected-stage\n", "--ci-delegated-release-state-and-corrected-stage-unknown\n")
 elif fixture_case == "lint-delegation-duplicated":
     replace_once(
-        "        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n",
-        "        run: |\n          ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n          ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state\n",
+        "        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage\n",
+        "        run: |\n          ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage\n          ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage\n",
     )
 elif fixture_case == "jobs-dependent":
     replace_once(
@@ -11457,9 +11281,9 @@ elif fixture_case == "timeout-excessive":
     replace_once("    timeout-minutes: 50\n", "    timeout-minutes: 65\n")
 elif fixture_case in ("lint-timeout-former", "lint-timeout-below", "lint-timeout-above"):
     timeout = {"lint-timeout-former": 30, "lint-timeout-below": 119, "lint-timeout-above": 121}[fixture_case]
-    replace_once("    timeout-minutes: 120\n", f"    timeout-minutes: {timeout}\n")
+    replace_once("  lint-core:\n    name: lint-core\n    runs-on: ubuntu-latest\n    timeout-minutes: 120\n", f"  lint-core:\n    name: lint-core\n    runs-on: ubuntu-latest\n    timeout-minutes: {timeout}\n")
 elif fixture_case == "lint-timeout-removed":
-    replace_once("    timeout-minutes: 120\n", "")
+    replace_once("  lint-core:\n    name: lint-core\n    runs-on: ubuntu-latest\n    timeout-minutes: 120\n", "  lint-core:\n    name: lint-core\n    runs-on: ubuntu-latest\n")
 else:
     raise SystemExit(f"unknown lint release-state fixture case: {fixture_case}")
 
@@ -11888,7 +11712,17 @@ fi
 
 echo "quality-gate: Docker workflow/context contract verified"
 
+# Corrected-stage delegation is permitted only by the validated full topology.
 ruby "$ROOT_DIR/scripts/validate-corrected-stage-workflow.rb" "$ROOT_DIR"
-PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_corrected_stage_release.py"
+ruby "$ROOT_DIR/scripts/validate-lint-workflow.rb" "$ROOT_DIR/.github/workflows/lint.yml"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
+python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check
+if [ "$CORRECTED_STAGE_SELFCHECK_MODE" = "full" ]; then
+  PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_corrected_stage_release.py"
+else
+  [ "$CORRECTED_STAGE_SELFCHECK_MODE" = "ci-delegated" ] ||
+    fail "unknown corrected-stage selfcheck mode"
+  echo "corrected-stage-suite: DELEGATED_TO_REQUIRED_LINT_SHARDS"
+fi
 
 echo "selfcheck: OK"

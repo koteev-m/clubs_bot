@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  lint:
-    name: lint
+  lint-core:
+    name: lint-core
     runs-on: ubuntu-latest
     timeout-minutes: 120
     concurrency:
@@ -36,9 +36,6 @@ jobs:
           cache-disabled: false
           gradle-version: wrapper
           cache-read-only: false
-          cache-key-prefix: >
-            ${{ runner.os }}-gradle-
-            ${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'settings.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
 
       - name: Payment hardening required runtime
         run: |
@@ -47,7 +44,7 @@ jobs:
             .
 
       - name: Quality gate regression self-check
-        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state
+        run: ./scripts/selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage
 
       - name: Run detekt gate (blocking, baseline-aware)
         run: ./gradlew detektGate --console=plain --stacktrace
@@ -67,6 +64,139 @@ jobs:
             **/build/reports/detekt/**
             **/build/reports/ktlint/**
           if-no-files-found: ignore
+
+  corrected-authority:
+    name: corrected-authority
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: lint-corrected-authority-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Python 3.11+
+        run: |
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info < (3, 11):
+              raise SystemExit(f"Python 3.11+ required; got {sys.version.split()[0]}")
+          print(f"corrected-stage-python: {sys.version.split()[0]}")
+          PY
+
+      - name: Run complete corrected-stage shard
+        run: python3 -B scripts/run-corrected-stage-shard.py authority
+
+  corrected-executor:
+    name: corrected-executor
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: lint-corrected-executor-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Python 3.11+
+        run: |
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info < (3, 11):
+              raise SystemExit(f"Python 3.11+ required; got {sys.version.split()[0]}")
+          print(f"corrected-stage-python: {sys.version.split()[0]}")
+          PY
+
+      - name: Run complete corrected-stage shard
+        run: python3 -B scripts/run-corrected-stage-shard.py executor
+
+  corrected-import-root:
+    name: corrected-import-root
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: lint-corrected-import-root-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Python 3.11+
+        run: |
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info < (3, 11):
+              raise SystemExit(f"Python 3.11+ required; got {sys.version.split()[0]}")
+          print(f"corrected-stage-python: {sys.version.split()[0]}")
+          PY
+
+      - name: Run complete corrected-stage shard
+        run: python3 -B scripts/run-corrected-stage-shard.py import-root
+
+  corrected-support:
+    name: corrected-support
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: lint-corrected-support-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify Python 3.11+
+        run: |
+          python3 - <<'PY'
+          import sys
+
+          if sys.version_info < (3, 11):
+              raise SystemExit(f"Python 3.11+ required; got {sys.version.split()[0]}")
+          print(f"corrected-stage-python: {sys.version.split()[0]}")
+          PY
+
+      - name: Run complete corrected-stage shard
+        run: python3 -B scripts/run-corrected-stage-shard.py support
+
+  lint:
+    name: lint
+    if: always()
+    needs: [lint-core, corrected-authority, corrected-executor, corrected-import-root, corrected-support]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every lint worker to succeed
+        env:
+          LINT_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          expected = {"lint-core", "corrected-authority", "corrected-executor", "corrected-import-root", "corrected-support"}
+          needs = json.loads(os.environ["LINT_NEEDS_JSON"])
+          if not isinstance(needs, dict) or set(needs) != expected:
+              raise SystemExit("lint gate: missing or unexpected worker")
+          failed = [name for name in sorted(expected) if not isinstance(needs[name], dict) or needs[name].get("result") != "success"]
+          if failed:
+              raise SystemExit("lint gate: workers did not succeed: " + ", ".join(failed))
+          print("lint gate: every mandatory worker succeeded")
+          PY
 
   release-state:
     name: release-state

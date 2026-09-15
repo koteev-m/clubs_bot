@@ -38,14 +38,16 @@ Task order by mode:
 - `ci` mode: `lint` (detektGate + changed-files ktlint) → `clean coverageGate` → resolved production dependency graph + `app-bot` runtime distribution → `test -PrunIT=true` → `secret-scan`.
 - `lint` mode: `detektGate` + changed-files `ktlint` (тот же контракт, что и в GitHub Actions lint gate).
 - `secret-scan` mode: локальный gitleaks через Docker (тот же образ, что в GitHub Actions). Если Docker недоступен — шаг завершается с понятной ошибкой.
-- `scripts/selfcheck-quality-gates.sh` без аргументов: полный локальный regression selfcheck для shell-обвязки quality gates. Он включает structural/inventory проверки release-state и напрямую запускает strict suite из 73 тестов, поэтому не является быстрым smoke. Режим `--ci-delegated-release-state` предназначен только для Lint workflow: он сохраняет structural validation, точный inventory из 73 тестов и fail-closed workflow contract, но передаёт единственный непосредственный запуск heavy suite отдельному exact-head job.
+- `scripts/selfcheck-quality-gates.sh` без аргументов: полный локальный regression selfcheck для shell-обвязки quality gates, включая strict release-state suite и полный corrected-stage suite. Старый режим `--ci-delegated-release-state` делегирует только release-state и по-прежнему полностью выполняет corrected-stage. Lint использует узкий режим `--ci-delegated-release-state-and-corrected-stage`: structural validation, inventory и regression contracts сохраняются; выполнение suites передаётся обязательным workflow jobs.
 
 ## PR quality gates (blocking)
 
 Every PR is blocked until all gates are green:
 
-- **Lint workflow** (`.github/workflows/lint.yml`) содержит два независимых параллельных job: `lint` и `release-state`. `lint` сохраняет обязательный Payment hardening runtime, bounded delegated selfcheck, `./gradlew detektGate`, changed-files `ktlint` и upload отчётов. `release-state` checkout-ит exact PR head SHA (или `github.sha` для push), запускает structural validator и ровно один strict full run authoritative 73-test suite; SHA-keyed non-cancelling concurrency не позволяет новому SHA отменить evidence предыдущего SHA.
-  Локальный no-argument selfcheck при этом остаётся полным и сам запускает все 73 теста.
+- **Lint workflow** (`.github/workflows/lint.yml`) запускает параллельно `lint-core`, четыре corrected-stage shards и отдельный `release-state`. Core сохраняет обязательный Payment hardening runtime, delegated selfcheck, `./gradlew detektGate`, changed-files `ktlint` и upload отчётов на каждом PR/main run. Финальный job с именем `lint` использует `if: always()` и принимает только явный `success` от core и всех четырёх shards: failure, cancelled, skipped или отсутствующий worker блокируют gate.
+  `release-state` остаётся отдельным required context и не входит в aggregator: он checkout-ит exact PR head SHA (или `github.sha` для push), запускает structural validator и ровно один strict full run authoritative 73-test suite. Его SHA-keyed non-cancelling concurrency сохранён. Core и каждый corrected shard сохраняют ref-oriented cancelling policy в раздельных группах; sibling jobs не отменяют друг друга.
+  `scripts/corrected-stage-shards.json` распределяет все unittest classes между `authority`, `executor`, `import-root` и `support`. `python3 -B scripts/run-corrected-stage-shard.py --check` сверяет исходные test declarations, полный unittest discovery и mapping; каждый discovered test принадлежит ровно одному shard. Новые методы mapped class включаются автоматически, новый unmapped class или duplicate/omitted coverage блокируют проверку. Shard runner отклоняет skips, expected failures и неполное выполнение. Полный suite и production executor/helper не меняются.
+  Локальная проверка topology: `ruby scripts/validate-lint-workflow.rb .github/workflows/lint.yml` и `python3 -B scripts/tests/test_lint_sharding.py`. Каждый shard выполняется командой `python3 -B scripts/run-corrected-stage-shard.py <shard>` в свежем процессе; no-argument selfcheck продолжает напрямую выполнять оба полных suites.
   Baseline wiring: `app-bot` uses `config/detekt/baseline-main.xml` + `config/detekt/baseline-test.xml`; остальные модули используют `config/detekt/baseline-<module>.xml`.
   Historical debt фиксируется baseline-файлами, новые нарушения в PR блокируют CI.
 - **Coverage gate** (`.github/workflows/coverage.yml`) runs `./gradlew coverageGate` (и верификация, и генерация `jacocoTestReport` для upload артефактов).
@@ -59,7 +61,7 @@ Every PR is blocked until all gates are green:
 
 No personal API key is required for this architecture. Main-only dependency submission uses GitHub's built-in token, while Trivy remains pinned to the repository's approved action and binary versions. Do not add new vulnerability suppressions to make a finding green; upgrade the dependency or document a narrowly scoped, time-bounded exception through the normal security review.
 
-Repository workflow wiring само по себе не изменяет branch protection или rulesets. Новый `release-state` job ещё не настроен как required check; точная наблюдаемая check identity будет подтверждена только после отдельного будущего push. До этого ожидаемое имя `Lint / release-state` нельзя считать подтверждённым GitHub context.
+Repository workflow wiring само по себе не изменяет branch protection или rulesets. Read-only проверка GitHub ruleset `main-required-ci` (ID `21949427`, 2026-09-15) подтвердила required contexts `lint` и `release-state`, оба от GitHub Actions, со strict required status checks. Sharding сохраняет эти имена и не изменяет GitHub settings.
 
 ### Required GitHub repository settings
 

@@ -1,0 +1,14 @@
+{
+  "authority": ["AuthorityRegressionTest"],
+  "executor": ["CorrectedExecutorTest"],
+  "import-root": ["ImportRootRegressionTest"],
+  "support": [
+    "CaptureCancellationOwnershipTest",
+    "CaptureGroupCleanupTest",
+    "FixtureBootstrapTest",
+    "PriorApiDiagnosticsTest",
+    "ProducerLogEscapeCompatibilityTest",
+    "SshBoundaryDiagnosticsTest",
+    "V3EvidenceTest"
+  ]
+}
