@@ -446,6 +446,108 @@ REST interfaces: [run attempt](https://docs.github.com/en/rest/actions/workflow-
 [attempt jobs и job logs](https://docs.github.com/en/rest/actions/workflow-jobs),
 [repository contents](https://docs.github.com/en/rest/repos/contents#get-repository-content).
 
+**CLB-91 — runner SSH boundary diagnostics (local continuation, 2026-09-12).**
+Hosted inspect [34707584391](https://github.com/koteev-m/clubs_bot/actions/runs/34707584391),
+attempt `1`, run number `3`, job `103590359083`, head
+`ff6913973340f5b96819cbf0c0da2daa2ecf4bcd` завершился
+`corrected-stage:v=1 result=blocked category=STATUS_UNAVAILABLE`.
+Предыдущее расследование подтвердило prior/execution authority, загрузку deployment key,
+local pin validation и запуск SSH child. Session establishment / remote principal guard —
+первая недоказанная граница. Candidate/claim/resume отсутствуют. Stderr был подавлен,
+а `status("inspect")` отвергал nonzero до разбора stdout. Поэтому retained evidence не различает
+transport, bootstrap и helper failure:
+`CLB_91_INSPECT_STATUS_UNAVAILABLE_EVIDENCE_INSUFFICIENT`.
+Новые milestones ниже в этом historical run **не существовали** и его root cause не устанавливают.
+
+Independent review локального patch нашёл P2 F1: заранее известный stdout prefix мог ложно
+повысить diagnostic boundary до helper при отказавшем principal guard. F1 исправлен private
+transport-bound framing: каждый transport получает отдельный случайный 256-bit nonce, переданный
+только отдельным полем существующего bounded stdin payload. Nonce не входит в SSH argv,
+environment, command text, helper stdin/control/argv/environment или публичные outputs.
+Bootstrap выдаёт отдельный HMAC-SHA256 tag для каждой exact boundary; runner принимает только
+tags текущего вызова. Сам nonce не выводится. Helper не получает ни ключ, ни private framing.
+Это аутентификация диагностических меток в пределах доверенного runner/bootstrap и private stdin
+transport, не execution authority и не защита от скомпрометированного SSH peer/remote OS.
+
+`principal_ok` теперь выдаётся самим bootstrap, который exec-ится только после прежних двух
+principal guards; `bootstrap_entered` — после Python startup/isolation guard и чтения private
+binding. До этого чтения отсутствие метки не доказывает отказ самого principal guard.
+`bootstrap_ready` следует framing, implementation hash/size/blob и private control-FD checks;
+`helper_started` — успешному `Popen` Bash, до передачи approved helper bytes. Последний marker
+доказывает создание процесса, но не parsing helper или его внутренние root/config/state checks.
+Bootstrap не заменяет их. Private prefix полностью удаляется перед canonical status/candidate/ACK
+parsing. Startup noise, wrong/missing tag, duplicate/reordered/skipped/partial frame или framing
+в helper stdout закрываются целиком: public boundary `local`, fixed `framing_invalid`, без raw bytes
+и без successful canonical parsing. На local capture failure сохраняется его отдельная категория.
+
+На failure публикуется только одна bounded строка:
+
+```text
+corrected-ssh:v=1 boundary=<fixed_boundary> failure=<fixed_failure>
+```
+
+`boundary` — последняя последовательно доказанная граница из списка выше либо `local`, если
+remote boundary не доказана. Это evidence, а не authorization. Allowlist `failure`:
+
+| Fixed failure | Точное значение |
+| --- | --- |
+| `capture_timeout` | Локальный capture исчерпал deadline. |
+| `capture_output_limit` | Capture превысил stdout bound; body отброшен, milestones не сохраняются. |
+| `capture_interrupted` | Локальный capture получил обработанный runner signal либо явный `InterruptedError`. |
+| `capture_failed` | Local capture OSError, включая spawn; terminal остаётся `LOCAL_FAILURE`. |
+| `capture_cleanup_failed` | Не удалось доказать cleanup собственной process group/reap/close; terminal `LOCAL_FAILURE`. |
+| `framing_invalid` | Private framing невалиден; все diagnostic boundary claims отброшены, canonical parsing не разрешён. |
+| `child_signal` | Наблюдаемый отрицательный returncode локального SSH child; не вывод о remote signal. |
+| `principal_not_proven` | Nonzero без доказанного principal-passed boundary; причина connect/auth/host-key/guard не различается. |
+| `bootstrap_not_ready` | Principal passed, но bootstrap-ready boundary не доказана. |
+| `helper_not_reached` | Bootstrap ready, но успешный запуск Bash child не доказан. |
+| `helper_blocked` | После helper-started получен только exact `corrected-start:v=1 result=blocked` с одним LF. |
+| `child_nonzero_unknown` | Helper-started доказан, но bounded body пустой, malformed или содержит иной/дополнительный output. |
+
+Capture использует внутреннюю причину завершения: обычные child exit `124`/`125` больше не
+считаются timeout/output-limit в SSH diagnostics. Общий `capture()` сохраняет прежний tuple API
+и compatibility behavior для остальных callers, включая prior API adapter. Production обрабатывает
+только `SIGHUP`, `SIGINT`, `SIGTERM`. На serial main-thread capture его existing handler записывает
+scoped cancellation flag без исключения: scope установлен до `Popen` и снят только после cleanup
+либо failed spawn. Capture проверяет flag между bounded selector/wait iterations; EINTR retry не
+теряет cancellation. Final outcome выбирается после снятия scope, поэтому signal на последнем
+handoff не превращается в cached success. Несколько signals внутри scope дают один interruption
+outcome после cleanup: compatibility code `124` с internal `capture_interrupted`. Cleanup failure
+имеет приоритет и остаётся fail-closed. Signal mask и handlers capture не изменяет, child наследует
+исходную mask; искусственной очереди blocked signals не создаётся. Вне scope сохраняется прежний
+terminal `CaptureInterrupted` / `LOCAL_FAILURE`. Это контракт serial production callers, не новый
+параллельный capture API или изменение signal policy за пределами invocation.
+
+P2 F2 review выявил inherited cleanup defect: живой descendant мог пережить capture, если leader
+уже завершился. Capture теперь удерживает leader unreaped (`waitid/WNOWAIT`) до единственного
+`SIGKILL` собственной process group, созданной `start_new_session=True`. Cleanup выполняется при
+любом исходе, включая success/nonzero и EOF после закрытия descendant stdout; затем leader
+reap-ится с bound 2 s, pipes закрываются. Final independent review обнаружил ещё один P2:
+cancellation после spawn или на входе в finalizer могла обойти cleanup. Scoped deferral теперь
+охватывает оба перехода заранее; внутри них handler не может unwind-ить ownership. Локальные
+regressions доставляют реальные supported signals непосредственно на обоих edges, в том числе
+pending и повторные signals, и проверяют descendant EOF, single kill/reap/close и signal state.
+`ProcessLookupError` безвреден. Darwin `EPERM` для zombie-only group допустим только при последующем
+доказанном отсутствии группы после reap; проверка signal 0 не повторяет command/kill. Иная ошибка
+cleanup закрывается фиксированной категорией без OS text. Гарантия относится к оставшимся членам
+созданной process group: им посылается `SIGKILL`, leader boundedly reap-ится. Она не распространяется
+на descendants, намеренно покинувшие session/group, и не обещает время реакции зависшего kernel task.
+Никакой сырой body,
+stderr, exception text, host/user/path/key не печатается и не сохраняется как diagnostic artifact;
+stderr остаётся `DEVNULL`, nonzero stdout после классификации отбрасывается. Capture bounds,
+единственный SSH attempt и strict pinned-host trust сохранены. Retries/fallback отсутствуют.
+`STATUS_UNAVAILABLE` по-прежнему возникает до status parsing на nonzero; success/readiness,
+prior verification, root-binding и one-use resume authorization predicates не меняются.
+
+Approved helper **byte-for-byte unchanged**: revision
+`b8bcd3029f9397963be5d2b92839b5e0f132933a`, blob
+`fc09080ba4864133ca23ec5c777339b881094279`, size `174422`, SHA-256
+`48bcbafde22b90dc3902cac0ba80754239964466ce612d11565dd1fdeb75e2ec`.
+Внутренние причины helper не диагностируются. `inspect` остаётся read-only и не вызывает claim/resume.
+Protected root binding по handoff отсутствует; эта локальная работа его не читает и не provision-ит,
+не создаёт recovery authority. Будущий inspect требует **отдельного разрешения** после review/publication;
+этот шаг не dispatch-ит workflow и не обращается к stage.
+
 **Fixed binding и authoritative consumed-state (F2/root).** `CLB82_AUTHORIZED_ROOT_BINDING` — несекретный
 canonical JSON pin из protected stage configuration, вне server state tree; workflow-dispatch override отсутствует.
 Он связывает exact incident, новую implementation identity, principal name/UID, Compose path/project/service,

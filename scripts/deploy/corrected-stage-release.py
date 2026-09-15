@@ -6,6 +6,7 @@ if __name__ == "__main__" and not (sys.flags.isolated and sys.flags.no_site):
 
 import contextlib
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -92,8 +93,77 @@ def validate_request(env):
         require(not env.get("AUTHORIZATION"), "INSPECT_AUTHORIZATION_INVALID")
 
 
+class CaptureResult:
+    """Private bounded bytes plus local termination provenance, never a log record."""
+    __slots__ = ("code", "output", "failure")
+
+    def __init__(self, code, output, failure=None):
+        self.code, self.output, self.failure = code, output, failure
+
+
+class CaptureInterrupted(BaseException):
+    """Signal cancellation that selectors cannot swallow as an EINTR retry."""
+
+
+class CaptureCleanupError(OSError):
+    """The owned process group could not be cleaned up; never publish OS text."""
+
+
+# main() runs captures serially on the signal-handling thread. During a capture
+# the existing handler records cancellation without unwinding any ownership
+# transition. No signal mask/handler changes are inherited by the child.
+_capture_cancellation = None
+
+
+def interrupted(_signum, _frame):
+    if _capture_cancellation is not None:
+        _capture_cancellation[0] = True
+        return
+    for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        signal.signal(watched, signal.SIG_IGN)
+    raise CaptureInterrupted
+
+
 def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+    """Keep the existing tuple API, including its legacy 124/125 conventions."""
+    result = capture_result(argv, payload, timeout=timeout, limit=limit, env=env,
+                            pass_fds=pass_fds, spawn_failed=spawn_failed)
+    return result.code, result.output
+
+
+def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+    """Own cancellation before spawn, through cleanup, until outcome selection."""
+    global _capture_cancellation
+    cancellation = [False]
+    previous = _capture_cancellation
+    result, failure = None, None
+    _capture_cancellation = cancellation
+    try:
+        result = _capture_owned(argv, payload, timeout=timeout, limit=limit, env=env,
+                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation)
+    except BaseException as error:
+        failure = error
+    finally:
+        # This handoff happens only after cleanup (or failed spawn). A signal
+        # before it is recorded; one after it uses the original terminal path.
+        # Check the recorded outcome AFTER handoff, never cache a success first.
+        _capture_cancellation = previous
+    if isinstance(failure, CaptureCleanupError):
+        raise failure
+    if cancellation[0]:
+        if previous is not None:
+            previous[0] = True
+        return CaptureResult(124, result.output if result is not None else b"", "capture_interrupted")
+    if failure is not None:
+        raise failure
+    return result
+
+
+def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation):
     """No named stdout/stderr captures; bounded memory and bounded process lifetime."""
+    output = bytearray()
+    offset = 0
+    deadline = time.monotonic() + timeout
     try:
         child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds,
@@ -102,9 +172,9 @@ def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=()
         if spawn_failed is not None:
             spawn_failed()
         raise
-    output = bytearray()
-    offset = 0
-    deadline = time.monotonic() + timeout
+    # Keep the leader unreaped until killpg: its PID pins the owned group ID,
+    # even after exit, so cleanup cannot target a recycled PID/process group.
+    group = child.pid
     try:
         with selectors.DefaultSelector() as poll:
             os.set_blocking(child.stdin.fileno(), False)
@@ -115,9 +185,11 @@ def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=()
             else:
                 child.stdin.close()
             while poll.get_map():
+                if cancellation[0]:
+                    return CaptureResult(124, bytes(output), "capture_interrupted")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    return 124, bytes(output)
+                    return CaptureResult(124, bytes(output), "capture_timeout")
                 for key, _ in poll.select(min(remaining, 0.2)):
                     if key.fileobj is child.stdin:
                         try:
@@ -134,16 +206,62 @@ def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=()
                         else:
                             output.extend(chunk)
                             if len(output) > limit:
-                                return 125, b""
-            return child.wait(timeout=max(0.01, deadline - time.monotonic())), bytes(output)
-    except (subprocess.TimeoutExpired, InterruptedError):
-        return 124, bytes(output)
+                                return CaptureResult(125, b"", "capture_output_limit")
+            while True:
+                if cancellation[0]:
+                    return CaptureResult(124, bytes(output), "capture_interrupted")
+                exited = os.waitid(os.P_PID, group, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                if exited is not None:
+                    code = exited.si_status if exited.si_code == os.CLD_EXITED else -exited.si_status
+                    return CaptureResult(code, bytes(output))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return CaptureResult(124, bytes(output), "capture_timeout")
+                time.sleep(min(remaining, .01))
+    except subprocess.TimeoutExpired:
+        return CaptureResult(124, bytes(output), "capture_timeout")
+    except (InterruptedError, CaptureInterrupted):
+        return CaptureResult(124, bytes(output), "capture_interrupted")
     finally:
-        if child.poll() is None:
-            os.killpg(child.pid, signal.SIGKILL)
+        # No command retry. Terminate this invocation's group on every outcome,
+        # including an exited leader with live descendants and a successful EOF.
+        # Cancellation is already deferred, including entry into this finally.
+        cleanup_failed = False
+        permission_denied = False
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            permission_denied = True
+        except OSError:
+            cleanup_failed = True
+        try:
             child.wait(timeout=2)
-        child.stdin.close()
-        child.stdout.close()
+        except (OSError, subprocess.TimeoutExpired):
+            cleanup_failed = True
+        finally:
+            for stream in (child.stdin, child.stdout):
+                try:
+                    if not stream.closed:
+                        stream.close()
+                except OSError:
+                    cleanup_failed = True
+        if permission_denied:
+            # Darwin can report EPERM for an unreaped, zombie-only group.
+            # Accept that case only if the group is now proven absent. This
+            # is a non-mutating existence probe after reap, never another
+            # kill against a group ID that could have been recycled.
+            try:
+                os.killpg(group, 0)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                cleanup_failed = True
+            else:
+                cleanup_failed = True
+        if cleanup_failed:
+            raise CaptureCleanupError() from None
 
 
 # Fixed transport contract only; authority/source/response verification stays in
@@ -338,11 +456,89 @@ def binding_control(env, snapshot):
                 token=secrets.token_hex(32), principal=env["SSH_USER"])
 
 
+# Per-transport authenticated framing, removed before status/ACK parsing.
+# The dedicated key travels only in private stdin, not command text/control.
+REMOTE_BOUNDARIES = ("principal_ok", "bootstrap_entered", "bootstrap_ready", "helper_started")
+HELPER_BLOCKED = b"corrected-start:v=1 result=blocked\n"
+
+
+def remote_milestones(nonce):
+    require(isinstance(nonce, bytes) and len(nonce) == 32, "DIAGNOSTIC_BINDING_INVALID")
+    frames = []
+    for boundary in REMOTE_BOUNDARIES:
+        message = b"corrected-remote-boundary:v=2 " + boundary.encode()
+        frames.append(message + b" " + hmac.digest(nonce, message, "sha256").hex().encode() + b"\n")
+    return tuple(frames)
+
+
+def ssh_result(result, nonce):
+    """Consume bounded private framing; discard every nonzero child body."""
+    raw = result.output
+    reached = 0
+    markers = remote_milestones(nonce)
+    for marker in markers:
+        if not raw.startswith(marker):
+            break
+        raw = raw[len(marker):]
+        reached += 1
+    # Any bytes before completion of the prefix, or framing in helper output,
+    # invalidate framing as a whole. Never scan past startup/application noise.
+    malformed = ((reached < len(markers) and bool(raw))
+                 or b"corrected-remote-boundary:" in raw
+                 or (result.code == 0 and reached != len(markers)))
+    if malformed:
+        reached, raw = 0, b""
+    if result.code == 0 and result.failure is None and not malformed:
+        return 0, raw
+    if result.failure in {"capture_timeout", "capture_output_limit", "capture_interrupted"}:
+        failure = result.failure
+    elif malformed:
+        failure = "framing_invalid"
+    elif result.code < 0:
+        failure = "child_signal"
+    elif reached == 0:
+        failure = "principal_not_proven"
+    elif reached < 3:
+        failure = "bootstrap_not_ready"
+    elif reached == 3:
+        failure = "helper_not_reached"
+    elif raw == HELPER_BLOCKED:
+        failure = "helper_blocked"
+    else:
+        failure = "child_nonzero_unknown"
+    boundary = REMOTE_BOUNDARIES[reached - 1] if reached else "local"
+    print(f"corrected-ssh:v=1 boundary={boundary} failure={failure}", flush=True)
+    return result.code, b""
+
+
+def ssh_capture(argv, payload, *, diagnostic_nonce, **kwargs):
+    try:
+        result = capture_result(argv, payload, **kwargs)
+    except CaptureCleanupError:
+        print("corrected-ssh:v=1 boundary=local failure=capture_cleanup_failed", flush=True)
+        raise
+    except OSError:
+        # Preserve the existing LOCAL_FAILURE terminal for local capture errors.
+        print("corrected-ssh:v=1 boundary=local failure=capture_failed", flush=True)
+        raise
+    return ssh_result(result, diagnostic_nonce)
+
+
 # The transport carries helper and bounded control bytes over stdin. FD 4 is a
 # private data capture, never a caller-supplied root/lock FD. No token in argv.
 REMOTE_BOUND_BOOTSTRAP = r"""
-import hashlib,json,os,stat,struct,subprocess,sys,tempfile
+import hashlib,hmac,json,os,stat,struct,subprocess,sys,tempfile
 if not (sys.flags.isolated and sys.flags.no_site):raise SystemExit(1)
+nonce=sys.stdin.buffer.read(32)
+if len(nonce)!=32:raise SystemExit(1)
+markers=[]
+for boundary in ('principal_ok','bootstrap_entered','bootstrap_ready','helper_started'):
+ message=b'corrected-remote-boundary:v=2 '+boundary.encode()
+ markers.append(message+b' '+hmac.digest(nonce,message,'sha256').hex().encode()+b'\n')
+del nonce
+# This exact bootstrap is exec'd only after both principal guards. The nonce
+# never reaches Bash, its argv/environment, helper stdin or control descriptor.
+sys.stdout.buffer.write(markers[0]+markers[1]);sys.stdout.buffer.flush()
 header=sys.stdin.buffer.read(8)
 if len(header)!=8:raise SystemExit(1)
 csize,hsize=struct.unpack('!II',header)
@@ -358,8 +554,12 @@ with tempfile.TemporaryFile(dir=os.path.realpath('/tmp')) as data:
  if not (stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode)==0o600 and info.st_uid==os.geteuid() and info.st_nlink==0):raise SystemExit(1)
  data.write(control);data.flush();data.seek(0)
  os.dup2(data.fileno(),4,inheritable=True)
- result=subprocess.run(['bash','--noprofile','--norc','-s','--',*sys.argv[1:]],input=helper,pass_fds=(4,),env=env)
- raise SystemExit(result.returncode)
+ sys.stdout.buffer.write(markers[2]);sys.stdout.buffer.flush()
+ with subprocess.Popen(['bash','--noprofile','--norc','-s','--',*sys.argv[1:]],stdin=subprocess.PIPE,pass_fds=(4,),env=env) as child:
+  # Popen succeeded; helper input is sent only after this flushed milestone.
+  sys.stdout.buffer.write(markers[3]);sys.stdout.buffer.flush()
+  child.communicate(helper)
+  raise SystemExit(child.returncode)
 """
 
 
@@ -416,11 +616,6 @@ def execute(env, snapshot, remote, control):
 
 def main():
     os.umask(0o077)
-    def interrupted(_signum, _frame):
-        for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-            signal.signal(watched, signal.SIG_IGN)
-        raise InterruptedError
-
     for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(watched, interrupted)
     env = os.environ.copy()
@@ -454,23 +649,24 @@ def main():
         child_env = {k: env[k] for k in ("PATH", "SSH_AUTH_SOCK") if k in env}
         child_env["LC_ALL"] = "C"
 
-        def transport(data, command, timeout):
+        def transport(data, command, timeout, nonce):
             os.lseek(descriptor, 0, os.SEEK_SET)
             command = ('test "$(id -un)" = ' + shlex.quote(env["SSH_USER"])
                        + ' && test "$(id -u)" != 0 && exec ' + command)
-            return capture(["ssh", "-p", env["SSH_PORT"], "-F", "/dev/null",
+            return ssh_capture(["ssh", "-p", env["SSH_PORT"], "-F", "/dev/null",
                             "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                             "-o", f"UserKnownHostsFile={reference}", "-o", "GlobalKnownHostsFile=/dev/null",
                             "-o", "KnownHostsCommand=none", "-o", "VerifyHostKeyDNS=no", "-o", "UpdateHostKeys=no",
                             "-o", "ProxyCommand=none", "-o", "ProxyJump=none", "-o", "PermitLocalCommand=no",
                             "-o", "ConnectTimeout=15", "-o", "ConnectionAttempts=1", "--",
                             env["SSH_USER"] + "@" + env["SSH_HOST"], command],
-                           data, timeout=timeout, env=child_env, pass_fds=(descriptor,))
+                           data, diagnostic_nonce=nonce, timeout=timeout, env=child_env, pass_fds=(descriptor,))
 
         def remote(data, argv, timeout, control):
             control_bytes = json.dumps(control, sort_keys=True, separators=(",", ":")).encode()
-            payload = struct.pack("!II", len(control_bytes), len(data)) + control_bytes + data
-            return transport(payload, shlex.join(["python3", "-I", "-S", "-B", "-c", REMOTE_BOUND_BOOTSTRAP, *argv]), timeout)
+            nonce = secrets.token_bytes(32)
+            payload = nonce + struct.pack("!II", len(control_bytes), len(data)) + control_bytes + data
+            return transport(payload, shlex.join(["python3", "-I", "-S", "-B", "-c", REMOTE_BOUND_BOOTSTRAP, *argv]), timeout, nonce)
 
         print("corrected-stage-provenance:" + json.dumps({**INCIDENT,
               "implementation": control["implementation"], "binding_sha256": (hashlib.sha256(json.dumps(control["binding"], sort_keys=True, separators=(",", ":")).encode()).hexdigest() if control["binding"] else None),
