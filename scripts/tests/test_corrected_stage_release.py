@@ -2,6 +2,7 @@
 """Executable CLB-82 coverage. Every transport is synthetic; no real SSH target."""
 import contextlib
 import hashlib
+import hmac
 import importlib.util
 import io
 import json
@@ -20,6 +21,8 @@ import struct
 import getpass
 import secrets
 import shlex
+import signal
+import select
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -383,9 +386,12 @@ class CorrectedExecutorTest(unittest.TestCase):
             self.assertIs(snapshot, self.snapshot)
             calls.append(list(argv))
             payload_control = json.dumps(control, sort_keys=True, separators=(',', ':')).encode()
-            payload = struct.pack('!II', len(payload_control), len(snapshot)) + payload_control + snapshot
-            return executor.capture([sys.executable, '-I', '-S', '-B', '-c', executor.REMOTE_BOUND_BOOTSTRAP, *argv],
-                                    payload, timeout=timeout, env=harness.env)
+            nonce = secrets.token_bytes(32)
+            payload = nonce + struct.pack('!II', len(payload_control), len(snapshot)) + payload_control + snapshot
+            result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', executor.REMOTE_BOUND_BOOTSTRAP, *argv],
+                                             payload, timeout=timeout, env=harness.env)
+            # This fixture replaces SSH/principal checks, not bootstrap/helper.
+            return executor.ssh_result(result, nonce)
         control = executor.binding_control({**env, "ACTION":"inspect", "AUTHORIZATION":""}, self.snapshot)
         control['principal'] = 'deployment-fixture'
         argv = ['corrected-start', state.OWNER, 'stage', str(harness.compose_path), state.REVISION, state.DIGEST, 'inspect']
@@ -405,6 +411,7 @@ class CorrectedExecutorTest(unittest.TestCase):
             result = executor.execute(env, self.snapshot, remote, getattr(self, 'fixture_control', {}))
         for secret in state.SENSITIVE_VALUES:
             self.assertNotIn(secret, output.getvalue())
+        self.assertNotIn('corrected-remote-boundary:', output.getvalue())
         return result
 
     def test_dispatch_validation_and_injection_before_secrets(self):
@@ -712,7 +719,7 @@ class CorrectedExecutorTest(unittest.TestCase):
         f=AuthorityCliFixture(self)
         source=(f.bin/'ssh').read_text()
         needle="words=shlex.split(sys.argv[-1]);command=words[words.index('exec')+1:]"
-        replacement=needle+"\nrecord('ssh_options',values=sys.argv[1:])\nguard=sys.argv[-1].rsplit(' && exec ',1)[0]\nchecked=subprocess.run(['/bin/bash','--noprofile','--norc','-c',guard],env=config['helper_env'],capture_output=True)\nif checked.returncode:raise SystemExit(checked.returncode)"
+        replacement=needle+"\nrecord('ssh_options',values=sys.argv[1:])\nguard=sys.argv[-1].rsplit(' && exec ',1)[0]\nchecked=subprocess.run(['/bin/bash','--noprofile','--norc','-c',guard],env=config['helper_env'],capture_output=True)\nassert checked.stdout==b''\nif checked.returncode:raise SystemExit(checked.returncode)"
         self.assertIn(needle,source);state.write_executable(f.bin/'ssh',source.replace(needle,replacement))
         for user,uid,accepted in [('deployment-fixture',str(os.geteuid()),True),('wrong-user',str(os.geteuid()),False),('deployment-fixture','0',False)]:
             with self.subTest(user=user,uid=uid):
@@ -724,6 +731,8 @@ class CorrectedExecutorTest(unittest.TestCase):
                 self.assertEqual((user+'\n').encode(),linux_argv.stdout)
                 result=f.run(ACTION='inspect',AUTHORIZATION='')
                 self.assertEqual(accepted,result.returncode==0,result.stdout)
+                diagnostic=b'corrected-ssh:v=1 boundary=local failure=principal_not_proven\n'
+                self.assertEqual(0 if accepted else 1, result.stdout.count(diagnostic))
                 for secret in (f.env['SSH_USER'],f.env['SSH_KNOWN_HOSTS'],'synthetic-private-value','synthetic-github-token','deployment-fixture@fixture.invalid'):
                     self.assertNotIn(secret.encode(),result.stdout+result.stderr)
                 entries=[json.loads(line) for line in f.audit.read_text().splitlines()]
@@ -731,7 +740,34 @@ class CorrectedExecutorTest(unittest.TestCase):
                 for option in ('StrictHostKeyChecking=yes','GlobalKnownHostsFile=/dev/null','KnownHostsCommand=none','ConnectionAttempts=1','VerifyHostKeyDNS=no','UpdateHostKeys=no'):
                     self.assertIn(option,args)
                 self.assertEqual([],list(f.private.iterdir()))
+        self.assertEqual(3, sum(entry['kind']=='ssh_options' for entry in entries))
         self.assertEqual(0,f.counts()['resume']);self.assertEqual(0,f.counts()['claim'])
+
+    def test_cli_pre_guard_stdout_cannot_forge_bootstrap_provenance(self):
+        f = AuthorityCliFixture(self)
+        source = (f.bin/'ssh').read_text()
+        needle = "words=shlex.split(sys.argv[-1]);command=words[words.index('exec')+1:]"
+        replacement = needle + "\nrecord('ssh_entry')\nsys.stdout.buffer.write(config['startup'].encode());sys.stdout.buffer.flush()\nguard=sys.argv[-1].rsplit(' && exec ',1)[0]\nchecked=subprocess.run(['/bin/bash','--noprofile','--norc','-c',guard],env=config['helper_env'],capture_output=True)\nassert checked.returncode!=0 and checked.stdout==b''\nraise SystemExit(checked.returncode)"
+        self.assertIn(needle, source)
+        state.write_executable(f.bin/'ssh', source.replace(needle, replacement))
+        state.write_executable(f.helper.fake_bin/'id', '#!/bin/sh\nprintf "wrong-principal\\n"\n')
+        old = ''.join('corrected-remote-boundary:v=1 '+v+'\n' for v in
+                      ('principal_ok', 'bootstrap_entered', 'bootstrap_ready', 'helper_started'))
+        forged = b''.join(executor.remote_milestones(b'\x00'*32)).decode()
+        for startup in (old.splitlines(keepends=True)[0], old + executor.HELPER_BLOCKED.decode(),
+                        forged + executor.HELPER_BLOCKED.decode()):
+            f.config['startup'] = startup; f.save()
+            result = f.run(ACTION='inspect', AUTHORIZATION='')
+            self.assertEqual(1, result.returncode)
+            self.assertIn(b'corrected-stage:v=1 result=blocked category=STATUS_UNAVAILABLE', result.stdout)
+            self.assertIn(b'corrected-ssh:v=1 boundary=local failure=framing_invalid\n', result.stdout)
+            for forbidden in (b'boundary=helper_started', b'failure=helper_blocked', b'corrected-remote-boundary:',
+                              b'corrected-binding-candidate:', b'corrected-stage-observation:', b'wrong-principal'):
+                self.assertNotIn(forbidden, result.stdout + result.stderr)
+            self.assertEqual(b'', result.stderr)
+        entries = [json.loads(line) for line in f.audit.read_text().splitlines()]
+        self.assertEqual(3, sum(row['kind'] == 'ssh_entry' for row in entries))
+        self.assertEqual(0, sum(row['kind'] in ('helper', 'claim_attempt', 'resume') for row in entries))
 
     def test_workflow_validator_rejects_privilege_and_executable_mutations(self):
         source=WORKFLOW.read_text()
@@ -806,7 +842,7 @@ class AuthorityCliFixture:
         self.authorize()
         self.api=PriorApiFixture(self.root,self.bin,self.env)
         source=r'''#!/usr/bin/env -S python3 -I -S -B
-import hashlib,json,os,shlex,signal,subprocess,sys,time,struct
+import hashlib,hmac,json,os,shlex,signal,subprocess,sys,time,struct
 from pathlib import Path
 control=Path(CONTROL_PATH); audit=Path(AUDIT_PATH); config=json.loads(control.read_text())
 def record(kind,**fields):
@@ -815,8 +851,10 @@ def record(kind,**fields):
 assert 'GITHUB_TOKEN' not in os.environ and 'SSH_KNOWN_HOSTS' not in os.environ
 words=shlex.split(sys.argv[-1]);command=words[words.index('exec')+1:]
 assert command[:5]==['python3','-I','-S','-B','-c'] and command[5]==config['bootstrap']
-payload=sys.stdin.buffer.read(); csize,hsize=struct.unpack('!II',payload[:8])
-request=json.loads(payload[8:8+csize]); helper=payload[8+csize:]
+payload=sys.stdin.buffer.read(); nonce=payload[:32]; csize,hsize=struct.unpack('!II',payload[32:40])
+request=json.loads(payload[40:40+csize]); helper=payload[40+csize:]
+assert len(nonce)==32 and nonce.hex() not in sys.argv[-1] and nonce.hex() not in json.dumps(dict(os.environ))
+assert nonce not in payload[32:] and nonce.hex() not in json.dumps(request)
 assert len(helper)==hsize and hashlib.sha256(helper).hexdigest()==config['helper_sha']
 assert len(request['token'])==64 and request['token'] not in sys.argv[-1]
 argv=command[6:]; assert argv[0]=='corrected-start'; phase=argv[-1];fault=config['fault']
@@ -859,7 +897,7 @@ if request['binding'] is not None:
  request['binding']['incident']=dict(owner=config['owner'],environment='stage',revision=config['revision'],image=config['image'])
  request['binding']['compose']['path']=config['compose']
 request_bytes=json.dumps(request,separators=(',',':')).encode()
-payload=struct.pack('!II',len(request_bytes),len(helper))+request_bytes+helper
+payload=nonce+struct.pack('!II',len(request_bytes),len(helper))+request_bytes+helper
 record('helper',phase=phase)
 result=subprocess.run([REAL_PYTHON,'-I','-S','-B','-c',config['bootstrap'],*argv],input=payload,
                       env=env,cwd=config.get('cwd'),capture_output=True)
@@ -891,12 +929,17 @@ if phase=='claim' and result.returncode==0:
  if fault=='kill-after-claim':os.kill(os.getppid(),signal.SIGKILL);raise SystemExit(0)
  if fault=='claim-ack-loss':raise SystemExit(255)
 if phase=='resume-start' and fault=='resume-ack-loss':raise SystemExit(255)
+milestones=b''
+for v in ('principal_ok','bootstrap_entered','bootstrap_ready','helper_started'):
+ message=b'corrected-remote-boundary:v=2 '+v.encode()
+ milestones+=message+b' '+hmac.digest(nonce,message,'sha256').hex().encode()+b'\n'
 output=result.stdout
 if result.returncode==0 and phase=='inspect':
+ assert output.startswith(milestones);output=output[len(milestones):]
  lines=output.splitlines();candidate=json.loads(lines[1].split(b' ',1)[1])
  candidate['incident']=dict(owner=INCIDENT_OWNER,environment='stage',revision=INCIDENT_REVISION,image=INCIDENT_IMAGE)
  candidate['compose']['path']='/opt/clubs-bot-stage'
- output=lines[0]+b'\ncorrected-binding-candidate:v=1 '+json.dumps(candidate,sort_keys=True,separators=(',',':')).encode()+b'\n'
+ output=milestones+lines[0]+b'\ncorrected-binding-candidate:v=1 '+json.dumps(candidate,sort_keys=True,separators=(',',':')).encode()+b'\n'
 sys.stdout.buffer.write(output);raise SystemExit(result.returncode)
 '''
         for key,value in {'CONTROL_PATH' :repr(str(self.control)), 'AUDIT_PATH':repr(str(self.audit)), 'REAL_PYTHON':repr(sys.executable),
@@ -1021,6 +1064,559 @@ os.execv(REAL_PYTHON,[REAL_PYTHON,*arguments])
     def counts(self):
         entries=[json.loads(line)['kind'] for line in self.audit.read_text().splitlines()]
         return {**{key:entries.count(key) for key in ('claim_attempt','claim_ack','resume','status','transport','helper')}, 'claim':entries.count('claim_durable')}
+
+
+class SshBoundaryDiagnosticsTest(unittest.TestCase):
+    """Fixed outer boundaries only; no live SSH or helper predicate overrides."""
+    nonce = b'\xa7' * 32  # Dedicated synthetic binding, never a protected value.
+    markers = tuple((b'corrected-remote-boundary:v=2 ' + name.encode() + b' ' +
+        hmac.digest(b'\xa7' * 32, b'corrected-remote-boundary:v=2 ' + name.encode(), 'sha256').hex().encode() + b'\n')
+        for name in ('principal_ok', 'bootstrap_entered', 'bootstrap_ready', 'helper_started'))
+    prefix = b''.join(markers)
+    private = b'fixture-user@192.0.2.1 /private/secret token=not-a-real-secret'
+
+    def classified(self, result, boundary, failure):
+        with contextlib.redirect_stdout(io.StringIO()) as public:
+            answer = executor.ssh_result(result, self.nonce)
+        self.assertEqual((result.code, b''), answer)
+        self.assertEqual(f'corrected-ssh:v=1 boundary={boundary} failure={failure}\n', public.getvalue())
+        self.assertNotIn(self.private.decode(), public.getvalue())
+        self.assertNotIn(self.nonce.hex(), public.getvalue())
+        self.assertNotIn('corrected-remote-boundary:', public.getvalue())
+
+    def test_ordered_boundaries_and_exact_helper_blocked_body(self):
+        for reached, failure in enumerate(('principal_not_proven', 'bootstrap_not_ready',
+                                            'bootstrap_not_ready', 'helper_not_reached', 'helper_blocked')):
+            with self.subTest(reached=reached):
+                prefix = b''.join(self.markers[:reached])
+                boundary = executor.REMOTE_BOUNDARIES[reached-1] if reached else 'local'
+                body = executor.HELPER_BLOCKED if reached == 4 else b''
+                self.classified(executor.CaptureResult(1, prefix + body), boundary, failure)
+        for body in (b'', self.private, executor.HELPER_BLOCKED.rstrip(b'\n'),
+                     executor.HELPER_BLOCKED.replace(b'\n', b'\r\n'),
+                     executor.HELPER_BLOCKED + self.private, self.private + executor.HELPER_BLOCKED,
+                     executor.HELPER_BLOCKED * 2, b'\x1b[31m' + executor.HELPER_BLOCKED):
+            with self.subTest(body=body):
+                self.classified(executor.CaptureResult(1, self.prefix + body),
+                                'helper_started', 'child_nonzero_unknown')
+
+    def test_success_strips_only_complete_ordered_framing(self):
+        body = status_record() + b'corrected-binding-candidate:v=1 {}\n'
+        with contextlib.redirect_stdout(io.StringIO()) as public:
+            self.assertEqual((0, body), executor.ssh_result(executor.CaptureResult(0, self.prefix + body), self.nonce))
+        self.assertEqual('', public.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as public:
+            for raw in (body, self.prefix[1:] + body, self.prefix + self.prefix + body,
+                        b''.join(reversed(self.markers)) + body,
+                        self.prefix + body + self.markers[-1]):
+                self.assertEqual((0, b''), executor.ssh_result(executor.CaptureResult(0, raw), self.nonce))
+        self.assertEqual(('corrected-ssh:v=1 boundary=local failure=framing_invalid\n') * 5, public.getvalue())
+
+    def test_capture_timeout_is_not_child_exit_124(self):
+        child = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c',
+            'import sys;sys.stdout.buffer.write('+repr(self.prefix)+');sys.exit(124)'])
+        self.assertEqual(124, child.code); self.assertIsNone(child.failure)
+        self.classified(child, 'helper_started', 'child_nonzero_unknown')
+        started = time.monotonic()
+        timed = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', 'import time;time.sleep(10)'], timeout=.1)
+        self.assertLess(time.monotonic()-started, 3)
+        self.assertEqual('capture_timeout', timed.failure)
+        self.classified(timed, 'local', 'capture_timeout')
+
+    def test_capture_output_limit_is_not_child_exit_125(self):
+        child = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c',
+            'import sys;sys.stdout.buffer.write('+repr(self.prefix)+');sys.exit(125)'])
+        self.assertEqual(125, child.code); self.assertIsNone(child.failure)
+        self.classified(child, 'helper_started', 'child_nonzero_unknown')
+        limited = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', 'print("x"*40000)'], limit=32768)
+        self.assertEqual(b'', limited.output)
+        self.classified(limited, 'local', 'capture_output_limit')
+
+    def test_signal_and_interruption_kill_child_without_retry(self):
+        child = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c',
+            'import os,signal;os.kill(os.getpid(),signal.SIGTERM)'])
+        self.assertEqual(-signal.SIGTERM, child.code)
+        self.classified(child, 'local', 'child_signal')
+        started = time.monotonic()
+        with patch.object(executor.selectors.DefaultSelector, 'select', side_effect=InterruptedError(self.private)), \
+             patch.object(executor.subprocess, 'Popen', wraps=subprocess.Popen) as spawned, \
+             patch.object(executor.os, 'killpg', wraps=os.killpg) as killed:
+            interrupted = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', 'import time;time.sleep(10)'])
+        self.assertLess(time.monotonic()-started, 3)
+        self.assertEqual(1, spawned.call_count); self.assertEqual(1, killed.call_count)
+        self.classified(interrupted, 'local', 'capture_interrupted')
+        # The compatibility wrapper keeps its old interrupted tuple convention.
+        with patch.object(executor, 'capture_result', return_value=interrupted):
+            self.assertEqual((124, b''), executor.capture(['unused']))
+
+    def test_spawn_error_and_stderr_never_publish_dynamic_details(self):
+        with external_git_fixture('clb91-missing-child-') as temporary, \
+             contextlib.redirect_stdout(io.StringIO()) as public:
+            with self.assertRaises(OSError):
+                executor.ssh_capture([str(Path(temporary)/'private-missing-executable')], b'', diagnostic_nonce=self.nonce)
+        self.assertEqual('corrected-ssh:v=1 boundary=local failure=capture_failed\n', public.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as public:
+            result = executor.ssh_capture([sys.executable, '-I', '-S', '-B', '-c',
+                'import sys;sys.stderr.buffer.write('+repr(self.private)+');'
+                'sys.stdout.buffer.write('+repr(self.prefix+self.private)+');sys.exit(1)'], b'', diagnostic_nonce=self.nonce)
+        self.assertEqual((1, b''), result)
+        self.assertEqual('corrected-ssh:v=1 boundary=helper_started failure=child_nonzero_unknown\n', public.getvalue())
+
+    def test_real_signal_handler_and_os_stderr_redaction(self):
+        # Exercise real OS pipes and the production handler, not only a mocked
+        # InterruptedError (selectors can silently swallow that exception).
+        setup = ('import importlib.util,sys\n'
+                 's=importlib.util.spec_from_file_location("probe",'+repr(str(RUNNER))+')\n'
+                 'm=importlib.util.module_from_spec(s);s.loader.exec_module(m)\n')
+        child = ('import sys;sys.stderr.buffer.write('+repr(self.private)+');'
+                 'sys.stdout.buffer.write('+repr(self.prefix+self.private)+');sys.exit(1)')
+        ordinary = setup + ('assert m.ssh_capture([sys.executable,"-I","-S","-B","-c",'
+                            +repr(child)+'],b"",diagnostic_nonce='+repr(self.nonce)+') == (1,b"")\n')
+        interrupted = setup + '''import os,signal,threading,time
+signal.signal(signal.SIGTERM,m.interrupted)
+timer=threading.Timer(.2,lambda:os.kill(os.getpid(),signal.SIGTERM));timer.start()
+started=time.monotonic()
+result=m.capture_result([sys.executable,'-I','-S','-B','-c','import time;time.sleep(10)'],timeout=2)
+timer.join()
+assert result.failure=='capture_interrupted' and time.monotonic()-started<1.5
+assert m.ssh_result(result,bytes([167])*32)==(124,b'')
+'''
+        for probe, expected in ((ordinary, 'boundary=helper_started failure=child_nonzero_unknown'),
+                                (interrupted, 'boundary=local failure=capture_interrupted')):
+            with self.subTest(expected=expected):
+                result = subprocess.run([sys.executable, '-I', '-S', '-B', '-c', probe],
+                                        capture_output=True, timeout=5)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(b'', result.stderr)
+                self.assertEqual(('corrected-ssh:v=1 '+expected+'\n').encode(), result.stdout)
+                self.assertNotIn(self.private, result.stdout+result.stderr)
+
+    def bootstrap(self, payload, env=None):
+        result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', executor.REMOTE_BOUND_BOOTSTRAP,
+            'corrected-start', state.OWNER, 'stage', '/private/tmp/clb91-nonexistent-fixture',
+            state.REVISION, state.DIGEST, 'inspect'], payload, timeout=10, env=env)
+        self.assertNotEqual(0, result.code)
+        return result
+
+    def helper_payload(self, helper=None):
+        helper = _helper_bytes if helper is None else helper
+        control = json.dumps({'implementation': {'sha256': executor.IMPLEMENTATION_SHA256,
+            'blob': executor.IMPLEMENTATION_BLOB, 'size': executor.IMPLEMENTATION_SIZE}}).encode()
+        return self.nonce + struct.pack('!II', len(control), len(helper)) + control + helper
+
+    def test_real_bootstrap_framing_hash_and_spawn_boundaries(self):
+        self.classified(self.bootstrap(b''), 'local', 'principal_not_proven')
+        for payload in (self.nonce, self.helper_payload(_helper_bytes[:-1] + b'X')):
+            with self.subTest(payload_size=len(payload)):
+                self.classified(self.bootstrap(payload), 'bootstrap_entered', 'bootstrap_not_ready')
+        with external_git_fixture('clb91-no-bash-') as temporary:
+            self.classified(self.bootstrap(self.helper_payload(), {'PATH':temporary}),
+                            'bootstrap_ready', 'helper_not_reached')
+
+    def test_real_approved_helper_blocked_marker_without_state_access(self):
+        # Missing helper control fields stop before opening any incident root.
+        self.classified(self.bootstrap(self.helper_payload()), 'helper_started', 'helper_blocked')
+        self.assertEqual(174422, len(_helper_bytes))
+        self.assertEqual('48bcbafde22b90dc3902cac0ba80754239964466ce612d11565dd1fdeb75e2ec',
+                         hashlib.sha256(_helper_bytes).hexdigest())
+        self.assertEqual('fc09080ba4864133ca23ec5c777339b881094279',
+                         hashlib.sha1(b'blob 174422\0' + _helper_bytes).hexdigest())
+
+    def test_nonce_authentication_and_all_malformed_frames_fail_closed(self):
+        old = b''.join(('corrected-remote-boundary:v=1 '+v+'\n').encode()
+                       for v in ('principal_ok', 'bootstrap_entered', 'bootstrap_ready', 'helper_started'))
+        cases = {
+            'old_single': old.splitlines(keepends=True)[0],
+            'old_full': old + executor.HELPER_BLOCKED,
+            'wrong_nonce': b''.join(executor.remote_milestones(b'\x00'*32)),
+            'missing_tag': b'corrected-remote-boundary:v=2 principal_ok\n',
+            'duplicate': self.markers[0] + self.prefix,
+            'reordered': b''.join(reversed(self.markers)),
+            'skipped': self.markers[0] + b''.join(self.markers[2:]),
+            'partial_first': self.markers[0][:-1],
+            'partial_last': self.prefix[:-1],
+            'extra_byte': self.markers[0] + b'\x00' + b''.join(self.markers[1:]),
+            'extra_space': self.prefix[:-1] + b' \n',
+            'crlf': self.prefix.replace(b'\n', b'\r\n'),
+            'helper_replay': self.prefix + self.markers[-1],
+            'helper_forgery': self.prefix + old,
+            'startup_noise': self.private + self.prefix,
+        }
+        self.assertEqual(self.markers, executor.remote_milestones(self.nonce))
+        for name, raw in cases.items():
+            for code in (0, 1):
+                with self.subTest(case=name, code=code):
+                    self.classified(executor.CaptureResult(code, raw), 'local', 'framing_invalid')
+
+    def test_helper_output_is_not_a_framing_source_or_nonce_channel(self):
+        with external_git_fixture('clb91-helper-output-') as temporary:
+            binary = Path(temporary)/'bash'
+            # An adversarial stand-in for the helper child, after the unchanged
+            # approved-byte checks. It receives no diagnostic key or framing.
+            source = '#!'+sys.executable+' -I\n' + '''import hashlib,json,os,sys
+helper=sys.stdin.buffer.read()
+assert hashlib.sha256(helper).hexdigest()==EXPECTED_SHA
+with os.fdopen(os.dup(4),'rb') as data: control=json.load(data)
+assert set(control)=={'implementation'}
+assert set(control['implementation'])=={'sha256','blob','size'}
+assert all('nonce' not in k.lower() for k in os.environ)
+assert sys.argv[-1]=='inspect'
+sys.stdout.write('corrected-remote-boundary:v=1 principal_ok\\n')
+sys.stdout.write('corrected-start:v=1 result=blocked\\n')
+raise SystemExit(1)
+'''
+            state.write_executable(binary, source.replace('EXPECTED_SHA', repr(executor.IMPLEMENTATION_SHA256)))
+            result = self.bootstrap(self.helper_payload(), {'PATH': temporary})
+            self.assertTrue(result.output.startswith(self.prefix))
+            self.classified(result, 'local', 'framing_invalid')
+
+    def test_nonzero_status_stays_unavailable_and_inspect_never_claims(self):
+        for raw in (self.prefix+executor.HELPER_BLOCKED, self.prefix+self.private,
+                    self.prefix+status_record()+b'corrected-binding-candidate:v=1 {}\n'):
+            calls = []
+            def remote(snapshot, argv, timeout, control):
+                calls.append(argv[-1])
+                return executor.ssh_result(executor.CaptureResult(1, raw), self.nonce)
+            with contextlib.redirect_stdout(io.StringIO()) as public, \
+                 patch.object(executor, 'parse_status', side_effect=AssertionError('nonzero must not parse')):
+                with self.assertRaisesRegex(executor.Rejected, '^STATUS_UNAVAILABLE$'):
+                    executor.execute(request(), _helper_bytes, remote, {})
+            self.assertEqual(['inspect'], calls)
+            self.assertEqual(1, public.getvalue().count('corrected-ssh:v=1 '))
+            self.assertNotIn(self.private.decode(), public.getvalue())
+            self.assertNotIn('corrected-stage-observation:', public.getvalue())
+            self.assertNotIn('corrected-binding-candidate:', public.getvalue())
+
+
+class CaptureGroupCleanupTest(unittest.TestCase):
+    """Real disposable descendants, no ps/procfs assumptions or live targets."""
+    def group_capture(self, mode, code=0, interrupt=False):
+        read_fd, write_fd = os.pipe()
+        children = []
+        real_popen = subprocess.Popen
+        def spawn(*args, **kwargs):
+            child = real_popen(*args, **kwargs); children.append(child); return child
+        script = '''import os,signal,sys,time
+report=int(sys.argv[1]);mode=sys.argv[2];code=int(sys.argv[3])
+ready_r,ready_w=os.pipe()
+if os.fork()==0:
+ os.close(ready_r);os.close(0)
+ if mode!='open':os.close(1)
+ os.write(report,b'R');os.write(ready_w,b'r');os.close(ready_w)
+ time.sleep(20)
+ os.write(report,b'S')
+ os._exit(0)
+os.close(ready_w)
+assert os.read(ready_r,1)==b'r'
+os.close(ready_r);os.close(report)
+if mode=='limit':os.write(1,b'x'*40000);time.sleep(20)
+if mode=='signal':os.kill(os.getpid(),signal.SIGTERM)
+if mode=='sleep':time.sleep(20)
+os._exit(code)
+'''
+        old_handlers = {s:signal.getsignal(s) for s in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)}
+        interrupted_ready = []
+        sender = None
+        try:
+            if interrupt:
+                signal.signal(signal.SIGTERM, executor.interrupted)
+                def cancel_when_ready():
+                    if select.select([read_fd], [], [], 2)[0]:
+                        interrupted_ready.append(os.read(read_fd, 1))
+                        os.kill(os.getpid(), signal.SIGTERM)
+                sender = threading.Thread(target=cancel_when_ready)
+                sender.start()
+            started = time.monotonic()
+            with patch.object(executor.subprocess, 'Popen', side_effect=spawn), \
+                 patch.object(executor.os, 'killpg', wraps=os.killpg) as killed:
+                result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', script,
+                    str(write_fd), mode, str(code)], pass_fds=(write_fd,), timeout=.3 if not interrupt else 3)
+            self.assertLess(time.monotonic() - started, 3)
+            self.assertEqual(1, len(children)); self.assertEqual(1, killed.call_count)
+            self.assertEqual((children[0].pid, signal.SIGKILL), killed.call_args.args)
+            os.close(write_fd); write_fd = None
+            if sender is not None:
+                sender.join(timeout=2); self.assertFalse(sender.is_alive())
+                self.assertEqual([b'R'], interrupted_ready)
+            # The descendant keeps this descriptor open until death. EOF,
+            # rather than a delayed marker alone, proves it has terminated.
+            received = b''
+            deadline = time.monotonic() + 1
+            while True:
+                self.assertTrue(select.select([read_fd], [], [], max(0, deadline-time.monotonic()))[0],
+                                'owned descendant survived cleanup')
+                chunk = os.read(read_fd, 4096)
+                if not chunk: break
+                received += chunk
+            self.assertEqual(b'' if interrupt else b'R', received)
+            self.assertTrue(children[0].stdin.closed and children[0].stdout.closed)
+            with self.assertRaises(ChildProcessError): os.waitpid(children[0].pid, os.WNOHANG)
+            return result
+        finally:
+            if sender is not None: sender.join(timeout=3)
+            for s, handler in old_handlers.items(): signal.signal(s, handler)
+            # Bound cleanup of only these synthetic groups even if a regression
+            # causes an assertion above; never leave a 20-second sleeper behind.
+            for child in children:
+                try: os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                child.wait(timeout=2)
+            if write_fd is not None: os.close(write_fd)
+            os.close(read_fd)
+
+    def test_exited_leader_with_descendant_holding_stdout_is_cleaned(self):
+        result = self.group_capture('open')
+        self.assertEqual((124, 'capture_timeout'), (result.code, result.failure))
+
+    def test_exited_leader_and_closed_stdout_still_cleanup_success_and_nonzero(self):
+        for code in (0, 23, 124, 125):
+            with self.subTest(code=code):
+                result = self.group_capture('closed', code)
+                self.assertEqual((code, b'', None), (result.code, result.output, result.failure))
+
+    def test_timeout_limit_and_signal_cleanup_remaining_members(self):
+        for mode, code, failure in (('sleep',124,'capture_timeout'), ('limit',125,'capture_output_limit'),
+                                    ('signal',-signal.SIGTERM,None)):
+            with self.subTest(mode=mode):
+                result = self.group_capture(mode)
+                self.assertEqual((code, failure), (result.code, result.failure))
+
+    def test_real_runner_interruption_cleans_remaining_group_members(self):
+        result = self.group_capture('sleep', interrupt=True)
+        self.assertEqual((124, 'capture_interrupted'), (result.code, result.failure))
+
+    def test_already_gone_group_is_harmless_and_leader_is_not_reaped_before_kill(self):
+        observed = []
+        real_popen = subprocess.Popen
+        def spawn(*args, **kwargs):
+            child = real_popen(*args, **kwargs); observed.append(child); return child
+        real_killpg = os.killpg
+        def kill(group, sig):
+            if sig == 0:
+                return real_killpg(group, sig)
+            self.assertIsNone(observed[0].returncode)
+            info = os.waitid(os.P_PID, group, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            self.assertEqual(group, info.si_pid)  # Waitable leader pins the ID.
+            raise ProcessLookupError()  # Race with an already-gone group is benign.
+        with patch.object(executor.subprocess, 'Popen', side_effect=spawn), \
+             patch.object(executor.os, 'killpg', side_effect=kill):
+            self.assertEqual((0, b'ok\n'), executor.capture([sys.executable, '-I', '-S', '-B', '-c', 'print("ok")']))
+        with self.assertRaises(ChildProcessError): os.waitpid(observed[0].pid, os.WNOHANG)
+
+    def test_cleanup_failure_is_fixed_redacted_and_never_success(self):
+        # Exited leader only: a simulated permission failure leaves no live
+        # process; wait/close must still run and the outcome cannot be success.
+        children = []
+        real_popen = subprocess.Popen
+        def spawn(*args, **kwargs):
+            child = real_popen(*args, **kwargs); children.append(child); return child
+        with patch.object(executor.subprocess, 'Popen', side_effect=spawn), \
+             patch.object(executor.os, 'killpg', side_effect=PermissionError('synthetic-private-os-detail')), \
+             contextlib.redirect_stdout(io.StringIO()) as public:
+            with self.assertRaises(executor.CaptureCleanupError) as failure:
+                executor.ssh_capture([sys.executable, '-I', '-S', '-B', '-c', 'pass'], b'', diagnostic_nonce=b'x'*32)
+        self.assertEqual('', str(failure.exception))
+        self.assertEqual('corrected-ssh:v=1 boundary=local failure=capture_cleanup_failed\n', public.getvalue())
+        self.assertEqual(0, children[0].returncode)
+        self.assertTrue(children[0].stdin.closed and children[0].stdout.closed)
+        with self.assertRaises(ChildProcessError): os.waitpid(children[0].pid, os.WNOHANG)
+
+    def test_reap_failure_is_bounded_closes_pipes_and_fails_closed(self):
+        children, real_waits = [], []
+        real_popen = subprocess.Popen
+        def spawn(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child); real_waits.append(child.wait)
+            child.wait = lambda **unused: (_ for _ in ()).throw(subprocess.TimeoutExpired('synthetic-private-command', 2))
+            return child
+        try:
+            with patch.object(executor.subprocess, 'Popen', side_effect=spawn):
+                with self.assertRaises(executor.CaptureCleanupError) as failure:
+                    executor.capture([sys.executable, '-I', '-S', '-B', '-c', 'pass'])
+            self.assertEqual('', str(failure.exception))
+            self.assertTrue(children[0].stdin.closed and children[0].stdout.closed)
+        finally:
+            for child, wait in zip(children, real_waits):
+                child.wait = wait; wait(timeout=2)
+
+    def test_signal_during_cleanup_is_deferred_until_group_reaped_and_closed(self):
+        old_handlers = {s:signal.getsignal(s) for s in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)}
+        children = []
+        real_popen, real_killpg = subprocess.Popen, os.killpg
+        def spawn(*args, **kwargs):
+            child = real_popen(*args, **kwargs); children.append(child); return child
+        def kill(group, sig):
+            if sig == signal.SIGKILL: os.kill(os.getpid(), signal.SIGTERM)
+            return real_killpg(group, sig)
+        try:
+            signal.signal(signal.SIGTERM, executor.interrupted)
+            with patch.object(executor.subprocess, 'Popen', side_effect=spawn), \
+                 patch.object(executor.os, 'killpg', side_effect=kill):
+                result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', 'pass'])
+                self.assertEqual((124, 'capture_interrupted'), (result.code, result.failure))
+            self.assertEqual(0, children[0].returncode)
+            self.assertTrue(children[0].stdin.closed and children[0].stdout.closed)
+            with self.assertRaises(ChildProcessError): os.waitpid(children[0].pid, os.WNOHANG)
+        finally:
+            for s, handler in old_handlers.items(): signal.signal(s, handler)
+
+
+class CaptureCancellationOwnershipTest(unittest.TestCase):
+    """Real signals scheduled at ownership edges, without production hooks."""
+    watched = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+
+    def setUp(self):
+        self.handlers = {s: signal.getsignal(s) for s in self.watched}
+        self.mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+        self.addCleanup(signal.pthread_sigmask, signal.SIG_SETMASK, self.mask)
+        for s, handler in self.handlers.items():
+            self.addCleanup(signal.signal, s, handler)
+            signal.signal(s, executor.interrupted)
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, self.watched)
+
+    def cancellation_capture(self, window, signum=signal.SIGTERM, *, pending=False, second=False):
+        read_fd, write_fd = os.pipe()
+        children, close_calls, waits, events, kills = [], [], [], [], []
+        real_popen, real_killpg = subprocess.Popen, os.killpg
+        # Readiness and EOF on this private pipe prove a real same-group
+        # descendant existed and then died, including after its leader exited.
+        script = '''import os,sys,time
+report=int(sys.argv[1]);ready_r,ready_w=os.pipe()
+if os.fork()==0:
+ os.close(ready_r);os.close(0);os.close(1)
+ os.write(report,b'R');os.write(ready_w,b'r');os.close(ready_w)
+ time.sleep(20);os._exit(0)
+os.close(ready_w);assert os.read(ready_r,1)==b'r'
+os.close(ready_r);os.close(report)
+if sys.argv[2]=='spawn':time.sleep(20)
+os._exit(0)
+'''
+        source = RUNNER.read_text().splitlines()
+        target = {'spawn': '    group = child.pid',
+                  'cleanup': '        cleanup_failed = False',
+                  'handoff': '        _capture_cancellation = previous'}[window]
+        self.assertEqual(1, source.count(target))
+        line = source.index(target) + 1
+        old_trace = sys.gettrace()
+        mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+        handlers = {s:signal.getsignal(s) for s in self.watched}
+        def deliver():
+            if pending:
+                before = signal.pthread_sigmask(signal.SIG_BLOCK, {signum})
+                os.kill(os.getpid(), signum)
+                self.assertIn(signum, signal.sigpending())
+                signal.pthread_sigmask(signal.SIG_SETMASK, before)
+            else:
+                os.kill(os.getpid(), signum)
+        def trace(frame, event, arg):
+            if (event == 'line' and frame.f_code.co_filename == executor.capture_result.__code__.co_filename
+                    and frame.f_lineno == line and not events):
+                events.append(window)
+                deliver()
+            return trace
+        with contextlib.ExitStack() as stack:
+            def spawn(*args, **kwargs):
+                child = real_popen(*args, **kwargs); children.append(child)
+                waits.append(stack.enter_context(patch.object(child, 'wait', wraps=child.wait)))
+                close_calls.extend(stack.enter_context(patch.object(stream, 'close', wraps=stream.close))
+                                   for stream in (child.stdin, child.stdout))
+                self.assertTrue(select.select([read_fd], [], [], 2)[0], 'child did not become ready')
+                self.assertEqual(b'R', os.read(read_fd, 1))
+                return child
+            def kill(group, sig):
+                if sig == signal.SIGKILL:
+                    kills.append(group)
+                    if second:
+                        os.kill(os.getpid(), signal.SIGINT)
+                        os.kill(os.getpid(), signal.SIGHUP)
+                return real_killpg(group, sig)
+            try:
+                sys.settrace(trace)
+                started = time.monotonic()
+                with patch.object(executor.subprocess, 'Popen', side_effect=spawn), \
+                     patch.object(executor.os, 'killpg', side_effect=kill):
+                    result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', script,
+                        str(write_fd), window], pass_fds=(write_fd,), timeout=2)
+                sys.settrace(old_trace)
+                self.assertLess(time.monotonic()-started, 3)
+                self.assertEqual([window], events)
+                self.assertEqual((124, 'capture_interrupted'), (result.code, result.failure))
+                self.assertEqual([children[0].pid], kills)
+                self.assertEqual(1, waits[0].call_count)
+                self.assertEqual([1, 1], [close.call_count for close in close_calls])
+                self.assertTrue(children[0].stdin.closed and children[0].stdout.closed)
+                with self.assertRaises(ChildProcessError): os.waitpid(children[0].pid, os.WNOHANG)
+                os.close(write_fd); write_fd = None
+                self.assertTrue(select.select([read_fd], [], [], 1)[0], 'descendant survived cleanup')
+                self.assertEqual(b'', os.read(read_fd, 1))
+                self.assertEqual(mask, signal.pthread_sigmask(signal.SIG_BLOCK, set()))
+                self.assertEqual(handlers, {s:signal.getsignal(s) for s in self.watched})
+                self.assertTrue(set(self.watched).isdisjoint(signal.sigpending()))
+                self.assertIsNone(executor._capture_cancellation)
+                # No queued invocation cancellation may escape into a later
+                # successful capture or leave its signal state modified.
+                self.assertEqual((0, b'ok\n'), executor.capture([sys.executable, '-I', '-S', '-B', '-c', 'print("ok")']))
+            finally:
+                sys.settrace(old_trace)
+                for child in children:
+                    if child.returncode is None:
+                        try: real_killpg(child.pid, signal.SIGKILL)
+                        except ProcessLookupError: pass
+                        child.wait(timeout=2)
+                if write_fd is not None: os.close(write_fd)
+                os.close(read_fd)
+
+    def test_signal_immediately_after_spawn_cannot_lose_ownership(self):
+        for sig in self.watched:
+            with self.subTest(signal=sig): self.cancellation_capture('spawn', sig)
+
+    def test_signal_at_cleanup_entry_cannot_bypass_finalization(self):
+        for sig in self.watched:
+            with self.subTest(signal=sig): self.cancellation_capture('cleanup', sig)
+
+    def test_pending_and_second_signals_are_one_interruption_after_cleanup(self):
+        for window in ('spawn', 'cleanup'):
+            with self.subTest(window=window): self.cancellation_capture(window, pending=True, second=True)
+
+    def test_signal_at_final_handoff_cannot_return_cached_success(self):
+        self.cancellation_capture('handoff')
+
+    def test_spawn_failure_preserves_signal_state_and_pending_cancellation(self):
+        original = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
+        try:
+            mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+            handlers = {s:signal.getsignal(s) for s in self.watched}
+            with self.assertRaises(OSError): executor.capture(['/nonexistent/clb91-synthetic-command'])
+            real_popen = subprocess.Popen
+            def fail(*args, **kwargs):
+                os.kill(os.getpid(), signal.SIGTERM)
+                return real_popen(*args, **kwargs)
+            with patch.object(executor.subprocess, 'Popen', side_effect=fail):
+                result = executor.capture_result(['/nonexistent/clb91-synthetic-command'])
+            self.assertEqual((124, 'capture_interrupted'), (result.code, result.failure))
+            self.assertEqual(mask, signal.pthread_sigmask(signal.SIG_BLOCK, set()))
+            self.assertEqual(handlers, {s:signal.getsignal(s) for s in self.watched})
+            self.assertIsNone(executor._capture_cancellation)
+            child_mask = 'import signal;print(int(signal.SIGUSR1 in signal.pthread_sigmask(signal.SIG_BLOCK,set())))'
+            self.assertEqual((0, b'1\n'), executor.capture([sys.executable, '-I', '-S', '-B', '-c', child_mask]))
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, original)
+
+    def test_cleanup_failure_dominates_cancellation_without_signal_state_leak(self):
+        real_killpg = os.killpg
+        def kill(group, sig):
+            os.kill(os.getpid(), signal.SIGTERM)
+            if sig == signal.SIGKILL:
+                try: real_killpg(group, sig)
+                except (ProcessLookupError, PermissionError): pass
+            raise OSError('synthetic-private-cleanup-detail')
+        with patch.object(executor.os, 'killpg', side_effect=kill), contextlib.redirect_stdout(io.StringIO()) as public:
+            with self.assertRaises(executor.CaptureCleanupError) as failure:
+                executor.ssh_capture([sys.executable, '-I', '-S', '-B', '-c', 'pass'], b'', diagnostic_nonce=b'x'*32)
+        self.assertEqual('', str(failure.exception))
+        self.assertEqual('corrected-ssh:v=1 boundary=local failure=capture_cleanup_failed\n', public.getvalue())
+        self.assertIsNone(executor._capture_cancellation)
+        self.assertTrue(all(signal.getsignal(s) is executor.interrupted for s in self.watched))
 
 
 class PriorApiDiagnosticsTest(unittest.TestCase):
