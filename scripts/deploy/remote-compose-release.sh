@@ -3331,6 +3331,7 @@ bound_corrected_start() {
   IFS= read -r -d '' bound_python <<'CLB82_BOUND_PYTHON' || true
 # Embedded implementation bytes: no imports from checkout, cwd or user site.
 import base64
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -3347,9 +3348,82 @@ import sys
 import tempfile
 
 
+# Diagnostic data only. No guard state survives a successful scope or a caught
+# RPC failure; only the exception causing the terminal block carries a tag.
+INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'compose_owner',
+    'protocol_layout', 'protocol_device', 'lock_files', 'lock_shared', 'context_edges',
+    'application_binding', 'mount_query', 'mount_identity', 'configuration_capture',
+    'compose_file', 'compose_subset', 'override', 'dotenv', 'compose_command', 'compose_model',
+    'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
+    'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
+    'status_classification', 'status_read', 'inspect_output', 'interrupted', 'internal'))
+INSPECT_FAILURES = frozenset(('invalid', 'mismatch', 'missing', 'permission', 'busy',
+    'command', 'protocol', 'io', 'interrupted', 'internal'))
+INSPECT_MODE = len(sys.argv) == 7 and sys.argv[6] == 'inspect'
+
+
+class InspectRejected(RuntimeError):
+    pass
+
+
+class InspectFailure(Exception):
+    def __init__(self, guard, failure):
+        self.guard, self.failure = guard, failure
+
+
+@contextlib.contextmanager
+def inspect_guard(guard, rejected='invalid'):
+    if not INSPECT_MODE:
+        yield
+        return
+    try:
+        yield
+    except InspectFailure:
+        raise
+    except BaseException as error:
+        failure = 'internal'
+        if isinstance(error, (InterruptedError, KeyboardInterrupt)):
+            guard, failure = 'interrupted', 'interrupted'
+        elif isinstance(error, InspectRejected):
+            failure = rejected
+        elif isinstance(error, FileNotFoundError):
+            failure = 'missing'
+        elif isinstance(error, PermissionError):
+            failure = 'permission'
+        elif isinstance(error, BlockingIOError):
+            failure = 'busy'
+        elif isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+            failure = 'command'
+        elif isinstance(error, OSError):
+            failure = 'io'
+        elif isinstance(error, (UnicodeError, json.JSONDecodeError)):
+            failure = 'invalid'
+        raise InspectFailure(guard, failure) from None
+
+
+def inspect_guarded(guard, rejected='invalid'):
+    def decorate(function):
+        def invoke(*args, **kwargs):
+            with inspect_guard(guard, rejected):
+                return function(*args, **kwargs)
+        return invoke
+    return decorate
+
+
+def inspect_diagnostic(error):
+    guard, failure = 'internal', 'internal'
+    if isinstance(error, InspectFailure):
+        guard, failure = error.guard, error.failure
+    elif isinstance(error, (InterruptedError, KeyboardInterrupt)):
+        guard, failure = 'interrupted', 'interrupted'
+    if type(guard) is not str or type(failure) is not str or guard not in INSPECT_GUARDS or failure not in INSPECT_FAILURES:
+        guard, failure = 'internal', 'internal'
+    return f'corrected-inspect:v=1 guard={guard} failure={failure}\n'
+
+
 def check(ok):
     if not ok:
-        raise RuntimeError('bound context rejected')
+        raise (InspectRejected if INSPECT_MODE else RuntimeError)('bound context rejected')
 
 
 def canonical(value):
@@ -3400,65 +3474,73 @@ def fdpath(fd):
 
 class BoundContext:
     def __init__(self, owner, environment, compose, revision, image, phase, control):
-        check(environment == 'stage' and phase in ('inspect', 'claim', 'resume-start', 'reconcile'))
-        check(re.fullmatch(r'[0-9]{1,20}-[0-9]{1,20}', owner))
-        check(re.fullmatch(r'[0-9a-f]{40}', revision))
-        check(re.fullmatch(r'ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}', image))
-        check(re.fullmatch(r'/[A-Za-z0-9._/-]+', compose) and
-              all(part not in ('', '.', '..') for part in compose.split('/')[1:]))
-        check(not compose.startswith(('/tmp/', '/private/tmp/', '/run/', '/var/tmp/', '/dev/shm/')))
-        check(set(control) == {'version', 'implementation', 'binding', 'authorization', 'token', 'principal'})
-        check(control['version'] == 1 and isinstance(control['implementation'], dict))
-        impl = control['implementation']
-        check(set(impl) == {'revision', 'blob', 'sha256', 'size', 'path', 'mode', 'type'})
-        check(impl['path'] == 'scripts/deploy/remote-compose-release.sh' and impl['mode'] == '100644' and impl['type'] == 'blob')
-        check(re.fullmatch('[0-9a-f]{40}', impl['revision']) and re.fullmatch('[0-9a-f]{40}', impl['blob'])
-              and re.fullmatch('[0-9a-f]{64}', impl['sha256']) and type(impl['size']) is int and 100000 < impl['size'] < 262144)
+        with inspect_guard('input'):
+            check(environment == 'stage' and phase in ('inspect', 'claim', 'resume-start', 'reconcile'))
+            check(re.fullmatch(r'[0-9]{1,20}-[0-9]{1,20}', owner))
+            check(re.fullmatch(r'[0-9a-f]{40}', revision))
+            check(re.fullmatch(r'ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}', image))
+            check(re.fullmatch(r'/[A-Za-z0-9._/-]+', compose) and
+                  all(part not in ('', '.', '..') for part in compose.split('/')[1:]))
+            check(not compose.startswith(('/tmp/', '/private/tmp/', '/run/', '/var/tmp/', '/dev/shm/')))
+        with inspect_guard('control'):
+            check(set(control) == {'version', 'implementation', 'binding', 'authorization', 'token', 'principal'})
+            check(control['version'] == 1 and isinstance(control['implementation'], dict))
+            impl = control['implementation']
+            check(set(impl) == {'revision', 'blob', 'sha256', 'size', 'path', 'mode', 'type'})
+            check(impl['path'] == 'scripts/deploy/remote-compose-release.sh' and impl['mode'] == '100644' and impl['type'] == 'blob')
+            check(re.fullmatch('[0-9a-f]{40}', impl['revision']) and re.fullmatch('[0-9a-f]{40}', impl['blob'])
+                  and re.fullmatch('[0-9a-f]{64}', impl['sha256']) and type(impl['size']) is int and 100000 < impl['size'] < 262144)
         self.owner, self.environment, self.compose, self.revision, self.image, self.phase = owner, environment, compose, revision, image, phase
         self.control, self.fds, self.directories, self.edges, self.objects = control, [], {}, [], {}
         self.metadata = {}
         self.active, self.completed, self.signaled = False, False, False
-        self.uid = os.geteuid()
-        principal = subprocess.check_output(['id', '-un'], stderr=subprocess.DEVNULL).decode().strip()
-        check(self.uid != 0 and principal not in ('root', 'hookah-staging') and control['principal'] == principal)
+        with inspect_guard('principal', 'mismatch'):
+            self.uid = os.geteuid()
+            principal = subprocess.check_output(['id', '-un'], stderr=subprocess.DEVNULL).decode().strip()
+            check(self.uid != 0 and principal not in ('root', 'hookah-staging') and control['principal'] == principal)
         self.incident = dict(owner=owner, environment=environment, revision=revision, image=image)
         self.path_hash = sha(compose.encode())
-        self.pin = control['binding']
-        check(self.pin is None or isinstance(self.pin, dict))
-        check(phase == 'inspect' or self.pin is not None)
+        with inspect_guard('control'):
+            self.pin = control['binding']
+            check(self.pin is None or isinstance(self.pin, dict))
+            check(phase == 'inspect' or self.pin is not None)
         self.open_context()
         self.lock_context()
         self.check_edges()
-        self.binding_record = self.record('parent', 'application.binding', 7)
-        self.project = self.binding_record.get('compose_project')
-        check(re.fullmatch('[A-Za-z0-9_.-]{1,128}', self.project or ''))
+        with inspect_guard('application_binding'):
+            self.binding_record = self.record('parent', 'application.binding', 7)
+            self.project = self.binding_record.get('compose_project')
+            check(re.fullmatch('[A-Za-z0-9_.-]{1,128}', self.project or ''))
         self.backing = self.mount_identity()
-        check(self.binding_record == dict(binding_version='3', environment='stage', compose_path_hash=self.path_hash,
-              mount_fingerprint_version='2', mount_fingerprint=self.backing, compose_project=self.project, compose_service='app'))
+        with inspect_guard('application_binding', 'mismatch'):
+            check(self.binding_record == dict(binding_version='3', environment='stage', compose_path_hash=self.path_hash,
+                  mount_fingerprint_version='2', mount_fingerprint=self.backing, compose_project=self.project, compose_service='app'))
         self.docker_environment = {k:v for k,v in os.environ.items() if not k.startswith(('COMPOSE_', 'DOCKER_', 'PYTHON', 'BASH_FUNC_'))
                                    and k not in ('BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS', 'CDPATH')}
         # Only local, already present images are used. No ambient Docker context,
         # credentials helpers, TLS files or client config may redirect this path.
-        temporary_root = os.path.realpath('/tmp')
-        temporary_info = os.stat(temporary_root, follow_symlinks=False)
-        check(stat.S_ISDIR(temporary_info.st_mode) and temporary_info.st_uid == 0 and temporary_info.st_mode & stat.S_ISVTX)
-        temporary_fd = self.keep(os.open(temporary_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
-        name = '.clubs-bound-docker-' + os.urandom(16).hex()
-        os.mkdir(name, 0o700, dir_fd=temporary_fd)
-        self.docker_config_fd = self.keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=temporary_fd))
-        check(os.fstat(self.docker_config_fd).st_uid == self.uid and stat.S_IMODE(os.fstat(self.docker_config_fd).st_mode) == 0o700)
-        os.rmdir(name, dir_fd=temporary_fd)
-        self.docker_environment['DOCKER_CONFIG'] = fdpath(self.docker_config_fd)
-        self.docker_environment['DOCKER_HOST'] = 'unix:///var/run/docker.sock'
+        with inspect_guard('configuration_capture'):
+            temporary_root = os.path.realpath('/tmp')
+            temporary_info = os.stat(temporary_root, follow_symlinks=False)
+            check(stat.S_ISDIR(temporary_info.st_mode) and temporary_info.st_uid == 0 and temporary_info.st_mode & stat.S_ISVTX)
+            temporary_fd = self.keep(os.open(temporary_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+            name = '.clubs-bound-docker-' + os.urandom(16).hex()
+            os.mkdir(name, 0o700, dir_fd=temporary_fd)
+            self.docker_config_fd = self.keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=temporary_fd))
+            check(os.fstat(self.docker_config_fd).st_uid == self.uid and stat.S_IMODE(os.fstat(self.docker_config_fd).st_mode) == 0o700)
+            os.rmdir(name, dir_fd=temporary_fd)
+            self.docker_environment['DOCKER_CONFIG'] = fdpath(self.docker_config_fd)
+            self.docker_environment['DOCKER_HOST'] = 'unix:///var/run/docker.sock'
         self.config_fds = []
         self.capture_configuration()
-        self.candidate = dict(version=1, incident=self.incident, implementation=impl,
-                              principal=dict(name=principal, uid=self.uid),
-                              compose=dict(path=compose, project=self.project, service='app'),
-                              backing=self.backing, objects=self.objects, configuration=self.config_hashes)
-        if self.pin is not None:
-            check(canonical(self.pin) == canonical(self.candidate))
-        self.binding_digest = sha(canonical(self.candidate))
+        with inspect_guard('binding_candidate', 'mismatch'):
+            self.candidate = dict(version=1, incident=self.incident, implementation=impl,
+                                  principal=dict(name=principal, uid=self.uid),
+                                  compose=dict(path=compose, project=self.project, service='app'),
+                                  backing=self.backing, objects=self.objects, configuration=self.config_hashes)
+            if self.pin is not None:
+                check(canonical(self.pin) == canonical(self.candidate))
+            self.binding_digest = sha(canonical(self.candidate))
         self.check_evidence()
 
     def keep(self, fd):
@@ -3468,42 +3550,50 @@ class BoundContext:
         return fd
 
     def open_context(self):
-        parent = self.keep(os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
-        self.objects['/'] = identity(parent)
-        current = ''
-        for part in self.compose.split('/')[1:]:
-            current += '/' + part
-            child = self.keep(os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent))
-            info = os.fstat(child)
-            check(info.st_uid in (0, self.uid) and not stat.S_IMODE(info.st_mode) & 0o022)
-            self.edges.append((parent, part, child)); self.objects[current] = identity(child)
-            parent = child
-        check(os.fstat(parent).st_uid == self.uid)
+        with inspect_guard('compose_chain'):
+            parent = self.keep(os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+            self.objects['/'] = identity(parent)
+            current = ''
+            for part in self.compose.split('/')[1:]:
+                current += '/' + part
+                child = self.keep(os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent))
+                info = os.fstat(child)
+                check(info.st_uid in (0, self.uid) and not stat.S_IMODE(info.st_mode) & 0o022)
+                self.edges.append((parent, part, child)); self.objects[current] = identity(child)
+                parent = child
+        with inspect_guard('compose_owner', 'mismatch'):
+            check(os.fstat(parent).st_uid == self.uid)
         self.directories['compose'] = parent
-        for key, parent_key, name in (
-            ('parent', 'compose', '.clubs-bot-release-state'), ('root', 'parent', 'stage'),
-            ('state', 'root', 'clubs-bot-schema-stage.lock'),
-            ('results', 'root', 'clubs-bot-schema-stage.results'),
-            ('ledger', 'root', 'clubs-bot-schema-stage.migration-ledgers')):
-            base = self.directories[parent_key]
-            child = self.keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=base))
-            info = os.fstat(child)
-            check(info.st_uid == self.uid and stat.S_IMODE(info.st_mode) == 0o700)
-            check(info.st_dev == os.fstat(parent).st_dev)
-            self.directories[key] = child; self.edges.append((base, name, child)); self.objects[key] = identity(child)
-        for key, parent_key, name in (('application_lock', 'parent', 'application.lock'), ('operation_lock', 'results', 'operation.lock')):
-            base = self.directories[parent_key]
-            child = self.open_file(parent_key, name, os.O_RDWR)
-            self.edges.append((base, name, child)); self.objects[key] = identity(child)
-            self.directories[key] = child
-        if self.pin is not None:
-            check(self.pin.get('objects') == self.objects)
+        with inspect_guard('protocol_layout'):
+            for key, parent_key, name in (
+                ('parent', 'compose', '.clubs-bot-release-state'), ('root', 'parent', 'stage'),
+                ('state', 'root', 'clubs-bot-schema-stage.lock'),
+                ('results', 'root', 'clubs-bot-schema-stage.results'),
+                ('ledger', 'root', 'clubs-bot-schema-stage.migration-ledgers')):
+                base = self.directories[parent_key]
+                child = self.keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=base))
+                info = os.fstat(child)
+                check(info.st_uid == self.uid and stat.S_IMODE(info.st_mode) == 0o700)
+                with inspect_guard('protocol_device', 'mismatch'):
+                    check(info.st_dev == os.fstat(parent).st_dev)
+                self.directories[key] = child; self.edges.append((base, name, child)); self.objects[key] = identity(child)
+        with inspect_guard('lock_files'):
+            for key, parent_key, name in (('application_lock', 'parent', 'application.lock'), ('operation_lock', 'results', 'operation.lock')):
+                base = self.directories[parent_key]
+                child = self.open_file(parent_key, name, os.O_RDWR)
+                self.edges.append((base, name, child)); self.objects[key] = identity(child)
+                self.directories[key] = child
+        with inspect_guard('binding_candidate', 'mismatch'):
+            if self.pin is not None:
+                check(self.pin.get('objects') == self.objects)
 
+    @inspect_guarded('lock_shared')
     def lock_context(self):
         mode = fcntl.LOCK_SH if self.phase in ('inspect', 'reconcile') else fcntl.LOCK_EX
         for key in ('application_lock', 'operation_lock'):
             fcntl.flock(self.directories[key], mode | fcntl.LOCK_NB)
 
+    @inspect_guarded('context_edges', 'mismatch')
     def check_edges(self):
         # Observed rename is rejected; safety does not depend on advisory locks
         # preventing rename. All subsequent accesses use these retained objects.
@@ -3548,26 +3638,30 @@ class BoundContext:
         fingerprints = set()
         # findmnt follows a reference to the held descriptor, not the public path.
         for key in ('compose', 'parent', 'root', 'state', 'results', 'ledger', 'application_lock', 'operation_lock'):
-            fd = self.directories[key]
-            result = subprocess.run(['findmnt', '--noheadings', '--pairs', '--output', 'FSTYPE,SOURCE,FSROOT,TARGET',
-                                     '--target', fdpath(fd)], capture_output=True, pass_fds=(fd,))
-            check(result.returncode == 0 and len(result.stdout) <= 4096)
-            line = result.stdout.decode('ascii').strip()
-            match = re.fullmatch(r'FSTYPE="([^"\s]+)" SOURCE="([^"\s]+)" FSROOT="([^"\s]+)" TARGET="([^"\s]+)"', line)
-            check(match)
-            values = []
-            for value in match.groups():
-                check(not re.search(r'\\(?!x[0-9a-fA-F]{2})', value))
-                value = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m[1], 16)), value)
-                check('\x00' not in value); values.append(value)
-            check(values[0] in ('ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'zfs', 'f2fs'))
-            check(values[2].startswith('/') and values[3].startswith('/'))
-            encoded = 'clubs-bot-mount-fingerprint-version=2\n' + '\n'.join(
-                key + '_SHA256=' + sha(value.encode()) for key, value in zip(('FSTYPE', 'SOURCE', 'FSROOT', 'TARGET'), values))
-            fingerprints.add('mount-v2:' + sha(encoded.encode()))
-        check(len(fingerprints) == 1)
-        return fingerprints.pop()
+            with inspect_guard('mount_query', 'command'):
+                fd = self.directories[key]
+                result = subprocess.run(['findmnt', '--noheadings', '--pairs', '--output', 'FSTYPE,SOURCE,FSROOT,TARGET',
+                                         '--target', fdpath(fd)], capture_output=True, pass_fds=(fd,))
+                check(result.returncode == 0 and len(result.stdout) <= 4096)
+            with inspect_guard('mount_identity'):
+                line = result.stdout.decode('ascii').strip()
+                match = re.fullmatch(r'FSTYPE="([^"\s]+)" SOURCE="([^"\s]+)" FSROOT="([^"\s]+)" TARGET="([^"\s]+)"', line)
+                check(match)
+                values = []
+                for value in match.groups():
+                    check(not re.search(r'\\(?!x[0-9a-fA-F]{2})', value))
+                    value = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m[1], 16)), value)
+                    check('\x00' not in value); values.append(value)
+                check(values[0] in ('ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'zfs', 'f2fs'))
+                check(values[2].startswith('/') and values[3].startswith('/'))
+                encoded = 'clubs-bot-mount-fingerprint-version=2\n' + '\n'.join(
+                    key + '_SHA256=' + sha(value.encode()) for key, value in zip(('FSTYPE', 'SOURCE', 'FSROOT', 'TARGET'), values))
+                fingerprints.add('mount-v2:' + sha(encoded.encode()))
+        with inspect_guard('mount_identity', 'mismatch'):
+            check(len(fingerprints) == 1)
+            return fingerprints.pop()
 
+    @inspect_guarded('configuration_capture')
     def capture(self, data):
         if hasattr(os, 'memfd_create'):
             fd = os.memfd_create('clubs-bound-capture', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
@@ -3588,56 +3682,63 @@ class BoundContext:
         # This incident path supports the repository's plain YAML mapping subset.
         # Reject constructs that can cause Compose to read another file before
         # handing any bytes to Compose. No generic YAML evaluator is introduced.
-        main_fd = self.keep(os.open('docker-compose.yml', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-                                    dir_fd=self.directories['compose']))
-        info = os.fstat(main_fd)
-        check(stat.S_ISREG(info.st_mode) and info.st_uid == self.uid and info.st_nlink == 1
-              and stat.S_IMODE(info.st_mode) in (0o600, 0o644) and info.st_dev == os.fstat(self.directories['compose']).st_dev)
-        main = read_all(main_fd, 65536)
-        for line in main.decode('utf-8').splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#'):
-                continue
-            check('\t' not in line and not stripped.startswith(('---', '...', '%', '!', '&', '*', '{', '[')))
-            if stripped.startswith('- '):
-                check(not stripped[2:].startswith(('!', '&', '*', '{')))
-                continue
-            match = re.match(r'([A-Za-z0-9_.-]+):(?:\s+(.*))?$', stripped)
-            check(match)
-            key, value = match[1], match[2] or ''
-            check(key not in ('include', 'extends', 'env_file', 'label_file', 'build', 'configs', 'secrets', 'develop', 'provider', 'models')
-                  and not value.startswith(('!', '&', '*', '|', '>', '{')))
-            if not line.startswith(' '):
-                check(key in ('services', 'volumes', 'version', 'name', 'networks'))
-        override = self.read('compose', 'docker-compose.override.yml')
-        release = self.read('state', 'docker-compose.release.yml')
-        expected = f'# clubs-bot-managed-quiesced-release\n# revision: {self.revision}\nservices:\n  app:\n    image: {self.image}\n'.encode()
-        check(override == expected and release == expected)
-        try:
-            dotenv = self.read('compose', '.env', 65536)
-        except FileNotFoundError:
-            dotenv = b''
-        # COMPOSE_* in .env can select other files; Docker client configuration
-        # is explicitly isolated. Ordinary interpolation remains Compose-owned.
-        for line in dotenv.decode('utf-8').splitlines():
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            match = re.fullmatch(r'(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=.*', line)
-            check(match and not match[1].startswith(('COMPOSE_', 'DOCKER_')))
+        with inspect_guard('compose_file'):
+            main_fd = self.keep(os.open('docker-compose.yml', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                        dir_fd=self.directories['compose']))
+            info = os.fstat(main_fd)
+            check(stat.S_ISREG(info.st_mode) and info.st_uid == self.uid and info.st_nlink == 1
+                  and stat.S_IMODE(info.st_mode) in (0o600, 0o644) and info.st_dev == os.fstat(self.directories['compose']).st_dev)
+            main = read_all(main_fd, 65536)
+        with inspect_guard('compose_subset'):
+            for line in main.decode('utf-8').splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith('#'):
+                    continue
+                check('\t' not in line and not stripped.startswith(('---', '...', '%', '!', '&', '*', '{', '[')))
+                if stripped.startswith('- '):
+                    check(not stripped[2:].startswith(('!', '&', '*', '{')))
+                    continue
+                match = re.match(r'([A-Za-z0-9_.-]+):(?:\s+(.*))?$', stripped)
+                check(match)
+                key, value = match[1], match[2] or ''
+                check(key not in ('include', 'extends', 'env_file', 'label_file', 'build', 'configs', 'secrets', 'develop', 'provider', 'models')
+                      and not value.startswith(('!', '&', '*', '|', '>', '{')))
+                if not line.startswith(' '):
+                    check(key in ('services', 'volumes', 'version', 'name', 'networks'))
+        with inspect_guard('override', 'mismatch'):
+            override = self.read('compose', 'docker-compose.override.yml')
+            release = self.read('state', 'docker-compose.release.yml')
+            expected = f'# clubs-bot-managed-quiesced-release\n# revision: {self.revision}\nservices:\n  app:\n    image: {self.image}\n'.encode()
+            check(override == expected and release == expected)
+        with inspect_guard('dotenv'):
+            try:
+                dotenv = self.read('compose', '.env', 65536)
+            except FileNotFoundError:
+                dotenv = b''
+            # COMPOSE_* in .env can select other files; Docker client configuration
+            # is explicitly isolated. Ordinary interpolation remains Compose-owned.
+            for line in dotenv.decode('utf-8').splitlines():
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                match = re.fullmatch(r'(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=.*', line)
+                check(match and not match[1].startswith(('COMPOSE_', 'DOCKER_')))
         self.config_hashes = dict(main=sha(main), override=sha(override), release=sha(release), dotenv=sha(dotenv))
         self.main_capture, self.override_capture, self.env_capture = map(self.capture, (main, override, dotenv))
-        self.normalized = self.compose_call(['config', '--format', 'json'], normalize=True)
-        check(self.normalized[0] == 0)
-        model = json.loads(self.normalized[1], object_pairs_hook=unique)
-        app = model.get('services', {}).get('app', {})
-        check(app.get('image') == self.image and not any(k in app for k in ('build', 'env_file', 'configs', 'secrets', 'label_file')))
-        check(all(isinstance(v, dict) and v.get('type') == 'volume' for v in app.get('volumes', [])))
-        self.config_hashes['resolved'] = sha(canonical(model))
-        # Compose config already serializes literal dollars for reuse as input.
-        # Re-escaping would change application environment values on the next call.
-        self.resolved_capture = self.capture(canonical(model))
+        with inspect_guard('compose_command', 'command'):
+            self.normalized = self.compose_call(['config', '--format', 'json'], normalize=True)
+            check(self.normalized[0] == 0)
+        with inspect_guard('compose_model'):
+            model = json.loads(self.normalized[1], object_pairs_hook=unique)
+            app = model.get('services', {}).get('app', {})
+            check(app.get('image') == self.image and not any(k in app for k in ('build', 'env_file', 'configs', 'secrets', 'label_file')))
+            check(all(isinstance(v, dict) and v.get('type') == 'volume' for v in app.get('volumes', [])))
+            self.config_hashes['resolved'] = sha(canonical(model))
+            # Compose config already serializes literal dollars for reuse as input.
+            # Re-escaping would change application environment values on the next call.
+            self.resolved_capture = self.capture(canonical(model))
 
+    @inspect_guarded('compose_command', 'command')
     def compose_call(self, args, normalize=False):
         self.check_edges()
         files = ['-f', self.main_capture, '-f', self.override_capture] if normalize else ['-f', self.resolved_capture]
@@ -3656,55 +3757,61 @@ class BoundContext:
 
     def check_evidence(self):
         self.check_edges()
-        check('active-candidate.anchor' not in os.listdir(self.directories['parent']))
-        root_entries = set(os.listdir(self.directories['root']))
-        check(root_entries <= {'clubs-bot-schema-stage.lock', 'clubs-bot-schema-stage.results',
-                                'clubs-bot-schema-stage.migration-ledgers', '.clb82-resume-start-33468965282-1.consumed'})
-        check(set(os.listdir(self.directories['state'])) == self.state_keys | {'docker-compose.release.yml', 'prior-override'})
-        for key, value in dict(owner=self.owner, expected_revision=self.revision, image_digest=self.image,
-                               compose_path_hash=self.path_hash, compose_project=self.project, compose_service='app',
-                               migration_image_digest=self.image).items():
-            check(self.value(key) == value)
-        check(self.value('checkpoint') in ('migration_completed', 'candidate_start_begun', 'candidate_healthy'))
-        check(re.fullmatch(r'sha256:[0-9a-f]{64}', self.value('migration_image_id')))
-        prior = self.read('state', 'prior-override', 1024)
-        check(sha(prior) == self.value('prior_override_sha256'))
-        if self.value('prior_override_exists') == 'no':
-            check(prior == b'absent')
-        else:
-            check(self.value('prior_override_exists') == 'yes')
-            old_image, old_revision = self.value('old_app_digest'), self.value('old_app_revision')
-            check(re.fullmatch(r'ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}', old_image)
-                  and re.fullmatch('[0-9a-f]{40}', old_revision))
-            prefix = '# clubs-bot-managed-quiesced-release\n'
-            check(prior in ((prefix + f'# revision: {old_revision}\nservices:\n  app:\n    image: {old_image}\n').encode(),
-                            (prefix + f'services:\n  app:\n    image: {old_image}\n').encode()))
-        check(self.value('candidate_override_sha256') == self.config_hashes['override'])
-        common = dict(owner=self.owner, environment='stage', expected_revision=self.revision, image_digest=self.image,
-                      compose_path_hash=self.path_hash, operation='migration',
-                      invocation_fingerprint=sha(f'v1|stage|{self.owner}|{self.revision}|{self.image}|{self.path_hash}'.encode()))
-        ledger = self.record('ledger', self.owner + '.ledger', 13)
-        outcome = self.record('ledger', self.owner + '.outcome', 12)
-        check(set(os.listdir(self.directories['ledger'])) == {self.owner + '.ledger', self.owner + '.outcome'})
-        for value, required, epochs in (
-            (ledger, dict(ledger_version='1', state='completed', result='completed', completion_checkpoint='migration_completed'), ('created_epoch', 'completed_epoch')),
-            (outcome, dict(outcome_version='1', state='succeeded', bounded_result='migration_succeeded', completion_checkpoint='migration_process_succeeded'), ('recorded_epoch',))):
-            check(set(value) == set(common) | set(required) | set(epochs))
-            check(all(value.get(k) == v for k,v in {**common, **required}.items()))
-            check(all(re.fullmatch('[0-9]{1,12}', value[k]) for k in epochs))
-        result = self.record('results', self.owner + '.result', 10)
-        check(set(result) == set('result_version owner requested_operation checkpoint_before checkpoint_after result failure_category expected_revision image_digest compose_path_hash'.split()))
-        check(all(result.get(k) == v for k,v in dict(result_version='1', owner=self.owner, expected_revision=self.revision,
-                                                   image_digest=self.image, compose_path_hash=self.path_hash).items()))
-        check(result['requested_operation'] in ('start', 'resume-start'))
-        check(result['checkpoint_before'] in ('migration_completed', 'candidate_start_begun', 'candidate_healthy'))
-        check(result['checkpoint_after'] in ('migration_completed', 'candidate_start_begun', 'candidate_healthy', 'unavailable'))
-        check((result['result'], result['failure_category']) in (
-            ('success', 'success'), ('remote_failure', 'app_identity_mismatch'), ('remote_failure', 'candidate_start_failed'),
-            ('remote_failure', 'readiness_failed'), ('remote_failure', 'health_failed'), ('remote_failure', 'unexpected'),
-            ('remote_failure', 'child_exit_255'), ('remote_failure', 'durability_failure'),
-            ('incomplete_unknown', 'operation_in_progress'), ('incomplete_unknown', 'interrupted')))
-        self.result = result
+        with inspect_guard('retained_layout'):
+            check('active-candidate.anchor' not in os.listdir(self.directories['parent']))
+            root_entries = set(os.listdir(self.directories['root']))
+            check(root_entries <= {'clubs-bot-schema-stage.lock', 'clubs-bot-schema-stage.results',
+                                    'clubs-bot-schema-stage.migration-ledgers', '.clb82-resume-start-33468965282-1.consumed'})
+            check(set(os.listdir(self.directories['state'])) == self.state_keys | {'docker-compose.release.yml', 'prior-override'})
+        with inspect_guard('retained_identity', 'mismatch'):
+            for key, value in dict(owner=self.owner, expected_revision=self.revision, image_digest=self.image,
+                                   compose_path_hash=self.path_hash, compose_project=self.project, compose_service='app',
+                                   migration_image_digest=self.image).items():
+                check(self.value(key) == value)
+        with inspect_guard('retained_checkpoint'):
+            check(self.value('checkpoint') in ('migration_completed', 'candidate_start_begun', 'candidate_healthy'))
+            check(re.fullmatch(r'sha256:[0-9a-f]{64}', self.value('migration_image_id')))
+        with inspect_guard('prior_override', 'mismatch'):
+            prior = self.read('state', 'prior-override', 1024)
+            check(sha(prior) == self.value('prior_override_sha256'))
+            if self.value('prior_override_exists') == 'no':
+                check(prior == b'absent')
+            else:
+                check(self.value('prior_override_exists') == 'yes')
+                old_image, old_revision = self.value('old_app_digest'), self.value('old_app_revision')
+                check(re.fullmatch(r'ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}', old_image)
+                      and re.fullmatch('[0-9a-f]{40}', old_revision))
+                prefix = '# clubs-bot-managed-quiesced-release\n'
+                check(prior in ((prefix + f'# revision: {old_revision}\nservices:\n  app:\n    image: {old_image}\n').encode(),
+                                (prefix + f'services:\n  app:\n    image: {old_image}\n').encode()))
+            check(self.value('candidate_override_sha256') == self.config_hashes['override'])
+        with inspect_guard('migration_records'):
+            common = dict(owner=self.owner, environment='stage', expected_revision=self.revision, image_digest=self.image,
+                          compose_path_hash=self.path_hash, operation='migration',
+                          invocation_fingerprint=sha(f'v1|stage|{self.owner}|{self.revision}|{self.image}|{self.path_hash}'.encode()))
+            ledger = self.record('ledger', self.owner + '.ledger', 13)
+            outcome = self.record('ledger', self.owner + '.outcome', 12)
+            check(set(os.listdir(self.directories['ledger'])) == {self.owner + '.ledger', self.owner + '.outcome'})
+            for value, required, epochs in (
+                (ledger, dict(ledger_version='1', state='completed', result='completed', completion_checkpoint='migration_completed'), ('created_epoch', 'completed_epoch')),
+                (outcome, dict(outcome_version='1', state='succeeded', bounded_result='migration_succeeded', completion_checkpoint='migration_process_succeeded'), ('recorded_epoch',))):
+                check(set(value) == set(common) | set(required) | set(epochs))
+                check(all(value.get(k) == v for k,v in {**common, **required}.items()))
+                check(all(re.fullmatch('[0-9]{1,12}', value[k]) for k in epochs))
+        with inspect_guard('result_record'):
+            result = self.record('results', self.owner + '.result', 10)
+            check(set(result) == set('result_version owner requested_operation checkpoint_before checkpoint_after result failure_category expected_revision image_digest compose_path_hash'.split()))
+            check(all(result.get(k) == v for k,v in dict(result_version='1', owner=self.owner, expected_revision=self.revision,
+                                                       image_digest=self.image, compose_path_hash=self.path_hash).items()))
+            check(result['requested_operation'] in ('start', 'resume-start'))
+            check(result['checkpoint_before'] in ('migration_completed', 'candidate_start_begun', 'candidate_healthy'))
+            check(result['checkpoint_after'] in ('migration_completed', 'candidate_start_begun', 'candidate_healthy', 'unavailable'))
+            check((result['result'], result['failure_category']) in (
+                ('success', 'success'), ('remote_failure', 'app_identity_mismatch'), ('remote_failure', 'candidate_start_failed'),
+                ('remote_failure', 'readiness_failed'), ('remote_failure', 'health_failed'), ('remote_failure', 'unexpected'),
+                ('remote_failure', 'child_exit_255'), ('remote_failure', 'durability_failure'),
+                ('incomplete_unknown', 'operation_in_progress'), ('incomplete_unknown', 'interrupted')))
+            self.result = result
         self.check_edges()
 
     def replace(self, directory, name, data):
@@ -3774,10 +3881,12 @@ class BoundContext:
         self.completed = True
         return b'release-operation:v=1 result=success\n'
 
+    @inspect_guarded('status_read')
     def status(self):
         self.check_evidence()
-        code, app = self.worker('classify')
-        check(code == 0 and app in (b'absent', b'candidate_running', b'ambiguous', b'replaced'))
+        with inspect_guard('status_classification'):
+            code, app = self.worker('classify')
+            check(code == 0 and app in (b'absent', b'candidate_running', b'ambiguous', b'replaced'))
         checkpoint = self.value('checkpoint')
         permit = False
         if checkpoint == 'migration_completed' and app == b'absent':
@@ -3817,6 +3926,7 @@ class BoundContext:
             return self.compose_call(args)
         raise RuntimeError('invalid internal operation')
 
+    @inspect_guarded('worker_capture')
     def worker(self, action):
         parent, child = socket.socketpair()
         worker_env = dict(self.docker_environment, CLB82_RPC_FD=str(child.fileno()))
@@ -3835,20 +3945,21 @@ class BoundContext:
                 while process.poll() is None or poll.get_map():
                     for key, _ in poll.select(.1):
                         if key.fileobj is parent:
-                            header = parent.recv(4)
-                            if not header:
-                                poll.unregister(parent); continue
-                            check(len(header) == 4)
-                            size = struct.unpack('!I', header)[0]; check(size <= 8192)
-                            data = bytearray()
-                            while len(data) < size:
-                                part = parent.recv(size - len(data)); check(part); data.extend(part)
-                            try:
-                                code, value = self.rpc(json.loads(data))
-                            except Exception:
-                                code, value = 1, b''
-                            answer = canonical([code, base64.b64encode(value).decode()])
-                            parent.sendall(struct.pack('!I', len(answer)) + answer)
+                            with inspect_guard('worker_protocol', 'protocol'):
+                                header = parent.recv(4)
+                                if not header:
+                                    poll.unregister(parent); continue
+                                check(len(header) == 4)
+                                size = struct.unpack('!I', header)[0]; check(size <= 8192)
+                                data = bytearray()
+                                while len(data) < size:
+                                    part = parent.recv(size - len(data)); check(part); data.extend(part)
+                                try:
+                                    code, value = self.rpc(json.loads(data))
+                                except Exception:
+                                    code, value = 1, b''
+                                answer = canonical([code, base64.b64encode(value).decode()])
+                                parent.sendall(struct.pack('!I', len(answer)) + answer)
                         else:
                             data = os.read(process.stdout.fileno(), 4096)
                             if not data:
@@ -3919,7 +4030,8 @@ bound_ready() {
 '''
 context = None
 try:
-    control = json.loads(read_all(4, 32768), object_pairs_hook=unique)
+    with inspect_guard('control'):
+        control = json.loads(read_all(4, 32768), object_pairs_hook=unique)
     context = BoundContext(*sys.argv[1:], control)
     def interrupted(signum, frame):
         context.signaled = True
@@ -3929,20 +4041,23 @@ try:
     if context.phase in ('inspect', 'reconcile'):
         output = context.status()
         if context.phase == 'inspect':
-            output += b'corrected-binding-candidate:v=1 ' + canonical(context.candidate) + b'\n'
+            with inspect_guard('inspect_output'):
+                output += b'corrected-binding-candidate:v=1 ' + canonical(context.candidate) + b'\n'
     elif context.phase == 'claim':
         output = context.claim()
     else:
         output = context.resume()
-    sys.stdout.buffer.write(output); sys.stdout.flush()
-except BaseException:
+    with inspect_guard('inspect_output'):
+        sys.stdout.buffer.write(output); sys.stdout.flush()
+except BaseException as failure:
     if context is not None and context.active and not context.completed:
         try:
             context.operation_result('incomplete_unknown' if context.signaled else 'remote_failure',
                                      'interrupted' if context.signaled else getattr(context, 'worker_failure', 'unexpected'))
         except BaseException:
             pass
-    print('corrected-start:v=1 result=blocked', flush=True)
+    diagnostic = inspect_diagnostic(failure) if INSPECT_MODE else ''
+    print(diagnostic + 'corrected-start:v=1 result=blocked', flush=True)
     sys.exit(1)
 finally:
     if context is not None:

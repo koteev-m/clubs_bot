@@ -46,9 +46,9 @@ HELPER_PATH = "scripts/deploy/remote-compose-release.sh"
 # Working implementation identity. No unpublished/future commit is invented.
 # A separately approved stage configuration must bind these bytes to a real
 # Git commit before execution. Fixtures supply their own isolated Git objects.
-IMPLEMENTATION_BLOB = "fc09080ba4864133ca23ec5c777339b881094279"
-IMPLEMENTATION_SHA256 = "48bcbafde22b90dc3902cac0ba80754239964466ce612d11565dd1fdeb75e2ec"
-IMPLEMENTATION_SIZE = 174422
+IMPLEMENTATION_BLOB = "8f8930952de7363f550ec6518a9747d07e50f22c"
+IMPLEMENTATION_SHA256 = "2df5005f05c000324b257b77e52395b639635bb9c5138d55be02a17bd7eabde2"
+IMPLEMENTATION_SIZE = 180419
 IMPLEMENTATION_PATTERN = r"([0-9a-f]{40}):" + IMPLEMENTATION_BLOB + ":" + IMPLEMENTATION_SHA256
 INCIDENT = _authority.INCIDENT
 COMPOSE_PATH = "/opt/clubs-bot-stage"
@@ -460,6 +460,28 @@ def binding_control(env, snapshot):
 # The dedicated key travels only in private stdin, not command text/control.
 REMOTE_BOUNDARIES = ("principal_ok", "bootstrap_entered", "bootstrap_ready", "helper_started")
 HELPER_BLOCKED = b"corrected-start:v=1 result=blocked\n"
+INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'compose_owner',
+    'protocol_layout', 'protocol_device', 'lock_files', 'lock_shared', 'context_edges',
+    'application_binding', 'mount_query', 'mount_identity', 'configuration_capture',
+    'compose_file', 'compose_subset', 'override', 'dotenv', 'compose_command', 'compose_model',
+    'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
+    'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
+    'status_classification', 'status_read', 'inspect_output', 'interrupted', 'internal'))
+INSPECT_FAILURES = frozenset(('invalid', 'mismatch', 'missing', 'permission', 'busy',
+    'command', 'protocol', 'io', 'interrupted', 'internal'))
+
+
+def inspect_failure_diagnostic(raw):
+    """Exact bounded failure body only; never decode or reflect arbitrary output."""
+    if len(raw) > 160:
+        return None
+    match = re.fullmatch(rb"corrected-inspect:v=1 guard=([a-z_]+) failure=([a-z_]+)\n"
+                         rb"corrected-start:v=1 result=blocked\n", raw)
+    if match:
+        guard, failure = (value.decode('ascii') for value in match.groups())
+        if guard in INSPECT_GUARDS and failure in INSPECT_FAILURES:
+            return f"corrected-inspect:v=1 guard={guard} failure={failure}"
+    return None
 
 
 def remote_milestones(nonce):
@@ -474,6 +496,7 @@ def remote_milestones(nonce):
 def ssh_result(result, nonce):
     """Consume bounded private framing; discard every nonzero child body."""
     raw = result.output
+    diagnostic = None
     reached = 0
     markers = remote_milestones(nonce)
     for marker in markers:
@@ -505,8 +528,11 @@ def ssh_result(result, nonce):
     elif raw == HELPER_BLOCKED:
         failure = "helper_blocked"
     else:
-        failure = "child_nonzero_unknown"
+        diagnostic = inspect_failure_diagnostic(raw)
+        failure = "helper_blocked" if diagnostic is not None else "child_nonzero_unknown"
     boundary = REMOTE_BOUNDARIES[reached - 1] if reached else "local"
+    if diagnostic is not None:
+        print(diagnostic, flush=True)
     print(f"corrected-ssh:v=1 boundary={boundary} failure={failure}", flush=True)
     return result.code, b""
 
