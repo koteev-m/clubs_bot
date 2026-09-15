@@ -3356,7 +3356,7 @@ INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'c
     'compose_file', 'compose_subset', 'override', 'dotenv', 'compose_command', 'compose_model',
     'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
     'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
-    'status_classification', 'status_read', 'inspect_output', 'interrupted', 'internal'))
+    'status_classification', 'status_read', 'inspect_output', 'finalize', 'interrupted', 'internal'))
 INSPECT_FAILURES = frozenset(('invalid', 'mismatch', 'missing', 'permission', 'busy',
     'command', 'protocol', 'io', 'interrupted', 'internal'))
 INSPECT_MODE = len(sys.argv) == 7 and sys.argv[6] == 'inspect'
@@ -3881,8 +3881,13 @@ class BoundContext:
         self.completed = True
         return b'release-operation:v=1 result=success\n'
 
+    def check_interruption(self):
+        if self.phase == 'inspect' and self.signaled:
+            raise InterruptedError
+
     @inspect_guarded('status_read')
     def status(self):
+        self.check_interruption()
         self.check_evidence()
         with inspect_guard('status_classification'):
             code, app = self.worker('classify')
@@ -3894,6 +3899,7 @@ class BoundContext:
             permit = code == 0 and not data
         elif checkpoint == 'candidate_healthy' and app == b'candidate_running':
             code, data = self.worker('healthy'); permit = code == 0 and not data
+        self.check_interruption()
         requested = 'resume-start' if self.phase == 'reconcile' else 'start'
         result = self.result['result'] if self.result['requested_operation'] == requested else 'unavailable'
         line = (f'release-status:v=1 status_available=yes owner_match=yes revision_match=yes digest_match=yes checkpoint={checkpoint} '
@@ -3928,6 +3934,7 @@ class BoundContext:
 
     @inspect_guarded('worker_capture')
     def worker(self, action):
+        self.check_interruption()
         parent, child = socket.socketpair()
         worker_env = dict(self.docker_environment, CLB82_RPC_FD=str(child.fileno()))
         script = FUNCTIONS + '\n' + WORKER
@@ -3943,6 +3950,7 @@ class BoundContext:
             with selectors.DefaultSelector() as poll:
                 poll.register(parent, selectors.EVENT_READ); poll.register(process.stdout, selectors.EVENT_READ)
                 while process.poll() is None or poll.get_map():
+                    self.check_interruption()
                     for key, _ in poll.select(.1):
                         if key.fileobj is parent:
                             with inspect_guard('worker_protocol', 'protocol'):
@@ -3958,6 +3966,9 @@ class BoundContext:
                                     code, value = self.rpc(json.loads(data))
                                 except Exception:
                                     code, value = 1, b''
+                                # Recoverable RPC errors must not swallow a
+                                # cancellation recorded by the signal handler.
+                                self.check_interruption()
                                 answer = canonical([code, base64.b64encode(value).decode()])
                                 parent.sendall(struct.pack('!I', len(answer)) + answer)
                         else:
@@ -3973,6 +3984,25 @@ class BoundContext:
             parent.close(); process.stdout.close()
 
     def close(self):
+        if self.phase == 'inspect':
+            failure = None
+            # Attempt every owned resource once, preserving the first failure.
+            # The inspect handler records signals throughout this finalization.
+            for stream in getattr(self, 'config_fds', []):
+                try:
+                    stream.close()
+                except BaseException as error:
+                    if failure is None:
+                        failure = error
+            for fd in reversed(self.fds):
+                try:
+                    os.close(fd)
+                except BaseException as error:
+                    if failure is None:
+                        failure = error
+            if failure is not None:
+                raise failure
+            return
         for stream in getattr(self, 'config_fds', []):
             stream.close()
         for fd in reversed(self.fds):
@@ -4033,16 +4063,39 @@ try:
     with inspect_guard('control'):
         control = json.loads(read_all(4, 32768), object_pairs_hook=unique)
     context = BoundContext(*sys.argv[1:], control)
+    # Armed before installing the handler: no signal can unwind an inspect
+    # ownership handoff or its finalizer. Worker/status safe points observe it.
+    inspect_owned = context.phase == 'inspect'
     def interrupted(signum, frame):
         context.signaled = True
-        raise InterruptedError
+        if not inspect_owned:
+            raise InterruptedError
     for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(number, interrupted)
-    if context.phase in ('inspect', 'reconcile'):
-        output = context.status()
-        if context.phase == 'inspect':
+    if context.phase == 'inspect':
+        failure = None
+        try:
+            output = context.status()
+            context.check_interruption()
             with inspect_guard('inspect_output'):
                 output += b'corrected-binding-candidate:v=1 ' + canonical(context.candidate) + b'\n'
+        except BaseException as error:
+            failure = error
+        finally:
+            try:
+                with inspect_guard('finalize'):
+                    context.close()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+        if failure is not None:
+            raise failure
+        # Finalization is complete. Restore immediate interruption before the
+        # last recorded-cancellation check and before any success publication.
+        inspect_owned = False
+        context.check_interruption()
+    elif context.phase == 'reconcile':
+        output = context.status()
     elif context.phase == 'claim':
         output = context.claim()
     else:
@@ -4060,7 +4113,7 @@ except BaseException as failure:
     print(diagnostic + 'corrected-start:v=1 result=blocked', flush=True)
     sys.exit(1)
 finally:
-    if context is not None:
+    if context is not None and context.phase != 'inspect':
         context.close()
 CLB82_BOUND_PYTHON
   declare -f sha256_text image_revision current_compose_container_id inspect_container_value \

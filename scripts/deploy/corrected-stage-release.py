@@ -46,9 +46,9 @@ HELPER_PATH = "scripts/deploy/remote-compose-release.sh"
 # Working implementation identity. No unpublished/future commit is invented.
 # A separately approved stage configuration must bind these bytes to a real
 # Git commit before execution. Fixtures supply their own isolated Git objects.
-IMPLEMENTATION_BLOB = "8f8930952de7363f550ec6518a9747d07e50f22c"
-IMPLEMENTATION_SHA256 = "2df5005f05c000324b257b77e52395b639635bb9c5138d55be02a17bd7eabde2"
-IMPLEMENTATION_SIZE = 180419
+IMPLEMENTATION_BLOB = "c174814a4b442b06a7172aac747ff4c146712309"
+IMPLEMENTATION_SHA256 = "a3150d63eb58abaed40a4a6eadb743510b8053c15a2b9447f5e6c4f6330ddd0c"
+IMPLEMENTATION_SIZE = 182637
 IMPLEMENTATION_PATTERN = r"([0-9a-f]{40}):" + IMPLEMENTATION_BLOB + ":" + IMPLEMENTATION_SHA256
 INCIDENT = _authority.INCIDENT
 COMPOSE_PATH = "/opt/clubs-bot-stage"
@@ -466,7 +466,7 @@ INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'c
     'compose_file', 'compose_subset', 'override', 'dotenv', 'compose_command', 'compose_model',
     'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
     'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
-    'status_classification', 'status_read', 'inspect_output', 'interrupted', 'internal'))
+    'status_classification', 'status_read', 'inspect_output', 'finalize', 'interrupted', 'internal'))
 INSPECT_FAILURES = frozenset(('invalid', 'mismatch', 'missing', 'permission', 'busy',
     'command', 'protocol', 'io', 'interrupted', 'internal'))
 

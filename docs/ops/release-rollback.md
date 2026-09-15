@@ -571,7 +571,7 @@ Static guard allowlist: `control`, `input`, `principal`, `compose_chain`, `compo
 `compose_file`, `compose_subset`, `override`, `dotenv`, `compose_command`, `compose_model`,
 `binding_candidate`, `retained_layout`, `retained_identity`, `retained_checkpoint`,
 `prior_override`, `migration_records`, `result_record`, `worker_protocol`, `worker_capture`,
-`status_classification`, `status_read`, `inspect_output`, `interrupted`, `internal`.
+`status_classification`, `status_read`, `inspect_output`, `finalize`, `interrupted`, `internal`.
 Static failure allowlist: `invalid`, `mismatch`, `missing`, `permission`, `busy`, `command`,
 `protocol`, `io`, `interrupted`, `internal`. Это semantic operation и механизм отказа,
 не значения защищённых inputs/state и не конкретный syscall или внутренний exception type.
@@ -580,7 +580,22 @@ Guard scope прикрепляет только fixed tag к исключени�
 innermost fatal scope сохраняется при propagation. После success или обработанного RPC exception
 глобального last-guard state нет. Неожиданная ошибка вне scope — `internal/internal`, обработанное
 прерывание — `interrupted/interrupted`. Ordinary negative ready/healthy RPC по-прежнему даёт valid
-status с `resume_permitted=no`; transient RPC failure не выдаётся как fatal guard.
+status с `resume_permitted=no`; transient RPC failure без recorded cancellation не выдаётся как fatal guard.
+Recorded cancellation проверяется после recoverable RPC catch, в worker/status safe points и перед
+success publication: она не может превратиться в ordinary negative readiness или `INSPECTED`.
+
+Только inspect подготавливает status/candidate в памяти, затем ровно один раз выполняет обязательный
+`BoundContext.close()` до их публикации. Его handler записывает SIGINT/SIGTERM/SIGHUP от установки
+до завершения inspect finalization; он не unwind-ит ownership transitions или cleanup. После cleanup
+восстанавливается immediate interruption и проверяется recorded flag до success output. PR #504
+runner capture/cancellation ownership, process-group bounds и signal policy mutation phases не меняются.
+`close()` делает best-effort попытку закрыть каждый owned stream/FD один раз, включая остальные
+ресурсы после ошибки одного close; сохранены порядок streams → reversed FDs и lock release через close.
+Новый `finalize` обозначает failure обязательной finalization, не ошибку уже начатого output.
+Primary fatal cause сохраняется при secondary cleanup failure; без primary cause первая cleanup
+ошибка становится terminal diagnostic. Recorded signal без другого fatal cause даёт
+`interrupted/interrupted`. Никаких raw secondary exceptions, повторного close или success body
+при failure finalization. Это не обещает доставку diagnostic при неисправном/частично записанном stdout.
 
 Runner принимает новый body только после authenticated `helper_started`, на nonzero child result,
 с exact grammar, allowlisted значениями и bound 160 bytes. Legacy exact one-line blocked остаётся
