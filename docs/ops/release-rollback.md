@@ -125,6 +125,81 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
+### CLB-91 incident-only Compose mode repair (local candidate)
+
+User-provided run `35108589661` (run 6, attempt 1) reached authenticated
+`helper_started/helper_blocked` with `compose_file_mode/invalid`, then
+`STATUS_UNAVAILABLE`. This proves the mode predicate failed at that snapshot;
+it does not prove the current mode or exclude later device/size/state blockers.
+The direct metadata probe remained blocked and is not an alternative channel.
+
+The separate [Stage Compose Mode Repair workflow](../../.github/workflows/stage-compose-mode-repair.yml)
+and [runner](../../scripts/deploy/stage-compose-mode-repair.py) are a local candidate,
+not permission to execute. They do not extend corrected-stage actions or use
+deploy-ssh's live keyscan path. After independent review/publication, a future
+dispatch requires separate explicit repair authorization and manual `stage`
+Environment approval. Confirmation is exactly `CLB-91:35108589661:repair-compose-mode-0600`;
+it is a human-error guard, not a substitute for that approval. The only input is
+confirmation. Repository/default branch/ref must be `koteev-m/clubs_bot`/`main`,
+and reruns (`run_attempt != 1`) are rejected before SSH credentials. Checkout and
+remote operation source are bound to dispatched `github.sha`. Shared concurrency
+is `payments-schema-stage`, with no cancellation of in-progress operations.
+
+The target is fixed `/opt/clubs-bot-stage/docker-compose.yml`; protected
+`COMPOSE_PATH` must agree. Target mode is `0600`. Repository Compose clients run
+under the deployment principal; the Compose YAML itself is not a container
+mount. No other-UID reader was found in repository evidence. This does not prove
+absence of external readers: compatibility must be checked before authorizing
+application, without silently widening the target to `0644`.
+
+The [fixed remote operation](../../scripts/deploy/stage-compose-mode-operation.py)
+walks a trusted no-follow directory chain, retains descriptors, checks
+regular-file/owner/nlink/device and rechecks object/path identities. It acquires
+existing `application.lock` then `operation.lock` exclusively and nonblocking;
+missing, malformed or busy locks block execution. No lock is created, removed,
+truncated or reset. Snapshots detect in-invocation drift and are not persisted
+root-binding approval. Advisory locks serialize cooperating clients; they do not
+exclude malicious root/same-UID actors or noncooperating writers.
+
+ACL/capability names or inability to enumerate them block before mutation.
+Filesystem assumptions are restricted to Linux x86_64/aarch64 local ext[234],
+XFS or Btrfs; unsupported filesystems (including NFS/SMB/FUSE) are rejected.
+If mode is already `0600` or `0644`, no mutation occurs. Otherwise only one
+`fchmod(target_fd, 0600)` may be attempted. Same-object readback must confirm
+`0600`, with identity/size/mtime preserved; mode and ctime may change. No content
+read, checksum, chown/chgrp, ACL rewrite, directory chmod, retry or rollback is
+performed. A readback/cleanup/interruption failure after an attempted write is
+ambiguous, never a reason to try again automatically.
+
+SSH uses the same stage secrets, unchanged anonymous pinned-known-hosts/capture
+primitives, strict host verification and principal guard as corrected-stage.
+There is one transport, `ConnectionAttempts=1`, no keyscan/proxy/fallback/sudo.
+The fixed source executes in isolated Python without remote temporary files.
+A fresh private stdin nonce authenticates the single bounded result with HMAC;
+raw startup/child output, wrong tags, unknown enums or duplicate lines cannot
+be logged as accepted evidence. Stderr is discarded. Public output is exactly:
+
+```text
+compose-mode-repair:v=1 result=changed
+compose-mode-repair:v=1 result=already_valid
+compose-mode-repair:v=1 result=blocked reason=<fixed_reason>
+compose-mode-repair:v=1 result=ambiguous reason=<fixed_reason>
+```
+
+Blocked reasons: `request`, `principal`, `layout`, `identity`, `busy`, `acl`,
+`filesystem`, `io`, `interrupted`, `local`. Ambiguous reasons: `write`, `readback`,
+`cleanup`, `interrupted`, `transport`, `protocol`. Transport failure/timeout or
+unverifiable output after submission is ambiguous because chmod may have happened.
+No username/UID/GID/path/prior-mode/inode/device/size/content/exception is printed.
+No automatic inspect, Docker/Compose or lifecycle command follows. `changed`
+means only verified mode repair, not recovery readiness. This capability neither
+reads nor changes `CLB82_APPROVED_IMPLEMENTATION`/`CLB82_AUTHORIZED_ROOT_BINDING`;
+their corrected-stage authority remains separate and unchanged.
+
+Local tests use disposable fixtures, with Linux filesystem/ACL and selected
+error metadata injected on Darwin. Hosted Linux/OpenSSH, actual filesystem ACL
+behavior, reader compatibility and live application remain unverified.
+
 ### Deployment-principal read-only status channel
 
 `.github/workflows/release-status.yml` — отдельный manual-only канал наблюдения, а не deploy/recovery workflow.

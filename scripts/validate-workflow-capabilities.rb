@@ -6,6 +6,7 @@ require "set"
 require "yaml"
 require_relative "validate-workflow-yaml"
 require_relative "validate-corrected-stage-workflow"
+require_relative "validate-stage-compose-mode-workflow"
 
 module WorkflowCapabilityPolicy
   module_function
@@ -1276,6 +1277,7 @@ module WorkflowCapabilityPolicy
     key = [path, job_name]
     return DEPLOY_SECRETS if DEPLOY_JOBS.key?(key)
     return RELEASE_STATUS_SECRETS if key == [RELEASE_STATUS_WORKFLOW, "status"]
+    return RELEASE_STATUS_SECRETS if key == [StageComposeModeWorkflow::PATH, "repair"]
     return RELEASE_STATUS_SECRETS | Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "execute"]
     return Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "validate"]
     return Set.new(["GITHUB_TOKEN"]) if key == [".github/workflows/release.yml", "release"]
@@ -1323,6 +1325,7 @@ module WorkflowCapabilityPolicy
     expected = "${{ needs.validate.outputs.environment }}" if
       key == [RELEASE_STATUS_WORKFLOW, "status"]
     expected = "stage" if key == [CorrectedStageWorkflow::PATH, "execute"]
+    expected = "stage" if key == [StageComposeModeWorkflow::PATH, "repair"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
     elsif !environment.nil?
@@ -2176,6 +2179,7 @@ module WorkflowCapabilityPolicy
         end
       end
       CorrectedStageWorkflow.validate(self, workflow) if path == CorrectedStageWorkflow::PATH
+      StageComposeModeWorkflow.validate(self, workflow) if path == StageComposeModeWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
       validate_release_status_contract(path, workflow, triggers, jobs, raw)
       top_level = workflow.reject { |key, _value| key == "jobs" }

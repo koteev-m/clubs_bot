@@ -11715,6 +11715,7 @@ echo "quality-gate: Docker workflow/context contract verified"
 # Corrected-stage delegation is permitted only by the validated full topology.
 ruby "$ROOT_DIR/scripts/validate-corrected-stage-workflow.rb" "$ROOT_DIR"
 ruby "$ROOT_DIR/scripts/validate-lint-workflow.rb" "$ROOT_DIR/.github/workflows/lint.yml"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_mode_repair.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check
 if [ "$CORRECTED_STAGE_SELFCHECK_MODE" = "full" ]; then
