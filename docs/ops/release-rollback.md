@@ -568,13 +568,24 @@ corrected-start:v=1 result=blocked
 Static guard allowlist: `control`, `input`, `principal`, `compose_chain`, `compose_owner`,
 `protocol_layout`, `protocol_device`, `lock_files`, `lock_shared`, `context_edges`,
 `application_binding`, `mount_query`, `mount_identity`, `configuration_capture`,
-`compose_file`, `compose_subset`, `override`, `dotenv`, `compose_command`, `compose_model`,
+`compose_file`, `compose_file_type`, `compose_file_owner`, `compose_file_nlink`,
+`compose_file_mode`, `compose_file_device`, `compose_file_size`, `compose_subset`,
+`override`, `dotenv`, `compose_command`, `compose_model`,
 `binding_candidate`, `retained_layout`, `retained_identity`, `retained_checkpoint`,
 `prior_override`, `migration_records`, `result_record`, `worker_protocol`, `worker_capture`,
 `status_classification`, `status_read`, `inspect_output`, `finalize`, `interrupted`, `internal`.
 Static failure allowlist: `invalid`, `mismatch`, `missing`, `permission`, `busy`, `command`,
 `protocol`, `io`, `interrupted`, `internal`. Это semantic operation и механизм отказа,
 не значения защищённых inputs/state и не конкретный syscall или внутренний exception type.
+
+`compose_file` остаётся scope для open/fstat/read и поэтому сохраняет fixed
+`missing`/`permission`/`busy`/`io` attribution. Только существующие boolean rejections получают
+более точные `invalid` guards: `compose_file_type` (regular file), `compose_file_owner`
+(effective-UID match), `compose_file_nlink` (ровно одна ссылка), `compose_file_mode`
+(`0600`/`0644`), `compose_file_device` (тот же filesystem device) и `compose_file_size`
+(не более 65536 прочитанных bytes). Значения UID/mode/link/device/size не публикуются.
+Size contract остаётся read-based: ровно 65536 bytes разрешены, rejection возникает только
+после наблюдения следующего byte; metadata `st_size` не заменяет чтение.
 
 Guard scope прикрепляет только fixed tag к исключению, приводящему к terminal rejection;
 innermost fatal scope сохраняется при propagation. После success или обработанного RPC exception

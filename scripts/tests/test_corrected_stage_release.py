@@ -1340,6 +1340,67 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
                     raise error
             self.assertEqual('corrected-inspect:v=1 guard=interrupted failure=interrupted\n', diagnostic(caught.exception))
 
+    def test_compose_file_predicates_have_exact_subguards_without_changing_io_mapping(self):
+        tree, helper = self.helper_namespace()
+        compose_scope = next(node for node in ast.walk(tree) if isinstance(node, ast.With)
+            and isinstance(node.items[0].context_expr, ast.Call)
+            and isinstance(node.items[0].context_expr.func, ast.Name)
+            and node.items[0].context_expr.func.id == 'inspect_guard'
+            and node.items[0].context_expr.args
+            and isinstance(node.items[0].context_expr.args[0], ast.Constant)
+            and node.items[0].context_expr.args[0].value == 'compose_file')
+        code = compile(ast.fix_missing_locations(ast.Module(body=[compose_scope], type_ignores=[])),
+                       '<approved-helper-compose-file>', 'exec')
+        file_descriptor, directory_descriptor = 71, 72
+        file_info = dict(st_mode=helper['stat'].S_IFREG | 0o644, st_uid=501, st_nlink=1, st_dev=9)
+        directory_info = SimpleNamespace(st_dev=9)
+
+        def execute(changes=None, reads=(b'',), open_error=None, read_error=None):
+            context = SimpleNamespace(uid=501, directories={'compose': directory_descriptor}, keep=lambda fd:fd)
+            values = dict(helper, self=context)
+            info = SimpleNamespace(**{**file_info, **(changes or {})})
+            open_effect = open_error if open_error is not None else file_descriptor
+            read_effect = read_error if read_error is not None else list(reads)
+            with patch.object(helper['os'], 'open', side_effect=open_effect if isinstance(open_effect, BaseException) else None,
+                              return_value=None if isinstance(open_effect, BaseException) else open_effect), \
+                 patch.object(helper['os'], 'fstat', side_effect=[info, directory_info]), \
+                 patch.object(helper['os'], 'read', side_effect=read_effect if isinstance(read_effect, BaseException) else list(read_effect)):
+                exec(code, values)
+            return values.get('main')
+
+        rejected = (
+            ({'st_mode': helper['stat'].S_IFDIR | 0o644}, 'compose_file_type'),
+            ({'st_uid': 0}, 'compose_file_owner'),
+            ({'st_nlink': 2}, 'compose_file_nlink'),
+            ({'st_mode': helper['stat'].S_IFREG | 0o640}, 'compose_file_mode'),
+            ({'st_dev': 10}, 'compose_file_device'),
+        )
+        for changes, guard in rejected:
+            with self.subTest(guard=guard), self.assertRaises(helper['InspectFailure']) as caught:
+                execute(changes)
+            self.assertEqual((guard, 'invalid'), (caught.exception.guard, caught.exception.failure))
+            line = helper['inspect_diagnostic'](caught.exception)
+            self.assertEqual(f'corrected-inspect:v=1 guard={guard} failure=invalid\n', line)
+            self.assertNotIn('501', line); self.assertNotIn('/srv/fixture', line)
+
+        self.assertEqual(b'x' * 65536, execute(reads=(b'x' * 65536, b'')))
+        with self.assertRaises(helper['InspectFailure']) as overflow:
+            execute(reads=(b'x' * 65536, b'x'))
+        self.assertEqual(('compose_file_size', 'invalid'),
+                         (overflow.exception.guard, overflow.exception.failure))
+
+        for error, failure in ((FileNotFoundError(self.private), 'missing'),
+                               (PermissionError(self.private), 'permission'),
+                               (OSError(self.private), 'io')):
+            with self.subTest(failure=failure), self.assertRaises(helper['InspectFailure']) as caught:
+                execute(open_error=error)
+            self.assertEqual(('compose_file', failure),
+                             (caught.exception.guard, caught.exception.failure))
+        with self.assertRaises(helper['InspectFailure']) as read_failure:
+            execute(read_error=OSError(self.private))
+        self.assertEqual(('compose_file', 'io'),
+                         (read_failure.exception.guard, read_failure.exception.failure))
+
     def test_inspect_each_guard_has_a_production_rejection_fixture(self):
         tree, helper = self.helper_namespace()
         # Execute the actual lexical operation from the embedded AST with
@@ -1392,6 +1453,23 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
             run('compose_chain', lambda: block('compose_chain'), 'missing')
             run('protocol_layout', lambda: block('protocol_layout'), 'missing')
             run('compose_file', lambda: block('compose_file'), 'missing')
+        values['info'] = SimpleNamespace(st_mode=helper['stat'].S_IFDIR | 0o644,
+                                         st_uid=501, st_nlink=1, st_dev=1)
+        run('compose_file_type', lambda: block('compose_file_type'))
+        values['info'] = SimpleNamespace(st_mode=helper['stat'].S_IFREG | 0o644,
+                                         st_uid=0, st_nlink=1, st_dev=1)
+        run('compose_file_owner', lambda: block('compose_file_owner'))
+        values['info'] = SimpleNamespace(st_mode=helper['stat'].S_IFREG | 0o644,
+                                         st_uid=501, st_nlink=2, st_dev=1)
+        run('compose_file_nlink', lambda: block('compose_file_nlink'))
+        values['info'] = SimpleNamespace(st_mode=helper['stat'].S_IFREG | 0o640,
+                                         st_uid=501, st_nlink=1, st_dev=1)
+        run('compose_file_mode', lambda: block('compose_file_mode'))
+        values['info'] = SimpleNamespace(st_dev=1); values['compose_info'] = SimpleNamespace(st_dev=2)
+        run('compose_file_device', lambda: block('compose_file_device'))
+        values['main'] = b'x' * 65537
+        run('compose_file_size', lambda: block('compose_file_size'))
+        values['info'] = SimpleNamespace(st_dev=2)
         info = SimpleNamespace(st_uid=0, st_dev=1)
         with patch.object(helper['os'], 'fstat', return_value=info):
             run('compose_owner', lambda: block('compose_owner'), 'mismatch')
@@ -1657,11 +1735,11 @@ assert m.ssh_result(result,bytes([167])*32)==(124,b'')
         # Invalid public compose prefix stops before opening any incident root.
         self.classified(self.bootstrap(self.helper_payload()), 'helper_started', 'helper_blocked',
                         'corrected-inspect:v=1 guard=input failure=invalid\n')
-        self.assertEqual(182637, len(_helper_bytes))
-        self.assertEqual('a3150d63eb58abaed40a4a6eadb743510b8053c15a2b9447f5e6c4f6330ddd0c',
+        self.assertEqual(183462, len(_helper_bytes))
+        self.assertEqual('54839fcfa543888cc4613d2af480d85aee07ab8dd6b4a2bf879e64d501577809',
                          hashlib.sha256(_helper_bytes).hexdigest())
-        self.assertEqual('c174814a4b442b06a7172aac747ff4c146712309',
-                         hashlib.sha1(b'blob 182637\0' + _helper_bytes).hexdigest())
+        self.assertEqual('162c2fba50ce84019de9fb0151491e518cca95ca',
+                         hashlib.sha1(b'blob 183462\0' + _helper_bytes).hexdigest())
 
     def test_nonce_authentication_and_all_malformed_frames_fail_closed(self):
         old = b''.join(('corrected-remote-boundary:v=1 '+v+'\n').encode()

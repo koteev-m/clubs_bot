@@ -3353,7 +3353,9 @@ import tempfile
 INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'compose_owner',
     'protocol_layout', 'protocol_device', 'lock_files', 'lock_shared', 'context_edges',
     'application_binding', 'mount_query', 'mount_identity', 'configuration_capture',
-    'compose_file', 'compose_subset', 'override', 'dotenv', 'compose_command', 'compose_model',
+    'compose_file', 'compose_file_type', 'compose_file_owner', 'compose_file_nlink',
+    'compose_file_mode', 'compose_file_device', 'compose_file_size', 'compose_subset',
+    'override', 'dotenv', 'compose_command', 'compose_model',
     'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
     'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
     'status_classification', 'status_read', 'inspect_output', 'finalize', 'interrupted', 'internal'))
@@ -3686,9 +3688,26 @@ class BoundContext:
             main_fd = self.keep(os.open('docker-compose.yml', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                                         dir_fd=self.directories['compose']))
             info = os.fstat(main_fd)
-            check(stat.S_ISREG(info.st_mode) and info.st_uid == self.uid and info.st_nlink == 1
-                  and stat.S_IMODE(info.st_mode) in (0o600, 0o644) and info.st_dev == os.fstat(self.directories['compose']).st_dev)
-            main = read_all(main_fd, 65536)
+            with inspect_guard('compose_file_type'):
+                check(stat.S_ISREG(info.st_mode))
+            with inspect_guard('compose_file_owner'):
+                check(info.st_uid == self.uid)
+            with inspect_guard('compose_file_nlink'):
+                check(info.st_nlink == 1)
+            with inspect_guard('compose_file_mode'):
+                check(stat.S_IMODE(info.st_mode) in (0o600, 0o644))
+            compose_info = os.fstat(self.directories['compose'])
+            with inspect_guard('compose_file_device'):
+                check(info.st_dev == compose_info.st_dev)
+            main = bytearray()
+            while True:
+                chunk = os.read(main_fd, min(65536, 65537 - len(main)))
+                if not chunk:
+                    main = bytes(main)
+                    break
+                main.extend(chunk)
+                with inspect_guard('compose_file_size'):
+                    check(len(main) <= 65536)
         with inspect_guard('compose_subset'):
             for line in main.decode('utf-8').splitlines():
                 stripped = line.strip()

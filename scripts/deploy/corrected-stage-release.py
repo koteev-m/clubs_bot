@@ -46,9 +46,9 @@ HELPER_PATH = "scripts/deploy/remote-compose-release.sh"
 # Working implementation identity. No unpublished/future commit is invented.
 # A separately approved stage configuration must bind these bytes to a real
 # Git commit before execution. Fixtures supply their own isolated Git objects.
-IMPLEMENTATION_BLOB = "c174814a4b442b06a7172aac747ff4c146712309"
-IMPLEMENTATION_SHA256 = "a3150d63eb58abaed40a4a6eadb743510b8053c15a2b9447f5e6c4f6330ddd0c"
-IMPLEMENTATION_SIZE = 182637
+IMPLEMENTATION_BLOB = "162c2fba50ce84019de9fb0151491e518cca95ca"
+IMPLEMENTATION_SHA256 = "54839fcfa543888cc4613d2af480d85aee07ab8dd6b4a2bf879e64d501577809"
+IMPLEMENTATION_SIZE = 183462
 IMPLEMENTATION_PATTERN = r"([0-9a-f]{40}):" + IMPLEMENTATION_BLOB + ":" + IMPLEMENTATION_SHA256
 INCIDENT = _authority.INCIDENT
 COMPOSE_PATH = "/opt/clubs-bot-stage"
@@ -463,7 +463,9 @@ HELPER_BLOCKED = b"corrected-start:v=1 result=blocked\n"
 INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'compose_owner',
     'protocol_layout', 'protocol_device', 'lock_files', 'lock_shared', 'context_edges',
     'application_binding', 'mount_query', 'mount_identity', 'configuration_capture',
-    'compose_file', 'compose_subset', 'override', 'dotenv', 'compose_command', 'compose_model',
+    'compose_file', 'compose_file_type', 'compose_file_owner', 'compose_file_nlink',
+    'compose_file_mode', 'compose_file_device', 'compose_file_size', 'compose_subset',
+    'override', 'dotenv', 'compose_command', 'compose_model',
     'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
     'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
     'status_classification', 'status_read', 'inspect_output', 'finalize', 'interrupted', 'internal'))
