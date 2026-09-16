@@ -548,6 +548,72 @@ Protected root binding по handoff отсутствует; эта локаль�
 не создаёт recovery authority. Будущий inspect требует **отдельного разрешения** после review/publication;
 этот шаг не dispatch-ит workflow и не обращается к stage.
 
+**CLB-91 — fixed inspect guard diagnostics (local candidate, after run #4).**
+Описанный выше published runner PR #504 совместим с прежним однострочным helper rejection.
+Post-diagnostics inspect [34981781124](https://github.com/koteev-m/clubs_bot/actions/runs/34981781124),
+run number `4`, attempt `1`, head `281a32472c27c0f4afad7ae3c2eced57e124d0e9`, дал
+`boundary=helper_started failure=helper_blocked` и terminal `STATUS_UNAVAILABLE`.
+Это доказывает запуск helper и его generic rejection, но не конкретный внутренний guard:
+`CLB_91_HELPER_BLOCK_NARROWED`. Status/observation/binding candidate не получены;
+claim/resume/provisioning/recovery не выполнялись. Historical run `34707584391` не получает
+ретроспективно новых diagnostics; его exact root cause остаётся недоказанной.
+
+Локальный кандидат расширяет только fatal `inspect` body до ровно двух ASCII/LF строк:
+
+```text
+corrected-inspect:v=1 guard=<fixed_guard> failure=<fixed_failure>
+corrected-start:v=1 result=blocked
+```
+
+Static guard allowlist: `control`, `input`, `principal`, `compose_chain`, `compose_owner`,
+`protocol_layout`, `protocol_device`, `lock_files`, `lock_shared`, `context_edges`,
+`application_binding`, `mount_query`, `mount_identity`, `configuration_capture`,
+`compose_file`, `compose_subset`, `override`, `dotenv`, `compose_command`, `compose_model`,
+`binding_candidate`, `retained_layout`, `retained_identity`, `retained_checkpoint`,
+`prior_override`, `migration_records`, `result_record`, `worker_protocol`, `worker_capture`,
+`status_classification`, `status_read`, `inspect_output`, `finalize`, `interrupted`, `internal`.
+Static failure allowlist: `invalid`, `mismatch`, `missing`, `permission`, `busy`, `command`,
+`protocol`, `io`, `interrupted`, `internal`. Это semantic operation и механизм отказа,
+не значения защищённых inputs/state и не конкретный syscall или внутренний exception type.
+
+Guard scope прикрепляет только fixed tag к исключению, приводящему к terminal rejection;
+innermost fatal scope сохраняется при propagation. После success или обработанного RPC exception
+глобального last-guard state нет. Неожиданная ошибка вне scope — `internal/internal`, обработанное
+прерывание — `interrupted/interrupted`. Ordinary negative ready/healthy RPC по-прежнему даёт valid
+status с `resume_permitted=no`; transient RPC failure без recorded cancellation не выдаётся как fatal guard.
+Recorded cancellation проверяется после recoverable RPC catch, в worker/status safe points и перед
+success publication: она не может превратиться в ordinary negative readiness или `INSPECTED`.
+
+Только inspect подготавливает status/candidate в памяти, затем ровно один раз выполняет обязательный
+`BoundContext.close()` до их публикации. Его handler записывает SIGINT/SIGTERM/SIGHUP от установки
+до завершения inspect finalization; он не unwind-ит ownership transitions или cleanup. После cleanup
+восстанавливается immediate interruption и проверяется recorded flag до success output. PR #504
+runner capture/cancellation ownership, process-group bounds и signal policy mutation phases не меняются.
+`close()` делает best-effort попытку закрыть каждый owned stream/FD один раз, включая остальные
+ресурсы после ошибки одного close; сохранены порядок streams → reversed FDs и lock release через close.
+Новый `finalize` обозначает failure обязательной finalization, не ошибку уже начатого output.
+Primary fatal cause сохраняется при secondary cleanup failure; без primary cause первая cleanup
+ошибка становится terminal diagnostic. Recorded signal без другого fatal cause даёт
+`interrupted/interrupted`. Никаких raw secondary exceptions, повторного close или success body
+при failure finalization. Это не обещает доставку diagnostic при неисправном/частично записанном stdout.
+
+Runner принимает новый body только после authenticated `helper_started`, на nonzero child result,
+с exact grammar, allowlisted значениями и bound 160 bytes. Legacy exact one-line blocked остаётся
+допустимым. Для нового body он печатает только проверенную первую строку, затем прежний
+`corrected-ssh:v=1 boundary=helper_started failure=helper_blocked`; terminal остаётся
+`STATUS_UNAVAILABLE`. Extra/duplicate/reordered/unknown/CRLF/raw child bytes не публикуются.
+Успешный inspect не выдаёт failure diagnostic; canonical status/candidate contract прежний.
+
+Это только diagnostic evidence, не execution authority. Claim/resume/reconcile output и predicates,
+prior verification, protected binding, SSH trust и capture/cancellation ownership PR #504 не меняются.
+Inspect допускает отсутствие protected root pin; никаких retries, дополнительных transports,
+persistent state writes или автоматического принятия candidate не добавлено.
+Новые helper bytes имеют новую Git/blob/SHA identity, которую runner обязан проверить. Прежняя
+protected approved implementation не изменена этой локальной работой. Candidate **не approved**:
+после независимого review и отдельной publication потребуется отдельное решение об approval новой
+identity; live inspect также требует отдельного явного разрешения. Hosted/live execution новых bytes
+не проверялся.
+
 **Fixed binding и authoritative consumed-state (F2/root).** `CLB82_AUTHORIZED_ROOT_BINDING` — несекретный
 canonical JSON pin из protected stage configuration, вне server state tree; workflow-dispatch override отсутствует.
 Он связывает exact incident, новую implementation identity, principal name/UID, Compose path/project/service,

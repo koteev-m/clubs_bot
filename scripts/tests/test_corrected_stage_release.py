@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Executable CLB-82 coverage. Every transport is synthetic; no real SSH target."""
+import ast
 import contextlib
 import hashlib
 import hmac
@@ -23,6 +24,7 @@ import secrets
 import shlex
 import signal
 import select
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -412,6 +414,7 @@ class CorrectedExecutorTest(unittest.TestCase):
         for secret in state.SENSITIVE_VALUES:
             self.assertNotIn(secret, output.getvalue())
         self.assertNotIn('corrected-remote-boundary:', output.getvalue())
+        self.assertNotIn('corrected-inspect:', output.getvalue())
         return result
 
     def test_dispatch_validation_and_injection_before_secrets(self):
@@ -1067,7 +1070,7 @@ os.execv(REAL_PYTHON,[REAL_PYTHON,*arguments])
 
 
 class SshBoundaryDiagnosticsTest(unittest.TestCase):
-    """Fixed outer boundaries only; no live SSH or helper predicate overrides."""
+    """Authenticated outer/inspect diagnostics; no live SSH or helper predicate overrides."""
     nonce = b'\xa7' * 32  # Dedicated synthetic binding, never a protected value.
     markers = tuple((b'corrected-remote-boundary:v=2 ' + name.encode() + b' ' +
         hmac.digest(b'\xa7' * 32, b'corrected-remote-boundary:v=2 ' + name.encode(), 'sha256').hex().encode() + b'\n')
@@ -1075,14 +1078,451 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
     prefix = b''.join(markers)
     private = b'fixture-user@192.0.2.1 /private/secret token=not-a-real-secret'
 
-    def classified(self, result, boundary, failure):
+    def classified(self, result, boundary, failure, diagnostic=""):
         with contextlib.redirect_stdout(io.StringIO()) as public:
             answer = executor.ssh_result(result, self.nonce)
         self.assertEqual((result.code, b''), answer)
-        self.assertEqual(f'corrected-ssh:v=1 boundary={boundary} failure={failure}\n', public.getvalue())
+        self.assertEqual(diagnostic + f'corrected-ssh:v=1 boundary={boundary} failure={failure}\n', public.getvalue())
         self.assertNotIn(self.private.decode(), public.getvalue())
         self.assertNotIn(self.nonce.hex(), public.getvalue())
         self.assertNotIn('corrected-remote-boundary:', public.getvalue())
+
+    def helper_namespace(self, phase='inspect'):
+        # Compile the production embedded implementation, without running its
+        # descriptor-consuming entrypoint. No guard predicate is replaced.
+        source = _helper_bytes.decode().split("<<'CLB82_BOUND_PYTHON' || true\n", 1)[1].split('\nCLB82_BOUND_PYTHON', 1)[0]
+        tree = ast.parse(source)
+        definitions = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom,
+            ast.FunctionDef, ast.ClassDef, ast.Assign)) and not (isinstance(node, ast.Assign) and
+            any(isinstance(target, ast.Name) and target.id in ('FUNCTIONS', 'context') for target in node.targets))]
+        namespace = {}
+        with patch.object(sys, 'argv', ['helper', state.OWNER, 'stage', '/srv/fixture', state.REVISION, state.DIGEST, phase]):
+            exec(compile(ast.Module(body=definitions, type_ignores=[]), '<approved-helper-definitions>', 'exec'), namespace)
+        return tree, namespace
+
+    def inspect_terminal_fixture(self, scenario, phase='inspect'):
+        # Real entrypoint/status/worker/RPC/compose_call/close. Only retained
+        # host data and the external Docker command are disposable fixtures.
+        tree, helper = self.helper_namespace(phase)
+        entry = compile(ast.Module(body=[next(n for n in tree.body if isinstance(n, ast.Try))],
+                                   type_ignores=[]), '<approved-helper-entrypoint>', 'exec')
+        B = helper['BoundContext']; ctx = B.__new__(B)
+        ctx.phase = phase; ctx.owner = executor.INCIDENT['RELEASE_OWNER']; ctx.compose = executor.COMPOSE_PATH
+        ctx.revision = executor.INCIDENT['EXPECTED_REVISION']; ctx.image = executor.INCIDENT['IMAGE_DIGEST']
+        ctx.active = ctx.completed = ctx.signaled = False
+        ctx.check_evidence = lambda:None; ctx.check_edges = lambda:None
+        ctx.value = lambda key:'migration_completed'
+        ctx.result = {'requested_operation':'start', 'result':'remote_failure'}
+        ctx.docker_environment = dict(os.environ); ctx.project = 'fixture'
+        ctx.resolved_capture = ctx.env_capture = '/dev/null'; ctx.directories = {'compose':0}
+        implementation = dict(revision=_commit, blob=_blob, sha256=executor.IMPLEMENTATION_SHA256,
+            size=executor.IMPLEMENTATION_SIZE, path=executor.HELPER_PATH, mode='100644', type='blob')
+        env = request()
+        ctx.candidate = dict(version=1, incident=dict(owner=ctx.owner, environment='stage',
+            revision=ctx.revision, image=ctx.image), implementation=implementation,
+            principal=dict(name=env['SSH_USER'], uid=501),
+            compose=dict(path=ctx.compose, project='fixture', service='app'), backing='mount-v2:'+'a'*64,
+            objects={key:[1,2] for key in ('/', 'parent', 'root', 'state', 'results', 'ledger',
+                                         'application_lock', 'operation_lock')},
+            configuration={key:'b'*64 for key in ('main', 'override', 'release', 'dotenv', 'resolved')})
+        executor.validate_binding(ctx.candidate, env, implementation)
+        ctx.claim = lambda:b'release-authorization:v=1 consumed=yes\n'
+        ctx.resume = lambda:executor.ACK
+        helper['FUNCTIONS'] = ''
+        helper['WORKER'] += '\nbound_ready() { bound_rpc compose ps; }\n'
+        ctx.worker = lambda action:(0, b'absent') if action == 'classify' else B.worker(ctx, action)
+        if scenario == 'primary_and_cleanup':
+            def rejected_evidence():
+                with helper['inspect_guard']('retained_identity', 'mismatch'):
+                    helper['check'](False)
+            ctx.check_evidence = rejected_evidence
+        helper.update(context=None, BoundContext=lambda *args:ctx, read_all=lambda *args:b'{}')
+        events = []; publications = []; closes = []
+        stream = tempfile.TemporaryFile()
+        descriptors = [os.open(os.devnull, os.O_RDONLY), os.open(os.devnull, os.O_RDONLY)]
+        ctx.config_fds = [stream]; ctx.fds = descriptors
+        def fd_closed(fd):
+            try: os.fstat(fd); return False
+            except OSError: return True
+        class Public(io.BytesIO):
+            @property
+            def buffer(self): return self
+            def write(self, value):
+                if isinstance(value, bytes):
+                    publications.append((stream.closed, all(fd_closed(fd) for fd in descriptors)))
+                return super().write(value.encode() if isinstance(value, str) else value)
+        public = Public(); stderr = io.StringIO()
+        def compose(*args, **kwargs):
+            events.append('compose_call')
+            if scenario == 'rpc_signal': signal.raise_signal(signal.SIGTERM)
+            if scenario in ('rpc_signal', 'rpc_negative'):
+                raise InterruptedError(self.private) if scenario == 'rpc_signal' else OSError(self.private)
+            return SimpleNamespace(returncode=0, stdout=b'')
+        real_close = os.close
+        def close_fd(fd):
+            closes.append(fd); real_close(fd)
+            if scenario in ('close_error', 'primary_and_cleanup') and fd == descriptors[-1]:
+                raise OSError(self.private)
+        def trace(frame, event, arg):
+            if frame.f_code is B.close.__code__:
+                if event == 'call':
+                    events.append('close')
+                    if scenario == 'close_signal':
+                        signal.raise_signal(signal.SIGTERM); signal.raise_signal(signal.SIGHUP)
+                elif event == 'return' and scenario == 'handoff_signal':
+                    events.append('handoff_signal'); signal.raise_signal(signal.SIGTERM)
+            return trace
+        old_handlers = {num:signal.getsignal(num) for num in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+        old_trace = sys.gettrace(); started = time.monotonic()
+        try:
+            with open(os.devnull, 'rb') as config, patch.object(helper['subprocess'], 'run', compose), \
+                 patch.object(helper['os'], 'close', close_fd), patch.object(sys, 'stdout', public), \
+                 contextlib.redirect_stderr(stderr):
+                ctx.docker_config_fd = config.fileno(); sys.settrace(trace)
+                try: exec(entry, helper); code = 0
+                except SystemExit as error: code = error.code
+                except BaseException: code = 1  # Retain pre-fix unhandled finalizer evidence.
+            closed_at_return = stream.closed and all(fd_closed(fd) for fd in descriptors)
+        finally:
+            sys.settrace(old_trace)
+            for num, handler in old_handlers.items(): signal.signal(num, handler)
+            stream.close()
+            for fd in descriptors:
+                if not fd_closed(fd): real_close(fd)
+        self.assertLess(time.monotonic() - started, 10)
+        raw = public.getvalue(); logs = io.StringIO(); phases = []
+        if phase == 'inspect':
+            def remote(snapshot, argv, timeout, control):
+                phases.append(argv[-1])
+                return executor.ssh_result(executor.CaptureResult(code, self.prefix + raw), self.nonce)
+            with contextlib.redirect_stdout(logs):
+                try: category = executor.execute(env, b'', remote, dict(implementation=implementation))
+                except executor.Rejected as error: category = str(error)
+            self.assertEqual(['inspect'], phases)
+        else: category = None
+        self.assertNotIn(self.private, raw + stderr.getvalue().encode() + logs.getvalue().encode())
+        return dict(code=code, raw=raw, logs=logs.getvalue(), category=category, signaled=ctx.signaled,
+                    events=events, publications=publications, closed=closed_at_return,
+                    closes=[closes.count(fd) for fd in descriptors])
+
+    def assert_inspect_terminal_failure(self, value, guard, failure):
+        line = f'corrected-inspect:v=1 guard={guard} failure={failure}\n'
+        self.assertEqual(1, value['code'])
+        self.assertEqual(line.encode() + executor.HELPER_BLOCKED, value['raw'])
+        self.assertEqual(line + 'corrected-ssh:v=1 boundary=helper_started failure=helper_blocked\n', value['logs'])
+        self.assertEqual('STATUS_UNAVAILABLE', value['category'])
+        self.assertEqual([], value['publications'])
+        self.assertEqual(1, value['events'].count('close'))
+        self.assertTrue(value['closed']); self.assertEqual([1, 1], value['closes'])
+        for token in ('INSPECTED', 'release-status:', 'corrected-binding-candidate:', 'corrected-stage-observation:'):
+            self.assertNotIn(token, value['raw'].decode() + value['logs'])
+
+    def test_inspect_rpc_recorded_cancellation_is_terminal(self):
+        value = self.inspect_terminal_fixture('rpc_signal')
+        self.assertTrue(value['signaled']); self.assertIn('compose_call', value['events'])
+        self.assert_inspect_terminal_failure(value, 'interrupted', 'interrupted')
+
+    def test_inspect_rpc_without_signal_keeps_negative_status(self):
+        value = self.inspect_terminal_fixture('rpc_negative')
+        self.assertFalse(value['signaled']); self.assertIn('compose_call', value['events'])
+        self.assertEqual(0, value['code']); self.assertEqual('INSPECTED', value['category'])
+        self.assertIn(b'resume_permitted=no', value['raw'])
+        self.assertNotIn(b'corrected-inspect:', value['raw'])
+        self.assertEqual([(True, True)], value['publications'])
+        self.assertTrue(value['closed']); self.assertEqual([1, 1], value['closes'])
+
+    def test_inspect_finalization_before_success_publication(self):
+        for scenario, guard, failure in (('close_signal', 'interrupted', 'interrupted'),
+                                          ('close_error', 'finalize', 'io')):
+            with self.subTest(scenario=scenario):
+                self.assert_inspect_terminal_failure(self.inspect_terminal_fixture(scenario), guard, failure)
+        value = self.inspect_terminal_fixture('success')
+        self.assertEqual(0, value['code']); self.assertEqual('INSPECTED', value['category'])
+        self.assertIn(b'resume_permitted=yes', value['raw'])
+        self.assertEqual([(True, True)], value['publications'])
+        self.assertEqual(1, value['events'].count('close')); self.assertEqual([1, 1], value['closes'])
+        self.assertNotIn(b'corrected-inspect:', value['raw'])
+
+    def test_inspect_primary_failure_survives_finalization_failure(self):
+        self.assert_inspect_terminal_failure(self.inspect_terminal_fixture('primary_and_cleanup'),
+                                            'retained_identity', 'mismatch')
+
+    def test_inspect_final_handoff_preserves_recorded_signal(self):
+        value = self.inspect_terminal_fixture('handoff_signal')
+        self.assertIn('handoff_signal', value['events'])
+        self.assert_inspect_terminal_failure(value, 'interrupted', 'interrupted')
+
+    def test_mutation_phase_output_and_finalization_order_unchanged(self):
+        for phase, prefix in (('claim', b'release-authorization:'), ('resume-start', b'release-operation:'),
+                              ('reconcile', b'release-status:')):
+            with self.subTest(phase=phase):
+                value = self.inspect_terminal_fixture('success', phase)
+                self.assertEqual(0, value['code']); self.assertTrue(value['raw'].startswith(prefix))
+                self.assertNotIn(b'corrected-inspect:', value['raw'])
+                self.assertNotIn(b'corrected-binding-candidate:', value['raw'])
+                self.assertEqual([(False, False)], value['publications'])
+                self.assertTrue(value['closed']); self.assertEqual([1, 1], value['closes'])
+                self.assertEqual(1, value['events'].count('close'))
+
+    def test_inspect_diagnostic_exact_wire_and_enum_inventory(self):
+        tree, helper = self.helper_namespace()
+        self.assertEqual(helper['INSPECT_GUARDS'], executor.INSPECT_GUARDS)
+        self.assertEqual(helper['INSPECT_FAILURES'], executor.INSPECT_FAILURES)
+        scope_ids = {node.args[0].value for node in ast.walk(tree) if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name) and node.func.id in ('inspect_guard', 'inspect_guarded')
+            and isinstance(node.args[0], ast.Constant)}
+        self.assertEqual(scope_ids | {'internal', 'interrupted'}, helper['INSPECT_GUARDS'])
+        for guard in sorted(helper['INSPECT_GUARDS']):
+            for failure in sorted(helper['INSPECT_FAILURES']):
+                line = helper['inspect_diagnostic'](helper['InspectFailure'](guard, failure))
+                body = line.encode('ascii') + executor.HELPER_BLOCKED
+                self.assertLessEqual(len(body), 160)
+                self.assertEqual(line[:-1], executor.inspect_failure_diagnostic(body))
+                self.classified(executor.CaptureResult(1, self.prefix + body),
+                                'helper_started', 'helper_blocked', line)
+
+    def test_inspect_diagnostic_rejects_untrusted_or_nonexact_body(self):
+        good = b'corrected-inspect:v=1 guard=compose_owner failure=mismatch\n'
+        body = good + executor.HELPER_BLOCKED
+        invalid = [body.replace(b'compose_owner', b'unknown'), body.replace(b'mismatch', b'unknown'),
+            good + body, executor.HELPER_BLOCKED + good, body + b'\n', b'\n' + body,
+            body + self.private, body[:-1], body.replace(b'\n', b'\r\n'), body.replace(b' guard=', b'  guard='),
+            body.replace(b'guard=', b'guard ='), body.replace(b'mismatch', b'mismatch\x00'),
+            body.replace(b'compose_owner', 'compos\u00e9_owner'.encode()), body + b'x'*200]
+        for raw in invalid:
+            with self.subTest(raw_size=len(raw)):
+                self.assertIsNone(executor.inspect_failure_diagnostic(raw))
+                self.classified(executor.CaptureResult(1, self.prefix + raw),
+                                'helper_started', 'child_nonzero_unknown')
+        for reached in range(4):
+            prefix = b''.join(self.markers[:reached])
+            self.classified(executor.CaptureResult(1, prefix + body), 'local', 'framing_invalid')
+        # Startup/helper stdout cannot authenticate the private framing, even
+        # when it includes a plausible diagnostic body or an old full sequence.
+        for prefix in (b'', b''.join(executor.remote_milestones(b'\x00'*32)),
+                       b'corrected-remote-boundary:v=1 helper_started\n'):
+            with contextlib.redirect_stdout(io.StringIO()) as public:
+                executor.ssh_result(executor.CaptureResult(1, prefix + body), self.nonce)
+            self.assertNotIn('failure=helper_blocked', public.getvalue())
+            self.assertNotIn('corrected-inspect:', public.getvalue())
+
+    def test_inspect_fatal_attribution_is_scoped_and_redacted(self):
+        _, helper = self.helper_namespace()
+        scope, reject, diagnostic = helper['inspect_guard'], helper['check'], helper['inspect_diagnostic']
+        for error, expected in ((FileNotFoundError(self.private), 'missing'),
+            (PermissionError(self.private), 'permission'), (BlockingIOError(self.private), 'busy'),
+            (OSError(self.private), 'io'), (ValueError(self.private), 'internal'),
+            (subprocess.CalledProcessError(1, self.private, output=self.private, stderr=self.private), 'command')):
+            with self.subTest(failure=expected):
+                with self.assertRaises(helper['InspectFailure']) as caught:
+                    with scope('compose_file'):
+                        raise error
+                self.assertEqual(f'corrected-inspect:v=1 guard=compose_file failure={expected}\n', diagnostic(caught.exception))
+        with self.assertRaises(helper['InspectFailure']) as nested:
+            with scope('status_read'):
+                with scope('retained_identity', 'mismatch'):
+                    reject(False)
+        self.assertEqual('corrected-inspect:v=1 guard=retained_identity failure=mismatch\n', diagnostic(nested.exception))
+        # A successful operation and a handled transient RPC must not leave a
+        # global last-guard value that could contaminate a later fatal error.
+        with scope('compose_model'):
+            pass
+        try:
+            with scope('worker_protocol'):
+                reject(False)
+        except helper['InspectFailure']:
+            pass
+        for error in (RuntimeError(self.private), helper['InspectFailure']([], self.private)):
+            self.assertEqual('corrected-inspect:v=1 guard=internal failure=internal\n', diagnostic(error))
+        for error in (InterruptedError(self.private), KeyboardInterrupt()):
+            with self.assertRaises(helper['InspectFailure']) as caught:
+                with scope('compose_file'):
+                    raise error
+            self.assertEqual('corrected-inspect:v=1 guard=interrupted failure=interrupted\n', diagnostic(caught.exception))
+
+    def test_inspect_each_guard_has_a_production_rejection_fixture(self):
+        tree, helper = self.helper_namespace()
+        # Execute the actual lexical operation from the embedded AST with
+        # disposable metadata/command dependencies. This keeps its production
+        # predicates and nesting intact, without requiring live host state.
+        scopes = {}
+        for node in sorted(ast.walk(tree), key=lambda item:getattr(item, 'lineno', 0)):
+            if isinstance(node, ast.With) and isinstance(node.items[0].context_expr, ast.Call):
+                call = node.items[0].context_expr
+                if isinstance(call.func, ast.Name) and call.func.id == 'inspect_guard' and isinstance(call.args[0], ast.Constant):
+                    scopes.setdefault(call.args[0].value, node)
+        B = helper['BoundContext']
+        ctx = B.__new__(B)
+        ctx.uid = 501; ctx.phase = 'inspect'; ctx.signaled = False; ctx.compose = '/srv/fixture'; ctx.pin = None
+        ctx.owner = state.OWNER; ctx.environment = 'stage'; ctx.revision = state.REVISION; ctx.image = state.DIGEST
+        ctx.path_hash = 'a'*64; ctx.project = 'fixture'; ctx.config_hashes = {'override':'a'*64}
+        ctx.incident = {}; ctx.objects = {}; ctx.directories = {key: 77 for key in
+            ('compose', 'parent', 'root', 'state', 'ledger', 'results', 'application_lock', 'operation_lock')}
+        ctx.edges = []; ctx.metadata = {}; ctx.fds = []; ctx.config_fds = []
+        ctx.keep = lambda fd: fd
+        ctx.read = lambda *args: b'invalid'
+        ctx.record = lambda *args: {}
+        ctx.value = lambda key: 'invalid'
+        ctx.check_edges = lambda: None
+        ctx.capture = lambda data: '/dev/null'
+        ctx.compose_call = lambda *args, **kwargs: (1, self.private)
+        values = dict(helper, self=ctx, context=ctx, control={}, environment='wrong', phase='inspect',
+                      compose=ctx.compose, revision=state.REVISION, image=state.DIGEST, owner=state.OWNER,
+                      parent=77, info=SimpleNamespace(st_dev=2), main=b'include: secret\n', impl={},
+                      principal='fixture', key='compose', child=77, output=b'')
+        seen = set()
+        def run(guard, operation, expected='invalid'):
+            with self.subTest(guard=guard):
+                with self.assertRaises(helper['InspectFailure']) as caught:
+                    operation()
+                self.assertEqual((guard, expected), (caught.exception.guard, caught.exception.failure))
+                seen.add(guard)
+        def block(guard):
+            # Preserve the lexical loop required by worker_protocol's EOF continue.
+            loop = ast.For(target=ast.Name(id='_fixture_once', ctx=ast.Store()),
+                iter=ast.Tuple(elts=[ast.Constant(None)], ctx=ast.Load()), body=[scopes[guard]], orelse=[])
+            exec(compile(ast.fix_missing_locations(ast.Module(body=[loop], type_ignores=[])),
+                         '<approved-helper-guard>', 'exec'), values)
+        run('input', lambda: block('input'))
+        run('control', lambda: block('control'))
+        with patch.object(helper['os'], 'geteuid', return_value=0), patch.object(helper['subprocess'], 'check_output', return_value=b'root\n'):
+            run('principal', lambda: block('principal'), 'mismatch')
+        ctx.uid = 501
+        with patch.object(helper['os'], 'open', side_effect=FileNotFoundError(self.private)):
+            run('compose_chain', lambda: block('compose_chain'), 'missing')
+            run('protocol_layout', lambda: block('protocol_layout'), 'missing')
+            run('compose_file', lambda: block('compose_file'), 'missing')
+        info = SimpleNamespace(st_uid=0, st_dev=1)
+        with patch.object(helper['os'], 'fstat', return_value=info):
+            run('compose_owner', lambda: block('compose_owner'), 'mismatch')
+            run('protocol_device', lambda: block('protocol_device'), 'mismatch')
+        with patch.object(ctx, 'open_file', side_effect=PermissionError(self.private)):
+            run('lock_files', lambda: block('lock_files'), 'permission')
+        with patch.object(helper['fcntl'], 'flock', side_effect=BlockingIOError(self.private)):
+            run('lock_shared', lambda: B.lock_context(ctx), 'busy')
+        ctx.edges = [(77, 'fixture', 77)]
+        with patch.object(helper['os'], 'stat', side_effect=FileNotFoundError(self.private)):
+            run('context_edges', lambda: B.check_edges(ctx), 'missing')
+            run('configuration_capture', lambda: block('configuration_capture'), 'missing')
+        ctx.edges = []
+        run('application_binding', lambda: block('application_binding'))
+        with patch.dict(helper, fdpath=lambda fd:'/dev/null'), patch.object(helper['subprocess'], 'run', return_value=SimpleNamespace(returncode=1, stdout=self.private)):
+            run('mount_query', lambda: block('mount_query'), 'command')
+        values['result'] = SimpleNamespace(stdout=self.private)
+        run('mount_identity', lambda: block('mount_identity'))
+        run('compose_subset', lambda: block('compose_subset'))
+        run('override', lambda: block('override'), 'mismatch')
+        run('dotenv', lambda: block('dotenv'))
+        run('compose_command', lambda: block('compose_command'), 'command')
+        ctx.normalized = (0, b'{}')
+        run('compose_model', lambda: block('compose_model'))
+        ctx.pin = {}; ctx.backing = 'fixture'
+        run('binding_candidate', lambda: block('binding_candidate'), 'mismatch')
+        with patch.object(helper['os'], 'listdir', return_value=['active-candidate.anchor']):
+            run('retained_layout', lambda: block('retained_layout'))
+        run('retained_identity', lambda: block('retained_identity'), 'mismatch')
+        run('retained_checkpoint', lambda: block('retained_checkpoint'))
+        run('prior_override', lambda: block('prior_override'), 'mismatch')
+        with patch.object(helper['os'], 'listdir', return_value=[]):
+            run('migration_records', lambda: block('migration_records'))
+        run('result_record', lambda: block('result_record'))
+        ctx.check_evidence = lambda: None
+        ctx.worker = lambda action: (1, self.private)
+        run('status_classification', lambda: B.status(ctx))
+        ctx.check_evidence = lambda: None
+        ctx.worker = lambda action: (0, b'ambiguous')
+        with patch.object(ctx, 'value', side_effect=PermissionError(self.private)):
+            run('status_read', lambda: B.status(ctx), 'permission')
+        values['parent'] = SimpleNamespace(recv=lambda size: b'!')
+        run('worker_protocol', lambda: block('worker_protocol'), 'protocol')
+        ctx.docker_environment = {}; ctx.docker_config_fd = 77
+        with patch.dict(helper, FUNCTIONS=''), \
+             patch.object(helper['socket'], 'socketpair', return_value=(SimpleNamespace(), SimpleNamespace(fileno=lambda:77))), \
+             patch.object(helper['subprocess'], 'Popen', side_effect=FileNotFoundError(self.private)):
+            run('worker_capture', lambda: B.worker(ctx, 'classify'), 'missing')
+        with patch.object(ctx, 'close', side_effect=OSError(self.private)):
+            run('finalize', lambda: block('finalize'), 'io')
+        ctx.candidate = {'unsafe': object()}
+        run('inspect_output', lambda: block('inspect_output'), 'internal')
+        self.assertEqual(helper['INSPECT_GUARDS'] - {'internal', 'interrupted'}, seen)
+
+    def test_inspect_entrypoint_fallback_signal_and_mutating_phase_output(self):
+        tree, helper = self.helper_namespace()
+        entrypoint = next(node for node in tree.body if isinstance(node, ast.Try))
+        code = compile(ast.Module(body=[entrypoint], type_ignores=[]), '<approved-helper-entrypoint>', 'exec')
+        class Public(io.BytesIO):
+            @property
+            def buffer(self): return self
+            def write(self, value): return super().write(value.encode() if isinstance(value, str) else value)
+        real_context = helper['BoundContext']
+        original_handlers = {number:signal.getsignal(number) for number in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)}
+        try:
+            for phase in ('inspect', 'claim', 'resume-start', 'reconcile'):
+                helper['INSPECT_MODE'] = phase == 'inspect'
+                helper['context'] = None
+                helper['read_all'] = lambda *args: b'{}'
+                def broken(*args): raise RuntimeError(self.private)
+                helper['BoundContext'] = broken
+                output = Public()
+                with patch.object(sys, 'stdout', output), self.assertRaises(SystemExit) as terminal:
+                    exec(code, helper)
+                expected = (b'corrected-inspect:v=1 guard=internal failure=internal\n' if phase == 'inspect' else b'') + executor.HELPER_BLOCKED
+                self.assertEqual(expected, output.getvalue()); self.assertEqual(1, terminal.exception.code)
+            helper['INSPECT_MODE'] = True
+            closed = []
+            def interrupted_status():
+                signal.raise_signal(signal.SIGTERM)
+            ctx = SimpleNamespace(phase='inspect', active=False, completed=False, signaled=False,
+                                  status=interrupted_status, close=lambda:closed.append(True))
+            ctx.check_interruption = lambda: real_context.check_interruption(ctx)
+            helper['BoundContext'] = lambda *args:ctx
+            output = Public()
+            with patch.object(sys, 'stdout', output), self.assertRaises(SystemExit):
+                exec(code, helper)
+            self.assertEqual(b'corrected-inspect:v=1 guard=interrupted failure=interrupted\n' + executor.HELPER_BLOCKED, output.getvalue())
+            self.assertEqual([True], closed)
+        finally:
+            for number, handler in original_handlers.items(): signal.signal(number, handler)
+
+    def test_inspect_negative_readiness_is_status_not_fatal_or_stale_rpc(self):
+        _, helper = self.helper_namespace()
+        B = helper['BoundContext']; ctx = B.__new__(B)
+        ctx.phase = 'inspect'; ctx.signaled = False; ctx.check_evidence = lambda:None; ctx.check_edges = lambda:None
+        ctx.result = {'requested_operation':'start', 'result':'remote_failure'}
+        for checkpoint, app, probe in (('migration_completed', b'absent', 'ready'),
+                                        ('candidate_healthy', b'candidate_running', 'healthy')):
+            ctx.value = lambda key:checkpoint
+            calls = []
+            def worker(action):
+                calls.append(action)
+                if action == 'classify': return 0, app
+                # A rejected RPC is deliberately handled by worker(); its
+                # exception must not affect a subsequent valid status.
+                try:
+                    with helper['inspect_guard']('retained_identity', 'mismatch'):
+                        helper['check'](False)
+                except helper['InspectFailure']:
+                    return 1, b''
+            ctx.worker = worker
+            output = B.status(ctx)
+            self.assertIn(b'resume_permitted=no', output)
+            self.assertNotIn(b'corrected-inspect:', output)
+            self.assertEqual(['classify', probe], calls)
+
+    def test_nested_worker_output_cannot_spoof_helper_diagnostic(self):
+        _, helper = self.helper_namespace()
+        B = helper['BoundContext']; ctx = B.__new__(B)
+        ctx.owner = state.OWNER; ctx.compose = '/srv/fixture'; ctx.revision = state.REVISION; ctx.image = state.DIGEST
+        ctx.phase = 'inspect'; ctx.signaled = False
+        ctx.docker_environment = dict(os.environ); ctx.check_evidence = lambda:None
+        spoof = b'corrected-inspect:v=1 guard=principal failure=mismatch\n' + executor.HELPER_BLOCKED
+        helper['FUNCTIONS'] = 'classify_app_state() { printf %s ' + shlex.quote(spoof.decode()) + '; }'
+        with open(os.devnull, 'rb') as config:
+            ctx.docker_config_fd = config.fileno()
+            with self.assertRaises(helper['InspectFailure']) as caught:
+                B.status(ctx)
+        self.assertEqual('corrected-inspect:v=1 guard=status_classification failure=invalid\n',
+                         helper['inspect_diagnostic'](caught.exception))
 
     def test_ordered_boundaries_and_exact_helper_blocked_body(self):
         for reached, failure in enumerate(('principal_not_proven', 'bootstrap_not_ready',
@@ -1214,13 +1654,14 @@ assert m.ssh_result(result,bytes([167])*32)==(124,b'')
                             'bootstrap_ready', 'helper_not_reached')
 
     def test_real_approved_helper_blocked_marker_without_state_access(self):
-        # Missing helper control fields stop before opening any incident root.
-        self.classified(self.bootstrap(self.helper_payload()), 'helper_started', 'helper_blocked')
-        self.assertEqual(174422, len(_helper_bytes))
-        self.assertEqual('48bcbafde22b90dc3902cac0ba80754239964466ce612d11565dd1fdeb75e2ec',
+        # Invalid public compose prefix stops before opening any incident root.
+        self.classified(self.bootstrap(self.helper_payload()), 'helper_started', 'helper_blocked',
+                        'corrected-inspect:v=1 guard=input failure=invalid\n')
+        self.assertEqual(182637, len(_helper_bytes))
+        self.assertEqual('a3150d63eb58abaed40a4a6eadb743510b8053c15a2b9447f5e6c4f6330ddd0c',
                          hashlib.sha256(_helper_bytes).hexdigest())
-        self.assertEqual('fc09080ba4864133ca23ec5c777339b881094279',
-                         hashlib.sha1(b'blob 174422\0' + _helper_bytes).hexdigest())
+        self.assertEqual('c174814a4b442b06a7172aac747ff4c146712309',
+                         hashlib.sha1(b'blob 182637\0' + _helper_bytes).hexdigest())
 
     def test_nonce_authentication_and_all_malformed_frames_fail_closed(self):
         old = b''.join(('corrected-remote-boundary:v=1 '+v+'\n').encode()
