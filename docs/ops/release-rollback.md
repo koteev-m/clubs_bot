@@ -125,7 +125,7 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
-### CLB-91 aggregate Compose diagnostics (local F1/F2 correction awaiting review)
+### CLB-91 aggregate Compose diagnostics (local CI fixture correction awaiting review)
 
 The user handoff records completed independent review of the mode-repair and
 count-fix candidates, merged through PR #508 at `29b521969f5e5afc3c7f64be5f06dc56a675cf8f`.
@@ -139,13 +139,27 @@ unknown. Neither observation proves continuity between runs or readiness.
 The separate [workflow](../../.github/workflows/stage-compose-diagnostic.yml),
 [consumer](../../scripts/deploy/stage-compose-diagnostic.py) and
 [remote diagnostic](../../scripts/deploy/stage-compose-diagnostic-operation.py)
-have a local, unreviewed and unpublished F1/F2 correction. Independent review of
-`11be0b0e6f417b1a2b82c0e025ad7f8b72b75187` found pre-verification project-module
-execution (F1/P1) and acquisition errors incorrectly presented as complete
-collection (F2/P2). Both were reproduced in isolated fixtures before correction;
-the prior review is not approval of new bytes. They do not extend corrected inspect, construct
-`BoundContext`, change approved implementation/root-binding or authorize repair,
-claim, resume, deploy, recovery or rollback. The existing paths remain unchanged.
+were published as Draft PR #509 at `47cf73511ac3dcdd863f162031ad642ac5ac39ea`
+after the independent focused F1/F2 review passed. That review corrected the
+pre-verification module execution and incomplete acquisition findings in
+`11be0b0e6f417b1a2b82c0e025ad7f8b72b75187`.
+
+The user then supplied a hosted `Lint core` test failure: the post-snapshot
+source replacement scenario returned `unavailable/protocol` instead of complete.
+Private synthetic tracing established a fixture startup defect: the old SSH
+test-double shebang supplied `-I -S -B` as one Linux argument, causing Python
+exit 2 before bootstrap and an absent HMAC frame. Darwin native startup split
+those flags, masking the defect. The local correction uses `env -S` and adds a
+Linux single-argument regression requiring successful authenticated completion,
+no pathname canary execution/disclosure, one transport, and rejection before SSH
+on the next invocation. The old header fails this regression; the corrected
+header passes. This test-only correction awaits independent review/publication;
+production diagnostic and protected/shared bytes are unchanged. Hosted full
+Linux verification is still pending. This is CI evidence, not stage evidence.
+
+These paths do not extend corrected inspect, construct `BoundContext`, change
+approved implementation/root-binding or authorize repair, claim, resume, deploy,
+recovery or rollback. No stage execution is authorized by the fixture fix.
 
 The sole dispatch input is confirmation
 `CLB-91:35206468948:diagnose-compose-subset`. Repository/default branch/ref are

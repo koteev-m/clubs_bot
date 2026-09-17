@@ -1054,8 +1054,9 @@ if os.environ.get('CLB91_SYNTHETIC_REMOTE') == '1':
         return subprocess.check_output(['git', '-C', str(self.repo), *args], env=self.git_env, stderr=subprocess.DEVNULL)
 
     def transport(self, behavior='normal'):
-        script = '''#!PYTHON -I -S -B
+        script = '''#!/usr/bin/env -S PYTHON -I -S -B
 import os, sys, shlex, subprocess
+assert sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode
 with open(CALLS, 'ab') as stream: stream.write(b'invoked\\n')
 command = shlex.split(sys.argv[-1])
 assert command[-6:-1] == ['python3', '-I', '-S', '-B', '-c']
@@ -1163,6 +1164,12 @@ subprocess.Popen = _spawn
                 self.assertFalse(self.calls.exists())
 
     def test_post_snapshot_path_replacement_executes_only_captured_bytes(self):
+        self.assert_post_snapshot_path_replacement()
+
+    def test_post_snapshot_path_replacement_with_linux_shebang_argv(self):
+        self.assert_post_snapshot_path_replacement(linux_shebang=True)
+
+    def assert_post_snapshot_path_replacement(self, *, linux_shebang=False):
         marker = self.root / 'race-canary'
         canary = 'from pathlib import Path\nPath(' + repr(str(marker)) + ').write_text("PRIVATE")\nprint("PRIVATE_RACE_CANARY")\n'
         injection = '''
@@ -1175,17 +1182,36 @@ def snapshot(env, cancelled):
         os.replace(replacement, ROOT / path)
     return sources
 '''.replace('CANARY', repr(canary))
+        if linux_shebang:
+            # Existing repository parity pattern: Linux execve passes a script
+            # interpreter ONE optional shebang argument. Exercise that exact
+            # argv on every host, without claiming a native Linux kernel run.
+            # Only the disposable ssh wrapper's exec boundary is substituted;
+            # payload, pass_fds, bootstrap, HMAC and consumer remain real.
+            injection += '''
+_original_spawn = subprocess.Popen
+def _linux_script_spawn(argv, *args, **kwargs):
+    if argv[0] == 'ssh':
+        wrapper = SSH_WRAPPER
+        interpreter, optional = Path(wrapper).read_text().splitlines()[0][2:].split(' ', 1)
+        argv = [interpreter, optional, wrapper, *argv[1:]]
+    return _original_spawn(argv, *args, **kwargs)
+subprocess.Popen = _linux_script_spawn
+'''.replace('SSH_WRAPPER', repr(str(self.bin / 'ssh')))
         self.commit_injection(injection, local=True)
         result = self.invoke()
         self.assertEqual((result.returncode, result.stderr), (0, b''), result.stdout)
         self.assertEqual(fields(result.stdout)['result'], 'complete')
+        self.assertEqual(result.stdout, operation.complete(operation.scan(b''),
+                         {field: 'pass' for field in operation.STATIC_FIELDS}))
         self.assertNotIn(b'PRIVATE', result.stdout)
         self.assertFalse(marker.exists())
         self.assertEqual(self.calls.read_bytes(), b'invoked\n')
         # Subsequent validation observes drift and cannot reuse that snapshot.
         result = self.invoke()
-        self.assertEqual((result.returncode, result.stdout), (1, operation.unavailable('request')))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (1, operation.unavailable('request'), b''))
         self.assertEqual(self.calls.read_bytes(), b'invoked\n')
+        self.assertFalse(marker.exists())
 
     def test_acquisition_failures_through_bootstrap_consumer_and_exit(self):
         # Every fault is injected only in the disposable remote source. The
