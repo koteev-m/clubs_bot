@@ -2,7 +2,7 @@
 """CLB-91 fixed manual read-only diagnostic; one transport, no retry."""
 import sys
 if __name__ == '__main__' and not (sys.flags.isolated and sys.flags.no_site):
-    raise SystemExit('compose-diagnostic:v=1 result=unavailable reason=request')
+    raise SystemExit('compose-diagnostic:v=2 result=unavailable reason=request')
 
 import ast
 import hashlib
@@ -191,7 +191,7 @@ try:
     signal.alarm(0)
     if cancelled[0] or set(signal.sigpending()).intersection(watched):
         body = module.unavailable('interrupted')
-    code = 1 if body.startswith(b'compose-diagnostic:v=1 result=unavailable ') else 0
+    code = 1 if body.startswith(b'compose-diagnostic:v=2 result=unavailable ') else 0
     module.parse_body(body, code)
     tag = hmac.new(nonce, body, hashlib.sha256).hexdigest().encode('ascii')
     frame = b'clb91-compose-auth:v=1 tag=' + tag + b' ' + body
@@ -220,7 +220,7 @@ def ssh_argv(env, reference):
 
 def parse_result(raw, code, nonce, protocol):
     require(type(raw) is bytes and len(raw) <= FRAME_LIMIT)
-    match = re.fullmatch(rb'clb91-compose-auth:v=1 tag=([0-9a-f]{64}) (compose-diagnostic:v=1 [^\r\n]*\n)', raw)
+    match = re.fullmatch(rb'clb91-compose-auth:v=1 tag=([0-9a-f]{64}) (compose-diagnostic:v=2 [^\r\n]*\n)', raw)
     require(match is not None)
     require(hmac.compare_digest(match[1], hmac.new(nonce, match[2], hashlib.sha256).hexdigest().encode()))
     return protocol.parse_body(match[2], code)
@@ -275,14 +275,14 @@ def main(env, args, cancelled):
         return answer
     except BaseException:
         reason = 'interrupted' if cancelled[0] else phase
-        return 'compose-diagnostic:v=1 result=unavailable reason=' + reason, 1
+        return 'compose-diagnostic:v=2 result=unavailable reason=' + reason, 1
 
 
 def publish(line, code, cancelled):
     # Local publication follows SSH process-group AND anonymous pin cleanup.
     signal.pthread_sigmask(signal.SIG_BLOCK, WATCHED)
     if cancelled[0] or set(signal.sigpending()).intersection(WATCHED):
-        line, code = 'compose-diagnostic:v=1 result=unavailable reason=interrupted', 1
+        line, code = 'compose-diagnostic:v=2 result=unavailable reason=interrupted', 1
     body = (line + '\n').encode('ascii')
     require(len(body) <= 2048)
     require(os.write(1, body) == len(body))

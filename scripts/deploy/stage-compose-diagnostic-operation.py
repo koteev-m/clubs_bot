@@ -19,7 +19,7 @@ COMPOSE_PATH = '/opt/clubs-bot-stage'
 OWNER = '33468965282-1'
 REVISION = '44497dcd28139cef865c3f98ac3f2c4a5afac636'
 IMAGE = 'ghcr.io/koteev-m/clubs_bot/app-bot@sha256:ddf5486e02835855178cc3b30bd2f22899335131e6dc388def20feac328016fe'
-PREFIX = 'compose-diagnostic:v=1'
+PREFIX = 'compose-diagnostic:v=2'
 BODY_LIMIT = 2048
 FRAME_LIMIT = 4096
 FILE_LIMIT = 65536
@@ -40,7 +40,14 @@ STATIC_FIELDS = ('static_inputs', 'managed_override', 'managed_release',
 STATUSES = frozenset(('pass', 'invalid', 'not_evaluated'))
 REASONS = frozenset(('request', 'principal', 'layout', 'identity', 'busy', 'backing',
                      'bounds', 'io', 'interrupted', 'cleanup', 'transport', 'protocol'))
-FIELDS = ('result', 'subset', 'violations', 'mapping_details', 'top_level_details', *STATIC_FIELDS)
+SHAPE_LIMIT = 8
+STRUCTURE_DEPTH = 32
+STRUCTURE_LINES = 4096
+KNOWN_SERVICES = frozenset(('app', 'db', 'caddy'))
+UNKNOWN_SHAPE = 'unresolved/unknown/unresolved/not_applicable'
+STRUCTURE_FIELDS = ('env_file_occurrences', 'env_file_shapes')
+FIELDS = ('result', 'subset', 'violations', 'mapping_details', 'top_level_details',
+          *STRUCTURE_FIELDS, *STATIC_FIELDS)
 STATE_KEYS = frozenset('owner expected_revision image_digest compose_path_hash checkpoint prior_override_exists prior_override_sha256 old_app_digest old_app_revision old_container_hash old_image_id_hash old_started_at_hash old_restart_count compose_project compose_service candidate_override_sha256 migration_image_digest migration_image_id'.split())
 IDENTITY_VALUES = ('owner', 'expected_revision', 'image_digest', 'compose_path_hash',
                    'compose_project', 'compose_service', 'migration_image_digest')
@@ -167,7 +174,135 @@ def unavailable(reason):
     return f'{PREFIX} result=unavailable reason={reason}\n'.encode('ascii')
 
 
-def complete(lexical, statuses):
+def env_file_structure(data):
+    """Lexical indentation observations, NOT a YAML parser or Compose model.
+
+    Count exactly the scanner's mapping-branch collisions, even in unsupported
+    syntax. Assign locations only for a whole plain indentation outline. An
+    ambiguous outline discards ALL locations, never a partial resolved list.
+    Values stay private; the only recognized reference literals are .env and
+    ./.env, optionally quoted. Nothing is interpolated, normalized or opened.
+    """
+    lexical = scan(data)
+    allowed = {'top_level_key', *('key_' + key for key in DENIED_KEYS)}
+    reliable = set(lexical['violations']) <= allowed
+    text = data.decode('utf-8', 'surrogateescape')
+    reliable &= not any(c in text.replace('\r\n', '\n') for c in '\r\v\f\x1c\x1d\x1e\x85\u2028\u2029')
+    nodes, stack, occurrences = [], [], []
+    children, seen = {-1: []}, {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        require(len(nodes) < STRUCTURE_LINES, 'bounds')
+        indent = len(line) - len(line.lstrip(' '))
+        if line[indent:].rstrip(' ') != stripped or any(ord(c) < 32 or (c.isspace() and c != ' ') for c in line):
+            reliable = False
+        listing = stripped.startswith('- ')
+        match = None if listing else re.fullmatch(r'([A-Za-z0-9_.-]+):(?:\s+(.*))?', stripped)
+        key = match[1] if match else None
+        value = (match[2] or '') if match else stripped[2:] if listing else stripped
+        if value.startswith('#'):
+            value = ''
+        if not listing and match is None:
+            reliable = False
+        while stack and nodes[stack[-1]]['indent'] >= indent:
+            stack.pop()
+        require(len(stack) < STRUCTURE_DEPTH, 'bounds')
+        parent = stack[-1] if stack else -1
+        if parent == -1:
+            reliable &= indent == 0 and not listing
+        else:
+            reliable &= not nodes[parent]['value'] and nodes[parent]['key'] is not None
+        siblings = children[parent]
+        if siblings:
+            first = nodes[siblings[0]]
+            reliable &= first['indent'] == indent and first['listing'] == listing
+        if key is not None:
+            identity = (parent, key)
+            if identity in seen:
+                reliable = False  # Duplicate maps cannot identify a Compose location.
+            seen[identity] = True
+        # Reject multiline/ambiguous scalar outlines without evaluating values.
+        if value.startswith(('"', "'")):
+            reliable &= bool(re.fullmatch(r'''(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(?: +#.*)?''', value))
+        elif value and not value.startswith(('[', '{')) and re.search(r':(?:\s|$)', value):
+            reliable = False
+        index = len(nodes)
+        nodes.append(dict(indent=indent, key=key, value=value, listing=listing, parent=parent))
+        children[index] = []
+        siblings.append(index)
+        if key == 'env_file':
+            occurrences.append(index)
+        stack.append(index)
+    bucket = 'zero' if not occurrences else 'one' if len(occurrences) == 1 else 'multiple'
+    if not occurrences:
+        return dict(env_file_occurrences=bucket, env_file_shapes=())
+    if not reliable:
+        return dict(env_file_occurrences=bucket, env_file_shapes=(UNKNOWN_SHAPE,))
+
+    def dotenv_literal(value):
+        return bool(re.fullmatch(r'''(?:(?:\./)?\.env|"(?:\./)?\.env"|'(?:\./)?\.env')(?: +#.*)?''', value))
+
+    shapes = set()
+    for index in occurrences:
+        node, ancestry = nodes[index], []
+        parent = node['parent']
+        while parent != -1:
+            ancestry.append(nodes[parent]['key'])
+            parent = nodes[parent]['parent']
+        ancestry.reverse()
+        service, scope = 'none', 'other'
+        if len(ancestry) >= 2 and ancestry[0] == 'services':
+            service = ancestry[1] if ancestry[1] in KNOWN_SERVICES else 'other'
+            if len(ancestry) == 2:
+                scope = 'service'
+            elif len(ancestry) == 3 and ancestry[2] == 'environment':
+                scope = 'environment'
+        value, nested = node['value'], children[index]
+        literals = []
+        if value.startswith('['):
+            form = 'sequence'
+            # Only a single-line sequence of exact fixed literals is recognized.
+            match = re.fullmatch(r'\[(.*)\](?: +#.*)?', value)
+            if match and '#' not in match[1]:
+                literals = [part.strip() for part in match[1].split(',')]
+        elif value:
+            form, literals = 'scalar', [value]
+        elif nested:
+            form = 'sequence' if nodes[nested[0]]['listing'] else 'mapping'
+            if form == 'sequence' and all(not children[child] for child in nested):
+                literals = [nodes[child]['value'] for child in nested]
+        else:
+            form = 'empty'
+        reference = 'not_applicable'
+        if scope == 'service':
+            reference = 'canonical_dotenv' if literals and all(map(dotenv_literal, literals)) else 'other_or_unknown'
+        shapes.add('/'.join((scope, service, form, reference)))
+        require(len(shapes) <= SHAPE_LIMIT, 'bounds')
+    return dict(env_file_occurrences=bucket, env_file_shapes=tuple(sorted(shapes)))
+
+
+def valid_env_file_shape(shape):
+    if shape == UNKNOWN_SHAPE:
+        return True
+    parts = shape.split('/')
+    if len(parts) != 4:
+        return False
+    scope, service, form, reference = parts
+    if form not in ('scalar', 'sequence', 'mapping', 'empty'):
+        return False
+    if scope in ('service', 'environment'):
+        if service not in KNOWN_SERVICES | {'other'}:
+            return False
+    elif scope != 'other' or service not in KNOWN_SERVICES | {'other', 'none'}:
+        return False
+    if scope != 'service':
+        return reference == 'not_applicable'
+    return reference == 'other_or_unknown' or (reference == 'canonical_dotenv' and form in ('scalar', 'sequence'))
+
+
+def complete(lexical, statuses, structure):
     require(set(lexical) == {'violations', 'mapping_details', 'top_level_details'}, 'protocol')
     require(set(statuses) == set(STATIC_FIELDS), 'protocol')
     fields = dict(result='complete', subset='invalid' if lexical['violations'] else 'clear')
@@ -178,6 +313,16 @@ def complete(lexical, statuses):
         fields[key] = ','.join(values) if values else 'none'
     require(bool(lexical['mapping_details']) == ('mapping_syntax' in lexical['violations'])
             and bool(lexical['top_level_details']) == ('top_level_key' in lexical['violations']), 'protocol')
+    require(set(structure) == set(STRUCTURE_FIELDS), 'protocol')
+    bucket, shapes = (structure[key] for key in STRUCTURE_FIELDS)
+    require(bucket in ('zero', 'one', 'multiple') and type(shapes) is tuple
+            and len(shapes) <= SHAPE_LIMIT and tuple(sorted(set(shapes))) == shapes
+            and all(type(shape) is str and valid_env_file_shape(shape) for shape in shapes), 'protocol')
+    require((bucket == 'zero') == (not shapes) == ('key_env_file' not in lexical['violations'])
+            and (bucket != 'one' or len(shapes) == 1)
+            and (UNKNOWN_SHAPE not in shapes or shapes == (UNKNOWN_SHAPE,)), 'protocol')
+    fields['env_file_occurrences'] = bucket
+    fields['env_file_shapes'] = ','.join(shapes) if shapes else 'none'
     for key in STATIC_FIELDS:
         require(statuses[key] in (STATUSES | ({'absent'} if key == 'dotenv_metadata' else set())), 'protocol')
         fields[key] = statuses[key]
@@ -188,7 +333,7 @@ def complete(lexical, statuses):
 
 def parse_body(body, code):
     require(type(body) is bytes and len(body) <= BODY_LIMIT, 'protocol')
-    match = re.fullmatch(rb'compose-diagnostic:v=1 result=unavailable reason=([a-z_]+)\n', body)
+    match = re.fullmatch(rb'compose-diagnostic:v=2 result=unavailable reason=([a-z_]+)\n', body)
     if match:
         require(match[1].decode() in REASONS and code == 1, 'protocol')
         return body.decode().rstrip('\n'), 1
@@ -202,7 +347,9 @@ def parse_body(body, code):
         values = dict(pairs)
         lexical = {key: (() if values[key] == 'none' else tuple(values[key].split(',')))
                    for key in ('violations', 'mapping_details', 'top_level_details')}
-        require(complete(lexical, {key: values[key] for key in STATIC_FIELDS}) == body, 'protocol')
+        structure = dict(env_file_occurrences=values['env_file_occurrences'],
+                         env_file_shapes=() if values['env_file_shapes'] == 'none' else tuple(values['env_file_shapes'].split(',')))
+        require(complete(lexical, {key: values[key] for key in STATIC_FIELDS}, structure) == body, 'protocol')
         return text[:-1], 0
     except (UnicodeError, KeyError, ValueError):
         raise Unavailable('protocol') from None
@@ -565,6 +712,7 @@ class ReadOnlyCapture:
         main_fd = self.file('compose', 'docker-compose.yml', modes=(0o600, 0o644))
         main = self.bounded_read(main_fd, FILE_LIMIT)  # Sole open/read of base file.
         lexical = scan(main)
+        structure = env_file_structure(main)
         for key in ('parent', 'root', 'state', 'ledger'):
             self.inventories[key] = self.inventory(key)
         self.recheck()
@@ -585,7 +733,7 @@ class ReadOnlyCapture:
         self.recheck()
         require(self.mount_identity() == self.backing, 'backing')
         self.recheck()  # Includes held base FD, every edge, records and inventories.
-        return complete(lexical, statuses)
+        return complete(lexical, statuses, structure)
 
     def close(self):
         failed = False

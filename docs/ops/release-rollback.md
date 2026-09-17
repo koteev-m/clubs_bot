@@ -125,7 +125,7 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
-### CLB-91 aggregate Compose diagnostics (local CI fixture correction awaiting review)
+### CLB-91 aggregate Compose diagnostics and local env-file structural extension
 
 The user handoff records completed independent review of the mode-repair and
 count-fix candidates, merged through PR #508 at `29b521969f5e5afc3c7f64be5f06dc56a675cf8f`.
@@ -153,9 +153,51 @@ those flags, masking the defect. The local correction uses `env -S` and adds a
 Linux single-argument regression requiring successful authenticated completion,
 no pathname canary execution/disclosure, one transport, and rejection before SSH
 on the next invocation. The old header fails this regression; the corrected
-header passes. This test-only correction awaits independent review/publication;
-production diagnostic and protected/shared bytes are unchanged. Hosted full
-Linux verification is still pending. This is CI evidence, not stage evidence.
+header passes. The reviewed correction `93758bb6319eea3f80194f947eb859ba093fcc6b`
+was subsequently merged through PR #509 at `9fde0f8bf62cd1ea41d5ec149dd0bcf01a878af6`,
+tree `448b77ea88ba4cb5683464da0f5881722527bada`. The user handoff records successful
+post-merge CI reconciliation. The fixture correction did not change production
+diagnostic or protected/shared bytes. This is CI evidence, not stage evidence.
+
+The separately authorized [diagnostic run 35262529462](https://github.com/koteev-m/clubs_bot/actions/runs/35262529462),
+number 1 / attempt 1, executed that exact merged SHA on `main`. A bounded read
+confirmed workflow identity, both successful jobs and the single public result:
+
+```text
+compose-diagnostic:v=1 result=complete subset=invalid violations=key_env_file mapping_details=none top_level_details=none static_inputs=pass managed_override=pass managed_release=pass dotenv_metadata=pass retained_layout=pass retained_identity=pass retained_checkpoint=pass prior_override=pass migration_records=pass result_record=pass
+```
+
+Green means authenticated diagnostic collection completed, not that the lexical
+subset is clear or Compose is semantically invalid. All ten independent static
+checks passed at that snapshot. No live contents, scope, count, referenced path,
+or effective container environment were exposed. The earlier corrected inspect
+run #7 remains `compose_subset/invalid`; neither result establishes continuity,
+repair, readiness, root-binding, claim, resume, deployment or recovery.
+
+**Provenance and decision (Outcome B).** The [repository base](../../docker-compose.yml)
+has no `env_file` and explicitly maps environment variables, as did the initial
+import `5c310c6`. Available non-shallow history of Compose/templates/deployment
+paths did not reveal an `env_file` provisioning template; relevant introductions
+were helper rejection predicates (`82b2ecb`, `5e4bb8a`). The initial SSH workflow
+used an existing host directory; the current [release runner](../../scripts/deploy/quiesced-release.sh)
+uploads the helper, not the repository base. The helper requires the base to
+preexist and generates the fixed image-only managed override. Retained state
+captures prior override/identity/checkpoint records, not an authenticated copy
+of the base; `compose_path_hash` hashes the directory string, not Compose bytes.
+Passing managed/retained checks therefore cannot identify who introduced this
+base key. Legacy/manual bootstrap is plausible, not proven. The confirmed
+divergence is a lexical mapping-branch `env_file` occurrence in captured stage
+base absent from repository base, not proof of a normal service `env_file`.
+
+The helper deliberately rejects this key before Compose normalization, including
+collisions in `environment`. It later passes its privately captured `.env` as
+`--env-file` for interpolation. Neither that contract nor repository mappings
+prove that removing a live service key preserves its effective environment.
+No mutating remediation is prepared and the helper predicate remains unchanged.
+The local extension below first distinguishes the lexical location/form without
+reading secret-bearing dependencies. It is unreviewed, unpublished and unexecuted;
+another execution needs independent review, publication and explicit dispatch
+authorization. No authority is inferred from the original confirmation token.
 
 These paths do not extend corrected inspect, construct `BoundContext`, change
 approved implementation/root-binding or authorize repair, claim, resume, deploy,
@@ -232,6 +274,43 @@ lexical forms and do not alter BASIC acceptance or infer semantic context.
 Arbitrary keys, service names, snippets and inline values never leave memory.
 A lexical key does not prove that any external file was read.
 
+**Structural output v2.** Two mandatory fields are derived only from the same
+captured base bytes. BASIC scanner acceptance and the 22 categories are unchanged.
+`env_file_occurrences=zero|one|multiple` counts only exact mapping-branch lexical
+collisions (case-sensitive; comments, quoted keys and `- env_file: ...` list
+items are excluded exactly as in the existing scanner). It is not the number
+of semantic YAML keys or files read. `env_file_shapes` is `none`, or at most eight
+unique sorted tuples `scope/service/form/reference`:
+
+| Component | Fixed vocabulary / meaning |
+| --- | --- |
+| scope | `service`: plain indentation ancestry `services/<service>`; `environment`: `services/<service>/environment`; `other`: other plain mapping ancestry; `unresolved`: outline is unsupported/ambiguous. These are lexical observations, never a YAML semantic verdict. |
+| service | Only already-public `app`, `db`, `caddy`; other names collapse to `other`; outside a service to `none`; unresolved outline to `unknown`. |
+| form | `scalar`, `sequence` (plain block or single-line flow), `mapping`, `empty`; unresolved outline to `unresolved`. No general YAML parser or object normalization is introduced. |
+| reference | Only for `service` scope: `canonical_dotenv` for exact `.env` or `./.env` literals (optional single/double quotes) or a nonempty plain sequence consisting solely of these literals; otherwise `other_or_unknown`. Other scopes always use `not_applicable`, so environment values are never described as references. |
+
+Plain indentation maps require consistent sibling indentation/kind, empty-valued
+parents and no duplicate mapping keys. Scalar continuations, unsupported list
+objects/indentationless sequences, tabs/non-ASCII whitespace, invalid UTF-8, BOM, directives, documents,
+anchors/aliases/tags, block scalars or ambiguous outlines discard **all** resolved
+locations: the sole tuple is `unresolved/unknown/unresolved/not_applicable`.
+The occurrence bucket still reports the scanner's collisions. Unresolved is
+honest bounded evidence, not a partially resolved location list. Sequence object
+forms and interpolated/escaped/absolute/parent paths do not receive the canonical
+literal classification. No path resolution, interpolation, referenced metadata
+probe, `.env` content read or environment equivalence comparison occurs.
+
+Each tuple preserves the association between its four components; repetitions
+are deduplicated, while the bucket distinguishes one from multiple occurrences.
+No per-service/exact counts, arbitrary names, paths, snippets or values are
+published. Processing permits at most 4096 active lines and 32 outline levels;
+more than eight unique shapes or any processing bound yields whole-report
+`unavailable/bounds`, never truncation. All capture, identity, FD/lock, static,
+cleanup and final cancellation checks still gate publication of the whole body.
+`canonical_dotenv` proves only a literal spelling, not file use, safe contents,
+variable coverage or permission to delete the key. Even a resolved structural
+result cannot by itself authorize remediation or prove environment equivalence.
+
 Fixed read allowlist and dependency map (paths here are design documentation,
 never public diagnostic fields): `compose` is the fixed base directory; `parent`
 is its `.clubs-bot-release-state`; `root` is `parent/stage`; `state`, `results`
@@ -282,8 +361,8 @@ collected jointly. No status reports record contents or proves runtime state.
 Exact public field order for complete collection is:
 
 ```text
-compose-diagnostic:v=1 result=complete subset=<clear|invalid> violations=<sorted BASIC enums|none> mapping_details=<sorted details|none> top_level_details=<sorted details|none> static_inputs=<status> managed_override=<status> managed_release=<status> dotenv_metadata=<status> retained_layout=<status> retained_identity=<status> retained_checkpoint=<status> prior_override=<status> migration_records=<status> result_record=<status>
-compose-diagnostic:v=1 result=unavailable reason=<fixed reason>
+compose-diagnostic:v=2 result=complete subset=<clear|invalid> violations=<sorted BASIC enums|none> mapping_details=<sorted details|none> top_level_details=<sorted details|none> env_file_occurrences=<zero|one|multiple> env_file_shapes=<sorted fixed tuples|none> static_inputs=<status> managed_override=<status> managed_release=<status> dotenv_metadata=<status> retained_layout=<status> retained_identity=<status> retained_checkpoint=<status> prior_override=<status> migration_records=<status> result_record=<status>
+compose-diagnostic:v=2 result=unavailable reason=<fixed reason>
 ```
 
 Static status vocabulary is `pass|invalid|not_evaluated`, plus `absent` only for
@@ -296,13 +375,18 @@ This is collection success, not a successful inspect/deploy or permission to
 continue. No partial list is labelled complete.
 
 The public body is at most 2048 bytes; the private HMAC frame at most 4096
-(the full enum contract measures 805 and 897 bytes respectively). A
+(the maximum v2 enum contract measures 1177 and 1269 bytes respectively,
+including eight tuple entries). A
 fresh private nonce authenticates the entire canonical body. Unknown, duplicate,
 reordered or extra fields, startup output, multiple/trailing lines, wrong HMAC,
-nonce replay or exit/body disagreement fail closed. Both remote FD/process
+nonce replay or exit/body disagreement fail closed.
+The v2 consumer also rejects old v1 bodies, missing structural fields, invalid
+tuple combinations, duplicate/unsorted tuples, bucket/category disagreement and
+mixed unresolved/resolved observations. Private HMAC envelope v1 is unchanged
+and authenticates all v2 fields. Both remote FD/process
 cleanup and local SSH/pin cleanup precede publication. Final signal handoffs
 reject cancellation already observed or pending before completion publication.
-No contents, paths, usernames, UID/GID, line numbers, counts, content hashes,
+No contents, paths, usernames, UID/GID, line numbers, exact counts, content hashes,
 container IDs, exception text or child stderr are public.
 
 Local tests exercise real descriptors/flock/rename/read, exact-source lexical
