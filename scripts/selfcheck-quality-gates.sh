@@ -8769,7 +8769,7 @@ assert_yaml_safety_fixture_valid() {
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
       "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "23"
+      "24"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
@@ -11716,6 +11716,7 @@ echo "quality-gate: Docker workflow/context contract verified"
 ruby "$ROOT_DIR/scripts/validate-corrected-stage-workflow.rb" "$ROOT_DIR"
 ruby "$ROOT_DIR/scripts/validate-lint-workflow.rb" "$ROOT_DIR/.github/workflows/lint.yml"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_mode_repair.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_diagnostic.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check
 if [ "$CORRECTED_STAGE_SELFCHECK_MODE" = "full" ]; then

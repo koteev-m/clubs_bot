@@ -125,7 +125,195 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
-### CLB-91 incident-only Compose mode repair (local candidate)
+### CLB-91 aggregate Compose diagnostics (local CI fixture correction awaiting review)
+
+The user handoff records completed independent review of the mode-repair and
+count-fix candidates, merged through PR #508 at `29b521969f5e5afc3c7f64be5f06dc56a675cf8f`.
+The earlier authorized repair returned `compose-mode-repair:v=1 result=changed`.
+User-provided corrected inspect `35206468948` (run 7, attempt 1) subsequently
+returned `compose_subset/invalid`, authenticated `helper_started/helper_blocked`,
+then `STATUS_UNAVAILABLE`. At that snapshot the preceding file guards, including
+mode `0600|0644`, device and read-based size, had passed. Exact live bytes are
+unknown. Neither observation proves continuity between runs or readiness.
+
+The separate [workflow](../../.github/workflows/stage-compose-diagnostic.yml),
+[consumer](../../scripts/deploy/stage-compose-diagnostic.py) and
+[remote diagnostic](../../scripts/deploy/stage-compose-diagnostic-operation.py)
+were published as Draft PR #509 at `47cf73511ac3dcdd863f162031ad642ac5ac39ea`
+after the independent focused F1/F2 review passed. That review corrected the
+pre-verification module execution and incomplete acquisition findings in
+`11be0b0e6f417b1a2b82c0e025ad7f8b72b75187`.
+
+The user then supplied a hosted `Lint core` test failure: the post-snapshot
+source replacement scenario returned `unavailable/protocol` instead of complete.
+Private synthetic tracing established a fixture startup defect: the old SSH
+test-double shebang supplied `-I -S -B` as one Linux argument, causing Python
+exit 2 before bootstrap and an absent HMAC frame. Darwin native startup split
+those flags, masking the defect. The local correction uses `env -S` and adds a
+Linux single-argument regression requiring successful authenticated completion,
+no pathname canary execution/disclosure, one transport, and rejection before SSH
+on the next invocation. The old header fails this regression; the corrected
+header passes. This test-only correction awaits independent review/publication;
+production diagnostic and protected/shared bytes are unchanged. Hosted full
+Linux verification is still pending. This is CI evidence, not stage evidence.
+
+These paths do not extend corrected inspect, construct `BoundContext`, change
+approved implementation/root-binding or authorize repair, claim, resume, deploy,
+recovery or rollback. No stage execution is authorized by the fixture fix.
+
+The sole dispatch input is confirmation
+`CLB-91:35206468948:diagnose-compose-subset`. Repository/default branch/ref are
+fixed to `koteev-m/clubs_bot`/`main`; Environment is `stage`, concurrency is
+`payments-schema-stage`, and cancellation of in-progress work is disabled.
+Validation occurs before SSH credentials in both jobs and again in execution;
+checkout and source snapshots use exact dispatched `github.sha`. Attempt other
+than 1 is rejected. Before executing any loaded project module, the diagnostic
+uses its own byte-identical copy of the existing bounded capture primitive to
+verify the complete fixed closure against dispatched Git objects. This includes
+the consumer, `corrected-stage-release.py`, `release_private_root.py`,
+`release_authority.py` and the remote diagnostic. Local consumer/shared-module
+bytes must equal their Git blobs; shared modules also match fixed SHA-256 pins.
+All three shared modules compile before any of them execute. Only the pinned
+corrected transport's `source_module` AST definition is omitted; its two fixed
+calls resolve captured dependency modules. The rest of that source is unchanged.
+There is no generic import hook, working-path reread, `.pyc`, `sys.path` or
+revision fallback. Incomplete/mismatched/unreadable source or cancellation before
+execution fails without executing project modules or submitting SSH. Replacement
+after capture cannot substitute new executable bytes; only the verified snapshot
+can execute. Each new invocation verifies its own snapshot.
+The same deployment principal and anonymous pinned `SSH_KNOWN_HOSTS` primitive
+are used, with one bounded strict SSH transport and no sudo/keyscan/proxy/retry.
+Import is inert; remote startup is `python3 -I -S -B` without a remote temp script.
+One invocation and rejection of reruns are **not** durable incident-wide
+consumption. Every future dispatch needs separate explicit user authorization
+and manual `stage` Environment approval. No execution is authorized by this text.
+
+The fixed base is `/opt/clubs-bot-stage/docker-compose.yml`. A no-follow directory
+chain, canonical protocol directories, exact application binding/backing
+fingerprint, and existing application then operation **shared, nonblocking**
+locks are required before reading the base or its dependent static inputs. Locks
+are not created or changed. The base is opened once, without create/follow,
+and must be a deployment-owned regular single-link file, mode `0600|0644`, on
+the expected device. Byte 65536 is allowed; observing byte 65537 fails closed.
+Held descriptors, pathname edges and detectable size/mtime/ctime/inode drift are
+revalidated before/after reads and before completing collection, while locks
+remain held. Advisory locks cannot exclude root or noncooperating same-UID
+writers, and metadata checks cannot prove absence of undetectable writes.
+
+No recursive walk, target create/truncate/chmod/chown/rename/unlink/fsync,
+Compose normalization, Docker/Engine query, worker/RPC/HTTP/health check or
+lifecycle action occurs. Ordinary reads can have system atime/audit effects.
+The only subprocess is bounded `findmnt` over retained FD references, using the
+approved fingerprint predicate. There are at most 16 such captures (initial and
+final), each at most 4096 output bytes/2 seconds, within a 20-second operation
+deadline and 25-second bootstrap alarm; the single SSH capture is bounded by
+45 seconds. Each of four fixed inventories is limited to 64 entries; there are
+at most 48 retained FDs and 196608 total bytes read. Limit/timeout/cancellation
+failure makes the whole report unavailable, never a partial complete report.
+
+The lexical scanner operates only on captured bytes. Its BASIC vocabulary is:
+`utf8_invalid`, `tab_active_line`, `document_prefix`, `directive_prefix`,
+`tag_prefix`, `anchor_prefix`, `alias_prefix`, `flow_mapping_prefix`,
+`flow_sequence_line_prefix`, `mapping_syntax`, `block_scalar_value`,
+`top_level_key`, `key_include`, `key_extends`, `key_env_file`, `key_label_file`,
+`key_build`, `key_configs`, `key_secrets`, `key_develop`, `key_provider`,
+`key_models`. Violations are unique and sorted, with no counts or line numbers.
+Valid UTF-8 uses the original strip/splitlines, comment skipping, list-vs-mapping
+branch, mapping grammar, case sensitivity and positional top-level rule. Thus
+`key: [a,b]` is accepted, quoted literals are not automatically anchors, and an
+`env_file` key inside `environment` still collides lexically. An empty file clears
+this lexical scope but is not valid Compose. Invalid UTF-8 adds `utf8_invalid`;
+surrogateescape permits further private indicators without normalizing YAML.
+
+`mapping_details` uses only `bom`, `quoted_key`, `merge_key`, `x_extension`,
+`other`; `top_level_details` uses the same fixed vocabulary (the current scanner
+can produce `x_extension` or `other` there). These explain only reliably visible
+lexical forms and do not alter BASIC acceptance or infer semantic context.
+Arbitrary keys, service names, snippets and inline values never leave memory.
+A lexical key does not prove that any external file was read.
+
+Fixed read allowlist and dependency map (paths here are design documentation,
+never public diagnostic fields): `compose` is the fixed base directory; `parent`
+is its `.clubs-bot-release-state`; `root` is `parent/stage`; `state`, `results`
+and `ledger` are the existing `clubs-bot-schema-stage.lock`,
+`clubs-bot-schema-stage.results` and `clubs-bot-schema-stage.migration-ledgers`.
+The incident owner is fixed `33468965282-1`.
+
+| Static field | Required bounded evidence / exact predicate |
+| --- | --- |
+| `static_inputs` | Metadata/read availability of the fixed record inputs below; missing/unsafe inputs are `invalid` here, not a claimed content mismatch. Binding failure instead makes the entire report unavailable. |
+| `managed_override` | `compose/docker-compose.override.yml`, at most 4096 bytes; exact approved managed override bytes for fixed revision/image. |
+| `managed_release` | `state/docker-compose.release.yml`, at most 4096 bytes; same exact managed bytes. |
+| `dotenv_metadata` | Optional `compose/.env`, open/fstat only with the original regular/owner/nlink/mode-0600/device predicate; absent is allowed. `pass` means metadata only, never content validity. |
+| `retained_layout` | Bounded `parent`, `root`, `state` inventories; original absent active anchor, allowed root names and exact state-name set. No file contents inferred from names. |
+| `retained_identity` | Fixed state values `owner`, `expected_revision`, `image_digest`, `compose_path_hash`, `compose_project`, `compose_service`, `migration_image_digest`; exact approved equality, with project from trusted application binding. |
+| `retained_checkpoint` | State `checkpoint`, `migration_image_id`; exact original enum/format predicates. |
+| `prior_override` | `state/prior-override` (1024 bytes), `prior_override_exists`, `prior_override_sha256`, `candidate_override_sha256`, and captured managed override. Only when exists is exactly `yes`, also `old_app_digest`/`old_app_revision`; exact original bytes/hash/form predicates. |
+| `migration_records` | Fixed `ledger/33468965282-1.ledger` and `.outcome` (2048 bytes each), bounded exact ledger inventory; original record keys/enums/identity/epoch syntax. |
+| `result_record` | Fixed `results/33468965282-1.result` (2048 bytes), exact original record keys/enums/pairs/identity. |
+
+All state values above are at most 4096 bytes. `parent/application.binding` is
+at most 2048 bytes and is an obligatory trust dependency, not a skippable check.
+No other file contents are read. In particular `.env` content, referenced
+env/include/label/config/secret files, container identity records and consumption
+marker contents are excluded. Migrated predicates are differentially tested
+against scopes extracted from the exact approved production helper; no
+`BoundContext` constructor or continuation after its exception is used.
+
+Expected negative observations are narrowly classified: ENOENT from the fixed
+file **open** is absence; ELOOP is metadata rejection only if no-follow `stat`
+proves a symlink at that edge; an opened file failing the original regular/owner/
+nlink/mode/device predicate is metadata rejection. Symlink observations are
+retained and revalidated. Optional `.env` absence is `absent`; missing or
+metadata-rejected record dependencies yield `not_evaluated` for the dependent
+field, while other applicable checks still run. Other acquisition/resource
+errors, including EIO, EACCES, EPERM, EMFILE, ENFILE, ENOMEM, ENOTDIR or an
+unproven ELOOP, make the entire report `unavailable/io`, exit 1. ENOENT during
+fstat/read after an open is not absence; disappearance of a previously observed
+pathname instead fails identity revalidation. Interrupted acquisition remains
+`unavailable/interrupted`; failed cleanup remains `unavailable/cleanup`. These
+failures discard even an already collected portion of the report. A safely captured
+record with a false exact predicate yields `invalid`. Malformed/missing protocol
+directories, busy locks, changed edges/backing, I/O during capture or any bound
+violation invalidate the entire collection. Static checks do not depend on
+successful lexical scope or Compose normalization, and static failures are
+collected jointly. No status reports record contents or proves runtime state.
+
+Exact public field order for complete collection is:
+
+```text
+compose-diagnostic:v=1 result=complete subset=<clear|invalid> violations=<sorted BASIC enums|none> mapping_details=<sorted details|none> top_level_details=<sorted details|none> static_inputs=<status> managed_override=<status> managed_release=<status> dotenv_metadata=<status> retained_layout=<status> retained_identity=<status> retained_checkpoint=<status> prior_override=<status> migration_records=<status> result_record=<status>
+compose-diagnostic:v=1 result=unavailable reason=<fixed reason>
+```
+
+Static status vocabulary is `pass|invalid|not_evaluated`, plus `absent` only for
+`dotenv_metadata`. Unavailable reasons are `request`, `principal`, `layout`,
+`identity`, `busy`, `backing`, `bounds`, `io`, `interrupted`, `cleanup`,
+`transport`, `protocol`. Complete collection exits 0 even with violations;
+unavailable exits 1. A bootstrap that cannot produce a trusted frame exits
+nonzero with no accepted body; the consumer emits bounded unavailable evidence.
+This is collection success, not a successful inspect/deploy or permission to
+continue. No partial list is labelled complete.
+
+The public body is at most 2048 bytes; the private HMAC frame at most 4096
+(the full enum contract measures 805 and 897 bytes respectively). A
+fresh private nonce authenticates the entire canonical body. Unknown, duplicate,
+reordered or extra fields, startup output, multiple/trailing lines, wrong HMAC,
+nonce replay or exit/body disagreement fail closed. Both remote FD/process
+cleanup and local SSH/pin cleanup precede publication. Final signal handoffs
+reject cancellation already observed or pending before completion publication.
+No contents, paths, usernames, UID/GID, line numbers, counts, content hashes,
+container IDs, exception text or child stderr are public.
+
+Local tests exercise real descriptors/flock/rename/read, exact-source lexical
+acceptance and static-predicate oracles, and the actual bootstrap/consumer with
+a substitute transport. Synthetic ownership/backing and Linux fault injection
+on Darwin are identified as simulations; hosted Linux/findmnt/OpenSSH and live
+stage remain unverified until separately authorized execution. No successful
+future corrected inspect, external-reader compatibility or recovery readiness
+is implied by any diagnostic result.
+
+### CLB-91 incident-only Compose mode repair (reviewed prior capability)
 
 User-provided run `35108589661` (run 6, attempt 1) reached authenticated
 `helper_started/helper_blocked` with `compose_file_mode/invalid`, then
@@ -134,10 +322,10 @@ it does not prove the current mode or exclude later device/size/state blockers.
 The direct metadata probe remained blocked and is not an alternative channel.
 
 The separate [Stage Compose Mode Repair workflow](../../.github/workflows/stage-compose-mode-repair.yml)
-and [runner](../../scripts/deploy/stage-compose-mode-repair.py) are a local candidate,
-not permission to execute. They do not extend corrected-stage actions or use
-deploy-ssh's live keyscan path. After independent review/publication, a future
-dispatch requires separate explicit repair authorization and manual `stage`
+and [runner](../../scripts/deploy/stage-compose-mode-repair.py) were independently
+reviewed and published according to the user handoff above; that is not renewed
+permission to execute. They do not extend corrected-stage actions or use
+deploy-ssh's live keyscan path. Any future dispatch requires separate explicit repair authorization and manual `stage`
 Environment approval. Confirmation is exactly `CLB-91:35108589661:repair-compose-mode-0600`;
 it is a human-error guard, not a substitute for that approval. The only input is
 confirmation. Repository/default branch/ref must be `koteev-m/clubs_bot`/`main`,
