@@ -1,0 +1,67 @@
+---
+name: Stage Compose Mode Repair (CLB-91 manual)
+'on':
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type CLB-91:35108589661:repair-compose-mode-0600 after separate repair authorization
+        required: true
+        default: ''
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: payments-schema-stage
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout exact workflow revision
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        ref: "${{ github.sha }}"
+        persist-credentials: false
+    - name: Validate fixed request before credentials
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        APP_ENV: stage
+        CONFIRMATION: "${{ inputs.confirmation }}"
+      run: python3 -I -S -B scripts/deploy/stage-compose-mode-repair.py --validate
+  repair:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: stage
+    steps:
+    - name: Checkout exact workflow revision
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        ref: "${{ github.sha }}"
+        persist-credentials: false
+    - name: Revalidate first attempt before credentials
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        APP_ENV: stage
+        CONFIRMATION: "${{ inputs.confirmation }}"
+      run: python3 -I -S -B scripts/deploy/stage-compose-mode-repair.py --validate
+    - name: Setup deployment SSH principal
+      uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387
+      with:
+        ssh-private-key: "${{ secrets.SSH_PRIVATE_KEY }}"
+    - name: Repair only the fixed Compose file mode
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        APP_ENV: stage
+        CONFIRMATION: "${{ inputs.confirmation }}"
+        TMPDIR: "${{ runner.temp }}"
+        SSH_USER: "${{ secrets.SSH_USER }}"
+        SSH_HOST: "${{ secrets.SSH_HOST }}"
+        SSH_PORT: "${{ secrets.SSH_PORT || '22' }}"
+        COMPOSE_PATH: "${{ secrets.COMPOSE_PATH }}"
+        SSH_KNOWN_HOSTS: "${{ secrets.SSH_KNOWN_HOSTS }}"
+      run: python3 -I -S -B scripts/deploy/stage-compose-mode-repair.py
