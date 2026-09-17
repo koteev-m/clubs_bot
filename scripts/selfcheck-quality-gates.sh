@@ -8769,7 +8769,7 @@ assert_yaml_safety_fixture_valid() {
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
       "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "22"
+      "23"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
