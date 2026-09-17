@@ -125,7 +125,7 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
-### CLB-91 aggregate Compose diagnostics (local, unreviewed candidate)
+### CLB-91 aggregate Compose diagnostics (local F1/F2 correction awaiting review)
 
 The user handoff records completed independent review of the mode-repair and
 count-fix candidates, merged through PR #508 at `29b521969f5e5afc3c7f64be5f06dc56a675cf8f`.
@@ -139,7 +139,11 @@ unknown. Neither observation proves continuity between runs or readiness.
 The separate [workflow](../../.github/workflows/stage-compose-diagnostic.yml),
 [consumer](../../scripts/deploy/stage-compose-diagnostic.py) and
 [remote diagnostic](../../scripts/deploy/stage-compose-diagnostic-operation.py)
-are local/unreviewed/unpublished. They do not extend corrected inspect, construct
+have a local, unreviewed and unpublished F1/F2 correction. Independent review of
+`11be0b0e6f417b1a2b82c0e025ad7f8b72b75187` found pre-verification project-module
+execution (F1/P1) and acquisition errors incorrectly presented as complete
+collection (F2/P2). Both were reproduced in isolated fixtures before correction;
+the prior review is not approval of new bytes. They do not extend corrected inspect, construct
 `BoundContext`, change approved implementation/root-binding or authorize repair,
 claim, resume, deploy, recovery or rollback. The existing paths remain unchanged.
 
@@ -149,7 +153,20 @@ fixed to `koteev-m/clubs_bot`/`main`; Environment is `stage`, concurrency is
 `payments-schema-stage`, and cancellation of in-progress work is disabled.
 Validation occurs before SSH credentials in both jobs and again in execution;
 checkout and source snapshots use exact dispatched `github.sha`. Attempt other
-than 1 is rejected. Source comes from Git blobs, with no working-copy fallback.
+than 1 is rejected. Before executing any loaded project module, the diagnostic
+uses its own byte-identical copy of the existing bounded capture primitive to
+verify the complete fixed closure against dispatched Git objects. This includes
+the consumer, `corrected-stage-release.py`, `release_private_root.py`,
+`release_authority.py` and the remote diagnostic. Local consumer/shared-module
+bytes must equal their Git blobs; shared modules also match fixed SHA-256 pins.
+All three shared modules compile before any of them execute. Only the pinned
+corrected transport's `source_module` AST definition is omitted; its two fixed
+calls resolve captured dependency modules. The rest of that source is unchanged.
+There is no generic import hook, working-path reread, `.pyc`, `sys.path` or
+revision fallback. Incomplete/mismatched/unreadable source or cancellation before
+execution fails without executing project modules or submitting SSH. Replacement
+after capture cannot substitute new executable bytes; only the verified snapshot
+can execute. Each new invocation verifies its own snapshot.
 The same deployment principal and anonymous pinned `SSH_KNOWN_HOSTS` primitive
 are used, with one bounded strict SSH transport and no sudo/keyscan/proxy/retry.
 Import is inert; remote startup is `python3 -I -S -B` without a remote temp script.
@@ -229,8 +246,19 @@ marker contents are excluded. Migrated predicates are differentially tested
 against scopes extracted from the exact approved production helper; no
 `BoundContext` constructor or continuation after its exception is used.
 
-Missing or metadata-rejected record dependencies yield `not_evaluated` for the
-dependent field, while other applicable checks still run. A safely captured
+Expected negative observations are narrowly classified: ENOENT from the fixed
+file **open** is absence; ELOOP is metadata rejection only if no-follow `stat`
+proves a symlink at that edge; an opened file failing the original regular/owner/
+nlink/mode/device predicate is metadata rejection. Symlink observations are
+retained and revalidated. Optional `.env` absence is `absent`; missing or
+metadata-rejected record dependencies yield `not_evaluated` for the dependent
+field, while other applicable checks still run. Other acquisition/resource
+errors, including EIO, EACCES, EPERM, EMFILE, ENFILE, ENOMEM, ENOTDIR or an
+unproven ELOOP, make the entire report `unavailable/io`, exit 1. ENOENT during
+fstat/read after an open is not absence; disappearance of a previously observed
+pathname instead fails identity revalidation. Interrupted acquisition remains
+`unavailable/interrupted`; failed cleanup remains `unavailable/cleanup`. These
+failures discard even an already collected portion of the report. A safely captured
 record with a false exact predicate yields `invalid`. Malformed/missing protocol
 directories, busy locks, changed edges/backing, I/O during capture or any bound
 violation invalidate the entire collection. Static checks do not depend on

@@ -2,6 +2,7 @@
 """CLB-91 source-oracle, real FD/lock and synthetic transport regression tests."""
 import ast
 import contextlib
+import errno
 import hashlib
 import hmac
 import importlib.util
@@ -86,6 +87,13 @@ def fixture_temporary_directory(prefix):
     if parent.is_relative_to(ROOT):
         raise RuntimeError('disposable fixtures must be outside the checkout')
     return tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
+
+
+def captured_sources():
+    # Test-only complete source snapshot; production obtains this from Git.
+    sources = {path: (ROOT / path).read_bytes() for path in (*runner.LOCAL_SOURCES, runner.REMOTE_PATH)}
+    assert all(hashlib.sha256(sources[path]).hexdigest() == digest for path, digest in runner.SOURCE_PINS.items())
+    return types.MappingProxyType(sources)
 
 
 class Fixture:
@@ -667,6 +675,99 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout, result.stderr), (1, b'', b''))
 
 
+class AcquisitionTest(unittest.TestCase):
+    def failure(self, phase, number, *, cleanup_failure=False):
+        fixture = Fixture()
+        original_close = os.close
+        failed = []
+        try:
+            with fixture.patches():
+                opening, fstating, reading, stating, scanning = os.open, os.fstat, os.read, os.stat, os.scandir
+                target = '.env' if phase == 'dotenv_open' else 'docker-compose.override.yml'
+                target_fds = set()
+                def fail():
+                    failed.append(True)
+                    raise OSError(number, 'PRIVATE acquisition error')
+                def open_file(path, *args, **kwargs):
+                    if path == target and phase in ('override_open', 'dotenv_open', 'unproven_loop'):
+                        fail()
+                    fd = opening(path, *args, **kwargs)
+                    if path == target: target_fds.add(fd)
+                    return fd
+                def fstat_file(fd):
+                    if phase == 'fstat' and fd in target_fds: fail()
+                    return fstating(fd)
+                def read_file(fd, count):
+                    if phase == 'read' and fd in target_fds: fail()
+                    return reading(fd, count)
+                def stat_file(path, *args, **kwargs):
+                    if phase == 'stat' and path == target and target_fds: fail()
+                    return stating(path, *args, **kwargs)
+                def inventory(fd):
+                    if phase == 'inventory': fail()
+                    if phase == 'inventory_iteration':
+                        class BrokenIterator:
+                            def __enter__(self): return self
+                            def __exit__(self, *unused): pass
+                            def __iter__(self): return self
+                            def __next__(self): fail()
+                        return BrokenIterator()
+                    return scanning(fd)
+                def close(fd):
+                    original_close(fd)
+                    if cleanup_failure: raise OSError(errno.EIO, 'PRIVATE cleanup')
+                with patch.object(operation.os, 'open', side_effect=open_file), \
+                     patch.object(operation.os, 'fstat', side_effect=fstat_file), \
+                     patch.object(operation.os, 'read', side_effect=read_file), \
+                     patch.object(operation.os, 'stat', side_effect=stat_file), \
+                     patch.object(operation.os, 'scandir', side_effect=inventory), \
+                     patch.object(operation.os, 'close', side_effect=close):
+                    body = operation.diagnose(pwd.getpwuid(os.geteuid()).pw_name, lambda: False)
+            self.assertTrue(failed, 'fault was not reached')
+            for fd in fixture.allocated:
+                with self.assertRaises(OSError): fixture.original_fstat(fd)
+            return body
+        finally:
+            fixture.close()
+
+    def test_unexpected_open_errno_matrix_never_means_absent_or_invalid(self):
+        for phase in ('override_open', 'dotenv_open'):
+            for number in (errno.EIO, errno.EACCES, errno.EPERM, errno.EMFILE, errno.ENFILE,
+                           errno.ENOMEM, errno.ENOTDIR, errno.ELOOP):
+                with self.subTest(phase=phase, errno=number):
+                    self.assertEqual(self.failure(phase, number), operation.unavailable('io'))
+
+    def test_metadata_read_inventory_errors_and_interruption_close_all_resources(self):
+        for phase in ('fstat', 'read', 'stat', 'inventory', 'inventory_iteration'):
+            for number in (errno.EIO, errno.EINTR):
+                with self.subTest(phase=phase, errno=number):
+                    expected = 'interrupted' if number == errno.EINTR else 'io'
+                    self.assertEqual(self.failure(phase, number), operation.unavailable(expected))
+        # ENOENT after a successful open is not optional absence. The FD was
+        # acquired; inability to fstat/read it makes the report unavailable.
+        for phase in ('fstat', 'read'):
+            self.assertEqual(self.failure(phase, errno.ENOENT), operation.unavailable('io'))
+        self.assertEqual(self.failure('read', errno.EIO, cleanup_failure=True), operation.unavailable('cleanup'))
+
+    def test_observed_rejected_symlink_is_revalidated_before_complete(self):
+        fixture = Fixture()
+        try:
+            path = fixture.paths['compose'] / '.env'
+            path.unlink()
+            path.symlink_to(fixture.paths['compose'] / 'referenced-secret')
+            original = operation.ReadOnlyCapture.capture_optional_metadata
+            def substitute(context):
+                result = original(context)
+                self.assertEqual(result, 'invalid')
+                path.unlink()
+                fixture.write_path(path, b'PRIVATE new metadata target')
+                return result
+            with patch.object(operation.ReadOnlyCapture, 'capture_optional_metadata', substitute):
+                self.assertEqual(fixture.invoke(), operation.unavailable('identity'))
+        finally:
+            fixture.close()
+
+
 class RunnerTest(unittest.TestCase):
     def setUp(self):
         self.env = dict(GITHUB_REPOSITORY='koteev-m/clubs_bot', GITHUB_EVENT_NAME='workflow_dispatch',
@@ -708,12 +809,75 @@ class RunnerTest(unittest.TestCase):
         self.assertIn('test "$(id -un)" = synthetic', actual[-1])
         self.assertIn('test "$(id -u)" != 0', actual[-1])
         original = source[source.index('class CaptureResult:'):source.index('# Fixed transport contract only;')]
-        new = (ROOT / runner.REMOTE_PATH).read_text()
-        copied = new[new.index('class CaptureResult:'):new.index('# END EXACT CORRECTED CAPTURE PRIMITIVES')]
-        self.assertEqual(copied, original)
-        transport = runner.load_transport()
+        for path in (runner.REMOTE_PATH, runner.RUNNER_PATH):
+            new = (ROOT / path).read_text()
+            copied = new[new.index('class CaptureResult:'):new.index('# END EXACT CORRECTED CAPTURE PRIMITIVES')]
+            self.assertEqual(copied, original)
+        transport = runner.load_transport(captured_sources(), [False])
         self.assertEqual(transport.capture_result.__code__.co_filename, str(ROOT / 'scripts/deploy/corrected-stage-release.py'))
         self.assertEqual(transport.pinned_hosts.__wrapped__.__code__.co_filename, str(ROOT / 'scripts/deploy/corrected-stage-release.py'))
+
+    def test_source_closure_compiles_and_verifies_all_before_project_execution(self):
+        sources = captured_sources()
+        for path in (*runner.SOURCE_PINS, runner.REMOTE_PATH):
+            bad = dict(sources)
+            del bad[path]
+            with self.subTest(missing=path), patch.object(runner, 'exec', create=True) as execute:
+                with self.assertRaises(ValueError):
+                    runner.load_transport(bad, [False])
+                execute.assert_not_called()
+        for path in runner.SOURCE_PINS:
+            for value in (b'print("PRIVATE canary")', b'', 'not bytes', b'x' * 65537):
+                bad = dict(sources, **{path: value})
+                with self.subTest(path=path, kind=type(value)), patch.object(runner, 'exec', create=True) as execute:
+                    with self.assertRaises(ValueError):
+                        runner.load_transport(bad, [False])
+                    execute.assert_not_called()
+        with patch.object(runner, 'exec', create=True) as execute:
+            with self.assertRaises(InterruptedError):
+                runner.load_transport(sources, [True])
+            execute.assert_not_called()
+        # A compile/readiness failure in the last compiled module still cannot
+        # execute an earlier dependency. The production pins stay unchanged.
+        real_compile = compile
+        def compile_failure(source, filename, *args, **kwargs):
+            if isinstance(source, ast.Module):
+                raise MemoryError('PRIVATE resource error')
+            return real_compile(source, filename, *args, **kwargs)
+        with patch.object(runner, 'compile', side_effect=compile_failure, create=True), \
+             patch.object(runner, 'exec', create=True) as execute:
+            with self.assertRaises(MemoryError):
+                runner.load_transport(sources, [False])
+            execute.assert_not_called()
+
+    def test_fixed_source_adapter_preserves_other_ast_and_never_reopens_modules(self):
+        sources = captured_sources()
+        tree = ast.parse(sources[runner.TRANSPORT_PATH])
+        calls = [node.args[0].value for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name) and node.func.id == 'source_module']
+        self.assertEqual(sorted(calls), ['release_authority', 'release_private_root'])
+        # Dependencies have no transitive project import or source loader.
+        for path in runner.DEPENDENCY_PATHS:
+            dependency = ast.parse(sources[path])
+            imports = {alias.name.split('.')[0] for node in ast.walk(dependency) if isinstance(node, ast.Import)
+                       for alias in node.names}
+            imports |= {node.module.split('.')[0] for node in ast.walk(dependency) if isinstance(node, ast.ImportFrom)}
+            self.assertLessEqual(imports, sys.stdlib_module_names)
+            self.assertFalse(any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                                 and node.func.id in ('exec', 'eval', '__import__', 'source_module')
+                                 for node in ast.walk(dependency)))
+        tree.body = [node for node in tree.body if not (isinstance(node, ast.FunctionDef) and node.name == 'source_module')]
+        observed = []
+        real_compile = compile
+        def compiling(source, filename, *args, **kwargs):
+            if isinstance(source, ast.Module): observed.append(ast.dump(source))
+            return real_compile(source, filename, *args, **kwargs)
+        with patch.object(runner.os, 'open', side_effect=AssertionError('project source reopened')), \
+             patch.object(runner, 'compile', side_effect=compiling, create=True):
+            transport = runner.load_transport(sources, [False])
+            self.assertTrue(callable(transport.pinned_hosts))
+            with self.assertRaises(ValueError): transport.source_module('unapproved')
+        self.assertEqual(observed, [ast.dump(tree)])
 
     def test_actual_capture_output_timeout_and_process_cleanup(self):
         success = operation.capture_result([sys.executable, '-I', '-S', '-B', '-c', 'print("bounded")'], limit=8)
@@ -732,22 +896,28 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(cancelled.failure, 'capture_interrupted')
 
     def test_one_transport_and_cleanup_failure_reject_cached_complete(self):
-        transport = runner.load_transport()
+        transport = runner.load_transport(captured_sources(), [False])
         source = (ROOT / runner.REMOTE_PATH).read_bytes()
         body = operation.complete(operation.scan(b''), {key: 'pass' for key in operation.STATIC_FIELDS})
         for sig in runner.WATCHED:
             self.addCleanup(signal.signal, sig, signal.getsignal(sig))
-        for failure in ('transport', 'protocol', 'cleanup', 'cancel'):
+        for failure in ('transport', 'protocol', 'cleanup', 'cancel', 'signal_pin', 'signal_close'):
             calls = []
+            cleanup_calls = []
             cancelled = [False]
             with tempfile.TemporaryFile() as pin:
                 @contextlib.contextmanager
                 def pinned(env):
-                    yield pin.fileno(), '/PRIVATE_PIN'
-                    if failure == 'cleanup':
-                        raise OSError('PRIVATE cleanup')
-                    if failure == 'cancel':
-                        cancelled[0] = True
+                    try:
+                        if failure == 'signal_pin': os.kill(os.getpid(), signal.SIGTERM)
+                        yield pin.fileno(), '/PRIVATE_PIN'
+                    finally:
+                        cleanup_calls.append(True)
+                        if failure == 'cleanup':
+                            raise OSError('PRIVATE cleanup')
+                        if failure == 'cancel':
+                            cancelled[0] = True
+                        if failure == 'signal_close': os.kill(os.getpid(), signal.SIGTERM)
 
                 def capture(argv, payload, **kwargs):
                     calls.append((argv, kwargs))
@@ -758,15 +928,17 @@ class RunnerTest(unittest.TestCase):
                         output += b'PRIVATE extra\n'
                     return transport.CaptureResult(0, output, 'capture_timeout' if failure == 'transport' else None)
 
-                with patch.object(runner, 'load_transport', return_value=transport), patch.object(runner, 'snapshot', return_value=source), \
+                with patch.object(runner, 'load_transport', return_value=transport), patch.object(runner, 'snapshot', return_value=captured_sources()), \
                      patch.object(transport, 'pinned_hosts', pinned), patch.object(transport, 'capture_result', side_effect=capture):
                     line, code = runner.main(dict(self.env, SSH_KNOWN_HOSTS='PRIVATE', PATH=os.defpath), [], cancelled)
             self.assertEqual(code, 1)
             self.assertIn('result=unavailable', line)
             self.assertNotIn('PRIVATE', line)
-            self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0][1]['limit'], 4096)
-            self.assertEqual(set(calls[0][1]['env']), {'PATH', 'LC_ALL'})
+            self.assertEqual(cleanup_calls, [True])
+            self.assertEqual(len(calls), 0 if failure == 'signal_pin' else 1)
+            if calls:
+                self.assertEqual(calls[0][1]['limit'], 4096)
+                self.assertEqual(set(calls[0][1]['env']), {'PATH', 'LC_ALL'})
 
     def test_workflow_exact_security_contract_and_negative_mutations(self):
         ruby = '''require "validate-workflow-capabilities";
@@ -855,7 +1027,9 @@ if os.environ.get('CLB91_SYNTHETIC_REMOTE') == '1':
             destination.write_bytes((ROOT / path).read_bytes())
         self.operation_path = self.repo / runner.REMOTE_PATH
         self.operation_path.write_text((ROOT / runner.REMOTE_PATH).read_text() + self.injection)
-        self.git_env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull,
+        self.private_env = dict(PATH=os.environ.get('PATH', os.defpath), HOME=str(self.root),
+                                TMPDIR=str(self.root), RUNNER_TEMP=str(self.root), LC_ALL='C')
+        self.git_env = dict(self.private_env, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull,
                             GIT_TERMINAL_PROMPT='0', GIT_AUTHOR_NAME='Disposable Fixture',
                             GIT_AUTHOR_EMAIL='fixture@example.invalid', GIT_COMMITTER_NAME='Disposable Fixture',
                             GIT_COMMITTER_EMAIL='fixture@example.invalid')
@@ -865,9 +1039,9 @@ if os.environ.get('CLB91_SYNTHETIC_REMOTE') == '1':
         self.git('commit', '-q', '-m', 'synthetic production path fixture')
         sha = self.git('rev-parse', 'HEAD').decode().strip()
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(self.root / 'key')],
-                       check=True, capture_output=True, timeout=10)
+                       env=self.private_env, cwd=self.root, check=True, capture_output=True, timeout=10)
         public = (self.root / 'key.pub').read_text().split()
-        self.env = dict(os.environ, GITHUB_REPOSITORY='koteev-m/clubs_bot', GITHUB_EVENT_NAME='workflow_dispatch',
+        self.env = dict(self.private_env, GITHUB_REPOSITORY='koteev-m/clubs_bot', GITHUB_EVENT_NAME='workflow_dispatch',
             GITHUB_REF='refs/heads/main', GITHUB_REF_TYPE='branch', REPOSITORY_DEFAULT_BRANCH='main',
             APP_ENV='stage', CONFIRMATION=runner.CONFIRMATION, GITHUB_RUN_ATTEMPT='1', GITHUB_SHA=sha,
             GITHUB_WORKFLOW_REF='koteev-m/clubs_bot/' + runner.WORKFLOW_PATH + '@refs/heads/main',
@@ -885,10 +1059,10 @@ import os, sys, shlex, subprocess
 with open(CALLS, 'ab') as stream: stream.write(b'invoked\\n')
 command = shlex.split(sys.argv[-1])
 assert command[-6:-1] == ['python3', '-I', '-S', '-B', '-c']
-env = dict(os.environ, CLB91_SYNTHETIC_REMOTE='1')
+env = dict(os.environ, CLB91_SYNTHETIC_REMOTE='1', HOME=HOME_LITERAL)
 argv = [PYTHON_LITERAL, '-I', '-S', '-B', '-c', command[-1]]
 BEHAVIOR
-'''.replace('PYTHON_LITERAL', repr(sys.executable)).replace('PYTHON', sys.executable).replace('CALLS', repr(str(self.calls)))
+'''.replace('PYTHON_LITERAL', repr(sys.executable)).replace('PYTHON', sys.executable).replace('CALLS', repr(str(self.calls))).replace('HOME_LITERAL', repr(str(self.root)))
         behaviors = {
             'normal': 'os.execve(argv[0], argv, env)',
             'startup': "os.write(1, b'PRIVATE startup spoof\\n'); os.execve(argv[0], argv, env)",
@@ -899,7 +1073,155 @@ BEHAVIOR
 
     def invoke(self, *args, env=None):
         return subprocess.run([sys.executable, '-I', '-S', '-B', str(self.repo / runner.RUNNER_PATH), *args],
-                              env=env or self.env, capture_output=True, timeout=30)
+                              env=env or self.env, cwd=self.root, capture_output=True, timeout=30)
+
+    def commit_injection(self, text, *, local=False):
+        if local:
+            path = self.repo / runner.RUNNER_PATH
+            source = (ROOT / runner.RUNNER_PATH).read_text()
+            entry = "if __name__ == '__main__':\n    os.umask"
+            self.assertEqual(source.count(entry), 1)
+            path.write_text(source.replace(entry, text + '\n' + entry))
+        else:
+            self.operation_path.write_text((ROOT / runner.REMOTE_PATH).read_text() + self.injection + text)
+        self.git('add', 'scripts')
+        self.git('commit', '-q', '-m', 'disposable adversarial source fixture')
+        self.env['GITHUB_SHA'] = self.git('rev-parse', 'HEAD').decode().strip()
+
+    def test_each_source_tamper_executes_no_canary_and_submits_no_ssh(self):
+        marker = self.root / 'project-canary'
+        self.env['SYNTHETIC_CREDENTIAL'] = 'PRIVATE_SYNTHETIC_CREDENTIAL'
+        canary = ('\nfrom pathlib import Path\nimport os\nPath(' + repr(str(marker)) +
+                  ').write_text(os.environ["SYNTHETIC_CREDENTIAL"])\nprint("PRIVATE_EXECUTED_CANARY")\n').encode()
+        for path in runner.SOURCE_PINS:
+            original = (self.repo / path).read_bytes()
+            for args in ((), ('--validate',)):
+                with self.subTest(path=path, args=args):
+                    (self.repo / path).write_bytes(original + canary)
+                    result = self.invoke(*args)
+                    self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                     (1, operation.unavailable('request'), b''))
+                    self.assertFalse(marker.exists(), 'project code ran before the whole closure was verified')
+                    self.assertFalse(self.calls.exists())
+            (self.repo / path).write_bytes(original)
+
+    def test_snapshot_errors_and_cancellation_precede_every_project_exec(self):
+        marker = self.root / 'project-executed'
+        # Instrument the trusted, fixture-committed bootstrap itself, not a
+        # project module: every exec by the bootstrap would create this marker.
+        observer = '''
+import builtins as _builtins
+def exec(*args, **kwargs):
+    Path(MARKER).write_text('PRIVATE project execution')
+    return _builtins.exec(*args, **kwargs)
+'''.replace('MARKER', repr(str(marker)))
+        injections = {
+            'open_io': '''
+_original_open = os.open
+def _failed_open(path, *args, **kwargs):
+    if str(path).endswith('release_authority.py'): raise OSError(5, 'PRIVATE acquisition')
+    return _original_open(path, *args, **kwargs)
+os.open = _failed_open
+''',
+            'git_incomplete': '''
+_original_capture = capture_result
+def capture_result(argv, *args, **kwargs):
+    result = _original_capture(argv, *args, **kwargs)
+    if 'ls-tree' in argv and argv[-1].endswith('release_authority.py'): result.output = b''
+    return result
+''',
+            'git_error': '''
+_original_capture = capture_result
+def capture_result(argv, *args, **kwargs):
+    result = _original_capture(argv, *args, **kwargs)
+    if 'cat-file' in argv: result.failure = 'capture_output_limit'
+    return result
+''',
+            'cancel_after_capture': '''
+_original_capture = capture_result
+def capture_result(argv, *args, **kwargs):
+    result = _original_capture(argv, *args, **kwargs)
+    if 'cat-file' in argv: os.kill(os.getpid(), signal.SIGTERM)
+    return result
+''',
+            'cancel_during_capture': '''
+_original_spawn = subprocess.Popen
+def _spawn(*args, **kwargs):
+    child = _original_spawn(*args, **kwargs)
+    os.kill(os.getpid(), signal.SIGTERM)
+    return child
+subprocess.Popen = _spawn
+''',
+        }
+        for kind, injection in injections.items():
+            with self.subTest(kind=kind):
+                self.commit_injection(observer + injection, local=True)
+                result = self.invoke()
+                reason = 'interrupted' if kind.startswith('cancel') else 'request'
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (1, operation.unavailable(reason), b''))
+                self.assertFalse(marker.exists())
+                self.assertFalse(self.calls.exists())
+
+    def test_post_snapshot_path_replacement_executes_only_captured_bytes(self):
+        marker = self.root / 'race-canary'
+        canary = 'from pathlib import Path\nPath(' + repr(str(marker)) + ').write_text("PRIVATE")\nprint("PRIVATE_RACE_CANARY")\n'
+        injection = '''
+_original_snapshot = snapshot
+def snapshot(env, cancelled):
+    sources = _original_snapshot(env, cancelled)
+    for path in SOURCE_PINS:
+        replacement = ROOT / (path + '.replacement')
+        replacement.write_text(CANARY)
+        os.replace(replacement, ROOT / path)
+    return sources
+'''.replace('CANARY', repr(canary))
+        self.commit_injection(injection, local=True)
+        result = self.invoke()
+        self.assertEqual((result.returncode, result.stderr), (0, b''), result.stdout)
+        self.assertEqual(fields(result.stdout)['result'], 'complete')
+        self.assertNotIn(b'PRIVATE', result.stdout)
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.calls.read_bytes(), b'invoked\n')
+        # Subsequent validation observes drift and cannot reuse that snapshot.
+        result = self.invoke()
+        self.assertEqual((result.returncode, result.stdout), (1, operation.unavailable('request')))
+        self.assertEqual(self.calls.read_bytes(), b'invoked\n')
+
+    def test_acquisition_failures_through_bootstrap_consumer_and_exit(self):
+        # Every fault is injected only in the disposable remote source. The
+        # production bootstrap, transport capture, HMAC and parser execute.
+        faults = {
+            'override_open': "_old=os.open\ndef _fail(path,*a,**k):\n    if path=='docker-compose.override.yml': raise OSError(5,'PRIVATE EIO')\n    return _old(path,*a,**k)\nos.open=_fail",
+            'dotenv_open': "_old=os.open\ndef _fail(path,*a,**k):\n    if path=='.env': raise OSError(5,'PRIVATE EIO')\n    return _old(path,*a,**k)\nos.open=_fail",
+            'fstat_after_open': "_old=os.fstat\ndef _fail(fd):\n    value=_old(fd)\n    if value.st_ino==os.stat(_root+'/opt/clubs-bot-stage/.env').st_ino: raise OSError(5,'PRIVATE EIO')\n    return value\nos.fstat=_fail",
+            'read': "_old=os.read\ndef _fail(fd,n):\n    if os.fstat(fd).st_ino==os.stat(_root+'/opt/clubs-bot-stage/docker-compose.override.yml').st_ino: raise OSError(5,'PRIVATE EIO')\n    return _old(fd,n)\nos.read=_fail",
+            'inventory': "def _fail(*a,**k): raise OSError(5,'PRIVATE EIO')\nos.scandir=_fail",
+            'after_static_results': "_old=StaticRecords.evaluate\ndef _fail(self,field):\n    if field=='result_record': raise OSError(5,'PRIVATE EIO')\n    return _old(self,field)\nStaticRecords.evaluate=_fail",
+            'interrupted_read': "def _fail(*a,**k): raise InterruptedError('PRIVATE interrupted')\nos.read=_fail",
+            'cleanup': "_old=os.close\ndef _fail(fd):\n    _old(fd)\n    raise OSError(5,'PRIVATE cleanup')\nos.close=_fail",
+        }
+        for kind, code in faults.items():
+            with self.subTest(kind=kind):
+                self.commit_injection("\nif os.environ.get('CLB91_SYNTHETIC_REMOTE') == '1':\n" +
+                                      '\n'.join('    ' + line for line in code.splitlines()) + '\n')
+                result = self.invoke()
+                reason = 'cleanup' if kind == 'cleanup' else 'interrupted' if kind == 'interrupted_read' else 'io'
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (1, operation.unavailable(reason), b''))
+        self.assertEqual(self.calls.read_bytes().splitlines(), [b'invoked'] * len(faults))
+
+    def test_expected_missing_and_invalid_metadata_remain_complete_through_consumer(self):
+        (self.fixture.paths['compose'] / '.env').unlink()
+        (self.fixture.paths['compose'] / 'docker-compose.override.yml').unlink()
+        (self.fixture.paths['state'] / 'owner').chmod(0o644)
+        result = self.invoke()
+        self.assertEqual((result.returncode, result.stderr), (0, b''), result.stdout)
+        body = fields(result.stdout)
+        self.assertEqual(body['result'], 'complete')
+        self.assertEqual(body['dotenv_metadata'], 'absent')
+        self.assertEqual(body['static_inputs'], 'invalid')
+        for key in ('managed_override', 'prior_override', 'retained_identity'):
+            self.assertEqual(body[key], 'not_evaluated')
+        self.assertEqual(body['migration_records'], 'pass')
 
     def test_full_synthetic_path_aggregate_static_records_no_leak(self):
         Fixture.write_path(self.fixture.paths['base'], b'services:\n  app:\n    env_file: referenced-secret\n    label_file: PRIVATE\n    build: PRIVATE\n', 0o644)

@@ -4,6 +4,7 @@ import sys
 if __name__ == '__main__' and not (sys.flags.isolated and sys.flags.no_site):
     raise SystemExit('compose-diagnostic:v=1 result=unavailable reason=request')
 
+import ast
 import hashlib
 import hmac
 import json
@@ -13,6 +14,10 @@ import re
 import secrets
 import shlex
 import signal
+import selectors
+import stat
+import subprocess
+import time
 import struct
 import types
 
@@ -28,16 +33,59 @@ LOCAL_SOURCES = (RUNNER_PATH, 'scripts/deploy/corrected-stage-release.py',
                  'scripts/deploy/release_private_root.py', 'scripts/deploy/release_authority.py')
 
 
-def load_transport():
-    # Existing capture ownership and anonymous pinned-known-hosts primitives.
-    # Import does not invoke corrected main, BoundContext or a mutation path.
-    path = Path(__file__).resolve().with_name('corrected-stage-release.py')
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd, 'rb') as stream:
-        module = types.ModuleType('corrected_transport')
-        module.__file__ = str(path)
-        exec(compile(stream.read(), str(path), 'exec'), module.__dict__)
-    return module
+# Fixed, stdlib-only source closure of the unchanged corrected transport.
+# Pins restrict the loader adapter below to precisely these reviewed modules.
+TRANSPORT_PATH = 'scripts/deploy/corrected-stage-release.py'
+DEPENDENCY_PATHS = ('scripts/deploy/release_private_root.py', 'scripts/deploy/release_authority.py')
+SOURCE_PINS = {
+    TRANSPORT_PATH: 'f7717f5cb41ad56a74c397000a44112d622e5aa040175abe5ce4d0921b88add2',
+    DEPENDENCY_PATHS[0]: '250d359d114779ddcc12c38bc64dc7015d5679f0ffce12a859f007810726cdba',
+    DEPENDENCY_PATHS[1]: '83c8c81adeffc0ba7bb97d499ac3d8077950593ab03875856e17feccc8540216',
+}
+
+
+def active(cancelled):
+    if cancelled[0]:
+        raise InterruptedError()
+
+
+def load_transport(sources, cancelled):
+    # snapshot() has verified the WHOLE closure before this first project exec.
+    # Recheck completeness/pins and compile everything before executing anything.
+    active(cancelled)
+    require(set(sources) == set((*LOCAL_SOURCES, REMOTE_PATH)))
+    require(all(type(raw) is bytes and 0 < len(raw) <= SOURCE_LIMIT for raw in sources.values()))
+    require(all(hashlib.sha256(sources[path]).hexdigest() == digest for path, digest in SOURCE_PINS.items()))
+    tree = ast.parse(sources[TRANSPORT_PATH], filename=str(ROOT / TRANSPORT_PATH))
+    loaders = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'source_module']
+    require(len(loaders) == 1)
+    # The sole adaptation of the pinned source: omit its pathname loader and
+    # supply the same two-name API from captured bytes. All other AST nodes are
+    # untouched. No import hooks, sys.path, .pyc, fallback or working-copy reread.
+    tree.body.remove(loaders[0])
+    compiled = {path: compile(sources[path], str(ROOT / path), 'exec') for path in DEPENDENCY_PATHS}
+    compiled[TRANSPORT_PATH] = compile(tree, str(ROOT / TRANSPORT_PATH), 'exec')
+    modules = {}
+    for path in DEPENDENCY_PATHS:
+        active(cancelled)
+        name = Path(path).stem
+        module = types.ModuleType(name)
+        module.__file__ = str(ROOT / path)
+        exec(compiled[path], module.__dict__)
+        modules[name] = module
+
+    def captured_module(name):
+        active(cancelled)
+        require(name in ('release_private_root', 'release_authority'))
+        return modules[name]
+
+    active(cancelled)
+    transport = types.ModuleType('corrected_transport')
+    transport.__file__ = str(ROOT / TRANSPORT_PATH)
+    transport.source_module = captured_module
+    exec(compiled[TRANSPORT_PATH], transport.__dict__)
+    active(cancelled)
+    return transport
 
 
 def require(ok):
@@ -58,15 +106,17 @@ def validate(env):
             and env.get('GITHUB_WORKFLOW_REF') == 'koteev-m/clubs_bot/' + WORKFLOW_PATH + '@refs/heads/main')
 
 
-def snapshot(transport, env):
+def snapshot(env, cancelled):
     git_env = dict(PATH=env.get('PATH', os.defpath), LC_ALL='C', GIT_NO_REPLACE_OBJECTS='1',
                    GIT_OPTIONAL_LOCKS='0', GIT_LITERAL_PATHSPECS='1')
 
     def git(*args, limit=1024):
-        code, raw = transport.capture(['git', '--no-replace-objects', '-C', str(ROOT), *args],
-                                      env=git_env, timeout=10, limit=limit)
-        require(code == 0)
-        return raw
+        active(cancelled)
+        result = capture_result(['git', '--no-replace-objects', '-C', str(ROOT), *args],
+                                env=git_env, timeout=10, limit=limit)
+        active(cancelled)
+        require(result.failure is None and result.code == 0)
+        return result.output
 
     sha = env['GITHUB_SHA']
     require(git('rev-parse', 'HEAD') == (sha + '\n').encode())
@@ -80,12 +130,17 @@ def snapshot(transport, env):
         return raw
 
     # No working-copy fallback, filters, URL, caller path or Python bytecode.
+    sources = {path: source(path) for path in (*LOCAL_SOURCES, REMOTE_PATH)}
     for path in LOCAL_SOURCES:
-        raw = source(path)
+        active(cancelled)
+        raw = sources[path]
         fd = os.open(ROOT / path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, 'rb') as stream:
+            require(stat.S_ISREG(os.fstat(stream.fileno()).st_mode))
             require(stream.read(SOURCE_LIMIT + 1) == raw)
-    return source(REMOTE_PATH)
+    active(cancelled)
+    require(all(hashlib.sha256(sources[path]).hexdigest() == digest for path, digest in SOURCE_PINS.items()))
+    return types.MappingProxyType(sources)
 
 
 def validate_target(env):
@@ -176,17 +231,25 @@ def main(env, args, cancelled):
     try:
         validate(env)
         require(args in ([], ['--validate']))
-        transport = load_transport()
+        transport = None
 
         def stop(*unused):
             cancelled[0] = True
-            if transport._capture_cancellation is not None:
-                transport._capture_cancellation[0] = True
+            capture_cancel = _capture_cancellation if transport is None else transport._capture_cancellation
+            if capture_cancel is not None:
+                capture_cancel[0] = True
+            elif transport is None:
+                # Before module loading, cancellation must abort execution.
+                # Once loaded, retain the existing pin/transport ownership
+                # handoff: latch outside captures and let cleanup finish.
+                raise InterruptedError()
 
         for sig in WATCHED:
             signal.signal(sig, stop)
-        source = snapshot(transport, env)
-        require(not cancelled[0])
+        sources = snapshot(env, cancelled)
+        active(cancelled)
+        transport = load_transport(sources, cancelled)
+        source = sources[REMOTE_PATH]
         if args == ['--validate']:
             return 'compose-diagnostic-validation:v=1 result=ok', 0
         validate_target(env)
@@ -224,6 +287,182 @@ def publish(line, code, cancelled):
     require(len(body) <= 2048)
     require(os.write(1, body) == len(body))
     return code
+
+
+# BEGIN EXACT CORRECTED CAPTURE PRIMITIVES
+# Trusted bootstrap copy: Git verification cannot depend on unchecked modules.
+class CaptureResult:
+    """Private bounded bytes plus local termination provenance, never a log record."""
+    __slots__ = ("code", "output", "failure")
+
+    def __init__(self, code, output, failure=None):
+        self.code, self.output, self.failure = code, output, failure
+
+
+class CaptureInterrupted(BaseException):
+    """Signal cancellation that selectors cannot swallow as an EINTR retry."""
+
+
+class CaptureCleanupError(OSError):
+    """The owned process group could not be cleaned up; never publish OS text."""
+
+
+# main() runs captures serially on the signal-handling thread. During a capture
+# the existing handler records cancellation without unwinding any ownership
+# transition. No signal mask/handler changes are inherited by the child.
+_capture_cancellation = None
+
+
+def interrupted(_signum, _frame):
+    if _capture_cancellation is not None:
+        _capture_cancellation[0] = True
+        return
+    for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        signal.signal(watched, signal.SIG_IGN)
+    raise CaptureInterrupted
+
+
+def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+    """Keep the existing tuple API, including its legacy 124/125 conventions."""
+    result = capture_result(argv, payload, timeout=timeout, limit=limit, env=env,
+                            pass_fds=pass_fds, spawn_failed=spawn_failed)
+    return result.code, result.output
+
+
+def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+    """Own cancellation before spawn, through cleanup, until outcome selection."""
+    global _capture_cancellation
+    cancellation = [False]
+    previous = _capture_cancellation
+    result, failure = None, None
+    _capture_cancellation = cancellation
+    try:
+        result = _capture_owned(argv, payload, timeout=timeout, limit=limit, env=env,
+                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation)
+    except BaseException as error:
+        failure = error
+    finally:
+        # This handoff happens only after cleanup (or failed spawn). A signal
+        # before it is recorded; one after it uses the original terminal path.
+        # Check the recorded outcome AFTER handoff, never cache a success first.
+        _capture_cancellation = previous
+    if isinstance(failure, CaptureCleanupError):
+        raise failure
+    if cancellation[0]:
+        if previous is not None:
+            previous[0] = True
+        return CaptureResult(124, result.output if result is not None else b"", "capture_interrupted")
+    if failure is not None:
+        raise failure
+    return result
+
+
+def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation):
+    """No named stdout/stderr captures; bounded memory and bounded process lifetime."""
+    output = bytearray()
+    offset = 0
+    deadline = time.monotonic() + timeout
+    try:
+        child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds,
+                                 start_new_session=True)
+    except OSError:
+        if spawn_failed is not None:
+            spawn_failed()
+        raise
+    # Keep the leader unreaped until killpg: its PID pins the owned group ID,
+    # even after exit, so cleanup cannot target a recycled PID/process group.
+    group = child.pid
+    try:
+        with selectors.DefaultSelector() as poll:
+            os.set_blocking(child.stdin.fileno(), False)
+            os.set_blocking(child.stdout.fileno(), False)
+            poll.register(child.stdout, selectors.EVENT_READ)
+            if payload:
+                poll.register(child.stdin, selectors.EVENT_WRITE)
+            else:
+                child.stdin.close()
+            while poll.get_map():
+                if cancellation[0]:
+                    return CaptureResult(124, bytes(output), "capture_interrupted")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return CaptureResult(124, bytes(output), "capture_timeout")
+                for key, _ in poll.select(min(remaining, 0.2)):
+                    if key.fileobj is child.stdin:
+                        try:
+                            offset += os.write(child.stdin.fileno(), payload[offset:offset + 4096])
+                        except BrokenPipeError:
+                            offset = len(payload)
+                        if offset == len(payload):
+                            poll.unregister(child.stdin)
+                            child.stdin.close()
+                    else:
+                        chunk = os.read(child.stdout.fileno(), 4096)
+                        if not chunk:
+                            poll.unregister(child.stdout)
+                        else:
+                            output.extend(chunk)
+                            if len(output) > limit:
+                                return CaptureResult(125, b"", "capture_output_limit")
+            while True:
+                if cancellation[0]:
+                    return CaptureResult(124, bytes(output), "capture_interrupted")
+                exited = os.waitid(os.P_PID, group, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                if exited is not None:
+                    code = exited.si_status if exited.si_code == os.CLD_EXITED else -exited.si_status
+                    return CaptureResult(code, bytes(output))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return CaptureResult(124, bytes(output), "capture_timeout")
+                time.sleep(min(remaining, .01))
+    except subprocess.TimeoutExpired:
+        return CaptureResult(124, bytes(output), "capture_timeout")
+    except (InterruptedError, CaptureInterrupted):
+        return CaptureResult(124, bytes(output), "capture_interrupted")
+    finally:
+        # No command retry. Terminate this invocation's group on every outcome,
+        # including an exited leader with live descendants and a successful EOF.
+        # Cancellation is already deferred, including entry into this finally.
+        cleanup_failed = False
+        permission_denied = False
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            permission_denied = True
+        except OSError:
+            cleanup_failed = True
+        try:
+            child.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            cleanup_failed = True
+        finally:
+            for stream in (child.stdin, child.stdout):
+                try:
+                    if not stream.closed:
+                        stream.close()
+                except OSError:
+                    cleanup_failed = True
+        if permission_denied:
+            # Darwin can report EPERM for an unreaped, zombie-only group.
+            # Accept that case only if the group is now proven absent. This
+            # is a non-mutating existence probe after reap, never another
+            # kill against a group ID that could have been recycled.
+            try:
+                os.killpg(group, 0)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                cleanup_failed = True
+            else:
+                cleanup_failed = True
+        if cleanup_failed:
+            raise CaptureCleanupError() from None
+
+
+# END EXACT CORRECTED CAPTURE PRIMITIVES
 
 
 if __name__ == '__main__':

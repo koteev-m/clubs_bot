@@ -3,6 +3,7 @@
 No YAML evaluation, BoundContext construction, Docker, referenced-file reads or
 target filesystem writes. Reading can still affect filesystem atime/audit state.
 """
+import errno
 import fcntl
 import hashlib
 import os
@@ -334,6 +335,10 @@ def identity(value):
             value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
 
 
+class InputMissing(InputUnavailable):
+    """ENOENT observed at the fixed file open, never a later acquisition error."""
+
+
 class ReadOnlyCapture:
     """Fixed descriptor graph, shared protocol locks and bounded private reads."""
     def __init__(self, principal, cancelled):
@@ -341,6 +346,7 @@ class ReadOnlyCapture:
         self.principal, self.cancelled = principal, cancelled
         self.fds, self.directories, self.snapshots, self.edges = [], {}, {}, []
         self.missing, self.opened, self.data, self.inventories = set(), set(), {}, {}
+        self.rejected_edges = {}
         self.total, self.inputs_valid = 0, True
         self.deadline = time.monotonic() + OPERATION_SECONDS
 
@@ -413,10 +419,21 @@ class ReadOnlyCapture:
         self.opened.add((directory, name))
         base = self.directories[directory]
         try:
-            fd = self.keep(os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=base))
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=base)
         except FileNotFoundError:
             self.missing.add((base, name))
-            raise
+            raise InputMissing('io') from None
+        except OSError as error:
+            # ELOOP is an expected negative observation only when no-follow
+            # metadata proves this exact edge is a symlink. No other errno is
+            # absence/invalid evidence (including EACCES and resource failures).
+            if error.errno != errno.ELOOP:
+                raise
+            value = os.stat(name, dir_fd=base, follow_symlinks=False)
+            require(stat.S_ISLNK(value.st_mode), 'io')
+            self.rejected_edges[(base, name)] = identity(value)
+            raise InputUnavailable('identity') from None
+        self.keep(fd)  # Own before fstat; errors here are acquisition failures.
         self.edges.append((base, name, fd))
         value = os.fstat(fd)
         if not (stat.S_ISREG(value.st_mode) and value.st_uid == self.uid and value.st_nlink == 1
@@ -431,6 +448,8 @@ class ReadOnlyCapture:
             self.tick()
             try:
                 chunk = os.read(fd, min(65536, limit + 1 - len(data)))
+            except InterruptedError:
+                raise
             except OSError:
                 raise Unavailable('io') from None
             self.total += len(chunk)
@@ -461,15 +480,26 @@ class ReadOnlyCapture:
         self.tick()
         try:
             self.check_observed_edges()
+        except InterruptedError:
+            raise
         except OSError:
-            raise Unavailable('identity') from None
+            raise Unavailable('io') from None
 
     def check_observed_edges(self):
         for fd in self.fds:
             require(identity(os.fstat(fd)) == self.snapshots[fd], 'identity')
         for parent, name, child in self.edges:
-            value = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            try:
+                value = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                raise Unavailable('identity') from None
             require(not stat.S_ISLNK(value.st_mode) and identity(value) == self.snapshots[child], 'identity')
+        for (parent, name), observed in self.rejected_edges.items():
+            try:
+                value = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                raise Unavailable('identity') from None
+            require(identity(value) == observed, 'identity')
         for parent, name in self.missing:
             try:
                 os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -517,16 +547,16 @@ class ReadOnlyCapture:
         try:
             self.file('compose', '.env')
             return 'pass'
-        except FileNotFoundError:
+        except InputMissing:
             return 'absent'
-        except (InputUnavailable, OSError):
+        except InputUnavailable:
             return 'invalid'
 
     def capture_record(self, directory, name):
         try:
             self.data[(directory, name)] = self.read_file(directory, name)
-        except (OSError, InputUnavailable):
-            # Unreadable/unsafe/missing input is visible separately; consumers
+        except InputUnavailable:
+            # Proven unsafe metadata or observed missing input; consumers
             # depending on its contents are not evaluated. Never substitute b''.
             self.inputs_valid = False
 
