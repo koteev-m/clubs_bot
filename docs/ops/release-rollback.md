@@ -125,6 +125,139 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
+### CLB-91 local private-snapshot env-file proposal (no live writer)
+
+User-provided terminal evidence for [run 35371386455](https://github.com/koteev-m/clubs_bot/actions/runs/35371386455),
+number 2 / attempt 1, is on merged `45637cae26f1e5d27c21e826e4c74d74857698a7`,
+tree `8ce7f0b38780c271c291601bf2808295cbf9d018`; validate/diagnose succeeded:
+
+```text
+compose-diagnostic:v=2 result=complete subset=invalid violations=key_env_file mapping_details=none top_level_details=none env_file_occurrences=one env_file_shapes=service/app/sequence/canonical_dotenv static_inputs=pass managed_override=pass managed_release=pass dotenv_metadata=pass retained_layout=pass retained_identity=pass retained_checkpoint=pass prior_override=pass migration_records=pass result_record=pass
+```
+
+This establishes the bounded `services.app` canonical-dotenv sequence shape at
+that capture. It supplies no `.env` content, effective environment, redundancy,
+future compatibility or readiness evidence. Run 35262529462 below is historical
+v1 evidence. Historical provenance is not required for the next semantic decision.
+
+The new [local planner](../../scripts/deploy/stage-compose-env-file-plan.py) is an
+import-only private-snapshot API with [real Compose tests](../../scripts/tests/test_stage_compose_env_file_plan.py).
+It has no remote workflow, live reader/writer, dispatch input or authority token.
+Its public CLI refuses use; callers explicitly supply immutable private bytes for
+base, present `.env`, exact incident managed override, interpolation environment,
+project name, installed Compose executable and safe disposable temporary root.
+`None`/missing dotenv evidence is refused; `b''` means a captured PRESENT empty
+file. No snapshot is discovered from the checkout, caller cwd, Docker config or
+ambient environment. Importing the existing inert diagnostic/capture modules
+does not invoke their entrypoints, SSH or `BoundContext`.
+
+The supported local executable is the already available **Compose 5.1.1**.
+Neither repository helper nor supplied stage evidence pins the live version;
+**stage Compose version/build remain unknown**. Another version is refused,
+not silently accepted. No package, engine, image, VM or dependency is installed.
+Only `version --short` and offline `config --format json` are invoked. An isolated
+HOME/config/cwd and a nonexistent local Engine socket are used. Ruby/Psych,
+already used by repository validators, supplies a bounded syntax tree, without
+constructors, aliases, tags, merge expansion or emitting a rewritten YAML file.
+This is not a new generic YAML/dotenv implementation. The helper's lexical dotenv
+boundary remains required: each active stripped physical line must match its
+assignment regex. This rejects bare unset lines but is not a multiline dotenv
+parser; accepted quoted multiline values still require real Compose equivalence.
+The local preparer is deliberately more restrictive about
+process/tool control names. References to parser-control variables such as HOME,
+PATH or PWD (even quoted/escaped spellings), environment entries with those names
+in ANY service, environment list forms, tilde-prefixed bind sources and dynamic
+mount sources are unsupported. A dynamic source could expand to a tilde path;
+the planner declines it instead of adding another interpolation parser.
+Fixture-specific values must never masquerade as the
+deployment principal's values. Ruby/version checks receive no application
+environment; normalization receives only the explicitly supplied non-control
+interpolation map. Existing helper acceptance is not widened.
+The fixed cwd handoff uses a shell before exec. Shell-special variables (including
+IFS, OPTIND and the BASH prefix) are therefore excluded from every input channel,
+not treated as application inputs: the shell can reset or synthesize them.
+The same control-reference guard also examines every decoded YAML scalar in the
+existing bounded AST: escapes that synthesize a dollar sign or part of a variable
+name must not bypass the raw-input check. No additional parser is introduced.
+
+Let `N(B,D,O,E,P,V)` denote the pinned real Compose normalized JSON model from
+base B, dotenv D, managed override O, explicit interpolation environment E,
+project context P and executable/version V. A proposal C is eligible only if:
+
+1. Input syntax/trust assumptions are supported; exactly one canonical sequence
+   belongs to `services.app`, and no other service/reference-file expansion is allowed.
+2. `N(B,D,O,E,P,V) == N(C,D,O,E,P,V)` as complete typed JSON trees. This includes
+   every environment value and key presence, null versus absent versus empty,
+   interpolation/escape effects, other services and every remaining model field.
+3. Reusing each normalized JSON model as input, as the existing captured helper
+   does, produces the identical model again. Literal dollar serialization must
+   survive without another layer of escaping.
+4. All bounded captures and private temporary cleanup finish before a plan returns.
+
+The proposal algorithm first deletes only the exact AST-located `env_file` line
+range. Comments and unrelated bytes outside that property are retained. If the
+whole model remains equal, strategy is `remove`. Otherwise it may add only names
+missing from the removed model's app environment, without touching existing keys:
+`NAME: ${NAME?CLB91 required contribution}`. This selects the existing Compose
+interpolation channel; it does not embed dotenv values or serialize resolved
+secrets into Compose. An existing environment mapping is extended, or a small
+mapping is inserted where the removed property was. A contributed null/unset
+value, unsupported environment form, malformed YAML, ambiguity, incompatible
+ambient precedence or any remaining model difference refuses the proposal.
+
+The explicit strategy is a candidate to VERIFY, not an algebraic assumption:
+service env-file values can differ from interpolation values (for example when
+an ambient variable overrides the latter). The real comparison detects that and
+refuses. Both strategies retain environment precedence. Repeated `.env`/`./.env`
+references use the same supplied bytes in their original order; arbitrary paths,
+optional/object forms and other reference files are unsupported.
+
+`Plan.candidate` is sensitive PRIVATE memory, potentially including existing
+inline base values. Never print it, put it in Git/public patches, or log model,
+dotenv, exception/stderr text or hashes of secret-bearing data. `repr(plan)` is
+redacted; `plan.public()` contains only the fixed strategy and
+`scope=snapshot future=requires_recheck application=not_authorized`.
+Private fixture copies use a validated root, 0700 workspace and 0600 files; they
+are cleaned on normal completion/errors. A forcibly killed local process can
+leave private temporary files and never produces a successful plan. This is not
+the sealed-FD stage backend or a claim of durable secret erasure.
+
+**Future `.env` edits.** Equality is specific to ALL supplied inputs. Value rotation
+can preserve the same interpolation proposal, but every change requires a fresh
+proof. New dotenv names would otherwise be silently lost after removing the
+wildcard import. Missing names in the explicit strategy fail via `${NAME?...}`;
+empty values remain empty. Changed ambient environment or Compose version can
+also invalidate equivalence. No finite explicit mapping is equivalent for all
+possible future dotenv key additions. There is no integrated deployment gate for
+this proposal yet; therefore local PASS alone cannot authorize permanent removal.
+
+**Minimum next authorization, not implemented here.** A separately reviewed
+private semantic capture would need the exact base, present dotenv contents,
+managed override/release bytes, effective helper interpolation environment and
+project context, plus actual installed Compose version/build identity. The
+interpolation snapshot must contain every relevant non-control helper variable;
+control variables are excluded only with the planner's strict no-reference/no-key
+guard. An incomplete projection or control-dependent input must refuse. Capture
+must use the existing no-follow/owner/mode/nlink/device/size/identity checks and
+application→operation locks; values stay in private stage memory/captures and
+never become job output/artifacts or local exports. Normalization may use only
+those captured inputs, no referenced files or Engine/lifecycle query. Public
+output may contain only fixed success/refusal/strategy/snapshot-scope enums.
+An unsupported live version or incomplete context stops before a proposal.
+
+The v2 report cannot supply these semantic inputs, so that new `.env` read and
+normalization need explicit authorization. A later application mechanism would
+also need separate reviewed write authority, exact pre-state/FD/lock revalidation,
+private rollback handling and an enforceable recheck for future input changes.
+Neither that writer nor a diagnostic v3 or weaker trusted-helper predicate is
+added here. No live `.env` read, stage normalization/write, repair, binding, claim,
+resume, deploy, recovery or lifecycle operation occurred in this local task.
+
+Local command: `python3 -B scripts/tests/test_stage_compose_env_file_plan.py`.
+It requires the installed supported Compose executable; absence/version drift is
+a failed/unavailable semantic check, never a mocked equivalence PASS. Existing
+workflow inventory remains 24; no workflow/selfcheck/shared-helper wiring changes.
+
 ### CLB-91 aggregate Compose diagnostics and local env-file structural extension
 
 The user handoff records completed independent review of the mode-repair and
@@ -194,10 +327,12 @@ collisions in `environment`. It later passes its privately captured `.env` as
 `--env-file` for interpolation. Neither that contract nor repository mappings
 prove that removing a live service key preserves its effective environment.
 No mutating remediation is prepared and the helper predicate remains unchanged.
-The local extension below first distinguishes the lexical location/form without
-reading secret-bearing dependencies. It is unreviewed, unpublished and unexecuted;
-another execution needs independent review, publication and explicit dispatch
-authorization. No authority is inferred from the original confirmation token.
+The extension below distinguishes lexical location/form without reading
+secret-bearing dependencies. The P1-corrected `f261d62945aabb2dc337c76fe9413c588ec94e56`
+passed independent review and was merged through PR #510 at the base recorded
+above. The subsequent user-provided v2 result is also recorded above. Every new
+execution still needs explicit dispatch authorization; no authority is inferred
+from the original confirmation token or this historical execution.
 
 These paths do not extend corrected inspect, construct `BoundContext`, change
 approved implementation/root-binding or authorize repair, claim, resume, deploy,
@@ -414,8 +549,8 @@ container IDs, exception text or child stderr are public.
 Local tests exercise real descriptors/flock/rename/read, exact-source lexical
 acceptance and static-predicate oracles, and the actual bootstrap/consumer with
 a substitute transport. Synthetic ownership/backing and Linux fault injection
-on Darwin are identified as simulations; hosted Linux/findmnt/OpenSSH and live
-stage remain unverified until separately authorized execution. No successful
+on Darwin are identified as simulations; they do not replace run-specific hosted
+or live evidence such as the user-provided v2 result above. No successful
 future corrected inspect, external-reader compatibility or recovery readiness
 is implied by any diagnostic result.
 
