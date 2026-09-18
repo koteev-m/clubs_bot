@@ -6,6 +6,7 @@ import errno
 import hashlib
 import hmac
 import importlib.util
+import itertools
 import json
 import os
 from pathlib import Path
@@ -70,6 +71,28 @@ def fields(body):
 
 def record(values):
     return '\n'.join(key + '=' + value for key, value in values.items()).encode()
+
+
+FLOW_REVIEW_CASES = (
+    b'services:\n  app:\n    labels: ["\n    env_file: .env\n    image: PRIVATE"]\n',
+    b'services:\n  app:\n    env_file: [.env\n',
+)
+
+
+def safe_yaml_oracle(data):
+    # Test-only independent parser already required by repository validators.
+    # Synthetic bytes only; no custom constructors/classes, aliases or files.
+    ruby = '''require "yaml"; require "json"
+begin
+  value = YAML.safe_load(STDIN.read, permitted_classes: [], permitted_symbols: [], aliases: false)
+  puts JSON.generate({valid: true, value: value})
+rescue Psych::SyntaxError
+  puts JSON.generate({valid: false})
+end
+'''
+    child = subprocess.run(['ruby', '-e', ruby], input=data, capture_output=True, timeout=10)
+    assert child.returncode == 0 and child.stderr == b'' and len(child.stdout) <= 65536
+    return json.loads(child.stdout)
 
 
 MOUNT_VALUES = ('ext4', '/dev/synthetic', '/', '/synthetic')
@@ -291,6 +314,214 @@ class LexicalTest(unittest.TestCase):
         self.assertEqual((), operation.scan(b'#' * 65536)['violations'])
         with self.assertRaises(operation.Unavailable):
             operation.scan(b'#' * 65537)
+
+
+class EnvFileStructureTest(unittest.TestCase):
+    def observe(self, data, bucket, *shapes):
+        result = operation.env_file_structure(data)
+        self.assertEqual(result, dict(env_file_occurrences=bucket, env_file_shapes=tuple(sorted(shapes))))
+        body = operation.complete(operation.scan(data), {key: 'pass' for key in operation.STATIC_FIELDS}, result)
+        self.assertEqual(operation.parse_body(body, 0), (body.decode().strip(), 0))
+        self.assertNotIn(b'PRIVATE', body)
+        return result
+
+    def test_canonical_zero_and_exact_mapping_branch_applicability(self):
+        for data in (b'', (ROOT / 'docker-compose.yml').read_bytes(), b'# env_file: .env\n',
+                     b'  - env_file: PRIVATE\n', b'  Env_file: PRIVATE\n', b'  "env_file": PRIVATE\n',
+                     b'  env_file:PRIVATE\n'):
+            with self.subTest(data=data[:50]):
+                self.observe(data, 'zero')
+        self.observe(b'services:\n  app:\n    env_file: .env\n', 'one',
+                     'service/app/scalar/canonical_dotenv')
+
+    def test_fixed_known_services_and_never_disclose_other_service_names(self):
+        for name in ('app', 'db', 'caddy', 'PRIVATE_SERVICE'):
+            with self.subTest(name=name):
+                expected = name if name in ('app', 'db', 'caddy') else 'other'
+                self.observe(f'services:\n  {name}:\n    env_file: ./PRIVATE\n'.encode(), 'one',
+                             f'service/{expected}/scalar/other_or_unknown')
+
+    def test_environment_collision_and_other_scopes_are_not_reference_claims(self):
+        cases = ((b'services:\n  app:\n    environment:\n      env_file: .env\n',
+                  'environment/app/scalar/not_applicable'),
+                 (b'services:\n  caddy:\n    labels:\n      env_file: .env\n',
+                  'other/caddy/scalar/not_applicable'),
+                 (b'volumes:\n  PRIVATE:\n    env_file: .env\n', 'other/none/scalar/not_applicable'),
+                 (b'env_file: .env\n', 'other/none/scalar/not_applicable'),
+                 (b'services:\n  env_file: .env\n', 'other/none/scalar/not_applicable'))
+        for data, shape in cases:
+            with self.subTest(shape=shape):
+                self.observe(data, 'one', shape)
+
+    def test_literal_classes_do_not_resolve_interpolation_or_arbitrary_paths(self):
+        for literal in ('.env', './.env', '".env"', "'./.env'", '.env # PRIVATE comment', '"./.env" # PRIVATE'):
+            with self.subTest(literal=literal):
+                self.observe(f'services:\n  app:\n    env_file: {literal}\n'.encode(), 'one',
+                             'service/app/scalar/canonical_dotenv')
+        for literal in ('/.env', '../.env', '/opt/clubs-bot-stage/.env', '${PRIVATE}',
+                        'PRIVATE.env', '.env/PRIVATE', '.env#PRIVATE', '".\\u0065nv"', '.env PRIVATE'):
+            with self.subTest(literal=literal):
+                self.observe(f'services:\n  app:\n    env_file: {literal}\n'.encode(), 'one',
+                             'service/app/scalar/other_or_unknown')
+
+    def test_sequence_mapping_empty_and_unsupported_object_forms(self):
+        base = b'services:\n  app:\n    env_file:'
+        cases = ((b' [.env, "./.env"]\n', 'sequence/canonical_dotenv'),
+                 (b' # PRIVATE\n      - .env\n      - "./.env" # comment\n', 'sequence/canonical_dotenv'),
+                 (b' [.env, PRIVATE]\n', 'sequence/other_or_unknown'),
+                 (b' []\n', 'sequence/other_or_unknown'),
+                 (b'\n      path: .env\n      required: false\n', 'mapping/other_or_unknown'),
+                 (b'\n', 'empty/other_or_unknown'))
+        for suffix, tail in cases:
+            with self.subTest(suffix=suffix):
+                self.observe(base + suffix, 'one', 'service/app/' + tail)
+        for suffix in (b' {path: .env}\n', b'\n      - path: .env\n        required: false\n',
+                       b'\n    - .env\n', b' [.env # PRIVATE, .env]\n'):
+            self.observe(base + suffix, 'one', operation.UNKNOWN_SHAPE)
+
+    def test_multiple_dedup_sorted_and_no_partial_location_when_outline_ambiguous(self):
+        data = (b'services:\n  caddy:\n    environment:\n      env_file: PRIVATE\n'
+                b'  app:\n    env_file: .env\n  db:\n    env_file: [.env]\n')
+        self.observe(data, 'multiple', 'environment/caddy/scalar/not_applicable',
+                     'service/app/scalar/canonical_dotenv', 'service/db/sequence/canonical_dotenv')
+        self.observe(b'services:\n  PRIVATE_A:\n    env_file: .env\n  PRIVATE_B:\n    env_file: .env\n',
+                     'multiple', 'service/other/scalar/canonical_dotenv')
+        self.observe(data + b'PRIVATE: |\n  env_file: .env\n', 'multiple', operation.UNKNOWN_SHAPE)
+        self.observe(b'services:\n  app:\n    env_file: .env\n    env_file: PRIVATE\n',
+                     'multiple', operation.UNKNOWN_SHAPE)
+
+    def test_unsupported_utf8_whitespace_scalar_and_indentation_remain_unresolved(self):
+        good = b'services:\n  app:\n    env_file: .env\n'
+        bad = (b'\xff\n' + good, b'\xef\xbb\xbf' + good, good.replace(b'    env_file', b'\t env_file'),
+               good.replace(b'\n', b'\v'), good.replace(b'\n', '\u2028'.encode()),
+               good.replace(b': .env', ':\u00a0.env'.encode()),
+               good + b'  other:\n   image: PRIVATE\n    env_file: .env\n',
+               good + b'  app:\n    image: PRIVATE\n', good + b'  other: "PRIVATE\n',
+               good + b'---\n', good + b'  other: &PRIVATE value\n',
+               good + b'  other: !PRIVATE value\n', good + b'  other: *PRIVATE\n')
+        for data in bad:
+            with self.subTest(data=data[:60]):
+                bucket = 'multiple' if data.count(b'env_file:') > 1 else 'one'
+                self.observe(data, bucket, operation.UNKNOWN_SHAPE)
+        self.observe(good.replace(b'\n', b'\r\n'), 'one', 'service/app/scalar/canonical_dotenv')
+        self.observe(good + b'#\tPRIVATE\n', 'one', 'service/app/scalar/canonical_dotenv')
+
+    def test_count_equivalence_bounded_generated_corpus(self):
+        rng = random.Random(62529462)
+        atoms = [b'env_file: .env', b'env_file:PRIVATE', b'- env_file: PRIVATE', b'"env_file": PRIVATE',
+                 b'Env_file: PRIVATE', b'# env_file: PRIVATE', b'\xff', b'app:', b'environment:']
+        for _ in range(750):
+            lines = [rng.choice((b'', b'  ', b'    ', b'\t')) + rng.choice(atoms)
+                     for _ in range(rng.randrange(1, 12))]
+            data = b'\n'.join(lines)
+            expected = sum(bool(re.fullmatch(rb'env_file:(?:\s+(.*))?', line.strip())) for line in lines)
+            observed = operation.env_file_structure(data)
+            self.assertEqual(observed['env_file_occurrences'], 'zero' if expected == 0 else 'one' if expected == 1 else 'multiple')
+            self.assertEqual('key_env_file' in operation.scan(data)['violations'], expected > 0)
+            self.assertEqual(original_accepts(data), not operation.scan(data)['violations'])
+
+    def test_processing_bounds_and_no_truncated_complete(self):
+        self.observe(b'#' * 65536, 'zero')
+        for data in (b'#' * 65537, b'  x: y\n' * (operation.STRUCTURE_LINES + 1),
+                     b'\n'.join(b' ' * i + b'x:' for i in range(operation.STRUCTURE_DEPTH + 1))):
+            with self.assertRaisesRegex(operation.Unavailable, 'bounds'):
+                operation.env_file_structure(data)
+        data = b'services:\n'
+        for number, suffix in enumerate((b' .env', b' PRIVATE', b' [.env]', b' [PRIVATE]',
+                                        b'\n      path: .env', b'', b' .env', b' .env', b' .env')):
+            # Six distinct service/other forms, plus three environment contexts.
+            if number < 6:
+                data += f'  PRIVATE_{number}:\n    env_file:'.encode() + suffix + b'\n'
+            else:
+                name = ('app', 'db', 'caddy')[number - 6]
+                data += f'  {name}:\n    environment:\n      env_file: PRIVATE\n'.encode()
+        with self.assertRaisesRegex(operation.Unavailable, 'bounds'):
+            operation.env_file_structure(data)
+
+
+class FlowOutlineTest(unittest.TestCase):
+    observe = EnvFileStructureTest.observe
+
+    def test_reviewer_multiline_flow_scalar_has_no_service_env_file(self):
+        data = FLOW_REVIEW_CASES[0]
+        parsed = safe_yaml_oracle(data)
+        self.assertTrue(parsed['valid'])
+        app = parsed['value']['services']['app']
+        self.assertEqual(set(app), {'labels'})
+        self.assertEqual(len(app['labels']), 1)
+        self.assertIsInstance(app['labels'][0], str)
+        self.assertNotIn('env_file', app)
+        self.assertEqual(operation.scan(data), dict(violations=('key_env_file',),
+                                                  mapping_details=(), top_level_details=()))
+        self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+
+    def test_reviewer_unclosed_sequence_is_unresolved_not_resolved_sequence(self):
+        data = FLOW_REVIEW_CASES[1]
+        self.assertFalse(safe_yaml_oracle(data)['valid'])
+        self.assertEqual(operation.scan(data)['violations'], ('key_env_file',))
+        self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+        self.observe(b'env_file: [.env\n', 'one', operation.UNKNOWN_SHAPE)
+
+    def test_multiline_single_double_and_nested_flow_scalar_oracle(self):
+        for opening, closing in ((b'["', b'"]'), (b"['", b"']"),
+                                 (b'[["', b'"]]'), (b"[['", b"']]"),
+                                 (b'["escaped \\"', b'"]'), (b"['doubled ''", b"']")):
+            for service in (b'app', b'db'):
+                data = (b'services:\n  ' + service + b':\n    labels: ' + opening +
+                        b'\n    env_file: .env\n    image: PRIVATE' + closing + b'\n')
+                with self.subTest(opening=opening, service=service):
+                    parsed = safe_yaml_oracle(data)
+                    self.assertTrue(parsed['valid'])
+                    self.assertEqual(set(parsed['value']['services'][service.decode()]), {'labels'})
+                    self.assertEqual(operation.scan(data)['violations'], ('key_env_file',))
+                    self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+
+    def test_ambiguity_before_after_and_multiple_occurrences_discards_every_tuple(self):
+        real = b'    env_file: .env\n'
+        hidden = b'    labels: ["\n    env_file: PRIVATE\n    image: PRIVATE"]\n'
+        for fragment in (real + hidden, hidden + real):
+            self.observe(b'services:\n  app:\n' + fragment, 'multiple', operation.UNKNOWN_SHAPE)
+        for fragment in (real + b'    labels: [PRIVATE\n', b'    labels: [PRIVATE\n' + real):
+            self.observe(b'services:\n  app:\n' + fragment, 'one', operation.UNKNOWN_SHAPE)
+        # No collision is still zero lexical matches, never proof of semantic absence.
+        self.observe(b'services:\n  app:\n    labels: ["\n', 'zero')
+
+    def test_unclosed_mismatched_nested_delimiters_quotes_escapes_and_comments(self):
+        bad = (b'[.env', b'[.env}', b'[{PRIVATE}]', b'[[.env]]', b'[".env]', b"['.env]",
+               b'["PRIVATE\\"]', b'["PRIVATE\\q"]', b'["PRIVATE\\u12"]', b'["PRIVATE\\U00110000"]',
+               b'["PRIVATE\\ud800"]', b'[".env" PRIVATE]', b'[.env] PRIVATE', b'[.env]]',
+               b'[.env # PRIVATE]', b'[.env, # PRIVATE]', b'[, .env]', b'[.env,, .env]',
+               b'[PRIVATE: value]', b'[!PRIVATE .env]', b'[*PRIVATE]', b'[&PRIVATE .env]',
+               b'"PRIVATE\\', b'"PRIVATE\\q"', b"'PRIVATE", b'"PRIVATE"junk')
+        for value in bad:
+            with self.subTest(value=value):
+                data = b'services:\n  app:\n    env_file: .env\n    labels: ' + value + b'\n'
+                self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+
+    def test_supported_quotes_brackets_hashes_and_escapes_preserve_attribution(self):
+        values = (b'["PRIVATE[{}]#", ".env"]', b"['PRIVATE]#', 'it''s [literal]']",
+                  b'["PRIVATE\\\"[", "PRIVATE\\\\", "PRIVATE\\u005b", "PRIVATE\\x23"]',
+                  br'[CMD-SHELL, "echo \"PRIVATE]#\"", "http://fixture.invalid/path"]',
+                  b'[PRIVATE#literal, .env] # PRIVATE [" unclosed comment',
+                  b'[.env,]', b'[]', b'"PRIVATE[{}]#" # [PRIVATE',
+                  b"'it''s PRIVATE[{}]#'", b'PRIVATE [literal', b"PRIVATE's [literal",
+                  b'PRIVATE # ["unclosed comment')
+        for value in values:
+            with self.subTest(value=value):
+                data = b'services:\n  app:\n    env_file: .env\n    labels: ' + value + b'\n'
+                parsed = safe_yaml_oracle(data)
+                self.assertTrue(parsed['valid'])
+                self.assertEqual(parsed['value']['services']['app']['env_file'], '.env')
+                self.observe(data, 'one', 'service/app/scalar/canonical_dotenv')
+        for value, reference in ((b'[.env, "./.env"]', 'canonical_dotenv'),
+                                 (b'[".env,PRIVATE"]', 'other_or_unknown'),
+                                 (b'[".env#PRIVATE"]', 'other_or_unknown')):
+            data = b'services:\n  app:\n    env_file: ' + value + b'\n'
+            self.assertTrue(safe_yaml_oracle(data)['valid'])
+            self.observe(data, 'one', 'service/app/sequence/' + reference)
+        data = b'services:\n  app:\n    environment:\n      env_file: "PRIVATE[\\\"#"\n'
+        self.assertTrue(safe_yaml_oracle(data)['valid'])
+        self.observe(data, 'one', 'environment/app/scalar/not_applicable')
 
 
 class StaticOracleTest(unittest.TestCase):
@@ -621,7 +852,8 @@ class ProtocolTest(unittest.TestCase):
     def setUp(self):
         self.nonce = b'n' * 32
         self.statuses = {key: 'pass' for key in operation.STATIC_FIELDS}
-        self.body = operation.complete(operation.scan(b'services:\n  app:\n    env_file: PRIVATE\n'), self.statuses)
+        data = b'services:\n  app:\n    env_file: PRIVATE\n'
+        self.body = operation.complete(operation.scan(data), self.statuses, operation.env_file_structure(data))
 
     def frame(self, body, nonce=None):
         return b'clb91-compose-auth:v=1 tag=' + hmac.new(nonce or self.nonce, body, hashlib.sha256).hexdigest().encode() + b' ' + body
@@ -652,11 +884,71 @@ class ProtocolTest(unittest.TestCase):
     def test_full_enum_contract_fits_measured_public_private_bounds(self):
         lexical = dict(violations=tuple(sorted(operation.BASIC)), mapping_details=tuple(sorted(operation.DETAILS)),
                        top_level_details=tuple(sorted(operation.DETAILS)))
-        maximum = operation.complete(lexical, {key: 'not_evaluated' for key in operation.STATIC_FIELDS})
+        shapes = tuple(sorted(sorted(self.allowed_shapes() - {operation.UNKNOWN_SHAPE},
+                                     key=lambda s: (-len(s), s))[:operation.SHAPE_LIMIT]))
+        maximum = operation.complete(lexical, {key: 'not_evaluated' for key in operation.STATIC_FIELDS},
+                                     dict(env_file_occurrences='multiple', env_file_shapes=shapes))
         self.assertLessEqual(len(maximum), 2048)
         self.assertLessEqual(len(self.frame(maximum)), 4096)
         self.assertEqual(runner.parse_result(self.frame(maximum), 0, self.nonce, operation)[1], 0)
         self.assertNotIn(b'PRIVATE', self.body)
+
+    @staticmethod
+    def allowed_shapes():
+        # Independent finite public grammar, including states not produced by
+        # today's fixtures. Keep the validator closed when new enums are added.
+        shapes = {operation.UNKNOWN_SHAPE}
+        for scope, service, form in itertools.product(('service', 'environment', 'other'),
+                                                      ('app', 'db', 'caddy', 'other', 'none'),
+                                                      ('scalar', 'sequence', 'mapping', 'empty')):
+            if service == 'none' and scope != 'other':
+                continue
+            references = ('other_or_unknown',) if scope == 'service' else ('not_applicable',)
+            if scope == 'service' and form in ('scalar', 'sequence'):
+                references += ('canonical_dotenv',)
+            shapes.update('/'.join((scope, service, form, reference)) for reference in references)
+        return shapes
+
+    def test_exhaustive_structure_tuple_grammar_and_authenticated_fields(self):
+        allowed = self.allowed_shapes()
+        for parts in itertools.product(('service', 'environment', 'other', 'unresolved', 'PRIVATE'),
+                                       ('app', 'db', 'caddy', 'other', 'none', 'unknown', 'PRIVATE'),
+                                       ('scalar', 'sequence', 'mapping', 'empty', 'unresolved', 'PRIVATE'),
+                                       ('canonical_dotenv', 'other_or_unknown', 'not_applicable', 'PRIVATE')):
+            shape = '/'.join(parts)
+            with self.subTest(shape=shape):
+                self.assertEqual(operation.valid_env_file_shape(shape), shape in allowed)
+                body = re.sub(rb'env_file_shapes=[^ ]+', b'env_file_shapes=' + shape.encode(), self.body)
+                if shape in allowed:
+                    self.assertEqual(runner.parse_result(self.frame(body), 0, self.nonce, operation),
+                                     (body.decode().strip(), 0))
+                else:
+                    with self.assertRaises((ValueError, operation.Unavailable)):
+                        runner.parse_result(self.frame(body), 0, self.nonce, operation)
+        changed = self.frame(self.body).replace(b'env_file_occurrences=one', b'env_file_occurrences=multiple')
+        with self.assertRaises((ValueError, operation.Unavailable)):
+            runner.parse_result(changed, 0, self.nonce, operation)
+
+    def test_structure_field_cardinality_version_order_and_cross_field_constraints(self):
+        shape = b'service/app/scalar/other_or_unknown'
+        bad = [self.body.replace(b'v=2', b'v=1'),
+               self.body.replace(b'env_file_occurrences=one ', b''),
+               self.body.replace(b'env_file_occurrences=one', b'env_file_occurrences=1'),
+               self.body.replace(b'env_file_occurrences=one', b'env_file_occurrences=zero'),
+               self.body.replace(b'env_file_occurrences=one', b'env_file_occurrences=one env_file_occurrences=one'),
+               self.body.replace(b'key_env_file', b'none').replace(b'subset=invalid', b'subset=clear'),
+               self.body.replace(shape, b'none'), self.body.replace(shape, shape + b',' + shape),
+               self.body.replace(shape, shape + b',environment/app/scalar/not_applicable'),
+               self.body.replace(b'violations=key_env_file', b'violations=key_env_file,PRIVATE')]
+        many = self.body.replace(b'occurrences=one', b'occurrences=multiple')
+        bad += [many.replace(shape, shape + b',' + operation.UNKNOWN_SHAPE.encode()),
+                many.replace(shape, ','.join(sorted(self.allowed_shapes() - {operation.UNKNOWN_SHAPE})[:9]).encode()),
+                many.replace(shape, b'service/db/scalar/canonical_dotenv,' + shape)]
+        ordered = b'env_file_occurrences=one env_file_shapes=' + shape
+        bad.append(self.body.replace(ordered, b'env_file_shapes=' + shape + b' env_file_occurrences=one'))
+        for body in bad:
+            with self.subTest(body=body[:160]), self.assertRaises((ValueError, operation.Unavailable)):
+                runner.parse_result(self.frame(body), 0, self.nonce, operation)
 
     def test_final_local_handoff_pending_signal_beats_cached_complete(self):
         written = []
@@ -898,7 +1190,8 @@ class RunnerTest(unittest.TestCase):
     def test_one_transport_and_cleanup_failure_reject_cached_complete(self):
         transport = runner.load_transport(captured_sources(), [False])
         source = (ROOT / runner.REMOTE_PATH).read_bytes()
-        body = operation.complete(operation.scan(b''), {key: 'pass' for key in operation.STATIC_FIELDS})
+        body = operation.complete(operation.scan(b''), {key: 'pass' for key in operation.STATIC_FIELDS},
+                                  operation.env_file_structure(b''))
         for sig in runner.WATCHED:
             self.addCleanup(signal.signal, sig, signal.getsignal(sig))
         for failure in ('transport', 'protocol', 'cleanup', 'cancel', 'signal_pin', 'signal_close'):
@@ -1203,7 +1496,7 @@ subprocess.Popen = _linux_script_spawn
         self.assertEqual((result.returncode, result.stderr), (0, b''), result.stdout)
         self.assertEqual(fields(result.stdout)['result'], 'complete')
         self.assertEqual(result.stdout, operation.complete(operation.scan(b''),
-                         {field: 'pass' for field in operation.STATIC_FIELDS}))
+                         {field: 'pass' for field in operation.STATIC_FIELDS}, operation.env_file_structure(b'')))
         self.assertNotIn(b'PRIVATE', result.stdout)
         self.assertFalse(marker.exists())
         self.assertEqual(self.calls.read_bytes(), b'invoked\n')
@@ -1270,6 +1563,75 @@ subprocess.Popen = _linux_script_spawn
         self.assertNotIn(b'PRIVATE', result.stdout)
         self.assertEqual(self.calls.read_bytes(), b'invoked\n')
         self.assertEqual(before, {str(path): path.read_bytes() for path in self.fixture.root.rglob('*') if path.is_file()})
+
+    def test_structural_evidence_through_real_bootstrap_with_no_extra_reads_or_writes(self):
+        # Only the base bytes vary. Every invocation uses the unchanged single
+        # capture/locks/recheck/cleanup path and authenticated whole-body consumer.
+        cases = (
+            (b'services:\n  app:\n    env_file: .env\n', 'one', 'service/app/scalar/canonical_dotenv'),
+            (b'services:\n  app:\n    env_file:\n      - ./PRIVATE\n', 'one', 'service/app/sequence/other_or_unknown'),
+            (b'services:\n  app:\n    environment:\n      env_file: PRIVATE\n', 'one', 'environment/app/scalar/not_applicable'),
+            (b'services:\n  app:\n    env_file: .env\n  db:\n    env_file: PRIVATE\n', 'multiple',
+             'service/app/scalar/canonical_dotenv,service/db/scalar/other_or_unknown'),
+            (b'\xff\n  env_file: PRIVATE\n', 'one', operation.UNKNOWN_SHAPE),
+            ((ROOT / 'docker-compose.yml').read_bytes(), 'zero', 'none'))
+        # Fail if any new code reads .env or a referenced file; also prohibit
+        # mutation syscalls, allowing only the existing read-only os.open path.
+        self.commit_injection('''
+if os.environ.get('CLB91_SYNTHETIC_REMOTE') == '1':
+    _read = os.read
+    _private_inodes = {os.stat(_root + '/opt/clubs-bot-stage/' + p).st_ino
+                       for p in ('.env', 'referenced-secret')}
+    def _checked_read(fd, count):
+        assert os.fstat(fd).st_ino not in _private_inodes
+        return _read(fd, count)
+    os.read = _checked_read
+    def _mutation(*a, **k): raise AssertionError('PRIVATE mutation')
+    for _name in ('chmod', 'fchmod', 'chown', 'fchown', 'rename', 'replace', 'unlink', 'fsync', 'mkdir'):
+        setattr(os, _name, _mutation)
+''')
+        for data, bucket, shapes in cases:
+            with self.subTest(bucket=bucket, shapes=shapes):
+                Fixture.write_path(self.fixture.paths['base'], data, 0o644)
+                before = {str(p): (p.read_bytes(), p.stat().st_mode) for p in self.fixture.root.rglob('*') if p.is_file()}
+                result = self.invoke()
+                self.assertEqual((result.returncode, result.stderr), (0, b''), result.stdout)
+                body = fields(result.stdout)
+                self.assertEqual((body['env_file_occurrences'], body['env_file_shapes']), (bucket, shapes))
+                self.assertTrue(all(body[key] == 'pass' for key in operation.STATIC_FIELDS))
+                self.assertNotIn(b'PRIVATE', result.stdout)
+                self.assertEqual(before, {str(p): (p.read_bytes(), p.stat().st_mode)
+                                         for p in self.fixture.root.rglob('*') if p.is_file()})
+        self.assertEqual(self.calls.read_bytes().splitlines(), [b'invoked'] * len(cases))
+
+    def test_structural_bound_failure_never_publishes_partial_complete(self):
+        # Stay within the existing file limit while exceeding the outline bound.
+        Fixture.write_path(self.fixture.paths['base'], b'x:\n' * (operation.STRUCTURE_LINES + 1), 0o644)
+        result = self.invoke()
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (1, operation.unavailable('bounds'), b''))
+        self.assertEqual(self.calls.read_bytes(), b'invoked\n')
+
+    def test_flow_ambiguity_authenticated_result_preserves_lexical_evidence(self):
+        cases = (*FLOW_REVIEW_CASES,
+                 b'services:\n  app:\n    env_file: .env\n    labels: ["PRIVATE\n',
+                 b'services:\n  app:\n    labels: [\'\n    env_file: PRIVATE\n    image: PRIVATE\']\n')
+        for data in cases:
+            with self.subTest(data=data[:55]):
+                Fixture.write_path(self.fixture.paths['base'], data, 0o644)
+                before = {str(p): (p.read_bytes(), p.stat().st_mode) for p in self.fixture.root.rglob('*') if p.is_file()}
+                result = self.invoke()
+                self.assertEqual((result.returncode, result.stderr), (0, b''), result.stdout)
+                body = fields(result.stdout)
+                self.assertEqual((body['result'], body['subset'], body['violations']),
+                                 ('complete', 'invalid', 'key_env_file'))
+                self.assertEqual((body['env_file_occurrences'], body['env_file_shapes']), ('one', operation.UNKNOWN_SHAPE))
+                self.assertTrue(all(body[key] == 'pass' for key in operation.STATIC_FIELDS))
+                self.assertEqual(result.stdout, operation.complete(operation.scan(data),
+                                 {key: 'pass' for key in operation.STATIC_FIELDS}, operation.env_file_structure(data)))
+                self.assertNotIn(b'PRIVATE', result.stdout)
+                self.assertEqual(before, {str(p): (p.read_bytes(), p.stat().st_mode)
+                                         for p in self.fixture.root.rglob('*') if p.is_file()})
+        self.assertEqual(self.calls.read_bytes().splitlines(), [b'invoked'] * len(cases))
 
     def test_authenticated_path_rejects_raw_startup_wrong_nonce_and_exit_mismatch(self):
         for behavior in ('startup', 'bad_auth', 'wrong_exit'):
