@@ -286,7 +286,7 @@ unique sorted tuples `scope/service/form/reference`:
 | --- | --- |
 | scope | `service`: plain indentation ancestry `services/<service>`; `environment`: `services/<service>/environment`; `other`: other plain mapping ancestry; `unresolved`: outline is unsupported/ambiguous. These are lexical observations, never a YAML semantic verdict. |
 | service | Only already-public `app`, `db`, `caddy`; other names collapse to `other`; outside a service to `none`; unresolved outline to `unknown`. |
-| form | `scalar`, `sequence` (plain block or single-line flow), `mapping`, `empty`; unresolved outline to `unresolved`. No general YAML parser or object normalization is introduced. |
+| form | `scalar`, `sequence` (plain block or a closed single-line flat flow sequence of scalars), `mapping`, `empty`; unresolved outline to `unresolved`. No general YAML parser or object normalization is introduced. |
 | reference | Only for `service` scope: `canonical_dotenv` for exact `.env` or `./.env` literals (optional single/double quotes) or a nonempty plain sequence consisting solely of these literals; otherwise `other_or_unknown`. Other scopes always use `not_applicable`, so environment values are never described as references. |
 
 Plain indentation maps require consistent sibling indentation/kind, empty-valued
@@ -294,6 +294,16 @@ parents and no duplicate mapping keys. Scalar continuations, unsupported list
 objects/indentationless sequences, tabs/non-ASCII whitespace, invalid UTF-8, BOM, directives, documents,
 anchors/aliases/tags, block scalars or ambiguous outlines discard **all** resolved
 locations: the sole tuple is `unresolved/unknown/unresolved/not_applicable`.
+Every mapping/list value must have a supported single-line boundary. Single and
+double quoted scalars require actual closure; doubled single quotes and the fixed
+YAML double-quote escape spellings are recognized without evaluating values.
+Flat flow sequences require balanced closure, scalar items and valid separators;
+nested collections, flow maps, implicit flow mappings, multiline quotes/flows,
+malformed escapes and comments consuming the closer make the entire outline
+unresolved. Brackets and `#` inside a closed quoted scalar are content; brackets
+inside ordinary block plain text are not automatically flow syntax. A later
+ambiguity invalidates earlier resolved tuples too; no guessed recovery point is
+used. This is deliberately a conservative boundary recognizer, not YAML parsing.
 The occurrence bucket still reports the scanner's collisions. Unresolved is
 honest bounded evidence, not a partially resolved location list. Sequence object
 forms and interpolated/escaped/absolute/parent paths do not receive the canonical
@@ -310,6 +320,18 @@ cleanup and final cancellation checks still gate publication of the whole body.
 `canonical_dotenv` proves only a literal spelling, not file use, safe contents,
 variable coverage or permission to delete the key. Even a resolved structural
 result cannot by itself authorize remediation or prove environment equivalence.
+
+The independent P1 against local candidate `b8beb3d77f8dfbc76564615b06d072f9370da246`
+showed that a multiline quoted item in `labels: ["...` could make an embedded
+lexical `env_file: .env` look like a service reference; an unclosed `[.env` also
+received a resolved sequence form. Both were reproduced through the classifier
+and authenticated bootstrap/consumer. The local correction above preserves
+`complete subset=invalid violations=key_env_file` and the lexical occurrence
+bucket, but returns only the unresolved tuple. This is a collected report with
+unknown structure, not unavailable I/O or proof of semantic key absence. The
+historical run 35262529462 remains v1 evidence only; live role/origin and any v2
+result remain unknown. Local tests use the repository's existing safe YAML reader
+only as an independent synthetic oracle; production gains no dependency or reads.
 
 Fixed read allowlist and dependency map (paths here are design documentation,
 never public diagnostic fields): `compose` is the fixed base directory; `parent`

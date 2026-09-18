@@ -174,6 +174,91 @@ def unavailable(reason):
     return f'{PREFIX} result=unavailable reason={reason}\n'.encode('ascii')
 
 
+def closed_inline_value(value):
+    """Fence the supported single-line forms; never recover a multiline context.
+
+    Only a scalar or a flat sequence of scalars is supported. Nested flow/maps,
+    implicit flow mappings, multiline quotes and unclosed delimiters return
+    False for the ENTIRE outline. Brackets/quotes inside a quoted scalar, or
+    brackets inside an ordinary block plain scalar, are literal content.
+    This recognizes boundaries, not YAML values/types or Compose semantics.
+    """
+    def tail(end):
+        rest = value[end:]
+        return not rest or (rest.startswith(' ') and (not rest.strip(' ') or rest.lstrip(' ').startswith('#')))
+
+    def quoted_end(start):
+        quote, i = value[start], start + 1
+        while i < len(value):
+            char = value[i]
+            if char == quote:
+                if quote == "'" and i + 1 < len(value) and value[i + 1] == "'":
+                    i += 2  # YAML single-quote escaping, not backslash escaping.
+                    continue
+                return i + 1
+            if quote == '"' and char == '\\':
+                i += 1
+                if i == len(value):
+                    return None
+                escape = value[i]
+                if escape in 'xuU':
+                    width = {'x': 2, 'u': 4, 'U': 8}[escape]
+                    digits = value[i + 1:i + 1 + width]
+                    if len(digits) != width or not re.fullmatch('[0-9a-fA-F]+', digits):
+                        return None
+                    point = int(digits, 16)
+                    if point > 0x10ffff or 0xd800 <= point <= 0xdfff:
+                        return None
+                    i += width
+                elif escape not in '0abtnvfre "/\\N_LP':
+                    return None
+            i += 1
+        return None
+
+    if not value:
+        return True
+    if value[0] in ('"', "'"):
+        end = quoted_end(0)
+        return end is not None and tail(end)
+    if value[0] != '[':
+        return value[0] not in '{}]!&*|>@`' and not re.search(r':(?:\s|$)', value)
+    i = 1
+    while True:
+        while i < len(value) and value[i] == ' ':
+            i += 1
+        if i == len(value):
+            return False
+        if value[i] == ']':  # Empty sequence or optional final comma.
+            return tail(i + 1)
+        if value[i] in ('"', "'"):
+            end = quoted_end(i)
+            if end is None:
+                return False
+            i = end
+        else:
+            start = i
+            if value[i] in ',[{}#!&*|>@`?:' or value[i:].startswith('- '):
+                return False
+            while i < len(value) and value[i] not in ',]':
+                char = value[i]
+                if char in '[{}"\'' or (char == '#' and value[i - 1] == ' '):
+                    return False  # A comment cannot supply the missing closer.
+                if char == ':' and (i + 1 == len(value) or value[i + 1] in ' ,]'):
+                    return False  # Implicit mapping is outside the supported grammar.
+                i += 1
+            if not value[start:i].strip(' '):
+                return False
+        while i < len(value) and value[i] == ' ':
+            i += 1
+        if i == len(value):
+            return False
+        if value[i] == ']':
+            return tail(i + 1)
+        if value[i] != ',':
+            return False
+        i += 1
+
+
 def env_file_structure(data):
     """Lexical indentation observations, NOT a YAML parser or Compose model.
 
@@ -223,11 +308,9 @@ def env_file_structure(data):
             if identity in seen:
                 reliable = False  # Duplicate maps cannot identify a Compose location.
             seen[identity] = True
-        # Reject multiline/ambiguous scalar outlines without evaluating values.
-        if value.startswith(('"', "'")):
-            reliable &= bool(re.fullmatch(r'''(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')(?: +#.*)?''', value))
-        elif value and not value.startswith(('[', '{')) and re.search(r':(?:\s|$)', value):
-            reliable = False
+        # Every mapping/list value must close on this line, including unrelated
+        # fields before OR after a collision. Never guess where flow/quotes end.
+        reliable &= closed_inline_value(value)
         index = len(nodes)
         nodes.append(dict(indent=indent, key=key, value=value, listing=listing, parent=parent))
         children[index] = []

@@ -73,6 +73,28 @@ def record(values):
     return '\n'.join(key + '=' + value for key, value in values.items()).encode()
 
 
+FLOW_REVIEW_CASES = (
+    b'services:\n  app:\n    labels: ["\n    env_file: .env\n    image: PRIVATE"]\n',
+    b'services:\n  app:\n    env_file: [.env\n',
+)
+
+
+def safe_yaml_oracle(data):
+    # Test-only independent parser already required by repository validators.
+    # Synthetic bytes only; no custom constructors/classes, aliases or files.
+    ruby = '''require "yaml"; require "json"
+begin
+  value = YAML.safe_load(STDIN.read, permitted_classes: [], permitted_symbols: [], aliases: false)
+  puts JSON.generate({valid: true, value: value})
+rescue Psych::SyntaxError
+  puts JSON.generate({valid: false})
+end
+'''
+    child = subprocess.run(['ruby', '-e', ruby], input=data, capture_output=True, timeout=10)
+    assert child.returncode == 0 and child.stderr == b'' and len(child.stdout) <= 65536
+    return json.loads(child.stdout)
+
+
 MOUNT_VALUES = ('ext4', '/dev/synthetic', '/', '/synthetic')
 MOUNT_OUTPUT = (' '.join(key + '="' + value + '"' for key, value in
                        zip(('FSTYPE', 'SOURCE', 'FSROOT', 'TARGET'), MOUNT_VALUES)) + '\n').encode()
@@ -348,14 +370,13 @@ class EnvFileStructureTest(unittest.TestCase):
                  (b' # PRIVATE\n      - .env\n      - "./.env" # comment\n', 'sequence/canonical_dotenv'),
                  (b' [.env, PRIVATE]\n', 'sequence/other_or_unknown'),
                  (b' []\n', 'sequence/other_or_unknown'),
-                 (b' [.env # PRIVATE, .env]\n', 'sequence/other_or_unknown'),
                  (b'\n      path: .env\n      required: false\n', 'mapping/other_or_unknown'),
                  (b'\n', 'empty/other_or_unknown'))
         for suffix, tail in cases:
             with self.subTest(suffix=suffix):
                 self.observe(base + suffix, 'one', 'service/app/' + tail)
         for suffix in (b' {path: .env}\n', b'\n      - path: .env\n        required: false\n',
-                       b'\n    - .env\n'):
+                       b'\n    - .env\n', b' [.env # PRIVATE, .env]\n'):
             self.observe(base + suffix, 'one', operation.UNKNOWN_SHAPE)
 
     def test_multiple_dedup_sorted_and_no_partial_location_when_outline_ambiguous(self):
@@ -416,6 +437,91 @@ class EnvFileStructureTest(unittest.TestCase):
                 data += f'  {name}:\n    environment:\n      env_file: PRIVATE\n'.encode()
         with self.assertRaisesRegex(operation.Unavailable, 'bounds'):
             operation.env_file_structure(data)
+
+
+class FlowOutlineTest(unittest.TestCase):
+    observe = EnvFileStructureTest.observe
+
+    def test_reviewer_multiline_flow_scalar_has_no_service_env_file(self):
+        data = FLOW_REVIEW_CASES[0]
+        parsed = safe_yaml_oracle(data)
+        self.assertTrue(parsed['valid'])
+        app = parsed['value']['services']['app']
+        self.assertEqual(set(app), {'labels'})
+        self.assertEqual(len(app['labels']), 1)
+        self.assertIsInstance(app['labels'][0], str)
+        self.assertNotIn('env_file', app)
+        self.assertEqual(operation.scan(data), dict(violations=('key_env_file',),
+                                                  mapping_details=(), top_level_details=()))
+        self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+
+    def test_reviewer_unclosed_sequence_is_unresolved_not_resolved_sequence(self):
+        data = FLOW_REVIEW_CASES[1]
+        self.assertFalse(safe_yaml_oracle(data)['valid'])
+        self.assertEqual(operation.scan(data)['violations'], ('key_env_file',))
+        self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+        self.observe(b'env_file: [.env\n', 'one', operation.UNKNOWN_SHAPE)
+
+    def test_multiline_single_double_and_nested_flow_scalar_oracle(self):
+        for opening, closing in ((b'["', b'"]'), (b"['", b"']"),
+                                 (b'[["', b'"]]'), (b"[['", b"']]"),
+                                 (b'["escaped \\"', b'"]'), (b"['doubled ''", b"']")):
+            for service in (b'app', b'db'):
+                data = (b'services:\n  ' + service + b':\n    labels: ' + opening +
+                        b'\n    env_file: .env\n    image: PRIVATE' + closing + b'\n')
+                with self.subTest(opening=opening, service=service):
+                    parsed = safe_yaml_oracle(data)
+                    self.assertTrue(parsed['valid'])
+                    self.assertEqual(set(parsed['value']['services'][service.decode()]), {'labels'})
+                    self.assertEqual(operation.scan(data)['violations'], ('key_env_file',))
+                    self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+
+    def test_ambiguity_before_after_and_multiple_occurrences_discards_every_tuple(self):
+        real = b'    env_file: .env\n'
+        hidden = b'    labels: ["\n    env_file: PRIVATE\n    image: PRIVATE"]\n'
+        for fragment in (real + hidden, hidden + real):
+            self.observe(b'services:\n  app:\n' + fragment, 'multiple', operation.UNKNOWN_SHAPE)
+        for fragment in (real + b'    labels: [PRIVATE\n', b'    labels: [PRIVATE\n' + real):
+            self.observe(b'services:\n  app:\n' + fragment, 'one', operation.UNKNOWN_SHAPE)
+        # No collision is still zero lexical matches, never proof of semantic absence.
+        self.observe(b'services:\n  app:\n    labels: ["\n', 'zero')
+
+    def test_unclosed_mismatched_nested_delimiters_quotes_escapes_and_comments(self):
+        bad = (b'[.env', b'[.env}', b'[{PRIVATE}]', b'[[.env]]', b'[".env]', b"['.env]",
+               b'["PRIVATE\\"]', b'["PRIVATE\\q"]', b'["PRIVATE\\u12"]', b'["PRIVATE\\U00110000"]',
+               b'["PRIVATE\\ud800"]', b'[".env" PRIVATE]', b'[.env] PRIVATE', b'[.env]]',
+               b'[.env # PRIVATE]', b'[.env, # PRIVATE]', b'[, .env]', b'[.env,, .env]',
+               b'[PRIVATE: value]', b'[!PRIVATE .env]', b'[*PRIVATE]', b'[&PRIVATE .env]',
+               b'"PRIVATE\\', b'"PRIVATE\\q"', b"'PRIVATE", b'"PRIVATE"junk')
+        for value in bad:
+            with self.subTest(value=value):
+                data = b'services:\n  app:\n    env_file: .env\n    labels: ' + value + b'\n'
+                self.observe(data, 'one', operation.UNKNOWN_SHAPE)
+
+    def test_supported_quotes_brackets_hashes_and_escapes_preserve_attribution(self):
+        values = (b'["PRIVATE[{}]#", ".env"]', b"['PRIVATE]#', 'it''s [literal]']",
+                  b'["PRIVATE\\\"[", "PRIVATE\\\\", "PRIVATE\\u005b", "PRIVATE\\x23"]',
+                  br'[CMD-SHELL, "echo \"PRIVATE]#\"", "http://fixture.invalid/path"]',
+                  b'[PRIVATE#literal, .env] # PRIVATE [" unclosed comment',
+                  b'[.env,]', b'[]', b'"PRIVATE[{}]#" # [PRIVATE',
+                  b"'it''s PRIVATE[{}]#'", b'PRIVATE [literal', b"PRIVATE's [literal",
+                  b'PRIVATE # ["unclosed comment')
+        for value in values:
+            with self.subTest(value=value):
+                data = b'services:\n  app:\n    env_file: .env\n    labels: ' + value + b'\n'
+                parsed = safe_yaml_oracle(data)
+                self.assertTrue(parsed['valid'])
+                self.assertEqual(parsed['value']['services']['app']['env_file'], '.env')
+                self.observe(data, 'one', 'service/app/scalar/canonical_dotenv')
+        for value, reference in ((b'[.env, "./.env"]', 'canonical_dotenv'),
+                                 (b'[".env,PRIVATE"]', 'other_or_unknown'),
+                                 (b'[".env#PRIVATE"]', 'other_or_unknown')):
+            data = b'services:\n  app:\n    env_file: ' + value + b'\n'
+            self.assertTrue(safe_yaml_oracle(data)['valid'])
+            self.observe(data, 'one', 'service/app/sequence/' + reference)
+        data = b'services:\n  app:\n    environment:\n      env_file: "PRIVATE[\\\"#"\n'
+        self.assertTrue(safe_yaml_oracle(data)['valid'])
+        self.observe(data, 'one', 'environment/app/scalar/not_applicable')
 
 
 class StaticOracleTest(unittest.TestCase):
@@ -1504,6 +1610,28 @@ if os.environ.get('CLB91_SYNTHETIC_REMOTE') == '1':
         result = self.invoke()
         self.assertEqual((result.returncode, result.stdout, result.stderr), (1, operation.unavailable('bounds'), b''))
         self.assertEqual(self.calls.read_bytes(), b'invoked\n')
+
+    def test_flow_ambiguity_authenticated_result_preserves_lexical_evidence(self):
+        cases = (*FLOW_REVIEW_CASES,
+                 b'services:\n  app:\n    env_file: .env\n    labels: ["PRIVATE\n',
+                 b'services:\n  app:\n    labels: [\'\n    env_file: PRIVATE\n    image: PRIVATE\']\n')
+        for data in cases:
+            with self.subTest(data=data[:55]):
+                Fixture.write_path(self.fixture.paths['base'], data, 0o644)
+                before = {str(p): (p.read_bytes(), p.stat().st_mode) for p in self.fixture.root.rglob('*') if p.is_file()}
+                result = self.invoke()
+                self.assertEqual((result.returncode, result.stderr), (0, b''), result.stdout)
+                body = fields(result.stdout)
+                self.assertEqual((body['result'], body['subset'], body['violations']),
+                                 ('complete', 'invalid', 'key_env_file'))
+                self.assertEqual((body['env_file_occurrences'], body['env_file_shapes']), ('one', operation.UNKNOWN_SHAPE))
+                self.assertTrue(all(body[key] == 'pass' for key in operation.STATIC_FIELDS))
+                self.assertEqual(result.stdout, operation.complete(operation.scan(data),
+                                 {key: 'pass' for key in operation.STATIC_FIELDS}, operation.env_file_structure(data)))
+                self.assertNotIn(b'PRIVATE', result.stdout)
+                self.assertEqual(before, {str(p): (p.read_bytes(), p.stat().st_mode)
+                                         for p in self.fixture.root.rglob('*') if p.is_file()})
+        self.assertEqual(self.calls.read_bytes().splitlines(), [b'invoked'] * len(cases))
 
     def test_authenticated_path_rejects_raw_startup_wrong_nonce_and_exit_mismatch(self):
         for behavior in ('startup', 'bad_auth', 'wrong_exit'):
