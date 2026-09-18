@@ -27,6 +27,66 @@ OVERRIDE = ('# clubs-bot-managed-quiesced-release\n# revision: '+planner.DIAGNOS
 CANARY = 'SYNTHETIC_PRIVATE_CANARY_dollars$${literal}'
 
 
+def independent_json(value):
+    """Separate serialization oracle; never call the production comparator.
+
+    JSON serialization distinguishes bool/int/float, signed zero and array order;
+    validate exact Python JSON types first (json.dumps alone accepts tuples/keys).
+    """
+    pending = [value]
+    visited = 0
+    while pending:
+        item = pending.pop()
+        visited += 1
+        if visited > 10000 or type(item) not in (type(None), bool, int, float, str, list, dict):
+            raise ValueError('non_json')
+        if type(item) is dict:
+            if any(type(key) is not str for key in item):
+                raise ValueError('non_json')
+            pending.extend(item.values())
+        elif type(item) is list:
+            pending.extend(item)
+    return json.dumps(value, sort_keys=True, allow_nan=False, ensure_ascii=True, separators=(',', ':'))
+
+
+def independently_equal(left, right):
+    return independent_json(left) == independent_json(right)
+
+
+class TypedJsonTest(unittest.TestCase):
+    def test_nested_type_changes_and_presence_order_policy(self):
+        pairs = [(True, 1), (False, 0), (1, 1.0), (0.0, -0.0), (1, '1'),
+                 (None, ''), ({}, []), ({'A': None}, {}), ({'A': ''}, {'A': None}),
+                 ([1, 2], [2, 1])]
+        for index, (left, right) in enumerate(pairs):
+            a = {'services': {'db': {'nested': [left]}}}
+            b = {'services': {'db': {'nested': [right]}}}
+            with self.subTest(index=index):
+                self.assertFalse(independently_equal(a, b))
+                self.assertFalse(planner.same_json(a, b))
+                self.assertFalse(planner.same_json(b, a))
+
+    def test_equal_json_and_object_key_order(self):
+        left = {'empty': '', 'null': None, 'values': [True, False, 1, 1.0, -0.0, {}, []]}
+        right = dict(reversed(list(left.items())))
+        self.assertTrue(independently_equal(left, right))
+        self.assertTrue(planner.same_json(left, right))
+
+    def test_non_json_and_nonfinite_never_equivalent(self):
+        class IntegerSubclass(int):
+            pass
+        cycle = []; cycle.append(cycle)
+        values = [float('nan'), float('inf'), -float('inf'), (1,), {1}, b'private',
+                  object(), IntegerSubclass(1), {1: 'private'}, {True: 'private'}, cycle]
+        for index, value in enumerate(values):
+            with self.subTest(index=index):
+                with self.assertRaises(planner.Refused) as refused:
+                    planner.same_json({'nested': [value]}, {'nested': [value]})
+                self.assertEqual(str(refused.exception), 'model')
+                with self.assertRaises(ValueError):
+                    independently_equal({'nested': [value]}, {'nested': [value]})
+
+
 def base(environment='      A: ${A}\n', references='    env_file: [.env]\n', extras=''):
     return ('services:\n  app:\n    image: fixture:local\n' + references +
             ('    environment:\n'+environment if environment else '') + extras +
@@ -101,8 +161,9 @@ class SemanticTest(unittest.TestCase):
         result=self.prepare(content,dotenv,interpolation)
         self.assertEqual(result.strategy,strategy)
         before,after=self.models(content,result.candidate,dotenv,interpolation)
-        self.assertTrue(before==after,'whole model changed (private values withheld)')
-        self.assertTrue(before['services']['app']['environment']==expected,'effective environment differs (private)')
+        self.assertTrue(independently_equal(before, after),'whole model changed (private values withheld)')
+        self.assertTrue(independently_equal(before['services']['app']['environment'], expected),
+                        'effective environment differs (private)')
         self.assertEqual(result.candidate.count(b'SYNTHETIC_PRIVATE_CANARY'), content.count(b'SYNTHETIC_PRIVATE_CANARY'))
         return result
 
@@ -140,7 +201,7 @@ class SemanticTest(unittest.TestCase):
                 content=base('      B: explicit\n')
                 result=self.prepare(content,dot)
                 a,b=self.models(content,result.candidate,dot)
-                self.assertTrue(a==b,'dollar/interpolation semantics changed (private)')
+                self.assertTrue(independently_equal(a, b),'dollar/interpolation semantics changed (private)')
         dot=("A='"+CANARY+"'\n").encode()
         result=self.prepare(base('      B: explicit\n'),dot)
         self.assertNotIn(CANARY.encode(),result.candidate)
@@ -165,8 +226,8 @@ class SemanticTest(unittest.TestCase):
         initial=self.prepare(content,b'A=one\n')
         rotated=self.prepare(content,b'A=two\n')
         self.assertEqual(initial.candidate,rotated.candidate)
-        a,b=self.models(content,initial.candidate,b'A=two\n'); self.assertTrue(a==b)
-        a,b=self.models(content,initial.candidate,b'A=two\nNEW=added\n'); self.assertFalse(a==b)
+        a,b=self.models(content,initial.candidate,b'A=two\n'); self.assertTrue(independently_equal(a, b))
+        a,b=self.models(content,initial.candidate,b'A=two\nNEW=added\n'); self.assertFalse(independently_equal(a, b))
         new=self.prepare(content,b'A=two\nNEW=added\n'); self.assertNotEqual(new.candidate,initial.candidate)
         with self.assertRaises(planner.Refused):
             self.prepare(content,b'A=two\n',{'A':'ambient-changed'})
@@ -234,6 +295,108 @@ class SemanticTest(unittest.TestCase):
                     planner.prepare(base(),b'A=private\n',OVERRIDE,interpolation={},project='fixture',
                                     compose=COMPOSE,temporary_root=str(self.root))
             self.assertEqual(list(self.root.iterdir()),[])
+
+    def test_prepare_refuses_boolean_number_changes_at_each_model_decision(self):
+        # Comparator-contract fault injection, NOT evidence that real Compose
+        # turns a boolean into an integer. Use one actual normalized template,
+        # then substitute all config responses to isolate each decision point.
+        template = self.models(base(), base(), b'A=synthetic\n')[0]
+        for phase in ('removed.yml', 'explicit.yml', 'before-resolved.json', 'after-resolved.json'):
+            calls = []
+            def typed_drift(argv, *args, **kwargs):
+                if argv[-3:] == ['config', '--format', 'json']:
+                    model = json.loads(json.dumps(template))
+                    if phase == 'explicit.yml' and any(value.endswith('/removed.yml') for value in argv):
+                        model['services']['app']['environment'].pop('A')
+                    matched = any(value.endswith('/'+phase) for value in argv)
+                    model['services']['db']['init'] = 1 if matched else True
+                    if matched:
+                        calls.append(phase)
+                    return types.SimpleNamespace(code=0, output=json.dumps(model).encode(), failure=None)
+                return self.real_capture(argv, *args, **kwargs)
+            content = base('      KEEP: value\n') if phase == 'explicit.yml' else base()
+            with self.subTest(phase=phase), patch.object(planner, 'CAPTURE', typed_drift):
+                with self.assertRaises(planner.Refused):
+                    planner.prepare(content, b'A=synthetic\n', OVERRIDE, interpolation={},
+                                    project='fixture', compose=COMPOSE, temporary_root=str(self.root))
+            self.assertEqual(calls, [phase])
+            self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_prepare_refuses_nonfinite_normalizer_numbers(self):
+        template = self.models(base(), base(), b'A=synthetic\n')[0]
+        for token in ('NaN', 'Infinity', '-Infinity', '1e999'):
+            def nonfinite(argv, *args, **kwargs):
+                if argv[-3:] == ['config', '--format', 'json']:
+                    raw = json.dumps(template).encode()
+                    raw = raw[:-1] + b', "probe": ' + token.encode() + b'}'
+                    return types.SimpleNamespace(code=0, output=raw, failure=None)
+                return self.real_capture(argv, *args, **kwargs)
+            with self.subTest(token=token), patch.object(planner, 'CAPTURE', nonfinite):
+                with self.assertRaises(planner.Refused) as refused:
+                    planner.prepare(base(), b'A=synthetic\n', OVERRIDE, interpolation={},
+                                    project='fixture', compose=COMPOSE, temporary_root=str(self.root))
+                self.assertEqual(refused.exception.reason, 'model')
+            self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_local_comparisons_use_one_complete_synthetic_context(self):
+        contexts = []
+        def observe(argv, *args, **kwargs):
+            if argv[-3:] == ['config', '--format', 'json']:
+                contexts.append((argv[argv.index('--project-name')+1],
+                                 argv[argv.index('--project-directory')+1],
+                                 argv[argv.index('--env-file')+1], dict(kwargs['env'])))
+            return self.real_capture(argv, *args, **kwargs)
+        with patch.object(planner, 'CAPTURE', observe):
+            planner.prepare(base('      KEEP: ${KEEP}\n'), b'A=synthetic\n', OVERRIDE,
+                            interpolation={'KEEP':'synthetic-context'}, project='fixture',
+                            compose=COMPOSE, temporary_root=str(self.root))
+        self.assertEqual(len(contexts), 5)
+        self.assertTrue(all(independently_equal(list(contexts[0]), list(value)) for value in contexts))
+        self.assertEqual(contexts[0][0], 'fixture')
+        self.assertTrue(Path(contexts[0][1]).is_relative_to(self.root))
+        self.assertEqual(contexts[0][3]['KEEP'], 'synthetic-context')
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_real_compose_project_directory_changes_relative_bind_model(self):
+        # Concrete runtime-adaptation blocker: equality inside one temporary
+        # project directory does NOT prove the model in the canonical directory.
+        with tempfile.TemporaryDirectory(dir=self.root) as private:
+            root = Path(private)
+            canonical = root/'canonical'; canonical.mkdir(mode=0o700)
+            captured = root/'captured'; captured.mkdir(mode=0o700)
+            (root/'config').mkdir(mode=0o700)
+            (root/'.env').write_bytes(b'A=synthetic\n')
+            content = base().replace(b'    env_file: [.env]\n', b'')
+            (root/'compose.yml').write_bytes(content)
+            env = dict(PATH='/usr/bin:/bin', HOME=private, DOCKER_CONFIG=str(root/'config'),
+                       DOCKER_HOST='unix://'+private+'/no-daemon.sock')
+            models = []
+            for directory in (canonical, captured):
+                result = subprocess.run([COMPOSE, '--project-name', 'fixture', '--project-directory', str(directory),
+                    '--env-file', str(root/'.env'), '-f', str(root/'compose.yml'), 'config', '--format', 'json'],
+                    cwd=private, env=env, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, 'private context probe failed')
+                model = json.loads(result.stdout); models.append(model)
+                self.assertEqual(model['services']['caddy']['volumes'][0]['source'], str(directory/'Caddyfile'))
+            self.assertFalse(independently_equal(*models))
+
+    def test_real_compose_env_file_is_not_redirected_by_interpolation_env_file(self):
+        # No live paths: prove why just restoring --project-directory is NOT a
+        # safe capture adapter. A service's .env is a separate file read.
+        with tempfile.TemporaryDirectory(dir=self.root) as private:
+            root = Path(private); canonical = root/'canonical'; canonical.mkdir(mode=0o700)
+            (root/'config').mkdir(mode=0o700)
+            (root/'captured.env').write_bytes(b'A=captured-synthetic\n')
+            (canonical/'.env').write_bytes(b'A=pathname-synthetic\n')
+            (root/'compose.yml').write_bytes(base('      KEEP: constant\n'))
+            env = dict(PATH='/usr/bin:/bin', HOME=private, DOCKER_CONFIG=str(root/'config'),
+                       DOCKER_HOST='unix://'+private+'/no-daemon.sock')
+            result = subprocess.run([COMPOSE, '--project-name', 'fixture', '--project-directory', str(canonical),
+                '--env-file', str(root/'captured.env'), '-f', str(root/'compose.yml'), 'config', '--format', 'json'],
+                cwd=private, env=env, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, 'private source-resolution probe failed')
+            self.assertTrue(independently_equal(json.loads(result.stdout)['services']['app']['environment'],
+                                               {'A':'pathname-synthetic', 'KEEP':'constant'}))
 
     def test_bounds_absent_dotenv_unsafe_root_and_bad_override_refuse(self):
         kwargs=dict(interpolation={},project='fixture',compose=COMPOSE,temporary_root=str(self.root))

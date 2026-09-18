@@ -6,6 +6,7 @@ Plan.public() is reportable. The result proves one snapshot, not future .env edi
 or permission to apply it. Existing diagnostic/helper/authority remain unchanged.
 """
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -168,6 +169,39 @@ def unique(pairs):
     return result
 
 
+def same_json(left, right):
+    """Strict JSON identity, not Python's bool/number-coercing equality.
+
+    Object order is irrelevant; key presence and array order are significant.
+    Conservatively distinguish integer/float and finite float signed zero.
+    Non-JSON types, non-string keys, nonfinite numbers and cycles cannot prove
+    equivalence. Tokens remain private and are never part of public evidence.
+    """
+    def identity(value):
+        kind = type(value)
+        if kind is type(None):
+            return ('null',)
+        if kind is bool:
+            return ('boolean', value)
+        if kind is int:
+            return ('integer', value)
+        if kind is float:
+            need(math.isfinite(value), 'model')
+            return ('float', value.hex())
+        if kind is str:
+            return ('string', value)
+        if kind is list:
+            return ('array', tuple(identity(item) for item in value))
+        if kind is dict:
+            need(all(type(key) is str for key in value), 'model')
+            return ('object', tuple((key, identity(value[key])) for key in sorted(value)))
+        raise Refused('model')
+    try:
+        return identity(left) == identity(right)
+    except RecursionError:
+        raise Refused('model') from None
+
+
 def capture(argv, env, payload=b'', limit=MODEL_LIMIT):
     # The reused bounded primitive intentionally has no cwd parameter. Fixed
     # quoted argv handoff keeps both parsers out of the caller's checkout/cwd.
@@ -247,7 +281,7 @@ def environment(model):
 
 
 def prepare(base, dotenv, override, *, interpolation, project, compose, temporary_root):
-    """Return a private byte proposal only after REAL pinned-version equivalence.
+    """Return a private local proposal after real, version-checked comparison.
 
     All input bytes/environment must be supplied explicitly by the private caller.
     This local API never discovers live paths/config/credentials, reads .env from
@@ -277,6 +311,7 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
 
             private_file('.env', dotenv)
             private_file('override.yml', override)
+            # Local synthetic project context, NOT a canonical stage adapter.
             options = [compose, '--project-name', project, '--project-directory', workspace,
                        '--env-file', str(root/'.env')]
 
@@ -297,7 +332,7 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
             candidate = transform(base, outline)
             after = normalize(candidate, 'removed.yml')
             strategy = 'remove'
-            if before != after:
+            if not same_json(before, after):
                 old, new = environment(before), environment(after)
                 # Replacement can only restore missing variables, never alter an
                 # existing environment entry, priority or another model field.
@@ -307,11 +342,11 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
                 candidate = transform(base, outline, additions)
                 after = normalize(candidate, 'explicit.yml')
                 strategy = 'explicit'
-            need(before == after, 'different')  # Full model: null != absent != ''.
+            need(same_json(before, after), 'different')
             # Exercise the helper's resolved-JSON reuse, including literal dollars.
             encoded = lambda model: json.dumps(model, sort_keys=True, separators=(',', ':')).encode()
-            need(normalize(encoded(before), 'before-resolved.json', False) == before, 'model')
-            need(normalize(encoded(after), 'after-resolved.json', False) == after, 'model')
+            need(same_json(normalize(encoded(before), 'before-resolved.json', False), before), 'model')
+            need(same_json(normalize(encoded(after), 'after-resolved.json', False), after), 'model')
             # Values survive only in private memory; no public hash of secret data.
             plan = Plan(candidate, strategy)
         return plan  # Cleanup must succeed before returning any successful plan.
