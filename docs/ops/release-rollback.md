@@ -142,14 +142,15 @@ v1 evidence. Historical provenance is not required for the next semantic decisio
 
 The new [local planner](../../scripts/deploy/stage-compose-env-file-plan.py) is an
 import-only private-snapshot API with [real Compose tests](../../scripts/tests/test_stage_compose_env_file_plan.py).
-It has no remote workflow, live reader/writer, dispatch input or authority token.
-Its public CLI refuses use; callers explicitly supply immutable private bytes for
+The API still has no live writer; the separate future semantic workflow below
+adds a distinct private-read authorization boundary. Its public CLI refuses use; callers explicitly supply immutable private bytes for
 base, present `.env`, exact incident managed override, interpolation environment,
 project name, installed Compose executable and safe disposable temporary root.
 `None`/missing dotenv evidence is refused; `b''` means a captured PRESENT empty
 file. No snapshot is discovered from the checkout, caller cwd, Docker config or
-ambient environment. Importing the existing inert diagnostic/capture modules
-does not invoke their entrypoints, SSH or `BoundContext`.
+ambient environment. Import no longer loads project files with `runpy`. The
+verified loader supplies its three explicit dependencies from captured bytes;
+local tests inject the same inert primitives. No `BoundContext` is constructed.
 
 The locally tested executable reports **Compose 5.1.1**. The current planner's
 version-string check is NOT an exact executable/build attestation and is not a
@@ -163,10 +164,11 @@ credentialed runtime gate. Local test executable fingerprints on Darwin are:
 
 These are measured local binaries, not Linux/stage pins. Python/Ruby also load
 runtime libraries; executable hashes alone do not attest that dependency closure.
-No supported Linux toolchain build/closure has been established for this planner.
+The separate Linux reference closure below is now pinned and tested; these
+Darwin measurements are historical local evidence only.
 Neither repository helper nor supplied stage evidence pins the live version;
 **stage Compose version/build remain unknown**. Another version is refused,
-not silently accepted. No package, engine, image, VM or dependency is installed.
+not silently accepted. No stage package, engine, image, VM or dependency is installed.
 Only `version --short` and offline `config --format json` are invoked. An isolated
 HOME/config/cwd and a nonexistent local Engine socket are used. Ruby/Psych,
 already used by repository validators, supplies a bounded syntax tree, without
@@ -251,8 +253,8 @@ also invalidate equivalence. No finite explicit mapping is equivalent for all
 possible future dotenv key additions. There is no integrated deployment gate for
 this proposal yet; therefore local PASS alone cannot authorize permanent removal.
 
-**Minimum next authorization, not implemented here.** A separately reviewed
-private semantic capture would need the exact base, present dotenv contents,
+**Minimum next live authorization (NOT granted by local preparation).** The
+separate private semantic capture needs the exact base, present dotenv contents,
 managed override/release bytes, effective helper interpolation environment and
 project context, plus actual installed Compose version/build identity. The
 interpolation snapshot must contain every relevant non-control helper variable;
@@ -265,68 +267,128 @@ those captured inputs, no referenced files or Engine/lifecycle query. Public
 output may contain only fixed success/refusal/strategy/snapshot-scope enums.
 An unsupported live version or incomplete context stops before a proposal.
 
-**Runtime-adaptation blocker; no semantic channel published.** A real offline
-synthetic probe shows why changing only subprocess flags is unsafe: temporary
-versus canonical `--project-directory` produces different absolute bind sources.
-Restoring canonical Q while passing `--env-file captured.env` also leaves service
-`env_file: .env` reading canonical `.env` independently of that interpolation file.
-Both probes use disposable synthetic directories only, not stage. Therefore the
-current local planner must not be installed behind SSH as an execution channel.
+**Linux capture-only context adapter and separate semantic channel.** The prior
+blocker is reproduced by retained negative controls: a temporary project directory
+changes bind sources, and CLI `--env-file` alone does not redirect service
+`env_file`. The [planner](../../scripts/deploy/stage-compose-env-file-plan.py)
+now accepts an explicit canonical project directory for its Linux capture backend.
+It preserves that directory and trusted project name, leaving private HOME,
+Docker config and temporary resources separate. A bounded Psych outline supplies
+the exact supported scalar token spans. Only app's accepted `.env` / `./.env`
+reference tokens are replaced in a PRIVATE computational projection, in their
+original order and multiplicity, with the held sealed dotenv FD path. CLI
+`--env-file` uses the same capture. Base/projection/override/resolved JSON inputs
+are sealed memfds at `/proc/<supervisor>/fd/<fd>`, held through subprocess cleanup,
+with independent repeated opens and rewinds. No original configuration pathname
+is given to the normalizer. The candidate is always transformed from ORIGINAL
+base bytes and never contains these service FD references. Neither projection
+nor candidate is written to the target.
 
-The next implementation needs a tested Linux executable/runtime-library identity
-profile and an explicit canonical-context capture adapter. Unknown/missing
-toolchain must refuse BEFORE reading base/dotenv/other secret-bearing snapshots;
-no stage installation/update or "accept any binary reporting 5.1.1" fallback is
-allowed. The available native binaries above cannot establish that Linux profile,
-and no server/toolchain was installed or stage metadata probed in this task.
+Real Linux tests prove A: original and projected full models match, including
+canonical other-service bind sources; B: replacing AND deleting the original
+`.env` after capture cannot change projection output (kernel file-open traces
+also exclude original configuration-content reads); C: projected BEFORE and
+candidate AFTER match with the unchanged strict typed comparator, and BOTH
+normalized JSON models pass reuse. Existing removal/explicit, priority,
+absent/null/empty/unset, dollars/escaping, future dotenv additions and negative
+context controls run on that backend. Equivalent remains snapshot-only.
 
-The intended fixed input allowlist is base `docker-compose.yml`, PRESENT `.env`,
-managed `docker-compose.override.yml`, retained `docker-compose.release.yml`,
-and existing application-binding/retained identity records for the trusted
-project/incident. They remain under the existing fixed compose/protocol roots.
-The complete applicable helper interpolation context is private memory, not a
-workflow input or exported variable list. Acquisition must retain the existing
-shared application→operation locks, no-follow descriptor graph, owner/type/nlink/
-mode/device/size checks, bounded reads and before/after/final revalidation.
+The reference [Linux harness](../../scripts/tests/linux-semantic/README.md) uses
+an official digest-pinned Ubuntu arm64 image, signed/pinned APT package inventory,
+and official Compose 5.1.1 Linux arm64 SHA-256
+`4b5c42952b7dd81f508d01a771df2a9e5dbffe9b8c5c7d983e738504ad38f056`.
+Python 3.12.3, Ruby 3.2.3 and bundled Psych 5.0.1 are the tested runtime; Ruby gems
+are disabled and the Linux parser load path is fixed to the two pinned standard
+library directories. The [runtime manifest](../../scripts/deploy/stage-compose-env-semantic-runtime.json)
+pins actual Linux executable, Python source/cache, Ruby/Psych and shared-library
+bytes, loader cache and command aliases. The future operation verifies these root-installed,
+non-writable files, architecture and interpreter isolation BEFORE opening target
+configuration, and holds/revalidates their descriptors through completion.
+Resident Python native mappings must belong to that allowlist. Before target
+capture, a bounded Ruby/Psych probe with the same fixed load path checks its
+actual loaded source/native closure and versions against the already hashed
+files. The pinned Compose executable is a static Linux ELF (no interpreter).
+Version strings alone, missing tools, another architecture/build or an unavailable
+safe `/run/user/<uid>` root cannot authorize private reads. Root/kernel remain
+trusted system authorities; this is not hostile-root attestation or a tool installer.
+Stage's architecture, tools and applicability remain UNKNOWN. No tools may be
+installed/upgraded there by this channel. Container runtime is a local test facility,
+not a new stage dependency.
 
-Before any project module executes, a separate explicitly authorized semantic
-entrypoint must verify its WHOLE Git source closure and execute only those captured
-bytes. The local `runpy` loading is not eligible for that credentialed path. The
-old structural-diagnostic confirmation must never authorize dotenv contents.
-The normalizer may consume only held/private captures: a reviewed FD-reference
-projection (or an equally proven bounded adapter) must preserve canonical Q and
-eliminate the mutable canonical dotenv reread demonstrated above. It must not
-open any other referenced file. This adapter, source bootstrap, authenticated
-consumer and semantic authorization path are NOT implemented by this correction.
+The separate [workflow](../../.github/workflows/stage-compose-env-semantic.yml)
+is `Stage Private Env Semantic Check (CLB-91 manual)`. Its ONLY input is exact
+`confirmation=CLB-91:35371386455:private-env-semantic-dry-run`, after separate user
+authorization for private `.env` capture and offline normalization. Structural
+v2's old confirmation does not pass. It remains manual-only, repository/main,
+initial attempt only, `contents: read`, Environment `stage`, checkout dispatched
+SHA, validation before credentials and again in execute job, shared
+`payments-schema-stage` concurrency with cancellation disabled. Existing six
+stage SSH/compose secret names and pinned-host deployment principal are used;
+no protected variable, approved-implementation change or root binding is added.
+One SSH transport, no retry/fallback/second channel; each later dispatch needs
+new user authorization. Attempt=1 is NOT incident-wide durable consumption.
 
-Future private transient resources must be described separately from target
-read-only state, bounded, cleaned and finalized before publishing a fixed
-HMAC/nonce-authenticated result. Cancellation, source/capture/context drift,
-cleanup failure or incomplete evidence cannot yield equivalent. No YAML/model,
-values, variable names or secret-data hashes may become public output/artifacts.
-Only offline version/config subprocesses are in scope; no Engine, pull, HTTP or
-lifecycle. These are prerequisites for a future reviewed channel, not claims that
-this local comparator correction supplies one. Until they are met, publication
-as a ready semantic dry-run package is blocked.
+The [consumer](../../scripts/deploy/stage-compose-env-semantic.py) verifies its
+whole fixed Git source closure before any loaded project module executes, and
+runs those same captured bytes. The fixed dependency adapter reuses unchanged
+corrected transport/private-root/authority sources; the remote bootstrap verifies
+and compiles the complete bundle before execution. No working-copy loader,
+`runpy`, `.pyc` or project import fallback is used. The unchanged diagnostic capture
+class supplies no-follow directory/file traversal, shared nonblocking application
+then operation locks, principal/owner/nlink/mode/device/read-size checks and
+held-FD/path/drift revalidation. Neither old structural diagnostic nor corrected
+helper/authority/mode-repair bytes are changed.
 
-The v2 report cannot supply these semantic inputs, so that new `.env` read and
-normalization need explicit authorization. A later application mechanism would
-also need separate reviewed write authority, exact pre-state/FD/lock revalidation,
-private rollback handling and an enforceable recheck for future input changes.
-Neither that writer nor a diagnostic v3 or weaker trusted-helper predicate is
-added here. No live `.env` read, stage normalization/write, repair, binding, claim,
-resume, deploy, recovery or lifecycle operation occurred in this local task.
+Private target content allowlist: `docker-compose.yml` (65536), PRESENT `.env`
+(65536), `docker-compose.override.yml` (4096), retained
+`.clubs-bot-release-state/stage/clubs-bot-schema-stage.lock/docker-compose.release.yml`
+(4096), and `.clubs-bot-release-state/application.binding` (2048). Existing lock
+files and protocol directories are opened for trust/locking, never created or
+changed. Base shape and exact managed override/release are checked before dotenv
+content. No referenced config/secret/env/label files are opened. The complete
+applicable process interpolation environment stays in private memory; all
+BEFORE/AFTER/reuse operations receive that SAME context. Tool/shell controls are
+private and control-dependent input is refused rather than approximated.
+This capture does not repeat or imply success of every historical static record.
 
-Local command: `python3 -B scripts/tests/test_stage_compose_env_file_plan.py`.
-It requires the installed supported Compose executable; absence/version drift is
-a failed/unavailable semantic check, never a mocked equivalence PASS. Existing
-workflow inventory remains 24; no workflow/selfcheck/shared-helper wiring changes.
-The comparator regression separately substitutes normalizer responses: old
-`prepare()` accepted nested `db.init: true → 1` at all four decision points;
-the correction refuses each. It is comparator-contract fault injection, NOT a
-real Compose type-change observation. Independent test assertions use validated
-canonical JSON serialization instead of production comparison or Python model
-equality. Real Compose checks still establish the supported LOCAL synthetic cases.
+Private effects are bounded anonymous memfd allocation/write/seal, and a private
+0700 temporary HOME/empty Docker config under the safe runtime root. They are
+not target writes. Ordinary reads may affect atime/audit state. All FD/process/
+temporary-resource cleanup and final cancellation handoff precede publication.
+The operation has a 90-second bootstrap alarm, bounded capture primitives,
+fixed per-source/bundle/model/frame limits, existing target total/read limits,
+and at most eight planner subprocesses. Cancellation, unexpected I/O, incomplete
+acquisition, cleanup or identity/context mismatch cannot publish equivalence.
+
+Public protocol, authenticated as a whole by a fresh private nonce/HMAC:
+
+```text
+compose-env-semantic:v=1 result=equivalent strategy=remove|explicit scope=snapshot future=requires_recheck application=not_authorized
+compose-env-semantic:v=1 result=unavailable reason=<fixed enum>
+```
+
+Only the first form exits 0. `reason` is exactly one of `runtime`, `request`,
+`principal`, `layout`, `identity`, `busy`, `backing`, `bounds`, `io`, `interrupted`,
+`cleanup`, `transport`, `protocol`, `input`, `unsupported`, `version`, `parser`,
+`model`, `different`. Body <=512 bytes; authenticated frame <=4096. Unknown,
+extra/reordered/duplicate fields, startup output, bad authentication, replay or
+exit/body contradiction fail closed. No values, names, YAML/model, private hashes,
+paths, exception text or child stderr are reportable. No Engine queries, pulls,
+HTTP, lifecycle, writer/apply, root-binding, claim/resume or automatic continuation.
+
+A future separately authorized single dispatch may only establish one captured
+semantic result on an applicable runtime. It does not approve permanent removal.
+A later writer needs separate review/write authorization, revalidation at apply
+and an enforceable gate for ALL dotenv/context/toolchain changes, including new
+keys. That writer/gate is not implemented. No live private read/normalization,
+stage write, dispatch or lifecycle action occurred during local preparation.
+
+Linux suites and bootstrap coverage are in the harness; portable request/source/
+protocol selectors are wired into the existing selfcheck. Workflow inventory is
+25, including the exact alias-inventory expectation; existing checks are retained.
+Full semantic tests require the pinned Linux harness and must not be reported as
+passing on a mocked/unsupported normalizer. Exact final candidate/review/check
+results are recorded in the handoff. Local tests do not establish live equivalence.
 
 ### CLB-91 aggregate Compose diagnostics and local env-file structural extension
 

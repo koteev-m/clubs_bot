@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,6 +19,10 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('private_plan', ROOT/'scripts/deploy/stage-compose-env-file-plan.py')
 planner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(planner)
+# Test-only pathname loading, with synthetic inputs and no credentials.
+planner.DIAGNOSTIC = runpy.run_path(str(ROOT/'scripts/deploy/stage-compose-diagnostic-operation.py'))
+planner.CAPTURE = planner.DIAGNOSTIC['capture_result']
+planner.SAFE_ROOT = runpy.run_path(str(ROOT/'scripts/deploy/release_private_root.py'))['open_canonical_root']
 COMPOSE = next((p for p in (
     '/Applications/Docker.app/Contents/Resources/cli-plugins/docker-compose',
     '/usr/libexec/docker/cli-plugins/docker-compose', '/usr/lib/docker/cli-plugins/docker-compose',
@@ -124,7 +129,7 @@ class SemanticTest(unittest.TestCase):
             if command[0] == COMPOSE:
                 self.assertTrue(command[1:] == ['version','--short'] or command[-3:] == ['config','--format','json'])
             else:
-                self.assertEqual(command[:2], ['/usr/bin/ruby','-e'])
+                self.assertEqual(command[:3], ['/usr/bin/ruby','--disable-gems','-e'])
             return self.real_capture(argv, payload, **kwargs)
         out, err = io.StringIO(), io.StringIO()
         try:

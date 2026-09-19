@@ -1,24 +1,27 @@
-"""Local-only CLB-91 private-snapshot planner; no CLI, remote path or live writer.
+"""CLB-91 private-snapshot planner; no file-discovery CLI or live writer.
 
-Import this reviewed module and call prepare() with captured bytes and an explicit
+Load verified bytes and call prepare() with captured bytes and an explicit
 interpolation environment. Private Plan.candidate is NEVER a public patch. Only
 Plan.public() is reportable. The result proves one snapshot, not future .env edits
 or permission to apply it. Existing diagnostic/helper/authority remain unchanged.
 """
 import json
+import fcntl
 import math
 import os
 from pathlib import Path
 import re
-import runpy
 import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-# Existing inert modules: no main, BoundContext, transport or target capture runs.
-DIAGNOSTIC = runpy.run_path(str(ROOT / 'scripts/deploy/stage-compose-diagnostic-operation.py'))
-CAPTURE = runpy.run_path(str(ROOT / 'scripts/deploy/stage-compose-diagnostic.py'))['capture_result']
-SAFE_ROOT = runpy.run_path(str(ROOT / 'scripts/deploy/release_private_root.py'))['open_canonical_root']
+# Explicit dependencies supplied by the verified source loader (or local tests).
+# Import never reads/executes project pathnames. No runpy/import/.pyc fallback.
+DIAGNOSTIC = None
+CAPTURE = None
+SAFE_ROOT = None
 SUPPORTED_VERSION = b'5.1.1'
+LINUX_RUBY_LOAD = "$LOAD_PATH.replace(['/usr/lib/ruby/3.2.0', '/usr/lib/aarch64-linux-gnu/ruby/3.2.0']);\n"
 FILE_LIMIT = 65536
 MODEL_LIMIT = 262144
 NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
@@ -123,7 +126,8 @@ begin
   end
   puts JSON.generate({remove: [key.start_line,last_line+1], insert: insert,
                       indent: indent, has_environment: !!env, names: names,
-                      environment_names: environment_names, references: references.uniq})
+                      environment_names: environment_names, references: references.uniq,
+                      dotenv_spans: refs.children.map { |n| [n.start_line,n.start_column,n.end_column] }})
 rescue Exception
   exit 1
 end
@@ -202,12 +206,12 @@ def same_json(left, right):
         raise Refused('model') from None
 
 
-def capture(argv, env, payload=b'', limit=MODEL_LIMIT):
+def capture(argv, env, payload=b'', limit=MODEL_LIMIT, pass_fds=()):
     # The reused bounded primitive intentionally has no cwd parameter. Fixed
     # quoted argv handoff keeps both parsers out of the caller's checkout/cwd.
     wrapped = ['/bin/sh', '-c', 'cd "$1" && shift && exec "$@"',
                'clb91-private-cwd', env['HOME'], *argv]
-    result = CAPTURE(wrapped, payload, timeout=10, limit=limit, env=env)
+    result = CAPTURE(wrapped, payload, timeout=10, limit=limit, env=env, pass_fds=pass_fds)
     if result.failure == 'capture_interrupted':
         raise Refused('interrupted')
     need(result.failure is None and result.code == 0, 'parser')
@@ -280,7 +284,68 @@ def environment(model):
     return values
 
 
-def prepare(base, dotenv, override, *, interpolation, project, compose, temporary_root):
+def project_dotenv(base, outline, reference):
+    """Private computational projection, never the candidate for application.
+
+    Psych supplies scalar token positions only after the restricted outline has
+    accepted every reference. Replace those tokens, not arbitrary '.env' text.
+    Work in Unicode columns (Psych's coordinate convention), then encode once.
+    """
+    need(re.fullmatch(r'/proc/[1-9][0-9]*/fd/[0-9]+', reference), 'unsupported')
+    lines = base.decode('utf-8').splitlines(keepends=True)
+    spans = outline['dotenv_spans']
+    need(1 <= len(spans) <= 16 and len({tuple(s) for s in spans}) == len(spans), 'unsupported')
+    for line, start, end in sorted(spans, reverse=True):
+        need(0 <= line < len(lines) and 0 <= start < end <= len(lines[line]), 'unsupported')
+        lines[line] = lines[line][:start] + json.dumps(reference) + lines[line][end:]
+    projected = ''.join(lines).encode()
+    need(len(projected) <= FILE_LIMIT, 'bounds')
+    return projected
+
+
+class SealedInputs:
+    """Linux-only immutable anonymous inputs, retained through all child cleanup.
+
+    /proc/<supervisor>/fd supports independent repeated opens by Compose; no
+    original input path is passed to it. This owns only anonymous resources.
+    """
+    def __init__(self):
+        need(sys.platform == 'linux' and hasattr(os, 'memfd_create'), 'unsupported')
+        self.fds = []
+
+    def add(self, data):
+        need(type(data) is bytes and len(data) <= MODEL_LIMIT and len(self.fds) < 8, 'bounds')
+        fd = os.memfd_create('clb91-private-input', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        self.fds.append(fd)
+        os.fchmod(fd, 0o600)  # Anonymous private capture only; never a target FD.
+        view = memoryview(data)
+        while view:
+            count = os.write(fd, view)
+            need(count > 0, 'io')
+            view = view[count:]
+        seals = fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, seals)
+        need(fcntl.fcntl(fd, fcntl.F_GET_SEALS) == seals, 'io')
+        os.lseek(fd, 0, os.SEEK_SET)
+        return f'/proc/{os.getpid()}/fd/{fd}'
+
+    def rewind(self):
+        for fd in self.fds:
+            os.lseek(fd, 0, os.SEEK_SET)
+
+    def close(self):
+        failed = False
+        for fd in reversed(self.fds):
+            try:
+                os.close(fd)
+            except BaseException:
+                failed = True
+        self.fds.clear()
+        need(not failed, 'cleanup')
+
+
+def prepare(base, dotenv, override, *, interpolation, project, compose, temporary_root,
+            canonical_directory=None):
     """Return a private local proposal after real, version-checked comparison.
 
     All input bytes/environment must be supplied explicitly by the private caller.
@@ -288,12 +353,18 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
     the checkout, writes the caller's files, emits values or calls a daemon.
     Any exception carries only a fixed reason. Re-run on EVERY changed input.
     """
+    sealed = None
+    canonical_fd = None
     try:
         check_inputs(base, dotenv, override, interpolation, project)
         need(type(compose) is str and os.path.isabs(compose) and Path(compose).is_file(), 'version')
         need(type(temporary_root) is str and not Path(temporary_root).resolve().is_relative_to(ROOT), 'input')
         fd = SAFE_ROOT(temporary_root)
         os.close(fd)
+        if canonical_directory is not None:
+            need(type(canonical_directory) is str and os.path.isabs(canonical_directory), 'input')
+            canonical_fd = SAFE_ROOT(canonical_directory)
+            sealed = SealedInputs()
         with tempfile.TemporaryDirectory(prefix='clb91-private-plan-', dir=temporary_root) as workspace:
             root = Path(workspace)
             (root/'config').mkdir(mode=0o700)
@@ -301,7 +372,8 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
                 DOCKER_CONFIG=str(root/'config'), DOCKER_HOST='unix://'+workspace+'/no-daemon.sock')
             env = dict(interpolation, **private_env)
             need(capture([compose, 'version', '--short'], private_env, limit=256).strip() == SUPPORTED_VERSION, 'version')
-            outline = json.loads(capture(['/usr/bin/ruby', '-e', OUTLINE], private_env, base, limit=FILE_LIMIT))
+            script = (LINUX_RUBY_LOAD if sealed else '') + OUTLINE
+            outline = json.loads(capture(['/usr/bin/ruby', '--disable-gems', '-e', script], private_env, base, limit=FILE_LIMIT))
             need(not any(controlled(name) for name in outline['environment_names']), 'unsupported')
             need(not any(controlled(name) for name in outline['references']), 'unsupported')
 
@@ -309,18 +381,31 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
                 with open(root/name, 'xb', opener=lambda p,f: os.open(p,f,0o600)) as stream:
                     stream.write(data)
 
-            private_file('.env', dotenv)
-            private_file('override.yml', override)
-            # Local synthetic project context, NOT a canonical stage adapter.
-            options = [compose, '--project-name', project, '--project-directory', workspace,
-                       '--env-file', str(root/'.env')]
+            if sealed is None:
+                private_file('.env', dotenv)
+                private_file('override.yml', override)
+                dotenv_path, override_path = str(root/'.env'), str(root/'override.yml')
+                before_input = base
+            else:
+                dotenv_path, override_path = sealed.add(dotenv), sealed.add(override)
+                before_input = project_dotenv(base, outline, dotenv_path)
+            options = [compose, '--project-name', project, '--project-directory',
+                       canonical_directory if sealed else workspace, '--env-file', dotenv_path]
 
             def normalize(data, name, with_override=True):
-                private_file(name, data)
-                args = options + ['-f', str(root/name)]
+                if sealed is None:
+                    private_file(name, data)
+                    path = str(root/name)
+                else:
+                    path = sealed.add(data)
+                    sealed.rewind()
+                    need(os.path.samestat(os.fstat(canonical_fd), os.stat(canonical_directory,
+                         follow_symlinks=False)), 'io')
+                args = options + ['-f', path]
                 if with_override:
-                    args += ['-f', str(root/'override.yml')]
-                raw = capture(args + ['config', '--format', 'json'], env)
+                    args += ['-f', override_path]
+                raw = capture(args + ['config', '--format', 'json'], env,
+                              pass_fds=tuple(sealed.fds) if sealed else ())
                 need(len(raw) <= MODEL_LIMIT, 'bounds')
                 model = json.loads(raw, object_pairs_hook=unique,
                                    parse_constant=lambda _: (_ for _ in ()).throw(Refused('model')))
@@ -328,7 +413,7 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
                 environment(model)
                 return model
 
-            before = normalize(base, 'before.yml')
+            before = normalize(before_input, 'before.yml')
             candidate = transform(base, outline)
             after = normalize(candidate, 'removed.yml')
             strategy = 'remove'
@@ -349,6 +434,9 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
             need(same_json(normalize(encoded(after), 'after-resolved.json', False), after), 'model')
             # Values survive only in private memory; no public hash of secret data.
             plan = Plan(candidate, strategy)
+            if sealed is not None:
+                need(os.path.samestat(os.fstat(canonical_fd), os.stat(canonical_directory,
+                     follow_symlinks=False)), 'io')
         return plan  # Cleanup must succeed before returning any successful plan.
     except (KeyboardInterrupt, InterruptedError):
         raise Refused('interrupted') from None
@@ -362,6 +450,13 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
         raise Refused('io') from None
     except RuntimeError:
         raise Refused('cleanup') from None
+    finally:
+        try:
+            if sealed is not None:
+                sealed.close()
+        finally:
+            if canonical_fd is not None:
+                os.close(canonical_fd)
 
 
 if __name__ == '__main__':

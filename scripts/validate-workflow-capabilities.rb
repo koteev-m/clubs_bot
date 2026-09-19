@@ -8,6 +8,7 @@ require_relative "validate-workflow-yaml"
 require_relative "validate-corrected-stage-workflow"
 require_relative "validate-stage-compose-mode-workflow"
 require_relative "validate-stage-compose-diagnostic-workflow"
+require_relative "validate-stage-compose-env-semantic-workflow"
 
 module WorkflowCapabilityPolicy
   module_function
@@ -1280,6 +1281,7 @@ module WorkflowCapabilityPolicy
     return RELEASE_STATUS_SECRETS if key == [RELEASE_STATUS_WORKFLOW, "status"]
     return RELEASE_STATUS_SECRETS if key == [StageComposeModeWorkflow::PATH, "repair"]
     return RELEASE_STATUS_SECRETS if key == [StageComposeDiagnosticWorkflow::PATH, "diagnose"]
+    return RELEASE_STATUS_SECRETS if key == [StageComposeEnvSemanticWorkflow::PATH, "diagnose"]
     return RELEASE_STATUS_SECRETS | Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "execute"]
     return Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "validate"]
     return Set.new(["GITHUB_TOKEN"]) if key == [".github/workflows/release.yml", "release"]
@@ -1329,6 +1331,7 @@ module WorkflowCapabilityPolicy
     expected = "stage" if key == [CorrectedStageWorkflow::PATH, "execute"]
     expected = "stage" if key == [StageComposeModeWorkflow::PATH, "repair"]
     expected = "stage" if key == [StageComposeDiagnosticWorkflow::PATH, "diagnose"]
+    expected = "stage" if key == [StageComposeEnvSemanticWorkflow::PATH, "diagnose"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
     elsif !environment.nil?
@@ -2184,6 +2187,7 @@ module WorkflowCapabilityPolicy
       CorrectedStageWorkflow.validate(self, workflow) if path == CorrectedStageWorkflow::PATH
       StageComposeModeWorkflow.validate(self, workflow) if path == StageComposeModeWorkflow::PATH
       StageComposeDiagnosticWorkflow.validate(self, workflow) if path == StageComposeDiagnosticWorkflow::PATH
+      StageComposeEnvSemanticWorkflow.validate(self, workflow) if path == StageComposeEnvSemanticWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
       validate_release_status_contract(path, workflow, triggers, jobs, raw)
       top_level = workflow.reject { |key, _value| key == "jobs" }
