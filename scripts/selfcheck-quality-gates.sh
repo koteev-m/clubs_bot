@@ -231,11 +231,17 @@ while IFS= read -r relative_path; do
   fi
 done < "$secret_contract_files"
 
-for allowlist_path in .gitleaksignore .gitleaks.toml gitleaks.toml; do
+for allowlist_path in .gitleaksignore gitleaks.toml; do
   if [ -e "$ROOT_DIR/$allowlist_path" ]; then
     fail "unexpected gitleaks ignore/allowlist file: $allowlist_path"
   fi
 done
+if [ ! -f "$ROOT_DIR/.gitleaks.toml" ]; then
+  fail "expected the exact CLB-91 gitleaks checksum exception config"
+fi
+
+echo "[selfcheck] pinned gitleaks runtime checksum exceptions"
+python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"
 
 fake_docker="$TMP_DIR/fake-docker"
 fake_docker_args="$TMP_DIR/fake-docker-args.txt"
