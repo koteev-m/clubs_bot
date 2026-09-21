@@ -421,9 +421,12 @@ neither the precise failing prerequisite, absence of private reads, nor semantic
 equivalence. Reference Linux PASS does not establish actual stage compatibility.
 The local incident history does not establish stage OS/architecture, installed
 executable/library closure, safe-root availability or Ruby/Psych applicability.
-The single next evidence path is a separately authorized invocation of this
-reviewed compatibility report after publication/merge. If incompatibility is
-confirmed, choosing/installing a server toolchain is a new operational decision;
+The subsequent user-provided run `35604124263` (number 2, attempt 1) returned
+`phase=initial guard=platform private_capture=not_started`, with aggregate
+prerequisites only. This run did not begin private capture or normalization, but
+does not identify architecture/distro/installed builds. The next evidence path
+is the separate non-secret inventory below, not another semantic invocation.
+Choosing/installing a server toolchain is a new operational decision;
 this channel never changes pins, installs tools, falls back, or probes stage here.
 
 A future separately authorized single dispatch may only establish one captured
@@ -435,10 +438,117 @@ stage write, dispatch or lifecycle action occurred during local preparation.
 
 Linux suites and bootstrap coverage are in the harness; portable request/source/
 protocol selectors are wired into the existing selfcheck. Workflow inventory is
-25, including the exact alias-inventory expectation; existing checks are retained.
+26 after adding the separate runtime inventory below, including the exact
+alias-inventory expectation; existing checks are retained.
 Full semantic tests require the pinned Linux harness and must not be reported as
 passing on a mocked/unsupported normalizer. Exact final candidate/review/check
 results are recorded in the handoff. Local tests do not establish live equivalence.
+
+### CLB-91 bounded non-secret runtime inventory
+
+The [inventory workflow](../../.github/workflows/stage-runtime-inventory.yml),
+[consumer](../../scripts/deploy/stage-runtime-inventory.py) and
+[collector](../../scripts/deploy/stage-runtime-inventory-operation.py) are a
+separate capability. The only input is
+`confirmation=CLB-91:35604124263:inventory-stage-runtime`. The previous semantic
+confirmation cannot select this operation. Manual dispatch, repository
+`koteev-m/clubs_bot`, exact dispatched main SHA, initial attempt 1, `contents: read`,
+Environment `stage`, validation before SSH credentials and execution revalidation,
+`payments-schema-stage` concurrency / `cancel-in-progress: false` remain mandatory.
+The same deployment principal, pinned known-hosts, isolated Python `-I -S -B`,
+whole-project-source verification before execution and one transport/no retry
+are retained. The remote bundle contains only collector bytes and the unchanged
+reference manifest as comparison data; no planner, normalization or target reader.
+
+**Finite observation/read contract (no discovered path traversal):**
+
+| Source / fixed slots | Bound and interpretation |
+| --- | --- |
+| Running bootstrap memory / system interface | OS family (`linux`, `darwin`, `freebsd`, unknown), fixed architecture vocabulary, 32/64 process bits, Python implementation/version and isolation flags. No environment, command line, hostname, user or UID output. |
+| `/etc/os-release`, missing-only fallback `/usr/lib/os-release` | 16 KiB each, 256 lines; only `ID` from a fixed distro list and numeric `VERSION_ID`. Parse data without source/eval; unsupported/malformed values become unknown. |
+| Python `/usr/bin/python3`, `/usr/local/bin/python3`, active `/proc/self/exe` readlink | Only those directories and finite `python3.8` through `python3.14` targets may resolve. The kernel link itself is not opened; arbitrary targets are not followed. Active binary hash is a system-artifact observation, not renewed bootstrap trust. |
+| Compose fixed slots | `/usr/local/bin/docker-compose`, `/usr/bin/docker-compose`, `/usr/lib/docker/cli-plugins/docker-compose`, `/usr/libexec/docker/cli-plugins/docker-compose`, `/usr/local/lib/docker/cli-plugins/docker-compose`. No other plugin search or execution. |
+| Ruby / Psych fixed slots | `/usr/bin/ruby`, `/usr/local/bin/ruby`, finite `ruby3.0` through `ruby3.4` targets in those directories; `/usr/lib/ruby/3.0.0/psych.rb` through `/usr/lib/ruby/3.4.0/psych.rb`. Slot names indicate placement only, not an inferred installed version. No Ruby require, gem enumeration or extensions executed. |
+| `/var/lib/dpkg/status` | 4 MiB, 8192 stanzas, 65536 characters per stanza; emit only Package/Status/Version/Architecture for the twelve packages listed below. No full package dump, package-manager command/scripts or arbitrary build strings. |
+
+Package keys: `python3`, `python3-minimal`, `ruby`, `ruby-psych`, `docker-compose`,
+`docker-compose-v2`, `docker-compose-plugin`, `libc6`, `libssl3`, `libssl3t64`,
+`libyaml-0-2`, `libffi8`. Versions are at most 64 ASCII characters from a narrow
+numeric/Debian build vocabulary; architecture has its own fixed vocabulary.
+Other package systems/build formats, custom directories, gem layouts, extension
+closure and cryptographic installation provenance remain unknown, not guessed.
+Metadata version is a **reported installation version**, not executable identity.
+No generic ELF, dependency or package scanner is added.
+
+All system paths use root-owned no-follow directory descriptors, reject writable
+ancestors, and require regular root-owned single-link files. Metadata/library
+modes are 0444/0644; executable modes 0555/0755. Only at most four leaf-link hops
+within the same fixed artifact kind are permitted; no directory links, home/app
+or secret redirection. Hashes are computed only after these guards. Bounds:
+64 MiB per artifact, 192 MiB total reads, 256 retained descriptors, 75-second
+collector deadline, 90-second bootstrap alarm, 110-second transport. Held FDs,
+pathname edges, missing edges and links are revalidated before complete output;
+detectable in-place/path drift or unexpected I/O refuses the entire report.
+This is a bounded observation under the trusted OS, not compromise attestation
+or an atomic filesystem-wide snapshot.
+
+There is no subprocess/tool execution in the collector, no ldd/version probes,
+recursive walk, target file access or target writes. In particular it never opens
+`/opt/clubs-bot-stage`, `.env`, Compose, application.binding, release records,
+home/SSH/config, process environment/cmdline or the Docker socket. Investigated
+files are never executed after hashing. It creates no remote files/directories,
+and performs no chmod/chown/unlink/fsync or installation. Normal read atime/audit
+effects are possible. The existing local SSH pin resource is anonymous and
+cleaned by the existing transport; it is not a stage artifact.
+
+**Authenticated output:** prefix `runtime-inventory:v=1 ` followed by canonical
+ASCII JSON and one newline, at most 8192 bytes. Fixed top-level keys for an
+observation are `artifacts`, `bootstrap`, `completeness`, `distro`, `packages`,
+`result`, `trust`; all slots and per-slot fields are fixed. Values are bounded
+numbers/booleans, allowlisted strings or system-artifact SHA-256 digests. There
+are no arbitrary paths or metadata strings. Each observation has its fixed source.
+Artifact status is observed/missing/unknown, with fixed reasons; unsupported
+observations use `-`, not fabricated values. `same_digest` / `different_digest` /
+`not_listed` compare with the immutable reference manifest only, never update it.
+
+`result=observed`, exit 0, means collection and cleanup finished; `completeness`
+is partial when any requested observation is unknown. Explicitly observed missing
+optional slots do not make it partial. Even complete always carries
+`trust=observed_not_approved`: it proves neither runtime compatibility nor full
+module/library closure. A required collection/identity/bounds/interruption/cleanup
+failure returns only `result=unavailable` plus a fixed reason, exit 1, without a
+partial profile masquerading as completed. Every byte is bound to a fresh private
+nonce by HMAC in the <=12288-byte frame. Consumer rejects unknown/duplicate/
+reordered/extra fields, arbitrary strings, startup output, replay, altered HMAC
+and exit/body mismatch. Cancellation and owned-resource cleanup precede output.
+
+**Manual boundaries:** the main-only policy requires publication, manual CI review
+and merge of these new bytes before execution. Do not use a feature-branch policy
+exception, semantic workflow script injection, direct SSH, another principal/host
+or a trial probe. After merge, verify exact reviewed sources, main/tree, stage
+reviewer/timer/branch policy, five secret names `SSH_USER`, `SSH_HOST`, `SSH_PORT`,
+`SSH_KNOWN_HOSTS`, `SSH_PRIVATE_KEY`, operational conflicts and duplicate runs.
+`COMPOSE_PATH` and protected variables are not consumed. Dispatch once on main,
+then stop without run lookup/polling; user approves stage and returns terminal
+output. One invocation/no retry is not durable incident-wide consumption.
+No duplicate is authorized on failure/timeout/ambiguous submission.
+
+Tests: [dedicated suite](../../scripts/tests/test_stage_runtime_inventory.py),
+[synthetic filesystem surrogate](../../scripts/tests/runtime_inventory_fixtures.py).
+Use the existing [Linux harness](../../scripts/tests/linux-semantic/README.md)
+without the `/opt/clubs-bot-stage` mount and run only the inventory suite. The
+real Linux test uses actual root-owned system artifacts and audited bootstrap;
+fixture tests substitute root/UID for disposable files and label that fault
+injection. Neither yields a stage profile. Dedicated regressions are registered
+in the existing selfcheck, with 26 workflows and exact capability validation.
+
+Once authenticated inventory arrives, compare observed OS/arch/bootstrap,
+artifact placement/digests and reported package versions to the checker contract.
+Unknown observations remain explicit prerequisites. Choose one minimal compatible
+runtime adaptation for a separate reviewed change with trustworthy upstream
+artifacts and real Linux tests; do not approve pins from observed hashes or
+reinstall stage to mimic the reference image. No semantic run, server install,
+private read, writer or lifecycle action follows automatically.
 
 ### CLB-91 aggregate Compose diagnostics and local env-file structural extension
 
