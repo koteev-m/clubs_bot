@@ -210,7 +210,7 @@ try:
     body = module.diagnose(control['principal'], lambda: cancelled[0])
     signal.pthread_sigmask(signal.SIG_BLOCK, watched)
     signal.alarm(0)
-    if cancelled[0] or set(signal.sigpending()).intersection(watched): body = module.refused('interrupted')
+    if cancelled[0] or set(signal.sigpending()).intersection(watched): body = module.interrupted_body(body)
     code = 1 if b' result=unavailable ' in body else 0
     module.parse_body(body, code)
     tag = hmac.new(nonce, body, hashlib.sha256).hexdigest().encode('ascii')
