@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
 import tomllib
@@ -47,20 +48,31 @@ def write(repo, name, content):
 def scanner(repo, output):
     # Same detect/Git/history mode and --redact as Secret Scan; no --no-git or
     # log truncation. The host checkout, home, credentials and socket are absent.
+    output_owner = output.parent.stat()
+    repo_owner = repo.stat()
+    if (repo_owner.st_uid, repo_owner.st_gid) != (output_owner.st_uid, output_owner.st_gid):
+        raise AssertionError('synthetic source/output owners differ')
     command = [os.environ.get('DOCKER_BIN', 'docker'), 'run', '--rm', '--read-only',
         '--network=none', '--cap-drop=ALL', '--security-opt=no-new-privileges',
         '--tmpfs', '/tmp:mode=1777,nosuid,nodev',
+        '--user', f'{output_owner.st_uid}:{output_owner.st_gid}',
         '-v', str(repo) + ':/repo:ro', '-v', str(output.parent) + ':/out',
         '-w', '/repo', '-e', 'GIT_CONFIG_COUNT=1',
         '-e', 'GIT_CONFIG_KEY_0=safe.directory', '-e', 'GIT_CONFIG_VALUE_0=/repo',
         IMAGE, 'detect', '--source', '.', '--report-format', 'json',
         '--report-path', '/out/' + output.name, '--redact']
-    result = subprocess.run(command, capture_output=True, timeout=90)
-    if result.returncode not in (0, 1):
-        raise AssertionError('pinned Gitleaks unavailable or failed outside finding status')
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=90)
+    except (OSError, subprocess.TimeoutExpired):
+        raise AssertionError('pinned Gitleaks could not start or finish') from None
     if not output.is_file():
-        raise AssertionError('pinned Gitleaks did not produce a report')
-    findings = json.loads(output.read_text())
+        raise AssertionError(f'pinned Gitleaks produced no report (scanner exit {result.returncode})')
+    if result.returncode not in (0, 1):
+        raise AssertionError(f'pinned Gitleaks failed outside finding status (exit {result.returncode})')
+    try:
+        findings = json.loads(output.read_text())
+    except (OSError, ValueError):
+        raise AssertionError('pinned Gitleaks report is unreadable or malformed') from None
     if type(findings) is not list or (result.returncode == 0) != (len(findings) == 0):
         raise AssertionError('scanner exit and redacted report disagree')
     return result.returncode, [(item['RuleID'], item['File'], item['StartLine']) for item in findings]
@@ -103,6 +115,29 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         expected = [r'^\s*"' + re.escape(name).replace('secrets', '[s]ecrets').replace(r'\-', '-') +
             r'": "' + digest + r'",$' for name, digest in zip(RUNTIME_PATHS, RUNTIME_DIGESTS)]
         self.assertEqual(allowlist['regexes'], expected)
+
+    def test_scanner_creates_report_for_owner_only_output(self):
+        owner = self.root.stat()
+        self.assertEqual(stat.S_IMODE(owner.st_mode), 0o700)
+        self.assertEqual((self.repo.stat().st_uid, self.repo.stat().st_gid),
+                         (owner.st_uid, owner.st_gid))
+        write(self.repo, Path('README.md'), b'benign synthetic fixture\n')
+        self.commit('benign synthetic fixture')
+        self.assertEqual(self.scan('owner-only'), (0, []))
+        report = (self.root / 'owner-only.json').stat()
+        self.assertEqual((report.st_uid, report.st_gid), (owner.st_uid, owner.st_gid))
+
+    def test_unwritable_output_never_passes_without_report(self):
+        write(self.repo, Path('README.md'), b'benign synthetic fixture\n')
+        self.commit('benign synthetic fixture')
+        unwritable = self.root / 'unwritable'
+        unwritable.mkdir(mode=0o500)
+        try:
+            with self.assertRaisesRegex(AssertionError, 'produced no report'):
+                scanner(self.repo, unwritable / 'report.json')
+            self.assertFalse((unwritable / 'report.json').exists())
+        finally:
+            unwritable.chmod(0o700)
 
     def test_original_and_exact_config_in_git_mode(self):
         write(self.repo, MANIFEST, self.raw)
