@@ -213,7 +213,8 @@ def collect(cancelled):
         self.assertEqual(value['distro']['status'], 'observed')
         self.assertEqual(value['trust'], 'observed_not_approved')
         # Generic selfcheck may provide only safe TMPDIR, not GitHub RUNNER_TEMP.
-        with patch.dict(os.environ):
+        safe_parent = fixture_parent()
+        with patch.dict(os.environ, TMPDIR=safe_parent), patch.object(tempfile, 'tempdir', None):
             os.environ.pop('RUNNER_TEMP', None)
             self.assertEqual(self.through_runner(suffix), (line, code))
 
