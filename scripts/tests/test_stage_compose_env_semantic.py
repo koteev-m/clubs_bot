@@ -72,6 +72,43 @@ StageComposeEnvSemanticWorkflow.validate(WorkflowCapabilityPolicy,w)
             raw = operation.refused(reason)
             self.assertEqual(runner.parse_result(frame(raw), 1, nonce, operation)[1], 1)
 
+    def test_compatibility_schema_bounds_and_authenticated_semantics(self):
+        evidence = operation.Evidence()
+        evidence.record('availability', 'fail')
+        evidence.record('integrity', 'fail')
+        raw = evidence.refused('runtime')
+        self.assertLessEqual(len(raw), operation.BODY_LIMIT)
+        nonce = bytes(range(32))
+        def accept(body, code=1):
+            frame = b'clb91-semantic-auth:v=1 tag='+hmac.new(nonce, body, hashlib.sha256).hexdigest().encode()+b' '+body
+            return runner.parse_result(frame, code, nonce, operation)
+        self.assertEqual(accept(raw), (raw.decode().strip(), 1))
+        for bad in (raw.replace(b'guard=availability', b'guard=PRIVATE'),
+                    raw.replace(b'availability=fail', b'availability=pass'),
+                    raw.replace(b'phase=initial', b'phase=post_prepare'),
+                    raw.replace(b'private_capture=not_started', b'private_capture=unknown'),
+                    raw.replace(b' maps=', b' extra=pass maps='),
+                    raw.replace(b' maps=', b' modules=pass maps='),
+                    raw.replace(b'platform=not_evaluated manifest=not_evaluated', b'manifest=not_evaluated platform=not_evaluated'),
+                    raw + b'\n', raw + b'x'*1024):
+            with self.subTest(bad=bad[:80]), self.assertRaises((ValueError, AssertionError)):
+                accept(bad)
+        with self.assertRaises(AssertionError): accept(raw, 0)
+        # Last failure cannot replace the first causal guard; cleanup/cancel must
+        # retain it without misreporting successful semantic proof.
+        evidence.phase = 'finalize'
+        evidence.record('ruby', 'fail')
+        self.assertIn(b'phase=initial guard=availability', evidence.refused('cleanup'))
+        self.assertIn(b'phase=initial guard=availability', operation.interrupted_body(raw))
+        for phase in operation.PHASES:
+            for guard in operation.PREREQUISITES:
+                e = operation.Evidence(); e.phase = phase
+                if phase not in ('initial', 'pre_capture'): e.capture = 'attempted'
+                e.record(guard, 'fail')
+                for reason in operation.REASONS:
+                    self.assertLessEqual(len(e.refused(reason)), 403)
+                    accept(e.refused(reason))
+
     def test_distinct_authorization_and_single_transport(self):
         self.assertNotEqual(runner.CONFIRMATION, 'CLB-91:35206468948:diagnose-compose-subset')
         env = dict(SSH_USER='fixture', SSH_HOST='fixture.invalid', SSH_PORT='22')
@@ -266,9 +303,146 @@ def diagnose(principal,cancelled):
                     del manifest['files'][path]
                 sources['stage-compose-env-semantic-runtime.json'] = json.dumps(manifest).encode()
                 with self.subTest(fault=fault):
-                    self.assertEqual(self.invoke(suffix, sources=sources),
-                        ('compose-env-semantic:v=1 result=unavailable reason=runtime', 1))
+                    line, code = self.invoke(suffix, sources=sources)
+                    self.assertEqual(code, 1)
+                    self.assertIn('reason=runtime phase=initial', line)
+                    self.assertIn('private_capture=not_started', line)
                     self.assertFalse(marker.exists())
+
+    def test_initial_compatibility_matrix_no_unverified_probe_or_capture(self):
+        faults = {
+            'platform': "platform.machine=lambda: 'unsupported'",
+            'manifest': "MANIFEST['format']=0",
+            'availability': "MANIFEST['files']['/usr/lib/PRIVATE-missing-runtime']='0'*64",
+            'integrity': "MANIFEST['files'][COMPOSE]='0'*64",
+            'path_safety': """_fstat=os.fstat
+    class Unsafe:
+        def __init__(self, value): self.value=value
+        def __getattr__(self, name): return getattr(self.value,name)
+        @property
+        def st_mode(self): return self.value.st_mode | 0o002
+    def unsafe(fd):
+        value=_fstat(fd)
+        return Unsafe(value) if value.st_ino==os.stat(COMPOSE).st_ino else value
+    os.fstat=unsafe""",
+            'interpreter': """_realpath=os.path.realpath
+    os.path.realpath=lambda p: '/PRIVATE/unlisted' if p=='/proc/self/exe' else _realpath(p)""",
+            'modules': """import types
+    module=types.ModuleType('canary_module'); module.__file__='/PRIVATE/missing.py'
+    sys.modules['canary_module']=module""",
+            'aliases': "MANIFEST['aliases']['/usr/bin/ruby']='/PRIVATE/unlisted'",
+            'maps': "Runtime.mapped_files=lambda self: self.check(False)",
+            'descriptors': """_recheck=Runtime.recheck
+    def fail(self):
+        self.observe('descriptors',lambda: self.check(False))
+        return _recheck(self)
+    Runtime.recheck=fail""",
+            'private_root': """def fail(*args): raise RuntimeError('PRIVATE unsafe root')
+    S.open_canonical_root=fail""",
+        }
+        with tempfile.TemporaryDirectory(dir=os.environ['RUNNER_TEMP']) as directory:
+            marker=Path(directory)/'executed'
+            for guard, injection in faults.items():
+                suffix=('''
+_original=diagnose
+def diagnose(principal,cancelled):
+    def canary(*args,**kwargs):
+        with open(%r,'w') as f: f.write('PRIVATE')
+        raise AssertionError('PRIVATE unverified execution')
+    D.capture_result=canary
+    D.ReadOnlyCapture=canary
+    global interpolation_context
+    interpolation_context=canary
+    _close=Runtime.close
+    def close(self):
+        fds=[fd for _,fd,_ in self.held]
+        _close(self)
+        for fd in fds:
+            try: os.fstat(fd)
+            except OSError as error: assert error.errno==9
+            else: raise AssertionError('PRIVATE descriptor leaked')
+    Runtime.close=close
+    %s
+    return _original(principal,cancelled)
+''' % (str(marker),injection)).encode()
+                with self.subTest(guard=guard):
+                    line,code=self.invoke(suffix)
+                    self.assertEqual(code,1)
+                    self.assertIn('reason=runtime phase=initial guard='+guard+' ',line)
+                    self.assertIn('private_capture=not_started',line)
+                    self.assertIn(' '+guard+'=fail',line)
+                    self.assertIn(' ruby=not_evaluated',line)
+                    self.assertFalse(marker.exists())
+
+    def test_independent_mismatches_aggregate_through_production_consumer(self):
+        suffix=b'''
+_original=diagnose
+def diagnose(principal,cancelled):
+    platform.machine=lambda: 'unsupported'
+    MANIFEST['files']['/usr/lib/PRIVATE-missing-runtime']='0'*64
+    MANIFEST['files'][COMPOSE]='0'*64
+    MANIFEST['aliases']['/usr/bin/ruby']='/PRIVATE/wrong'
+    def fail(*args): raise RuntimeError('PRIVATE unsafe root')
+    S.open_canonical_root=fail
+    return _original(principal,cancelled)
+'''
+        line,code=self.through_runner(suffix)
+        self.assertEqual(code,1)
+        self.assertIn('reason=runtime phase=initial guard=platform private_capture=not_started',line)
+        for guard in ('platform','availability','integrity','aliases','private_root'):
+            self.assertIn(' '+guard+'=fail',line)
+        self.assertIn(' ruby=not_evaluated',line)
+        self.assertNotIn('PRIVATE',line)
+
+    def test_initial_failure_cleanup_and_cancellation_preserve_attribution(self):
+        for reason, tail in (
+            ('cleanup', """_close=Runtime.close
+    def close(self):
+        _close(self)
+        assert not self.held
+        raise OSError('PRIVATE cleanup')
+    Runtime.close=close"""),
+            ('interrupted', """import signal
+    _close=Runtime.close
+    def close(self):
+        _close(self)
+        signal.pthread_sigmask(signal.SIG_BLOCK,[signal.SIGTERM])
+        os.kill(os.getpid(),signal.SIGTERM)
+    Runtime.close=close""")):
+            suffix=('''
+_original=diagnose
+def diagnose(principal,cancelled):
+    MANIFEST['files'][COMPOSE]='0'*64
+    %s
+    return _original(principal,cancelled)
+''' % tail).encode()
+            with self.subTest(reason=reason):
+                line,code=self.invoke(suffix)
+                self.assertEqual(code,1)
+                self.assertIn('reason='+reason+' phase=initial guard=integrity private_capture=not_started',line)
+                self.assertNotIn('result=equivalent',line)
+
+    def test_probe_failure_and_pre_open_capture_boundary(self):
+        for failure in ('interrupted', 'cleanup', 'input'):
+            if failure == 'interrupted':
+                injection = "D.capture_result=lambda *a,**k: D.CaptureResult(124,b'','capture_interrupted')"
+            elif failure == 'cleanup':
+                injection = "def fail(*a,**k): raise D.CaptureCleanupError('PRIVATE cleanup')\n    D.capture_result=fail"
+            else:
+                injection = "global interpolation_context\n    def fail(*a,**k): raise P.Refused('input')\n    interpolation_context=fail"
+            suffix=('''
+_original=diagnose
+def diagnose(principal,cancelled):
+    %s
+    return _original(principal,cancelled)
+''' % injection).encode()
+            with self.subTest(failure=failure):
+                line,code=self.invoke(suffix)
+                self.assertEqual(code,1)
+                self.assertIn('reason='+failure+' ',line)
+                capture = 'attempted' if failure == 'input' else 'not_started'
+                self.assertIn('private_capture='+capture,line)
+                self.assertNotIn('result=equivalent',line)
 
     def test_actual_capture_bootstrap_planner_hmac_consumer(self):
         spec = importlib.util.spec_from_file_location('diagnostic_tests', ROOT/'scripts/tests/test_stage_compose_diagnostic.py')
@@ -310,13 +484,43 @@ def diagnose(principal,cancelled):
             altered = suffix.replace(b'    return _original(principal,cancelled)',
                 ('    '+injection+'\n    return _original(principal,cancelled)').encode())
             with self.subTest(failure=failure):
-                self.assertEqual(self.invoke(altered), ('compose-env-semantic:v=1 result=unavailable reason='+failure, 1))
+                line, code = self.invoke(altered)
+                self.assertEqual(code, 1)
+                self.assertIn('reason='+failure+' ', line)
+                self.assertIn('private_capture=attempted', line)
+        for phase in ('pre_capture', 'post_open', 'post_prepare'):
+            injection = """    _recheck=Runtime.recheck
+    def drift(self):
+        if self.evidence.phase == %r:
+            self.observe('descriptors', lambda: self.check(False))
+        return _recheck(self)
+    Runtime.recheck=drift
+    return _original(principal,cancelled)""" % phase
+            altered = suffix.replace(b'    return _original(principal,cancelled)', injection.encode())
+            with self.subTest(drift=phase):
+                line, code = self.invoke(altered)
+                self.assertEqual(code, 1)
+                self.assertIn('reason=runtime phase='+phase+' guard=descriptors', line)
+                capture = 'not_started' if phase == 'pre_capture' else 'attempted'
+                self.assertIn('private_capture='+capture, line)
+                self.assertNotIn('result=equivalent', line)
+        # open() already reads application.binding; even its first failed attempt
+        # must never be advertised as no capture. Test via actual consumer too.
+        altered = suffix.replace(b'    return _original(principal,cancelled)', b"""    def failed_open(self):
+        raise OSError('PRIVATE first capture attempt')
+    D.ReadOnlyCapture.open=failed_open
+    return _original(principal,cancelled)""")
+        line, code = self.through_runner(altered)
+        self.assertEqual(code, 1)
+        self.assertIn('reason=io phase=capture guard=none private_capture=attempted', line)
         final_cancel = suffix.replace(b'    return _original(principal,cancelled)', b'''    import signal
     body=_original(principal,cancelled)
     signal.pthread_sigmask(signal.SIG_BLOCK,[signal.SIGTERM])
     os.kill(os.getpid(),signal.SIGTERM)
     return body''')
-        self.assertEqual(self.invoke(final_cancel), ('compose-env-semantic:v=1 result=unavailable reason=interrupted', 1))
+        line, code = self.invoke(final_cancel)
+        self.assertEqual(code, 1)
+        self.assertIn('reason=interrupted phase=finalize guard=none private_capture=attempted', line)
         self.assertEqual(snapshots, {str(path): (path.read_bytes(), path.stat().st_mode) for path in target.rglob('*') if path.is_file()})
         self.assertEqual(list(Path('/run/user/1000').iterdir()), [])
 

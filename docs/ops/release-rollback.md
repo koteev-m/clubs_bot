@@ -367,14 +367,64 @@ compose-env-semantic:v=1 result=equivalent strategy=remove|explicit scope=snapsh
 compose-env-semantic:v=1 result=unavailable reason=<fixed enum>
 ```
 
-Only the first form exits 0. `reason` is exactly one of `runtime`, `request`,
-`principal`, `layout`, `identity`, `busy`, `backing`, `bounds`, `io`, `interrupted`,
-`cleanup`, `transport`, `protocol`, `input`, `unsupported`, `version`, `parser`,
-`model`, `different`. Body <=512 bytes; authenticated frame <=4096. Unknown,
-extra/reordered/duplicate fields, startup output, bad authentication, replay or
-exit/body contradiction fail closed. No values, names, YAML/model, private hashes,
-paths, exception text or child stderr are reportable. No Engine queries, pulls,
-HTTP, lifecycle, writer/apply, root-binding, claim/resume or automatic continuation.
+Only the first form exits 0. Compact unavailable bodies remain valid for local,
+transport and legacy failures, and make **no** capture/phase assertion. New remote
+operation refusals append the following exact ordered inventory to the unavailable
+line (still protocol v1; the unchanged HMAC covers the whole body):
+
+```text
+phase=<phase> guard=<guard> private_capture=not_started|attempted platform=<status> manifest=<status> availability=<status> path_safety=<status> integrity=<status> interpreter=<status> modules=<status> aliases=<status> maps=<status> descriptors=<status> private_root=<status> ruby=<status>
+```
+
+- `phase`: `initial`, `pre_capture`, `post_open`, `capture`, `prepare`,
+  `post_prepare`, `finalize`. `guard`: `none` or one of the twelve prerequisite
+  field names. The first failed runtime guard/phase is retained even if later
+  independent checks also fail or cleanup/cancellation supersedes the reason.
+- Each status is `pass`, `fail`, or `not_evaluated`. Failure takes precedence;
+  skipped dependencies prevent a positive result for the aggregate class.
+  Availability means stat/open succeeded; path safety includes canonical parents,
+  root ownership, non-writability, regular type and the existing per-file size
+  bound. Integrity hashes only safely opened files under the existing total byte
+  budget. Interpreter/modules/maps/aliases are metadata/allowlist observations;
+  they do not approve an otherwise mismatched installation. Descriptors describes
+  only held runtime files. Missing inputs do not become successful integrity checks.
+- Initial platform/manifest/file/closure observations and private-root safety are
+  independent where safe. Invalid manifest makes dependent inventory checks
+  `not_evaluated`. Ruby/Psych is probed **only after every non-executing gate passes**;
+  otherwise `ruby=not_evaluated`. No unverified Ruby/Compose executable is run for
+  version discovery. Initial failure prevents target acquisition and normalization.
+- `private_capture=attempted` is latched **before** copying private process interpolation inputs and
+  `ReadOnlyCapture.open()`, which already reads `application.binding`; it does not claim a read succeeded or that
+  `.env` was reached. An added pre-capture recheck precedes this latch; the existing
+  post-open and post-prepare checks remain. A late drift therefore cannot claim
+  zero reads. Cancellation/cleanup never publishes equivalence; positive
+  prerequisite statuses become `not_evaluated` on that incomplete finalization.
+  The remote final signal handoff preserves capture attribution. A local transport
+  or publication failure may only provide the compact form: capture is unknown.
+
+`reason` remains exactly one of `runtime`, `request`, `principal`, `layout`,
+`identity`, `busy`, `backing`, `bounds`, `io`, `interrupted`, `cleanup`, `transport`,
+`protocol`, `input`, `unsupported`, `version`, `parser`, `model`, `different`.
+Body <=512 bytes; authenticated frame <=4096. Unknown, extra/reordered/duplicate
+fields, startup output, bad authentication, replay or exit/body contradiction
+fail closed. No observed hashes, paths, architecture strings, usernames/IDs,
+values, YAML/model, exception text or child stderr are reportable. The map is
+compatibility evidence for the **unchanged** arm64 reference allowlist, not an
+approval of the observed installation. No Engine queries, pulls, HTTP, lifecycle,
+writer/apply, root-binding, claim/resume or automatic continuation.
+
+Historical semantic run `35558150872` (number 1, attempt 1, merged
+`edfa135255f06a3f42073af02ea74aa68ba59c8b`) returned authenticated
+`compose-env-semantic:v=1 result=unavailable reason=runtime`. That old result
+conflates initial build/root/Ruby checks with late runtime rechecks. It establishes
+neither the precise failing prerequisite, absence of private reads, nor semantic
+equivalence. Reference Linux PASS does not establish actual stage compatibility.
+The local incident history does not establish stage OS/architecture, installed
+executable/library closure, safe-root availability or Ruby/Psych applicability.
+The single next evidence path is a separately authorized invocation of this
+reviewed compatibility report after publication/merge. If incompatibility is
+confirmed, choosing/installing a server toolchain is a new operational decision;
+this channel never changes pins, installs tools, falls back, or probes stage here.
 
 A future separately authorized single dispatch may only establish one captured
 semantic result on an applicable runtime. It does not approve permanent removal.
