@@ -36,9 +36,18 @@ import types
 from contextlib import contextmanager
 operation.REFERENCE = json.loads((ROOT/runner.REFERENCE_PATH).read_bytes())
 
+def fixture_parent():
+    # Same supported safe-temp selection as the existing local source fixtures.
+    # The production pin guard still rejects unsafe ancestors; no guard is relaxed.
+    parent = Path(os.environ.get('RUNNER_TEMP') or tempfile.gettempdir()).resolve()
+    if parent.is_relative_to(ROOT):
+        raise AssertionError('disposable fixtures must be outside the checkout')
+    return str(parent)
+
+
 class SourceTest(unittest.TestCase):
     def setUp(self):
-        parent = str(Path(os.environ.get('RUNNER_TEMP') or tempfile.gettempdir()).resolve())
+        parent = fixture_parent()
         self.temp = tempfile.TemporaryDirectory(dir=parent, prefix='clb91-semantic-source-')
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name)
@@ -131,7 +140,7 @@ class BootstrapTest(unittest.TestCase):
     def through_runner(self, suffix):
         # Real local Git snapshot/whole-closure load/pin setup and one substitute
         # SSH executable; the subprocess executes the actual production bootstrap.
-        parent = str(Path(os.environ['RUNNER_TEMP']).resolve())
+        parent = fixture_parent()
         self.assertFalse(os.statvfs(parent).f_flag & os.ST_NOEXEC,
                          'synthetic executable fixture needs an executable local test mount')
         with tempfile.TemporaryDirectory(dir=parent) as directory:
@@ -203,11 +212,14 @@ def collect(cancelled):
         self.assertEqual(value['artifacts']['python_bootstrap']['status'], 'observed')
         self.assertEqual(value['distro']['status'], 'observed')
         self.assertEqual(value['trust'], 'observed_not_approved')
-        self.assertEqual(self.through_runner(suffix), (line, code))
+        # Generic selfcheck may provide only safe TMPDIR, not GitHub RUNNER_TEMP.
+        with patch.dict(os.environ):
+            os.environ.pop('RUNNER_TEMP', None)
+            self.assertEqual(self.through_runner(suffix), (line, code))
 
     def test_synthetic_profile_actual_bootstrap_hmac_consumer_and_cleanup(self):
         from runtime_inventory_fixtures import make_fixture
-        with tempfile.TemporaryDirectory(dir=os.environ['RUNNER_TEMP']) as directory:
+        with tempfile.TemporaryDirectory(dir=fixture_parent()) as directory:
             make_fixture(directory)
             fixture_source = (ROOT/'scripts/tests/runtime_inventory_fixtures.py').read_bytes()
             # Test-only verified source suffix. No production path can select it.
@@ -237,7 +249,7 @@ def collect(cancelled):
 class FixtureCase(unittest.TestCase):
     def setUp(self):
         from runtime_inventory_fixtures import FixtureOS, make_fixture
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(dir=fixture_parent())
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.put = make_fixture(self.root)
