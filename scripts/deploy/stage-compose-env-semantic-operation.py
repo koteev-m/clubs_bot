@@ -175,6 +175,7 @@ class Runtime:
             available = self.observe('availability', lambda: os.stat(path, follow_symlinks=False))
             safe = self.observe('path_safety', safe_path)
             if not (available and safe):
+                self.evidence.record('path_safety', 'not_evaluated')
                 self.evidence.record('integrity', 'not_evaluated')
                 continue
             fd = None
@@ -186,6 +187,7 @@ class Runtime:
                 value = os.fstat(fd)
                 self.held[-1] = (path, fd, D.identity(value))
             if not self.observe('availability', acquire):
+                self.evidence.record('path_safety', 'not_evaluated')
                 self.evidence.record('integrity', 'not_evaluated')
                 continue
             def metadata():

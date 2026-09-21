@@ -371,8 +371,41 @@ def diagnose(principal,cancelled):
                     self.assertIn('reason=runtime phase=initial guard='+guard+' ',line)
                     self.assertIn('private_capture=not_started',line)
                     self.assertIn(' '+guard+'=fail',line)
+                    if guard == 'availability':
+                        self.assertIn(' path_safety=not_evaluated',line)
+                        self.assertIn(' integrity=not_evaluated',line)
                     self.assertIn(' ruby=not_evaluated',line)
                     self.assertFalse(marker.exists())
+
+    def test_failed_acquisition_does_not_claim_final_file_metadata_pass(self):
+        for fault, injection in (
+            ('open', """_open=os.open
+    def fail(path,*a,**k):
+        if path==COMPOSE: raise PermissionError(13,'PRIVATE denied')
+        return _open(path,*a,**k)
+    os.open=fail"""),
+            ('fstat', """_fstat=os.fstat
+    def fail(fd):
+        value=_fstat(fd)
+        if value.st_ino==os.stat(COMPOSE).st_ino: raise OSError(5,'PRIVATE metadata')
+        return value
+    os.fstat=fail""")):
+            suffix=('''
+_original=diagnose
+def diagnose(principal,cancelled):
+    def never(*a,**k): raise AssertionError('PRIVATE tool or capture reached')
+    D.capture_result=never
+    D.ReadOnlyCapture=never
+    %s
+    return _original(principal,cancelled)
+''' % injection).encode()
+            with self.subTest(fault=fault):
+                line,code=self.through_runner(suffix)
+                self.assertEqual(code,1)
+                self.assertIn('reason=runtime phase=initial guard=availability private_capture=not_started',line)
+                self.assertIn(' path_safety=not_evaluated',line)
+                self.assertIn(' integrity=not_evaluated',line)
+                self.assertIn(' ruby=not_evaluated',line)
 
     def test_independent_mismatches_aggregate_through_production_consumer(self):
         suffix=b'''
