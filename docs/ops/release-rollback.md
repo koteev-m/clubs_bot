@@ -583,6 +583,38 @@ not. This has not been exercised in a new credentialed hosted run.
 
 ### CLB-91 bounded runtime closure feasibility (local preparation)
 
+
+PR #515 CI-fixture follow-up: the positive bootstrap proof must use a bounded
+synthetic filesystem rather than assume every artifact on an arbitrary CI host
+fits the reader limits. Lint `35695122661` / job `106640199984` executed merge
+`29ed527558d3e4b801dafdb2dca3433d6e89acc1` and failed the `code == 0` assertion
+after authenticating a refusal. Its [exact runner image](https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md)
+reports Compose 2.38.2; [official asset metadata](https://github.com/docker/compose/releases/tag/v2.38.2)
+identifies the x86_64 plugin as 75108694 bytes, above the unchanged 64 MiB bound.
+Synthetic reproduction returns authenticated `unavailable/bounds`, exit 1,
+171 stdout bytes and no stderr; the original job log did not record the reason.
+The new regression fails with the original positive method, and also tests
+64 MiB minus one, exactly 64 MiB, plus one and the hosted asset size. Oversized
+artifacts remain unread/refused. The positive fixture substitutes only test root,
+ownership and own-proc metadata, retaining real Linux FD operations, actual
+bootstrap/HMAC/consumer and one synthetic transport. It is not root-installation
+or hosted x64 parity evidence. Test diagnostics report fixed stages/counts and
+verified refusal categories, never raw stdout/stderr or nonce/canary values.
+Full delegated selfcheck remains required in a suitable environment; executing
+its exact affected suite block locally is partial integration evidence only.
+No production limit, read scope, workflow/pin/authority or installation policy
+changes for this fix, and no server run is authorized by it.
+
+The follow-up test-helper P2 separates capture EOF from process termination.
+It uses the existing capture primitive's `waitid(WNOWAIT)` approach within the
+original deadline: the leader stays unreaped until group cleanup, preventing
+PID/PGID reuse while preserving its real exit status or signal. A child that
+closes both outputs and hangs still times out. Signal-synchronized regressions
+fail on the old helper, and check exit 0/1/SIGTERM, timeout, waitable leader
+identity before `killpg`, reap afterwards, and descendant termination via a
+separate pipe EOF. This correction is test-only; it does not change the
+production transport or remove the full hosted verification requirement.
+
 PR #514 is merged at `a436f74632acb2af2df88aeb06fc6cdb6df4802b`, tree
 `cb80285b4d71a386ab73338ee82334fc4d0145a2`. User-supplied terminal evidence for
 manual Tests `35686542517`, attempt 1 / `63ad587bd694a5e79ccd5efe4dcf99c3aa1dfaa9`,

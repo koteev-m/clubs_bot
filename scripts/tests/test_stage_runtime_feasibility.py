@@ -21,7 +21,8 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'scripts/tests'))
 import test_stage_runtime_inventory as existing
-from runtime_feasibility_fixtures import FixtureOS, make_fixture
+from runtime_feasibility_fixtures import (FixtureOS, make_fixture, captured_fixture_source,
+    run_synthetic, checked_response)
 runner=existing.load('stage-runtime-feasibility.py')
 I=existing.load('stage-runtime-inventory-operation.py')
 operation=types.ModuleType('feasibility')
@@ -198,6 +199,31 @@ class FixtureCase(unittest.TestCase):
         self.put('/proc/self/maps',b'x'*65537)
         self.assertEqual(self.collect()[0]['reason'],'bounds')
 
+    def test_system_artifact_size_boundaries_and_hosted_plugin(self):
+        path='/usr/libexec/docker/cli-plugins/docker-compose'
+        target=self.put(path,b'',0o755)
+        for size in (operation.MAX_FILE-1,operation.MAX_FILE,operation.MAX_FILE+1,75108694):
+            with self.subTest(size=size):
+                with target.open('wb') as stream: stream.truncate(size)
+                original=self.os.read
+                reads=[0]
+                def guarded_read(fd,count):
+                    if os.fstat(fd).st_ino==target.stat().st_ino:
+                        reads[0]+=1
+                        self.assertLessEqual(size,operation.MAX_FILE,'oversized artifact was read')
+                    return original(fd,count)
+                with patch.object(self.os,'read',guarded_read),patch.object(operation,'os',self.os),patch.object(I,'os',self.os):
+                    files=operation.SystemFiles(lambda:False)
+                    try:
+                        if size>operation.MAX_FILE:
+                            with self.assertRaises(I.Unavailable) as error: operation.artifact(files,path)
+                            self.assertEqual(error.exception.args,('bounds',)); self.assertEqual(reads[0],0)
+                        else:
+                            row=operation.artifact(files,path)
+                            self.assertEqual(row['status'],'observed'); self.assertEqual(row['size'],size)
+                            self.assertGreater(reads[0],0)
+                    finally: files.close()
+
     def test_maximum_report_bound_and_local_comparison(self):
         value,_=self.collect()
         for path,row in value['files'].items():
@@ -232,6 +258,136 @@ class FixtureCase(unittest.TestCase):
                 with self.assertRaises((ValueError,I.Unavailable)):runner.parse_result(frame(data),0,nonce,operation)
 
 
+class SubprocessDiagnosticTest(unittest.TestCase):
+    def test_eof_before_exit_preserves_status_and_retains_group_identity(self):
+        import signal
+        real_waitid, real_killpg = os.waitid, os.killpg
+        for expected in (0, 1, -signal.SIGTERM):
+            with self.subTest(expected=expected):
+                released, cleanup = [], []
+                def observe(kind, pid, flags):
+                    # Called only after all pipe EOFs. The child cannot exit
+                    # until this observer explicitly releases its blocked signal.
+                    if not released:
+                        os.kill(pid, signal.SIGUSR1); released.append(pid)
+                    return real_waitid(kind, pid, flags)
+                def kill(group, sig):
+                    if sig == signal.SIGKILL:
+                        info=real_waitid(os.P_PID,group,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+                        cleanup.append((group,info.si_pid if info else None))
+                    return real_killpg(group,sig)
+                end='os._exit('+str(expected)+')' if expected>=0 else 'os.kill(os.getpid(),signal.SIGTERM)'
+                program=('import os,signal; signal.pthread_sigmask(signal.SIG_BLOCK,{signal.SIGUSR1}); '
+                         'os.write(1,b"complete\\n"); os.close(1); os.close(2); '
+                         'signal.sigwait({signal.SIGUSR1}); '+end)
+                with patch('os.waitid',observe),patch('os.killpg',kill):
+                    result=run_synthetic([sys.executable,'-I','-S','-B','-c',program],b'',1024,timeout=3)
+                self.assertEqual((expected,b'complete\n',b''),(result.returncode,result.stdout,result.stderr))
+                self.assertEqual([(released[0],released[0])],cleanup)
+                with self.assertRaises(ChildProcessError): os.waitpid(released[0],os.WNOHANG)
+
+    def test_eof_without_exit_times_out_and_reaps_leader(self):
+        import signal
+        import time
+        children=[]; real_popen=subprocess.Popen
+        def spawn(*args,**kwargs):
+            child=real_popen(*args,**kwargs); children.append(child); return child
+        program='import os,signal; os.write(1,b"ready"); os.close(1); os.close(2); signal.pause()'
+        started=time.monotonic()
+        with patch('subprocess.Popen',spawn),self.assertRaises(AssertionError) as error:
+            run_synthetic([sys.executable,'-I','-S','-B','-c',program],b'',1024,timeout=0.5)
+        self.assertIn('stage=timeout',str(error.exception)); self.assertIn('stdout_bytes=5',str(error.exception))
+        self.assertEqual(-signal.SIGKILL,children[0].returncode)
+        self.assertLess(time.monotonic()-started,3)
+        with self.assertRaises(ChildProcessError): os.waitpid(children[0].pid,os.WNOHANG)
+
+    def test_exited_leader_cleanup_terminates_owned_descendant(self):
+        import select
+        import signal
+        read_fd,write_fd=os.pipe()
+        real_popen,real_killpg=subprocess.Popen,os.killpg
+        children,cleanup=[],[]
+        def spawn(*args,**kwargs):
+            kwargs['pass_fds']=(write_fd,)
+            child=real_popen(*args,**kwargs); children.append(child); return child
+        def kill(group,sig):
+            if sig==signal.SIGKILL:
+                info=os.waitid(os.P_PID,group,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+                cleanup.append((group,info.si_pid if info else None,children[0].returncode))
+            return real_killpg(group,sig)
+        program="import os,signal,sys\nreport=int(sys.argv[1]); r,w=os.pipe()\nif os.fork()==0:\n os.close(r); os.close(0); os.close(1); os.close(2)\n signal.alarm(2)  # Independent finite lifetime even if the assertion fails.\n os.write(report,b'R'); os.write(w,b'r'); os.close(w)\n signal.pause(); os._exit(1)\nos.close(w); assert os.read(r,1)==b'r'; os.close(r); os.close(report)\nos.close(1); os.close(2); os._exit(0)\n"
+        try:
+            with patch('subprocess.Popen',spawn),patch('os.killpg',kill):
+                result=run_synthetic([sys.executable,'-I','-S','-B','-c',program,str(write_fd)],b'',1024,timeout=1)
+            os.close(write_fd); write_fd=None
+            self.assertEqual(0,result.returncode)
+            self.assertEqual([(children[0].pid,children[0].pid,None)],cleanup)
+            self.assertTrue(select.select([read_fd],[],[],1)[0]); self.assertEqual(b'R',os.read(read_fd,1))
+            self.assertTrue(select.select([read_fd],[],[],1)[0]); self.assertEqual(b'',os.read(read_fd,1))
+            # Only the descendant retained report: EOF proves its termination.
+            with self.assertRaises(ChildProcessError): os.waitpid(children[0].pid,os.WNOHANG)
+            self.assertTrue(all(s.closed for s in (children[0].stdin,children[0].stdout,children[0].stderr)))
+        finally:
+            if write_fd is not None: os.close(write_fd)
+            os.close(read_fd)
+
+    def test_cleanup_failure_preserves_primary_bounds_and_redaction(self):
+        original=os.killpg
+        def failed_cleanup(pid,sig):
+            try: original(pid,sig)
+            except (ProcessLookupError,PermissionError): pass
+            raise OSError(errno.EIO,'PRIVATE cleanup detail')
+        with patch('os.killpg',failed_cleanup),self.assertRaises(AssertionError) as error:
+            run_synthetic([sys.executable,'-I','-S','-B','-c',"import sys; sys.stdout.write('X'*131201)"],b'',runner.FRAME_LIMIT)
+        self.assertIn('stage=bounds',str(error.exception))
+        self.assertIn('cleanup=failed',str(error.exception))
+        self.assertNotIn('PRIVATE',str(error.exception))
+
+    def test_real_process_failures_are_bounded_distinct_and_redacted(self):
+        nonce=bytes(range(32))
+        def execute(program):
+            return run_synthetic([sys.executable,'-I','-S','-B','-c',program],b'',runner.FRAME_LIMIT)
+        def checked(response):return checked_response(response,runner,operation,nonce,expected_code=0)
+        cases=[('empty',"raise SystemExit(1)"),
+               ('subprocess',"import os,signal; os.kill(os.getpid(),signal.SIGTERM)"),
+               ('subprocess',"import sys; sys.stderr.write('PRIVATE credential'); raise SystemExit(2)"),
+               ('framing',"print('PRIVATE credential')")]
+        for stage,program in cases:
+            with self.subTest(stage=stage):
+                with self.assertRaises(AssertionError) as error: checked(execute(program))
+                self.assertIn('stage='+stage,str(error.exception)); self.assertNotIn('PRIVATE',str(error.exception))
+                self.assertLess(len(str(error.exception)),256)
+        for stream,count in [('stdout',runner.FRAME_LIMIT+1),('stderr',4097)]:
+            with self.assertRaises(AssertionError) as error:
+                execute("import sys; sys."+stream+".write('X'*"+str(count)+")")
+            self.assertIn('stage=bounds',str(error.exception))
+        with self.assertRaises(AssertionError) as error:
+            run_synthetic(['/missing-synthetic-PRIVATE'],b'',runner.FRAME_LIMIT)
+        self.assertIn('stage=spawn',str(error.exception)); self.assertNotIn('PRIVATE',str(error.exception))
+        with self.assertRaises(AssertionError) as error:
+            run_synthetic([sys.executable,'-I','-S','-B','-c','while True: pass'],b'',runner.FRAME_LIMIT,timeout=0.1)
+        self.assertIn('stage=timeout',str(error.exception))
+
+    def test_authentication_schema_and_authenticated_refusal_remain_failures(self):
+        nonce=bytes(range(32))
+        def frame(body,key=nonce):
+            return b'clb91-runtime-feasibility-auth:v=1 tag='+hmac.new(key,body,hashlib.sha256).hexdigest().encode()+b' '+body
+        valid=operation.refused('bounds')
+        cases=[('authentication',frame(valid,b'z'*32),1),
+               ('schema',frame(operation.canonical(dict(result='PRIVATE'))),1),
+               ('collect',frame(valid),1)]
+        for stage,raw,code in cases:
+            # Actual child pipes, then the same authenticating production parser.
+            program='import os; os.write(1,'+repr(raw)+'); raise SystemExit('+str(code)+')'
+            response=run_synthetic([sys.executable,'-I','-S','-B','-c',program],b'',runner.FRAME_LIMIT)
+            with self.assertRaises(AssertionError) as error:
+                checked_response(response,runner,operation,nonce,expected_code=0)
+            text=str(error.exception); self.assertIn('stage='+stage,text); self.assertNotIn('PRIVATE',text)
+            if stage=='collect':self.assertIn('reason=bounds',text); self.assertIn('authenticated=yes',text)
+        response=subprocess.CompletedProcess([],1,frame(valid),b'')
+        self.assertEqual(checked_response(response,runner,operation,nonce,expected_code=1)[1],1)
+
+
 class WorkflowTest(unittest.TestCase):
     def test_existing_selfcheck_includes_new_suite_exactly_once(self):
         selfcheck=(ROOT/'scripts/selfcheck-quality-gates.sh').read_text()
@@ -254,14 +410,13 @@ class LinuxTest(unittest.TestCase):
     def setUp(self):
         self.sources={Path(p).name:(ROOT/p).read_bytes() for p in runner.REMOTE_SOURCES}; self.nonce=bytes(range(32))
 
-    def invoke(self,suffix=b'',sources=None):
+    def invoke(self,suffix=b'',sources=None,expected_code=None):
         data=dict(sources or self.sources); data[Path(runner.REMOTE_PATH).name]+=suffix
         bundle=json.dumps({k:base64.b64encode(v).decode() for k,v in data.items()},sort_keys=True,separators=(',',':')).encode()
         control=json.dumps(dict(principal='fixture',sha256=hashlib.sha256(bundle).hexdigest())).encode()
         payload=self.nonce+struct.pack('!I',len(control))+control+bundle
-        r=subprocess.run(['/usr/bin/python3','-I','-S','-B','-c',runner.BOOTSTRAP],input=payload,capture_output=True,timeout=110,env=dict(PATH='/usr/bin:/bin',LC_ALL='C'))
-        self.assertEqual(r.stderr,b''); self.assertNotIn(b'PRIVATE',r.stdout)
-        return runner.parse_result(r.stdout,r.returncode,self.nonce,operation)
+        r=run_synthetic(['/usr/bin/python3','-I','-S','-B','-c',runner.BOOTSTRAP],payload,runner.FRAME_LIMIT)
+        return checked_response(r,runner,operation,self.nonce,expected_code=expected_code)
 
     def test_actual_linux_bootstrap_full_closure_no_tools_or_private_reads(self):
         suffix=b'''
@@ -277,15 +432,41 @@ def collect(cancelled):
     sys.addaudithook(audit)
     return original(cancelled)
 '''
-        line,code=self.invoke(suffix); self.assertEqual(code,0)
-        value=json.loads(line[len(operation.PREFIX):]); self.assertEqual(len(value['files']),191)
-        self.assertEqual(value['bootstrap']['os_family'],'linux')
-        self.assertEqual(value['files']['/usr/bin/python3.12']['status'] in ('match','mismatch'),True)
-        self.assertEqual(value['trust'],'observed_not_approved')
-        with patch.multiple(existing,runner=runner,operation=operation):
-            line2,code2=existing.BootstrapTest.through_runner(self,suffix)
-        self.assertEqual(code2,0); parsed=json.loads(line2[len(operation.PREFIX):])
-        self.assertEqual(parsed['files'],value['files'])
+        # Positive protocol proof uses a finite synthetic filesystem, not the
+        # hosted runner's unpinned tool installation (Compose v2 can exceed 64 MiB).
+        versions=dict(l.split('=',1) for l in operation.PACKAGE_TEXT.splitlines())
+        with tempfile.TemporaryDirectory(dir=existing.fixture_parent()) as directory:
+            make_fixture(directory,operation.REFERENCE,{n:v for n,v in versions.items() if n in operation.PACKAGES})
+            suffix=captured_fixture_source(ROOT,directory)+suffix
+            line,code=self.invoke(suffix,expected_code=0); self.assertEqual(code,0)
+            value=json.loads(line[len(operation.PREFIX):]); self.assertEqual(len(value['files']),191)
+            self.assertEqual(value['bootstrap']['os_family'],'linux')
+            self.assertEqual(value['files']['/usr/bin/python3.12']['status'],'mismatch')
+            self.assertEqual(value['trust'],'observed_not_approved')
+            with patch.multiple(existing,runner=runner,operation=operation):
+                line2,code2=existing.BootstrapTest.through_runner(self,suffix)
+            self.assertEqual(code2,0); parsed=json.loads(line2[len(operation.PREFIX):])
+            self.assertEqual(parsed['files'],value['files'])
+
+    def test_hosted_plugin_size_refusal_and_positive_fixture_isolation(self):
+        versions=dict(l.split('=',1) for l in operation.PACKAGE_TEXT.splitlines())
+        with tempfile.TemporaryDirectory(dir=existing.fixture_parent()) as directory:
+            make_fixture(directory,operation.REFERENCE,{n:v for n,v in versions.items() if n in operation.PACKAGES})
+            target=Path(directory)/'usr/libexec/docker/cli-plugins/docker-compose'
+            target.parent.mkdir(parents=True,exist_ok=True)
+            with target.open('wb') as stream: stream.truncate(75108694)
+            target.chmod(0o755)
+            ambient=captured_fixture_source(ROOT,directory)
+            self.assertEqual(self.invoke(ambient),(operation.refused('bounds').decode().strip(),1))
+            with self.assertRaises(AssertionError) as error:self.invoke(ambient,expected_code=0)
+            self.assertIn('stage=collect',str(error.exception)); self.assertIn('reason=bounds',str(error.exception))
+            with patch.multiple(existing,runner=runner,operation=operation):
+                self.assertEqual(existing.BootstrapTest.through_runner(self,ambient),(operation.refused('bounds').decode().strip(),1))
+            invoke=self.invoke
+            with patch.object(self,'invoke',lambda suffix=b'',**kw:invoke(ambient+suffix,**kw)):
+                # This exact test used to assert code 0 on the oversized host;
+                # now its own finite positive fixture makes it independent.
+                self.test_actual_linux_bootstrap_full_closure_no_tools_or_private_reads()
 
     def test_synthetic_fd_failures_through_bootstrap_and_real_consumer(self):
         versions=dict(l.split('=',1) for l in operation.PACKAGE_TEXT.splitlines())
@@ -309,7 +490,8 @@ def collect(cancelled):
 
     def test_real_bootstrap_source_failure_cancellation_cleanup(self):
         broken=dict(self.sources); del broken[Path(runner.INVENTORY_PATH).name]
-        with self.assertRaises(ValueError):self.invoke(sources=broken)
+        with self.assertRaises(AssertionError) as error:self.invoke(sources=broken)
+        self.assertIn('stage=empty exit=1 stdout_bytes=0 stderr_bytes=0 authenticated=no',str(error.exception))
         self.assertEqual(self.invoke(b'\ndef collect(cancelled):\n    return refused("cleanup")\n'),(operation.refused('cleanup').decode().strip(),1))
         suffix=b'\noriginal=collect\ndef collect(cancelled):\n    body=original(cancelled)\n    s=__import__("signal")\n    s.pthread_sigmask(s.SIG_BLOCK,[s.SIGTERM])\n    os.kill(os.getpid(),s.SIGTERM)\n    return body\n'
         self.assertEqual(self.invoke(suffix),(operation.refused('interrupted').decode().strip(),1))
