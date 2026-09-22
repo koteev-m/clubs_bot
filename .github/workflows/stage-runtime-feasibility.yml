@@ -1,0 +1,66 @@
+---
+name: Stage Runtime Feasibility (CLB-91 manual)
+'on':
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type CLB-91:35646675380:runtime-feasibility after separate non-secret feasibility authorization
+        required: true
+        default: ''
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: payments-schema-stage
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout exact workflow revision
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        ref: "${{ github.sha }}"
+        persist-credentials: false
+    - name: Validate fixed request before credentials
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        APP_ENV: stage
+        CONFIRMATION: "${{ inputs.confirmation }}"
+      run: python3 -I -S -B scripts/deploy/stage-runtime-feasibility.py --validate
+  feasibility:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: stage
+    steps:
+    - name: Checkout exact workflow revision
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      with:
+        ref: "${{ github.sha }}"
+        persist-credentials: false
+    - name: Revalidate first attempt before credentials
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        APP_ENV: stage
+        CONFIRMATION: "${{ inputs.confirmation }}"
+      run: python3 -I -S -B scripts/deploy/stage-runtime-feasibility.py --validate
+    - name: Setup deployment SSH principal
+      uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555
+      with:
+        ssh-private-key: "${{ secrets.SSH_PRIVATE_KEY }}"
+    - name: Collect fixed non-secret runtime feasibility
+      shell: bash
+      env:
+        REPOSITORY_DEFAULT_BRANCH: "${{ github.event.repository.default_branch }}"
+        APP_ENV: stage
+        CONFIRMATION: "${{ inputs.confirmation }}"
+        TMPDIR: "${{ runner.temp }}"
+        SSH_USER: "${{ secrets.SSH_USER }}"
+        SSH_HOST: "${{ secrets.SSH_HOST }}"
+        SSH_PORT: "${{ secrets.SSH_PORT || '22' }}"
+        SSH_KNOWN_HOSTS: "${{ secrets.SSH_KNOWN_HOSTS }}"
+      run: python3 -I -S -B scripts/deploy/stage-runtime-feasibility.py
