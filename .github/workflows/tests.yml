@@ -300,3 +300,42 @@ jobs:
           name: jacoco-reports
           path: "**/build/reports/jacoco/**"
           if-no-files-found: ignore
+
+  amd64-runtime-prototype:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout dispatched bytes
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify native harness controls
+        run: python3 -B scripts/tests/test_amd64_ci_harness.py
+      - name: Native amd64 runtime experiment
+        run: python3 -B scripts/tests/linux-semantic/run-amd64-ci.py
+      - name: Check evidence allowlist and size
+        if: always()
+        id: evidence
+        run: python3 -B scripts/tests/linux-semantic/run-amd64-ci.py check-artifacts
+      - name: Upload bounded synthetic evidence
+        if: always() && steps.evidence.outcome == 'success'
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: clb91-native-amd64-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/clb91-amd64/evidence/identity.json
+            ${{ runner.temp }}/clb91-amd64/evidence/status.json
+            ${{ runner.temp }}/clb91-amd64/evidence/prepare.log
+            ${{ runner.temp }}/clb91-amd64/evidence/build.log
+            ${{ runner.temp }}/clb91-amd64/evidence/comparison.txt
+            ${{ runner.temp }}/clb91-amd64/evidence/experiment.patch
+            ${{ runner.temp }}/clb91-amd64/evidence/runtime.log
+            ${{ runner.temp }}/clb91-amd64/evidence/planner.log
+            ${{ runner.temp }}/clb91-amd64/evidence/context.log
+            ${{ runner.temp }}/clb91-amd64/evidence/semantic.log

@@ -243,6 +243,9 @@ fi
 echo "[selfcheck] pinned gitleaks runtime checksum exceptions"
 python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"
 
+echo "[selfcheck] native amd64 prototype CI wiring controls"
+python3 -B "$ROOT_DIR/scripts/tests/test_amd64_ci_harness.py"
+
 fake_docker="$TMP_DIR/fake-docker"
 fake_docker_args="$TMP_DIR/fake-docker-args.txt"
 fake_docker_log="$TMP_DIR/fake-docker.log"

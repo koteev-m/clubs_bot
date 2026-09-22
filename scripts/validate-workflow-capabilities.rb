@@ -2256,8 +2256,15 @@ module WorkflowCapabilityPolicy
         if path == RELEASE_STATUS_WORKFLOW && !job.key?("permissions")
           reject("#{context}: release-status jobs require job-level permission isolation")
         end
-        if job.key?("steps") && job["runs-on"] != "ubuntu-latest"
-          reject("#{context}: jobs with steps must use an ephemeral ubuntu-latest runner")
+        # One manual, uncredentialed native prototype pins the standard x64 OS.
+        # Effective permissions remain the existing exact contents: read policy.
+        native_prototype = path == ".github/workflows/tests.yml" && job_name == "amd64-runtime-prototype"
+        expected_runner = native_prototype ? "ubuntu-24.04" : "ubuntu-latest"
+        if native_prototype && job["if"] != "github.event_name == 'workflow_dispatch'"
+          reject("#{context}: native prototype must be manual-only")
+        end
+        if job.key?("steps") && job["runs-on"] != expected_runner
+          reject("#{context}: jobs with steps must use an ephemeral #{expected_runner} runner")
         end
         validate_environment(path, job_name, job)
         validate_deploy_job_contract(path, job_name, job)

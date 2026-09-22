@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the two CLB-91 checksum exceptions with the pinned real scanner.
+"""Exercise the exact CLB-91 checksum exceptions with the pinned real scanner.
 
 All canaries and Git history are synthetic and disposable. Never print matches.
 """
@@ -16,6 +16,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path('scripts/deploy/stage-compose-env-semantic-runtime.json')
+AMD64_MANIFEST = Path('scripts/tests/linux-semantic/amd64-runtime-candidate.json')
 IMAGE = 'ghcr.io/gitleaks/gitleaks@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854'
 RUNTIME_PATHS = (
     '/usr/lib/python3.12/__pycache__/' + 'se' + 'crets.cpython-312.pyc',
@@ -45,7 +46,7 @@ def write(repo, name, content):
     path.write_bytes(content)
 
 
-def scanner(repo, output):
+def scanner(repo, output, *, directory=False):
     # Same detect/Git/history mode and --redact as Secret Scan; no --no-git or
     # log truncation. The host checkout, home, credentials and socket are absent.
     output_owner = output.parent.stat()
@@ -61,6 +62,8 @@ def scanner(repo, output):
         '-e', 'GIT_CONFIG_KEY_0=safe.directory', '-e', 'GIT_CONFIG_VALUE_0=/repo',
         IMAGE, 'detect', '--source', '.', '--report-format', 'json',
         '--report-path', '/out/' + output.name, '--redact']
+    if directory:
+        command.append('--no-git')
     try:
         result = subprocess.run(command, capture_output=True, timeout=90)
     except (OSError, subprocess.TimeoutExpired):
@@ -79,6 +82,8 @@ def scanner(repo, output):
 
 
 class RuntimeChecksumAllowlistTest(unittest.TestCase):
+    manifest = MANIFEST
+    lines = (65, 140)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='clb91-gitleaks-')
         self.addCleanup(self.temp.cleanup)
@@ -86,7 +91,7 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         self.repo = self.root / 'repo'
         self.repo.mkdir()
         git(self.repo, 'init', '-q', '-b', 'main')
-        self.raw = (ROOT / MANIFEST).read_bytes()
+        self.raw = (ROOT / self.manifest).read_bytes()
         self.config = (ROOT / '.gitleaks.toml').read_bytes()
 
     def scan(self, label):
@@ -106,15 +111,16 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         rule = config['rules'][0]
         self.assertEqual(set(rule), {'id', 'allowlists'})
         self.assertEqual(rule['id'], 'generic-api-key')
-        self.assertEqual(len(rule['allowlists']), 1)
-        allowlist = rule['allowlists'][0]
-        self.assertEqual(set(allowlist), {'description', 'condition', 'paths', 'regexTarget', 'regexes'})
-        self.assertEqual(allowlist['condition'], 'AND')
-        self.assertEqual(allowlist['paths'], [r'^scripts/deploy/stage-compose-env-semantic-runtime\.json$'])
-        self.assertEqual(allowlist['regexTarget'], 'line')
-        expected = [r'^\s*"' + re.escape(name).replace('secrets', '[s]ecrets').replace(r'\-', '-') +
-            r'": "' + digest + r'",$' for name, digest in zip(RUNTIME_PATHS, RUNTIME_DIGESTS)]
-        self.assertEqual(allowlist['regexes'], expected)
+        self.assertEqual(len(rule['allowlists']), 2)
+        for allowlist, name in zip(rule['allowlists'], (MANIFEST, AMD64_MANIFEST)):
+            self.assertEqual(set(allowlist), {'description', 'condition', 'paths', 'regexTarget', 'regexes'})
+            self.assertEqual(allowlist['condition'], 'AND')
+            self.assertEqual(allowlist['paths'], ['^' + str(name).replace('.', r'\.') + '$'])
+            self.assertEqual(allowlist['regexTarget'], 'line')
+            expected = [r'^\s*"' + re.escape(path).replace('secrets', '[s]ecrets').replace(r'\-', '-') +
+                r'": "' + digest + r'",$' for path, digest in zip(RUNTIME_PATHS, RUNTIME_DIGESTS)]
+            self.assertEqual(allowlist['regexes'], expected)
+
 
     def test_scanner_creates_report_for_owner_only_output(self):
         owner = self.root.stat()
@@ -140,21 +146,22 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
             unwritable.chmod(0o700)
 
     def test_original_and_exact_config_in_git_mode(self):
-        write(self.repo, MANIFEST, self.raw)
+        write(self.repo, self.manifest, self.raw)
         self.commit('manifest without config')
         code, findings = self.scan('before')
         self.assertEqual(code, 1)
-        self.assertEqual(findings, [('generic-api-key', str(MANIFEST), 65),
-                                    ('generic-api-key', str(MANIFEST), 140)])
+        self.assertEqual(findings, [('generic-api-key', str(self.manifest), self.lines[0]),
+                                    ('generic-api-key', str(self.manifest), self.lines[1])])
         write(self.repo, Path('.gitleaks.toml'), self.config)
         self.commit('add exact rule allowlist')
         self.assertEqual(self.scan('after'), (0, []))
+        self.assertEqual(scanner(self.repo, self.root / 'directory.json', directory=True), (0, []))
 
     def test_shallow_synthetic_merge_matches_ci_history_scope(self):
         write(self.repo, Path('README.md'), b'synthetic main\n')
         self.commit('synthetic main')
         git(self.repo, 'switch', '-q', '-c', 'feature')
-        write(self.repo, MANIFEST, self.raw)
+        write(self.repo, self.manifest, self.raw)
         write(self.repo, Path('.gitleaks.toml'), self.config)
         self.commit('synthetic feature')
         git(self.repo, 'switch', '-q', 'main')
@@ -176,12 +183,13 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         provider = 'ghp_' + hashlib.sha256(b'CLB-91 synthetic GitHub canary').hexdigest()[:36]
         exact = '"' + RUNTIME_PATHS[0] + '": "' + RUNTIME_DIGESTS[0] + '",'
         cases = (
-            ('changed_digest', base.replace(RUNTIME_DIGESTS[0], other), str(MANIFEST), 'generic-api-key'),
-            ('same_key_credential', base.replace(RUNTIME_DIGESTS[0], marker), str(MANIFEST), 'generic-api-key'),
+            ('other_runtime_key', base.replace(RUNTIME_PATHS[0], RUNTIME_PATHS[0].replace('/usr/lib/', '/usr/local/lib/')), str(self.manifest), 'generic-api-key'),
+            ('changed_digest', base.replace(RUNTIME_DIGESTS[0], other), str(self.manifest), 'generic-api-key'),
+            ('same_key_credential', base.replace(RUNTIME_DIGESTS[0], marker), str(self.manifest), 'generic-api-key'),
             ('other_field_credential', base.replace('  "files": {',
-                 '  "files": {\n    "synthetic_api_key": "' + marker + '",'), str(MANIFEST), 'generic-api-key'),
+                 '  "files": {\n    "synthetic_api_key": "' + marker + '",'), str(self.manifest), 'generic-api-key'),
             ('extra_same_line', base.replace(exact, exact + ' "synthetic_api_key": "' + marker + '",'),
-                 str(MANIFEST), 'generic-api-key'),
+                 str(self.manifest), 'generic-api-key'),
             ('other_file', base, 'other/runtime.json', 'generic-api-key'),
         )
         for label, altered, name, rule in cases:
@@ -191,13 +199,16 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
                 git(fixture, 'init', '-q', '-b', 'main')
                 write(fixture, Path('.gitleaks.toml'), self.config)
                 if label == 'other_file':
-                    write(fixture, Path(name), '\n'.join(base.splitlines()[63:66] + base.splitlines()[138:141]).encode())
+                    write(fixture, Path(name), '\n'.join(line for line in base.splitlines() if any(path in line for path in RUNTIME_PATHS)).encode())
                 else:
-                    write(fixture, MANIFEST, altered.encode())
+                    write(fixture, self.manifest, altered.encode())
                 git(fixture, 'add', '--', '.')
                 git(fixture, 'commit', '-q', '-m', 'synthetic negative control')
                 code, findings = scanner(fixture, self.root / (label + '.json'))
                 self.assertEqual(code, 1, label)
+                directory_code, directory_findings = scanner(fixture, self.root / (label + '-dir.json'), directory=True)
+                self.assertEqual(directory_code, 1, label)
+                self.assertTrue(any(r == rule and p == name for r, p, _ in directory_findings))
                 self.assertTrue(any(found_rule == rule and path == name for found_rule, path, _ in findings),
                     label + ': expected blocking rule/path absent')
 
@@ -213,6 +224,47 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('generic-api-key', {rule for rule, _, _ in findings})
         self.assertTrue(any(rule.startswith('github-') for rule, _, _ in findings))
+
+
+class Amd64ChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
+    manifest = AMD64_MANIFEST
+    lines = (39, 114)
+
+
+class CandidateScanTest(unittest.TestCase):
+    def test_complete_visible_candidate_directory_and_shallow_merge(self):
+        # Include authorized untracked harness materials for local verification;
+        # on CI these are tracked. Never commit or stage the actual checkout.
+        with tempfile.TemporaryDirectory(prefix='clb91-complete-gitleaks-') as directory:
+            root = Path(directory).resolve()
+            repo = root / 'repo'
+            repo.mkdir()
+            git(repo, 'init', '-q', '-b', 'main')
+            write(repo, Path('synthetic-base.txt'), b'synthetic base\n')
+            git(repo, 'add', '--', '.')
+            git(repo, 'commit', '-q', '-m', 'synthetic base')
+            git(repo, 'switch', '-q', '-c', 'feature')
+            files = subprocess.check_output(['git', '-C', str(ROOT), 'ls-files',
+                '--cached', '--others', '--exclude-standard', '-z']).split(b'\0')
+            for raw in files:
+                if raw:
+                    relative = Path(os.fsdecode(raw))
+                    source = ROOT / relative
+                    if source.is_symlink() or not source.is_file():
+                        raise AssertionError('candidate scan refuses nonregular visible file')
+                    write(repo, relative, source.read_bytes())
+            git(repo, 'add', '--', '.')
+            git(repo, 'commit', '-q', '-m', 'complete synthetic candidate')
+            self.assertEqual(scanner(repo, root / 'directory.json', directory=True), (0, []))
+            self.assertEqual(scanner(repo, root / 'history.json'), (0, []))
+            git(repo, 'switch', '-q', 'main')
+            git(repo, 'merge', '-q', '--no-ff', '-m', 'synthetic PR merge', 'feature')
+            self.assertEqual(len(git(repo, 'show', '-s', '--format=%P', 'HEAD').split()), 2)
+            clone = root / 'checkout'
+            subprocess.run(['git', 'clone', '-q', '--no-local', '--depth=1', repo.as_uri(),
+                            str(clone)], check=True, capture_output=True, timeout=30)
+            self.assertEqual(git(clone, 'rev-list', '--count', 'HEAD'), '1')
+            self.assertEqual(scanner(clone, root / 'merge.json'), (0, []))
 
 
 if __name__ == '__main__':

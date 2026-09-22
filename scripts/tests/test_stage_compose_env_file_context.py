@@ -72,6 +72,12 @@ class LinuxContextTest(sem.SemanticTest):
                     result = real_capture(['strace', '-f', '-qq', '-e', 'trace=%file', '-o', str(log),
                                            *argv], payload, **options)
                     trace = log.read_text()
+                    if os.environ.get('CLB91_SYNTHETIC_TRACE_EVIDENCE') == '1':
+                        # Synthetic fixtures only. Preserve the actual audit before
+                        # TemporaryDirectory cleanup, including on assertion failure.
+                        self.assertLessEqual(len(trace.encode()), 256 * 1024)
+                        print('CLB91_SYNTHETIC_TRACE ' + json.dumps(
+                            {'change': change, 'index': len(traced), 'trace': trace}))
                     traced.append(trace)
                     # Kernel trace, not a matching-value inference: no open of any
                     # original configuration content after capture. FD paths must occur.
