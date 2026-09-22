@@ -583,6 +583,19 @@ not. This has not been exercised in a new credentialed hosted run.
 
 ### CLB-91 bounded runtime closure feasibility (local preparation)
 
+Lint #618 / job `106795287027` exposed a separate fixture-placement defect:
+its two positive bootstrap paths returned authenticated `unavailable/io`.
+The surrogate translates logical `/` and `/proc/self/maps` to its physical
+fixture; the old test audit rejected those opens under `/home/runner/...`.
+Both failures reproduce on unchanged `52f12f220ab8d6e517048b31dc79100f279381e8`
+with a synthetic hosted-style temporary root. The selected temp path itself
+was not printed by that job. The test-only correction permits exactly two
+preidentified physical objects, not an entire prefix; no-follow, canonical
+path and device/inode/mode checks reject substitutions. Absolute neighbors,
+byte paths and forbidden effects remain blocked. Regressions cover RUNNER_TEMP
+precedence and TMPDIR fallback using real Linux FDs/bootstrap/HMAC/consumer.
+This does not alter production access or establish hosted x64/full CI success.
+
 
 PR #515 CI-fixture follow-up: the positive bootstrap proof must use a bounded
 synthetic filesystem rather than assume every artifact on an arbitrary CI host

@@ -420,13 +420,26 @@ class LinuxTest(unittest.TestCase):
 
     def test_actual_linux_bootstrap_full_closure_no_tools_or_private_reads(self):
         suffix=b'''
+# Only these two physical opens implement the surrogate's logical / and maps.
+# Pin their pre-audit identity; no prefix-based exemption for the fixture tree.
+physical_reads={}
+for name,is_directory in ((os.root,True),(os.root+'/proc/self/maps',False)):
+    value=os.stat(name,follow_symlinks=False)
+    assert (stat.S_ISDIR(value.st_mode) if is_directory else stat.S_ISREG(value.st_mode))
+    assert os.path.realpath(name)==name
+    physical_reads[name]=(value.st_dev,value.st_ino,value.st_mode)
 def audit(event,args):
     if event in ('subprocess.Popen','os.system','os.exec','socket.connect','os.mkdir','os.chmod','os.chown','os.remove','os.rename'):
         raise RuntimeError('PRIVATE forbidden effect')
     if event=='open':
         path,mode,flags=args
         if flags & (os.O_WRONLY|os.O_RDWR|os.O_CREAT|os.O_TRUNC|os.O_APPEND): raise RuntimeError('PRIVATE write')
-        if isinstance(path,str) and path.startswith(('/opt/','/home/','/root/','/var/run/')): raise RuntimeError('PRIVATE read')
+        if isinstance(path,bytes): raise RuntimeError('PRIVATE byte path')
+        if isinstance(path,str) and path.startswith('/'):
+            if path not in physical_reads or not flags & os.O_NOFOLLOW: raise RuntimeError('PRIVATE read')
+            value=os.stat(path,follow_symlinks=False)
+            if os.path.realpath(path)!=path or (value.st_dev,value.st_ino,value.st_mode)!=physical_reads[path]:
+                raise RuntimeError('PRIVATE substituted fixture')
 original=collect
 def collect(cancelled):
     sys.addaudithook(audit)
@@ -447,6 +460,74 @@ def collect(cancelled):
                 line2,code2=existing.BootstrapTest.through_runner(self,suffix)
             self.assertEqual(code2,0); parsed=json.loads(line2[len(operation.PREFIX):])
             self.assertEqual(parsed['files'],value['files'])
+
+    def test_positive_fixture_runner_temp_and_tmpdir_selection(self):
+        # On hosted Linux this is /home/runner/work/_temp; local Linux controls
+        # also run the entire selfcheck block under that synthetic mount.
+        with tempfile.TemporaryDirectory(dir=existing.fixture_parent()) as parent:
+            first=Path(parent)/'runner'; second=Path(parent)/'tmp'
+            first.mkdir(); second.mkdir()
+            for runner_temp,tmpdir,expected in ((str(first),str(second),first),('',str(second),second)):
+                with self.subTest(selection='RUNNER_TEMP' if runner_temp else 'TMPDIR'):
+                    with patch.dict(os.environ,dict(RUNNER_TEMP=runner_temp,TMPDIR=tmpdir)),patch.object(tempfile,'tempdir',None):
+                        self.assertEqual(existing.fixture_parent(),str(expected.resolve()))
+                        self.test_actual_linux_bootstrap_full_closure_no_tools_or_private_reads()
+
+    def test_positive_fixture_audit_rejects_neighbor_and_substitution(self):
+        # Fault injection uses the exact positive suffix and actual child audit.
+        invoke=self.invoke
+        capture=captured_fixture_source
+        with tempfile.TemporaryDirectory(dir=existing.fixture_parent()) as owned:
+            for case in ('neighbor','bytes_neighbor','prefix_neighbor','substituted_maps','replaced_maps','substituted_root','forbidden_effect'):
+                with self.subTest(case=case):
+                    roots=[]
+                    def remember(repository,directory):
+                        roots.append(Path(directory)); return capture(repository,directory)
+                    def attempt(suffix,**kwargs):
+                        extra=("\nreal_os=base.os\ncase="+repr(case)+"\n"+'''
+neighbor=os.root+'-neighbor'
+with open(neighbor,'wb') as stream: stream.write(b'PRIVATE-neighbor-canary')
+if case=='substituted_maps':
+    real_os.rename(os.root+'/proc/self/maps',os.root+'/proc/self/maps-old')
+    real_os.symlink(neighbor,os.root+'/proc/self/maps')
+if case=='replaced_maps':
+    real_os.rename(os.root+'/proc/self/maps',os.root+'/proc/self/maps-old')
+    with open(os.root+'/proc/self/maps','wb') as stream: stream.write(b'PRIVATE replacement')
+if case=='substituted_root':
+    real_os.rename(os.root,os.root+'-old')
+    real_os.symlink(os.root+'-old',os.root)
+original_collect=collect
+def collect(cancelled):
+    sys.addaudithook(audit)
+    if case in ('neighbor','bytes_neighbor','prefix_neighbor','forbidden_effect'):
+        try:
+            if case=='forbidden_effect':
+                real_os.mkdir(os.root+'/forbidden-directory')
+            else:
+                target=neighbor if case in ('neighbor','bytes_neighbor') else os.root+'/../'+os.root.rsplit('/',1)[1]+'-neighbor'
+                if case=='bytes_neighbor': target=target.encode()
+                fd=real_os.open(target,real_os.O_RDONLY|real_os.O_NOFOLLOW)
+                real_os.close(fd)
+        except RuntimeError:
+            return refused('io')
+        return refused('bounds')  # Audit bypass must NOT look like expected refusal.
+    return original_collect(cancelled)
+''').encode()
+                        try:
+                            result=invoke(suffix+extra,expected_code=1)
+                            self.assertEqual(result,(operation.refused('io').decode().strip(),1))
+                            self.assertNotIn('PRIVATE',result[0])
+                        finally:
+                            # Outside the child audit, restore only this owned
+                            # synthetic root so TemporaryDirectory can remove it.
+                            root=roots[-1]
+                            if case=='substituted_root' and root.is_symlink():
+                                root.unlink(); root.with_name(root.name+'-old').rename(root)
+                        raise RuntimeError('synthetic verified refusal')
+                    with patch.object(existing,'fixture_parent',lambda:owned), \
+                         patch(__name__+'.captured_fixture_source',remember), \
+                         patch.object(self,'invoke',attempt),self.assertRaisesRegex(RuntimeError,'synthetic verified refusal'):
+                        self.test_actual_linux_bootstrap_full_closure_no_tools_or_private_reads()
 
     def test_hosted_plugin_size_refusal_and_positive_fixture_isolation(self):
         versions=dict(l.split('=',1) for l in operation.PACKAGE_TEXT.splitlines())
