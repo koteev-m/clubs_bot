@@ -2603,7 +2603,7 @@ class ReleaseStatusWorkflowContractTest(unittest.TestCase):
         canonical = WORKFLOW.read_text(encoding="utf-8")
         removed = canonical.replace('          test "$GITHUB_REF" = "refs/heads/main"\n', "", 1)
         self.assert_workflow_rejected(removed, "main/ref/default-branch guard changed")
-        late = canonical.replace("    steps:\n      - name: Require main dispatch\n", "    steps:\n      - name: Premature secret setup\n        uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387\n        with:\n          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}\n      - name: Require main dispatch\n", 1)
+        late = canonical.replace("    steps:\n      - name: Require main dispatch\n", "    steps:\n      - name: Premature secret setup\n        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555\n        with:\n          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}\n      - name: Require main dispatch\n", 1)
         self.assert_workflow_rejected(late, "main dispatch guard must be the first executable step")
 
     def test_job_privilege_boundary_regressions_are_rejected(self) -> None:

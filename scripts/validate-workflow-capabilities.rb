@@ -36,7 +36,7 @@ module WorkflowCapabilityPolicy
   SETUP_JAVA_ACTION = "actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73"
   DEPENDENCY_SUBMISSION_ACTION =
     "gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92"
-  SSH_AGENT_ACTION = "webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387"
+  SSH_AGENT_ACTION = "webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555"
   PUBLISHER_LOGIN_ACTION = "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567"
   COSIGN_INSTALLER_ACTION = "sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409"
   TRIVY_ACTION = "aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1"

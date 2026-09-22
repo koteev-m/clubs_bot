@@ -5,6 +5,15 @@ Use the existing Docker Desktop runtime. Dependency preparation needs network;
 test execution has none, no Docker socket, no credentials, a read-only root and
 RAM-only owned fixture directories. No daemon/Engine calls are made by Compose.
 
+## Historical ARM64 reference
+
+The following recipe and original evidence apply to the pre-integration source
+revision `67cabe65843fe803f53213aac4d3d5c3fdd73b58`. Export that revision for
+historical ARM tests; current production sources intentionally reject aarch64.
+`arm64-runtime-reference.json` preserves the exact former production manifest,
+SHA-256 `d2c7794fa073ab310df46a80880a83fceb0a2eb450aae410e123266f07c83903`.
+The Dockerfile and `packages.txt` remain unchanged.
+
 The image uses the official Ubuntu 24.04 arm64 digest in `Dockerfile`. APT uses
 the image's Ubuntu signing keys; exact direct versions and the full resulting
 package inventory (`packages.txt`) are checked. Changed dependency resolution
@@ -72,7 +81,7 @@ python3 -B scripts/tests/test_stage_compose_env_semantic.py ProtocolTest SourceT
 These selectors are not Linux semantic proof. Missing/unsupported runtime, or
 any failed Linux test, cannot be replaced by mocks or reported as semantic PASS.
 
-## amd64 local prototype — blocked on emulation, not stage-ready
+## Historical amd64 local prototype — blocked on emulation, not stage-ready
 
 The original experiment left the ARM64 materials, production `scripts/deploy`
 and workflows unchanged. The subsequent test-only CI wrapper is described below. `amd64-runtime-candidate.json` is a **test candidate**, never an
@@ -141,7 +150,7 @@ the network ban and every checksum, produced the two successful clean builds.
 
 In each immutable networkless image, run `python3 -I -S -B /derive.py /reference.json`
 with read-only mounts of `derive-amd64-manifest.py` and the **unchanged ARM64**
-production manifest. The script translates only the architecture-specific paths
+archived `arm64-runtime-reference.json` manifest (originally production). The script translates only the architecture-specific paths
 in that fixed 191-file closure and hashes the verified installed artifacts.
 Missing/renamed files refuse; no discovery, pruning or runtime auto-approval.
 It retains Python source/cache/extension files, Ruby/Psych, loader/shared-library
@@ -223,7 +232,7 @@ weaken tracing/assertions, or add emulator files to production trust to obtain g
 No JVM, full delegated selfcheck or old ARM suites were repeated: their production
 bytes/wiring are unchanged and these tests are an unintegrated prototype.
 
-### Native CI wrapper (local preparation; no hosted result yet)
+### Native CI wrapper and production-profile integration
 
 The existing [Tests workflow](../../../.github/workflows/tests.yml) now includes
 one `amd64-runtime-prototype` job, only on `workflow_dispatch`, using the standard
@@ -275,10 +284,15 @@ The job performs **one** clean `--platform linux/amd64 --pull=false --no-cache
 --network=none` build, then compares the full installed package inventory and
 all 191 manifest files/four aliases byte-for-byte with the frozen candidates.
 A mismatch records an expected/actual diff and fails, with no baseline update.
-It archives the dispatched Git revision outside the checkout and applies exactly
-the three experimental changes documented above, checking each original source
-SHA and replacement count first. The full experimental diff is an artifact.
-Production files in the checkout are never edited or mounted in containers.
+It archives the dispatched Git revision outside the checkout. Since production
+integration, `integrated_diff` verifies that the exported runtime is byte-for-byte
+the exact three native-tested adaptations of the hash-pinned ARM sources; inverse
+replacement and the archived ARM manifest must recover all original hashes.
+It never changes this export. The `experiment.patch` artifact is now the historical
+ARM-to-production comparison, not a modification performed by the current run.
+The old `adapt` function remains a historical regression oracle; no profile
+selector, fallback or baseline update is added. Production checkout files are
+never edited or mounted in containers.
 
 The runtime gate and full planner/context/semantic suites execute separately on
 synthetic fixtures, without changed assertions. Containers use read-only root,
@@ -306,21 +320,32 @@ Local regression command: `python3 -B scripts/tests/test_amd64_ci_harness.py`.
 These controls cover wiring, preserved old jobs, privilege/runner refusals,
 locked inputs, strict comparisons, three source changes, malformed/concatenated
 indexes, command failures/timeouts and artifact bounds. They are also part of the
-existing quality-gate selfcheck. They do **not** prove a native runtime PASS.
+existing quality-gate selfcheck. Its stale two-job Tests expectation is now the
+exact existing three-job inventory; native job/runner/trigger mutations must fail,
+and unit/integration guards remain intact. These controls do **not** prove a native
+runtime PASS.
 
 The two amd64 manifest checksum false positives now have their own exact-path,
 rule-scoped `generic-api-key` AND/whole-line exceptions in `.gitleaks.toml`.
 They use the same verified Python file digests from both prior builds; default
 rules and the production/ARM exceptions remain. Real pinned Gitleaks regressions
-exercise both manifests, altered digest/key/path, extra same-line token and
+exercise production, amd64 candidate and archived ARM manifests, altered digest/key/path, extra same-line token and
 independent generic/provider canaries, plus complete-candidate directory/history
 and shallow synthetic merge scans. Missing/unwritable reports remain failures.
 
-The earlier Rosetta **BLOCKED** result remains historical evidence. Native build
-reproducibility, runtime/maps acceptance, decoded syscall audit and all positive
-semantic integration outcomes remain **unverified until the authorized native
-job actually runs**. Neither a green wrapper test nor a future native PASS approves
-production pins, existing stage closure, server installation or semantic dispatch.
+The earlier Rosetta **BLOCKED** result remains historical evidence. Native Tests
+[run 35679432271](https://github.com/koteev-m/clubs_bot/actions/runs/35679432271),
+attempt 1, workflow_dispatch on `67cabe65843fe803f53213aac4d3d5c3fdd73b58`,
+completed successfully in unit-tests, integration-tests and amd64-runtime-prototype.
+The native runtime gate passed; planner 33/33, context/syscall 34/34 and semantic
+15/15 passed with zero skips. Manifest/packages matched the frozen candidates;
+real decoded `/proc/fd` traces excluded original-file reopens after capture.
+The current local production candidate adopts exactly that manifest and the two
+code substitutions above. Inputs, package inventory and candidate bytes are
+unchanged. This native evidence is reused for those adaptations; local protocol,
+source/pin/harness/security checks cover the integration. The available Mac uses
+Rosetta for amd64: it cannot replace native positive runtime/maps/syscall evidence.
+No new hosted or credentialed run is implied.
 
 ### Stage is a separate decision
 
@@ -332,6 +357,9 @@ loader/cache and command aliases, plus applicability of the existing private-roo
 memfd/procfs and capture predicates. Package names/version strings are insufficient.
 Adding Ruby/Psych or standalone Compose requires a separately reviewed installation
 and dependency-impact decision; it may change libraries and `ld.so.cache`.
-No server install script, production profile selection, writer, pins update or
-semantic dispatch is included. The known pinned SSH-agent cleanup export-name
-defect remains separate and unresolved before a future credentialed invocation.
+No server install script, production profile selection, writer or semantic
+dispatch is included. The production profile is a local reviewed-code candidate,
+not approval of existing stage bytes. The SSH-agent cleanup export-name defect
+is separately addressed locally by the exact upstream v0.10.0 pin; offline source
+and dist-module tests use synthetic command stubs, without keys or a real agent.
+No new credentialed invocation has verified that migration on GitHub/stage.

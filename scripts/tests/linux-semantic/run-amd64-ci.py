@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One fixed native experiment. No runtime selection, baseline update or stage path."""
+"""Fixed native production-profile checks; historical experiment retained below."""
 import difflib
 import hashlib
 import json
@@ -50,6 +50,7 @@ def native_guard(system, machine, runner_arch, docker_arch):
 
 
 def adapt(export, candidate):
+    # Historical pre-integration experiment only; never used on current sources.
     folder = export / 'scripts/deploy'
     originals = {name: (folder / name).read_bytes() for name in ORIGINAL}
     for name, expected in ORIGINAL.items():
@@ -71,6 +72,35 @@ def adapt(export, candidate):
             tofile='b/scripts/deploy/' + name))
         (folder / name).write_bytes(updates[name])
     return diff
+
+
+def integrated_diff(export, candidate):
+    """Prove current bytes are exactly the three native-tested adaptations.
+
+    Return the historical comparison for evidence, without modifying the export.
+    Inverse checks are anchored to the original source hashes, not current output.
+    """
+    folder = export / 'scripts/deploy'
+    reference = (HERE / 'arm64-runtime-reference.json').read_bytes()
+    originals = {'stage-compose-env-semantic-runtime.json': reference}
+    replacements = {
+        'stage-compose-env-semantic-operation.py': (b"platform.machine() == 'aarch64'", b"platform.machine() == 'x86_64'"),
+        'stage-compose-env-file-plan.py': (b'/usr/lib/aarch64-linux-gnu/ruby/3.2.0', b'/usr/lib/x86_64-linux-gnu/ruby/3.2.0'),
+    }
+    for name, (before, after) in replacements.items():
+        actual = (folder / name).read_bytes()
+        if actual.count(after) != 1 or before in actual:
+            raise ValueError('integrated source precondition: ' + name)
+        originals[name] = actual.replace(after, before)
+    for name, expected in ORIGINAL.items():
+        if digest(originals[name]) != expected:
+            raise ValueError('integrated source precondition: ' + name)
+    if digest(candidate) != '93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008':
+        raise ValueError('native-tested candidate changed')
+    exact(candidate, (folder / 'stage-compose-env-semantic-runtime.json').read_bytes(), 'production manifest')
+    return ''.join(''.join(difflib.unified_diff(originals[name].decode().splitlines(True),
+        (folder / name).read_text().splitlines(True), fromfile='a/scripts/deploy/' + name,
+        tofile='b/scripts/deploy/' + name)) for name in sorted(originals))
 
 
 def container(image, *command, mounts=(), fixtures=False):
@@ -205,7 +235,7 @@ def main():
         material = work / 'material'
         material.mkdir(mode=0o755)
         for name, source in (('derive.py', HERE / 'derive-amd64-manifest.py'),
-                             ('reference.json', ROOT / 'scripts/deploy/stage-compose-env-semantic-runtime.json')):
+                             ('reference.json', HERE / 'arm64-runtime-reference.json')):
             shutil.copyfile(source, material / name)
         actual_manifest = subprocess.check_output(container(image, 'python3', '-I', '-S', '-B',
             '/material/derive.py', '/material/reference.json', mounts=((material, '/material'),)), timeout=90)
@@ -227,7 +257,7 @@ def main():
         export.mkdir(mode=0o755)
         with tarfile.open(archive) as tar:
             tar.extractall(export, filter='data')
-        (evidence / 'experiment.patch').write_text(adapt(export, (HERE / 'amd64-runtime-candidate.json').read_bytes()))
+        (evidence / 'experiment.patch').write_text(integrated_diff(export, (HERE / 'amd64-runtime-candidate.json').read_bytes()))
         return run_suites(image, export, evidence, status)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         status['harness'] = 1

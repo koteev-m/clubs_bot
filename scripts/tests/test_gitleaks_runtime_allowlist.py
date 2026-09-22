@@ -16,6 +16,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path('scripts/deploy/stage-compose-env-semantic-runtime.json')
+ARM64_MANIFEST = Path('scripts/tests/linux-semantic/arm64-runtime-reference.json')
 AMD64_MANIFEST = Path('scripts/tests/linux-semantic/amd64-runtime-candidate.json')
 IMAGE = 'ghcr.io/gitleaks/gitleaks@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854'
 RUNTIME_PATHS = (
@@ -83,7 +84,7 @@ def scanner(repo, output, *, directory=False):
 
 class RuntimeChecksumAllowlistTest(unittest.TestCase):
     manifest = MANIFEST
-    lines = (65, 140)
+    lines = (39, 114)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='clb91-gitleaks-')
         self.addCleanup(self.temp.cleanup)
@@ -111,8 +112,8 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         rule = config['rules'][0]
         self.assertEqual(set(rule), {'id', 'allowlists'})
         self.assertEqual(rule['id'], 'generic-api-key')
-        self.assertEqual(len(rule['allowlists']), 2)
-        for allowlist, name in zip(rule['allowlists'], (MANIFEST, AMD64_MANIFEST)):
+        self.assertEqual(len(rule['allowlists']), 3)
+        for allowlist, name in zip(rule['allowlists'], (MANIFEST, AMD64_MANIFEST, ARM64_MANIFEST)):
             self.assertEqual(set(allowlist), {'description', 'condition', 'paths', 'regexTarget', 'regexes'})
             self.assertEqual(allowlist['condition'], 'AND')
             self.assertEqual(allowlist['paths'], ['^' + str(name).replace('.', r'\.') + '$'])
@@ -229,6 +230,11 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
 class Amd64ChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
     manifest = AMD64_MANIFEST
     lines = (39, 114)
+
+
+class Arm64ReferenceChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
+    manifest = ARM64_MANIFEST
+    lines = (65, 140)
 
 
 class CandidateScanTest(unittest.TestCase):

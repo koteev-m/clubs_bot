@@ -66,6 +66,9 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(text.count(command), 1)
         self.assertIn('python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"', text)
         self.assertLess(text.index(command), text.index('validate_keyless_action_inventory()'))
+        self.assertIn("$'unit-tests\\nintegration-tests\\namd64-runtime-prototype'", text)
+        self.assertNotIn("$'unit-tests\\nintegration-tests'", text)
+        self.assertIn('assert_tests_workflow_contract_rejected "tests-native-$native_mutation"', text)
 
     def test_architecture_fail_closed(self):
         ci.native_guard('Linux', 'x86_64', 'X64', 'x86_64')
@@ -132,15 +135,31 @@ class HarnessTest(unittest.TestCase):
             for name in ci.ORIGINAL:
                 (folder / name).write_bytes((ROOT / 'scripts/deploy' / name).read_bytes())
             candidate = (HERE / 'amd64-runtime-candidate.json').read_bytes()
+            actual = {name: (folder / name).read_bytes() for name in ci.ORIGINAL}
+            integrated = ci.integrated_diff(export, candidate)
+            self.assertEqual(actual, {name: (folder / name).read_bytes() for name in ci.ORIGINAL})
+            # Reconstruct only the exact historical inputs; adapt checks all old hashes.
+            for name, before, after in (
+                ('stage-compose-env-semantic-operation.py', b"platform.machine() == 'x86_64'", b"platform.machine() == 'aarch64'"),
+                ('stage-compose-env-file-plan.py', b'/usr/lib/x86_64-linux-gnu/ruby/3.2.0', b'/usr/lib/aarch64-linux-gnu/ruby/3.2.0'),
+            ):
+                (folder / name).write_bytes(actual[name].replace(before, after))
+            (folder / 'stage-compose-env-semantic-runtime.json').write_bytes((HERE / 'arm64-runtime-reference.json').read_bytes())
             diff = ci.adapt(export, candidate)
+            self.assertEqual(diff, integrated)
+            self.assertEqual(actual, {name: (folder / name).read_bytes() for name in ci.ORIGINAL})
             self.assertEqual(diff.count('\n+++ b/scripts/deploy/'), 3)
             self.assertEqual((folder / 'stage-compose-env-semantic-runtime.json').read_bytes(), candidate)
             self.assertIn("platform.machine() == 'x86_64'", (folder / 'stage-compose-env-semantic-operation.py').read_text())
             self.assertIn('/usr/lib/x86_64-linux-gnu/ruby/3.2.0', (folder / 'stage-compose-env-file-plan.py').read_text())
             with self.assertRaisesRegex(ValueError, 'precondition'):
                 ci.adapt(export, candidate)
-        for name, expected in ci.ORIGINAL.items():
-            self.assertEqual(ci.digest((ROOT / 'scripts/deploy' / name).read_bytes()), expected)
+            for name in ci.ORIGINAL:
+                with self.subTest(changed=name):
+                    (folder / name).write_bytes(actual[name] + b'\n')
+                    with self.assertRaises(ValueError):
+                        ci.integrated_diff(export, candidate)
+                    (folder / name).write_bytes(actual[name])
 
     def test_container_isolation_and_fixed_suites(self):
         argv = ci.container('test:image', 'true', mounts=((Path('/disposable'), '/source'),), fixtures=True)
