@@ -160,7 +160,7 @@ class Runtime:
                    and all(type(k) is str and type(v) is str for k, v in aliases.items()))
 
     def open(self):
-        self.observe('platform', lambda: self.check(sys.platform == 'linux' and platform.machine() == 'aarch64'
+        self.observe('platform', lambda: self.check(sys.platform == 'linux' and platform.machine() == 'x86_64'
                      and sys.flags.isolated and sys.flags.no_site))
         if not self.observe('manifest', self.manifest):
             self.require_compatible()

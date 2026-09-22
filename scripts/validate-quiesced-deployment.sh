@@ -551,7 +551,7 @@ unless ordered_helper_indices.none?(&:nil?) &&
 end
 unless agent == {
   "name" => "Setup deployment SSH principal",
-  "uses" => "webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387",
+  "uses" => "webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555",
   "with" => {"ssh-private-key" => "${{ secrets.SSH_PRIVATE_KEY }}"},
 }
   reject_status_contract("deployment SSH principal setup changed")
@@ -596,7 +596,7 @@ puts "read-only-status-contract: workflow verified"
 RUBY
 
   [ "$(sha256sum "$status_workflow" | awk '{print $1}')" = \
-    "9447edff259b1fce562b256531a6557ca6318b0625af27e7562f6beec3a822db" ] ||
+    "9791933b5847858c2d0db6b81305dee2dc6070a09f8ce7b7ff92a57842fe6c9f" ] ||
     fail_status_contract "workflow content SHA-256 changed outside the approved contract"
 
   remote_wrapper="$(awk '/<<'\''REMOTE_STATUS'\''/ { inside = 1; next } inside && /^REMOTE_STATUS$/ { exit } inside { print }' "$status_runner")"

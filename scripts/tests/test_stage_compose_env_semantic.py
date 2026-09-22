@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,45 @@ def load(name):
 
 runner = load('stage-compose-env-semantic.py')
 operation = load('stage-compose-env-semantic-operation.py')
+
+
+class RuntimeProfileTest(unittest.TestCase):
+    def test_exact_native_profile(self):
+        raw = (ROOT/'scripts/deploy/stage-compose-env-semantic-runtime.json').read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         '93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008')
+        self.assertEqual(raw, (ROOT/'scripts/tests/linux-semantic/amd64-runtime-candidate.json').read_bytes())
+        manifest = json.loads(raw)
+        self.assertEqual({k: v for k, v in manifest.items() if k not in ('files', 'aliases')},
+                         dict(format=1, architecture='x86_64', python='3.12.3', ruby='3.2.3', psych='5.0.1', compose='5.1.1'))
+        self.assertEqual(len(manifest['files']), 191)
+        self.assertEqual(len(manifest['aliases']), 4)
+        self.assertIn('/usr/lib/x86_64-linux-gnu/ruby/3.2.0/psych.so', manifest['files'])
+
+    def test_platform_predicate_remains_single_architecture_and_isolated_linux(self):
+        # Execute the real open() platform guard only. This is portable fault
+        # injection, not a claim that the host has the approved runtime closure.
+        class EndPlatform(Exception): pass
+        planner = load('stage-compose-env-file-plan.py')
+        for system, machine, isolated, no_site, expected in (
+            ('linux', 'x86_64', 1, 1, 'pass'), ('linux', 'aarch64', 1, 1, 'fail'),
+            ('linux', 's390x', 1, 1, 'fail'), ('darwin', 'x86_64', 1, 1, 'fail'),
+            ('linux', 'x86_64', 0, 1, 'fail'), ('linux', 'x86_64', 1, 0, 'fail'),
+        ):
+            with self.subTest(system=system, machine=machine, isolated=isolated, no_site=no_site):
+                runtime = operation.Runtime(lambda: False)
+                observe = runtime.observe
+                def first(guard, check):
+                    if guard != 'platform': raise EndPlatform()
+                    return observe(guard, check)
+                fake_sys = SimpleNamespace(platform=system, flags=SimpleNamespace(isolated=isolated, no_site=no_site))
+                with patch.object(operation, 'P', planner), patch.object(operation, 'sys', fake_sys), \
+                     patch.object(operation.platform, 'machine', return_value=machine), \
+                     patch.object(runtime, 'observe', first):
+                    with self.assertRaises(EndPlatform): runtime.open()
+                self.assertEqual(runtime.evidence.statuses()['platform'], expected)
+                self.assertEqual(runtime.evidence.capture, 'not_started')
+                self.assertEqual(runtime.held, [])
 
 
 class ProtocolTest(unittest.TestCase):
@@ -308,6 +348,50 @@ def diagnose(principal,cancelled):
                     self.assertIn('reason=runtime phase=initial', line)
                     self.assertIn('private_capture=not_started', line)
                     self.assertFalse(marker.exists())
+
+    def test_corrupt_cache_and_library_refuse_at_integrity_before_capture(self):
+        for ending in ('.pyc', '/libc.so.6'):
+            sources = dict(self.sources)
+            manifest = json.loads(sources['stage-compose-env-semantic-runtime.json'])
+            path = next(p for p in manifest['files'] if p.endswith(ending))
+            manifest['files'][path] = '0'*64
+            sources['stage-compose-env-semantic-runtime.json'] = json.dumps(manifest).encode()
+            suffix = b'''
+_original=diagnose
+def diagnose(principal, cancelled):
+    def forbidden(*args, **kwargs): raise AssertionError('PRIVATE capture or tool executed')
+    Runtime.ruby_probe=forbidden
+    D.ReadOnlyCapture=forbidden
+    global interpolation_context
+    interpolation_context=forbidden
+    return _original(principal, cancelled)
+'''
+            with self.subTest(ending=ending):
+                line, code = self.invoke(suffix, sources=sources)
+                self.assertEqual(code, 1)
+                self.assertIn('reason=runtime phase=initial guard=integrity private_capture=not_started', line)
+                self.assertIn('integrity=fail', line)
+                self.assertNotIn('PRIVATE', line)
+
+    def test_wrong_architecture_refuses_before_private_capture(self):
+        for machine in ('aarch64', 's390x'):
+            suffix = ('''
+_original=diagnose
+def diagnose(principal, cancelled):
+    platform.machine=lambda: %r
+    def forbidden(*args, **kwargs): raise AssertionError('PRIVATE capture or tool executed')
+    Runtime.ruby_probe=forbidden
+    D.ReadOnlyCapture=forbidden
+    global interpolation_context
+    interpolation_context=forbidden
+    return _original(principal, cancelled)
+''' % machine).encode()
+            with self.subTest(machine=machine):
+                line, code = self.through_runner(suffix)
+                self.assertEqual(code, 1)
+                self.assertIn('reason=runtime phase=initial guard=platform private_capture=not_started', line)
+                self.assertIn('platform=fail', line)
+                self.assertNotIn('PRIVATE', line)
 
     def test_initial_compatibility_matrix_no_unverified_probe_or_capture(self):
         faults = {

@@ -243,6 +243,12 @@ fi
 echo "[selfcheck] pinned gitleaks runtime checksum exceptions"
 python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"
 
+echo "[selfcheck] native amd64 prototype CI wiring controls"
+python3 -B "$ROOT_DIR/scripts/tests/test_amd64_ci_harness.py"
+
+echo "[selfcheck] canonical SSH action pin and offline post-cleanup regression"
+python3 -B "$ROOT_DIR/scripts/tests/test_ssh_agent_pin.py"
+
 fake_docker="$TMP_DIR/fake-docker"
 fake_docker_args="$TMP_DIR/fake-docker-args.txt"
 fake_docker_log="$TMP_DIR/fake-docker.log"
@@ -1522,8 +1528,8 @@ validate_tests_workflow_contract() {
   ' "$file")"; then
     fail "Tests workflow jobs block is missing or ambiguous: $file"
   fi
-  if [ "$jobs_contract" != $'unit-tests\nintegration-tests' ]; then
-    fail "Tests workflow must contain exactly unit-tests and integration-tests: $file"
+  if [ "$jobs_contract" != $'unit-tests\nintegration-tests\namd64-runtime-prototype' ]; then
+    fail "Tests workflow must contain exactly unit-tests, integration-tests and amd64-runtime-prototype: $file"
   fi
 
   for job_name in unit-tests integration-tests; do
@@ -1532,6 +1538,11 @@ validate_tests_workflow_contract() {
     assert_job_has_no_direct_key "$file" "$job_name" "continue-on-error"
     assert_job_has_no_direct_key "$file" "$job_name" "permissions"
   done
+  assert_job_line "$file" "amd64-runtime-prototype" "    if: github.event_name == 'workflow_dispatch'"
+  assert_job_line "$file" "amd64-runtime-prototype" "    runs-on: ubuntu-24.04"
+  assert_job_line "$file" "amd64-runtime-prototype" "    timeout-minutes: 75"
+  assert_job_line "$file" "amd64-runtime-prototype" "      contents: read"
+  assert_job_has_no_direct_key "$file" "amd64-runtime-prototype" "environment"
   if grep -Fq "continue-on-error:" "$file"; then
     fail "Tests workflow contains a fail-open continue-on-error contract: $file"
   fi
@@ -4489,6 +4500,17 @@ assert_tests_workflow_contract_rejected \
   "$tests_integration_guard_removed_fixture"
 
 echo "quality-gate: native Gradle repository policy and Tests workflow regressions verified"
+
+for native_mutation in job runner trigger; do
+  native_fixture="$TMP_DIR/tests-native-$native_mutation.yml"
+  case "$native_mutation" in
+    job) native_before="  amd64-runtime-prototype:"; native_after="  unexpected-native-job:" ;;
+    runner) native_before="    runs-on: ubuntu-24.04"; native_after="    runs-on: ubuntu-latest" ;;
+    trigger) native_before="    if: github.event_name == 'workflow_dispatch'"; native_after="    if: true" ;;
+  esac
+  replace_exact_line_once "$tests_workflow" "$native_fixture" "$native_before" "$native_after"
+  assert_tests_workflow_contract_rejected "tests-native-$native_mutation" "$native_fixture"
+done
 
 detekt_report_probe="$TMP_DIR/detekt-report-contract.init.gradle"
 detekt_report_probe_manifest="$TMP_DIR/detekt-report-contract.manifest"
@@ -11724,7 +11746,7 @@ ruby "$ROOT_DIR/scripts/validate-lint-workflow.rb" "$ROOT_DIR/.github/workflows/
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_mode_repair.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_diagnostic.py"
 echo "[selfcheck] private semantic request/source/protocol regressions (offline Linux semantics: separate pinned harness)"
-PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_env_semantic.py" ProtocolTest SourceTest
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_env_semantic.py" RuntimeProfileTest ProtocolTest SourceTest
 echo "[selfcheck] fixed non-secret runtime inventory regressions"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_inventory.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"

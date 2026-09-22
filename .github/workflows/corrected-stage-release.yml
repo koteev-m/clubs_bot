@@ -150,7 +150,7 @@ jobs:
         CLB82_AUTHORIZED_ROOT_BINDING: "${{ vars.CLB82_AUTHORIZED_ROOT_BINDING }}"
       run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --validate-execution
     - name: Setup deployment SSH principal
-      uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387
+      uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555
       with:
         ssh-private-key: "${{ secrets.SSH_PRIVATE_KEY }}"
     - name: Execute bounded corrected helper

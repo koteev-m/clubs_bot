@@ -293,10 +293,21 @@ normalized JSON models pass reuse. Existing removal/explicit, priority,
 absent/null/empty/unset, dollars/escaping, future dotenv additions and negative
 context controls run on that backend. Equivalent remains snapshot-only.
 
-The reference [Linux harness](../../scripts/tests/linux-semantic/README.md) uses
-an official digest-pinned Ubuntu arm64 image, signed/pinned APT package inventory,
-and official Compose 5.1.1 Linux arm64 SHA-256
-`4b5c42952b7dd81f508d01a771df2a9e5dbffe9b8c5c7d983e738504ad38f056`.
+The current local production candidate uses the independently sourced, fixed
+Linux x86_64 closure from the [Linux harness](../../scripts/tests/linux-semantic/README.md):
+digest-pinned Ubuntu amd64, signed/pinned APT package metadata and official
+Compose 5.1.1 Linux x86_64 SHA-256
+`2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5`.
+The exact manifest SHA-256 is
+`93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008`.
+Native Tests [run 35679432271](https://github.com/koteev-m/clubs_bot/actions/runs/35679432271)
+on `67cabe65843fe803f53213aac4d3d5c3fdd73b58`, attempt 1, passed runtime,
+planner 33/33, context/syscall 34/34 and semantic 15/15, no skips. Production
+runtime behavior differs from the old profile only in the architecture predicate,
+Ruby architecture directory and manifest, exactly the three tested adaptations.
+The ARM64 Dockerfile/package evidence and
+[old manifest](../../scripts/tests/linux-semantic/arm64-runtime-reference.json)
+are retained as history, not a second accepted production profile.
 Python 3.12.3, Ruby 3.2.3 and bundled Psych 5.0.1 are the tested runtime; Ruby gems
 are disabled and the Linux parser load path is fixed to the two pinned standard
 library directories. The [runtime manifest](../../scripts/deploy/stage-compose-env-semantic-runtime.json)
@@ -311,8 +322,11 @@ files. The pinned Compose executable is a static Linux ELF (no interpreter).
 Version strings alone, missing tools, another architecture/build or an unavailable
 safe `/run/user/<uid>` root cannot authorize private reads. Root/kernel remain
 trusted system authorities; this is not hostile-root attestation or a tool installer.
-Stage's architecture, tools and applicability remain UNKNOWN. No tools may be
-installed/upgraded there by this channel. Container runtime is a local test facility,
+Historical inventory `35646675380` observed Ubuntu 24.04/x86_64/CPython 3.12.3,
+missing Ruby/Psych and standalone Compose in the checked locations, and a plugin
+with unknown version/provenance. The profile is partial and not approved; the
+full root-installed trusted closure and actual applicability remain unproven.
+No tools may be installed/upgraded there by this channel. Container runtime is a local test facility,
 not a new stage dependency.
 
 The separate [workflow](../../.github/workflows/stage-compose-env-semantic.yml)
@@ -409,7 +423,7 @@ Body <=512 bytes; authenticated frame <=4096. Unknown, extra/reordered/duplicate
 fields, startup output, bad authentication, replay or exit/body contradiction
 fail closed. No observed hashes, paths, architecture strings, usernames/IDs,
 values, YAML/model, exception text or child stderr are reportable. The map is
-compatibility evidence for the **unchanged** arm64 reference allowlist, not an
+compatibility evidence for the exact production reference allowlist, not an
 approval of the observed installation. No Engine queries, pulls, HTTP, lifecycle,
 writer/apply, root-binding, claim/resume or automatic continuation.
 
@@ -424,8 +438,9 @@ executable/library closure, safe-root availability or Ruby/Psych applicability.
 The subsequent user-provided run `35604124263` (number 2, attempt 1) returned
 `phase=initial guard=platform private_capture=not_started`, with aggregate
 prerequisites only. This run did not begin private capture or normalization, but
-does not identify architecture/distro/installed builds. The next evidence path
-is the separate non-secret inventory below, not another semantic invocation.
+does not identify architecture/distro/installed builds. The subsequently completed
+inventory `35646675380` adds the partial observations described above; they do not
+prove server identity or unchanged state between the two runs.
 Choosing/installing a server toolchain is a new operational decision;
 this channel never changes pins, installs tools, falls back, or probes stage here.
 
@@ -544,11 +559,27 @@ in the existing selfcheck, with 26 workflows and exact capability validation.
 
 Once authenticated inventory arrives, compare observed OS/arch/bootstrap,
 artifact placement/digests and reported package versions to the checker contract.
-Unknown observations remain explicit prerequisites. Choose one minimal compatible
-runtime adaptation for a separate reviewed change with trustworthy upstream
-artifacts and real Linux tests; do not approve pins from observed hashes or
+Unknown observations remain explicit prerequisites. The local x86_64 candidate
+uses independently verified upstream artifacts and native synthetic tests, not
+stage-observed hashes. The inventory consumer's reference hash changes with this
+production manifest; historical `same_digest`/`different_digest` fields still refer
+to the manifest at their run revision. This neither reruns inventory nor changes
+collector authority. Before any server work, separately review installation and
+its impact on libraries, caches and aliases; do not approve pins from observed hashes or
 reinstall stage to mimic the reference image. No semantic run, server install,
 private read, writer or lifecycle action follows automatically.
+
+The shared SSH action pin is locally migrated to
+`webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555`
+([v0.10.0](https://github.com/webfactory/ssh-agent/releases/tag/v0.10.0), Node 24).
+It descends from [v0.9.1](https://github.com/webfactory/ssh-agent/releases/tag/v0.9.1),
+which fixes custom-command cleanup; exact source and bundled post modules export
+and consume a defined `sshAgentCmd`. A bounded upstream fixture and offline
+[regression](../../scripts/tests/test_ssh_agent_pin.py) test default/custom cleanup
+without an agent or key, reproduce the old undefined-command failure and reject
+old pins in all active credentialed workflows. Only the action revision changes;
+permissions, Environment, host-key checks, secrets and one-transport contracts do
+not. This has not been exercised in a new credentialed hosted run.
 
 ### CLB-91 aggregate Compose diagnostics and local env-file structural extension
 

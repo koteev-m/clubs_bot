@@ -36,7 +36,7 @@ module WorkflowCapabilityPolicy
   SETUP_JAVA_ACTION = "actions/setup-java@b36c23c0d998641eff861008f374ee103c25ac73"
   DEPENDENCY_SUBMISSION_ACTION =
     "gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92"
-  SSH_AGENT_ACTION = "webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387"
+  SSH_AGENT_ACTION = "webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555"
   PUBLISHER_LOGIN_ACTION = "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567"
   COSIGN_INSTALLER_ACTION = "sigstore/cosign-installer@1aa8e0f2454b781fbf0fbf306a4c9533a0c57409"
   TRIVY_ACTION = "aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1"
@@ -2256,8 +2256,15 @@ module WorkflowCapabilityPolicy
         if path == RELEASE_STATUS_WORKFLOW && !job.key?("permissions")
           reject("#{context}: release-status jobs require job-level permission isolation")
         end
-        if job.key?("steps") && job["runs-on"] != "ubuntu-latest"
-          reject("#{context}: jobs with steps must use an ephemeral ubuntu-latest runner")
+        # One manual, uncredentialed native prototype pins the standard x64 OS.
+        # Effective permissions remain the existing exact contents: read policy.
+        native_prototype = path == ".github/workflows/tests.yml" && job_name == "amd64-runtime-prototype"
+        expected_runner = native_prototype ? "ubuntu-24.04" : "ubuntu-latest"
+        if native_prototype && job["if"] != "github.event_name == 'workflow_dispatch'"
+          reject("#{context}: native prototype must be manual-only")
+        end
+        if job.key?("steps") && job["runs-on"] != expected_runner
+          reject("#{context}: jobs with steps must use an ephemeral #{expected_runner} runner")
         end
         validate_environment(path, job_name, job)
         validate_deploy_job_contract(path, job_name, job)
