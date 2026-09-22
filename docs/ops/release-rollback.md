@@ -581,6 +581,119 @@ old pins in all active credentialed workflows. Only the action revision changes;
 permissions, Environment, host-key checks, secrets and one-transport contracts do
 not. This has not been exercised in a new credentialed hosted run.
 
+### CLB-91 bounded runtime closure feasibility (local preparation)
+
+PR #514 is merged at `a436f74632acb2af2df88aeb06fc6cdb6df4802b`, tree
+`cb80285b4d71a386ab73338ee82334fc4d0145a2`. User-supplied terminal evidence for
+manual Tests `35686542517`, attempt 1 / `63ad587bd694a5e79ccd5efe4dcf99c3aa1dfaa9`,
+is runtime 1/1, planner 33/33, context 34/34 and semantic 19/19 PASS, no skips;
+PR CI and 15 post-merge workflows succeeded. This is synthetic tool evidence,
+not installed stage closure or recovery authority. The original inventory
+`35646675380` remains a spent one-shot, partial observed profile.
+
+The new [workflow](../../.github/workflows/stage-runtime-feasibility.yml),
+[consumer](../../scripts/deploy/stage-runtime-feasibility.py) and
+[collector](../../scripts/deploy/stage-runtime-feasibility-operation.py) are
+**local preparation only**. A separate workflow is necessary because the old
+inventory authorization/read set must not silently expand. Exact capability
+validation registers only this main/initial-attempt operation. Workflow inventory
+is now 27; prior counts above remain historical. The only input is
+`confirmation=CLB-91:35646675380:runtime-feasibility`. That token does not supply
+human authorization, and old inventory/semantic confirmations cannot select it.
+No semantic, installer, writer, binding or recovery continuation exists.
+
+Finite source/read allowlist (no caller paths or filesystem discovery):
+
+| Object | Limit / interpretation |
+| --- | --- |
+| All 191 `files` and four `aliases` of the unchanged production manifest | Manifest SHA-256 `93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008`; safe regular-file metadata and SHA-256, compared per exact path. Aliases disclose only an approved target or `outside_allowlist`, never an arbitrary observed target; targets are never followed for content reads. `/bin` may only be the root-owned link to `/usr/bin`. |
+| Six recovery-tool slots | `/usr/bin/docker`, `/usr/local/bin/docker`, `/usr/bin/docker-compose`, `/usr/lib/docker/cli-plugins/docker-compose`, `/usr/libexec/docker/cli-plugins/docker-compose`, `/usr/local/lib/docker/cli-plugins/docker-compose`. Strict regular system artifacts; no symlink following, execution or implicit plugin search. Observed hash does not approve Docker CLI/plugin. |
+| `/var/lib/dpkg/status` | At most 4 MiB, 8192 stanzas, 64 KiB/stanza. Only the 37 literal `PACKAGES` in the collector: Python packages, Ruby/Psych, directly relevant runtime libraries/cache owner, dash/util-linux and five Docker/Compose package names. Output status/version/architecture and dpkg selection/hold; no package-manager command, scripts, database dump or omitted-record inference when metadata is unavailable. Version grammar is bounded to 64 ASCII characters. |
+| Accepted isolated bootstrap | Fixed memory fields for OS/arch/bits/implementation/version/isolation. `/proc/self/exe` readlink and at most 64 KiB of **own** `/proc/self/maps`; loaded module/cache names come only from this bootstrap's memory. Emit only manifest-known names and an outside-allowlist count. Never stat/open/hash a discovered path. No other process, environ/cmdline, raw maps, host/user/UID output. |
+| Private root | Metadata/descriptor only for `/run/user/<current deployment principal UID>`; root-owned no-follow `/run/user` parents, selected directory owned by that principal, non-writable-by-others, owner-access bits. No contents, mount query, mkdir/chmod or public UID/path. This does not prove future captures/locks will succeed. |
+
+Retained no-follow directory/leaf descriptors, single-link regular files,
+root ownership and non-group/world-writable paths precede content reads. Leaf
+symlinks are not accepted even inside the allowlist; unsupported layouts are
+explicitly unknown. FDs, path edges, link identities, missing entries and observed
+unsafe metadata are rechecked before reporting. Detectable substitution/in-place
+drift refuses the whole collection. This is not an atomic filesystem snapshot.
+Bounds: 320 retained FDs, 64 MiB/artifact, 256 MiB total artifact/metadata reads,
+75-second collector deadline, 90-second bootstrap alarm, 110-second transport,
+131072-byte canonical public body and 131200-byte authenticated frame. Own procfs
+has its separate 64 KiB bound. Source files are at most 65536 bytes each; the
+captured source/data bundle remains at most 524288 bytes. Unexpected I/O, exceeded
+bounds, identity drift, malformed protocol, interruption or cleanup failure
+returns only a fixed `unavailable` reason, exit 1. Unknown package syntax is
+reported unknown, not absence; malformed/oversized output is rejected entirely.
+
+Source-before-exec and authentication reuse the unchanged corrected capture and
+pinned-host transport primitives. The unchanged inventory primitive module,
+production manifest, amd64 inputs and package inventory have explicit SHA-256
+pins. All local source closure is captured from exact dispatched Git objects and
+verified before project execution. Remote code runs from those captured bytes in
+memory, no import/path fallback. Before credentials and again in the execution
+job, exact-source validation enforces repository/main/attempt 1. The workflow
+retains `contents: read`, Environment stage, `payments-schema-stage`, no concurrency
+cancellation, canonical SSH action and strict pinned-host principal. One SSH
+transport, no retry, no alternate command. Cleanup/cancellation precede HMAC
+publication. No remote files, subprocesses or target writes are created by the
+collector; ordinary atime/audit effects remain possible. Local transport still
+owns and cleans its anonymous host-pin resource and process group.
+
+`runtime-feasibility:v=1` contains canonical ASCII JSON with fixed top-level
+`result/trust/reference_sha256/files/aliases/docker/packages/bootstrap/private_root/
+closure/comparison/completeness`. Per-file rows distinguish exact `match`, safely
+hashed `mismatch`, `missing`, and `unknown` with unsafe/permission/malformed/
+unsupported reason. Only safely observed system artifacts expose SHA-256/mode/size.
+Unknown is never promoted to match. `result=observed` means collection completed,
+not runtime readiness; even a complete result is `observed_not_approved`.
+
+The consumer validates every key/type/bound and recomputes `comparison()` locally
+from the pinned manifest, `amd64-inputs.json` and `amd64-packages.txt`. It separately
+identifies Python, Ruby/Psych, system-library and loader-cache changes, expected
+package versions/known architectures and whether a signed archive or official
+base reference is available. Host package provenance stays unauthenticated;
+version equality does not prove byte equality, an approved package transaction,
+or executable origin. Hold is only the recorded dpkg selection, not all possible
+APT policy/preferences. No package scripts/restart plan is inferred.
+
+Synthetic example (subset, from the dedicated fixture):
+
+```text
+files: match=188, mismatch=1, missing=1, unknown=1
+/usr/bin/python3.12: mismatch -> Python package/cache/closure decision required
+/usr/bin/ruby3.2: missing -> Ruby/Psych installation decision required
+/etc/ld.so.cache: unknown/unsafe -> do not read/hash or approve; resolve path safety
+package_provenance=host_not_authenticated
+installation=separate_transaction_review_required
+recovery_toolchain=not_approved; runtime_acceptance=not_proven
+```
+
+This result would prevent a Ruby/Compose-only installation assumption: Python
+and loader-cache questions remain explicit. It neither proposes overwriting the
+191 files nor approves upgrading/downgrading Python/libc/OpenSSL. Standalone
+Compose and Docker plugin are separate observations. Any package transaction,
+server trust change, semantic run and recovery require distinct decisions.
+
+Tests: [feasibility suite](../../scripts/tests/test_stage_runtime_feasibility.py)
+and [FD fixtures](../../scripts/tests/runtime_feasibility_fixtures.py). Existing
+Linux harness, read-only root, nonroot, network none, cap-drop ALL and
+no-new-privileges; only disposable source export and safe tmpfs mounts, no app,
+home, credentials or Docker socket. Real Linux collection exercises root-owned
+system artifacts and actual bootstrap/HMAC/consumer; fixture root/owner and fault
+substitutions are labelled fault injection. No positive Rosetta semantic gate or
+repeat native experiment is required. The suite is wired into the existing
+selfcheck; exact topology/capability counts remain enforced.
+
+Future boundaries: after independent review, separately authorize publication
+and one Draft PR; user checks hosted CI and merges. Then a fresh main/source,
+Environment reviewer/timer/branch policy, secret-name-only, conflict and duplicate
+preflight must precede a **separately authorized** initial dispatch of this exact
+workflow with its own confirmation. User performs Environment approval. A failure
+or ambiguous submission does not authorize a retry. No collection, installation,
+private semantic execution or recovery has occurred in this local task.
+
 ### CLB-91 aggregate Compose diagnostics and local env-file structural extension
 
 The user handoff records completed independent review of the mode-repair and

@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""Finite closure reader: real synthetic FDs and authenticated Linux bootstrap."""
+import base64
+import copy
+import errno
+import hashlib
+import hmac
+import importlib.util
+import json
+import os
+from pathlib import Path
+import stat
+import struct
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from unittest.mock import patch
+
+ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'scripts/tests'))
+import test_stage_runtime_inventory as existing
+from runtime_feasibility_fixtures import FixtureOS, make_fixture
+runner=existing.load('stage-runtime-feasibility.py')
+I=existing.load('stage-runtime-inventory-operation.py')
+operation=types.ModuleType('feasibility')
+operation.I=I
+operation.REFERENCE=json.loads((ROOT/runner.REFERENCE_PATH).read_bytes())
+operation.INPUTS=json.loads((ROOT/runner.INPUTS_PATH).read_bytes())
+operation.PACKAGE_TEXT=(ROOT/runner.PACKAGES_PATH).read_text()
+exec(compile((ROOT/runner.REMOTE_PATH).read_bytes(),str(ROOT/runner.REMOTE_PATH),'exec'),operation.__dict__)
+
+
+class SourceTest(existing.SourceTest):
+    def setUp(self):
+        self.swap=patch.multiple(existing,runner=runner,operation=operation)
+        self.swap.start(); self.addCleanup(self.swap.stop)
+        super().setUp()
+
+    def test_source_pins_primitives_inputs_and_old_contract_preserved(self):
+        for path,digest in runner.SOURCE_PINS.items():
+            self.assertEqual(hashlib.sha256((ROOT/path).read_bytes()).hexdigest(),digest)
+        old=existing.load('stage-runtime-inventory.py')
+        self.assertNotEqual(old.CONFIRMATION,runner.CONFIRMATION)
+        marker='# BEGIN EXACT CORRECTED CAPTURE PRIMITIVES'
+        end='# END EXACT CORRECTED CAPTURE PRIMITIVES'
+        new=(ROOT/runner.RUNNER_PATH).read_text().split(marker,1)[1].split(end,1)[0]
+        prior=(ROOT/'scripts/deploy/stage-runtime-inventory.py').read_text().split(marker,1)[1].split(end,1)[0]
+        self.assertEqual(new,prior)
+        self.assertEqual(runner.ssh_argv(dict(SSH_USER='fixture',SSH_HOST='fixture.invalid',SSH_PORT='22'),'fd')[:-1],
+                         old.ssh_argv(dict(SSH_USER='fixture',SSH_HOST='fixture.invalid',SSH_PORT='22'),'fd')[:-1])
+        self.assertNotIn('stage-compose-env-semantic-operation.py',runner.REMOTE_SOURCES)
+        with self.assertRaises(ValueError): runner.validate(dict(self.env,CONFIRMATION=old.CONFIRMATION))
+
+
+class FixtureCase(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(dir=existing.fixture_parent())
+        self.addCleanup(self.temp.cleanup); self.root=Path(self.temp.name)
+        versions=dict(l.split('=',1) for l in operation.PACKAGE_TEXT.splitlines())
+        self.put,self.reference=make_fixture(self.root,operation.REFERENCE,{n:v for n,v in versions.items() if n in operation.PACKAGES})
+        self.os=FixtureOS(self.root)
+        self.addCleanup(lambda:self.assertEqual(self.os.owned,set()))
+
+    def collect(self, cancelled=lambda:False):
+        with patch.object(operation,'os',self.os),patch.object(I,'os',self.os),patch.object(operation,'REFERENCE',self.reference):
+            raw=operation.collect(cancelled)
+            self.assertNotIn(b'PRIVATE',raw); self.assertNotIn(str(self.root).encode(),raw)
+            value=json.loads(raw[len(operation.PREFIX):]); code=1 if value['result']=='unavailable' else 0
+            operation.parse_body(raw,code)
+        return value,code
+
+    def test_full_allowlist_and_useful_exact_mismatch_missing_unknown(self):
+        value,code=self.collect(); self.assertEqual(code,0)
+        self.assertEqual(value['comparison']['files'],dict(match=191,mismatch=0,missing=0,unknown=0))
+        self.assertTrue(all(r['status']=='match' for r in value['aliases'].values()))
+        self.assertEqual(len(value['docker']),6)
+        self.assertEqual(len(value['packages']),37)
+        self.assertEqual(value['packages']['ruby']['status'],'observed')
+        self.assertEqual(value['comparison']['runtime_acceptance'],'not_proven')
+        self.put('/usr/bin/python3.12',b'different public fixture')
+        (self.root/'usr/bin/ruby3.2').unlink()
+        (self.root/'etc/ld.so.cache').chmod(0o666)
+        value,code=self.collect(); self.assertEqual(code,0)
+        self.assertEqual(value['comparison']['files'],dict(match=188,mismatch=1,missing=1,unknown=1))
+        self.assertIn('/usr/bin/python3.12',value['comparison']['decisions']['python'])
+        self.assertIn('/etc/ld.so.cache',value['comparison']['decisions']['loader_cache'])
+        self.assertEqual(value['completeness'],'partial')
+
+    def test_no_tool_execution_and_no_forbidden_reads(self):
+        # Canary content would fail if executed. The OS surrogate rejects writes,
+        # arbitrary absolute opens and environment lookup during actual collection.
+        for path in ('/usr/bin/docker','/usr/local/bin/docker-compose'):
+            self.put(path,b'#!/bin/sh\nprintf PRIVATE\nexit 99\n',0o755)
+        with patch('subprocess.Popen',side_effect=AssertionError('PRIVATE executed')),patch('os.system',side_effect=AssertionError('PRIVATE shell')):
+            value,code=self.collect()
+        self.assertEqual(code,0)
+        standalone=value['files']['/usr/local/bin/docker-compose']
+        self.assertEqual(standalone['status'],'mismatch')
+        self.assertEqual(standalone['sha256'],hashlib.sha256(b'#!/bin/sh\nprintf PRIVATE\nexit 99\n').hexdigest())
+        self.assertEqual(value['docker']['/usr/bin/docker']['status'],'observed')
+        self.assertFalse(any(str(p).startswith(('/opt/','/home/','/root/','/var/run/')) for p in self.os.opens))
+        self.assertFalse((self.root/'canary').exists())
+
+    def test_symlink_escape_wrong_type_and_unsafe_parent(self):
+        target=self.root/'usr/bin/python3.12'; target.unlink()
+        secret=self.put('/home/private',b'PRIVATE secret must not be hashed',0o600)
+        target.symlink_to('/home/private')
+        value,code=self.collect(); self.assertEqual(code,0)
+        self.assertEqual(value['files']['/usr/bin/python3.12']['reason'],'unsafe')
+        self.assertNotIn(hashlib.sha256(secret.read_bytes()).hexdigest(),json.dumps(value))
+        target.unlink(); os.mkfifo(target)
+        self.assertEqual(self.collect()[0]['files']['/usr/bin/python3.12']['reason'],'unsafe')
+        target.unlink(); target.mkdir()
+        self.assertEqual(self.collect()[0]['files']['/usr/bin/python3.12']['reason'],'unsafe')
+        (self.root/'usr/lib/python3.12').chmod(0o777)
+        self.assertEqual(self.collect()[0]['files']['/usr/lib/python3.12/ast.py']['reason'],'unsafe')
+
+    def test_wrong_owner_alias_escape_and_missing_parents(self):
+        self.os.bad_owner=True
+        value,code=self.collect(); self.assertEqual(code,0)
+        self.assertTrue(all(r['reason']=='unsafe' for r in value['files'].values()))
+        self.os.bad_owner=False
+        link=self.root/'usr/bin/ruby'; link.unlink(); link.symlink_to('/home/PRIVATE')
+        value,code=self.collect(); self.assertEqual(code,0)
+        self.assertEqual(value['aliases']['/usr/bin/ruby'],dict(status='mismatch',reason='none',target='outside_allowlist'))
+        self.assertNotIn('/home/',json.dumps(value))
+
+    def test_replacement_in_place_drift_and_missing_becomes_present(self):
+        def replace():
+            f=self.root/'etc/ld.so.cache'; f.unlink(); self.put('/etc/ld.so.cache',b'new')
+        self.os.after_read=replace
+        self.assertEqual(self.collect(),({'result':'unavailable','reason':'identity'},1))
+        self.os.after_read=lambda:self.put('/etc/ld.so.cache',b'changed in-place')
+        self.assertEqual(self.collect(),({'result':'unavailable','reason':'identity'},1))
+        # Negative observations also participate in the last recheck.
+        original=operation.SystemFiles.recheck
+        fired=[False]
+        def mutate(files):
+            if files.missing and not fired[0]:
+                fired[0]=True; self.put('/usr/bin/docker',b'appeared')
+            return original(files)
+        with patch.object(operation.SystemFiles,'recheck',mutate):
+            self.assertEqual(self.collect()[0]['result'],'unavailable')
+
+    def test_io_permissions_descriptor_cleanup_cancellation_and_bounds(self):
+        original=self.os.read
+        self.os.read=lambda *a:(_ for _ in ()).throw(OSError(errno.EIO,'PRIVATE IO'))
+        self.assertEqual(self.collect(),({'result':'unavailable','reason':'io'},1))
+        self.os.read=original
+        self.os.close_failure=True
+        self.assertEqual(self.collect(),({'result':'unavailable','reason':'cleanup'},1)); self.os.close_failure=False
+        self.assertEqual(self.collect(lambda:True),({'result':'unavailable','reason':'interrupted'},1))
+        with patch.object(operation,'MAX_FDS',4): self.assertEqual(self.collect()[0]['reason'],'bounds')
+        with patch.object(operation,'MAX_BYTES',5): self.assertEqual(self.collect()[0]['reason'],'bounds')
+        with patch.object(operation,'MAX_FILE',2): self.assertEqual(self.collect()[0]['reason'],'bounds')
+        oldopen=self.os.open
+        def deny(path,*args,**kwargs):
+            if path=='python3.12': raise PermissionError(errno.EACCES,'PRIVATE denied')
+            return oldopen(path,*args,**kwargs)
+        self.os.open=deny
+        value,code=self.collect(); self.assertEqual(code,0); self.assertEqual(value['files']['/usr/bin/python3.12']['reason'],'permission')
+
+    def test_package_hold_malformed_unknown_and_canaries(self):
+        for status,hold in [('hold',True),('install',False)]:
+            self.put('/var/lib/dpkg/status',('Package: ruby\nStatus: '+status+' ok installed\nVersion: 1:3.2~ubuntu1\nArchitecture: amd64\nDescription: PRIVATE\n').encode())
+            value,_=self.collect(); self.assertIs(value['packages']['ruby']['hold'],hold); self.assertEqual(value['packages']['ruby']['selection'],status)
+        for raw,reason in [(b'Package: ruby\nPackage: ruby\n','malformed'),(b'Package: ruby\nStatus: install ok installed\nVersion: PRIVATE\nArchitecture: amd64\n','unsupported'),(b'\xff','malformed')]:
+            self.put('/var/lib/dpkg/status',raw); value,code=self.collect(); self.assertEqual(code,0)
+            self.assertEqual(value['packages']['ruby']['reason'],reason)
+        (self.root/'var/lib/dpkg/status').unlink()
+        self.assertEqual(self.collect()[0]['packages']['ruby']['status'],'unknown')
+        self.put('/var/lib/dpkg/status',b'x'*65537)
+        self.assertEqual(self.collect()[0]['reason'],'bounds')
+        self.put('/var/lib/dpkg/status',('Package: unrelated\nDescription: '+'\u00e9'*32768).encode())
+        self.assertEqual(self.collect()[0]['reason'],'bounds')
+
+    def test_malformed_package_identity_never_becomes_missing(self):
+        suffix=b'\nStatus: install ok installed\nVersion: 1:3.2~ubuntu1\nArchitecture: amd64\n'
+        for header in (b'Package:ruby',b'Package: ruby ',b'Package: PRIVATE',b'Package: ',b'Package ruby',b'Description: no package header'):
+            with self.subTest(header=header):
+                self.put('/var/lib/dpkg/status',header+suffix)
+                value,code=self.collect(); self.assertEqual(code,0)
+                self.assertTrue(all(row['status']=='unknown' and row['reason']=='malformed' for row in value['packages'].values()))
+                self.assertEqual(value['completeness'],'partial')
+        for record in (b'Package: ruby\n continuation'+suffix,b'Package: ruby'+suffix+b' continuation\n'):
+            self.put('/var/lib/dpkg/status',record)
+            self.assertEqual(self.collect()[0]['packages']['ruby']['reason'],'malformed')
+        self.put('/var/lib/dpkg/status',b'Package: unrelated-package'+suffix+b'Description: PRIVATE ignored\n continuation ignored\n')
+        self.assertEqual(self.collect()[0]['packages']['ruby']['status'],'missing')
+
+    def test_own_maps_unknown_paths_never_read_or_output(self):
+        self.put('/proc/self/maps',b'0010-0020 r-xp 0000 00:01 1 /home/PRIVATE-secret\n')
+        value,code=self.collect(); self.assertEqual(code,0)
+        self.assertEqual(value['closure']['maps'],dict(known=[],outside_allowlist=1,status='observed',reason='none'))
+        self.assertNotIn('/home/',json.dumps(value)); self.assertNotIn('/home/PRIVATE-secret',self.os.opens)
+        self.put('/proc/self/maps',b'x'*65537)
+        self.assertEqual(self.collect()[0]['reason'],'bounds')
+
+    def test_maximum_report_bound_and_local_comparison(self):
+        value,_=self.collect()
+        for path,row in value['files'].items():
+            row.update(status='mismatch',reason='none',sha256='f'*64,size=operation.MAX_FILE,mode='0755')
+        for row in value['docker'].values():
+            row.update(status='observed',reason='none',sha256='f'*64,size=operation.MAX_FILE,mode='0755')
+        for row in value['packages'].values():
+            row.update(status='observed',reason='none',version='1'*64,architecture='amd64',hold=True,selection='hold')
+        for row in (value['closure']['maps'],value['closure']['modules']):
+            row['known']=sorted(operation.REFERENCE['files']); row['outside_allowlist']=1024
+        value['comparison']=operation.comparison(value)
+        value['completeness']='partial'
+        raw=operation.canonical(value)
+        self.assertLessEqual(len(raw),operation.BODY_LIMIT)
+        self.assertLessEqual(len(raw)+110,runner.FRAME_LIMIT)
+        operation.parse_body(raw,0)
+        self.assertEqual(value['comparison']['files']['mismatch'],191)
+        self.assertIn('/etc/ld.so.cache',value['comparison']['decisions']['loader_cache'])
+
+    def test_authenticated_strict_schema_tamper_replay_truncation(self):
+        value,code=self.collect(); nonce=bytes(range(32))
+        def frame(raw):return b'clb91-runtime-feasibility-auth:v=1 tag='+hmac.new(nonce,raw,hashlib.sha256).hexdigest().encode()+b' '+raw
+        raw=operation.canonical(value)
+        with patch.object(operation,'REFERENCE',self.reference):
+            self.assertEqual(runner.parse_result(frame(raw),0,nonce,operation)[1],0)
+            for data,status,key in [(frame(raw)[:-1],0,nonce),(frame(raw),1,nonce),(frame(raw),0,b'z'*32),(frame(raw)*2,0,nonce),(b'PRIVATE'+frame(raw),0,nonce)]:
+                with self.assertRaises((ValueError,I.Unavailable)):runner.parse_result(data,status,key,operation)
+            for mutate in [lambda v:v.update(extra='PRIVATE'),lambda v:v['comparison']['files'].update(match=True),lambda v:v['bootstrap'].update(bits=True),lambda v:v['files']['/etc/ld.so.cache'].update(sha256='PRIVATE'),lambda v:v['closure']['maps']['known'].append('/home/PRIVATE')]:
+                v=copy.deepcopy(value); mutate(v)
+                with self.assertRaises((ValueError,I.Unavailable,TypeError)):runner.parse_result(frame(operation.canonical(v)),0,nonce,operation)
+            for data in (b'x'*(operation.BODY_LIMIT+1),raw.replace(b'{',b'{"result":"observed",',1)):
+                with self.assertRaises((ValueError,I.Unavailable)):runner.parse_result(frame(data),0,nonce,operation)
+
+
+class WorkflowTest(unittest.TestCase):
+    def test_existing_selfcheck_includes_new_suite_exactly_once(self):
+        selfcheck=(ROOT/'scripts/selfcheck-quality-gates.sh').read_text()
+        for name in ('test_stage_runtime_feasibility.py','test_stage_runtime_inventory.py'):
+            self.assertEqual(selfcheck.count('python3 "$ROOT_DIR/scripts/tests/'+name+'"'),1)
+        self.assertIn('"27"',selfcheck.split('if [ "$fixture_name" = "valid-current-alias-inventory" ]; then',1)[1].split('\n  fi',1)[0])
+
+    def test_exact_capability_and_negative_authority_mutations(self):
+        # Exercise the actual capability parser, not string-presence assertions.
+        import inspect
+        text=inspect.getsource(existing.ProtocolTest.test_workflow_exact_authority_and_negative_mutations)
+        script=text.split("script = '''",1)[1].split("'''",1)[0].replace('StageRuntimeInventoryWorkflow','StageRuntimeFeasibilityWorkflow').replace('["inventory"]','["feasibility"]')
+        for mutation in ('none','input','trigger','environment','concurrency','cancel','credentials','write','command','checkout','validation','confirmation'):
+            r=subprocess.run(['ruby','-I',str(ROOT/'scripts'),'-e',script,str(ROOT),mutation],capture_output=True,timeout=10)
+            self.assertEqual(r.returncode==0,mutation=='none',r.stderr)
+
+
+@unittest.skipUnless(sys.platform=='linux','real Linux system interfaces required')
+class LinuxTest(unittest.TestCase):
+    def setUp(self):
+        self.sources={Path(p).name:(ROOT/p).read_bytes() for p in runner.REMOTE_SOURCES}; self.nonce=bytes(range(32))
+
+    def invoke(self,suffix=b'',sources=None):
+        data=dict(sources or self.sources); data[Path(runner.REMOTE_PATH).name]+=suffix
+        bundle=json.dumps({k:base64.b64encode(v).decode() for k,v in data.items()},sort_keys=True,separators=(',',':')).encode()
+        control=json.dumps(dict(principal='fixture',sha256=hashlib.sha256(bundle).hexdigest())).encode()
+        payload=self.nonce+struct.pack('!I',len(control))+control+bundle
+        r=subprocess.run(['/usr/bin/python3','-I','-S','-B','-c',runner.BOOTSTRAP],input=payload,capture_output=True,timeout=110,env=dict(PATH='/usr/bin:/bin',LC_ALL='C'))
+        self.assertEqual(r.stderr,b''); self.assertNotIn(b'PRIVATE',r.stdout)
+        return runner.parse_result(r.stdout,r.returncode,self.nonce,operation)
+
+    def test_actual_linux_bootstrap_full_closure_no_tools_or_private_reads(self):
+        suffix=b'''
+def audit(event,args):
+    if event in ('subprocess.Popen','os.system','os.exec','socket.connect','os.mkdir','os.chmod','os.chown','os.remove','os.rename'):
+        raise RuntimeError('PRIVATE forbidden effect')
+    if event=='open':
+        path,mode,flags=args
+        if flags & (os.O_WRONLY|os.O_RDWR|os.O_CREAT|os.O_TRUNC|os.O_APPEND): raise RuntimeError('PRIVATE write')
+        if isinstance(path,str) and path.startswith(('/opt/','/home/','/root/','/var/run/')): raise RuntimeError('PRIVATE read')
+original=collect
+def collect(cancelled):
+    sys.addaudithook(audit)
+    return original(cancelled)
+'''
+        line,code=self.invoke(suffix); self.assertEqual(code,0)
+        value=json.loads(line[len(operation.PREFIX):]); self.assertEqual(len(value['files']),191)
+        self.assertEqual(value['bootstrap']['os_family'],'linux')
+        self.assertEqual(value['files']['/usr/bin/python3.12']['status'] in ('match','mismatch'),True)
+        self.assertEqual(value['trust'],'observed_not_approved')
+        with patch.multiple(existing,runner=runner,operation=operation):
+            line2,code2=existing.BootstrapTest.through_runner(self,suffix)
+        self.assertEqual(code2,0); parsed=json.loads(line2[len(operation.PREFIX):])
+        self.assertEqual(parsed['files'],value['files'])
+
+    def test_synthetic_fd_failures_through_bootstrap_and_real_consumer(self):
+        versions=dict(l.split('=',1) for l in operation.PACKAGE_TEXT.splitlines())
+        with tempfile.TemporaryDirectory(dir=existing.fixture_parent()) as directory:
+            make_fixture(directory,operation.REFERENCE,{n:v for n,v in versions.items() if n in operation.PACKAGES})
+            base=(ROOT/'scripts/tests/runtime_inventory_fixtures.py').read_text()
+            fixture=(ROOT/'scripts/tests/runtime_feasibility_fixtures.py').read_text().replace('from runtime_inventory_fixtures import FixtureOS as BaseOS','BaseOS = base.FixtureOS')
+            suffix=('\nbase=__import__("types").ModuleType("fixture_base")\nexec('+repr(base)+',base.__dict__)\n'
+                'fixture=__import__("types").ModuleType("fixture")\nfixture.base=base\nexec('+repr(fixture)+',fixture.__dict__)\n'
+                'os=fixture.FixtureOS('+repr(directory)+')\nI.os=os\n').encode()
+            line,code=self.invoke(suffix); self.assertEqual(code,0)
+            self.assertEqual(json.loads(line[len(operation.PREFIX):])['comparison']['files']['mismatch'],191)
+            for extra,reason in [(b'os.close_failure=True\n','cleanup'),
+                (b"os.read=lambda *a: (_ for _ in ()).throw(OSError(5,'PRIVATE'))\n",'io'),
+                (b"os.read=lambda *a: (_ for _ in ()).throw(InterruptedError('PRIVATE'))\n",'interrupted')]:
+                with self.subTest(reason=reason):
+                    expected=(operation.refused(reason).decode().strip(),1)
+                    self.assertEqual(self.invoke(suffix+extra),expected)
+                    with patch.multiple(existing,runner=runner,operation=operation):
+                        self.assertEqual(existing.BootstrapTest.through_runner(self,suffix+extra),expected)
+
+    def test_real_bootstrap_source_failure_cancellation_cleanup(self):
+        broken=dict(self.sources); del broken[Path(runner.INVENTORY_PATH).name]
+        with self.assertRaises(ValueError):self.invoke(sources=broken)
+        self.assertEqual(self.invoke(b'\ndef collect(cancelled):\n    return refused("cleanup")\n'),(operation.refused('cleanup').decode().strip(),1))
+        suffix=b'\noriginal=collect\ndef collect(cancelled):\n    body=original(cancelled)\n    s=__import__("signal")\n    s.pthread_sigmask(s.SIG_BLOCK,[s.SIGTERM])\n    os.kill(os.getpid(),s.SIGTERM)\n    return body\n'
+        self.assertEqual(self.invoke(suffix),(operation.refused('interrupted').decode().strip(),1))
+
+
+if __name__=='__main__':unittest.main()
