@@ -347,7 +347,11 @@ int main(int argc,char**argv)  {
     .code=-1
   };
   const char*primary="request";
-  int source_created=0,runtime_owned=0,work_owned=0,uid_control=0,symlink_control=0,runtime_control=0,backing_control=0,backing_context_started=0;
+  int source_created=0,source_identity_captured=0,runtime_owned=0,work_owned=0,uid_control=0,symlink_control=0,runtime_control=0,backing_control=0,backing_context_started=0;
+  /* Diagnostics only: capture direct-call errno before cleanup can change it.
+   * Composite helpers have no errno contract; report null, never stale errno. */
+  int fixture_errno=-1,fixture_entry=-1,fixture_has_magic=0;
+  unsigned long fixture_magic=0;
   size_t i;
   struct utsname un;
   {
@@ -397,18 +401,62 @@ int main(int argc,char**argv)  {
   * cover /opt only inside this disposable test namespace. */
   primary="outer_namespace";
   if(unshare(CLONE_NEWNS|CLONE_NEWNET)||mount(NULL,"/",NULL,MS_REC|MS_PRIVATE,NULL)||mount("tmpfs","/opt","tmpfs",MS_NOSUID|MS_NODEV,"size=1048576,mode=0755"))goto finish;
-  primary="fixture_source";
-  if(mkdirat(work,"source",0700))goto finish;
+  primary="fixture_source_mkdir";
+  errno=0;
+  if(mkdirat(work,"source",0700)) { fixture_errno=errno?errno:-1;goto finish; }
   source_created=1;
+  primary="fixture_source_open";
+  errno=0;
   source=openat(work,"source",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
-  if(source<0||fchown(source,1000,1000)||fstat(source,&sourcest)||fstatfs(source,&fs)||!supported_backing((unsigned long)fs.f_type))goto finish;
-  if(mkdir(SOURCE_ROOT,0700)||snprintf(fdpath,sizeof fdpath,"/proc/self/fd/%d",source)>=(int)sizeof fdpath||mount(fdpath,SOURCE_ROOT,NULL,MS_BIND,NULL)||read_mount_tuple(&outer))goto finish;
+  if(source<0) { fixture_errno=errno?errno:-1;goto finish; }
+  primary="fixture_source_chown";
+  errno=0;
+  if(fchown(source,1000,1000)) { fixture_errno=errno?errno:-1;goto finish; }
+  primary="fixture_source_stat";
+  errno=0;
+  if(fstat(source,&sourcest)) { fixture_errno=errno?errno:-1;goto finish; }
+  source_identity_captured=1;
+  primary="fixture_source_statfs";
+  errno=0;
+  if(fstatfs(source,&fs)) { fixture_errno=errno?errno:-1;goto finish; }
+  primary="fixture_source_backing_policy";
+  if(!supported_backing((unsigned long)fs.f_type)) {
+    fixture_has_magic=1;fixture_magic=(unsigned long)fs.f_type;goto finish;
+  }
+  primary="fixture_source_mountpoint";
+  errno=0;
+  if(mkdir(SOURCE_ROOT,0700)) { fixture_errno=errno?errno:-1;goto finish; }
+  primary="fixture_source_fdpath";
+  if(snprintf(fdpath,sizeof fdpath,"/proc/self/fd/%d",source)>=(int)sizeof fdpath)goto finish;
+  primary="fixture_source_bind";
+  errno=0;
+  if(mount(fdpath,SOURCE_ROOT,NULL,MS_BIND,NULL)) { fixture_errno=errno?errno:-1;goto finish; }
+  primary="fixture_source_mountinfo";
+  errno=0;
+  if(read_mount_tuple(&outer))goto finish;
+  primary="fixture_source_paths";
   if(snprintf(runtimepath,sizeof runtimepath,"%s/runtime",argv[2])>=(int)sizeof runtimepath||snprintf(sourcepath,sizeof sourcepath,"%s/source",argv[2])>=(int)sizeof sourcepath)goto finish;
-  for(i=0;i<sizeof srcdirs/sizeof*srcdirs;i++)if(made(source,srcdirs[i],1,NULL,0))goto finish;
-  if(made(source,".clubs-bot-release-state/application.lock",0,"",0)||made(source,".clubs-bot-release-state/stage/clubs-bot-schema-stage.results/operation.lock",0,"",0))goto finish;
-  if(getrandom(random,32,0)!=32)goto finish;
+  primary="fixture_source_directory";
+  for(i=0;i<sizeof srcdirs/sizeof*srcdirs;i++) {
+    fixture_entry=(int)i;errno=0;
+    if(made(source,srcdirs[i],1,NULL,0))goto finish;
+  }
+  primary="fixture_source_lock";
+  fixture_entry=0;errno=0;
+  if(made(source,".clubs-bot-release-state/application.lock",0,"",0))goto finish;
+  fixture_entry=1;errno=0;
+  if(made(source,".clubs-bot-release-state/stage/clubs-bot-schema-stage.results/operation.lock",0,"",0))goto finish;
+  fixture_entry=-1;
+  primary="fixture_source_random";
+  errno=0;
+  {
+    ssize_t n=getrandom(random,32,0);
+    if(n!=32) { if(n<0)fixture_errno=errno?errno:-1;goto finish; }
+  }
   hex(random,32,canary);
   snprintf(dotenv,sizeof dotenv,"A=%s\n",canary);
+  primary="fixture_source_dotenv";
+  errno=0;
   if(made(source,".env",0,dotenv,strlen(dotenv)))goto finish;
   memset(canary,0,sizeof canary);
   memset(dotenv,0,sizeof dotenv);
@@ -416,7 +464,14 @@ int main(int argc,char**argv)  {
   {
     const char*main="services:\n  app:\n    image: fixture:local\n    env_file: [.env]\n    environment:\n      A: ${A}\n  caddy:\n    image: fixture:local\n    volumes:\n      - ./Caddyfile:/public:ro\n";
     const char*override="# clubs-bot-managed-quiesced-release\n# revision: 44497dcd28139cef865c3f98ac3f2c4a5afac636\nservices:\n  app:\n    image: ghcr.io/koteev-m/clubs_bot/app-bot@sha256:ddf5486e02835855178cc3b30bd2f22899335131e6dc388def20feac328016fe\n";
-    if(made(source,"docker-compose.yml",0,main,strlen(main))||made(source,"docker-compose.override.yml",0,override,strlen(override))||made(source,".clubs-bot-release-state/stage/clubs-bot-schema-stage.lock/docker-compose.release.yml",0,override,strlen(override)))goto finish;
+    primary="fixture_source_compose";
+    fixture_entry=0;errno=0;
+    if(made(source,"docker-compose.yml",0,main,strlen(main)))goto finish;
+    fixture_entry=1;errno=0;
+    if(made(source,"docker-compose.override.yml",0,override,strlen(override)))goto finish;
+    fixture_entry=2;errno=0;
+    if(made(source,".clubs-bot-release-state/stage/clubs-bot-schema-stage.lock/docker-compose.release.yml",0,override,strlen(override)))goto finish;
+    fixture_entry=-1;
   }
   primary="native_backing_binding";
   if(fingerprint(runtimepath,runtime,source,&outer,hash))goto finish;
@@ -493,7 +548,7 @@ int main(int argc,char**argv)  {
   if(source>=0&&cleanup_owned(source))cleanup=1;
   if(source_created)  {
     struct stat st;
-    if(source<0||fstat(source,&st)||st.st_dev!=sourcest.st_dev||st.st_ino!=sourcest.st_ino||unlinkat(work,"source",AT_REMOVEDIR))cleanup=1;
+    if(source<0||!source_identity_captured||fstat(source,&st)||st.st_dev!=sourcest.st_dev||st.st_ino!=sourcest.st_ino||unlinkat(work,"source",AT_REMOVEDIR))cleanup=1;
   }
   if(recheck(&rt))cleanup=1;
   if(close_leases(&rt))cleanup=1;
@@ -509,7 +564,13 @@ int main(int argc,char**argv)  {
   printf("{\"fixture\":1,\"verdict\":\"%s\",\"cleanup\":\"%s\",\"primary\":\"%s\",\"adapter_started\":%s,\"adapter_invocations\":%u,\"adapter_invocations_relation\":\"%s\",\"tmpfs_adapter_attempt\":\"%s\",\"adapter_exit\":%d,\"cleanup_error\":%s,\"negative_controls\":{\"wrong_uid\":%s,\"symlink\":%s,\"runtime_hash\":%s,\"actual_tmpfs_backing\":%s},\"adapter_result\":",status?"BLOCKED":"PASS",cleanup?"UNKNOWN":"confirmed",primary,adapter_calls?"true":"false",adapter_calls,backing_context_started&&!backing_control?"confirmed_lower_bound":"exact",backing_control?"confirmed":backing_context_started?"UNKNOWN":"NOT_RUN",result.code,cleanup?"true":"false",uid_control?"true":"false",symlink_control?"true":"false",runtime_control?"true":"false",backing_control?"true":"false");
   if(result.used&&result.used<=OUTPUT_LIMIT&&result.out[0]=='{'&&result.out[result.used-1]=='\n')fwrite(result.out,1,result.used-1,stdout);
   else fputs("null",stdout);
-  puts("}");
+  fputs(",\"fixture_diagnostic\":{\"errno\":",stdout);
+  if(fixture_errno>=0)printf("%d",fixture_errno);else fputs("null",stdout);
+  fputs(",\"fs_magic\":",stdout);
+  if(fixture_has_magic)printf("%lu",fixture_magic);else fputs("null",stdout);
+  fputs(",\"entry\":",stdout);
+  if(fixture_entry>=0)printf("%d",fixture_entry);else fputs("null",stdout);
+  puts("}}");
   return status;
 }
 #endif
