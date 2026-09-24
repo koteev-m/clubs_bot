@@ -1,0 +1,37 @@
+{
+  "bootstrap.py": {
+    "bytes": 3191,
+    "provenance": "bundle:reference/bootstrap.py",
+    "sha256": "0e061bd45aad54711ec8dc9ee3601534ce78f8a0e73c85e876be22aeb884d9e4"
+  },
+  "candidate-runtime.json": {
+    "bytes": 24953,
+    "provenance": "bundle:reference/candidate-runtime.json",
+    "sha256": "68fc3b06b2198b06f1583c0bb1157669c4df6d8c9548934ed3c79315d6e82649"
+  },
+  "release_private_root.py": {
+    "bytes": 1577,
+    "provenance": "bundle:reference/release_private_root.py",
+    "sha256": "250d359d114779ddcc12c38bc64dc7015d5679f0ffce12a859f007810726cdba"
+  },
+  "rootfs-manifest.json": {
+    "bytes": 60563,
+    "provenance": "bundle:reference/rootfs-manifest.json",
+    "sha256": "58ea998d3f51a6b50b4c8ee46f0b48d3454ebf8dc1a5d1a819622dfd3a1c0a0d"
+  },
+  "stage-compose-diagnostic-operation.py": {
+    "bytes": 48654,
+    "provenance": "bundle:reference/stage-compose-diagnostic-operation.py",
+    "sha256": "2487c9b9d82de02ab2df9d11bd54c45c75e423d595079c9cf3ab2e10890ee96c"
+  },
+  "stage-compose-env-file-plan.py": {
+    "bytes": 21652,
+    "provenance": "bundle:reference/stage-compose-env-file-plan.py",
+    "sha256": "1317a5a89323b0d3296e8678dd1a8f7a668aa91cc5594c066d93bad1919a6cd5"
+  },
+  "stage-compose-env-semantic-operation.py": {
+    "bytes": 18168,
+    "provenance": "bundle:reference/stage-compose-env-semantic-operation.py",
+    "sha256": "af328463da08079defb51b163af1309faa7820e5dd9ded6da910501e251d47b6"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "approval_status": "NOT_AUTHORIZED_TO_EXECUTE",
+  "archive_count": 61,
+  "archive_limit_each": 67108864,
+  "base": "docker.io/library/ubuntu@sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4",
+  "compose": {
+    "assets": {
+      "checksums.txt": "c50495285d5e2de5222244d9640c7abde2e4ebf45dd3279a44a2002d0251499e",
+      "docker-compose-linux-x86_64": "2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5",
+      "docker-compose-linux-x86_64.provenance.json": "d4a4bb414c26f63968cca38103dff847292a9bd5dba4dfd692dc28e3236ff03f",
+      "docker-compose-linux-x86_64.sigstore.json": "70601549186c8aa8afc6c468b349db814c981982ff81999efd31fa4154896b21"
+    },
+    "issuer": "https://token.actions.githubusercontent.com",
+    "provenance_subject_matches": true,
+    "sha256": "2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5",
+    "signer": "https://github.com/docker/github-builder/.github/workflows/bake.yml@refs/tags/v1.4.0",
+    "sigstore_verified": true,
+    "source_commit": "b043368028e9fcb4545fa340c8ad635c370825da",
+    "version": "5.1.1"
+  },
+  "cosign_verifier": "gcr.io/projectsigstore/cosign@sha256:b03690aa52bfe94054187142fba24dc54137650682810633901767d8a3e15b31",
+  "currently_performed_external_actions": [],
+  "expected_candidate_manifest_sha256": "68fc3b06b2198b06f1583c0bb1157669c4df6d8c9548934ed3c79315d6e82649",
+  "expected_rootfs": {
+    "bytes": 59392000,
+    "sha256": "f78a1d704c746a17ee5c848ab0667ca64859bf48bc94fdc45eb46b40791b3f22"
+  },
+  "external_actions": [
+    "manual exact-ref publication/dispatch",
+    "HTTPS official locked input retrieval",
+    "registry digest-pinned image pull",
+    "offline reference-image package scripts inside disposable Docker image",
+    "one fixed privileged namespace adapter test if explicitly authorized",
+    "bounded synthetic artifact upload retention 3 days"
+  ],
+  "index_count": 15,
+  "release_count": 4,
+  "route": "official_locked_rebuild_on_disposable_GitHub_hosted_VM",
+  "snapshot": "https://snapshot.ubuntu.com/ubuntu/20260921T200000Z/"
+}

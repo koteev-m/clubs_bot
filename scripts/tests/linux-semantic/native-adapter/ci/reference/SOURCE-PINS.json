@@ -1,0 +1,65 @@
+{
+  "Dockerfile.amd64": {
+    "bytes": 825,
+    "sha256": "99aabb65094dba357a236c17158f4cbcd3cdc354e0e55e8f372b3abb8cfec5c6",
+    "source": "bundle:ci/reference/Dockerfile.amd64"
+  },
+  "accepted-manifest.json": {
+    "bytes": 22916,
+    "sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
+    "source": "bundle:ci/reference/accepted-manifest.json"
+  },
+  "additional-inputs.json": {
+    "bytes": 1319,
+    "sha256": "41add2d4fa46858f5a4b3650409ef36468ad2897e060cafac35d65cdc495f271",
+    "source": "bundle:ci/reference/additional-inputs.json"
+  },
+  "amd64-inputs.json": {
+    "bytes": 37237,
+    "sha256": "a365d37e6bf45dacfe672364d2e3493bc3c786e692940e4ee0566b8f97fd5833",
+    "source": "bundle:ci/reference/amd64-inputs.json"
+  },
+  "amd64-packages.txt": {
+    "bytes": 4346,
+    "sha256": "17ac090efb6ba58f50f72f7e2e7425e6db5941b7a5758b4099e4553058b6983c",
+    "source": "bundle:ci/reference/amd64-packages.txt"
+  },
+  "amd64-runtime-candidate.json": {
+    "bytes": 22916,
+    "sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
+    "source": "bundle:ci/reference/amd64-runtime-candidate.json"
+  },
+  "arm64-runtime-reference.json": {
+    "bytes": 22948,
+    "sha256": "d2c7794fa073ab310df46a80880a83fceb0a2eb450aae410e123266f07c83903",
+    "source": "bundle:ci/reference/arm64-runtime-reference.json"
+  },
+  "build.py": {
+    "ancestor_bytes": 10495,
+    "ancestor_sha256": "5d37e3efb8fa25784646bebaedb9053cc4bc8870949d074c6e22ee7042941a57",
+    "bytes": 11869,
+    "change": "Explicit checked image/archive parameters; generator and runtime algorithms unchanged.",
+    "sha256": "992db2529812f5ac29a9f1ed5f13702b55aa93d08ecf04b1588a9306f1058774",
+    "source": "bundle:ci/reference/build.py"
+  },
+  "derive-amd64-manifest.py": {
+    "bytes": 2281,
+    "sha256": "4b802b5fa543650f694eb92632d6ddc8bfc57c64f191f53d2a206dc5ee1ae82e",
+    "source": "bundle:ci/reference/derive-amd64-manifest.py"
+  },
+  "export_inputs.py": {
+    "bytes": 6919,
+    "sha256": "e2ce25e4731a3102e191a2805ce8433a43da17575b8ce80e945685fada3b34ff",
+    "source": "bundle:ci/reference/export_inputs.py"
+  },
+  "prepare-amd64-context.py": {
+    "bytes": 2734,
+    "sha256": "369af354f49e6a64e3c484104756427a1ce774b6d3fbaeb68f4bd330d8fec1c4",
+    "source": "bundle:ci/reference/prepare-amd64-context.py"
+  },
+  "prepare-amd64-downloads.py": {
+    "bytes": 6354,
+    "sha256": "62ea9fcbdaa346bded3970c688dbaf5171ecf1e5447588ce7f2d9e9b35baf893",
+    "source": "bundle:ci/reference/prepare-amd64-downloads.py"
+  }
+}
