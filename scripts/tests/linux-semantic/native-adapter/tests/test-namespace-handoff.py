@@ -102,6 +102,8 @@ static int recheck(const struct lease_set*s){if(s->n&&!fds[s->fd].live)abort();r
 static int close_leases(struct lease_set*s){int old=s->fd;s->n=0;return is("close_leases")&&old==12?-1:0;}
 static int t_chown(int fd,unsigned uid,unsigned gid){if(fd!=11||uid||gid)abort();fds[fd].st.st_uid=uid;fds[fd].st.st_gid=gid;fds[fd].st.MODEL_CT.tv_sec++;return 0;}
 static int t_chmod(int fd,unsigned mode){if(fd!=11||mode!=0700)abort();fds[fd].st.st_mode=S_IFDIR|mode;fds[fd].st.MODEL_CT.tv_sec++;return 0;}
+/* Resource admission is exercised by test-resource-envelope.py. */
+static const char *fixture_envelope_admit(void){return NULL;}
 static int t_unshare(int flags){if(flags!=(CLONE_NEWNS|CLONE_NEWNET)||phase++)abort();current_ns=1;return 0;}
 static int t_mount(const char*src,const char*dst,const char*type,unsigned long flags,const void*data) {
  if(flags==MS_BIND){binds++;if(strcmp(dst,SOURCE_ROOT)||type||data)abort();unsigned fd;if(sscanf(src,"/proc/self/fd/%u",&fd)!=1)abort();if(fds[fd].ns!=current_ns){errno=EINVAL;return -1;}return 0;}

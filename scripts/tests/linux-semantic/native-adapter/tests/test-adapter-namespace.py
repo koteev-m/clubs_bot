@@ -164,7 +164,14 @@ class Adapter(unittest.TestCase):
  def test_20_parent_and_contract_blocks_byte_identical(self):
   text=(HERE.parent/'adapter/adapter.c').read_text()
   for label,start,end,expected in [('parent_rechecks_cleanup', '  launched=1;', '  printf("{\\\"adapter', 'cf4057a0f6302a1c9ba2e4913e7dd1b08f00b0e0fa00d51013d1aba735b4d2cf'), ('private_view', 'static void private_view(', 'static void namespace_child(', 'c93a060cb1467ac358812c6cf5f52c63960c492818200bb065d12f9c0364ebf9'), ('lease_source', 'static int lease_source(', 'static int verify_view_source(', 'b6292db619ca4a6274e325d754bc3ed3fe9df5e3dd1814a732f79ac7cacb1c3e'), ('verify_runtime', 'static int verify_runtime_owned(', '#if defined(__linux__) && !defined(ADAPTER_TEST)', 'fce54534544b51165942519aa83a1ab1a9f0ef579a52ef3cc9e322285bd69526'), ('auth', 'static int semantic_body(', '#if defined(__linux__) && !defined(ADAPTER_TEST)', 'cd764c3adbac8c2e9fb9dcfe336426f61831cc7645cb1d350eb2f5a6710da4c7')]:
-   a=text.index(start);b=text.index(end,a);self.assertEqual(hashlib.sha256(text[a:b].encode()).hexdigest(),expected,label)
+   a=text.index(start);b=text.index(end,a);region=text[a:b]
+   if label=='parent_rechecks_cleanup':
+    # CLB-97 changes only capture mode here; retain the original byte-level
+    # parent recheck/cleanup proof after reversing precisely that argument.
+    added='perr[0],RUN_SECONDS,CLB97_WORKER_CAPTURE,&result);'
+    self.assertEqual(region.count(added),1)
+    region=region.replace(added,'perr[0],RUN_SECONDS,1,&result);')
+   self.assertEqual(hashlib.sha256(region.encode()).hexdigest(),expected,label)
 
  def test_21_descriptor_exhaustion_refused_without_limit_change(self):
   r=self.refused('fd_exhausted','child_runtime_contract');self.assertGreater(r['cleanup_attempts'],0);self.assertTrue(r['fd_budget']['fd_budget_sufficient']);self.assertEqual(r['fd_budget']['required_total_peak'],1098)

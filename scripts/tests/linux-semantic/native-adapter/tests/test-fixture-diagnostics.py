@@ -44,6 +44,11 @@ struct fd_budget {
  uint64_t soft,hard,open_count,additional,total;
  int limits_known,soft_infinite,hard_infinite,count_known,required_known,sufficient,close_error;
 };static struct fd_budget namespace_budget;
+/* This suite enters after resource admission; its separate suite executes
+ * admission/restoration. The identity/F1 cleanup under test stays exact. */
+static struct {int close_error;} fixture_envelope;
+static int fixture_envelope_restore(void){return 0;}
+static void print_fixture_envelope(void){fputs("null",stdout);}
 static int interrupted,untracked_created;static unsigned adapter_calls;
 static const char*srcdirs[]={".clubs-bot-release-state",".clubs-bot-release-state/stage",".clubs-bot-release-state/stage/clubs-bot-schema-stage.lock",".clubs-bot-release-state/stage/clubs-bot-schema-stage.results",".clubs-bot-release-state/stage/clubs-bot-schema-stage.migration-ledgers"};
 static const char *fault;static int fault_n,fault_error,cleanup_fault,in_finish,short_random,probe_errno_bad;

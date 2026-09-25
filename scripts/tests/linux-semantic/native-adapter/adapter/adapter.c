@@ -48,6 +48,7 @@ struct contract_entry  {
   long long mtime;
 };
 #include "generated_contract.h"
+#include "worker-evidence.h"
 static int dup_cloexec(int fd) {
   return fcntl(fd,F_DUPFD_CLOEXEC,3);
 }
@@ -432,10 +433,55 @@ struct captured  {
   unsigned char out[OUTPUT_LIMIT+1];
   size_t used,err_bytes,err_used;
   unsigned char err[64];
+  size_t stderr_total;
+  int worker_expected;
+  struct worker_record worker;
   int code,signal_no;
   const char*primary;
   int cleanup;
 };
+/* Keep the fixed verification prefix separate from the original error tail.
+ * Mode is selected ONLY at native_main's owned worker capture. Fingerprint and
+ * helper/common captures still interpret every stderr byte as ordinary error.
+ */
+static void capture_error_tail(struct captured *r,const unsigned char *b,size_t n) {
+  size_t keep=sizeof r->err-r->err_used;
+  if(keep>n)keep=n;
+  memcpy(r->err+r->err_used,b,keep);
+  r->err_used+=keep;r->err_bytes+=n;
+}
+static void capture_worker_stderr(struct captured *r,const unsigned char *b,size_t n) {
+  size_t i;
+  for(i=0;i<n;i++) {
+    if(r->worker.complete||r->worker.rejected) {
+      capture_error_tail(r,b+i,n-i);return;
+    }
+    if(b[i]==CLB97_WORKER_RECORD[r->worker.matched]) {
+      if(++r->worker.matched==CLB97_WORKER_RECORD_BYTES)r->worker.complete=1;
+    }else {
+      r->worker.rejected=1;
+      capture_error_tail(r,CLB97_WORKER_RECORD,r->worker.matched);
+      capture_error_tail(r,b+i,n-i);return;
+    }
+  }
+}
+static int worker_record_ok(const struct captured *r) {
+  return r->worker_expected&&r->worker.complete&&!r->worker.rejected&&!r->err_bytes;
+}
+static const char *worker_record_status(const struct captured *r) {
+  if(!r->worker_expected)return "NOT_RUN";
+  if(r->worker.rejected)return "INVALID";
+  if(r->worker.complete)return r->err_bytes?"UNEXPECTED_STDERR":"CONFIRMED";
+  return "MISSING";
+}
+static void print_worker_record(const struct captured *r) {
+  int ok=worker_record_ok(r);
+  fputs("{\"version\":1,\"role\":\"worker\",\"stage\":\"pre_exec\",\"basis\":\"getrlimit\",\"identity_verified\":",stdout);
+  fputs(ok?"true":"false",stdout);
+  printf(",\"status\":\"%s\",\"nofile_soft\":%s,\"nofile_hard\":%s,\"record_bytes\":%zu,\"stderr_total\":%zu}",
+         worker_record_status(r),ok?"1024":"null",ok?"1024":"null",
+         r->worker.complete?(size_t)CLB97_WORKER_RECORD_BYTES:(size_t)0,r->stderr_total);
+}
 /* Own exact child PID, never kill by name. Linux caller uses PID namespace PID1:
 * killing that exact PID destroys all namespace descendants. Common tests use
 * a fixed isolated process group, explicitly not proof of namespace cleanup. */
@@ -446,6 +492,7 @@ static void capture_child(pid_t pid,int infd,const unsigned char*input,size_t in
   memset(r,0,sizeof*r);
   r->code=-1;
   r->primary="none";
+  r->worker_expected=(ns==CLB97_WORKER_CAPTURE);
   fcntl(infd,F_SETFL,O_NONBLOCK);
   fcntl(outfd,F_SETFL,O_NONBLOCK);
   fcntl(errfd,F_SETFL,O_NONBLOCK);
@@ -508,14 +555,10 @@ static void capture_child(pid_t pid,int infd,const unsigned char*input,size_t in
     if(erropen&&(f[2].revents&(POLLIN|POLLHUP)))  {
       n=read(errfd,b,sizeof b);
       if(n>0)  {
-        {
-          size_t keep=sizeof r->err-r->err_used;
-          if(keep>(size_t)n)keep=(size_t)n;
-          memcpy(r->err+r->err_used,b,keep);
-          r->err_used+=keep;
-        }
-        r->err_bytes+=(size_t)n;
-        if(r->err_bytes>OUTPUT_LIMIT)  {
+        r->stderr_total+=(size_t)n;
+        if(r->worker_expected)capture_worker_stderr(r,b,(size_t)n);
+        else capture_error_tail(r,b,(size_t)n);
+        if(r->stderr_total>OUTPUT_LIMIT) {
           r->primary="stderr_bounds";
           break;
         }
@@ -559,6 +602,13 @@ static void capture_child(pid_t pid,int infd,const unsigned char*input,size_t in
     r->signal_no=WTERMSIG(status);
     r->code=128+r->signal_no;
   }
+  if(r->worker_expected&&!r->worker.complete&&!r->worker.rejected&&r->worker.matched) {
+    capture_error_tail(r,CLB97_WORKER_RECORD,r->worker.matched);r->worker.rejected=1;
+  }
+  /* Preserve pre-existing failures, including pre-record child_fail and exec.
+   * Only an otherwise clean zero exit gets the new missing-evidence refusal. */
+  if(r->worker_expected&&r->code==0&&!strcmp(r->primary,"none")&&!r->err_bytes&&!worker_record_ok(r))
+    r->primary="worker_evidence";
   r->out[r->used]=0;
 }
 /* Only authenticated exact bootstrap reports are eligible for forwarding.
@@ -573,6 +623,7 @@ static const char*child_error(const struct captured*r) {
     "pipes","source_recheck","mount_private","runtime_mount","path","source_mount","null_device","dev_mount","dev_path","null_target",
     "null_bind","null_close","proc_mount","tmp_mount","private_mount","chroot","view_identity","as","core","fsize","nofile",
     "fork","principal","exec","wait","descriptor_close","parent_death_guard",
+    "worker_nofile_read","worker_nofile_mismatch","worker_record_write",
     "child_allocation","child_root","child_runtime_path","child_runtime_open","child_runtime_identity","child_runtime_contract",
     "child_runtime_mount","child_source_open","child_source_identity","child_source_backing","child_source_leases",
     "child_source_mount","child_outer_tuple","child_anchor_recheck","child_view_recheck","child_cleanup"
@@ -1007,6 +1058,10 @@ static void namespace_child(const struct namespace_args *a)  {
     };
     if(setgroups(0,NULL)||setresgid(1000,1000,1000)||setresuid(1000,1000,1000)||prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0))child_fail("principal");
     close_extra_fds();
+    /* CLB-97: read-only evidence in the actual worker, immediately pre-exec. */
+    {const char *measurement_error=worker_measure_emit();
+      if(measurement_error)child_fail(measurement_error);
+    }
     execve(argv[0],argv,env);
     child_fail("exec");
   }
@@ -1145,7 +1200,7 @@ static int native_main(int argc,char**argv)  {
   close(pin[0]);
   close(pout[1]);
   close(perr[1]);
-  capture_child(pid,pin[1],request,32+REQUEST_TAIL_LEN,pout[0],perr[0],RUN_SECONDS,1,&result);
+  capture_child(pid,pin[1],request,32+REQUEST_TAIL_LEN,pout[0],perr[0],RUN_SECONDS,CLB97_WORKER_CAPTURE,&result);
   primary=result.primary;
   cleanup=result.cleanup;
   if(!strcmp(primary,"none"))  {
@@ -1184,6 +1239,7 @@ static int native_main(int argc,char**argv)  {
   if(have_original)printf("{\"device\":%llu,\"inode\":%llu,\"uid\":%lu,\"gid\":%lu}",(unsigned long long)original.st_dev,(unsigned long long)original.st_ino,(unsigned long)original.st_uid,(unsigned long)original.st_gid);
   else fputs("null",stdout);
   fputs(",\"fd_budget\":",stdout);print_fd_budget(&namespace_budget);
+  fputs(",\"worker_rlimit\":",stdout);print_worker_record(&result);
   puts("}");
   return code;
 }

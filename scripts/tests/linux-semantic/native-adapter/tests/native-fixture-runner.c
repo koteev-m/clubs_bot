@@ -15,6 +15,7 @@ int main(void)  {
 #else
 #include "fixture-bind-probe.h"
 #include "fixture-namespace-handles.h"
+#include "fixture-resource-envelope.h"
 struct owned  {
   char path[MAX_PATH];
   struct stat st;
@@ -413,6 +414,9 @@ int main(int argc,char**argv)  {
    * after our ownership/mode changes, never the pre-change snapshot. */
   primary="namespace_anchor_identity";
   if(fstat(work,&work_identity)||fstat(runtime,&runtime_identity))goto finish;
+  {const char *failure=fixture_envelope_admit();
+    if(failure){primary=failure;goto finish;}
+  }
   primary="namespace_fd_budget";
   {uint64_t held;if(fd_budget_runtime(&held)||fd_budget_admit(3+held+2,&namespace_budget))goto finish;}
   primary="outer_namespace";
@@ -565,7 +569,7 @@ int main(int argc,char**argv)  {
   status=0;
   primary="native_adapter_cases_passed";
   finish:alarm(30);
-  if(untracked_created||bind_observation.close_error||namespace_budget.close_error)cleanup=1;
+  if(untracked_created||bind_observation.close_error||namespace_budget.close_error||fixture_envelope.close_error)cleanup=1;
   interrupted=0;
   if(source>=0&&cleanup_owned(source))cleanup=1;
   if(source_created)  {
@@ -581,12 +585,14 @@ int main(int argc,char**argv)  {
   if(work>=0&&close(work))cleanup=1;
   if(adapter>=0&&close(adapter))cleanup=1;
   if(global>=0&&close(global))cleanup=1;
+  if(fixture_envelope_restore())cleanup=1;
   alarm(0);
   if(cleanup)status=1;
   printf("{\"fixture\":1,\"verdict\":\"%s\",\"cleanup\":\"%s\",\"primary\":\"%s\",\"adapter_started\":%s,\"adapter_invocations\":%u,\"adapter_invocations_relation\":\"%s\",\"tmpfs_adapter_attempt\":\"%s\",\"adapter_exit\":%d,\"cleanup_error\":%s,\"negative_controls\":{\"wrong_uid\":%s,\"symlink\":%s,\"runtime_hash\":%s,\"actual_tmpfs_backing\":%s},\"adapter_result\":",status?"BLOCKED":"PASS",cleanup?"UNKNOWN":"confirmed",primary,adapter_calls?"true":"false",adapter_calls,backing_context_started&&!backing_control?"confirmed_lower_bound":"exact",backing_control?"confirmed":backing_context_started?"UNKNOWN":"NOT_RUN",result.code,cleanup?"true":"false",uid_control?"true":"false",symlink_control?"true":"false",runtime_control?"true":"false",backing_control?"true":"false");
   if(result.used&&result.used<=OUTPUT_LIMIT&&result.out[0]=='{'&&result.out[result.used-1]=='\n')fwrite(result.out,1,result.used-1,stdout);
   else fputs("null",stdout);
   fputs(",\"fd_budget\":",stdout);print_fd_budget(&namespace_budget);
+  fputs(",\"resource_envelope\":",stdout);print_fixture_envelope();
   fputs(",\"fixture_diagnostic\":{\"errno\":",stdout);
   if(fixture_errno>=0)printf("%d",fixture_errno);else fputs("null",stdout);
   fputs(",\"fs_magic\":",stdout);
