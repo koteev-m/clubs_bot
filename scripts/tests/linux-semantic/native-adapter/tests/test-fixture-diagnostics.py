@@ -27,10 +27,14 @@ HEADER=r'''
 #define O_DIRECTORY 0x10
 #define O_NOFOLLOW 0x20
 #define O_CLOEXEC 0x40
+#define O_NONBLOCK 0x80
+#define S_IFREG 0100000
+#define S_IFDIR 0040000
+#define S_ISREG(m) (((m)&0170000)==S_IFREG)
 #define MS_BIND 4096
 #define AT_REMOVEDIR 0x200
 #define SOURCE_ROOT "/opt/clubs-bot-stage"
-struct stat {unsigned long st_dev,st_ino;unsigned st_uid,st_gid;};
+struct stat {unsigned long st_dev,st_ino;unsigned st_uid,st_gid,st_mode;};
 struct statfs {long f_type;};
 struct lease_set {int x;};struct mount_tuple {int x;};
 struct captured {int code;size_t used;unsigned char out[OUTPUT_LIMIT+1];};
@@ -111,6 +115,8 @@ static int under_test(void) {
 TAIL=r'''
 int main(int argc,char**argv) {
  if(argc!=6)return 98;fault=argv[1];fault_n=atoi(argv[2]);fault_error=atoi(argv[3]);cleanup_fault=atoi(argv[4]);short_random=atoi(argv[5]);errno=ERANGE;
+ bp_scenario=!strcmp(fault,"probe_missing")?"missing":!strcmp(fault,"probe_close")?"close_error":"ok";
+ if(!strncmp(fault,"probe_",6))fault="bind";
  int rc=under_test();
  printf("{\"boundary\":{\"errno_reset_violations\":%d,\"calls\":[",probe_errno_bad);
  for(int i=0;i<ncalls;i++)printf("%s{\"name\":\"%s\",\"ordinal\":%d,\"errno_zero\":%s}",i?",":"",names[i],ordinals[i],zeros[i]?"true":"false");
@@ -125,12 +131,17 @@ def source_parts(root):
  if 'int fixture_errno=' in helper:
   decl+=re.search(r'  int fixture_errno=.*?\n  unsigned long fixture_magic=0;',helper,re.S).group()+'\n'
  policy=re.search(r'static int supported_backing\(unsigned long t\)  \{.*?\n\}',adapter,re.S).group()
+ if 'struct bind_probe bind_observation=' in helper:
+  decl+=re.search(r'  struct bind_probe bind_observation=.*?;',helper).group()+'\n'
  return helper,region,finish,decl,policy
 
 def compile_boundary(root,dest):
  helper,region,finish,decl,policy=source_parts(root)
  finish=finish.replace('sourcest.st_dev','identity_read(&sourcest,0)').replace('sourcest.st_ino','identity_read(&sourcest,1)')
- src=dest/'fault-boundary.c';src.write_text(HEADER+policy+'\n'+DECL+decl+region+'\n  primary="fixture_source_region_complete";status=0;\n'+finish+'\n'+TAIL)
+ spec=importlib.util.spec_from_file_location('probe_test_boundary',root/'tests/test-bind-probe.py');probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
+ # Actual collector and parsers, with only individual read-only syscalls replaced.
+ probe_include='\n#undef fstat\n#undef close\n#undef snprintf\n'+probe.boundary_include(root)+'\n#define fstat f_fstat\n#define close f_close\n#define snprintf f_snprintf\n'
+ src=dest/'fault-boundary.c';src.write_text(HEADER+probe_include+policy+'\n'+DECL+decl+region+'\n  primary="fixture_source_region_complete";status=0;\n'+finish+'\n'+TAIL)
  cmd=[CC]+SANITIZERS+['-std=c11','-O1','-Wall','-Wextra','-Wno-unused-function','-Wno-unused-variable','-Wno-unused-parameter','-Wno-misleading-indentation',str(src),'-o',str(dest/'fault-boundary')]
  q=subprocess.run(cmd,capture_output=True,timeout=30)
  if q.returncode:raise RuntimeError(q.stderr.decode())
@@ -260,14 +271,14 @@ class Tests(unittest.TestCase):
    for cleanup in (0,1):
     with self.subTest(call=call,cleanup=cleanup):
      rc,r,b=self.run_case(call,cleanup=cleanup);self.assertEqual(rc,1);self.assertEqual(r['primary'],'fixture_source_'+call)
-     self.assertEqual(r['fixture_diagnostic'],{'errno':5,'fs_magic':None,'entry':None});self.assertEqual(b['errno_reset_violations'],0)
+     self.assertEqual({k:r['fixture_diagnostic'][k] for k in ('errno','fs_magic','entry')},{'errno':5,'fs_magic':0xef53 if call in ('mountpoint','bind','random') else None,'entry':None});self.assertEqual(b['errno_reset_violations'],0)
      if cleanup:self.assertTrue(r['cleanup_error']);self.assertEqual(r['cleanup'],'UNKNOWN')
  def test_reset_and_failure_without_errno(self):
   for call in ('mkdir','open','chown','stat','statfs','mountpoint','bind','random'):
    with self.subTest(call=call):
     _,r,b=self.run_case(call,error=-1);self.assertIsNone(r['fixture_diagnostic']['errno']);self.assertEqual(b['errno_reset_violations'],0)
  def test_backing_policy_is_observation_not_statfs_error(self):
-  _,r,b=self.run_case('backing_policy');self.assertEqual(r['primary'],'fixture_source_backing_policy');self.assertEqual(r['fixture_diagnostic'],{'errno':None,'fs_magic':0x01021994,'entry':None})
+  _,r,b=self.run_case('backing_policy');self.assertEqual(r['primary'],'fixture_source_backing_policy');self.assertEqual({k:r['fixture_diagnostic'][k] for k in ('errno','fs_magic','entry')},{'errno':None,'fs_magic':0x01021994,'entry':None})
   self.assertNotIn('mountpoint',[c['name'] for c in b['calls']]);_,r,_=self.run_case('statfs');self.assertIsNone(r['fixture_diagnostic']['fs_magic'])
  def test_bind_vs_mountinfo_no_composite_errno_claim(self):
   for call,error in [('bind',13),('mountinfo',13),('mountinfo',0),('mountinfo',-1)]:
@@ -278,16 +289,29 @@ class Tests(unittest.TestCase):
    for n in range(count):
     with self.subTest(call=call,n=n):
      rc,r,_=self.run_case(call,n);self.assertEqual(rc,1);self.assertEqual(r['primary'],'fixture_source_'+call)
-     self.assertEqual(r['fixture_diagnostic'],{'errno':None,'fs_magic':None,'entry':n if call in ('directory','lock','compose') else None})
+     self.assertEqual({k:r['fixture_diagnostic'][k] for k in ('errno','fs_magic','entry')},{'errno':None,'fs_magic':0xef53,'entry':n if call in ('directory','lock','compose') else None})
  def test_numeric_diagnostic_budget(self):
   _,r,_=self.run_case('bind',error=2147483647);self.assertEqual(r['fixture_diagnostic']['errno'],2147483647)
-  self.assertLess(len(json.dumps(r).encode()),1024)
+  self.assertLess(len(json.dumps(r).encode()),4096)
  def test_short_random_has_no_errno(self):
   _,r,_=self.run_case('none',short=1);self.assertEqual(r['primary'],'fixture_source_random');self.assertIsNone(r['fixture_diagnostic']['errno'])
  def test_region_success_and_order_not_native_pass(self):
-  rc,r,b=self.run_case('none');self.assertEqual(rc,0);self.assertEqual(r['primary'],'fixture_source_region_complete');self.assertEqual(r['fixture_diagnostic'],{'errno':None,'fs_magic':None,'entry':None})
+  rc,r,b=self.run_case('none');self.assertEqual(rc,0);self.assertEqual(r['primary'],'fixture_source_region_complete');self.assertEqual({k:r['fixture_diagnostic'][k] for k in ('errno','fs_magic','entry')},{'errno':None,'fs_magic':0xef53,'entry':None})
   self.assertEqual(b['errno_reset_violations'],0)
   names=[c['name'] for c in b['calls']];self.assertEqual(names[:11],['mkdir','open','chown','stat','statfs','mountpoint','fdpath','bind','mountinfo','paths','paths'])
+ def test_bind_einval_retains_probe_and_single_attempt(self):
+  _,r,b=self.run_case('bind',error=22);d=r['fixture_diagnostic']
+  self.assertEqual(r['primary'],'fixture_source_bind');self.assertEqual(d['errno'],22)
+  self.assertEqual(d['fs_magic'],0xef53);self.assertEqual(d['probe_status'],'complete')
+  self.assertEqual((d['source_mount_class'],d['target_mount_class']),('private','private'))
+  self.assertEqual(d['source_submount_count'],0);self.assertEqual(d['userns_class'],'initial_identity')
+  self.assertEqual(sum(c['name']=='bind' for c in b['calls']),1);self.assertEqual(r['cleanup'],'confirmed')
+ def test_incomplete_probe_and_probe_close_error_do_not_replace_bind(self):
+  for call in ('probe_missing','probe_close'):
+   _,r,b=self.run_case(call,error=22);d=r['fixture_diagnostic']
+   self.assertEqual(r['primary'],'fixture_source_bind');self.assertEqual(d['errno'],22)
+   self.assertEqual(d['probe_status'],'incomplete');self.assertEqual(d['probe_cleanup_error'],call=='probe_close')
+   self.assertEqual(r['cleanup_error'],call=='probe_close');self.assertEqual(sum(c['name']=='bind' for c in b['calls']),1)
  def test_actual_driver_capture_write_artifact_preserves_diagnostic(self):
   spec=importlib.util.spec_from_file_location('diagnostic_driver',ROOT/'tests/native-driver.py');driver=importlib.util.module_from_spec(spec);spec.loader.exec_module(driver)
   # Actual capture + writer/checker, but no native driver main or sudo call.
@@ -297,7 +321,7 @@ class Tests(unittest.TestCase):
    root=P(td).resolve();folder=root/'clb91-native-adapter/evidence';folder.mkdir(parents=True)
    driver.write_evidence(folder,{'result.json':{'primary':'native_fixture_exit','native_tests':helper}})
    spec=importlib.util.spec_from_file_location('diagnostic_artifacts',ROOT/'ci/check-artifacts.py');checker=importlib.util.module_from_spec(spec);spec.loader.exec_module(checker)
-   self.assertEqual(checker.check(root)['checked_files'],1);saved=json.loads((folder/'result.json').read_bytes());self.assertEqual(saved['native_tests']['fixture_diagnostic']['errno'],13);self.assertTrue(saved['native_tests']['cleanup_error'])
+   self.assertEqual(checker.check(root)['checked_files'],1);saved=json.loads((folder/'result.json').read_bytes());self.assertEqual(saved['native_tests']['fixture_diagnostic']['errno'],13);self.assertTrue(saved['native_tests']['cleanup_error']);self.assertEqual(saved['native_tests']['fixture_diagnostic']['source_mount_class'],'private')
 
 if __name__=='__main__':
  ap=argparse.ArgumentParser();ap.add_argument('--root',type=P,default=HERE.parent);ap.add_argument('--cc',default='cc');ap.add_argument('--ubsan',action='store_true');a=ap.parse_args();ROOT=a.root.resolve();CC=a.cc;SANITIZERS=['-fsanitize=undefined','-fno-sanitize-recover=all'] if a.ubsan else []

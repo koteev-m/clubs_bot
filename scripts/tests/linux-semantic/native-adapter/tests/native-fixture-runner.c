@@ -13,6 +13,7 @@ int main(void)  {
   return 1;
 }
 #else
+#include "fixture-bind-probe.h"
 struct owned  {
   char path[MAX_PATH];
   struct stat st;
@@ -352,6 +353,7 @@ int main(int argc,char**argv)  {
    * Composite helpers have no errno contract; report null, never stale errno. */
   int fixture_errno=-1,fixture_entry=-1,fixture_has_magic=0;
   unsigned long fixture_magic=0;
+  struct bind_probe bind_observation=bp_empty();
   size_t i;
   struct utsname un;
   {
@@ -419,15 +421,17 @@ int main(int argc,char**argv)  {
   primary="fixture_source_statfs";
   errno=0;
   if(fstatfs(source,&fs)) { fixture_errno=errno?errno:-1;goto finish; }
+  fixture_has_magic=1;fixture_magic=(unsigned long)fs.f_type;
   primary="fixture_source_backing_policy";
   if(!supported_backing((unsigned long)fs.f_type)) {
-    fixture_has_magic=1;fixture_magic=(unsigned long)fs.f_type;goto finish;
+    goto finish;
   }
   primary="fixture_source_mountpoint";
   errno=0;
   if(mkdir(SOURCE_ROOT,0700)) { fixture_errno=errno?errno:-1;goto finish; }
   primary="fixture_source_fdpath";
   if(snprintf(fdpath,sizeof fdpath,"/proc/self/fd/%d",source)>=(int)sizeof fdpath)goto finish;
+  collect_bind_probe(source,&sourcest,argv[2],fdpath,&bind_observation);
   primary="fixture_source_bind";
   errno=0;
   if(mount(fdpath,SOURCE_ROOT,NULL,MS_BIND,NULL)) { fixture_errno=errno?errno:-1;goto finish; }
@@ -543,7 +547,7 @@ int main(int argc,char**argv)  {
   status=0;
   primary="native_adapter_cases_passed";
   finish:alarm(30);
-  if(untracked_created)cleanup=1;
+  if(untracked_created||bind_observation.close_error)cleanup=1;
   interrupted=0;
   if(source>=0&&cleanup_owned(source))cleanup=1;
   if(source_created)  {
@@ -570,6 +574,7 @@ int main(int argc,char**argv)  {
   if(fixture_has_magic)printf("%lu",fixture_magic);else fputs("null",stdout);
   fputs(",\"entry\":",stdout);
   if(fixture_entry>=0)printf("%d",fixture_entry);else fputs("null",stdout);
+  print_bind_probe(&bind_observation);
   puts("}}");
   return status;
 }
