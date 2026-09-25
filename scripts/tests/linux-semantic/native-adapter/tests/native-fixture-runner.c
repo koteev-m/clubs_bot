@@ -14,6 +14,7 @@ int main(void)  {
 }
 #else
 #include "fixture-bind-probe.h"
+#include "fixture-namespace-handles.h"
 struct owned  {
   char path[MAX_PATH];
   struct stat st;
@@ -99,6 +100,7 @@ struct probe_args  {
   int runtimefd,sourcefd;
   const struct mount_tuple*outer;
   int out,err;
+  struct stat runtime_identity,source_identity;
 };
 static int probe_start(void*v)  {
   struct probe_args*a=v;
@@ -112,6 +114,8 @@ static int probe_start(void*v)  {
     "PATH=/usr/bin:/bin","LC_ALL=C",NULL
   };
   if(dup2(a->out,1)<0||dup2(a->err,2)<0)child_fail("probe_pipe");
+  if(nh_fingerprint_handles(a->runtime,&a->runtimefd,&a->sourcefd,
+      &a->runtime_identity,&a->source_identity))child_fail("probe_namespace_handles");
   private_view(a->runtime,a->runtimefd,a->sourcefd,&empty,a->outer);
   if(setgroups(0,NULL)||setresgid(1000,1000,1000)||setresuid(1000,1000,1000)||prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0))child_fail("probe_principal");
   close_extra_fds();
@@ -133,12 +137,16 @@ static int fingerprint(const char*runtime,int runtimefd,int sourcefd,const struc
   struct captured r;
   struct probe_args a;
   char fs[32],src[MAX_PATH],root[MAX_PATH],target[MAX_PATH],expected[4096],h[4][65];
+  /* Six future pipe ends + three current handles + full runtime leases +
+   * two walker FDs. Admission happens in parent, before clone/partial leases. */
+  {uint64_t held;if(fd_budget_runtime(&held)||fd_budget_admit(6+3+held+2,&namespace_budget))return -1;}
   if(pipe2(in,O_CLOEXEC)||pipe2(stdoutp,O_CLOEXEC)||pipe2(stderrp,O_CLOEXEC))goto resource_failure;
   stack=malloc(1024*1024);
   if(!stack)goto resource_failure;
   a=(struct probe_args)  {
     runtime,runtimefd,sourcefd,outer,stdoutp[1],stderrp[1]
   };
+  if(fstat(runtimefd,&a.runtime_identity)||fstat(sourcefd,&a.source_identity)){free(stack);goto resource_failure;}
   child=clone(probe_start,(char*)stack+1024*1024,CLONE_NEWNS|CLONE_NEWNET|CLONE_NEWPID|SIGCHLD,&a);
   free(stack);
   if(child<0)goto resource_failure;
@@ -338,7 +346,7 @@ int main(int argc,char**argv)  {
   int work=-1,runtime=-1,source=-1,adapter=-1,global=-1,status=1,cleanup=0;
   char runtimepath[PATH_MAX],sourcepath[PATH_MAX],fdpath[64],hash[65],binding[1024],pathhash[65],canary[65],dotenv[128];
   unsigned char random[32];
-  struct stat workst,ast,sourcest;
+  struct stat workst,ast,sourcest,work_identity,runtime_identity;
   struct statfs fs;
   struct lease_set rt=  {
     0
@@ -401,8 +409,15 @@ int main(int argc,char**argv)  {
   if(fchmod(work,0700))goto finish;
   /* No original /opt mount is touched: first isolate all propagation, then
   * cover /opt only inside this disposable test namespace. */
+  /* workst retains only the original owner for restoration. Trust the state
+   * after our ownership/mode changes, never the pre-change snapshot. */
+  primary="namespace_anchor_identity";
+  if(fstat(work,&work_identity)||fstat(runtime,&runtime_identity))goto finish;
+  primary="namespace_fd_budget";
+  {uint64_t held;if(fd_budget_runtime(&held)||fd_budget_admit(3+held+2,&namespace_budget))goto finish;}
   primary="outer_namespace";
   if(unshare(CLONE_NEWNS|CLONE_NEWNET)||mount(NULL,"/",NULL,MS_REC|MS_PRIVATE,NULL)||mount("tmpfs","/opt","tmpfs",MS_NOSUID|MS_NODEV,"size=1048576,mode=0755"))goto finish;
+  if(nh_handoff(&global,&work,&runtime,argv[2],&work_identity,&runtime_identity,&rt,&primary,&cleanup))goto finish;
   primary="fixture_source_mkdir";
   errno=0;
   if(mkdirat(work,"source",0700)) { fixture_errno=errno?errno:-1;goto finish; }
@@ -478,7 +493,10 @@ int main(int argc,char**argv)  {
     fixture_entry=-1;
   }
   primary="native_backing_binding";
-  if(fingerprint(runtimepath,runtime,source,&outer,hash))goto finish;
+  if(fingerprint(runtimepath,runtime,source,&outer,hash)) {
+    if(!namespace_budget.sufficient)primary="namespace_fd_budget";
+    goto finish;
+  }
   digest(SOURCE_ROOT,strlen(SOURCE_ROOT),pathhash);
   snprintf(binding,sizeof binding,"binding_version=3\nenvironment=stage\ncompose_path_hash=%s\nmount_fingerprint_version=2\nmount_fingerprint=mount-v2:%s\ncompose_project=clb91-prototype\ncompose_service=app",pathhash,hash);
   if(made(source,".clubs-bot-release-state/application.binding",0,binding,strlen(binding)))goto finish;
@@ -547,7 +565,7 @@ int main(int argc,char**argv)  {
   status=0;
   primary="native_adapter_cases_passed";
   finish:alarm(30);
-  if(untracked_created||bind_observation.close_error)cleanup=1;
+  if(untracked_created||bind_observation.close_error||namespace_budget.close_error)cleanup=1;
   interrupted=0;
   if(source>=0&&cleanup_owned(source))cleanup=1;
   if(source_created)  {
@@ -568,6 +586,7 @@ int main(int argc,char**argv)  {
   printf("{\"fixture\":1,\"verdict\":\"%s\",\"cleanup\":\"%s\",\"primary\":\"%s\",\"adapter_started\":%s,\"adapter_invocations\":%u,\"adapter_invocations_relation\":\"%s\",\"tmpfs_adapter_attempt\":\"%s\",\"adapter_exit\":%d,\"cleanup_error\":%s,\"negative_controls\":{\"wrong_uid\":%s,\"symlink\":%s,\"runtime_hash\":%s,\"actual_tmpfs_backing\":%s},\"adapter_result\":",status?"BLOCKED":"PASS",cleanup?"UNKNOWN":"confirmed",primary,adapter_calls?"true":"false",adapter_calls,backing_context_started&&!backing_control?"confirmed_lower_bound":"exact",backing_control?"confirmed":backing_context_started?"UNKNOWN":"NOT_RUN",result.code,cleanup?"true":"false",uid_control?"true":"false",symlink_control?"true":"false",runtime_control?"true":"false",backing_control?"true":"false");
   if(result.used&&result.used<=OUTPUT_LIMIT&&result.out[0]=='{'&&result.out[result.used-1]=='\n')fwrite(result.out,1,result.used-1,stdout);
   else fputs("null",stdout);
+  fputs(",\"fd_budget\":",stdout);print_fd_budget(&namespace_budget);
   fputs(",\"fixture_diagnostic\":{\"errno\":",stdout);
   if(fixture_errno>=0)printf("%d",fixture_errno);else fputs("null",stdout);
   fputs(",\"fs_magic\":",stdout);

@@ -38,6 +38,12 @@ struct stat {unsigned long st_dev,st_ino;unsigned st_uid,st_gid,st_mode;};
 struct statfs {long f_type;};
 struct lease_set {int x;};struct mount_tuple {int x;};
 struct captured {int code;size_t used;unsigned char out[OUTPUT_LIMIT+1];};
+/* This suite begins after admission; only exact numeric printer is included.
+ * Admission/enumeration is executed by the separate FD-budget suite. */
+struct fd_budget {
+ uint64_t soft,hard,open_count,additional,total;
+ int limits_known,soft_infinite,hard_infinite,count_known,required_known,sufficient,close_error;
+};static struct fd_budget namespace_budget;
 static int interrupted,untracked_created;static unsigned adapter_calls;
 static const char*srcdirs[]={".clubs-bot-release-state",".clubs-bot-release-state/stage",".clubs-bot-release-state/stage/clubs-bot-schema-stage.lock",".clubs-bot-release-state/stage/clubs-bot-schema-stage.results",".clubs-bot-release-state/stage/clubs-bot-schema-stage.migration-ledgers"};
 static const char *fault;static int fault_n,fault_error,cleanup_fault,in_finish,short_random,probe_errno_bad;
@@ -141,7 +147,8 @@ def compile_boundary(root,dest):
  spec=importlib.util.spec_from_file_location('probe_test_boundary',root/'tests/test-bind-probe.py');probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
  # Actual collector and parsers, with only individual read-only syscalls replaced.
  probe_include='\n#undef fstat\n#undef close\n#undef snprintf\n'+probe.boundary_include(root)+'\n#define fstat f_fstat\n#define close f_close\n#define snprintf f_snprintf\n'
- src=dest/'fault-boundary.c';src.write_text(HEADER+probe_include+policy+'\n'+DECL+decl+region+'\n  primary="fixture_source_region_complete";status=0;\n'+finish+'\n'+TAIL)
+ src=dest/'fault-boundary.c';budget=(root/'adapter/fd-budget.h').read_text();budget_print=budget[budget.index('static void fd_budget_value('):budget.rindex('#endif')]
+ src.write_text(HEADER+budget_print+probe_include+policy+'\n'+DECL+decl+'\n namespace_budget=(struct fd_budget){.limits_known=1,.soft=1038,.hard=4096,.count_known=1,.open_count=520,.required_known=1,.additional=518,.total=1038,.sufficient=1};\n'+region+'\n  primary="fixture_source_region_complete";status=0;\n'+finish+'\n'+TAIL)
  cmd=[CC]+SANITIZERS+['-std=c11','-O1','-Wall','-Wextra','-Wno-unused-function','-Wno-unused-variable','-Wno-unused-parameter','-Wno-misleading-indentation',str(src),'-o',str(dest/'fault-boundary')]
  q=subprocess.run(cmd,capture_output=True,timeout=30)
  if q.returncode:raise RuntimeError(q.stderr.decode())
@@ -290,6 +297,10 @@ class Tests(unittest.TestCase):
     with self.subTest(call=call,n=n):
      rc,r,_=self.run_case(call,n);self.assertEqual(rc,1);self.assertEqual(r['primary'],'fixture_source_'+call)
      self.assertEqual({k:r['fixture_diagnostic'][k] for k in ('errno','fs_magic','entry')},{'errno':None,'fs_magic':0xef53,'entry':n if call in ('directory','lock','compose') else None})
+ def test_fd_budget_telemetry_survives_later_primary(self):
+  _,r,_=self.run_case('bind',error=22)
+  self.assertEqual(r['primary'],'fixture_source_bind')
+  self.assertEqual(r['fd_budget'],dict(nofile_soft=1038,nofile_hard=4096,open_fd_count=520,required_additional_peak=518,required_total_peak=1038,fd_budget_sufficient=True))
  def test_numeric_diagnostic_budget(self):
   _,r,_=self.run_case('bind',error=2147483647);self.assertEqual(r['fixture_diagnostic']['errno'],2147483647)
   self.assertLess(len(json.dumps(r).encode()),4096)

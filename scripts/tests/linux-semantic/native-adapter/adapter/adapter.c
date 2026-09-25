@@ -572,11 +572,22 @@ static const char*child_error(const struct captured*r) {
   static const char*const fixed[]= {
     "pipes","source_recheck","mount_private","runtime_mount","path","source_mount","null_device","dev_mount","dev_path","null_target",
     "null_bind","null_close","proc_mount","tmp_mount","private_mount","chroot","view_identity","as","core","fsize","nofile",
-    "fork","principal","exec","wait","descriptor_close","parent_death_guard"
+    "fork","principal","exec","wait","descriptor_close","parent_death_guard",
+    "child_allocation","child_root","child_runtime_path","child_runtime_open","child_runtime_identity","child_runtime_contract",
+    "child_runtime_mount","child_source_open","child_source_identity","child_source_backing","child_source_leases",
+    "child_source_mount","child_outer_tuple","child_anchor_recheck","child_view_recheck","child_cleanup"
   };
   size_t i;
+  static char combined[64];
   if(r->code!=120||r->err_used!=r->err_bytes)return "none_or_unrecognized";
-  for(i=0;i<sizeof fixed/sizeof*fixed;i++)if(strlen(fixed[i])==r->err_used&&!memcmp(r->err,fixed[i],r->err_used))return fixed[i];
+  for(i=0;i<sizeof fixed/sizeof*fixed;i++) {
+    size_t n=strlen(fixed[i]);
+    if(n==r->err_used&&!memcmp(r->err,fixed[i],n))return fixed[i];
+    if(n+14==r->err_used&&n+14<sizeof combined&&!memcmp(r->err,fixed[i],n)&&
+       !memcmp(r->err+n,"+child_cleanup",14)) {
+      memcpy(combined,fixed[i],n);memcpy(combined+n,"+child_cleanup",15);return combined;
+    }
+  }
   return "none_or_unrecognized";
 }
 static int semantic_body(const char*body,int code)  {
@@ -714,6 +725,8 @@ static int verify_runtime(int fd,struct lease_set*ls)  {
   return verify_runtime_owned(fd,ls,0,0);
 }
 #if defined(__linux__) && !defined(ADAPTER_TEST)
+#include "../tests/fixture-bind-probe.h"
+#include "fd-budget.h"
 struct mount_tuple  {
   char root[MAX_PATH],target[MAX_PATH],type[32],source[MAX_PATH];
 };
@@ -780,6 +793,14 @@ static const struct source_item srcfiles[]=  {
     ".clubs-bot-release-state/stage/clubs-bot-schema-stage.lock/docker-compose.release.yml",4096,1,1
   }
 };
+/* Remaining child peak: three current roots + full runtime/source leases +
+ * three walker FDs (view root + two open_beneath FDs). Existing anchors/pipes
+ * are counted live; no credit is taken for child pipe-end closures. */
+static int adapter_fd_budget(struct fd_budget *b) {
+  uint64_t runtime,source=2*(sizeof srcdirs/sizeof *srcdirs+sizeof srcfiles/sizeof *srcfiles);
+  if(source/2>MAX_LEASES||fd_budget_runtime(&runtime)){memset(b,0,sizeof *b);return -1;}
+  return fd_budget_admit(3+runtime+source+3,b);
+}
 static int source_optional(struct lease_set*s,int fd,const char*p,unsigned limit,int required,int content)  {
   struct stat st;
   int q=open_beneath(fd,p,O_RDONLY);
@@ -835,9 +856,80 @@ static int verify_view_source(int srcfd,const struct lease_set*s)  {
   close(root);
   return recheck(s);
 }
+/* Parent FDs remain trust anchors. They are never the child mount handles. */
+struct namespace_args  {
+  const char*runtime;
+  int runtimefd,srcfd;
+  const struct lease_set *boundary,*runtime_leases,*source;
+  const struct mount_tuple*outer;
+  struct stat runtime_identity,source_identity;
+  int in,out,err,close_in,close_out,close_err;
+};
+struct child_handles {
+  int global,runtime,source,close_error;
+  struct lease_set runtime_leases,source_leases;
+  struct mount_tuple outer;
+};
+static struct child_handles *active_child_handles;
+static int child_handles_close(struct child_handles *h) {
+  int bad=0;
+  if(!h)return 0;
+  bad=h->close_error;
+  if(close_leases(&h->source_leases))bad=1;
+  if(close_leases(&h->runtime_leases))bad=1;
+  if(h->source>=0&&close(h->source))bad=1;h->source=-1;
+  if(h->runtime>=0&&close(h->runtime))bad=1;h->runtime=-1;
+  if(h->global>=0&&close(h->global))bad=1;h->global=-1;
+  free(h);return bad;
+}
+static int child_mount_member(int fd,const char *canonical,int *close_error) {
+  struct bind_probe p=bp_empty();unsigned id=0,again=0;size_t n=0;int result=-1;
+  char *info=malloc(BP_MI_LIMIT+1);
+  if(!info)goto finish;
+  if(bp_fd_mount(fd,&id,&p)||bp_read("/proc/self/mountinfo",info,BP_MI_LIMIT,&n,&p))goto finish;
+  (void)bp_mountinfo(info,n,id,id,canonical,&p);
+  /* Parser sets ok only after the whole bounded table. Submount overflow does
+   * not negate membership; the existing diagnostic probe keeps its own rule. */
+  if(strcmp(p.source_state,"ok")||strcmp(p.target_state,"ok")||
+     bp_fd_mount(fd,&again,&p)||again!=id||p.close_error)goto finish;
+  result=0;
+finish:if(p.close_error)*close_error=1;free(info);return result;
+}
+static int child_same_object(int fd,int anchor,const struct stat *trusted) {
+  struct stat current,original;
+  return fstat(fd,&current)||fstat(anchor,&original)||!S_ISDIR(current.st_mode)||
+    !same_stat(trusted,&original)||!same_stat(trusted,&current)?-1:0;
+}
+static const char *child_reopen(const struct namespace_args *a,struct child_handles *h) {
+  struct statfs fs;
+  h->global=open("/",O_RDONLY|O_DIRECTORY|O_CLOEXEC);
+  if(h->global<0)return "child_root";
+  if(safe_runtime_path(h->global,a->runtime))return "child_runtime_path";
+  h->runtime=open_beneath(h->global,a->runtime,O_RDONLY|O_DIRECTORY);
+  if(h->runtime<0)return "child_runtime_open";
+  if(child_same_object(h->runtime,a->runtimefd,&a->runtime_identity))return "child_runtime_identity";
+  if(verify_runtime(h->runtime,&h->runtime_leases))return "child_runtime_contract";
+  if(child_mount_member(h->runtime,a->runtime,&h->close_error))return "child_runtime_mount";
+  h->source=open_beneath(h->global,SOURCE_ROOT,O_RDONLY|O_DIRECTORY);
+  if(h->source<0)return "child_source_open";
+  if(child_same_object(h->source,a->srcfd,&a->source_identity))return "child_source_identity";
+  if(fstatfs(h->source,&fs)||!supported_backing((unsigned long)fs.f_type))return "child_source_backing";
+  if(lease_source(h->source,&h->source_leases))return "child_source_leases";
+  if(child_mount_member(h->source,SOURCE_ROOT,&h->close_error))return "child_source_mount";
+  if(read_mount_tuple(&h->outer)||!tuple_equal(a->outer,&h->outer))return "child_outer_tuple";
+  /* Parent-held leases are comparison/recheck evidence, never current handles. */
+  if(recheck(a->boundary)||recheck(a->runtime_leases)||recheck(a->source)||
+     recheck(&h->runtime_leases)||recheck(&h->source_leases)||
+     child_same_object(h->runtime,a->runtimefd,&a->runtime_identity)||
+     child_same_object(h->source,a->srcfd,&a->source_identity))return "child_anchor_recheck";
+  return NULL;
+}
 static void child_fail(const char*reason)  {
-  /* fixed class only, consumed as stderr byte count */
+  /* Fixed primary plus optional fixed secondary; never raw stderr or paths. */
+  struct child_handles *h=active_child_handles;active_child_handles=NULL;
+  int cleanup=child_handles_close(h);
   write(2,reason,strlen(reason));
+  if(cleanup)write(2,"+child_cleanup",14);
   _exit(120);
 }
 static void close_extra_fds(void)  {
@@ -877,12 +969,25 @@ static void private_view(const char*runtime,int runtimefd,int srcfd,const struct
   if(chdir(runtime)||chroot(".")||chdir("/"))child_fail("chroot");
   if(read_mount_tuple(&inner)||!tuple_equal(outer,&inner)||fstatfs(srcfd,&fs)||!supported_backing((unsigned long)fs.f_type)||verify_view_source(srcfd,source))child_fail("view_identity");
 }
-static void namespace_child(const char*runtime,int runtimefd,int srcfd,const struct lease_set*source,const struct mount_tuple*outer,int in,int out,int err)  {
+static void namespace_child(const struct namespace_args *a)  {
   struct rlimit r;
   pid_t worker;
   int status;
-  if(dup2(in,0)<0||dup2(out,1)<0||dup2(err,2)<0)child_fail("pipes");
-  private_view(runtime,runtimefd,srcfd,source,outer);
+  const char *reason;
+  if(dup2(a->in,0)<0||dup2(a->out,1)<0||dup2(a->err,2)<0)child_fail("pipes");
+  active_child_handles=calloc(1,sizeof *active_child_handles);
+  if(!active_child_handles)child_fail("child_allocation");
+  active_child_handles->global=active_child_handles->runtime=active_child_handles->source=-1;
+  reason=child_reopen(a,active_child_handles);
+  if(reason)child_fail(reason);
+  private_view(a->runtime,active_child_handles->runtime,active_child_handles->source,
+               &active_child_handles->source_leases,&active_child_handles->outer);
+  if(recheck(&active_child_handles->runtime_leases)||recheck(&active_child_handles->source_leases))child_fail("child_view_recheck");
+  /* Release child-local resources before any semantic result exists. Parent
+   * retains the original leases/locks through capture and final rechecks. */
+  {struct child_handles *h=active_child_handles;active_child_handles=NULL;
+    if(child_handles_close(h))child_fail("child_cleanup");
+  }
   r.rlim_cur=r.rlim_max=768ULL*1024*1024;
   if(setrlimit(RLIMIT_AS,&r))child_fail("as");
   r.rlim_cur=r.rlim_max=0;
@@ -913,21 +1018,13 @@ static void namespace_child(const char*runtime,int runtimefd,int srcfd,const str
   }
   if(WIFEXITED(status))_exit(WEXITSTATUS(status));
   _exit(128+(WIFSIGNALED(status)?WTERMSIG(status):0));
-}
-struct namespace_args  {
-  const char*runtime;
-  int runtimefd,srcfd;
-  const struct lease_set*source;
-  const struct mount_tuple*outer;
-  int in,out,err,close_in,close_out,close_err;
-};
-static int namespace_start(void*opaque)  {
+}static int namespace_start(void*opaque)  {
   struct namespace_args*a=opaque;
   if(prctl(PR_SET_PDEATHSIG,SIGKILL))child_fail("parent_death_guard");
   close(a->close_in);
   close(a->close_out);
   close(a->close_err);
-  namespace_child(a->runtime,a->runtimefd,a->srcfd,a->source,a->outer,a->in,a->out,a->err);
+  namespace_child(a);
   return 120;
 }
 static int native_main(int argc,char**argv)  {
@@ -1024,12 +1121,17 @@ static int native_main(int argc,char**argv)  {
   memcpy(request+32,REQUEST_TAIL,REQUEST_TAIL_LEN);
   primary="pipes";
   if(pipe2(pin,O_CLOEXEC)||pipe2(pout,O_CLOEXEC)||pipe2(perr,O_CLOEXEC))goto finish;
+  primary="namespace_fd_budget";
+  if(adapter_fd_budget(&namespace_budget)){if(namespace_budget.close_error)cleanup=1;goto finish;}
   primary="namespace";
   /* clone returns the exact namespace PID1 to the original parent. */
   {
     struct namespace_args args=  {
-      argv[2],root,src,&source,&outer,pin[0],pout[1],perr[1],pin[1],pout[0],perr[0]
+      .runtime=argv[2],.runtimefd=root,.srcfd=src,.boundary=&boundary,
+      .runtime_leases=&runtime,.source=&source,.outer=&outer,.source_identity=original,
+      .in=pin[0],.out=pout[1],.err=perr[1],.close_in=pin[1],.close_out=pout[0],.close_err=perr[0]
     };
+    if(fstat(root,&args.runtime_identity))goto finish;
     void*stack=malloc(1024*1024);
     if(!stack)goto finish;
     pid=clone(namespace_start,(char*)stack+1024*1024,CLONE_NEWNS|CLONE_NEWNET|CLONE_NEWPID|SIGCHLD,&args);
@@ -1081,6 +1183,7 @@ static int native_main(int argc,char**argv)  {
   fputs(",\"original_identity\":",stdout);
   if(have_original)printf("{\"device\":%llu,\"inode\":%llu,\"uid\":%lu,\"gid\":%lu}",(unsigned long long)original.st_dev,(unsigned long long)original.st_ino,(unsigned long)original.st_uid,(unsigned long)original.st_gid);
   else fputs("null",stdout);
+  fputs(",\"fd_budget\":",stdout);print_fd_budget(&namespace_budget);
   puts("}");
   return code;
 }
