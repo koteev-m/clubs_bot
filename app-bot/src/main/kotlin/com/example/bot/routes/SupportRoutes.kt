@@ -7,14 +7,20 @@ import com.example.bot.data.security.Role
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRolePermissionRepository
 import com.example.bot.http.ErrorCodes
-import com.example.bot.http.respondError
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
+import com.example.bot.http.respondError
+import com.example.bot.opschat.NoopOpsNotificationPublisher
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.isProdLikeProfile
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.rejectMiniAppInitDataQuery
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.support.GuestTicketThread
-import com.example.bot.support.StaffTicketThread
 import com.example.bot.support.StaffSupportReadService
+import com.example.bot.support.StaffTicketThread
 import com.example.bot.support.SupportReplyDeliveryOutcome
 import com.example.bot.support.SupportReplyDeliveryService
 import com.example.bot.support.SupportService
@@ -25,10 +31,6 @@ import com.example.bot.support.TicketMessage
 import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketSummary
 import com.example.bot.support.TicketTopic
-import com.example.bot.opschat.NoopOpsNotificationPublisher
-import com.example.bot.opschat.OpsDomainNotification
-import com.example.bot.opschat.OpsNotificationEvent
-import com.example.bot.opschat.OpsNotificationPublisher
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -50,6 +52,7 @@ import kotlin.coroutines.cancellation.CancellationException
 private val logger = LoggerFactory.getLogger("SupportRoutes")
 private val canonicalPositiveTicketId = Regex("[1-9][0-9]*")
 private val supportUserIdKey = AttributeKey<Long>("support.user.id")
+
 @Serializable
 internal data class CreateTicketRequest(
     val clubId: Long? = null,
@@ -185,6 +188,7 @@ fun Application.supportRoutes(
     opsPublisher: OpsNotificationPublisher = NoopOpsNotificationPublisher,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
+    if (isProdLikeProfile()) rejectMiniAppInitDataQuery("/api/support")
     routing {
         route("/api/support") {
             intercept(ApplicationCallPipeline.Setup) { call.ensureMiniAppNoStoreHeaders() }
@@ -205,8 +209,9 @@ fun Application.supportRoutes(
                     return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                 }
 
-                val userId = call.userIdOrNull(userRepository)
-                    ?: return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                val userId =
+                    call.userIdOrNull(userRepository)
+                        ?: return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
 
                 when (
                     val result =
@@ -253,8 +258,9 @@ fun Application.supportRoutes(
             }
 
             get("/tickets/my") {
-                val userId = call.userIdOrNull(userRepository)
-                    ?: return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                val userId =
+                    call.userIdOrNull(userRepository)
+                        ?: return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                 val tickets = supportService.listMyTickets(userId)
                 call.respond(HttpStatusCode.OK, tickets.map { it.toResponse() })
             }
@@ -303,8 +309,9 @@ fun Application.supportRoutes(
                     return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                 }
 
-                val userId = call.userIdOrNull(userRepository)
-                    ?: return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                val userId =
+                    call.userIdOrNull(userRepository)
+                        ?: return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
 
                 when (
                     val result =

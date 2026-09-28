@@ -7,12 +7,19 @@ import com.example.bot.security.auth.TelegramUser
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.URLDecodeException
+import io.ktor.http.decodeURLPart
+import io.ktor.http.decodeURLQueryComponent
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.DuplicatePluginException
+import io.ktor.server.application.call
 import io.ktor.server.application.createRouteScopedPlugin
 import io.ktor.server.request.contentType
 import io.ktor.server.request.header
+import io.ktor.server.request.path
+import io.ktor.server.request.queryString
 import io.ktor.server.request.receiveParameters
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
@@ -50,10 +57,13 @@ internal class MiniAppAuthAbort : RuntimeException() {
 
 private class MiniAppAuthConfig {
     lateinit var botTokenProvider: () -> String
+
     // Если true — отсутствие initData не считается ошибкой (например, на публичных маршрутах).
     var allowMissingInitData: Boolean = false
+
     // Если true — можно пытаться извлекать initData из JSON/form body.
     var allowInitDataFromBody: Boolean = true
+
     // Максимальный размер body для чтения initData (Content-Length).
     var maxInitDataBodyBytes: Long = 8_192
 }
@@ -121,6 +131,17 @@ fun Route.withMiniAppAuth(
     attributes.put(MiniAppAuthRouteMarker, true)
 }
 
+internal fun Application.rejectMiniAppInitDataQuery(pathPrefix: String) {
+    val prefixSegments = pathPrefix.split('/').filter { it.isNotEmpty() }
+    // Ktor constructs routing parameters before route-scoped plugins, decoding even forbidden values.
+    intercept(ApplicationCallPipeline.Monitoring) {
+        if (call.matchesPathPrefix(prefixSegments) && call.hasForbiddenInitDataQuery()) {
+            call.respondUnauthorized("initData query transport forbidden")
+            finish()
+        }
+    }
+}
+
 fun Application.installMiniAppAuthStatusPage() {
     // No-op: centralized handling is provided by installJsonErrorPages().
 }
@@ -136,6 +157,35 @@ internal fun resetMiniAppValidator() {
 private fun TelegramUser.toMiniUser(): TelegramMiniUser = TelegramMiniUser(id = id, username = username)
 
 // -------- helpers --------
+
+private fun ApplicationCall.matchesPathPrefix(prefixSegments: List<String>): Boolean {
+    val segments =
+        request
+            .path()
+            .splitToSequence('/')
+            .filter { it.isNotEmpty() }
+            .take(prefixSegments.size)
+            .toList()
+    if (segments.size != prefixSegments.size) return false
+    return segments.zip(prefixSegments).all { (raw, expected) ->
+        try {
+            raw.decodeURLPart() == expected
+        } catch (_: URLDecodeException) {
+            false
+        }
+    }
+}
+
+private fun ApplicationCall.hasForbiddenInitDataQuery(): Boolean =
+    request.queryString().splitToSequence('&').any { parameter ->
+        // Inspect every key without decoding credential values or applying a parameter-count limit.
+        try {
+            parameter.substringBefore('=').trim().decodeURLQueryComponent() == "initData"
+        } catch (_: URLDecodeException) {
+            // An undecodable key cannot establish that forbidden transport is absent.
+            true
+        }
+    }
 
 private suspend fun extractInitData(
     call: ApplicationCall,
