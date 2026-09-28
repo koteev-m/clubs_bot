@@ -3,6 +3,7 @@
 
 All canaries and Git history are synthetic and disposable. Never print matches.
 """
+import ast
 import hashlib
 import json
 import os
@@ -18,6 +19,10 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path('scripts/deploy/stage-compose-env-semantic-runtime.json')
 ARM64_MANIFEST = Path('scripts/tests/linux-semantic/arm64-runtime-reference.json')
 AMD64_MANIFEST = Path('scripts/tests/linux-semantic/amd64-runtime-candidate.json')
+NATIVE_ACCEPTED_MANIFEST = Path('scripts/tests/linux-semantic/native-adapter/ci/reference/accepted-manifest.json')
+NATIVE_AMD64_MANIFEST = Path('scripts/tests/linux-semantic/native-adapter/ci/reference/amd64-runtime-candidate.json')
+NATIVE_ARM64_MANIFEST = Path('scripts/tests/linux-semantic/native-adapter/ci/reference/arm64-runtime-reference.json')
+NATIVE_CANDIDATE_MANIFEST = Path('scripts/tests/linux-semantic/native-adapter/reference/candidate-runtime.json')
 IMAGE = 'ghcr.io/gitleaks/gitleaks@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854'
 RUNTIME_PATHS = (
     '/usr/lib/python3.12/__pycache__/' + 'se' + 'crets.cpython-312.pyc',
@@ -27,6 +32,11 @@ RUNTIME_DIGESTS = (
     '08cd4dd20cb98e58ed935d9353928e74a80b17ea3412a9d6009431249cefbff6',
     '277000574358a6ecda4bb40e73332ae81a3bc1c8e1fa36f50e5c6a7d4d3f0f17',
 )
+
+SYNTHETIC_PATHS = ('/etc/' + 'pass' + 'wd',) + RUNTIME_PATHS
+SYNTHETIC_DIGESTS = ('3cd567e7c68f0bfb5594a4b594788734355b83b38a82a409482973952f9dad58',) + RUNTIME_DIGESTS
+PYTHON_MANIFESTS = (MANIFEST, AMD64_MANIFEST, ARM64_MANIFEST, NATIVE_ACCEPTED_MANIFEST,
+                    NATIVE_AMD64_MANIFEST, NATIVE_ARM64_MANIFEST)
 
 
 def git(repo, *args):
@@ -85,6 +95,9 @@ def scanner(repo, output, *, directory=False):
 class RuntimeChecksumAllowlistTest(unittest.TestCase):
     manifest = MANIFEST
     lines = (39, 114)
+    runtime_paths = RUNTIME_PATHS
+    runtime_digests = RUNTIME_DIGESTS
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='clb91-gitleaks-')
         self.addCleanup(self.temp.cleanup)
@@ -104,7 +117,7 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
 
     def test_exact_configuration_and_manifest_identity(self):
         manifest = json.loads(self.raw)
-        self.assertEqual(tuple(manifest['files'][name] for name in RUNTIME_PATHS), RUNTIME_DIGESTS)
+        self.assertEqual(tuple(manifest['files'][name] for name in self.runtime_paths), self.runtime_digests)
         config = tomllib.loads(self.config.decode())
         self.assertEqual(set(config), {'title', 'extend', 'rules'})
         self.assertEqual(config['extend'], {'useDefault': True})
@@ -112,14 +125,16 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         rule = config['rules'][0]
         self.assertEqual(set(rule), {'id', 'allowlists'})
         self.assertEqual(rule['id'], 'generic-api-key')
-        self.assertEqual(len(rule['allowlists']), 3)
-        for allowlist, name in zip(rule['allowlists'], (MANIFEST, AMD64_MANIFEST, ARM64_MANIFEST)):
+        expected_entries = [(name, RUNTIME_PATHS, RUNTIME_DIGESTS) for name in PYTHON_MANIFESTS]
+        expected_entries.append((NATIVE_CANDIDATE_MANIFEST, SYNTHETIC_PATHS, SYNTHETIC_DIGESTS))
+        self.assertEqual(len(rule['allowlists']), len(expected_entries))
+        for allowlist, (name, paths, digests) in zip(rule['allowlists'], expected_entries):
             self.assertEqual(set(allowlist), {'description', 'condition', 'paths', 'regexTarget', 'regexes'})
             self.assertEqual(allowlist['condition'], 'AND')
             self.assertEqual(allowlist['paths'], ['^' + str(name).replace('.', r'\.') + '$'])
             self.assertEqual(allowlist['regexTarget'], 'line')
-            expected = [r'^\s*"' + re.escape(path).replace('secrets', '[s]ecrets').replace(r'\-', '-') +
-                r'": "' + digest + r'",$' for path, digest in zip(RUNTIME_PATHS, RUNTIME_DIGESTS)]
+            expected = [r'^\s*"' + re.escape(path).replace('secrets', '[s]ecrets').replace('passwd', '[p]asswd').replace(r'\-', '-') +
+                r'": "' + digest + r'",$' for path, digest in zip(paths, digests)]
             self.assertEqual(allowlist['regexes'], expected)
 
 
@@ -151,8 +166,7 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         self.commit('manifest without config')
         code, findings = self.scan('before')
         self.assertEqual(code, 1)
-        self.assertEqual(findings, [('generic-api-key', str(self.manifest), self.lines[0]),
-                                    ('generic-api-key', str(self.manifest), self.lines[1])])
+        self.assertEqual(findings, [('generic-api-key', str(self.manifest), line) for line in self.lines])
         write(self.repo, Path('.gitleaks.toml'), self.config)
         self.commit('add exact rule allowlist')
         self.assertEqual(self.scan('after'), (0, []))
@@ -182,17 +196,31 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
         marker = hashlib.sha256(b'CLB-91 synthetic canary A').hexdigest()
         other = hashlib.sha256(b'CLB-91 synthetic canary B').hexdigest()
         provider = 'ghp_' + hashlib.sha256(b'CLB-91 synthetic GitHub canary').hexdigest()[:36]
-        exact = '"' + RUNTIME_PATHS[0] + '": "' + RUNTIME_DIGESTS[0] + '",'
-        cases = (
-            ('other_runtime_key', base.replace(RUNTIME_PATHS[0], RUNTIME_PATHS[0].replace('/usr/lib/', '/usr/local/lib/')), str(self.manifest), 'generic-api-key'),
-            ('changed_digest', base.replace(RUNTIME_DIGESTS[0], other), str(self.manifest), 'generic-api-key'),
-            ('same_key_credential', base.replace(RUNTIME_DIGESTS[0], marker), str(self.manifest), 'generic-api-key'),
+        exact = '"' + self.runtime_paths[0] + '": "' + self.runtime_digests[0] + '",'
+        other_path = self.runtime_paths[0].replace('/usr/lib/', '/usr/local/lib/').replace('/etc/', '/different/etc/')
+        cases = [
+            ('other_runtime_key', base.replace(self.runtime_paths[0], other_path), str(self.manifest), 'generic-api-key'),
+            ('changed_digest', base.replace(self.runtime_digests[0], other), str(self.manifest), 'generic-api-key'),
+            ('same_key_credential', base.replace(self.runtime_digests[0], marker), str(self.manifest), 'generic-api-key'),
             ('other_field_credential', base.replace('  "files": {',
                  '  "files": {\n    "synthetic_api_key": "' + marker + '",'), str(self.manifest), 'generic-api-key'),
             ('extra_same_line', base.replace(exact, exact + ' "synthetic_api_key": "' + marker + '",'),
                  str(self.manifest), 'generic-api-key'),
             ('other_file', base, 'other/runtime.json', 'generic-api-key'),
-        )
+            ('known_digest_other_field', base.replace(self.runtime_paths[0], 'synthetic_api_key'),
+                 str(self.manifest), 'generic-api-key'),
+        ]
+        # Exercise every approved key/digest, including both Python entries in
+        # the synthetic candidate manifest, in Git and directory scan modes.
+        for index, (path, digest) in enumerate(zip(self.runtime_paths[1:], self.runtime_digests[1:]), 1):
+            line = '"' + path + '": "' + digest + '",'
+            cases.extend([
+                (f'changed_digest_{index}', base.replace(digest, other), str(self.manifest), 'generic-api-key'),
+                (f'other_runtime_key_{index}', base.replace(path, '/different' + path),
+                    str(self.manifest), 'generic-api-key'),
+                (f'extra_same_line_{index}', base.replace(line, line + ' "synthetic_api_key": "' + marker + '",'),
+                    str(self.manifest), 'generic-api-key'),
+            ])
         for label, altered, name, rule in cases:
             with self.subTest(label=label):
                 fixture = self.root / label
@@ -200,7 +228,7 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
                 git(fixture, 'init', '-q', '-b', 'main')
                 write(fixture, Path('.gitleaks.toml'), self.config)
                 if label == 'other_file':
-                    write(fixture, Path(name), '\n'.join(line for line in base.splitlines() if any(path in line for path in RUNTIME_PATHS)).encode())
+                    write(fixture, Path(name), '\n'.join(line for line in base.splitlines() if any(path in line for path in self.runtime_paths)).encode())
                 else:
                     write(fixture, self.manifest, altered.encode())
                 git(fixture, 'add', '--', '.')
@@ -212,6 +240,11 @@ class RuntimeChecksumAllowlistTest(unittest.TestCase):
                 self.assertTrue(any(r == rule and p == name for r, p, _ in directory_findings))
                 self.assertTrue(any(found_rule == rule and path == name for found_rule, path, _ in findings),
                     label + ': expected blocking rule/path absent')
+                if label == 'other_file':
+                    expected = [('generic-api-key', name, line)
+                                for line in range(1, len(self.runtime_paths) + 1)]
+                    self.assertCountEqual(findings, expected)
+                    self.assertCountEqual(directory_findings, expected)
 
         fixture = self.root / 'default_canaries'
         fixture.mkdir()
@@ -235,6 +268,41 @@ class Amd64ChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
 class Arm64ReferenceChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
     manifest = ARM64_MANIFEST
     lines = (65, 140)
+
+
+class NativeAcceptedChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
+    manifest = NATIVE_ACCEPTED_MANIFEST
+
+
+class NativeAmd64ChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
+    manifest = NATIVE_AMD64_MANIFEST
+
+
+class NativeArm64ChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
+    manifest = NATIVE_ARM64_MANIFEST
+    lines = (65, 140)
+
+
+class NativeCandidateChecksumAllowlistTest(RuntimeChecksumAllowlistTest):
+    manifest = NATIVE_CANDIDATE_MANIFEST
+    lines = (33, 61, 136)
+    runtime_paths = SYNTHETIC_PATHS
+    runtime_digests = SYNTHETIC_DIGESTS
+
+    def test_synthetic_source_checksum_provenance(self):
+        source = ROOT / 'scripts/tests/linux-semantic/native-adapter/ci/reference/export_inputs.py'
+        tree = ast.parse(source.read_text())
+        literals = [node.args[1].value for node in ast.walk(tree)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == 'add_file' and len(node.args) >= 2
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value == SYNTHETIC_PATHS[0]
+                    and isinstance(node.args[1], ast.Constant)]
+        self.assertEqual(len(literals), 1)
+        self.assertIsInstance(literals[0], bytes)
+        self.assertEqual(hashlib.sha256(literals[0]).hexdigest(), SYNTHETIC_DIGESTS[0])
+        self.assertTrue(literals[0].splitlines())
+        self.assertTrue(all(line.split(b':')[1] == b'x' for line in literals[0].splitlines()))
 
 
 class CandidateScanTest(unittest.TestCase):

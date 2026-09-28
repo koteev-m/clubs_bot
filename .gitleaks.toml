@@ -35,3 +35,44 @@ regexes = [
   '''^\s*"/usr/lib/python3\.12/__pycache__/[s]ecrets\.cpython-312\.pyc": "08cd4dd20cb98e58ed935d9353928e74a80b17ea3412a9d6009431249cefbff6",$''',
   '''^\s*"/usr/lib/python3\.12/[s]ecrets\.py": "277000574358a6ecda4bb40e73332ae81a3bc1c8e1fa36f50e5c6a7d4d3f0f17",$''',
 ]
+
+[[rules.allowlists]]
+description = "CLB-120: exact SHA-256 of accepted runtime files"
+condition = "AND"
+paths = ['''^scripts/tests/linux-semantic/native-adapter/ci/reference/accepted-manifest\.json$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*"/usr/lib/python3\.12/__pycache__/[s]ecrets\.cpython-312\.pyc": "08cd4dd20cb98e58ed935d9353928e74a80b17ea3412a9d6009431249cefbff6",$''',
+  '''^\s*"/usr/lib/python3\.12/[s]ecrets\.py": "277000574358a6ecda4bb40e73332ae81a3bc1c8e1fa36f50e5c6a7d4d3f0f17",$''',
+]
+
+[[rules.allowlists]]
+description = "CLB-120: exact SHA-256 of amd64 runtime candidate files"
+condition = "AND"
+paths = ['''^scripts/tests/linux-semantic/native-adapter/ci/reference/amd64-runtime-candidate\.json$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*"/usr/lib/python3\.12/__pycache__/[s]ecrets\.cpython-312\.pyc": "08cd4dd20cb98e58ed935d9353928e74a80b17ea3412a9d6009431249cefbff6",$''',
+  '''^\s*"/usr/lib/python3\.12/[s]ecrets\.py": "277000574358a6ecda4bb40e73332ae81a3bc1c8e1fa36f50e5c6a7d4d3f0f17",$''',
+]
+
+[[rules.allowlists]]
+description = "CLB-120: exact SHA-256 of archived ARM64 runtime files"
+condition = "AND"
+paths = ['''^scripts/tests/linux-semantic/native-adapter/ci/reference/arm64-runtime-reference\.json$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*"/usr/lib/python3\.12/__pycache__/[s]ecrets\.cpython-312\.pyc": "08cd4dd20cb98e58ed935d9353928e74a80b17ea3412a9d6009431249cefbff6",$''',
+  '''^\s*"/usr/lib/python3\.12/[s]ecrets\.py": "277000574358a6ecda4bb40e73332ae81a3bc1c8e1fa36f50e5c6a7d4d3f0f17",$''',
+]
+
+[[rules.allowlists]]
+description = "CLB-120: exact SHA-256 of synthetic candidate runtime files"
+condition = "AND"
+paths = ['''^scripts/tests/linux-semantic/native-adapter/reference/candidate-runtime\.json$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*"/etc/[p]asswd": "3cd567e7c68f0bfb5594a4b594788734355b83b38a82a409482973952f9dad58",$''',
+  '''^\s*"/usr/lib/python3\.12/__pycache__/[s]ecrets\.cpython-312\.pyc": "08cd4dd20cb98e58ed935d9353928e74a80b17ea3412a9d6009431249cefbff6",$''',
+  '''^\s*"/usr/lib/python3\.12/[s]ecrets\.py": "277000574358a6ecda4bb40e73332ae81a3bc1c8e1fa36f50e5c6a7d4d3f0f17",$''',
+]

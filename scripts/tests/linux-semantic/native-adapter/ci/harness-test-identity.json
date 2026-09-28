@@ -1,0 +1,12 @@
+{
+  "candidate": {
+    "bytes": 14147,
+    "sha256": "fe5ad5e957f50d9b283eab9faa38853d2f7d9bc717c1234704a2559d00d58a61"
+  },
+  "original": {
+    "bytes": 12784,
+    "path": "repo:koteev-m/clubs_bot@9bc5c92fda67679ab876b696d70a41c12a20b71e/scripts/tests/test_amd64_ci_harness.py",
+    "sha256": "962e49c241139c1789005f99e32ec932d87500bbd9c7c550272a46edc6508ae5"
+  },
+  "scope": "One test method extended with exact new entrypoint/artifact expectations. All existing guards/tests retained."
+}
