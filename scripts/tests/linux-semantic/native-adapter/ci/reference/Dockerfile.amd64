@@ -1,0 +1,8 @@
+FROM ubuntu@sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4
+COPY debs /inputs/debs
+COPY docker-compose-linux-x86_64 SHA256SUMS /inputs/
+RUN cd /inputs && sha256sum -c SHA256SUMS && DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends install /inputs/debs/*.deb && install -m 0555 docker-compose-linux-x86_64 /usr/local/bin/docker-compose && rm -rf /inputs /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+RUN mkdir -p /work/runner-temp /work/tests /opt/clubs-bot-stage /run/user/1000 && chown -R 1000:1000 /work /opt/clubs-bot-stage /run/user/1000 && chmod 700 /work/runner-temp /run/user/1000 && dpkg-query -W -f='${Package}=${Version}\n' > /toolchain-packages.txt
+USER 1000:1000
+ENV RUNNER_TEMP=/work/runner-temp TMPDIR=/work/runner-temp PYTHONDONTWRITEBYTECODE=1
+WORKDIR /work/tests

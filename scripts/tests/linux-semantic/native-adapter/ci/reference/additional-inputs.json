@@ -1,0 +1,33 @@
+{
+  "reason": "Actual Psych.parse_stream synthetic YAML loads UTF-16LE/BE encoding modules lazily. Absence causes SyntaxError. Candidate extension only; accepted manifest unchanged.",
+  "archive": {
+    "package": "libruby3.2",
+    "version": "3.2.3-1ubuntu0.24.04.8",
+    "architecture": "amd64",
+    "file": "libruby3.2_3.2.3-1ubuntu0.24.04.8_amd64.deb",
+    "bytes": 5342224,
+    "sha256": "77c2e98ccfba2c4a4e5edb48ca8c0eb041702e1579eabc40cf07064fd4f3033e",
+    "independent_lock": "scripts/tests/linux-semantic/amd64-inputs.json packages[libruby3.2]",
+    "extraction": "dpkg-deb --fsys-tarfile; no package scripts or installation"
+  },
+  "files": {
+    "/usr/lib/x86_64-linux-gnu/ruby/3.2.0/enc/utf_16le.so": {
+      "sha256": "265669aa78753dc6c481cb8614b03be00b92c3b4af090e831de4697d2682d292",
+      "bytes": 14568,
+      "archive_uid": 0,
+      "archive_gid": 0,
+      "archive_mode": "0644",
+      "archive_mtime": 1781695760,
+      "reference_image_bytes_match": true
+    },
+    "/usr/lib/x86_64-linux-gnu/ruby/3.2.0/enc/utf_16be.so": {
+      "sha256": "ea962ba9d6debfa151ce16b4848a21b03bfdd439b132e75df71b7121cf72cf0e",
+      "bytes": 14568,
+      "archive_uid": 0,
+      "archive_gid": 0,
+      "archive_mode": "0644",
+      "archive_mtime": 1781695760,
+      "reference_image_bytes_match": true
+    }
+  }
+}

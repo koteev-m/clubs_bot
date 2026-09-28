@@ -1,0 +1,18 @@
+{
+  "bootstrap_sha256": "0e061bd45aad54711ec8dc9ee3601534ce78f8a0e73c85e876be22aeb884d9e4",
+  "encoded_sha256": "4899c89784b5fca3a3acda606ae2936b28e9f189ac8760bd69cbf4458e8bea66",
+  "header_bytes": 821681,
+  "header_sha256": "a42038d3ac9e71950b3be96b946431368090d04274043e34c900f44c45621531",
+  "request_tail_bytes": 153648,
+  "request_tail_sha256": "d6d1404f0e89a171dfd860478c1614119618a4faa8fee439cafa5c48669d58dd",
+  "runtime_aliases": 23,
+  "runtime_entries": 267,
+  "runtime_files": 196,
+  "source_hashes": {
+    "release_private_root.py": "250d359d114779ddcc12c38bc64dc7015d5679f0ffce12a859f007810726cdba",
+    "stage-compose-diagnostic-operation.py": "2487c9b9d82de02ab2df9d11bd54c45c75e423d595079c9cf3ab2e10890ee96c",
+    "stage-compose-env-file-plan.py": "1317a5a89323b0d3296e8678dd1a8f7a668aa91cc5594c066d93bad1919a6cd5",
+    "stage-compose-env-semantic-operation.py": "af328463da08079defb51b163af1309faa7820e5dd9ded6da910501e251d47b6",
+    "stage-compose-env-semantic-runtime.json": "68fc3b06b2198b06f1583c0bb1157669c4df6d8c9548934ed3c79315d6e82649"
+  }
+}
