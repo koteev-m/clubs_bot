@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7-labs
 
 # ---------- build stage ----------
-# builder: public.ecr.aws/docker/library/eclipse-temurin:21.0.11_10-jdk-noble
-FROM public.ecr.aws/docker/library/eclipse-temurin:21.0.11_10-jdk-noble@sha256:a871f3e3caddad75608fd4531ed8bbca5cc42a27dc1da3ea3a2e554772b0ee15 AS builder
+# builder: docker.io/library/eclipse-temurin:21.0.11_10-jdk-noble
+FROM docker.io/library/eclipse-temurin:21.0.11_10-jdk-noble@sha256:a871f3e3caddad75608fd4531ed8bbca5cc42a27dc1da3ea3a2e554772b0ee15 AS builder
 WORKDIR /app
 
 # прогрев gradle (депенденси-кеш)
@@ -25,8 +25,8 @@ RUN --mount=type=cache,target=/root/.gradle \
     ./gradlew --no-daemon :app-bot:installDist -x test
 
 # ---------- runtime stage ----------
-# runtime: public.ecr.aws/docker/library/eclipse-temurin:21.0.11_10-jre-noble
-FROM public.ecr.aws/docker/library/eclipse-temurin:21.0.11_10-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2 AS runner
+# runtime: docker.io/library/eclipse-temurin:21.0.11_10-jre-noble
+FROM docker.io/library/eclipse-temurin:21.0.11_10-jre-noble@sha256:ca397720325ceefe39ce397f186759fc87d9efafb2dc4ce53315980844c2f4f2 AS runner
 WORKDIR /opt/app
 
 USER root

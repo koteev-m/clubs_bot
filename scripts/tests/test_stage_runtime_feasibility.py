@@ -393,7 +393,7 @@ class WorkflowTest(unittest.TestCase):
         selfcheck=(ROOT/'scripts/selfcheck-quality-gates.sh').read_text()
         for name in ('test_stage_runtime_feasibility.py','test_stage_runtime_inventory.py'):
             self.assertEqual(selfcheck.count('python3 "$ROOT_DIR/scripts/tests/'+name+'"'),1)
-        self.assertIn('"27"',selfcheck.split('if [ "$fixture_name" = "valid-current-alias-inventory" ]; then',1)[1].split('\n  fi',1)[0])
+        self.assertIn('"28"',selfcheck.split('if [ "$fixture_name" = "valid-current-alias-inventory" ]; then',1)[1].split('\n  fi',1)[0])
 
     def test_exact_capability_and_negative_authority_mutations(self):
         # Exercise the actual capability parser, not string-presence assertions.
