@@ -1890,3 +1890,62 @@ guarded запуске, а повтор после completion является n
    ни base Compose, ни сохранённый «последний рабочий» image: после V056 он может быть schema-incompatible.
 5. После forward-fix подтвердить `/ready` и `/health`, сохранить отдельно собранные incident application logs и реконструированные canonical `migration-safe:v=1` events вместе со schema-history evidence. Unknown/malformed/duplicate/out-of-order raw output является protocol failure и не разрешает выход из maintenance. Repository protocol не пересылает в CI полный migration-container output и не сохраняет его как durable release evidence: parser читает его только из mode `0600` temporary file и удаляет этот файл на success/failure/trap paths. Raw Flyway/JDBC/exception logging не включать в bounded result/status records.
 6. Открыть postmortem-задачу с причиной и корректирующими действиями.
+
+
+## CLB-132 fixed package-plan channel (local candidate)
+
+The local candidate `.github/workflows/stage-package-plan.yml` is **unpublished and
+unexecuted**. It closes only the CLB-131 execution-channel gap. Neither this text
+nor a green workflow grants package mutation, readiness, root binding, release,
+recovery or Private Support Loop smoke authority.
+
+After separate publication review/authorization, a separately authorized manual
+main dispatch may select only confirmation `CLB-132:collect-package-plan`. Each
+run must use its exact workflow SHA (`GITHUB_WORKFLOW_SHA == GITHUB_SHA`), initial
+attempt 1 and protected `stage` Environment under DEC-037. Reruns are refused
+before credentials; another collection needs a new dispatch with fresh external
+authorization. There is no durable stage claim or inherited one-use authority.
+
+The channel consumes only existing stage `SSH_PRIVATE_KEY`, `SSH_USER`,
+`SSH_HOST`, `SSH_PORT`, `SSH_KNOWN_HOSTS`. The accepted deployment principal must
+be non-root; remote UID/name checks precede execution. The endpoint is fixed to
+`178.20.209.5:22`, with exactly the retained DEC-038 Ed25519 fingerprint
+`SHA256:Li2AIDm9/OG8CHWQw16qhDfzbRM7E9uLNjPeKOZ9ST0`. Strict host verification,
+no proxy/discovery/fallback and a single SSH invocation apply. No new secret or
+Environment setting is required or changed. Live protection/pin configuration
+has not been reverified by this local task.
+
+The runner verifies the complete fixed Git-object source/data closure and
+working-file identity, compiles every Python member, parses the frozen request,
+and checks its 20 exact pairs against the immutable CLB-131 collector before
+loading dependent project code. Captured modules bypass checkout imports.
+Only the fixed collector, protocol and request enter the memory-only remote
+bootstrap, with source hashes rechecked there. No remote helper file is created.
+The collector's original SHA-256 is preserved. The channel adds owned-child
+supervision: leaders are not reaped before group cleanup; timeout, interruption,
+exited leaders with descendants and setup exceptions cannot bypass cleanup.
+This adapter does not alter collector argv, environment, reads or package data.
+
+Remote collection retains the collector's 100-second budget and adds a
+105-second bootstrap alarm that remains active through final output; the local
+transport has a 120-second limit. Final remote output uses nonblocking writes
+with a five-second deadline; cancellation or backpressure leaves an invalid
+partial frame and cannot strand a writer with its alarm disabled.
+The one authenticated frame is at most 1,052,800 bytes; collector evidence
+remains at most 1 MiB. HMAC-SHA256 uses a fresh private memory-only key. The
+versioned body binds a separate challenge, run ID/attempt, workflow commit SHA,
+workflow/runner/closure/collector/target SHA-256 identities and exact schema.
+Duplicate records/keys, unknown fields, wrong authentication or identity,
+trailing bytes and oversized output are rejected. Raw transport stderr is never
+published. Only validated non-secret evidence is printed after local cleanup;
+local failures use a distinct unauthenticated `REFUSED` prefix and exit 1.
+
+`OBSERVED / COLLECTION_COMPLETED` and exit 0 mean collection completed. Even a
+nonzero resolver simulation exit may be observed as evidence; it does not prove
+package availability or a safe transaction. Collector refusal remains
+`UNAVAILABLE` with a fixed reason and exit 1. Missing candidate maintainer scripts,
+index freshness, generated-state byte reproduction and historical outside-mapping
+identity remain explicit unknowns. No package mutation, download, APT refresh,
+service control, application/private semantic read or root/release write exists
+in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
+and a separate transaction decision.
