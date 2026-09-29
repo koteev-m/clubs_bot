@@ -13,7 +13,8 @@ PIN = 'e83874834305fe9a4a2997156cb26c5de65a8555'
 OLD = 'dc588b651fe13675774614f8e6a936a468676387'
 WORKFLOWS = ('db-migrate', 'deploy-ssh', 'release-status', 'corrected-stage-release',
              'stage-compose-diagnostic', 'stage-runtime-inventory', 'stage-runtime-feasibility',
-             'stage-compose-mode-repair', 'stage-compose-env-semantic')
+             'stage-compose-mode-repair', 'stage-compose-env-semantic',
+             'stage-package-plan')
 FIXTURE = ROOT / 'scripts/tests/fixtures/ssh-agent-v0.10.0.json'
 
 # Exact upstream source and extracted dist module bodies are evaluated in a VM.
