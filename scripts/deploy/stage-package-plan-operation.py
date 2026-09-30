@@ -5,6 +5,7 @@ Output is one bounded JSON object. No stage files are created. This script is no
 an execution authority or an installer. Invoke as python3 -I -S -B from memory.
 """
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -248,8 +249,44 @@ def decompressed_index_digest(path,maximum=268435456):
         if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
         sel.close();p.stdout.close();p.stderr.close()
 
+def local_index_matches(filename, local):
+    return filename==local or filename.startswith(local+'.')
+
+def release_refs(text, prefix, package_files):
+    """Validate the entire byte-bounded section; retain only local relation inputs."""
+    refs=None; in_section=False; entries=0
+    # bounded_file already caps the whole Release at 2 MiB. Iterate lines without
+    # a quantifier/slice that could accept a valid prefix and hide a bad tail.
+    for line in io.StringIO(text):
+        tick()
+        if line.startswith('SHA256:'):
+            need(refs is None and re.fullmatch(r'SHA256:[ \t]*\r?\n?',line), 'MALFORMED_INDEX_HASH')
+            refs=[]; in_section=True
+            continue
+        if not in_section:continue
+        # Clear-signed text may separate the signature with a blank line. Keep
+        # scanning: a blank must not hide later malformed or ambiguous entries.
+        if line in ('\n','\r\n'):continue
+        if not line.startswith((' ','\t')):
+            need(entries>0 and re.fullmatch(r'(?:[A-Za-z][A-Za-z0-9-]*:[^\n]*|-----BEGIN PGP SIGNATURE-----\r?)\n?',line), 'MALFORMED_INDEX_HASH')
+            in_section=False
+            continue
+        m=re.fullmatch(r'[ \t]+([0-9a-f]{64})[ \t]+([0-9]{1,15})[ \t]+([A-Za-z0-9._+/-]{1,180})[ \t]*\r?\n?',line)
+        need(m is not None,'MALFORMED_INDEX_HASH')
+        entries+=1
+        if '/binary-amd64/Packages' not in m[3]:continue
+        local=prefix+m[3].replace('/','_')
+        if any(local_index_matches(name,local) for name in package_files):
+            # Same evidence/schema cap, now on useful refs only. Never truncate
+            # or deduplicate: duplicates/collisions must still reach ambiguity.
+            need(len(refs)<32,'INDEX_REFS_LIMIT')
+            refs.append({'path':m[3],'sha256':m[1],'size':int(m[2])})
+    need(refs is None or entries>0,'MALFORMED_INDEX_HASH')
+    return refs
+
 def index_rows(sources):
     names=files_in('/var/lib/apt/lists',('InRelease','Release','Packages','Packages.lz4','Packages.xz','Packages.gz'),128)
+    package_files=[Path(path).name for path in names if 'Packages' in Path(path).name]
     rows=[];total_package_bytes=0
     keypaths=sorted({s['signed_by'] for s in sources if s['signed_by'].startswith('/')})
     for path in names:
@@ -272,15 +309,9 @@ def index_rows(sources):
             for key in ('Origin','Label','Suite','Codename','Date','Valid-Until'):
                 m=re.search(r'^'+re.escape(key)+r':\s*(.{0,160})$',text,re.M)
                 if m:row[key.lower().replace('-','_')]=m[1]
-            sha_section=re.search(r'^SHA256:\s*\n((?:[ \t]+[^\n]*\n){1,256})',text,re.M)
-            if sha_section:
-                refs=[]
-                for line in sha_section[1].splitlines():
-                    m=re.fullmatch(r'\s*([0-9a-f]{64})\s+(\d{1,15})\s+([A-Za-z0-9._+/-]{1,180})\s*',line)
-                    need(m is not None,'MALFORMED_INDEX_HASH')
-                    if '/binary-amd64/Packages' in m[3]:refs.append({'path':m[3],'sha256':m[1],'size':int(m[2])})
-                row['amd64_package_refs']=refs[:32]
-                need(len(refs)<=32,'INDEX_REFS_LIMIT')
+            prefix=row['file'].removesuffix('InRelease').removesuffix('Release')
+            refs=release_refs(text,prefix,package_files)
+            if refs is not None:row['amd64_package_refs']=refs
             row['signature']={'status':'UNKNOWN'}
             if path.endswith('InRelease') and len(keypaths)==1:
                 key=keypaths[0]
@@ -300,7 +331,7 @@ def index_rows(sources):
             prefix=release['file'].removesuffix('InRelease').removesuffix('Release')
             for ref in release.get('amd64_package_refs',[]):
                 local=prefix+ref['path'].replace('/','_')
-                if row['file']==local or row['file'].startswith(local+'.'):
+                if local_index_matches(row['file'],local):
                     matches.append((release,ref))
         need(len(matches)<=1,'INDEX_RELATION_AMBIGUOUS')
         if matches:

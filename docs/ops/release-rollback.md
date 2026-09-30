@@ -1917,11 +1917,12 @@ has not been reverified by this local task.
 
 The runner verifies the complete fixed Git-object source/data closure and
 working-file identity, compiles every Python member, parses the frozen request,
-and checks its 20 exact pairs against the immutable CLB-131 collector before
+and checks its 20 exact pairs against the fixed collector before
 loading dependent project code. Captured modules bypass checkout imports.
 Only the fixed collector, protocol and request enter the memory-only remote
 bootstrap, with source hashes rechecked there. No remote helper file is created.
-The collector's original SHA-256 is preserved. The channel adds owned-child
+CLB-132 originally preserved the collector's SHA-256; the CLB-150 local candidate
+below synchronizes only changed source identities. The channel adds owned-child
 supervision: leaders are not reaped before group cleanup; timeout, interruption,
 exited leaders with descendants and setup exceptions cannot bypass cleanup.
 This adapter does not alter collector argv, environment, reads or package data.
@@ -1949,3 +1950,45 @@ identity remain explicit unknowns. No package mutation, download, APT refresh,
 service control, application/private semantic read or root/release write exists
 in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
 and a separate transaction decision.
+
+
+### CLB-150 local candidate: bounded Release references
+
+User-supplied CLB-149 run `36688999303` (attempt 1, published head
+`ad60de27034ba2967d90a7145cb0b74f318e185c`) returned authenticated
+`UNAVAILABLE / INDEX_REFS_LIMIT / evidence=null`. This supersedes the historical
+unpublished/unexecuted status above, but reveals neither the specific Release
+nor its reference count. No new live read is part of CLB-150.
+
+The original collector retained every amd64 Packages reference, refused over
+32, and could silently parse only the first 256 SHA256 lines. The local fix
+validates the complete SHA256 section within the unchanged 2 MiB Release file
+limit. There is no line-count slice: malformed entries (including unretained
+ones), empty/duplicate SHA256 sections and invalid section termination refuse.
+A final entry without a newline is validated as well. Blank signature separators
+do not end scanning or hide later entries; indented whitespace-only entries
+still refuse. Oversized files refuse
+before parsing; each scanned line checks the existing 100-second budget.
+The entry grammar needs at least 69 bytes, so the existing byte cap implies
+at most 30,393 entries per file, without an arbitrary new reference-count cap.
+
+`amd64_package_refs` now contains only references whose existing filename
+relation predicate can match a locally discovered Packages index. Discovery
+still permits at most 128 index files (within 256 directory entries); retained
+refs still permit at most 32 per Release. More than 32 relevant refs refuses
+`INDEX_REFS_LIMIT`, without truncation. Both filtering and relation construction
+use the same predicate. Duplicates, slash/underscore collisions, compression
+alternatives and multiple Releases are not deduplicated: more than one match
+still refuses `INDEX_RELATION_AMBIGUOUS`. Every possible local match is either
+retained or the entire collection refuses; irrelevant references are validated
+but not emitted. The field is not a complete remote repository inventory.
+
+Configured-key verification, hash/size comparison and all `signed_relation`
+values are unchanged. Source SHA-256 literals in runner/protocol follow the
+candidate bytes; schema, refusal allowlist, trust/key/host pins, frozen target
+and all 20 requested pairs are unchanged. Package byte limits, output/frame
+limits and command/overall deadlines are unchanged. No new command, path read,
+network operation or write is introduced. Large/unknown live inputs may still
+fail closed; this candidate is not proof that a future stage run will complete.
+Publication and any later exact-run collection remain separate authorization
+boundaries; this local task authorizes neither.
