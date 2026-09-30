@@ -1,7 +1,10 @@
 """Fixed CLB-132 evidence envelope. Strict validation and ownership of fixed collector commands."""
 import hashlib
 import json
+import errno
+import posixpath
 import re
+import stat
 import sys
 
 PREFIX = b'clb132-package-plan:v=1 '
@@ -430,15 +433,122 @@ class PhaseTracker:
             self.phase = 'apt_config'
 
 
+def _os_release_identity(value):
+    return (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+            value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+
+def _safe_os_release_directory(value):
+    need(value.st_uid == 0 and stat.S_ISDIR(value.st_mode) and not value.st_mode & 0o022)
+
+
+def _safe_os_release_file(value):
+    need(value.st_uid == 0 and stat.S_ISREG(value.st_mode) and value.st_nlink == 1
+         and stat.S_IMODE(value.st_mode) in (0o444, 0o644) and value.st_size <= 4096)
+
+
+def _read_fixed_os_release():
+    """Resolve only the accepted /etc/os-release link through pinned descriptors."""
+    fds, edges = [], []
+    try:
+        root = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fds.append(root)
+        root_identity = _os_release_identity(os.fstat(root))
+        _safe_os_release_directory(os.fstat(root))
+
+        def directory(parent, name):
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            _safe_os_release_directory(before)
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=parent)
+            fds.append(fd)
+            actual = os.fstat(fd)
+            _safe_os_release_directory(actual)
+            need(_os_release_identity(before) == _os_release_identity(actual))
+            edges.append((parent, name, fd, _os_release_identity(actual)))
+            return fd
+
+        etc = directory(root, 'etc')
+        link = os.stat('os-release', dir_fd=etc, follow_symlinks=False)
+        need(link.st_uid == 0 and stat.S_ISLNK(link.st_mode) and link.st_nlink == 1)
+        target = os.readlink('os-release', dir_fd=etc)
+        resolved = posixpath.normpath(target if target.startswith('/') else
+                                      posixpath.join('/etc', target))
+        need(resolved == '/usr/lib/os-release')
+        link_identity = _os_release_identity(link)
+
+        usr = directory(root, 'usr')
+        lib = directory(usr, 'lib')
+        before = os.stat('os-release', dir_fd=lib, follow_symlinks=False)
+        _safe_os_release_file(before)
+        fd = os.open('os-release', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=lib)
+        fds.append(fd)
+        actual = os.fstat(fd)
+        _safe_os_release_file(actual)
+        file_identity = _os_release_identity(actual)
+        need(_os_release_identity(before) == file_identity)
+        edges.append((lib, 'os-release', fd, file_identity))
+
+        def recheck():
+            need(_os_release_identity(os.fstat(root)) == root_identity)
+            for parent, name, child, expected in edges:
+                need(_os_release_identity(os.fstat(child)) == expected
+                     and _os_release_identity(os.stat(name, dir_fd=parent,
+                                                      follow_symlinks=False)) == expected)
+            need(_os_release_identity(os.stat('os-release', dir_fd=etc,
+                                              follow_symlinks=False)) == link_identity
+                 and os.readlink('os-release', dir_fd=etc) == target)
+
+        recheck()
+        data = os.read(fd, 4097)
+        need(len(data) <= 4096 and not os.read(fd, 1))
+        recheck()
+        return data, actual
+    finally:
+        failed = False
+        for fd in reversed(fds):
+            try:
+                os.close(fd)
+            except OSError:
+                failed = True
+        need(not failed)
+
+
+class OsReleaseSlot:
+    """Keep the frozen collector call; handle only its one fixed symlink layout."""
+
+    def __init__(self, collector):
+        self.collector = collector
+        self.original = collector.bounded_file
+
+    def __enter__(self):
+        self.collector.bounded_file = self.read
+        return self
+
+    def __exit__(self, *_unused):
+        self.collector.bounded_file = self.original
+
+    def read(self, path, maximum):
+        try:
+            return self.original(path, maximum)
+        except OSError as error:
+            if path != '/etc/os-release' or maximum != 4096 or error.errno != errno.ELOOP:
+                raise
+            return _read_fixed_os_release()
+
+
 def collect(collector, expected_identity, challenge, cancelled=lambda: False):
     result = dict(schema='clb132-package-plan-v1', challenge=challenge, identity=expected_identity,
                   result='OBSERVED', reason='COLLECTION_COMPLETED', evidence=None)
     code = 0
+    slot = OsReleaseSlot(collector)
     tracker = PhaseTracker(collector)
+    tracker.direct_codes[OsReleaseSlot.read.__code__] = 'os'
     try:
-        with CommandOwnership(collector, cancelled):
-            with tracker:
-                result['evidence'] = collector.collect()
+        with slot:
+            with CommandOwnership(collector, cancelled):
+                with tracker:
+                    result['evidence'] = collector.collect()
         tracker.phase = 'final_validation'
         evidence(result['evidence'], collector)
     except (collector.Refuse, OSError, UnicodeError, ValueError, collector.subprocess.SubprocessError) as error:

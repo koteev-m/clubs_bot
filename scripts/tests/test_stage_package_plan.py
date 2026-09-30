@@ -4,6 +4,7 @@ import ast
 import base64
 import builtins
 import copy
+import errno
 import hashlib
 import hmac
 import importlib.util
@@ -18,7 +19,7 @@ import sys
 import tempfile
 import types
 import unittest
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +35,7 @@ def load(path):
 r = load('scripts/deploy/stage-package-plan.py')
 p = load(r.PROTOCOL_PATH)
 c = load(r.REMOTE_PATH)
+inventory_fixtures = load('scripts/tests/runtime_inventory_fixtures.py')
 
 
 def sources():
@@ -252,6 +254,8 @@ class ProtocolTest(unittest.TestCase):
             target = getattr(fake, selected)
             if selected == 'run':
                 target(argv if argv is not None else ['dpkg', '--print-architecture'])
+            elif selected == 'bounded_file':
+                target('/etc/os-release', 4096)
             else:
                 target()
 
@@ -337,6 +341,162 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(body[len(p.PREFIX):])['reason'], p.PHASE_REASONS['apt_config'])
         self.assertNotIn(b'PRIVATE_CONFIG_CANARY', body)
+
+
+class OsReleaseSlotTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        inventory_fixtures.make_fixture(self.root)
+        self.identity = r.invocation_identity(environment(), sources())
+        self.challenge = 'c' * 64
+
+        class RoutedOS(inventory_fixtures.FixtureOS):
+            def open(self, path, flags, *args, **kwargs):
+                if path == '/etc/os-release':
+                    fd = os.open(Path(self.root) / 'etc/os-release', flags, *args, **kwargs)
+                    self.owned.add(fd)
+                    return fd
+                return super().open(path, flags, *args, **kwargs)
+
+        self.routed_os = RoutedOS(self.root)
+
+    def command(self, argv, *_unused):
+        if argv == ['dpkg', '--print-architecture']:
+            return 0, b'amd64\n', b''
+        if argv == ['dpkg', '--print-foreign-architectures']:
+            return 0, b'', b''
+        if argv[0] == 'apt-get':
+            return 100, b'Inst ruby (1:3.2~ubuntu1)\nConf ruby (1:3.2~ubuntu1)\n', b''
+        self.fail('unexpected package argv')
+
+    @contextmanager
+    def routed(self):
+        with ExitStack() as stack:
+            for module in (c, p):
+                stack.enter_context(patch.object(module, 'os', self.routed_os))
+            stack.enter_context(patch.object(p, 'CommandOwnership', return_value=nullcontext()))
+            stack.enter_context(patch.object(c, 'run', new=self.command))
+            stack.enter_context(patch.object(c, 'source_rows', return_value=[]))
+            stack.enter_context(patch.object(c, 'index_rows', return_value=[]))
+            stack.enter_context(patch.object(c, 'preferences', return_value=[]))
+            stack.enter_context(patch.object(c, 'config_value', return_value=None))
+            stack.enter_context(patch.object(c, 'package_state', return_value={}))
+            stack.enter_context(patch.object(c, 'policy', return_value={}))
+            stack.enter_context(patch.object(c, 'script_metadata', return_value=[]))
+            stack.enter_context(patch.object(c, 'outside_mapping', return_value=dict(
+                classification='UNKNOWN_REQUIRES_CONTRACT_DECISION', outside_count=0,
+                reason='not_exactly_one_current_collector_mapping')))
+            yield
+
+    def collect(self):
+        with self.routed():
+            body, code = p.collect(c, self.identity, self.challenge)
+        return json.loads(body[len(p.PREFIX):]), code, body
+
+    def test_frozen_direct_open_reproduces_eloop_and_phase_failure(self):
+        with self.routed():
+            with self.assertRaises(OSError) as caught:
+                c.bounded_file('/etc/os-release', 4096)
+            self.assertEqual(caught.exception.errno, errno.ELOOP)
+            with patch.object(p, '_read_fixed_os_release', side_effect=OSError(errno.ELOOP, 'PRIVATE')):
+                body, code = p.collect(c, self.identity, self.challenge)
+        value = json.loads(body[len(p.PREFIX):])
+        self.assertEqual((code, value['result'], value['reason'], value['evidence']),
+                         (1, 'UNAVAILABLE', 'READ_ONLY_OS_FAILED', None))
+        self.assertNotIn(b'PRIVATE', body)
+
+    def test_exact_safe_symlink_and_regular_file_observe_same_os_bytes(self):
+        expected = (self.root / 'usr/lib/os-release').read_bytes()
+        with self.routed():
+            self.assertEqual(p.collect(c, self.identity, self.challenge)[1], 0)
+            self.assertEqual(p._read_fixed_os_release()[0], expected)
+        (self.root / 'etc/os-release').unlink()
+        (self.root / 'etc/os-release').symlink_to('/usr/lib/os-release')
+        value, code, _ = self.collect()
+        self.assertEqual((code, value['result']), (0, 'OBSERVED'))
+        (self.root / 'etc/os-release').unlink()
+        (self.root / 'etc/os-release').write_bytes(expected)
+        value, code, _ = self.collect()
+        self.assertEqual(code, 0)
+        self.assertEqual((value['result'], value['reason']), ('OBSERVED', 'COLLECTION_COMPLETED'))
+        self.assertEqual(value['evidence']['os'], {'ID': 'ubuntu', 'VERSION_ID': '24.04'})
+
+    def test_unsafe_links_target_and_metadata_fail_closed(self):
+        link = self.root / 'etc/os-release'
+        target = self.root / 'usr/lib/os-release'
+        cases = ('arbitrary', 'absolute_arbitrary', 'nested', 'oversized', 'directory',
+                 'world_writable', 'bad_owner', 'unsafe_parent', 'hard_link')
+        for case in cases:
+            with self.subTest(case=case):
+                link.unlink(missing_ok=True)
+                target.unlink(missing_ok=True)
+                if case == 'directory':
+                    target.mkdir()
+                else:
+                    target.write_bytes(b'ID=ubuntu\nVERSION_ID=24.04\n')
+                link.symlink_to('../usr/lib/os-release')
+                if case == 'arbitrary':
+                    link.unlink(); link.symlink_to('PRIVATE_OTHER_TARGET')
+                elif case == 'absolute_arbitrary':
+                    link.unlink(); link.symlink_to('/etc/PRIVATE_OTHER_TARGET')
+                elif case == 'nested':
+                    target.unlink(); target.symlink_to('PRIVATE_OTHER_TARGET')
+                elif case == 'oversized':
+                    target.write_bytes(b'x' * 4097)
+                elif case == 'world_writable':
+                    target.chmod(0o666)
+                elif case == 'bad_owner':
+                    self.routed_os.bad_owner = True
+                elif case == 'unsafe_parent':
+                    (self.root / 'usr/lib').chmod(0o777)
+                elif case == 'hard_link':
+                    os.link(target, self.root / 'usr/lib/second-name')
+                value, code, body = self.collect()
+                self.assertEqual((code, value['result'], value['reason'], value['evidence']),
+                                 (1, 'UNAVAILABLE', 'READ_ONLY_OS_FAILED', None))
+                self.assertNotIn(b'PRIVATE', body)
+                self.routed_os.bad_owner = False
+                (self.root / 'usr/lib').chmod(0o755)
+                (self.root / 'usr/lib/second-name').unlink(missing_ok=True)
+                if target.is_dir() and not target.is_symlink():
+                    target.rmdir()
+
+    def test_link_and_target_substitution_during_read_fail_closed(self):
+        for slot in ('link', 'target'):
+            with self.subTest(slot=slot):
+                def replace():
+                    if slot == 'link':
+                        link = self.root / 'etc/os-release'
+                        link.unlink(); link.symlink_to('PRIVATE_OTHER_TARGET')
+                    else:
+                        target = self.root / 'usr/lib/os-release'
+                        target.rename(self.root / 'usr/lib/old-os-release')
+                        target.write_bytes(b'ID=ubuntu\nVERSION_ID=24.04\n')
+                self.routed_os.after_read = replace
+                value, code, body = self.collect()
+                self.assertEqual((code, value['reason'], value['evidence']),
+                                 (1, 'READ_ONLY_OS_FAILED', None))
+                self.assertNotIn(b'PRIVATE', body)
+                (self.root / 'etc/os-release').unlink(missing_ok=True)
+                (self.root / 'etc/os-release').symlink_to('../usr/lib/os-release')
+                (self.root / 'usr/lib/old-os-release').unlink(missing_ok=True)
+
+    def test_parent_symlink_chains_are_rejected(self):
+        for name in ('etc', 'usr'):
+            with self.subTest(name=name):
+                parent = self.root / name
+                saved = self.root / (name + '-saved')
+                parent.rename(saved)
+                parent.symlink_to(saved.name)
+                try:
+                    value, code, _ = self.collect()
+                    self.assertEqual((code, value['reason'], value['evidence']),
+                                     (1, 'READ_ONLY_OS_FAILED', None))
+                finally:
+                    parent.unlink()
+                    saved.rename(parent)
 
 
 class BootstrapTest(unittest.TestCase):
