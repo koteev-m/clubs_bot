@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -106,5 +107,160 @@ class BoundsRegressionTests(unittest.TestCase):
         st=SimpleNamespace(st_mode=0o100644,st_size=4,st_mtime_ns=123)
         with patch.object(c,'files_in',side_effect=files),patch.object(c.os,'stat',return_value=st),patch.object(c,'bounded_file',return_value=(b'Origin: Ubuntu\n',st)),patch.object(c,'file_digest',return_value='a'*64),patch.object(c,'decompressed_index_digest',side_effect=c.Refuse('INDEX_DECOMPRESSED_TOO_LARGE')):
             with self.assertRaisesRegex(c.Refuse,'INDEX_DECOMPRESSED_TOO_LARGE'):c.index_rows([])
+
+
+class ReleaseReferenceTests(unittest.TestCase):
+    PREFIX = 'archive.ubuntu.com_ubuntu_dists_noble_'
+    DIGEST = hashlib.sha256(b'data').hexdigest()
+
+    @classmethod
+    def entry(cls, path, digest=None, size=4):
+        return f' {digest or cls.DIGEST} {size} {path}\n'
+
+    @classmethod
+    def large_release(cls):
+        # Mixed architectures, components and compression alternatives, with the
+        # locally needed uncompressed reference deliberately beyond old line 256.
+        paths = [f'component{i}/binary-{arch}/Packages{suffix}'
+                 for i in range(40) for arch in ('amd64', 'arm64')
+                 for suffix in ('', '.gz', '.xz', '.bz2')]
+        paths += ['main/binary-amd64/Packages', 'universe/binary-amd64/Packages']
+        return ('Origin: Ubuntu\nSuite: noble\nSHA256:\n' +
+                ''.join(cls.entry(path) for path in paths) +
+                '-----BEGIN PGP SIGNATURE-----\n\nsynthetic-signature\n-----END PGP SIGNATURE-----\n').encode()
+
+    @classmethod
+    def indexes(cls, body, components=('main',), signature='verified', suffix='.lz4', second_release=False):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from contextlib import ExitStack
+        key='/usr/share/keyrings/ubuntu-archive-keyring.gpg'
+        original_stat=c.os.stat
+        def metadata(path, **kwargs):
+            if path == key:
+                return SimpleNamespace(st_mode=0o100644, st_size=4, st_uid=0)
+            return original_stat(path, **kwargs)
+        with TemporaryDirectory() as directory, ExitStack() as stack:
+            root=Path(directory)
+            release=root/(cls.PREFIX+'InRelease'); release.write_bytes(body)
+            paths=[str(release)]
+            if second_release:
+                other=root/(cls.PREFIX+'Release'); other.write_bytes(body); paths.append(str(other))
+            for component in components:
+                path=root/(cls.PREFIX+component+'_binary-amd64_Packages'+suffix)
+                path.write_bytes(b'data'); paths.append(str(path))
+            stack.enter_context(patch.object(c, 'files_in', return_value=sorted(paths)))
+            stack.enter_context(patch.object(c.os, 'stat', side_effect=metadata))
+            stack.enter_context(patch.object(c, 'decompressed_index_digest', return_value=(cls.DIGEST,4)))
+            command=stack.enter_context(patch.object(c, 'run', return_value=(
+                0 if signature=='verified' else 1, b'[GNUPG:] VALIDSIG '+b'A'*40+b'\n', b'')))
+            rows=c.index_rows([] if signature=='unknown' else [{'signed_by':key}])
+            if signature!='unknown':
+                command.assert_called_once_with(['gpgv','--status-fd','1','--keyring',key,str(release)],32768,12)
+            else:command.assert_not_called()
+            return rows
+
+    def test_large_release_all_local_signed_relations_and_bounded_evidence(self):
+        rows=self.indexes(self.large_release(), ('main','universe'))
+        release=next(row for row in rows if row['file'].endswith('InRelease'))
+        self.assertEqual(release['amd64_package_refs'],[
+            {'path':component+'/binary-amd64/Packages','sha256':self.DIGEST,'size':4}
+            for component in ('main','universe')])
+        packages=[row for row in rows if 'signed_relation' in row]
+        self.assertEqual(len(packages),2)
+        for row in packages:
+            self.assertEqual(row['signed_relation'],'MATCHED_VERIFIED_RELEASE')
+            self.assertEqual(row['release_file'],release['file'])
+            self.assertEqual(row['uncompressed_sha256'],self.DIGEST)
+        self.assertLess(len(json.dumps(rows)),4096)
+
+    def test_existing_small_release_signature_mismatch_and_missing_relation(self):
+        for count in (1,32):
+            body=('SHA256:\n'+''.join(self.entry(f'c{i}/binary-amd64/Packages') for i in range(count))).encode()
+            components=tuple(f'c{i}' for i in range(count))
+            for signature,expected in (('verified','MATCHED_VERIFIED_RELEASE'),('unknown','MATCHED_RELEASE_SIGNATURE_UNKNOWN'),('invalid','MATCHED_RELEASE_SIGNATURE_UNKNOWN')):
+                with self.subTest(count=count,signature=signature):
+                    rows=self.indexes(body,components,signature=signature)
+                    self.assertEqual(len(rows[0]['amd64_package_refs']),count)
+                    self.assertEqual([r['signed_relation'] for r in rows[1:]],[expected]*count)
+        for digest,size in (('b'*64,4),(self.DIGEST,5)):
+            rows=self.indexes(('SHA256:\n'+self.entry('main/binary-amd64/Packages',digest,size)).encode())
+            self.assertEqual(rows[1]['signed_relation'],'MISMATCH_SIGNED_REFERENCE')
+        for body in (b'Origin: Ubuntu\n',('SHA256:\n'+self.entry('other/binary-amd64/Packages')).encode()):
+            self.assertEqual(self.indexes(body)[1]['signed_relation'],'UNKNOWN')
+
+    def test_malformed_entries_including_unretained_tail_fail_closed(self):
+        good=self.entry('main/binary-amd64/Packages')
+        tails=(' bad 4 unrelated/path\n', ' '+self.DIGEST+' -1 unrelated/path\n',
+               ' '+self.DIGEST+' 4 private?token=x\n', ' malformed\n',
+               self.DIGEST+' 4 main/binary-amd64/Packages\n', ' \n',
+               ' '+self.DIGEST+' 1234567890123456 path\n',
+               ' '+self.DIGEST+' 4 '+'x'*181+'\n', ' '+'x'*65536+'\n')
+        for tail in tails:
+            for padding in (0,300):
+                body=('SHA256:\n'+good+self.entry('other/binary-arm64/Packages')*padding+tail).encode()
+                with self.subTest(tail=tail,padding=padding),self.assertRaisesRegex(c.Refuse,'MALFORMED_INDEX_HASH'):
+                    self.indexes(body)
+        for body in ('SHA256:\n','SHA256: garbage\n'+good,'SHA256:\n'+good+'SHA256:\n'+good):
+            with self.subTest(body=body),self.assertRaisesRegex(c.Refuse,'MALFORMED_INDEX_HASH'):
+                self.indexes(body.encode())
+
+    def test_full_section_boundary_and_no_final_newline(self):
+        for count in (255,256,257,1024):
+            body='SHA256:\n'+self.entry('other/binary-arm64/Packages')*count+self.entry('main/binary-amd64/Packages')
+            with self.subTest(count=count):
+                self.assertEqual(self.indexes(body.rstrip('\n').encode())[1]['signed_relation'],'MATCHED_VERIFIED_RELEASE')
+
+    def test_blank_signature_separator_does_not_truncate_section(self):
+        ref=self.entry('main/binary-amd64/Packages')
+        for padding in (0,300):
+            prefix='SHA256:\n'+ref+self.entry('other/binary-arm64/Packages')*padding+'\n'
+            for newline in ('\n','\r\n'):
+                body=(prefix+'-----BEGIN PGP SIGNATURE-----\n').replace('\n',newline).encode()
+                with self.subTest(padding=padding,newline=newline):
+                    self.assertEqual(self.indexes(body)[1]['signed_relation'],'MATCHED_VERIFIED_RELEASE')
+            for tail,reason in ((' malformed\n','MALFORMED_INDEX_HASH'),(ref,'INDEX_RELATION_AMBIGUOUS')):
+                with self.subTest(padding=padding,reason=reason),self.assertRaisesRegex(c.Refuse,reason):
+                    self.indexes((prefix+tail).encode())
+        for tail in ('','-----BEGIN PGP SIGNATURE-----\n'):
+            with self.assertRaisesRegex(c.Refuse,'MALFORMED_INDEX_HASH'):
+                self.indexes(('SHA256:\n\n'+tail).encode())
+
+    def test_near_file_bound_valid_section_is_fully_scanned(self):
+        last=self.entry('main/binary-amd64/Packages')
+        line=self.entry('other/binary-arm64/Packages')
+        count=(2097152-len('SHA256:\n')-len(last))//len(line)
+        body=('SHA256:\n'+line*count+last).encode()
+        self.assertGreater(len(body),2097000)
+        self.assertEqual(self.indexes(body)[1]['signed_relation'],'MATCHED_VERIFIED_RELEASE')
+
+    def test_oversized_section_and_retained_overflow_fail_closed(self):
+        line=self.entry('other/binary-arm64/Packages')
+        body=('SHA256:\n'+line*(2097152//len(line)+1)).encode()
+        with self.assertRaisesRegex(c.Refuse,'UNSAFE_OR_LARGE_FILE'):self.indexes(body)
+        components=tuple(f'c{i}' for i in range(33))
+        body=('SHA256:\n'+''.join(self.entry(x+'/binary-amd64/Packages') for x in components)).encode()
+        with self.assertRaisesRegex(c.Refuse,'INDEX_REFS_LIMIT'):self.indexes(body,components)
+        with patch.object(c,'START',c.time.monotonic()-101):
+            with self.assertRaisesRegex(c.Refuse,'TIME_LIMIT'):self.indexes(self.large_release())
+
+    def test_duplicate_collision_compressed_and_multiple_release_ambiguity(self):
+        ref=self.entry('main/binary-amd64/Packages')
+        for body,kwargs in (
+            ('SHA256:\n'+ref*2,{}),
+            ('SHA256:\n'+ref+self.entry('other/binary-arm64/Packages')*300+ref,{}),
+            ('SHA256:\n'+ref+self.entry('main/binary-amd64/Packages.lz4'),{}),
+            ('SHA256:\n'+ref,{'second_release':True}),
+            ('SHA256:\n'+self.entry('main/sub/binary-amd64/Packages')+self.entry('main_sub/binary-amd64/Packages'),{'components':('main_sub',)}),
+        ):
+            with self.subTest(kwargs=kwargs,body_length=len(body)),self.assertRaisesRegex(c.Refuse,'INDEX_RELATION_AMBIGUOUS'):
+                self.indexes(body.encode(),**kwargs)
+
+    def test_compressed_only_reference_does_not_false_match(self):
+        body=('SHA256:\n'+self.entry('main/binary-amd64/Packages.gz')).encode()
+        self.assertEqual(self.indexes(body)[1]['signed_relation'],'UNKNOWN')
+        body=('SHA256:\n'+self.entry('main/binary-amd64/Packages')).encode()
+        self.assertEqual(self.indexes(body,suffix='')[1]['signed_relation'],'MATCHED_VERIFIED_RELEASE')
+
 
 if __name__=='__main__':unittest.main()

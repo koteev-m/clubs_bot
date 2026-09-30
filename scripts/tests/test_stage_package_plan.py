@@ -203,6 +203,17 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(self.value['evidence']['resolver']['exit_status'],100)
         self.assertEqual(self.value['evidence']['generated_state_proof'],'NOT_ESTABLISHED')
 
+    def test_large_release_relations_fit_unchanged_authenticated_contract(self):
+        fixtures=load('scripts/tests/test_stage_package_plan_collector.py').ReleaseReferenceTests
+        self.value['evidence']['indexes']=fixtures.indexes(fixtures.large_release(), ('main','universe'))
+        body=p.body(self.value,0,c,self.identity,self.challenge)
+        self.assertEqual(self.parse(frame(body))[1],0)
+        self.assertIn(b'MATCHED_VERIFIED_RELEASE',body)
+        # Retention cap remains part of the authenticated consumer contract.
+        release=self.value['evidence']['indexes'][0]
+        release['amd64_package_refs']=[release['amd64_package_refs'][0]]*33
+        with self.assertRaises(ValueError):p.body(self.value,0,c,self.identity,self.challenge)
+
     def test_wrong_challenge_hmac_and_identity(self):
         with self.assertRaises(ValueError): self.parse(frame(self.body),key=b'z'*32)
         for key,value in (('challenge','d'*64), ('identity',{**self.identity,'run_id':'133'}), ('identity',{**self.identity,'attempt':'2'}), ('identity',{**self.identity,'workflow_sha':'b'*40})):
