@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+import sys
 
 PREFIX = b'clb132-package-plan:v=1 '
 BODY_LIMIT = 1052672
@@ -20,6 +21,23 @@ TIME_LIMIT UNEXPECTED_ARCHITECTURE UNEXPECTED_ARGUMENTS UNEXPECTED_OS UNEXPECTED
 UNEXPECTED_PACKAGE_RECORD UNEXPECTED_SOURCE_FIELD UNEXPECTED_SOURCE_OPTION UNSAFE_FILENAME UNSAFE_HOLDS UNSAFE_INDEX
 UNSAFE_KEY_FILE UNSAFE_KEY_PATH UNSAFE_OR_LARGE_FILE UNSAFE_OR_LARGE_INDEX UNSAFE_PREFERENCE UNSAFE_SOURCE
 UNSAFE_SOURCE_OPTION UNSAFE_TEXT WRONG_INTERPRETER_MODE INTERRUPTED INVALID_EVIDENCE'''.split())
+
+# Only these fixed labels may replace a generic collection exception.
+PHASE_REASONS = {
+    'architecture': 'READ_ONLY_ARCHITECTURE_FAILED',
+    'os': 'READ_ONLY_OS_FAILED',
+    'sources': 'READ_ONLY_SOURCES_FAILED',
+    'indexes': 'READ_ONLY_INDEXES_FAILED',
+    'preferences': 'READ_ONLY_PREFERENCES_FAILED',
+    'apt_config': 'READ_ONLY_APT_CONFIG_FAILED',
+    'package_state': 'READ_ONLY_PACKAGE_STATE_FAILED',
+    'apt_policy': 'READ_ONLY_APT_POLICY_FAILED',
+    'resolver': 'READ_ONLY_RESOLVER_FAILED',
+    'maintainer_scripts': 'READ_ONLY_MAINTAINER_SCRIPTS_FAILED',
+    'outside_mapping': 'READ_ONLY_OUTSIDE_MAPPING_FAILED',
+    'final_validation': 'READ_ONLY_FINAL_VALIDATION_FAILED',
+}
+REASONS = REASONS | frozenset(PHASE_REASONS.values())
 
 
 def need(ok):
@@ -343,16 +361,89 @@ class OwnedCommand:
             CRITICAL = prior
 
 
+class PhaseTracker:
+    """Observe pinned collector phase calls without replacing its functions."""
+
+    DIRECT = {
+        'bounded_file': 'os',
+        'source_rows': 'sources',
+        'index_rows': 'indexes',
+        'preferences': 'preferences',
+        'config_value': 'apt_config',
+        'package_state': 'package_state',
+        'policy': 'apt_policy',
+        'parse_plan': 'resolver',
+        'script_metadata': 'maintainer_scripts',
+        'outside_mapping': 'outside_mapping',
+        'safe_text': 'final_validation',
+        'generated_impact': 'final_validation',
+    }
+
+    def __init__(self, collector):
+        self.phase = None
+        self.collect_code = getattr(collector.collect, '__code__', None)
+        self.run_code = getattr(collector.run, '__code__', None)
+        self.config_code = getattr(collector.config_value, '__code__', None)
+        self.direct_codes = {getattr(getattr(collector, name), '__code__', None): phase
+                             for name, phase in self.DIRECT.items()}
+        self.direct_codes.pop(None, None)
+        os_parser = getattr(getattr(collector, 're', None), 'fullmatch', None)
+        if getattr(os_parser, '__code__', None) is not None:
+            self.direct_codes[os_parser.__code__] = 'os'
+        self.transparent_codes = {getattr(getattr(collector, 'need', None), '__code__', None)}
+        self.transparent_codes.discard(None)
+        self.config_callers = {self.collect_code}
+        if self.collect_code is not None:
+            self.config_callers.update(code for code in self.collect_code.co_consts
+                                       if isinstance(code, type(self.collect_code)) and code.co_name == '<dictcomp>')
+
+    def __enter__(self):
+        self.previous = sys.getprofile()
+        sys.setprofile(self.observe)
+        return self
+
+    def __exit__(self, *_unused):
+        sys.setprofile(self.previous)
+
+    def observe(self, frame, event, _arg):
+        if event != 'call':
+            return
+        if frame.f_code is self.collect_code:
+            self.phase = 'architecture'
+            return
+        caller = frame.f_back
+        if caller is None:
+            return
+        if caller.f_code is self.collect_code:
+            if frame.f_code is self.run_code:
+                argv = frame.f_locals.get('argv')
+                if argv in (['dpkg', '--print-architecture'], ['dpkg', '--print-foreign-architectures']):
+                    self.phase = 'architecture'
+                elif type(argv) is list and argv[:1] == ['apt-get']:
+                    self.phase = 'resolver'
+                else:
+                    self.phase = None
+            else:
+                if frame.f_code not in self.transparent_codes:
+                    self.phase = self.direct_codes.get(frame.f_code)
+        elif frame.f_code is self.config_code and caller.f_code in self.config_callers:
+            self.phase = 'apt_config'
+
+
 def collect(collector, expected_identity, challenge, cancelled=lambda: False):
     result = dict(schema='clb132-package-plan-v1', challenge=challenge, identity=expected_identity,
                   result='OBSERVED', reason='COLLECTION_COMPLETED', evidence=None)
     code = 0
+    tracker = PhaseTracker(collector)
     try:
         with CommandOwnership(collector, cancelled):
-            result['evidence'] = collector.collect()
+            with tracker:
+                result['evidence'] = collector.collect()
+        tracker.phase = 'final_validation'
         evidence(result['evidence'], collector)
     except (collector.Refuse, OSError, UnicodeError, ValueError, collector.subprocess.SubprocessError) as error:
-        reason = str(error) if isinstance(error, collector.Refuse) else 'READ_ONLY_COLLECTION_FAILED'
+        reason = (str(error) if isinstance(error, collector.Refuse)
+                  else PHASE_REASONS.get(tracker.phase, 'INVALID_EVIDENCE'))
         result.update(result='UNAVAILABLE', reason=reason if reason in REASONS else 'INVALID_EVIDENCE', evidence=None)
         code = 1
     return body(result, code, collector, expected_identity, challenge), code

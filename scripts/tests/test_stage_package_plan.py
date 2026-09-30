@@ -18,7 +18,7 @@ import sys
 import tempfile
 import types
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -230,6 +230,113 @@ class ProtocolTest(unittest.TestCase):
         with self.assertRaises(ValueError): self.parse(frame(body),code=0)
         with self.assertRaises(ValueError): self.parse(frame(self.body),code=1)
         with self.assertRaises(ValueError): self.parse(frame(self.body),code=255)
+
+    def phase_failure(self, phase, error, argv=None):
+        calls = {'architecture': 'run', 'os': 'bounded_file', 'sources': 'source_rows',
+                 'indexes': 'index_rows', 'preferences': 'preferences', 'apt_config': 'config_value',
+                 'package_state': 'package_state', 'apt_policy': 'policy', 'resolver': 'run',
+                 'maintainer_scripts': 'script_metadata', 'outside_mapping': 'outside_mapping',
+                 'final_validation': 'generated_impact'}
+        selected = calls[phase]
+        fake = types.SimpleNamespace(Refuse=c.Refuse, subprocess=subprocess,
+                                     **{name: getattr(c, name) for name in p.PhaseTracker.DIRECT})
+        fake.run = c.run
+        fake.config_value = c.config_value
+
+        def failure(argv=None, *_args):
+            raise error
+
+        setattr(fake, selected, failure)
+
+        def collect():
+            target = getattr(fake, selected)
+            if selected == 'run':
+                target(argv if argv is not None else ['dpkg', '--print-architecture'])
+            else:
+                target()
+
+        fake.collect = collect
+        with patch.object(p, 'CommandOwnership', return_value=nullcontext()):
+            return p.collect(fake, self.identity, self.challenge)
+
+    def test_every_fixed_phase_reports_only_its_allowlisted_reason(self):
+        canary = 'SECRET_PATH_token=DO_NOT_EMIT'
+        self.assertEqual(set(p.PHASE_REASONS), {
+            'architecture', 'os', 'sources', 'indexes', 'preferences', 'apt_config',
+            'package_state', 'apt_policy', 'resolver', 'maintainer_scripts',
+            'outside_mapping', 'final_validation'})
+        for phase, reason in p.PHASE_REASONS.items():
+            argv = ['apt-get'] if phase == 'resolver' else None
+            with self.subTest(phase=phase):
+                body, code = self.phase_failure(phase, ValueError(canary), argv)
+                self.assertEqual(code, 1)
+                value = json.loads(body[len(p.PREFIX):])
+                self.assertEqual((value['result'], value['reason'], value['evidence']),
+                                 ('UNAVAILABLE', reason, None))
+                self.assertNotIn(canary.encode(), body)
+                self.assertEqual(self.parse(frame(body), code=1), (body.decode().rstrip('\n'), 1))
+
+    def test_generic_exception_classes_do_not_leak_payload(self):
+        for exception in (OSError, UnicodeError, ValueError, subprocess.SubprocessError):
+            with self.subTest(exception=exception.__name__):
+                body, code = self.phase_failure('architecture', exception('PRIVATE_CANARY'))
+                self.assertEqual(code, 1)
+                self.assertEqual(json.loads(body[len(p.PREFIX):])['reason'],
+                                 p.PHASE_REASONS['architecture'])
+                self.assertNotIn(b'PRIVATE_CANARY', body)
+
+    def test_unregistered_phase_fails_closed(self):
+        body, code = self.phase_failure('architecture', OSError('PRIVATE_CANARY'), ['unexpected'])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(body[len(p.PREFIX):])['reason'], 'INVALID_EVIDENCE')
+        self.assertNotIn(b'PRIVATE_CANARY', body)
+
+        fake = types.SimpleNamespace(Refuse=c.Refuse, subprocess=subprocess,
+                                     **{name: getattr(c, name) for name in p.PhaseTracker.DIRECT})
+        fake.run = c.run
+
+        def unknown_helper():
+            raise ValueError('PRIVATE_UNKNOWN_CANARY')
+
+        def collect():
+            unknown_helper()
+
+        fake.collect = collect
+        with patch.object(p, 'CommandOwnership', return_value=nullcontext()):
+            body, code = p.collect(fake, self.identity, self.challenge)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(body[len(p.PREFIX):])['reason'], 'INVALID_EVIDENCE')
+        self.assertNotIn(b'PRIVATE_UNKNOWN_CANARY', body)
+
+    def test_pinned_collector_calls_mark_sources_and_config_comprehension(self):
+        def command(argv, *_args):
+            if argv == ['dpkg', '--print-architecture']:
+                return 0, b'amd64\n', b''
+            if argv == ['dpkg', '--print-foreign-architectures']:
+                return 0, b'', b''
+            raise AssertionError(argv)
+
+        def fail_sources():
+            raise OSError('PRIVATE_SOURCE_CANARY')
+
+        with patch.object(c, 'run', new=command), patch.object(c, 'bounded_file',
+                return_value=(b'ID=ubuntu\nVERSION_ID=24.04\n', None)), patch.object(c, 'source_rows', new=fail_sources):
+            body, code = p.collect(c, self.identity, self.challenge)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(body[len(p.PREFIX):])['reason'], p.PHASE_REASONS['sources'])
+        self.assertNotIn(b'PRIVATE_SOURCE_CANARY', body)
+
+        def fail_config(_key):
+            raise UnicodeError('PRIVATE_CONFIG_CANARY')
+
+        with patch.object(c, 'run', new=command), patch.object(c, 'bounded_file',
+                return_value=(b'ID=ubuntu\nVERSION_ID=24.04\n', None)), patch.object(c, 'source_rows',
+                return_value=[]), patch.object(c, 'index_rows', return_value=[]), patch.object(c, 'preferences',
+                return_value=[]), patch.object(c, 'config_value', new=fail_config):
+            body, code = p.collect(c, self.identity, self.challenge)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(body[len(p.PREFIX):])['reason'], p.PHASE_REASONS['apt_config'])
+        self.assertNotIn(b'PRIVATE_CONFIG_CANARY', body)
 
 
 class BootstrapTest(unittest.TestCase):
