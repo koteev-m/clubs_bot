@@ -5,14 +5,14 @@ P=pathlib.Path;H=P(__file__).resolve().parent;R=H/'reference'
 sha=lambda b:hashlib.sha256(b).hexdigest()
 assert not R.is_symlink() and not (R/'pins.json').is_symlink(),'reference_type'
 ledger=(R/'pins.json').read_bytes()
-assert sha(ledger)=='ada8f2c752449a661cb287373d414dade90d9c24daeaea98a3f4c17d4480bab4','reference_ledger'
+assert sha(ledger)=='d8c1d16ea2a9e5a033dcbe09a67458b7257dbcbfcf5a02c96f27cdc09f0963b1','reference_ledger'
 pins=json.loads(ledger)
 raw={}
 for name,x in pins.items():
  assert name not in ('.','..') and re.fullmatch('[A-Za-z0-9_.-]+',name) and not (R/name).is_symlink(),'reference_name_or_type'
  b=(R/name).read_bytes();assert len(b)==x['bytes'] and sha(b)==x['sha256'],name;raw[name]=b
 manifest=json.loads(raw['candidate-runtime.json']);entries=json.loads(raw['rootfs-manifest.json'])
-assert sha(raw['candidate-runtime.json'])=='68fc3b06b2198b06f1583c0bb1157669c4df6d8c9548934ed3c79315d6e82649'
+assert sha(raw['candidate-runtime.json'])=='8d75c3da0ed507cffc0ce5f0da05c6c03e7728bb65abe08c663c4e37e7906460'
 assert sha(raw['stage-compose-env-semantic-operation.py'])=='af328463da08079defb51b163af1309faa7820e5dd9ded6da910501e251d47b6'
 assert len(manifest['files'])==196 and len(manifest['aliases'])==23 and len(entries)==267
 names=('stage-compose-diagnostic-operation.py','stage-compose-env-file-plan.py','release_private_root.py','stage-compose-env-semantic-operation.py','stage-compose-env-semantic-runtime.json')

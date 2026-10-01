@@ -6,7 +6,7 @@
   },
   "accepted-manifest.json": {
     "bytes": 22916,
-    "sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
+    "sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5",
     "source": "bundle:ci/reference/accepted-manifest.json"
   },
   "additional-inputs.json": {
@@ -15,18 +15,18 @@
     "source": "bundle:ci/reference/additional-inputs.json"
   },
   "amd64-inputs.json": {
-    "bytes": 37237,
-    "sha256": "a365d37e6bf45dacfe672364d2e3493bc3c786e692940e4ee0566b8f97fd5833",
+    "bytes": 38575,
+    "sha256": "3b8b47c2cb5e73ddaac85fe438caff480069e6719d9a45593444895b0119e6ac",
     "source": "bundle:ci/reference/amd64-inputs.json"
   },
   "amd64-packages.txt": {
     "bytes": 4346,
-    "sha256": "17ac090efb6ba58f50f72f7e2e7425e6db5941b7a5758b4099e4553058b6983c",
+    "sha256": "439960997fde8a038d8999ecf715263d3e247c6f84909e5f860745f170efd82b",
     "source": "bundle:ci/reference/amd64-packages.txt"
   },
   "amd64-runtime-candidate.json": {
     "bytes": 22916,
-    "sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
+    "sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5",
     "source": "bundle:ci/reference/amd64-runtime-candidate.json"
   },
   "arm64-runtime-reference.json": {
@@ -48,8 +48,8 @@
     "source": "bundle:ci/reference/derive-amd64-manifest.py"
   },
   "export_inputs.py": {
-    "bytes": 6919,
-    "sha256": "e2ce25e4731a3102e191a2805ce8433a43da17575b8ce80e945685fada3b34ff",
+    "bytes": 6932,
+    "sha256": "328c1245c810094ea6f85255067e6006800b8404b571a8d6df98062c834c8182",
     "source": "bundle:ci/reference/export_inputs.py"
   },
   "prepare-amd64-context.py": {
@@ -58,8 +58,8 @@
     "source": "bundle:ci/reference/prepare-amd64-context.py"
   },
   "prepare-amd64-downloads.py": {
-    "bytes": 6354,
-    "sha256": "62ea9fcbdaa346bded3970c688dbaf5171ecf1e5447588ce7f2d9e9b35baf893",
+    "bytes": 13392,
+    "sha256": "82af11035ceae36f2d9f9a7b290dafa03c9971e8b3d8f6001d9154b8544db9bd",
     "source": "bundle:ci/reference/prepare-amd64-downloads.py"
   }
 }

@@ -16,8 +16,40 @@ class CollectorTests(unittest.TestCase):
         target=json.loads((ROOT/'scripts/deploy/stage-package-plan-targets.json').read_text())
         self.assertEqual([(x['package'],x['version']) for x in target['request']],list(c.REQUEST))
         self.assertEqual(len(c.ACCEPTED_PATHS),191)
+        manifest=(ROOT/'scripts/deploy/stage-compose-env-semantic-runtime.json').read_bytes()
+        self.assertEqual(target['manifest_sha256'],hashlib.sha256(manifest).hexdigest())
+        self.assertEqual(set(c.ACCEPTED_PATHS),set(json.loads(manifest)['files']))
         self.assertNotIn('ruby-psych',[x[0] for x in c.REQUEST])
         self.assertNotIn('udev',[x[0] for x in c.REQUEST])
+    def test_openssl_security_targets_are_explicit_exact_frozen_debs(self):
+        target=json.loads((ROOT/'scripts/deploy/stage-package-plan-targets.json').read_text())
+        expected={
+            'libssl3t64':'219f43b1cd836a4da550938db5fda93160d269d39a4edcf1f1ce698a470db797',
+            'openssl':'675b84971ffd4467707008c25ef7520f90ea7c23ef27b7a76b0dccf1d7c4dc3f',
+        }
+        self.assertEqual(target['task'],'CLB-157')
+        self.assertEqual(target['main'],c.MAIN)
+        self.assertEqual(c.MAIN,'0c934da1b76ad6916feaf2bb52d88a9b42ca2f27')
+        self.assertEqual(len(c.REQUEST),21)
+        self.assertEqual(len({name for name,_ in c.REQUEST}),21)
+        for name,digest in expected.items():
+            with self.subTest(package=name):
+                self.assertEqual([version for package,version in c.REQUEST if package==name],
+                                 ['3.0.13-0ubuntu3.16'])
+                rows=[row for row in target['request'] if row['package']==name]
+                self.assertEqual(len(rows),1)
+                self.assertEqual(rows[0]['architecture'],'amd64')
+                self.assertEqual(rows[0]['expected_transition'],'version_transition')
+                self.assertEqual(rows[0]['trusted_reference_source'],{
+                    'kind':'frozen_ubuntu_deb_lock',
+                    'archive_path':f'pool/main/o/openssl/{name}_3.0.13-0ubuntu3.16_amd64.deb',
+                    'sha256':digest,
+                })
+        self.assertEqual(next(row for row in target['request'] if row['package']=='openssl')['target_runtime_files'],[])
+        plan=c.parse_plan(b'Inst libssl3t64 [3.0.13-0ubuntu3.15] (3.0.13-0ubuntu3.16 Ubuntu:24.04/noble-security [amd64])\nInst openssl [3.0.13-0ubuntu3.15] (3.0.13-0ubuntu3.16 Ubuntu:24.04/noble-security [amd64])\n')
+        self.assertEqual(plan['expanded_packages'],[])
+        self.assertEqual([row['package'] for row in plan['high_impact_effects']],['libssl3t64','openssl'])
+
     def test_source_credential_redaction(self):
         self.assertEqual(c.safe_url('https://user:password@example.org/private?token=abc')['path'],'/REDACTED')
         self.assertTrue(c.safe_url('https://example.org/private?token=abc')['credential_redacted'])

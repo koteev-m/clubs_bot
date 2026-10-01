@@ -245,6 +245,7 @@ python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"
 
 echo "[selfcheck] native amd64 prototype CI wiring controls"
 python3 -B "$ROOT_DIR/scripts/tests/test_amd64_ci_harness.py"
+python3 -B "$ROOT_DIR/scripts/tests/test_amd64_dual_snapshot.py"
 
 echo "[selfcheck] canonical SSH action pin and offline post-cleanup regression"
 python3 -B "$ROOT_DIR/scripts/tests/test_ssh_agent_pin.py"

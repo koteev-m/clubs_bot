@@ -298,13 +298,18 @@ Linux x86_64 closure from the [Linux harness](../../scripts/tests/linux-semantic
 digest-pinned Ubuntu amd64, signed/pinned APT package metadata and official
 Compose 5.1.1 Linux x86_64 SHA-256
 `2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5`.
-The exact manifest SHA-256 is
-`93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008`.
-Native Tests [run 35679432271](https://github.com/koteev-m/clubs_bot/actions/runs/35679432271)
+The current CLB-157 local candidate manifest SHA-256 is
+`8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5`.
+It retains the 191-file/four-alias closure and advances the libcrypto bytes from
+exact authenticated OpenSSL `.16` package inputs; stage remains unmodified.
+Historical Native Tests [run 35679432271](https://github.com/koteev-m/clubs_bot/actions/runs/35679432271)
 on `67cabe65843fe803f53213aac4d3d5c3fdd73b58`, attempt 1, passed runtime,
-planner 33/33, context/syscall 34/34 and semantic 15/15, no skips. Production
-runtime behavior differs from the old profile only in the architecture predicate,
-Ruby architecture directory and manifest, exactly the three tested adaptations.
+planner 33/33, context/syscall 34/34 and semantic 15/15, no skips, for the prior
+manifest `93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008`.
+That run tested the architecture predicate, Ruby architecture directory and
+manifest adaptations of the older profile; it does not verify the new `.16`
+candidate. CLB-157 checks and remaining native verification belong to its current
+evidence/checkpoint.
 The ARM64 Dockerfile/package evidence and
 [old manifest](../../scripts/tests/linux-semantic/arm64-runtime-reference.json)
 are retained as history, not a second accepted production profile.
@@ -651,7 +656,7 @@ Finite source/read allowlist (no caller paths or filesystem discovery):
 
 | Object | Limit / interpretation |
 | --- | --- |
-| All 191 `files` and four `aliases` of the unchanged production manifest | Manifest SHA-256 `93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008`; safe regular-file metadata and SHA-256, compared per exact path. Aliases disclose only an approved target or `outside_allowlist`, never an arbitrary observed target; targets are never followed for content reads. `/bin` may only be the root-owned link to `/usr/bin`. |
+| All 191 `files` and four `aliases` of the current candidate manifest | Manifest SHA-256 `8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5`; safe regular-file metadata and SHA-256, compared per exact path. Aliases disclose only an approved target or `outside_allowlist`, never an arbitrary observed target; targets are never followed for content reads. `/bin` may only be the root-owned link to `/usr/bin`. |
 | Six recovery-tool slots | `/usr/bin/docker`, `/usr/local/bin/docker`, `/usr/bin/docker-compose`, `/usr/lib/docker/cli-plugins/docker-compose`, `/usr/libexec/docker/cli-plugins/docker-compose`, `/usr/local/lib/docker/cli-plugins/docker-compose`. Strict regular system artifacts; no symlink following, execution or implicit plugin search. Observed hash does not approve Docker CLI/plugin. |
 | `/var/lib/dpkg/status` | At most 4 MiB, 8192 stanzas, 64 KiB/stanza. Only the 37 literal `PACKAGES` in the collector: Python packages, Ruby/Psych, directly relevant runtime libraries/cache owner, dash/util-linux and five Docker/Compose package names. Output status/version/architecture and dpkg selection/hold; no package-manager command, scripts, database dump or omitted-record inference when metadata is unavailable. Version grammar is bounded to 64 ASCII characters. |
 | Accepted isolated bootstrap | Fixed memory fields for OS/arch/bits/implementation/version/isolation. `/proc/self/exe` readlink and at most 64 KiB of **own** `/proc/self/maps`; loaded module/cache names come only from this bootstrap's memory. Emit only manifest-known names and an outside-allowlist count. Never stat/open/hash a discovered path. No other process, environ/cmdline, raw maps, host/user/UID output. |
@@ -1917,7 +1922,7 @@ has not been reverified by this local task.
 
 The runner verifies the complete fixed Git-object source/data closure and
 working-file identity, compiles every Python member, parses the frozen request,
-and checks its 20 exact pairs against the fixed collector before
+and checks its 21 exact pairs against the fixed collector before
 loading dependent project code. Captured modules bypass checkout imports.
 Only the fixed collector, protocol and request enter the memory-only remote
 bootstrap, with source hashes rechecked there. No remote helper file is created.
@@ -1950,6 +1955,24 @@ identity remain explicit unknowns. No package mutation, download, APT refresh,
 service control, application/private semantic read or root/release write exists
 in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
 and a separate transaction decision.
+
+
+### CLB-157 local security reconciliation candidate
+
+The current frozen request derives from merged main
+`0c934da1b76ad6916feaf2bb52d88a9b42ca2f27` and has 21 exact pairs. Both
+`libssl3t64` and the independently installed `openssl` package explicitly target
+`3.0.13-0ubuntu3.16` through the existing frozen Ubuntu DEB-lock mechanism.
+The other 19 pairs retain their versions. The OpenSSL executable is not part of
+the accepted semantic runtime closure, so its target runtime-file list is empty;
+its exact package target and DEB lock still apply. The request, collector, protocol
+and runner identities change together. The established CLB-131/132 schemas and
+`CLB-132:collect-package-plan` confirmation retain their transport meaning; they
+do not transfer authorization or evidence from the historical 20-pair request.
+Old run `36688999303` remains historical and cannot authorize this new request.
+This local candidate neither collects stage evidence nor mutates stage packages;
+independent review and separate publication/collection/transaction authorization
+remain required.
 
 
 ### CLB-150 local candidate: bounded Release references

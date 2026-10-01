@@ -4,7 +4,7 @@ import argparse,importlib.util,json,pathlib,struct,subprocess,sys,tempfile,unitt
 P=pathlib.Path;HERE=P(__file__).resolve().parent
 s=importlib.util.spec_from_file_location('driver',HERE/'native-driver.py');d=importlib.util.module_from_spec(s);s.loader.exec_module(d)
 class Tests(unittest.TestCase):
- def test_sources(self):self.assertEqual(d.source_identity()['manifest'],'68fc3b06b2198b06f1583c0bb1157669c4df6d8c9548934ed3c79315d6e82649')
+ def test_sources(self):self.assertEqual(d.source_identity()['manifest'],'8d75c3da0ed507cffc0ce5f0da05c6c03e7728bb65abe08c663c4e37e7906460')
  def test_guard(self):
   d.native_guard(True,'Linux','x86_64',{'RUNNER_ARCH':'X64','GITHUB_EVENT_NAME':'workflow_dispatch'},1001)
   for auth,system,arch,event,uid in [(False,'Linux','x86_64','workflow_dispatch',1001),(True,'Darwin','arm64','workflow_dispatch',1001),(True,'Linux','aarch64','workflow_dispatch',1001),(True,'Linux','x86_64','push',1001),(True,'Linux','x86_64','workflow_dispatch',0)]:

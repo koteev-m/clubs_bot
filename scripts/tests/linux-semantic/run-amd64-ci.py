@@ -16,7 +16,7 @@ import tarfile
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 LIMIT = 8 * 2**20
-INPUTS_SHA256 = 'a365d37e6bf45dacfe672364d2e3493bc3c786e692940e4ee0566b8f97fd5833'
+INPUTS_SHA256 = '3b8b47c2cb5e73ddaac85fe438caff480069e6719d9a45593444895b0119e6ac'
 EVIDENCE = ('identity.json', 'status.json', 'prepare.log', 'build.log', 'comparison.txt',
             'experiment.patch', 'runtime.log', 'planner.log', 'context.log', 'semantic.log')
 ORIGINAL = {
@@ -95,7 +95,7 @@ def integrated_diff(export, candidate):
     for name, expected in ORIGINAL.items():
         if digest(originals[name]) != expected:
             raise ValueError('integrated source precondition: ' + name)
-    if digest(candidate) != '93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008':
+    if digest(candidate) != '8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5':
         raise ValueError('native-tested candidate changed')
     exact(candidate, (folder / 'stage-compose-env-semantic-runtime.json').read_bytes(), 'production manifest')
     return ''.join(''.join(difflib.unified_diff(originals[name].decode().splitlines(True),
