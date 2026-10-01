@@ -307,9 +307,36 @@ on `67cabe65843fe803f53213aac4d3d5c3fdd73b58`, attempt 1, passed runtime,
 planner 33/33, context/syscall 34/34 and semantic 15/15, no skips, for the prior
 manifest `93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008`.
 That run tested the architecture predicate, Ruby architecture directory and
-manifest adaptations of the older profile; it does not verify the new `.16`
-candidate. CLB-157 checks and remaining native verification belong to its current
-evidence/checkpoint.
+manifest adaptations of the older profile; it remains historical and does not
+verify or authorize the new `.16` candidate.
+
+The exact CLB-157 verification candidate is commit
+`629c981fa398f85f969dd5e00ebaaf0f5163a4b8`. GitHub-hosted Tests
+[run 36866285536](https://github.com/koteev-m/clubs_bot/actions/runs/36866285536),
+`workflow_dispatch`, attempt 1, executed that exact head and completed SUCCESS;
+the `amd64-runtime-prototype` job `110382493826` succeeded on Linux
+`x86_64` with `RUNNER_ARCH=X64`. Its bounded evidence is artifact `11164376819`,
+`clb91-native-adapter-36866285536-1`, digest
+`sha256:0ba9940a13bbe599920b7f432a122569e14a34ab00cb1b3ed4c325b2c4a7acd9`
+(exactly five allowlisted JSON evidence files). The native rootfs tar is
+59,392,000 bytes, SHA-256
+`9ff206d6d59e722e5a6e7b97034c488d5ae9cb5367a1ef7677c456ebf2a172ad`; the
+accepted libcrypto SHA-256 is
+`6866ed711dab8927e1bf82bf1cd30e828bdfc34f3cc1e83b1c9eb01ce6c37d9a`.
+The verified request has 21 explicit pairs, including
+`libssl3t64=3.0.13-0ubuntu3.16` and
+`openssl=3.0.13-0ubuntu3.16`; the other 19 package/version records are
+unchanged. Native adapter PASS, 25 core tests PASS, four negative controls PASS,
+and cleanup was confirmed. Independent technical security/supply-chain review
+PASS, with zero technical findings. This closes the native verification
+boundary for this exact candidate; it does not constitute live collection or
+stage acceptance.
+
+The live 21-pair Stage Package Plan collection has not run, current live stage
+installed versions remain unobserved, and stage has not changed. The verification
+branch is not merged; PR/publication remains separately authorized. No package
+transaction, post-transaction validation or deployment is authorized by this
+evidence.
 The ARM64 Dockerfile/package evidence and
 [old manifest](../../scripts/tests/linux-semantic/arm64-runtime-reference.json)
 are retained as history, not a second accepted production profile.
