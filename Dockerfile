@@ -30,8 +30,13 @@ FROM docker.io/library/eclipse-temurin:21.0.11_10-jre-noble@sha256:ca397720325ce
 WORKDIR /opt/app
 
 USER root
+# Ubuntu noble security fix for CVE-2026-84782; fail closed if unavailable.
+# Exact versions also change the apt-layer cache key on security updates.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
+    libssl3t64=3.0.13-0ubuntu3.16 openssl=3.0.13-0ubuntu3.16 \
+ && test "$(dpkg-query -W -f='${Version}' libssl3t64)" = '3.0.13-0ubuntu3.16' \
+ && test "$(dpkg-query -W -f='${Version}' openssl)" = '3.0.13-0ubuntu3.16' \
  && rm -rf /var/lib/apt/lists/* \
  && addgroup --system --gid 10001 app \
  && adduser --system --uid 10001 --ingroup app --no-create-home app
