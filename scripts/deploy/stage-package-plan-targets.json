@@ -114,8 +114,8 @@
     "docker-ce-cli"
   ],
   "caveat": "Frozen exact-version simulation request only; no package mutation is authorized. Package presence, dependency closure and generated-byte reproduction remain unproven.",
-  "main": "e86aa6420d4576ea7e77f47aa22f902aaa6ff25f",
-  "manifest_sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
+  "main": "0c934da1b76ad6916feaf2bb52d88a9b42ca2f27",
+  "manifest_sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5",
   "project": "clubs_bot",
   "request": [
     {
@@ -271,17 +271,31 @@
       "architecture": "amd64",
       "expected_transition": "version_transition",
       "package": "libssl3t64",
-      "reason": "exact accepted non-generated runtime file mismatch",
+      "reason": "security reconciliation of installed OpenSSL shared libraries and exact accepted runtime bytes",
       "section": "A_non_generated_mismatch",
       "target_runtime_files": [
         "/usr/lib/x86_64-linux-gnu/libcrypto.so.3"
       ],
       "trusted_reference_source": {
-        "artifact_sha256": null,
-        "base": "docker.io/library/ubuntu@sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4",
-        "kind": "digest_pinned_ubuntu_base_and_reference_inventory"
+        "archive_path": "pool/main/o/openssl/libssl3t64_3.0.13-0ubuntu3.16_amd64.deb",
+        "kind": "frozen_ubuntu_deb_lock",
+        "sha256": "219f43b1cd836a4da550938db5fda93160d269d39a4edcf1f1ce698a470db797"
       },
-      "version": "3.0.13-0ubuntu3.15"
+      "version": "3.0.13-0ubuntu3.16"
+    },
+    {
+      "architecture": "amd64",
+      "expected_transition": "version_transition",
+      "package": "openssl",
+      "reason": "explicit security reconciliation of independently installed OpenSSL executable package; not part of accepted semantic runtime closure",
+      "section": "A_non_generated_mismatch",
+      "target_runtime_files": [],
+      "trusted_reference_source": {
+        "archive_path": "pool/main/o/openssl/openssl_3.0.13-0ubuntu3.16_amd64.deb",
+        "kind": "frozen_ubuntu_deb_lock",
+        "sha256": "675b84971ffd4467707008c25ef7520f90ea7c23ef27b7a76b0dccf1d7c4dc3f"
+      },
+      "version": "3.0.13-0ubuntu3.16"
     },
     {
       "architecture": "amd64",
@@ -496,5 +510,5 @@
     "sha256": "2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5",
     "version": "5.1.1"
   },
-  "task": "CLB-131"
+  "task": "CLB-157"
 }

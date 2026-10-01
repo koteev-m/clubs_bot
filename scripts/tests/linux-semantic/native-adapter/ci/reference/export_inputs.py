@@ -9,11 +9,11 @@ import hashlib, io, json, os, pathlib, py_compile, stat, struct, subprocess, sys
 P = pathlib.Path
 M = json.loads(P('/build/accepted-manifest.json').read_bytes())
 assert len(M['files']) == 191
-assert hashlib.sha256(P('/build/accepted-manifest.json').read_bytes()).hexdigest() == '93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008'
+assert hashlib.sha256(P('/build/accepted-manifest.json').read_bytes()).hexdigest() == '8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5'
 assert hashlib.sha256(P(sys.executable).read_bytes()).hexdigest() == 'e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f'
 assert hashlib.sha256(P('/usr/sbin/ldconfig.real').read_bytes()).hexdigest() == 'd879c9a8a41240aeb7fd0f3221116fc4cf41cc6c64c24e10541d1bafbe537ab1'
 entries = {}
-metadata = {'pyc': [], 'ELF': [], 'source_image': 'sha256:7fac9bfeaaa66a163f206b80309432f608f079f36cddec25034b323b02612d2d'}
+metadata = {'pyc': [], 'ELF': [], 'source_binding': 'immutable image argument verified by coordinator; see commands and reference_image'}
 extra = json.loads(P('/build/additional-inputs.json').read_bytes())
 archive = P('/input-libruby.deb').read_bytes()
 assert hashlib.sha256(archive).hexdigest() == extra['archive']['sha256']

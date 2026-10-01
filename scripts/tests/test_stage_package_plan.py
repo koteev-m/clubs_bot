@@ -69,7 +69,7 @@ def frame(body, key=b'k'*32):
 class SourceTest(unittest.TestCase):
     def test_exact_closure_and_pinned_collector_request(self):
         r.verify_sources(sources())
-        self.assertEqual(len(c.REQUEST), 20)
+        self.assertEqual(len(c.REQUEST), 21)
         for path in (r.REMOTE_PATH, r.TARGET_PATH):
             self.assertEqual(hashlib.sha256((ROOT/path).read_bytes()).hexdigest(), r.SOURCE_PINS[path])
         self.assertEqual(c.TARGET_SHA256, r.SOURCE_PINS[r.TARGET_PATH])
@@ -86,6 +86,34 @@ class SourceTest(unittest.TestCase):
         for value in broken:
             with self.subTest(paths=list(value)), patch.object(r, 'exec', create=True) as execute:
                 with self.assertRaises((ValueError, SyntaxError)): r.load_transport(value, [False])
+                execute.assert_not_called()
+
+    def test_retired_target_and_wrong_request_count_refuse_before_exec(self):
+        original=sources()
+        target=json.loads(original[r.TARGET_PATH])
+        retired=copy.deepcopy(target)
+        retired['request']=[row for row in retired['request'] if row['package']!='openssl']
+        next(row for row in retired['request'] if row['package']=='libssl3t64')['version']='3.0.13-0ubuntu3.15'
+        broken=dict(original); broken[r.TARGET_PATH]=p.canonical(retired)
+        with patch.object(r,'exec',create=True) as execute:
+            with self.assertRaises(ValueError): r.load_transport(broken,[False])
+            execute.assert_not_called()
+        # Exercise the fixed count independently of source-hash and pair-equality
+        # guards: even mutually matching captured vectors cannot shrink to 20.
+        for package in ('openssl','libc-bin'):
+            wrong=copy.deepcopy(target)
+            wrong['request']=[row for row in wrong['request'] if row['package']!=package]
+            request=tuple((row['package'],row['version']) for row in wrong['request'])
+            tree=ast.parse(original[r.REMOTE_PATH])
+            node=next(node for node in tree.body if isinstance(node,ast.Assign)
+                      and any(isinstance(item,ast.Name) and item.id=='REQUEST' for item in node.targets))
+            node.value=ast.parse(repr(request),mode='eval').body
+            broken=dict(original)
+            broken[r.TARGET_PATH]=p.canonical(wrong)
+            broken[r.REMOTE_PATH]=ast.unparse(ast.fix_missing_locations(tree)).encode()
+            pins={path:hashlib.sha256(broken[path]).hexdigest() for path in r.SOURCE_PINS}
+            with self.subTest(removed=package),patch.object(r,'SOURCE_PINS',pins),patch.object(r,'exec',create=True) as execute:
+                with self.assertRaises(ValueError): r.load_transport(broken,[False])
                 execute.assert_not_called()
 
     def test_git_object_snapshot_checks_every_working_file_and_blob(self):
@@ -234,6 +262,27 @@ class ProtocolTest(unittest.TestCase):
             if change=='target': broken['evidence']['resolver']['requested']=['ruby-psych=1']
             if change=='schema': broken['evidence']['schema']='other'
             with self.subTest(change=change), self.assertRaises(ValueError): self.parse(frame(p.PREFIX+p.canonical(broken)+b'\n'))
+
+    def test_retired_openssl_request_and_identities_are_not_current_evidence(self):
+        retired_target='29e3592504e33066f2f2a9a208f4f038f052ca33067b8cd6322e46639bd16a14'
+        retired_collector='6e10f52cbfbdc6edfb3f9c40431f795f098cdd646465dc12f0dadcf7da9df6ea'
+        changes=('libssl15','openssl15','missing_openssl','duplicate_openssl','target','collector','evidence_target')
+        for change in changes:
+            broken=copy.deepcopy(self.value)
+            requested=broken['evidence']['resolver']['requested']
+            if change in ('libssl15','openssl15'):
+                package='libssl3t64' if change=='libssl15' else 'openssl'
+                requested[requested.index(package+'=3.0.13-0ubuntu3.16')]=package+'=3.0.13-0ubuntu3.15'
+            elif change=='missing_openssl': requested.remove('openssl=3.0.13-0ubuntu3.16')
+            elif change=='duplicate_openssl': requested.append('openssl=3.0.13-0ubuntu3.16')
+            elif change=='target': broken['identity']['target_sha256']=retired_target
+            elif change=='collector': broken['identity']['collector_sha256']=retired_collector
+            else: broken['evidence']['target_sha256']=retired_target
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                self.parse(frame(p.PREFIX+p.canonical(broken)+b'\n'))
+        self.assertEqual(c.MAIN,p.BASE)
+        self.assertEqual(c.TARGET_SHA256,p.TARGET_SHA)
+        self.assertEqual(hashlib.sha256((ROOT/r.REMOTE_PATH).read_bytes()).hexdigest(),p.COLLECTOR_SHA)
 
     def test_refusal_preserved_and_nonzero_cannot_be_success(self):
         with patch.object(c,'collect',side_effect=c.Refuse('PLAN_TOO_LARGE')):
@@ -711,13 +760,16 @@ class IntegrationTest(unittest.TestCase):
             if argv==['dpkg','--print-foreign-architectures']:return 0,b'',b''
             if argv[0]=='apt-get':return 100,b'Unable to resolve requested versions\n',b''
             raise AssertionError(argv)
-        with patch.object(c,'run',side_effect=command),patch.object(c,'bounded_file',return_value=(b'ID=ubuntu\nVERSION_ID=24.04\n',None)),patch.object(c,'source_rows',return_value=[]),patch.object(c,'index_rows',return_value=[]),patch.object(c,'preferences',return_value=[]),patch.object(c,'config_value',return_value=None),patch.object(c,'package_state',return_value={}),patch.object(c,'policy',return_value={}),patch.object(c,'script_metadata',return_value=[]),patch.object(c,'outside_mapping',return_value=dict(classification='UNKNOWN_REQUIRES_CONTRACT_DECISION',outside_count=0,reason='not_exactly_one_current_collector_mapping')):
+        with patch.object(c,'run',side_effect=command),patch.object(c,'bounded_file',return_value=(b'ID=ubuntu\nVERSION_ID=24.04\n',None)),patch.object(c,'source_rows',return_value=[]),patch.object(c,'index_rows',return_value=[]),patch.object(c,'preferences',return_value=[]),patch.object(c,'config_value',return_value=None),patch.object(c,'package_state',return_value={}) as state,patch.object(c,'policy',return_value={}) as policy,patch.object(c,'script_metadata',return_value=[]),patch.object(c,'outside_mapping',return_value=dict(classification='UNKNOWN_REQUIRES_CONTRACT_DECISION',outside_count=0,reason='not_exactly_one_current_collector_mapping')):
             c.collect()
+        for query in (state,policy):
+            query.assert_called_once()
+            self.assertTrue({'libssl3t64','openssl'} <= set(query.call_args.args[0]))
         apt=[args for args in calls if args[0]=='apt-get']
         self.assertEqual(apt,[['apt-get','-s','-o','Debug::NoLocking=1','-o','Dir::Cache::pkgcache=','-o','Dir::Cache::srcpkgcache=','install',*[n+'='+v for n,v in c.REQUEST]]])
         self.assertNotIn('update',apt[0]);self.assertNotIn('download',apt[0])
         target=json.loads((ROOT/r.TARGET_PATH).read_bytes())
-        self.assertEqual(len(target['request']),20)
+        self.assertEqual(len(target['request']),21)
         self.assertFalse({'systemd','systemd-sysv','udev','ruby-psych','docker-ce','docker.io'} & {n for n,_ in c.REQUEST})
         self.assertEqual(len(c.KNOWN_DEPENDENCIES),14)
         self.assertFalse(set(c.KNOWN_DEPENDENCIES)&{n for n,_ in c.REQUEST})

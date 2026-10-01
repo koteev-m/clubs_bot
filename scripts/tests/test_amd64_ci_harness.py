@@ -113,7 +113,7 @@ class HarnessTest(unittest.TestCase):
             downloads.checked(b'wrong', '0' * 64, 'input')
         with self.assertRaises(ValueError):
             downloads.download('http://example.invalid', 10)
-        self.assertEqual(len(lock['packages']), 61)
+        self.assertEqual(len(lock['packages']), 62)
         self.assertEqual(len(lock['indexes']), 15)
 
     def test_signed_index_concatenation_and_bad_inputs(self):

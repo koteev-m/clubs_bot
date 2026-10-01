@@ -10,11 +10,11 @@ import shutil, signal, subprocess, sys, time, selectors, uuid
 P=pathlib.Path
 HERE=P(__file__).resolve().parent
 REF=HERE/'reference'
-ROOTFS='f78a1d704c746a17ee5c848ab0667ca64859bf48bc94fdc45eb46b40791b3f22'
-MANIFEST='68fc3b06b2198b06f1583c0bb1157669c4df6d8c9548934ed3c79315d6e82649'
-INPUTS='a365d37e6bf45dacfe672364d2e3493bc3c786e692940e4ee0566b8f97fd5833'
+ROOTFS='9ff206d6d59e722e5a6e7b97034c488d5ae9cb5367a1ef7677c456ebf2a172ad'
+MANIFEST='8d75c3da0ed507cffc0ce5f0da05c6c03e7728bb65abe08c663c4e37e7906460'
+INPUTS='3b8b47c2cb5e73ddaac85fe438caff480069e6719d9a45593444895b0119e6ac'
 LOG_LIMIT=8*2**20
-SOURCE_PINS='f8e2e703dfa651334462c343d14b0ad4b1911d2f5ec900451012af12f983d282'
+SOURCE_PINS='30e41f518f46c07ded5246b66c1b8ea4c2dc70d0d1e214ec1cf7ef1c5c9249ee'
 
 def sha(x): return hashlib.sha256(x).hexdigest()
 def verify_sources(ref=REF):
@@ -140,6 +140,13 @@ def main():
         if actual!=(REF/'amd64-runtime-candidate.json').read_bytes():raise ValueError('reference_manifest_mismatch')
         packages=owned_run('reference-packages',flags+[image,'cat','/toolchain-packages.txt'],30)
         if packages!=(REF/'amd64-packages.txt').read_bytes():raise ValueError('reference_packages_mismatch')
+        installed=dict(line.split('=',1) for line in packages.decode('ascii').splitlines())
+        security={name:installed.get(name) for name in ('libssl3t64','openssl')}
+        if set(security.values())!={'3.0.13-0ubuntu3.16'}:raise ValueError('openssl_security_inventory')
+        lock=json.loads((REF/'amd64-inputs.json').read_bytes())
+        status['verified_reference']={'input_lock_sha256':INPUTS,'manifest_sha256':sha(actual),'packages_sha256':sha(packages),'package_count':len(installed),'openssl_packages':security,'libcrypto_sha256':json.loads(actual)['files']['/usr/lib/x86_64-linux-gnu/libcrypto.so.3'],'supplemental_indexes':lock['supplemental_indexes']}
+        status['run_identity']={k:os.environ.get(k) for k in ('GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','RUNNER_ARCH','GITHUB_EVENT_NAME')}
+        status['source_pins_sha256']=SOURCE_PINS
         build=work/'candidate-build';build.mkdir()
         for name in ('export_inputs.py','accepted-manifest.json','additional-inputs.json'):shutil.copyfile(REF/name,build/name)
         archive=work/'downloads/debs/libruby3.2_3.2.3-1ubuntu0.24.04.8_amd64.deb'

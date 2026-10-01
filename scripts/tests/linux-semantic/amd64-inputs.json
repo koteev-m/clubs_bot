@@ -138,8 +138,8 @@
       "url": "https://security.ubuntu.com/ubuntu/dists/noble-security/universe/binary-amd64/Packages"
     }
   ],
-  "input_sums_sha256": "f32ae3cfd1c697fc1aeb189a02c2fe59bdc510021016ec570cdf1e34eae5aa12",
-  "installed_packages_sha256": "17ac090efb6ba58f50f72f7e2e7425e6db5941b7a5758b4099e4553058b6983c",
+  "input_sums_sha256": "146b61921ed5ba611d9e2a33f5e8736be4f8c0026579109bd30e6e2bd4106236",
+  "installed_packages_sha256": "439960997fde8a038d8999ecf715263d3e247c6f84909e5f860745f170efd82b",
   "packages": [
     {
       "architecture": "all",
@@ -467,6 +467,17 @@
     },
     {
       "architecture": "amd64",
+      "archive_path": "pool/main/o/openssl/libssl3t64_3.0.13-0ubuntu3.16_amd64.deb",
+      "bytes": 1945300,
+      "file": "libssl3t64_3.0.13-0ubuntu3.16_amd64.deb",
+      "package": "libssl3t64",
+      "sha256": "219f43b1cd836a4da550938db5fda93160d269d39a4edcf1f1ce698a470db797",
+      "source": "openssl-security",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl3t64_3.0.13-0ubuntu3.16_amd64.deb",
+      "version": "3.0.13-0ubuntu3.16"
+    },
+    {
+      "architecture": "amd64",
       "archive_path": "pool/main/liby/libyaml/libyaml-0-2_0.2.5-1build1_amd64.deb",
       "file": "libyaml-0-2_0.2.5-1build1_amd64.deb",
       "package": "libyaml-0-2",
@@ -503,12 +514,14 @@
     },
     {
       "architecture": "amd64",
-      "archive_path": "pool/main/o/openssl/openssl_3.0.13-0ubuntu3.15_amd64.deb",
-      "file": "openssl_3.0.13-0ubuntu3.15_amd64.deb",
+      "archive_path": "pool/main/o/openssl/openssl_3.0.13-0ubuntu3.16_amd64.deb",
+      "bytes": 1003702,
+      "file": "openssl_3.0.13-0ubuntu3.16_amd64.deb",
       "package": "openssl",
-      "sha256": "1f2401db59a0beffde6cc47bea3664965ab8fa206b7a5ac8f1cc649cfeeb056b",
-      "url": "https://archive.ubuntu.com/ubuntu/pool/main/o/openssl/openssl_3.0.13-0ubuntu3.15_amd64.deb",
-      "version": "3.0.13-0ubuntu3.15"
+      "sha256": "675b84971ffd4467707008c25ef7520f90ea7c23ef27b7a76b0dccf1d7c4dc3f",
+      "source": "openssl-security",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/o/openssl/openssl_3.0.13-0ubuntu3.16_amd64.deb",
+      "version": "3.0.13-0ubuntu3.16"
     },
     {
       "architecture": "amd64",
@@ -693,8 +706,22 @@
   ],
   "platform": "linux/amd64",
   "purpose": "LOCAL TEST CANDIDATE ONLY; not a production or stage approval",
-  "runtime_candidate_sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
-  "source_revision": "8cc5389c61ac097c589de99fa474d63f7d050d13",
+  "runtime_candidate_sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5",
+  "source_revision": "0c934da1b76ad6916feaf2bb52d88a9b42ca2f27",
+  "supplemental_indexes": [
+    {
+      "bytes": 5797350,
+      "compressed_bytes": 1066176,
+      "compressed_sha256": "b9aa52a2bd0e42b0976036f59251c2bf9c76b20d7c6be96405b6290f38dff61f",
+      "name": "security.ubuntu.com_ubuntu_dists_noble-security_main_binary-amd64_Packages",
+      "release": "security.ubuntu.com_ubuntu_dists_noble-security_InRelease",
+      "release_sha256": "ba88a6da0b679ab57efe1b2ec88f3451d877cb4c01eaa112965fe7aedd77a8bf",
+      "release_url": "https://security.ubuntu.com/ubuntu/dists/noble-security/InRelease",
+      "sha256": "abfa0e7c57b579cf87e09b90501306dfb1bffcfbd4fee5be1c775a39adf1bd74",
+      "source": "openssl-security",
+      "url": "https://security.ubuntu.com/ubuntu/dists/noble-security/main/binary-amd64/Packages"
+    }
+  ],
   "ubuntu_base_source": "https://hub.docker.com/_/ubuntu",
   "ubuntu_keyring_sha256": "80a36b0a6de2f69f49d2df75ef473ccde121e9e190b9ea01d20a4f63778d5c31",
   "ubuntu_signer": "F6ECB3762474EDA9D21B7022871920D1991BC93C"

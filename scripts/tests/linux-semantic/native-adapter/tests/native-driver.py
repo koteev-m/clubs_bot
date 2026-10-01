@@ -8,8 +8,8 @@ import argparse, hashlib, json, os, pathlib, platform, selectors, signal
 import re, stat, struct, subprocess, tarfile, time, tempfile
 P = pathlib.Path
 HERE = P(__file__).resolve().parent.parent
-ROOTFS = (59392000, 'f78a1d704c746a17ee5c848ab0667ca64859bf48bc94fdc45eb46b40791b3f22')
-PINS_SHA = 'ada8f2c752449a661cb287373d414dade90d9c24daeaea98a3f4c17d4480bab4'
+ROOTFS = (59392000, '9ff206d6d59e722e5a6e7b97034c488d5ae9cb5367a1ef7677c456ebf2a172ad')
+PINS_SHA = 'd8c1d16ea2a9e5a033dcbe09a67458b7257dbcbfcf5a02c96f27cdc09f0963b1'
 ENV = {'PATH':'/usr/bin:/bin', 'LC_ALL':'C', 'HOME':'/nonexistent'}
 MAX_OUTPUT = 65536
 class Refused(Exception): pass
@@ -42,7 +42,7 @@ def source_identity():
         if len(raw) != rec['bytes'] or sha(raw) != rec['sha256']: raise Refused('reference_identity')
     generated = json.loads(read_exact(HERE/'generated-identity.json',8192))
     raw = read_exact(HERE/'adapter/generated_contract.h',1048576)
-    if len(raw) != 821681 or sha(raw) != 'a42038d3ac9e71950b3be96b946431368090d04274043e34c900f44c45621531' or len(raw) != generated['header_bytes'] or sha(raw) != generated['header_sha256']: raise Refused('generated_contract_identity')
+    if len(raw) != 821681 or sha(raw) != 'd4075698a174d78d10995ab2efbb9f2171559b1fd27f747d0feeade512779731' or len(raw) != generated['header_bytes'] or sha(raw) != generated['header_sha256']: raise Refused('generated_contract_identity')
     return {'reference_ledger':PINS_SHA, 'generated_contract':sha(raw), 'manifest':pins['candidate-runtime.json']['sha256']}
 
 def elf_static(raw):
@@ -221,6 +221,9 @@ def main():
         inputs=source_identity();raw,entries=validate_tar(P(a.runtime_tar))
         os.umask(0o077);root.mkdir(mode=0o700);evidence=root/'evidence';evidence.mkdir();build=root/'build';build.mkdir()
         env={'system':platform.system(),'machine':platform.machine(),'release':platform.release(),'coordinator_uid':os.getuid(),'coordinator_gid':os.getgid(),'runtime_inputs':inputs,'runtime_tar_sha256':ROOTFS[1],'kernel_and_runner_image':'external CI-provider trust, measured here; not production-approved pins'}
+        env['run_identity']={k:os.environ.get(k) for k in ('GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','RUNNER_ARCH','GITHUB_EVENT_NAME')}
+        source_paths=('tests/native-driver.py','adapter/adapter.c','adapter/core-tests.c','adapter/fd-budget.h','tests/native-fixture-runner.c','tests/fixture-namespace-handles.h','tests/fixture-bind-probe.h','tests/fixture-resource-envelope.h')
+        env['source_sha256']={name:sha(read_exact(HERE/name,1048576)) for name in source_paths}
         fixture=P(tempfile.mkdtemp(prefix='clb91-native-',dir='/tmp'));fixture_identity=fixture.stat()
         extract_runtime(raw,entries,fixture/'runtime');inventory=fixture_inventory(fixture)
         gcc=P('/usr/bin/gcc').resolve();compiler['executable']={'path':str(gcc),'sha256':sha(read_exact(gcc,32*1024*1024))}

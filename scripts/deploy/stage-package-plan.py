@@ -40,9 +40,9 @@ SOURCE_PINS = {
     TRANSPORT_PATH: 'f7717f5cb41ad56a74c397000a44112d622e5aa040175abe5ce4d0921b88add2',
     DEPENDENCY_PATHS[0]: '250d359d114779ddcc12c38bc64dc7015d5679f0ffce12a859f007810726cdba',
     DEPENDENCY_PATHS[1]: '83c8c81adeffc0ba7bb97d499ac3d8077950593ab03875856e17feccc8540216',
-    REMOTE_PATH: '6e10f52cbfbdc6edfb3f9c40431f795f098cdd646465dc12f0dadcf7da9df6ea',
-    TARGET_PATH: '29e3592504e33066f2f2a9a208f4f038f052ca33067b8cd6322e46639bd16a14',
-    PROTOCOL_PATH: '3f4ead9fb59fa1b3b48a42cc3bc90cd30bcb2b6280a8164e91bc206f84f3e347',
+    REMOTE_PATH: 'a770d79303795bf9d26a36fa62c4ff89c50b9af5a744dcb692c10c8b72d41321',
+    TARGET_PATH: '9c9ba991a9edcea28ed9b24ee6f3d2f9928a748883cc923fd621bf012fb42e02',
+    PROTOCOL_PATH: '5d3ec9a8a9807aa2a59e791c50786fec2646db71644b4cdc69229354494220b6',
 }
 
 
@@ -60,7 +60,7 @@ def verify_sources(sources):
                and any(isinstance(t, ast.Name) and t.id == 'REQUEST' for t in n.targets)]
     require(len(request) == 1)
     require([(r['package'], r['version']) for r in target['request']] == list(ast.literal_eval(request[0].value)))
-    require(len(target['request']) == 20)
+    require(len(target['request']) == 21)
 
 
 def unique(pairs):
