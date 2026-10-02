@@ -1,7 +1,13 @@
 import hashlib
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
+import stat
+import sys
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +16,118 @@ PATH=ROOT/'scripts/deploy/stage-package-plan-operation.py'
 spec=importlib.util.spec_from_file_location('clb131_collector',PATH)
 c=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
+
+class BoundedFileTests(unittest.TestCase):
+    def stream(self, payload, maximum, chunks, size=0, mode=stat.S_IFREG,
+               on_read=lambda: None):
+        # A stream fixture models legal read results independently of the
+        # collector: each read may return fewer bytes than the requested count.
+        source=io.BytesIO(payload); widths=iter(chunks)
+        metadata=SimpleNamespace(st_mode=mode,st_size=size)
+        def read(fd, count):
+            self.assertEqual(fd,91)
+            self.assertGreater(count,0);self.assertLessEqual(count,maximum+1)
+            on_read()
+            return source.read(min(count,next(widths,count)))
+        with patch.object(c.os,'open',return_value=91) as opened, \
+             patch.object(c.os,'fstat',return_value=metadata), \
+             patch.object(c.os,'read',side_effect=read) as reads, \
+             patch.object(c.os,'close') as closed:
+            try:
+                data,actual=c.bounded_file('/synthetic/regular',maximum)
+                self.assertIs(actual,metadata)
+                self.assertIsInstance(data,bytes)
+                return data
+            finally:
+                opened.assert_called_once_with('/synthetic/regular',
+                    os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                closed.assert_called_once_with(91)
+                if not stat.S_ISREG(mode) or size>maximum:reads.assert_not_called()
+
+    def test_legitimate_short_read_returns_complete_content(self):
+        self.assertEqual(self.stream(b'abcdefgh',16,[3,5]),b'abcdefgh')
+
+    def test_multiple_short_reads_preserve_all_bytes(self):
+        payload=b'first\nsecond\nthird\n'
+        self.assertEqual(self.stream(payload,32,[1,2,1,4,2,3,1]),payload)
+
+    def test_exact_limit_with_zero_stat_size_is_accepted(self):
+        self.assertEqual(self.stream(b'abcdefgh',8,[3,2,3]),b'abcdefgh')
+
+    def test_streamed_limit_plus_one_is_refused(self):
+        with self.assertRaisesRegex(c.Refuse,'UNSAFE_OR_LARGE_FILE'):
+            self.stream(b'abcdefghi',8,[3,2,3,1])
+
+    def test_empty_stream_and_zero_limit_reach_eof(self):
+        self.assertEqual(self.stream(b'',0,[]),b'')
+        self.assertEqual(self.stream(b'',8,[]),b'')
+
+    def test_nonempty_zero_limit_is_refused(self):
+        with self.assertRaisesRegex(c.Refuse,'UNSAFE_OR_LARGE_FILE'):
+            self.stream(b'a',0,[1])
+
+    def test_ordinary_regular_file_and_exact_boundary(self):
+        with tempfile.TemporaryDirectory(prefix='clb167-bounded-') as directory:
+            path=Path(directory)/'script'
+            for size in (17,65535,65536):
+                payload=b'#'+b'a'*(size-1);path.write_bytes(payload)
+                with self.subTest(size=size):
+                    data,metadata=c.bounded_file(str(path),65536)
+                    self.assertEqual(data,payload)
+                    self.assertEqual(metadata.st_size,size)
+            path.write_bytes(b'a'*65537)
+            with self.assertRaisesRegex(c.Refuse,'UNSAFE_OR_LARGE_FILE'):
+                c.bounded_file(str(path),65536)
+
+    def test_nonregular_types_refuse_before_read(self):
+        for mode in (stat.S_IFDIR,stat.S_IFIFO,stat.S_IFCHR,stat.S_IFSOCK):
+            with self.subTest(mode=mode),self.assertRaisesRegex(c.Refuse,'UNSAFE_OR_LARGE_FILE'):
+                self.stream(b'',8,[],mode=mode)
+
+    def test_oversized_stat_refuses_before_read(self):
+        with self.assertRaisesRegex(c.Refuse,'UNSAFE_OR_LARGE_FILE'):
+            self.stream(b'',8,[],size=9)
+
+    def test_symlink_is_not_followed(self):
+        with tempfile.TemporaryDirectory(prefix='clb167-no-follow-') as directory:
+            target=Path(directory)/'target';target.write_bytes(b'safe')
+            link=Path(directory)/'link';link.symlink_to(target)
+            with self.assertRaises(OSError):c.bounded_file(str(link),8)
+
+    def test_global_budget_is_checked_between_short_reads(self):
+        clock=[0]
+        def elapsed():clock[0]+=40
+        with patch.object(c,'START',0),patch.object(c.time,'monotonic',side_effect=lambda:clock[0]):
+            with self.assertRaisesRegex(c.Refuse,'TIME_LIMIT'):
+                self.stream(b'abcdefgh',16,[1]*8,on_read=elapsed)
+        self.assertEqual(clock[0],120)
+
+    def test_global_budget_also_applies_to_final_eof_read(self):
+        clock=[0]
+        def elapsed():clock[0]+=60
+        with patch.object(c,'START',0),patch.object(c.time,'monotonic',side_effect=lambda:clock[0]):
+            with self.assertRaisesRegex(c.Refuse,'TIME_LIMIT'):
+                self.stream(b'a',8,[1],on_read=elapsed)
+        self.assertEqual(clock[0],120)
+
+    def test_read_error_closes_descriptor(self):
+        def failed():raise OSError('synthetic read failure')
+        with self.assertRaises(OSError):self.stream(b'a',8,[1],on_read=failed)
+
+    @unittest.skipUnless(sys.platform=='linux','requires Linux procfs')
+    def test_linux_proc_maps_reads_to_eof_within_unchanged_bound(self):
+        original=c.os.read;parts=[]
+        def read(fd,count):
+            part=original(fd,count);parts.append(part);return part
+        with patch.object(c.os,'read',side_effect=read):
+            data,metadata=c.bounded_file('/proc/self/maps',65536)
+        self.assertTrue(stat.S_ISREG(metadata.st_mode))
+        self.assertEqual(metadata.st_size,0)
+        self.assertEqual(parts[-1],b'')
+        self.assertEqual(data,b''.join(parts))
+        self.assertLessEqual(len(data),65536)
+        self.assertTrue(data.endswith(b'\n'))
+        self.assertTrue(all(len(line.split(None,5))>=5 for line in data.splitlines()))
 
 class CollectorTests(unittest.TestCase):
     def test_frozen_target(self):

@@ -81,9 +81,14 @@ def bounded_file(path, maximum):
     try:
         st=os.fstat(fd)
         need(stat.S_ISREG(st.st_mode) and st.st_size<=maximum, 'UNSAFE_OR_LARGE_FILE')
-        data=os.read(fd,maximum+1)
-        need(len(data)<=maximum and not os.read(fd,1), 'UNSAFE_OR_LARGE_FILE')
-        return data,st
+        data=bytearray()
+        while True:
+            tick()
+            part=os.read(fd,maximum-len(data)+1)
+            tick()
+            need(len(data)+len(part)<=maximum, 'UNSAFE_OR_LARGE_FILE')
+            if not part:return bytes(data),st
+            data.extend(part)
     finally: os.close(fd)
 
 def run(argv, maximum=131072, timeout=20):
