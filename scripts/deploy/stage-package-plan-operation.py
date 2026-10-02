@@ -272,7 +272,7 @@ def release_refs(text, prefix, package_files):
             need(entries>0 and re.fullmatch(r'(?:[A-Za-z][A-Za-z0-9-]*:[^\n]*|-----BEGIN PGP SIGNATURE-----\r?)\n?',line), 'MALFORMED_INDEX_HASH')
             in_section=False
             continue
-        m=re.fullmatch(r'[ \t]+([0-9a-f]{64})[ \t]+([0-9]{1,15})[ \t]+([A-Za-z0-9._+/-]{1,180})[ \t]*\r?\n?',line)
+        m=re.fullmatch(r'[ \t]+([0-9a-f]{64})[ \t]+([0-9]{1,15})[ \t]+([A-Za-z0-9._+/@-]{1,180})[ \t]*\r?\n?',line)
         need(m is not None,'MALFORMED_INDEX_HASH')
         entries+=1
         if '/binary-amd64/Packages' not in m[3]:continue

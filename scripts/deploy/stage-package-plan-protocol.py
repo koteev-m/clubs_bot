@@ -9,7 +9,7 @@ import sys
 
 PREFIX = b'clb132-package-plan:v=1 '
 BODY_LIMIT = 1052672
-COLLECTOR_SHA = 'a770d79303795bf9d26a36fa62c4ff89c50b9af5a744dcb692c10c8b72d41321'
+COLLECTOR_SHA = '2cc04008656c62ef633029392a37666189cd0d8286a05309def92bcb4689e970'
 TARGET_SHA = '9c9ba991a9edcea28ed9b24ee6f3d2f9928a748883cc923fd621bf012fb42e02'
 BASE = '0c934da1b76ad6916feaf2bb52d88a9b42ca2f27'
 # Fixed collector refusal vocabulary, including the conditional output-limit reason.

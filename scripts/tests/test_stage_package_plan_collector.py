@@ -206,6 +206,50 @@ class ReleaseReferenceTests(unittest.TestCase):
             self.assertEqual(row['uncompressed_sha256'],self.DIGEST)
         self.assertLess(len(json.dumps(rows)),4096)
 
+    # Frozen representative entry from https://archive.ubuntu.com/ubuntu/dists/noble/Release
+    # (25 Apr 2024). Package bytes/signature remain synthetic and offline.
+    ICON_ENTRY = (b' 650ebdd9cef3bfb3af47d512d1a96a788d2cf636b94c19c6b2870d203931de4d'
+                  b'            59904 main/dep11/icons-128x128@2.tar\n')
+
+    def test_ubuntu_dep11_at2_scanned_not_retained_with_signed_package_relation(self):
+        package=self.entry('main/binary-amd64/Packages').encode()
+        for entries in (self.ICON_ENTRY+package, package+self.ICON_ENTRY):
+            with self.subTest(entries=entries):
+                body=b'Origin: Ubuntu\nSuite: noble\nCodename: noble\nSHA256:\n'+entries
+                rows=self.indexes(body)
+                release=next(row for row in rows if row['file'].endswith('InRelease'))
+                self.assertEqual(release['amd64_package_refs'],[
+                    {'path':'main/binary-amd64/Packages','sha256':self.DIGEST,'size':4}])
+                pkg=next(row for row in rows if 'signed_relation' in row)
+                self.assertEqual(pkg['signed_relation'],'MATCHED_VERIFIED_RELEASE')
+                self.assertEqual(pkg['release_file'],release['file'])
+                self.assertEqual(pkg['uncompressed_sha256'],self.DIGEST)
+                with self.assertRaisesRegex(c.Refuse,'MALFORMED_INDEX_HASH'):
+                    self.indexes(body+b' malformed continuation\n')
+                with self.assertRaisesRegex(c.Refuse,'MALFORMED_INDEX_HASH'):
+                    self.indexes(body+b'SHA256:\n'+package)
+                with self.assertRaisesRegex(c.Refuse,'INDEX_RELATION_AMBIGUOUS'):
+                    self.indexes(body+package)
+
+    def test_at_paths_preserve_strict_entry_grammar_and_bounds(self):
+        package=self.entry('main/binary-amd64/Packages')
+        icon='main/dep11/icons-128x128@2.tar'
+        invalid_paths=(icon+'?token=secret', icon+'?query',
+                       'https://user@example.org/'+icon, icon+'#fragment',
+                       icon+'=value', icon+'%20', icon+' extra', icon+'\textra',
+                       icon+'\x00', icon+'\x01', icon+'\x7f', icon+'\rhidden',
+                       icon+'\nhidden', '@'+'x'*180)
+        tails=[self.entry(path) for path in invalid_paths]
+        tails += [self.entry(icon,digest=digest) for digest in
+                  ('a'*63,'a'*65,'A'*64,'g'*64)]
+        tails += [self.entry(icon,size=size) for size in ('-1','abc','1234567890123456')]
+        for tail in tails:
+            with self.subTest(tail=tail),self.assertRaisesRegex(c.Refuse,'MALFORMED_INDEX_HASH'):
+                self.indexes(b'SHA256:\n'+package.encode()+self.ICON_ENTRY+tail.encode())
+        # Exact old boundaries still accept; the unrelated @ path is not evidence.
+        body=('SHA256:\n'+self.entry('@'+'x'*179,size='9'*15)+package).encode()
+        self.assertEqual(self.indexes(body)[1]['signed_relation'],'MATCHED_VERIFIED_RELEASE')
+
     def test_existing_small_release_signature_mismatch_and_missing_relation(self):
         for count in (1,32):
             body=('SHA256:\n'+''.join(self.entry(f'c{i}/binary-amd64/Packages') for i in range(count))).encode()
