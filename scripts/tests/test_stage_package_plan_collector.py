@@ -93,6 +93,95 @@ class CollectorTests(unittest.TestCase):
         self.assertNotIn('shell=True',source)
 
 
+class PackageStateIdentityTests(unittest.TestCase):
+    # Actual Noble amd64 dpkg-query output for a fixed-request Multi-Arch: same
+    # package. Qualification is dpkg identity syntax, not package expansion.
+    LIBC6 = b'libc6:amd64\t2.39-0ubuntu8.9\tamd64\tii \tno\toptional\n'
+
+    def state(self, output, names=('libc6',), holds=b'', code=0):
+        fmt='${binary:Package}\t${Version}\t${Architecture}\t${db:Status-Abbrev}\t${Essential}\t${Priority}\n'
+        def command(argv, *bounds):
+            if argv == ['dpkg-query','-W','-f='+fmt,*names]:
+                self.assertEqual(bounds,(65536,20))
+                return code,output,b''
+            self.assertEqual(argv,['apt-mark','showhold'])
+            self.assertEqual(bounds,(32768,12))
+            return 0,holds,b''
+        with patch.object(c,'run',side_effect=command):
+            return c.package_state(list(names))
+
+    def test_expected_unqualified_native_package(self):
+        rows=self.state(self.LIBC6.replace(b'libc6:amd64',b'libc6'))
+        self.assertEqual(rows,{'libc6':dict(version='2.39-0ubuntu8.9',architecture='amd64',
+            status_abbrev='ii ',essential='no',priority='optional',held=False)})
+
+    def test_expected_native_qualified_package_uses_requested_key(self):
+        self.assertIn('libc6',dict(c.REQUEST))
+        rows=self.state(self.LIBC6)
+        self.assertEqual(rows,self.state(self.LIBC6.replace(b'libc6:amd64',b'libc6')))
+        self.assertNotIn('libc6:amd64',rows)
+
+    def test_unqualified_all_and_partial_missing_packages_remain_observed(self):
+        rows=self.state(b'ruby\t1:3.2~ubuntu1\tall\tii \tno\toptional\n',
+                        names=('ruby','openssl'),code=1)
+        self.assertEqual(rows['ruby']['architecture'],'all')
+        self.assertEqual(rows['ruby']['version'],'1:3.2~ubuntu1')
+        self.assertIsNone(rows['openssl']['version'])
+        self.assertEqual(set(rows),{'ruby','openssl'})
+
+    def test_unexpected_package_cannot_expand_requested_set(self):
+        for name in (b'other',b'other:amd64'):
+            with self.subTest(name=name),self.assertRaisesRegex(c.Refuse,'UNEXPECTED_PACKAGE_RECORD'):
+                self.state(self.LIBC6.replace(b'libc6:amd64',name))
+
+    def test_wrong_or_nonconcrete_architecture_qualifier_refused(self):
+        for arch in (b'arm64',b'i386',b'all',b'any',b'native'):
+            for field in (arch,b'amd64'):
+                raw=self.LIBC6.replace(b'libc6:amd64',b'libc6:'+arch).replace(b'\tamd64\t',b'\t'+field+b'\t')
+                with self.subTest(qualifier=arch,field=field),self.assertRaisesRegex(c.Refuse,'UNEXPECTED_PACKAGE_RECORD'):
+                    self.state(raw)
+
+    def test_native_qualifier_must_match_architecture_field(self):
+        for arch in (b'arm64',b'all',b''):
+            with self.subTest(arch=arch),self.assertRaisesRegex(c.Refuse,'UNEXPECTED_PACKAGE_RECORD'):
+                self.state(self.LIBC6.replace(b'\tamd64\t',b'\t'+arch+b'\t'))
+
+    def test_duplicate_native_and_unqualified_collision_in_both_orders(self):
+        plain=self.LIBC6.replace(b'libc6:amd64',b'libc6')
+        for output in (plain+plain,self.LIBC6+self.LIBC6,plain+self.LIBC6,self.LIBC6+plain):
+            with self.subTest(output=output),self.assertRaisesRegex(c.Refuse,'DUPLICATE_PACKAGE_RECORD'):
+                self.state(output)
+
+    def test_malformed_name_and_record_shape_remain_refused(self):
+        for output in (self.LIBC6.replace(b'libc6:amd64',b'libc6:amd64:amd64'),
+                       self.LIBC6.replace(b'libc6:amd64',b'libc6/amd64'),
+                       self.LIBC6.replace(b'\toptional',b'')):
+            with self.subTest(output=output),self.assertRaisesRegex(c.Refuse,'DUPLICATE_PACKAGE_RECORD'):
+                self.state(output)
+
+    def test_record_line_bound_remains_fail_closed(self):
+        with self.assertRaisesRegex(c.Refuse,'UNEXPECTED_PACKAGE_RECORD'):
+            self.state(self.LIBC6.replace(b'optional',b'x'*513))
+
+    def test_holds_match_same_native_identity_without_foreign_aliasing(self):
+        for output in (self.LIBC6,self.LIBC6.replace(b'libc6:amd64',b'libc6')):
+            for holds,expected in ((b'libc6\n',True),(b'libc6:amd64\n',True),
+                                   (b'libc6:arm64\n',False),(b'',False)):
+                with self.subTest(output=output,holds=holds):
+                    self.assertEqual(self.state(output,holds=holds)['libc6']['held'],expected)
+        rows=self.state(b'ruby\t1:3.2~ubuntu1\tall\tii \tno\toptional\n',
+                        names=('ruby',),holds=b'ruby:amd64\n')
+        self.assertFalse(rows['ruby']['held'])
+
+    def test_invalid_holds_and_fatal_query_remain_refused(self):
+        plain=self.LIBC6.replace(b'libc6:amd64',b'libc6')
+        with self.assertRaisesRegex(c.Refuse,'DPKG_QUERY_FAILED'):
+            self.state(plain,code=2)
+        for holds in (b'libc6/amd64\n',b'libc6:amd64:all\n'):
+            with self.subTest(holds=holds),self.assertRaisesRegex(c.Refuse,'UNSAFE_HOLDS'):
+                self.state(plain,holds=holds)
+
+
 class CollectorRegressionTests(unittest.TestCase):
     def test_source_port_identity_and_key_traversal(self):
         one=c.safe_url('https://mirror.example:8443/ubuntu')

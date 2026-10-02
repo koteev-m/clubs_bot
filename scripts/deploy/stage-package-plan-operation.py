@@ -394,16 +394,24 @@ def package_state(names):
     need(code in (0,1),'DPKG_QUERY_FAILED')
     rows={}
     for line in out.decode('utf-8').splitlines():
-        cols=line.split('\t');need(len(cols)==6 and PKG_RE.fullmatch(cols[0]) and cols[0] not in rows,'DUPLICATE_PACKAGE_RECORD')
-        need(cols[0] in names and len(line)<=512,'UNEXPECTED_PACKAGE_RECORD')
-        rows[cols[0]]={'version':cols[1],'architecture':cols[2],
+        cols=line.split('\t');need(len(cols)==6 and PKG_RE.fullmatch(cols[0]),'DUPLICATE_PACKAGE_RECORD')
+        name=cols[0]
+        if ':' in name:
+            # binary:Package qualifies Multi-Arch: same even on the native host.
+            # This collector is amd64-only; never alias a foreign identity.
+            name,architecture=name.split(':')
+            need(architecture=='amd64' and cols[2]==architecture,'UNEXPECTED_PACKAGE_RECORD')
+        need(name in names and len(line)<=512,'UNEXPECTED_PACKAGE_RECORD')
+        need(name not in rows,'DUPLICATE_PACKAGE_RECORD')
+        rows[name]={'version':cols[1],'architecture':cols[2],
             'status_abbrev':cols[3],'essential':cols[4],'priority':cols[5]}
     hcode,hout,herr=run(['apt-mark','showhold'],32768,12)
     need(hcode==0,'HOLD_QUERY_FAILED')
     holds=safe_text(hout,32768).splitlines()
     need(len(holds)<=2048 and all(PKG_RE.fullmatch(x) for x in holds),'UNSAFE_HOLDS')
     for name in names:rows.setdefault(name,{'version':None,'architecture':None,'status_abbrev':None,'essential':None,'priority':None})
-    for name in names:rows[name]['held']=name in holds
+    for name in names:
+        rows[name]['held']=name in holds or (rows[name]['architecture']=='amd64' and name+':amd64' in holds)
     return rows
 
 def policy(names):
