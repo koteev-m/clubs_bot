@@ -231,6 +231,26 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(self.value['evidence']['resolver']['exit_status'],100)
         self.assertEqual(self.value['evidence']['generated_state_proof'],'NOT_ESTABLISHED')
 
+    def test_native_package_identity_round_trips_without_missing_state(self):
+        sample=b'libc6:amd64\t2.39-0ubuntu8.9\tamd64\tii \tno\toptional\n'
+        with patch.object(c,'run',side_effect=[(0,sample,b''),(0,b'libc6:amd64\n',b'')]):
+            self.value['evidence']['package_state']=c.package_state(['libc6'])
+        body=p.body(self.value,0,c,self.identity,self.challenge)
+        line,code=self.parse(frame(body))
+        value=json.loads(line[len(p.PREFIX):])
+        self.assertEqual(code,0)
+        self.assertEqual(value['evidence']['package_state'],{'libc6':dict(
+            version='2.39-0ubuntu8.9',architecture='amd64',status_abbrev='ii ',
+            essential='no',priority='optional',held=True)})
+
+    def test_previous_clb162_collector_identity_is_not_candidate_evidence(self):
+        previous='2cc04008656c62ef633029392a37666189cd0d8286a05309def92bcb4689e970'
+        self.assertNotEqual(self.identity['collector_sha256'],previous)
+        broken=copy.deepcopy(self.value)
+        broken['identity']['collector_sha256']=previous
+        with self.assertRaises(ValueError):
+            self.parse(frame(p.PREFIX+p.canonical(broken)+b'\n'))
+
     def test_large_release_relations_fit_unchanged_authenticated_contract(self):
         fixtures=load('scripts/tests/test_stage_package_plan_collector.py').ReleaseReferenceTests
         self.value['evidence']['indexes']=fixtures.indexes(fixtures.large_release(), ('main','universe'))

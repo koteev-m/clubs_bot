@@ -1984,6 +1984,60 @@ in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
 and a separate transaction decision.
 
 
+### CLB-163 local native package identity repair
+
+User-supplied CLB-162 [run 36970854873](https://github.com/koteev-m/clubs_bot/actions/runs/36970854873),
+attempt 1 on `36a3d1f72c7139c3bb53b760edd88e1b5489b3cd`, passed validation,
+then collection failed closed with `UNAVAILABLE / UNEXPECTED_PACKAGE_RECORD`,
+`evidence=null`. The earlier `MALFORMED_INDEX_HASH` did not recur: `collect()`
+reads and validates indexes before its first `package_state()` call. The same
+package-state parser is also called for resolver-expanded names later.
+
+The only producer of this reason is `package_state()`'s record identity/line
+check. It queries unqualified names but prints `${binary:Package}`. The
+[dpkg-query contract](https://manpages.debian.org/bookworm/dpkg/dpkg-query.1.en.html)
+qualifies names for Multi-Arch: same packages, including native packages, and
+for foreign architectures. Actual read-only local Noble amd64 reference queries
+returned `libc6:amd64`, `libblkid1:amd64`, `libssl3t64:amd64` and other members of
+the fixed set. On original repository bytes, the actual six-field libc6 record
+reproduced `UNEXPECTED_PACKAGE_RECORD`; valid syntax passed `PKG_RE` but failed
+literal membership against `libc6`. This proves the repository defect and that
+stage can return such identities; it does not disclose or prove the particular
+stage record. That attribution remains an inference because run evidence is null.
+Metadata reads used local Ubuntu image
+`sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4`;
+actual parser reproduction, fixed query and Linux tests used local provisional
+reference `sha256:4b344db615e8e4ce08db0b5132488044c7baaee611e020fe2e43f8c4be21fc9b`.
+Both are linux/amd64, emulated on the Darwin arm64 host, with network disabled
+and read-only roots; test temporaries use disposable tmpfs.
+Other causes of the same reason include an unexpected base name, a legitimate
+foreign-qualified record, or a line longer than 512 characters. Unqualified
+native/all records, empty output and partial-query exit 1 remain supported;
+malformed or duplicate records and fatal-query exit 2 remain refused.
+
+The local repair retains the query argv and package-name grammar. Only a concrete
+`:amd64` suffix with `Architecture=amd64` may map to an already requested base
+key; foreign, wildcard/nonconcrete, architecture-independent qualifiers and
+qualifier/field mismatches are refused. Canonical-key collisions, including
+qualified/unqualified duplicates in either order, fail closed. Native-qualified
+hold names match the same observed amd64 identity; foreign holds do not alias it.
+No caller package, fixed request, dependency/extra set or resolver expansion
+bound is added. All other collector functions remain unchanged.
+
+Collector SHA-256 becomes
+`513632d7d8d90dfa25b5413129f8cdbaf95f5fb6507bd93b252d7a4d0b6bdd90`;
+protocol `COLLECTOR_SHA` and runner collector/protocol pins follow those bytes.
+Workflow and target bytes, all 21 exact package/version pairs, established
+schemas and confirmation remain unchanged. Source closure and runner identity
+are recomputed from candidate bytes; CLB-162's old collector identity is rejected
+as candidate evidence. Offline regressions cover positive native/all records,
+unexpected/foreign/malformed names, architecture mismatch, collisions, holds,
+partial/fatal queries, bounds and authenticated round-trip. The exact local
+reference's full 42-name query succeeds after the repair. These are local checks,
+not live stage evidence. CLB-163 grants no dispatch, Environment approval,
+publication or package transaction, and performs none.
+
+
 ### CLB-161 local Release-path compatibility repair
 
 User-supplied authenticated CLB-160 evidence is immutable: [run 36959929757](https://github.com/koteev-m/clubs_bot/actions/runs/36959929757),
