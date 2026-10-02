@@ -1984,6 +1984,38 @@ in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
 and a separate transaction decision.
 
 
+### CLB-161 local Release-path compatibility repair
+
+User-supplied authenticated CLB-160 evidence is immutable: [run 36959929757](https://github.com/koteev-m/clubs_bot/actions/runs/36959929757),
+attempt 1, collect job `110691191181`, validation success and one stage Environment
+approval, returned `UNAVAILABLE / MALFORMED_INDEX_HASH`, `evidence=null`.
+Reruns 0, package mutations 0, deploy 0. Its collector SHA-256 is
+`a770d79303795bf9d26a36fa62c4ff89c50b9af5a744dcb692c10c8b72d41321`;
+its target SHA-256 is
+`9c9ba991a9edcea28ed9b24ee6f3d2f9928a748883cc923fd621bf012fb42e02`.
+Stage installed package versions remain unobserved by this run.
+
+CLB-160 failed closed at checksum-entry validation. The published collector's
+path whitelist rejected valid Ubuntu Release checksum-path syntax: the official
+[Ubuntu Noble Release](https://archive.ubuntu.com/ubuntu/dists/noble/Release)
+(dated 25 April 2024) includes `main/dep11/icons-128x128@2.tar` in its SHA256
+section. The original collector reproduces `MALFORMED_INDEX_HASH` on that entry.
+The exact offending stage line was intentionally not disclosed; attribution of
+the stage refusal to this particular entry remains an inference.
+
+The local fix adds only `@` to `[A-Za-z0-9._+/-]{1,180}`, producing
+`[A-Za-z0-9._+/@-]{1,180}`. SHA and size grammars, the 180-character path bound,
+full-section validation, useful-reference cap, collision/ambiguity detection,
+signed relations, redaction and all file/output/time bounds stay unchanged.
+Offline fixtures scan the DEP-11 entry without retaining it as package evidence,
+retain the relevant Packages reference in either order, and reject malformed
+tails, URL/query syntax and forbidden characters. Collector/protocol/runner
+pins follow the new source bytes. The target bytes and all 21 package/version
+pairs stay unchanged, including both OpenSSL targets at `3.0.13-0ubuntu3.16`.
+This repair does not claim a general Release-format parser or stage success.
+CLB-161 authorizes no new stage dispatch, Environment approval or publication.
+
+
 ### CLB-157 local security reconciliation candidate
 
 The current frozen request derives from merged main
