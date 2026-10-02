@@ -251,6 +251,14 @@ class ProtocolTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.parse(frame(p.PREFIX+p.canonical(broken)+b'\n'))
 
+    def test_previous_clb165_collector_identity_is_not_short_read_candidate_evidence(self):
+        previous='513632d7d8d90dfa25b5413129f8cdbaf95f5fb6507bd93b252d7a4d0b6bdd90'
+        self.assertNotEqual(self.identity['collector_sha256'],previous)
+        broken=copy.deepcopy(self.value)
+        broken['identity']['collector_sha256']=previous
+        with self.assertRaises(ValueError):
+            self.parse(frame(p.PREFIX+p.canonical(broken)+b'\n'))
+
     def test_large_release_relations_fit_unchanged_authenticated_contract(self):
         fixtures=load('scripts/tests/test_stage_package_plan_collector.py').ReleaseReferenceTests
         self.value['evidence']['indexes']=fixtures.indexes(fixtures.large_release(), ('main','universe'))

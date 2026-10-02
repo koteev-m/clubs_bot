@@ -1926,8 +1926,9 @@ guarded запуске, а повтор после completion является n
 
 ## CLB-132 fixed package-plan channel (local candidate)
 
-The local candidate `.github/workflows/stage-package-plan.yml` is **unpublished and
-unexecuted**. It closes only the CLB-131 execution-channel gap. Neither this text
+The existing `.github/workflows/stage-package-plan.yml` is published. The CLB-167
+reader candidate below is uncommitted and has not run on stage. The channel
+closes only the CLB-131 execution-channel gap. Neither this text
 nor a green workflow grants package mutation, readiness, root binding, release,
 recovery or Private Support Loop smoke authority.
 
@@ -1982,6 +1983,66 @@ identity remain explicit unknowns. No package mutation, download, APT refresh,
 service control, application/private semantic read or root/release write exists
 in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
 and a separate transaction decision.
+
+
+### CLB-167 local bounded short-read repair
+
+User-supplied CLB-165 [run 37036114119](https://github.com/koteev-m/clubs_bot/actions/runs/37036114119),
+attempt 1 on `cbd0b23e16ca4d115a99cd24a49209a056e2de3a`, passed validation
+and failed collection with authenticated `UNAVAILABLE / UNSAFE_OR_LARGE_FILE`,
+`evidence=null`. The result does not identify the offending path or phase;
+earlier successful reads cannot exclude subsequent changes in live files.
+
+CLB-166 proved a repository defect: after a legal short read, `bounded_file()`
+treated a nonempty one-byte probe as evidence of overflow. In a disposable Noble
+amd64 reproduction, `/proc/self/maps` was a regular procfs file with stat size
+zero: the first read returned 4058 bytes, the probe returned one byte, and full
+content was 6888 bytes, below the existing 65536-byte bound. Native Linux arm64
+independently reproduced the cause class (4076-byte first read, 4956 total).
+The original exact memory bootstrap returned authenticated `UNAVAILABLE` with
+the same reason in the local reference. These observations establish the defect,
+not that maps caused this particular stage failure. The exact offending stage
+path remains NOT ESTABLISHED; no valid oversized Ubuntu maintainer script was
+identified in the inspected local package set.
+
+The local CLB-167 repair changes only bounded sequential reading. The same
+descriptor, regular-file/stat-size checks, `O_NOFOLLOW` and `O_NONBLOCK` remain.
+Chunks accumulate until EOF; each read requests at most remaining capacity plus
+one, total bytes above maximum refuse with `UNSAFE_OR_LARGE_FILE` before retaining
+the overflow chunk, and exact maximum is accepted only after EOF. The existing
+100-second budget is checked before and after each read, including the final
+EOF read; descriptors close on success, refusal, timeout and I/O failure.
+Memory remains bounded by the unchanged per-file maximum. No path exception,
+package allowlist, caller, request, read scope or per-file limit changes.
+The separate fixed regular-file os-release adapter and protocol phase/path
+attribution are unchanged; this task does not redesign either contract.
+
+Final local verification: collector 49 tests on Darwin (one Linux-only skip),
+49/49 on disposable Ubuntu amd64; runner/protocol 48/48 on both, no skips.
+Fourteen new bounded-file tests cover single/multiple short reads, zero stat
+size, exact/overflow/zero boundaries, ordinary regular files, early non-regular
+and oversized-stat refusals, symlinks, I/O cleanup, time budget between reads
+and at EOF, and real Linux maps. Exact original Git bytes fail six selected
+Linux regressions; candidate passes them. The candidate exact memory bootstrap
+also produces authenticated `OBSERVED / COLLECTION_COMPLETED` with evidence
+in the local reference, without network or package installation. That result
+is NOT live stage evidence or transaction readiness. Source/pin/closure,
+Python compilation, scoped package-plan selfcheck registration, 28-workflow
+YAML/capability checks, unchanged-surface audit and affected links pass.
+
+Final source identities:
+
+- collector: `077d715634d092238be907abc8de7e69d6ddb131fbebacb1294d513589aa114a`;
+- protocol: `6f85d99ab22be7d7005cc81f2a9de632222dfb2e2998c18f56a3f80905d29bf0`;
+- runner: `e45e14445123b9627899f2ce5e382df86c83626568cbd66a2cfca934b9d158aa`;
+- closure: `c77a23abe1f41f0a95d83636e6d2a1c4f63ac1fb2601eb09eb0629e93c76354b`.
+
+Only dependent collector/protocol pins follow the changed bytes. Workflow,
+target bytes, all 21 exact pairs, schemas and confirmation are unchanged.
+CLB-167 grants local changes/tests only: no commit, publication, dispatch,
+rerun, Environment approval, stage/prod SSH or package/runtime mutations.
+The original dirty worktree is untouched. One next step: independent read-only
+review of the uncommitted candidate.
 
 
 ### CLB-163 local native package identity repair
