@@ -273,7 +273,7 @@ sys.exit(code)
 
 def ssh_argv(env, reference):
     command = ('test "$(id -un)" = ' + shlex.quote(env['SSH_USER'])
-               + ' && test "$(id -u)" != 0 && exec '
+               + ' && test "$(id -u)" != 0 && LC_ALL=C LANG=C exec '
                + shlex.join(['python3', '-I', '-S', '-B', '-c', BOOTSTRAP]))
     return ['ssh', '-p', env['SSH_PORT'], '-F', '/dev/null',
             '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',

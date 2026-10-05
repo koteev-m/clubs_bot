@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import struct
 import subprocess
 import sys
@@ -215,6 +216,94 @@ value=JSON.parse(STDIN.read); StagePackagePlanWorkflow.validate(WorkflowCapabili
         changed=copy.deepcopy(workflow); changed['jobs']['collect']['steps'][-1]['env']['OTHER']='${{ secrets.COMPOSE_PATH }}'; mutations.append(changed)
         for changed in mutations:
             with self.subTest(mutation=changed): self.assertNotEqual(check(changed),0)
+
+
+class RemoteLocaleTest(unittest.TestCase):
+    # Execute the actual ssh_argv remote command through a POSIX shell; no SSH.
+    # Only identity commands and the project bootstrap are synthetic here.
+    PROBE = '''import json,locale,os,sys
+archive_mapped=None
+if sys.platform=='linux':
+    with open('/proc/self/maps') as stream:
+        archive_mapped='/usr/lib/locale/locale-archive' in stream.read()
+print(json.dumps(dict(ctype=locale.setlocale(locale.LC_CTYPE),
+    lc_all=os.environ.get('LC_ALL'),lang=os.environ.get('LANG'),
+    isolated=sys.flags.isolated,no_site=sys.flags.no_site,
+    no_bytecode=sys.dont_write_bytecode,utf8_mode=sys.flags.utf8_mode,
+    archive_mapped=archive_mapped)))
+'''
+
+    def remote(self, inherited, *, username='synthetic-deployer', uid='1000',
+               expected='synthetic-deployer', shell='/bin/sh'):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); trace=root/'identity-trace'; marker=root/'injected'
+            (root/'python3').symlink_to(sys.executable)
+            identity=root/'id'
+            identity.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> '+shlex.quote(str(trace))+
+                '\ncase "$1" in\n-un) printf "%s\\n" '+shlex.quote(username)+
+                ';;\n-u) printf "%s\\n" '+shlex.quote(uid)+';;\n*) exit 1;;\nesac\n')
+            identity.chmod(0o700)
+            env={**os.environ,**inherited,'PATH':str(root)+os.pathsep+os.defpath}
+            # These caller fields are deliberately hostile. Locale values must
+            # come from fixed remote-shell assignments, never runner inputs.
+            request={**environment(),'SSH_USER':expected,'LC_ALL':'bad; touch '+str(marker),
+                     'LANG':'$(touch '+str(marker)+')'}
+            with patch.object(r,'BOOTSTRAP',self.PROBE):
+                command=r.ssh_argv(request,'/proc/1/fd/4')[-1]
+            result=subprocess.run([shell,'-c',command],env=env,stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE,timeout=10)
+            calls=trace.read_text().splitlines() if trace.exists() else []
+            self.assertFalse(marker.exists())
+            return result,calls
+
+    def test_remote_startup_overrides_inherited_locale_and_preserves_python_flags(self):
+        for inherited in ({'LC_ALL':'en_US.UTF-8','LANG':'en_US.UTF-8'},
+                          {'LC_ALL':'C.UTF-8','LANG':'invalid','LC_CTYPE':'en_US.UTF-8',
+                           'LC_MESSAGES':'invalid','LC_NUMERIC':'invalid','LOCPATH':'/nonexistent'}):
+            with self.subTest(inherited=inherited):
+                result,calls=self.remote(inherited)
+                self.assertEqual(result.returncode,0,result.stderr)
+                value=json.loads(result.stdout)
+                self.assertEqual((value['ctype'],value['lc_all'],value['lang']),('C','C','C'))
+                self.assertEqual((value['isolated'],value['no_site'],value['no_bytecode']),(1,1,True))
+                self.assertEqual(calls,['-un','-u'])
+
+    def test_identity_refusal_prevents_python_execution(self):
+        for username,uid,calls in (('wrong','1000',['-un']),
+                                   ('synthetic-deployer','0',['-un','-u'])):
+            with self.subTest(username=username,uid=uid):
+                result,actual=self.remote({'LC_ALL':'C.UTF-8'},username=username,uid=uid)
+                self.assertNotEqual(result.returncode,0)
+                self.assertEqual(result.stdout,b'')
+                self.assertEqual(actual,calls)
+
+    def test_expected_username_is_shell_quoted(self):
+        name="synthetic'; printf INJECTION; #"
+        result,calls=self.remote({'LC_ALL':'C.UTF-8'},username=name,expected=name)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout)['ctype'],'C')
+        self.assertEqual(calls,['-un','-u'])
+
+    @unittest.skipUnless(sys.platform=='linux' and Path('/usr/lib/locale/locale-archive').is_file()
+                         and Path('/usr/lib/locale/en_US.utf8/LC_CTYPE').is_file(),
+                         'Linux mapping proof requires a present archive with en_US.utf8 fixture')
+    def test_present_archive_control_and_remote_startup_mapping(self):
+        inherited={'LC_ALL':'en_US.utf8','LANG':'en_US.utf8','LC_CTYPE':'en_US.utf8'}
+        # A positive control must really mmap the fixture. An absent archive or
+        # unavailable locale cannot manufacture a passing closure regression.
+        control=subprocess.run([sys.executable,'-I','-S','-B','-c',self.PROBE],
+            env={**os.environ,**inherited},stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
+        self.assertEqual(control.returncode,0,control.stderr)
+        self.assertTrue(json.loads(control.stdout)['archive_mapped'])
+        for shell in ('/bin/sh','/bin/bash'):
+            with self.subTest(shell=shell):
+                result,calls=self.remote(inherited,shell=shell)
+                self.assertEqual(result.returncode,0,result.stderr)
+                value=json.loads(result.stdout)
+                self.assertEqual(value['ctype'],'C')
+                self.assertEqual(value['utf8_mode'],1)
+                self.assertFalse(value['archive_mapped'])
+                self.assertEqual(calls,['-un','-u'])
 
 
 class ProtocolTest(unittest.TestCase):
