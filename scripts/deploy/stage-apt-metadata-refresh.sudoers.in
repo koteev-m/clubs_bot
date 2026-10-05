@@ -1,0 +1,3 @@
+# CLB-175 template: replace only @STAGE_PRINCIPAL@ out of band.
+# Exact no-arguments, digest-bound command. No other grant.
+@STAGE_PRINCIPAL@ 178.20.209.5 = (root:root) NOPASSWD: NOSETENV: sha256:877715742a47e19bfa596be9c9aebc00de6e18de1a64b8d44346f2070f094c9b /usr/local/sbin/clubs-stage-apt-metadata-refresh ""

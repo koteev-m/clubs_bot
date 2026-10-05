@@ -1,0 +1,277 @@
+#!/bin/dash
+# CLB-175 installed root artifact. Never accepts caller input or arguments.
+[ "$#" -eq 0 ] || exit 64
+exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/ LANG=C LC_ALL=C \
+  /usr/bin/python3 -I -S -B - <<'PY'
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import selectors
+import signal
+import stat
+import subprocess
+import time
+
+INSTALL = '/usr/local/sbin/clubs-stage-apt-metadata-refresh'
+ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/', 'LANG': 'C',
+       'LC_ALL': 'C', 'DEBIAN_FRONTEND': 'noninteractive'}
+# This is read FIRST via APT_CONFIG, before parts/main or binary overrides.
+# No installed apt.conf, hooks, proxy autodetection or custom methods are read.
+CONFIG = b'''Dir::Etc::parts "/dev/null";
+Dir::Etc::main "/dev/null";
+#clear Binary;
+Dir::State::lists "/var/lib/apt/lists";
+Dir::State::status "/var/lib/dpkg/status";
+Dir::Cache::pkgcache "";
+Dir::Cache::srcpkgcache "";
+Dir::Log::Terminal "";
+Dir::Log::History "";
+Dir::Log::Planner "";
+Acquire::Retries "0";
+Acquire::http::Timeout "20";
+Acquire::https::Timeout "20";
+Acquire::Languages "none";
+Acquire::PDiffs "false";
+APT::Get::List-Cleanup "false";
+APT::List-Cleanup "false";
+APT::Update::Error-Mode "any";
+Acquire::AllowInsecureRepositories "false";
+Acquire::AllowWeakRepositories "false";
+Acquire::AllowDowngradeToInsecureRepositories "false";
+'''
+OPERATION = ['/usr/bin/apt-get', 'update']
+CANCELLED = False
+DEADLINE = time.monotonic() + 270
+
+
+def refuse(ok):
+    if not ok:
+        raise ValueError()
+
+
+def budget():
+    refuse(not CANCELLED and time.monotonic() < DEADLINE)
+
+
+def stop(*unused):
+    global CANCELLED
+    CANCELLED = True
+
+
+def digest_file(path, maximum=536870912):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        value = os.fstat(fd)
+        refuse(stat.S_ISREG(value.st_mode) and value.st_size <= maximum)
+        h = hashlib.sha256()
+        total = 0
+        while True:
+            budget()
+            data = os.read(fd, 65536)
+            if not data:
+                break
+            total += len(data)
+            refuse(total <= maximum)
+            h.update(data)
+        refuse(os.fstat(fd).st_size == value.st_size and os.fstat(fd).st_mtime_ns == value.st_mtime_ns)
+        return h.hexdigest(), value.st_size, value.st_mtime_ns
+    finally:
+        os.close(fd)
+
+
+def manifest(root):
+    # Never expose filenames (source URLs may be encoded in list filenames).
+    rows = []
+    total = 0
+    base = Path(root)
+    refuse(base.is_dir() and not base.is_symlink())
+    def unreadable(error):
+        raise error
+    for parent, dirs, names in os.walk(base, followlinks=False, onerror=unreadable):
+        budget()
+        for name in sorted(dirs + names):
+            path = Path(parent) / name
+            relative = str(path.relative_to(base))
+            if relative in ('lock', 'lock-frontend'):
+                continue
+            value = path.lstat()
+            if stat.S_ISREG(value.st_mode):
+                digest, size, mtime = digest_file(path)
+                total += size
+                row = [relative, 'file', digest, size, mtime]
+            elif stat.S_ISDIR(value.st_mode):
+                continue
+            elif stat.S_ISLNK(value.st_mode) and root == '/var/lib/dpkg':
+                row = [relative, 'link', hashlib.sha256(os.readlink(path).encode()).hexdigest()]
+            else:
+                raise ValueError()
+            rows.append(row)
+            refuse(len(rows) <= 40000 and total <= 1073741824)
+    raw = json.dumps(sorted(rows), separators=(',', ':')).encode()
+    stamps = [r[4] for r in rows if r[1] == 'file']
+    return {'sha256': hashlib.sha256(raw).hexdigest(), 'files': len(rows),
+            'bytes': total, 'latest_mtime_ns': max(stamps, default=0)}
+
+
+def capture(argv, env, pass_fds=(), timeout=180, keep=0):
+    # Bounded private diagnostics: digest ALL bytes up to 4 MiB; no raw logs.
+    budget()
+    child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, env=env, pass_fds=pass_fds,
+                             start_new_session=True, cwd='/')
+    h = hashlib.sha256()
+    total = 0
+    saved = bytearray()
+    failure = None
+    limit = min(DEADLINE, time.monotonic() + timeout)
+    try:
+        with selectors.DefaultSelector() as poll:
+            os.set_blocking(child.stdout.fileno(), False)
+            poll.register(child.stdout, selectors.EVENT_READ)
+            while poll.get_map():
+                if CANCELLED or time.monotonic() >= limit:
+                    failure = 'INTERRUPTED' if CANCELLED else 'TIMEOUT'
+                    break
+                for key, unused in poll.select(.1):
+                    data = os.read(key.fd, 65536)
+                    if not data:
+                        poll.unregister(key.fd)
+                        continue
+                    total += len(data)
+                    h.update(data)
+                    saved.extend(data[:max(0, keep-len(saved))])
+                    if total > 4194304:
+                        failure = 'OUTPUT_LIMIT'
+                        break
+                if failure:
+                    break
+            if not failure:
+                while os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                    if CANCELLED or time.monotonic() >= limit:
+                        failure = 'TIMEOUT'
+                        break
+                    time.sleep(.01)
+    finally:
+        # Retain the unreaped group leader until group termination.
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        code = child.wait(timeout=3)
+        child.stdout.close()
+    return code, bytes(saved), {'sha256': h.hexdigest(), 'bytes': total, 'failure': failure}
+
+
+def main():
+    result = {'schema': 'clb175-apt-refresh-v1', 'result': 'REFUSED', 'reason': 'PREFLIGHT',
+              'started_ns': time.time_ns(), 'ended_ns': None, 'attempts': 0,
+              'wrapper_sha256': None, 'operation_sha256': hashlib.sha256(
+                  json.dumps(OPERATION, separators=(',', ':')).encode()+CONFIG).hexdigest(),
+              'apt_exit_status': None, 'diagnostics': None, 'lists_before': None,
+              'lists_after': None, 'dpkg_before': None, 'dpkg_after': None,
+              'status_before': None, 'status_after': None,
+              'config_before': None, 'config_after': None,
+              'extended_state_before': None, 'extended_state_after': None}
+    fd = None
+    locks = []
+    try:
+        refuse(os.geteuid() == 0 and sys_flags())
+        for path in ('/usr', '/usr/local', '/usr/local/sbin', INSTALL):
+            value = os.lstat(path)
+            refuse(value.st_uid == 0 and value.st_gid == 0 and not stat.S_ISLNK(value.st_mode)
+                   and stat.S_IMODE(value.st_mode) == 0o755)
+        refuse(stat.S_ISREG(os.lstat(INSTALL).st_mode))
+        result['wrapper_sha256'] = digest_file(INSTALL, 65536)[0]
+        for path in ('/var', '/var/lib', '/var/lib/apt', '/var/lib/apt/lists', '/var/lib/dpkg'):
+            value = os.lstat(path)
+            refuse(stat.S_ISDIR(value.st_mode) and value.st_uid == 0 and value.st_gid == 0
+                   and not (stat.S_IMODE(value.st_mode) & 0o022))
+        # Existing dpkg locks only: reject concurrent package transactions.
+        for path in ('/var/lib/dpkg/lock-frontend', '/var/lib/dpkg/lock'):
+            lock = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+            locks.append(lock)
+            value = os.fstat(lock)
+            refuse(stat.S_ISREG(value.st_mode) and value.st_uid == 0
+                   and not (stat.S_IMODE(value.st_mode) & 0o022))
+            fcntl.lockf(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fd = os.memfd_create('clb175-fixed-apt-config', os.MFD_ALLOW_SEALING)
+        os.write(fd, CONFIG)
+        os.lseek(fd, 0, os.SEEK_SET)
+        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW |
+                    fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+        env = dict(ENV, APT_CONFIG=f'/proc/self/fd/{fd}')
+        version, raw, diag = capture(['/usr/bin/apt-get', '--version'], env, (fd,), timeout=10, keep=1024)
+        # Even read-only APT preflight uses sealed configuration. Refuse new
+        # families until their configuration-loading semantics are reviewed.
+        refuse(version == 0 and diag['failure'] is None
+               and raw.splitlines()[0].split()[1] in (b'2.7.14', b'2.8.3'))
+        code, raw, diag = capture(['/usr/bin/apt-config', 'dump'], env, (fd,), timeout=10, keep=65536)
+        refuse(code == 0 and diag['failure'] is None and diag['bytes'] <= 65536)
+        # apt-config itself adds compiled Binary::apt presentation defaults
+        # after reading CONFIG. They cannot affect apt-get. Reject its subtree.
+        lowered = raw.lower()
+        refuse(all(marker not in lowered for marker in
+                   (b'::pre-invoke', b'::post-invoke', b'::auth-failure',
+                    b'::pre-install-pkgs', b'proxy-auto-detect', b'proxyautodetect', b'binary::apt-get::')))
+        result['lists_before'] = manifest('/var/lib/apt/lists')
+        result['dpkg_before'] = manifest('/var/lib/dpkg')
+        result['status_before'] = digest_file('/var/lib/dpkg/status')[0]
+        result['config_before'] = manifest('/etc/apt')
+        result['extended_state_before'] = extended_state()
+        result['reason'] = 'UPDATE_FAILED'
+        result['attempts'] = 1
+        code, unused, diag = capture(OPERATION, env, (fd,))
+        result['apt_exit_status'], result['diagnostics'] = code, diag
+        result['reason'] = 'POSTCONDITION_UNAVAILABLE'
+        # Even failed/cancelled refreshes must attempt postcondition evidence.
+        global CANCELLED, DEADLINE
+        cancelled = CANCELLED
+        CANCELLED = False
+        DEADLINE = time.monotonic() + 30
+        result['lists_after'] = manifest('/var/lib/apt/lists')
+        result['dpkg_after'] = manifest('/var/lib/dpkg')
+        result['status_after'] = digest_file('/var/lib/dpkg/status')[0]
+        result['config_after'] = manifest('/etc/apt')
+        result['extended_state_after'] = extended_state()
+        result['reason'] = 'PACKAGE_STATE_CHANGED'
+        refuse(result['dpkg_before'] == result['dpkg_after']
+               and result['status_before'] == result['status_after']
+               and result['extended_state_before'] == result['extended_state_after'])
+        result['reason'] = 'CONFIG_STATE_CHANGED'
+        refuse(result['config_before'] == result['config_after'])
+        result['reason'] = 'UPDATE_FAILED'
+        budget()
+        if code == 0 and diag['failure'] is None and not cancelled:
+            result['result'], result['reason'] = 'REFRESHED', 'METADATA_REFRESH_COMPLETED'
+    except BaseException:
+        if result['dpkg_after'] is not None and result['dpkg_before'] != result['dpkg_after']:
+            result['reason'] = 'PACKAGE_STATE_CHANGED'
+    finally:
+        if fd is not None:
+            os.close(fd)
+        for lock in locks:
+            os.close(lock)
+        result['ended_ns'] = time.time_ns()
+    print(json.dumps(result, sort_keys=True, separators=(',', ':')), flush=True)
+    return 0 if result['result'] == 'REFRESHED' else 1
+
+
+def sys_flags():
+    import sys
+    return sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode
+
+
+def extended_state():
+    path = '/var/lib/apt/extended_states'
+    try:
+        return digest_file(path)[0]
+    except FileNotFoundError:
+        return 'ABSENT'
+
+
+for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+    signal.signal(sig, stop)
+raise SystemExit(main())
+PY
