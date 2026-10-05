@@ -1926,8 +1926,10 @@ guarded запуске, а повтор после completion является n
 
 ## CLB-132 fixed package-plan channel (local candidate)
 
-The existing `.github/workflows/stage-package-plan.yml` is published. The CLB-167
-reader candidate below is uncommitted and has not run on stage. The channel
+The existing `.github/workflows/stage-package-plan.yml` and CLB-167 reader repair
+are published through merged PR #529. CLB-169 run `37262165408` collected live
+authenticated evidence successfully. The CLB-171 locale candidate below remains
+local and has not run on stage. The channel
 closes only the CLB-131 execution-channel gap. Neither this text
 nor a green workflow grants package mutation, readiness, root binding, release,
 recovery or Private Support Loop smoke authority.
@@ -1984,6 +1986,57 @@ service control, application/private semantic read or root/release write exists
 in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
 and a separate transaction decision.
 
+
+### CLB-171 local strict locale bootstrap
+
+CLB-169 run `37262165408`, attempt 1 on exact main
+`0728fc5939bb221ccb5078613f91e22118459e65`, completed validate, collect and
+workflow SUCCESS with authenticated `OBSERVED / COLLECTION_COMPLETED`, evidence
+present. The preceding `MALFORMED_INDEX_HASH`, `UNEXPECTED_PACKAGE_RECORD` and
+`UNSAFE_OR_LARGE_FILE` refusals did not recur. CLB-170 identified the mapped
+`/usr/lib/locale/locale-archive` as uncontracted generated/shared locale data;
+its ownership and equality with the historical CLB-130 mapping remain unproven.
+The user selected strict closure, not acceptance of that archive.
+
+The local candidate retains the username and non-root identity checks, then
+executes `LC_ALL=C LANG=C exec python3 -I -S -B -c <BOOTSTRAP>` on the remote
+shell side. Literal assignments override inherited locale selection before
+Python starts, without a caller locale input or shell-profile dependency.
+`LC_ALL` takes precedence over inherited `LC_*`, `LANG` and locale search paths
+for the builtin C locale. Setting locale only on the local SSH client does not
+prove the remote process environment. Existing bootstrap bytes, flags, captured
+sources, HMAC/challenge/identity, transport/host restrictions and ownership
+remain unchanged. The runner identity and automatically computed closure change;
+no dependent literal pin needs updating.
+
+Four regression tests exercise actual shell execution, hostile inherited and
+caller locale values, quoting and pre-Python identity refusal. On disposable
+networkless Ubuntu amd64 / Python 3.12.3 (local reference image
+`sha256:4b344db615e8e4ce08db0b5132488044c7baaee611e020fe2e43f8c4be21fc9b`),
+a present archive is generated from
+already-installed compiled C.utf8 data under a synthetic en_US.utf8 name, without
+package installation. A positive control maps it. Exact-base command semantics
+fail the regression in dash and bash; candidate semantics use builtin C,
+Python UTF-8 mode 1, isolated/no-site/no-bytecode flags and no archive mapping.
+Runner/protocol 52/52 and collector 49/49 pass there; Darwin passes with one
+Linux-only skip in each suite. The unchanged actual authenticated bootstrap
+returns OBSERVED with 42 state keys and resolver exit 0 in the reference image.
+This amd64 environment is Rosetta-emulated: its `/run/rosetta/rosetta` mapping
+remains uncontracted. No emulator or locale archive path is added to an allowlist.
+
+The collector/protocol/target and all 21 pairs, including both OpenSSL `.16`
+targets, are byte-identical. Existing outside-mapping schema represents zero
+with the diagnostic `UNKNOWN_REQUIRES_CONTRACT_DECISION` classification and
+`outside_count=0`; the count is usable closure evidence without inventing a safe
+classification. Nonzero uncontracted mappings remain unresolved.
+
+CLB-171 is local verification only, not native-stage closure or transaction
+readiness. Stale stage APT metadata still exposes OpenSSL `.15` rather than `.16`;
+metadata refresh requires separate operational authorization. Source-signature
+trust, candidate scripts, guarded/high-impact effects and exact generated-byte
+proof also remain unresolved. No commit/publication, stage dispatch/approval/SSH
+or package/deploy/service/DB/config/secrets mutation occurred. Transaction
+readiness remains NO. Next step: independent read-only candidate review.
 
 ### CLB-167 local bounded short-read repair
 
