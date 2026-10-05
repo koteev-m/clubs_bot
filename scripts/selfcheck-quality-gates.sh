@@ -11753,6 +11753,8 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_in
 echo "[selfcheck] fixed read-only package-plan channel and frozen collector"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_plan_collector.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_plan.py"
+echo "[selfcheck] fixed least-privilege APT metadata refresh (disposable root tests run separately)"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_apt_metadata_refresh.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_feasibility.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check

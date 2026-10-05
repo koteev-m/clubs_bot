@@ -2242,3 +2242,12 @@ network operation or write is introduced. Large/unknown live inputs may still
 fail closed; this candidate is not proof that a future stage run will complete.
 Publication and any later exact-run collection remain separate authorization
 boundaries; this local task authorizes neither.
+
+## CLB-175 local APT metadata refresh candidate
+
+[Least-privilege maintenance/provisioning contract](stage-apt-metadata-refresh.md).
+CLB-173 live locale closure is verified with outside_count=0; stale APT indexes
+remain the immediate resolver blocker. CLB-175 is local-only, unprovisioned and
+unexecuted. The read-only package-plan channel and its 21 targets remain unchanged.
+Transaction readiness remains NO; refresh and later collection each require
+separate authorization.

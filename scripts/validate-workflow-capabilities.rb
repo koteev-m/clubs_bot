@@ -11,6 +11,7 @@ require_relative "validate-stage-compose-diagnostic-workflow"
 require_relative "validate-stage-compose-env-semantic-workflow"
 require_relative "validate-stage-runtime-inventory-workflow"
 require_relative "validate-stage-package-plan-workflow"
+require_relative "validate-stage-apt-metadata-refresh-workflow"
 require_relative "validate-stage-runtime-feasibility-workflow"
 
 module WorkflowCapabilityPolicy
@@ -1287,6 +1288,7 @@ module WorkflowCapabilityPolicy
     return RELEASE_STATUS_SECRETS if key == [StageComposeEnvSemanticWorkflow::PATH, "diagnose"]
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StageRuntimeInventoryWorkflow::PATH, "inventory"]
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StagePackagePlanWorkflow::PATH, "collect"]
+    return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StageAptMetadataRefreshWorkflow::PATH, "refresh"]
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
     return RELEASE_STATUS_SECRETS | Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "execute"]
     return Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "validate"]
@@ -1340,6 +1342,7 @@ module WorkflowCapabilityPolicy
     expected = "stage" if key == [StageComposeEnvSemanticWorkflow::PATH, "diagnose"]
     expected = "stage" if key == [StageRuntimeInventoryWorkflow::PATH, "inventory"]
     expected = "stage" if key == [StagePackagePlanWorkflow::PATH, "collect"]
+    expected = "stage" if key == [StageAptMetadataRefreshWorkflow::PATH, "refresh"]
     expected = "stage" if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
@@ -2199,6 +2202,7 @@ module WorkflowCapabilityPolicy
       StageComposeEnvSemanticWorkflow.validate(self, workflow) if path == StageComposeEnvSemanticWorkflow::PATH
       StageRuntimeInventoryWorkflow.validate(self, workflow) if path == StageRuntimeInventoryWorkflow::PATH
       StagePackagePlanWorkflow.validate(self, workflow) if path == StagePackagePlanWorkflow::PATH
+      StageAptMetadataRefreshWorkflow.validate(self, workflow) if path == StageAptMetadataRefreshWorkflow::PATH
       StageRuntimeFeasibilityWorkflow.validate(self, workflow) if path == StageRuntimeFeasibilityWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
       validate_release_status_contract(path, workflow, triggers, jobs, raw)
