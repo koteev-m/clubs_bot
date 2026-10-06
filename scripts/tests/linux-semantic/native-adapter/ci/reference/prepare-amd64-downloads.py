@@ -14,6 +14,7 @@ import urllib.request
 HERE = Path(__file__).resolve().parent
 SNAPSHOT = 'https://snapshot.ubuntu.com/ubuntu/20260921T200000Z/'
 SOURCES = {'default': SNAPSHOT,
+           'expat-security': 'https://snapshot.ubuntu.com/ubuntu/20260930T120000Z/',
            'openssl-security': 'https://snapshot.ubuntu.com/ubuntu/20260930T120000Z/'}
 UBUNTU_SIGNER = 'F6ECB3762474EDA9D21B7022871920D1991BC93C'
 SUPPLEMENTAL_INDEX = {
@@ -33,6 +34,9 @@ OPENSSL_PACKAGES = {
     'openssl': (1003702, '675b84971ffd4467707008c25ef7520f90ea7c23ef27b7a76b0dccf1d7c4dc3f'),
 }
 OPENSSL_VERSION = '3.0.13-0ubuntu3.16'
+EXPAT_VERSION = '2.6.1-2ubuntu0.6'
+EXPAT_PACKAGE = (98940, '494b8e672f722130c6bca6a7bc4cc31a43ca891a31d60d868bfdd699a3c20b13')
+EXPAT_INDEX = dict(SUPPLEMENTAL_INDEX, source='expat-security')
 
 
 def checked(data, digest, label):
@@ -124,6 +128,13 @@ def package_route(row):
         if (row['version'], row['architecture'], path, row.get('bytes'), row['sha256']) != (
                 OPENSSL_VERSION, 'amd64', expected, size, digest):
             raise ValueError('supplemental package identity')
+    elif source == 'expat-security':
+        expected = 'pool/main/e/expat/libexpat1_' + EXPAT_VERSION + '_amd64.deb'
+        if (row['package'], row['version'], row['architecture'], path, row.get('bytes'), row['sha256']) != (
+                'libexpat1', EXPAT_VERSION, 'amd64', expected, *EXPAT_PACKAGE):
+            raise ValueError('expat supplemental package identity')
+    elif row['package'] == 'libexpat1' and row['version'] == EXPAT_VERSION:
+        raise ValueError('Expat .6 requires supplemental source')
     elif row['package'] in OPENSSL_PACKAGES and row['version'] == OPENSSL_VERSION:
         raise ValueError('OpenSSL .16 requires supplemental source')
     return source, path
@@ -136,7 +147,7 @@ def validate_lock(lock):
     if any(source_id(row) != 'default' for row in indexes):
         raise ValueError('default index source assignment')
     supplemental = lock.get('supplemental_indexes', [])
-    if supplemental and supplemental != [SUPPLEMENTAL_INDEX]:
+    if supplemental and supplemental not in ([SUPPLEMENTAL_INDEX], [SUPPLEMENTAL_INDEX, EXPAT_INDEX]):
         raise ValueError('supplemental index identity or duplicate')
     names = set()
     for row in indexes + supplemental:
@@ -148,6 +159,7 @@ def validate_lock(lock):
     packages = set()
     filenames = set()
     selected = set()
+    expat_selected = False
     for row in lock['packages']:
         source, _ = package_route(row)
         key = row['package'], row['architecture']
@@ -157,8 +169,12 @@ def validate_lock(lock):
         filenames.add(row['file'])
         if source == 'openssl-security':
             selected.add(row['package'])
+        if source == 'expat-security':
+            expat_selected = True
     if selected != (set(OPENSSL_PACKAGES) if supplemental else set()):
         raise ValueError('supplemental source requires both exact packages and index')
+    if expat_selected != (EXPAT_INDEX in supplemental):
+        raise ValueError('expat source requires exact package and index')
 
 
 def verify_signer(status):
@@ -190,7 +206,7 @@ def acquire_ubuntu(lock, destination, verify_release, fetch=download):
             raise ValueError('conflicting release identity')
         if hashes[relative][0] != row['sha256']:
             raise ValueError('locked index is absent from signed Release')
-        if source == 'openssl-security' and (hashes[relative], hashes[relative + '.xz']) != (
+        if source in ('openssl-security', 'expat-security') and (hashes[relative], hashes[relative + '.xz']) != (
                 (row['sha256'], row['bytes']), (row['compressed_sha256'], row['compressed_bytes'])):
             raise ValueError('supplemental signed index identity')
         compressed = checked(fetch(SOURCES[source] + index_path + '.xz', 64 * 2**20),
@@ -218,7 +234,7 @@ def acquire_ubuntu(lock, destination, verify_release, fetch=download):
         digest, archive, size = packages[key]
         if (digest, archive) != (row['sha256'], path):
             raise ValueError('package does not match signed index: ' + row['package'])
-        if source == 'openssl-security' and int(size) != row['bytes']:
+        if source in ('openssl-security', 'expat-security') and int(size) != row['bytes']:
             raise ValueError('supplemental signed package size')
         data = checked(fetch(SOURCES[source] + path, 64 * 2**20), row['sha256'], row['file'])
         if len(data) != int(size):

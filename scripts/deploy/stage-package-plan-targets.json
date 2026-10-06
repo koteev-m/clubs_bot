@@ -115,7 +115,7 @@
   ],
   "caveat": "Frozen exact-version simulation request only; no package mutation is authorized. Package presence, dependency closure and generated-byte reproduction remain unproven.",
   "main": "0c934da1b76ad6916feaf2bb52d88a9b42ca2f27",
-  "manifest_sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5",
+  "manifest_sha256": "7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342",
   "project": "clubs_bot",
   "request": [
     {
@@ -178,11 +178,11 @@
         "/usr/lib/x86_64-linux-gnu/libexpat.so.1.9.1"
       ],
       "trusted_reference_source": {
-        "archive_path": "pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.5_amd64.deb",
+        "archive_path": "pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.6_amd64.deb",
         "kind": "frozen_ubuntu_deb_lock",
-        "sha256": "9e40c7f613631ffe5c22c3f61daa767d976bc8af5c9e2001a1981eb26f18befd"
+        "sha256": "494b8e672f722130c6bca6a7bc4cc31a43ca891a31d60d868bfdd699a3c20b13"
       },
-      "version": "2.6.1-2ubuntu0.5"
+      "version": "2.6.1-2ubuntu0.6"
     },
     {
       "architecture": "amd64",

@@ -35,7 +35,7 @@ class RuntimeProfileTest(unittest.TestCase):
     def test_exact_native_profile(self):
         raw = (ROOT/'scripts/deploy/stage-compose-env-semantic-runtime.json').read_bytes()
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         '8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5')
+                         '7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342')
         self.assertEqual(raw, (ROOT/'scripts/tests/linux-semantic/amd64-runtime-candidate.json').read_bytes())
         manifest = json.loads(raw)
         self.assertEqual({k: v for k, v in manifest.items() if k not in ('files', 'aliases')},

@@ -9,7 +9,7 @@ import hashlib, io, json, os, pathlib, py_compile, stat, struct, subprocess, sys
 P = pathlib.Path
 M = json.loads(P('/build/accepted-manifest.json').read_bytes())
 assert len(M['files']) == 191
-assert hashlib.sha256(P('/build/accepted-manifest.json').read_bytes()).hexdigest() == '8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5'
+assert hashlib.sha256(P('/build/accepted-manifest.json').read_bytes()).hexdigest() == '7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342'
 assert hashlib.sha256(P(sys.executable).read_bytes()).hexdigest() == 'e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f'
 assert hashlib.sha256(P('/usr/sbin/ldconfig.real').read_bytes()).hexdigest() == 'd879c9a8a41240aeb7fd0f3221116fc4cf41cc6c64c24e10541d1bafbe537ab1'
 entries = {}

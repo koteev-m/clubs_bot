@@ -18,7 +18,7 @@ BODY_LIMIT = 131072
 MAX_FDS = 320
 MAX_BYTES = 256 * 1024 * 1024
 MAX_FILE = 64 * 1024 * 1024
-REFERENCE_SHA = '8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5'
+REFERENCE_SHA = '7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342'
 DOCKER = ('/usr/bin/docker', '/usr/local/bin/docker', '/usr/bin/docker-compose',
           '/usr/lib/docker/cli-plugins/docker-compose', '/usr/libexec/docker/cli-plugins/docker-compose',
           '/usr/local/lib/docker/cli-plugins/docker-compose')

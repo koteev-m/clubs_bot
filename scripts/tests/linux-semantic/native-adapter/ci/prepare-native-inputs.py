@@ -10,11 +10,11 @@ import shutil, signal, subprocess, sys, time, selectors, uuid
 P=pathlib.Path
 HERE=P(__file__).resolve().parent
 REF=HERE/'reference'
-ROOTFS='9ff206d6d59e722e5a6e7b97034c488d5ae9cb5367a1ef7677c456ebf2a172ad'
-MANIFEST='8d75c3da0ed507cffc0ce5f0da05c6c03e7728bb65abe08c663c4e37e7906460'
-INPUTS='3b8b47c2cb5e73ddaac85fe438caff480069e6719d9a45593444895b0119e6ac'
+ROOTFS='1174a11ee56a2874824aa09cbe5ea9442eafcdce527dcdafc47a6508b4137371'
+MANIFEST='13901473be852a72cbe225e6d85c575f3bb6e5ed4433e36a60978d9bbb0749b7'
+INPUTS='ac55b1784078d52da308683dac4efc3107ad29b4cf7be345907f0643bbf4122e'
 LOG_LIMIT=8*2**20
-SOURCE_PINS='30e41f518f46c07ded5246b66c1b8ea4c2dc70d0d1e214ec1cf7ef1c5c9249ee'
+SOURCE_PINS='147b8f161510babd6b36ea74974e73e176b5fc7c8fb8e9269383cc74ed1d182b'
 
 def sha(x): return hashlib.sha256(x).hexdigest()
 def verify_sources(ref=REF):

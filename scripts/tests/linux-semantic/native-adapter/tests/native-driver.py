@@ -8,8 +8,8 @@ import argparse, hashlib, json, os, pathlib, platform, selectors, signal
 import re, stat, struct, subprocess, tarfile, time, tempfile
 P = pathlib.Path
 HERE = P(__file__).resolve().parent.parent
-ROOTFS = (59392000, '9ff206d6d59e722e5a6e7b97034c488d5ae9cb5367a1ef7677c456ebf2a172ad')
-PINS_SHA = 'd8c1d16ea2a9e5a033dcbe09a67458b7257dbcbfcf5a02c96f27cdc09f0963b1'
+ROOTFS = (59392000, '1174a11ee56a2874824aa09cbe5ea9442eafcdce527dcdafc47a6508b4137371')
+PINS_SHA = 'e5a1c335c9bf55c27f1d40f9ec2af8208a53aaa75f1eefadabcb37039775f5a6'
 ENV = {'PATH':'/usr/bin:/bin', 'LC_ALL':'C', 'HOME':'/nonexistent'}
 MAX_OUTPUT = 65536
 class Refused(Exception): pass
@@ -42,7 +42,7 @@ def source_identity():
         if len(raw) != rec['bytes'] or sha(raw) != rec['sha256']: raise Refused('reference_identity')
     generated = json.loads(read_exact(HERE/'generated-identity.json',8192))
     raw = read_exact(HERE/'adapter/generated_contract.h',1048576)
-    if len(raw) != 821681 or sha(raw) != 'd4075698a174d78d10995ab2efbb9f2171559b1fd27f747d0feeade512779731' or len(raw) != generated['header_bytes'] or sha(raw) != generated['header_sha256']: raise Refused('generated_contract_identity')
+    if len(raw) != 821681 or sha(raw) != '1426c767a5e3b1c6b8b9f80107d74350ff5fef3602ccb6b8dace3693dc643962' or len(raw) != generated['header_bytes'] or sha(raw) != generated['header_sha256']: raise Refused('generated_contract_identity')
     return {'reference_ledger':PINS_SHA, 'generated_contract':sha(raw), 'manifest':pins['candidate-runtime.json']['sha256']}
 
 def elf_static(raw):

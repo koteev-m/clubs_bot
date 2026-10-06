@@ -138,8 +138,8 @@
       "url": "https://security.ubuntu.com/ubuntu/dists/noble-security/universe/binary-amd64/Packages"
     }
   ],
-  "input_sums_sha256": "146b61921ed5ba611d9e2a33f5e8736be4f8c0026579109bd30e6e2bd4106236",
-  "installed_packages_sha256": "439960997fde8a038d8999ecf715263d3e247c6f84909e5f860745f170efd82b",
+  "input_sums_sha256": "83eb1a048a213869c048de6ee20c5cdcc2d446ebc7369b5f245094f0bbd3fd86",
+  "installed_packages_sha256": "b91c2d474e877b87fe7953fbdb960c8f75cb23a23ca7fd8fea5d7849f3e58f47",
   "packages": [
     {
       "architecture": "all",
@@ -233,12 +233,14 @@
     },
     {
       "architecture": "amd64",
-      "archive_path": "pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.5_amd64.deb",
-      "file": "libexpat1_2.6.1-2ubuntu0.5_amd64.deb",
+      "archive_path": "pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.6_amd64.deb",
+      "bytes": 98940,
+      "file": "libexpat1_2.6.1-2ubuntu0.6_amd64.deb",
       "package": "libexpat1",
-      "sha256": "9e40c7f613631ffe5c22c3f61daa767d976bc8af5c9e2001a1981eb26f18befd",
-      "url": "https://archive.ubuntu.com/ubuntu/pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.5_amd64.deb",
-      "version": "2.6.1-2ubuntu0.5"
+      "sha256": "494b8e672f722130c6bca6a7bc4cc31a43ca891a31d60d868bfdd699a3c20b13",
+      "source": "expat-security",
+      "url": "https://archive.ubuntu.com/ubuntu/pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.6_amd64.deb",
+      "version": "2.6.1-2ubuntu0.6"
     },
     {
       "architecture": "amd64",
@@ -706,7 +708,7 @@
   ],
   "platform": "linux/amd64",
   "purpose": "LOCAL TEST CANDIDATE ONLY; not a production or stage approval",
-  "runtime_candidate_sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5",
+  "runtime_candidate_sha256": "7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342",
   "source_revision": "0c934da1b76ad6916feaf2bb52d88a9b42ca2f27",
   "supplemental_indexes": [
     {
@@ -719,6 +721,18 @@
       "release_url": "https://security.ubuntu.com/ubuntu/dists/noble-security/InRelease",
       "sha256": "abfa0e7c57b579cf87e09b90501306dfb1bffcfbd4fee5be1c775a39adf1bd74",
       "source": "openssl-security",
+      "url": "https://security.ubuntu.com/ubuntu/dists/noble-security/main/binary-amd64/Packages"
+    },
+    {
+      "bytes": 5797350,
+      "compressed_bytes": 1066176,
+      "compressed_sha256": "b9aa52a2bd0e42b0976036f59251c2bf9c76b20d7c6be96405b6290f38dff61f",
+      "name": "security.ubuntu.com_ubuntu_dists_noble-security_main_binary-amd64_Packages",
+      "release": "security.ubuntu.com_ubuntu_dists_noble-security_InRelease",
+      "release_sha256": "ba88a6da0b679ab57efe1b2ec88f3451d877cb4c01eaa112965fe7aedd77a8bf",
+      "release_url": "https://security.ubuntu.com/ubuntu/dists/noble-security/InRelease",
+      "sha256": "abfa0e7c57b579cf87e09b90501306dfb1bffcfbd4fee5be1c775a39adf1bd74",
+      "source": "expat-security",
       "url": "https://security.ubuntu.com/ubuntu/dists/noble-security/main/binary-amd64/Packages"
     }
   ],

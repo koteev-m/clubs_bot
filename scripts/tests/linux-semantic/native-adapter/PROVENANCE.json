@@ -17,8 +17,8 @@
       "ancestor_sha256": "68fc3b06b2198b06f1583c0bb1157669c4df6d8c9548934ed3c79315d6e82649",
       "bundle_leaf": "reference/candidate-runtime.json",
       "bytes": 24953,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "8d75c3da0ed507cffc0ce5f0da05c6c03e7728bb65abe08c663c4e37e7906460"
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "13901473be852a72cbe225e6d85c575f3bb6e5ed4433e36a60978d9bbb0749b7"
     },
     {
       "ancestor_bytes": 1577,
@@ -33,8 +33,8 @@
       "ancestor_sha256": "58ea998d3f51a6b50b4c8ee46f0b48d3454ebf8dc1a5d1a819622dfd3a1c0a0d",
       "bundle_leaf": "reference/rootfs-manifest.json",
       "bytes": 60563,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "616046513661ea229438d22cc8207bb6c8610b4d84ba769874445ae6dedb9a7c"
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "087f115cff685dc33d750c4b957e410ac9a3a0419c6a535121b6ea6654b9aeee"
     },
     {
       "ancestor_bytes": 48654,
@@ -73,8 +73,8 @@
       "ancestor_sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
       "bundle_leaf": "ci/reference/accepted-manifest.json",
       "bytes": 22916,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5"
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342"
     },
     {
       "ancestor_bytes": 1319,
@@ -88,25 +88,25 @@
       "ancestor_bytes": 37237,
       "ancestor_sha256": "a365d37e6bf45dacfe672364d2e3493bc3c786e692940e4ee0566b8f97fd5833",
       "bundle_leaf": "ci/reference/amd64-inputs.json",
-      "bytes": 38575,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "3b8b47c2cb5e73ddaac85fe438caff480069e6719d9a45593444895b0119e6ac"
+      "bytes": 39366,
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "ac55b1784078d52da308683dac4efc3107ad29b4cf7be345907f0643bbf4122e"
     },
     {
       "ancestor_bytes": 4346,
       "ancestor_sha256": "17ac090efb6ba58f50f72f7e2e7425e6db5941b7a5758b4099e4553058b6983c",
       "bundle_leaf": "ci/reference/amd64-packages.txt",
       "bytes": 4346,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "439960997fde8a038d8999ecf715263d3e247c6f84909e5f860745f170efd82b"
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "b91c2d474e877b87fe7953fbdb960c8f75cb23a23ca7fd8fea5d7849f3e58f47"
     },
     {
       "ancestor_bytes": 22916,
       "ancestor_sha256": "93a9d29cba93770fab9cc6605709a3b159cfb7ce2c627677ff77bd9cacd62008",
       "bundle_leaf": "ci/reference/amd64-runtime-candidate.json",
       "bytes": 22916,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "8527c90aa942b4922d98fc607e12093085e8a2716822c481517c2b876327dfd5"
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342"
     },
     {
       "ancestor_bytes": 22948,
@@ -137,8 +137,8 @@
       "ancestor_sha256": "e2ce25e4731a3102e191a2805ce8433a43da17575b8ce80e945685fada3b34ff",
       "bundle_leaf": "ci/reference/export_inputs.py",
       "bytes": 6932,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "328c1245c810094ea6f85255067e6006800b8404b571a8d6df98062c834c8182"
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "578b71beda0eaa65b16b84c7340214f4a065573280adc8c0809287eb3fe828d7"
     },
     {
       "ancestor_bytes": 2734,
@@ -152,10 +152,10 @@
       "ancestor_bytes": 6354,
       "ancestor_sha256": "62ea9fcbdaa346bded3970c688dbaf5171ecf1e5447588ce7f2d9e9b35baf893",
       "bundle_leaf": "ci/reference/prepare-amd64-downloads.py",
-      "bytes": 13392,
-      "relation": "CLB-157 current security reference; preserved accepted-source ancestry",
-      "sha256": "82af11035ceae36f2d9f9a7b290dafa03c9971e8b3d8f6001d9154b8544db9bd"
+      "bytes": 14496,
+      "relation": "CLB-189 verified Expat security supersession; preserved accepted-source ancestry",
+      "sha256": "2b093ea88024781d38c3433d6d3368f4af8a2ed843521d3bdb4d57c5b9270c83"
     }
   ],
-  "semantics": "Bundle paths locate included content; they do not establish supplier trust. CLB-157 current leaves follow the authenticated OpenSSL security inputs; accepted archive and ancestor identities remain historical. Historical local-path map is intentionally not published."
+  "semantics": "Bundle paths locate included content; they do not establish supplier trust. CLB-157 current leaves follow the authenticated OpenSSL security inputs; accepted archive and ancestor identities remain historical. Historical local-path map is intentionally not published. CLB-189 changes only the Expat reference and its derived bindings; no prior native evidence transfers to new bytes."
 }

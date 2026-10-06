@@ -7,7 +7,7 @@
   "candidate-runtime.json": {
     "bytes": 24953,
     "provenance": "bundle:reference/candidate-runtime.json",
-    "sha256": "8d75c3da0ed507cffc0ce5f0da05c6c03e7728bb65abe08c663c4e37e7906460"
+    "sha256": "13901473be852a72cbe225e6d85c575f3bb6e5ed4433e36a60978d9bbb0749b7"
   },
   "release_private_root.py": {
     "bytes": 1577,
@@ -17,7 +17,7 @@
   "rootfs-manifest.json": {
     "bytes": 60563,
     "provenance": "bundle:reference/rootfs-manifest.json",
-    "sha256": "616046513661ea229438d22cc8207bb6c8610b4d84ba769874445ae6dedb9a7c"
+    "sha256": "087f115cff685dc33d750c4b957e410ac9a3a0419c6a535121b6ea6654b9aeee"
   },
   "stage-compose-diagnostic-operation.py": {
     "bytes": 48654,
