@@ -1987,6 +1987,130 @@ in this channel. `PACKAGE_PLAN_UNRESOLVED` requires separately reviewed evidence
 and a separate transaction decision.
 
 
+### CLB-189 local Expat reconciliation (2026-10-06)
+
+Current checkpoint supersedes the stale availability statements in the historical
+CLB-171/175 records below; those records remain immutable. Base and bounded
+remote main are `affcba7f0443b5ad5c63f4c3ca7778d73bccd701`.
+User-supplied authenticated runs [37459824214](https://github.com/koteev-m/clubs_bot/actions/runs/37459824214)
+and [37461219407](https://github.com/koteev-m/clubs_bot/actions/runs/37461219407),
+attempt 1 on that SHA, establish metadata refresh success without package changes
+and `OBSERVED / COLLECTION_COMPLETED`. Both requested OpenSSL `.16` versions
+are available. Exactly one of 21 requested versions is absent: Expat `.5`;
+installed `.4`, candidate `.6`. Resolver exit 100 with empty actions/expanded
+packages/effects means **no actual transaction plan was produced**.
+
+Route B is a local contract-preserving reference supersession, not byte equality
+or stage acceptance. The old lock came from the signed `20260921T200000Z` Ubuntu
+reference build; its exact `.5` archive was reacquired from that official snapshot
+and matched `9e40c7f613631ffe5c22c3f61daa767d976bc8af5c9e2001a1981eb26f18befd`.
+Retaining it in a test snapshot is reproducible, but stage APT cannot select it
+from the observed indexes. No direct-DEB stage injection or new transaction
+mechanism is introduced.
+
+The new exact archive is
+`pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.6_amd64.deb`, 98,940 bytes,
+SHA-256 `494b8e672f722130c6bca6a7bc4cc31a43ca891a31d60d868bfdd699a3c20b13`.
+It was obtained from [official security archive](https://security.ubuntu.com/ubuntu/pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.6_amd64.deb)
+and the [fixed official snapshot](https://snapshot.ubuntu.com/ubuntu/20260930T120000Z/pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.6_amd64.deb),
+with identical hashes. `noble-security/main/binary-amd64/Packages` identifies
+source `expat`, version `2.6.1-2ubuntu0.6`, architecture `amd64`.
+Both current and frozen InRelease signatures verified with the existing Ubuntu
+keyring and signer `F6ECB3762474EDA9D21B7022871920D1991BC93C`; compressed and
+uncompressed Packages size/hash relationships and the exact DEB record matched.
+[Machine-readable local comparison](../../scripts/tests/fixtures/clb189-expat-comparison.json)
+retains provenance hashes, full package inventory/control digests, both ELF
+summaries and deterministic native rootfs reconstruction identities.
+
+The `.6` changelog is a noble-security update, corroborated by
+[USN-8813-1](https://ubuntu.com/security/notices/USN-8813-1): overflow, use-after-free,
+DTD/scaffolding, Unicode and allocation protections. Both DEBs have identical
+`Depends: libc6 (>= 2.38)`, no Pre-Depends, no maintainer scripts or conffiles,
+identical `activate-noawait ldconfig` trigger and shlibs. Installed size is 416 KiB
+in both; archive size advances from 95,248 to 98,940 bytes. Paths, symlinks,
+root ownership and modes remain unchanged (libraries `0644`, symlinks `0777`).
+Only the two shared libraries and changelog content change. The wide-character
+library remains package-owned outside the accepted runtime closure; no new path
+is accepted. Control `symbols` raises the minimum version of three already
+exported newer APIs from `.5` to `.6`, without adding/removing exports.
+
+Linux dpkg-deb/GNU readelf 2.42 comparison found the same required target
+`/usr/lib/x86_64-linux-gnu/libexpat.so.1.9.1`, size 186,624, SONAME `libexpat.so.1`,
+DT_NEEDED only `libc.so.6`. Its new SHA-256 is
+`286682ecbc5e59a638963b1a4e6351e65eb32fcf4bdcb9cb7569b6a61fe06a8d`.
+Both libraries retain identical dynamic symbol names/types/bindings/visibility/
+section identities after omitting addresses and function sizes (95/94 entries,
+including undefined/null entries). This bounds the ABI conclusion; it is not
+proof of all XML behavior. Security fixes intentionally change affected parsing.
+Existing package/path/dependency and recovery scope is preserved.
+
+Changed-value authority: DEB identity and fixed snapshot index come from signed
+Ubuntu metadata; runtime library hash comes from its verified DEB; package list
+changes only Expat. Runtime manifests change only that one file digest. Native
+rootfs is reconstructed from every verified prior leaf with this one substitution;
+the old USTAR hash reproduces exactly before deriving the new hash. Generated C,
+ledgers, runner/protocol/source pins and input sums derive from the resulting
+exact bytes. Accepted-source ancestor hashes and historical run claims are retained.
+No package install, maintainer script execution or reference-image rebuild was
+performed; native positive runtime/namespace/semantic acceptance remains unverified
+and requires separately authorized hosted checks. No prior native PASS transfers.
+
+Occurrence classification at the base:
+- authoritative exact target: `stage-package-plan-targets.json`;
+- fixed operation request: `stage-package-plan-operation.py`;
+- semantic input inventory: `linux-semantic/amd64-inputs.json` and `amd64-packages.txt`;
+- intentional authoritative CI copies: `native-adapter/ci/reference/amd64-inputs.json`
+  and `amd64-packages.txt`;
+- runtime hash/path references: production/candidate/accepted/native manifests,
+  rootfs ledger and generated C contract (derived bindings updated together);
+- package-name-only tests/collectors and ARM64 `.4` historical fixtures: unchanged;
+- historical prose, source-revision/ancestor records: unchanged. The new comparison
+  fixture deliberately retains `.5` as evidence, and negative tests retain it as
+  the stale request. No repository-wide version substitution was used.
+
+`outside_count=0` is separate from resolver failure. CLB-171 explicitly preserves
+`UNKNOWN_REQUIRES_CONTRACT_DECISION` for zero as diagnostic evidence, and current
+code classifies even one supported-path mapping as UNKNOWN. Thus there is no
+unambiguous accepted safe classification to implement here: behavior/allowlists
+remain unchanged; zero-mapping classification is a remaining contract question.
+
+Local verification covers exact target/operation/provenance bindings, other 20
+unchanged requests, stale/partial/tampered inputs, signed-source routing, duplicated
+references and source closure. A disposable offline APT universe containing the
+observed 21 versions resolves `.6`; replacing only its request with `.5` yields
+exit 100. The synthetic universe does not reproduce the complete stage dependency
+state. Transaction readiness remains **NO**. Publication, CI dispatch, stage
+collection, package/service/config changes and all other external mutations: zero.
+
+Focused verification commands (2026-10-06; no JVM/full delegated suite):
+
+| Command / selector | Result |
+| --- | --- |
+| `python3 -I -S -B scripts/tests/test_expat_rebaseline.py` | Ubuntu 9/9 PASS, including real offline APT simulation |
+| `python3 -I -S -B scripts/tests/test_amd64_dual_snapshot.py` | Ubuntu 19/19 PASS, including Expat signed-record/DEB corruption |
+| `python3 -B scripts/tests/test_stage_package_plan_collector.py` | Ubuntu 49/49 PASS |
+| `python3 -B scripts/tests/test_stage_package_plan.py` | Ubuntu 52 tests PASS, one existing locale-archive selector skipped because archive absent |
+| `python3 -B scripts/tests/test_stage_runtime_inventory.py` | Ubuntu 16/16 PASS |
+| `python3 -B scripts/tests/test_stage_runtime_feasibility.py` | Ubuntu 30/30 PASS |
+| `python3 -B scripts/tests/test_stage_compose_env_semantic.py RuntimeProfileTest ProtocolTest SourceTest` | Ubuntu 9/9 PASS; not private native execution |
+| `python3 -I -S -B scripts/tests/test_amd64_ci_harness.py` | Darwin 10/10 PASS |
+| `python3 -I -S -B scripts/tests/linux-semantic/native-adapter/ci/test-recipe.py` | Darwin 9/9 PASS |
+| `python3 -I -S -B scripts/tests/linux-semantic/native-adapter/tests/test-codegen.py` | Darwin 3/3 PASS |
+| `python3 -I -S -B scripts/tests/linux-semantic/native-adapter/tests/test-driver.py --runtime-tar PATH` | Darwin 11/11 PASS with exact reconstructed tar |
+| `ruby scripts/validate-{stage-package-plan,stage-runtime-inventory,stage-runtime-feasibility,stage-compose-env-semantic}-workflow.rb .` (each separately) | PASS |
+| `ruby scripts/validate-workflow-capabilities.rb .` | PASS, 29 workflows; negative controls also exercised by harness |
+| changed Python `compile(...)`, `bash -n scripts/selfcheck-quality-gates.sh`, added relative links, `git diff --check` | PASS |
+
+The package-plan selfcheck now includes the Expat regression suite. The affected
+existing selfcheck test commands above were run directly; full selfcheck/Gradle
+and hosted CI were not claimed. Intermediate verification errors (stale derived
+manifest/input/header bindings and missing synthetic APT Filename metadata) were
+corrected within CLB-189 and affected checks passed afterward.
+One independent read-only reviewer returned PASS with no substantive finding,
+independently repeating both signatures/index bindings, the full DEB/ELF
+comparison, Linux Expat 9/9 and dual-snapshot 19/19. No review fixes were needed.
+
+
 ### CLB-171 local strict locale bootstrap
 
 CLB-169 run `37262165408`, attempt 1 on exact main

@@ -43,6 +43,7 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(d.SOURCES, {
             'default': 'https://snapshot.ubuntu.com/ubuntu/20260921T200000Z/',
             'openssl-security': 'https://snapshot.ubuntu.com/ubuntu/20260930T120000Z/',
+            'expat-security': 'https://snapshot.ubuntu.com/ubuntu/20260930T120000Z/',
         })
         self.assertTrue(all('source' not in r for r in self.lock['indexes']))
         self.assertEqual(len(self.lock['indexes']), 15)
@@ -50,15 +51,15 @@ class RoutingTest(unittest.TestCase):
                          (HERE / 'native-adapter/ci/reference/prepare-amd64-downloads.py').read_bytes())
 
     def test_default_closure_remains_frozen(self):
-        # Canonical identities of exact merged-main indexes and all 60 unchanged
+        # Canonical identities of exact merged-main indexes and all 59 unchanged
         # DEB rows, derived before this change. No default package is re-resolved.
         canonical = lambda value: sha(json.dumps(value, sort_keys=True, separators=(',', ':')).encode())
         self.assertEqual(canonical(self.lock['indexes']),
                          'd0896d3bdb60f5866c95d4e559694f7d81a72a0d3dc75fbf8cf05888618da579')
         default = [row for row in self.lock['packages'] if 'source' not in row]
-        self.assertEqual(len(default), 60)
+        self.assertEqual(len(default), 59)
         self.assertEqual(canonical(default),
-                         '9a2028dd408b66f067d530c1b5d6808137f6d8b58042a1f7ec4827efd2f0e33f')
+                         '921186c8b3480936f48ded1baa4ea8fa56ac1b70df086838e89f8b99efa3150d')
         legacy = copy.deepcopy(self.lock)
         legacy.pop('supplemental_indexes')
         legacy['packages'] = default + [{
@@ -161,23 +162,28 @@ class AcquisitionTest(unittest.TestCase):
     def fixture(self, metadata_change=None, duplicate=None, misroute=False):
         # Synthetic supplier records exercise real acquisition code. Only byte
         # identities are fixture values; package/source allowlists remain exact.
-        blobs = {'widget': b'default-deb', 'libssl3t64': b'fixed-library', 'openssl': b'fixed-program'}
+        blobs = {'widget': b'default-deb', 'libssl3t64': b'fixed-library',
+                 'openssl': b'fixed-program', 'libexpat1': b'fixed-expat'}
         constants = {name: (len(blobs[name]), sha(blobs[name])) for name in d.OPENSSL_PACKAGES}
         rows = []
         for name, raw in blobs.items():
             version = '1.0' if name == 'widget' else d.OPENSSL_VERSION
             package = 'widget' if name == 'widget' else 'openssl'
+            if name == 'libexpat1':
+                version, package = d.EXPAT_VERSION, 'expat'
             path = 'pool/main/' + package[0] + '/' + package + '/' + name + '_' + version + '_amd64.deb'
             row = dict(package=name, architecture='amd64', version=version,
                        archive_path=path, file=path.rsplit('/', 1)[1], sha256=sha(raw),
                        url='https://archive.ubuntu.com/ubuntu/' + path)
             if name != 'widget':
-                row.update(source='openssl-security', bytes=len(raw))
+                row.update(source='expat-security' if name == 'libexpat1' else 'openssl-security', bytes=len(raw))
             rows.append(row)
         resources = {}
         indexes = []
         for source in ('default', 'openssl-security'):
             selected = [r for r in rows if r.get('source', 'default') == source]
+            if source == 'openssl-security':
+                selected += [r for r in rows if r.get('source') == 'expat-security']
             if misroute and source == 'default':
                 selected = list(rows)
             stanzas = []
@@ -213,7 +219,7 @@ class AcquisitionTest(unittest.TestCase):
             resources[d.SOURCES[source] + 'dists/' + suite + '/InRelease'] = release
             resources[d.SOURCES[source] + 'dists/' + suite + '/' + relative + '.xz'] = compressed
         lock = dict(ubuntu_signer=d.UBUNTU_SIGNER, indexes=[indexes[0]],
-                    supplemental_indexes=[indexes[1]], packages=rows)
+                    supplemental_indexes=[indexes[1], dict(indexes[1], source='expat-security')], packages=rows)
         return lock, resources, constants
 
     def acquire(self, lock, resources, constants, status=None):
@@ -229,6 +235,8 @@ class AcquisitionTest(unittest.TestCase):
             (destination / 'debs').mkdir()
             stack.enter_context(patch.object(d, 'OPENSSL_PACKAGES', constants))
             stack.enter_context(patch.object(d, 'SUPPLEMENTAL_INDEX', lock['supplemental_indexes'][0]))
+            stack.enter_context(patch.object(d, 'EXPAT_INDEX', lock['supplemental_indexes'][1]))
+            stack.enter_context(patch.object(d, 'EXPAT_PACKAGE', (len(b'fixed-expat'), sha(b'fixed-expat'))))
             d.acquire_ubuntu(lock, destination,
                 lambda p: status if status is not None else b'[GNUPG:] VALIDSIG ' + d.UBUNTU_SIGNER.encode() + b' 0\n', fetch)
             result = {p.name: p.read_bytes() for p in (destination / 'debs').iterdir()}
@@ -237,7 +245,7 @@ class AcquisitionTest(unittest.TestCase):
     def test_both_sources_retrieve_only_assigned_exact_packages(self):
         lock, resources, constants = self.fixture()
         files, calls = self.acquire(lock, resources, constants)
-        self.assertEqual(len(files), 3)
+        self.assertEqual(len(files), 4)
         for row in lock['packages']:
             self.assertIn(d.SOURCES[row.get('source', 'default')] + row['archive_path'], calls)
             self.assertEqual(sha(files[row['file']]), row['sha256'])
@@ -264,6 +272,20 @@ class AcquisitionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'signer'):
             self.acquire(lock, resources, constants, b'[GNUPG:] VALIDSIG ' + b'0' * 40 + b' 0\n')
 
+    def test_expat_deb_and_signed_identity_tampering_refuse(self):
+        lock, resources, constants = self.fixture()
+        key = next(url for url in resources if 'libexpat1_' in url)
+        resources[key] += b'tampered'
+        with self.assertRaises(ValueError):
+            self.acquire(lock, resources, constants)
+        for field, value in (('Version', '2.6.1-2ubuntu0.5'), ('SHA256', '0' * 64),
+                             ('Architecture', 'arm64'), ('Size', '1')):
+            lock, resources, constants = self.fixture(
+                lambda source, fields: fields.update({field: value})
+                if source == 'openssl-security' and fields['Package'] == 'libexpat1' else None)
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.acquire(lock, resources, constants)
+
     def test_default_index_cannot_authorize_supplemental_package(self):
         # Correct OpenSSL tuples exist only in the default signed index. Even
         # valid identities there must not satisfy the supplemental assignment.
@@ -276,7 +298,7 @@ class AcquisitionTest(unittest.TestCase):
     def test_unrelated_duplicate_index_packages_are_ignored(self):
         lock, resources, constants = self.fixture(duplicate='unrelated')
         files, calls = self.acquire(lock, resources, constants)
-        self.assertEqual(len(files), 3)
+        self.assertEqual(len(files), 4)
 
     def test_requested_conflicting_index_packages_refuse(self):
         lock, resources, constants = self.fixture(duplicate='requested')

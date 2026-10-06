@@ -11751,6 +11751,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_en
 echo "[selfcheck] fixed non-secret runtime inventory regressions"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_inventory.py"
 echo "[selfcheck] fixed read-only package-plan channel and frozen collector"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_expat_rebaseline.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_plan_collector.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_plan.py"
 echo "[selfcheck] fixed least-privilege APT metadata refresh (disposable root tests run separately)"

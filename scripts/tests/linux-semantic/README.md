@@ -366,10 +366,11 @@ No new credentialed invocation has verified that migration on GitHub/stage.
 
 ## CLB-157 current OpenSSL security reference
 
-The current amd64 lock retains all 15 default index records and the 60 unchanged
+The CLB-157 amd64 lock retained all 15 default index records and the 60 unchanged
 DEB records from `20260921T200000Z`. A code-owned `openssl-security` source at
 `20260930T120000Z` provides exactly `libssl3t64` and `openssl`
 `3.0.13-0ubuntu3.16`, through one separately pinned noble-security/main index.
+CLB-189 below supersedes only the Expat row and its derived bindings.
 The 62 downloaded DEBs reconstruct the same installed package-name set; only
 these two package versions advance. Neither row URLs nor CLI/environment inputs
 can choose a snapshot. The existing archive keyring and signer remain unchanged;
@@ -385,3 +386,22 @@ run evidence for the verification commit can establish native acceptance.
 This reference update grants no stage package, collection, deploy or merge
 permission. The 21-pair package-plan explicitly requests both OpenSSL packages;
 the old 20-pair evidence is not authorization for it.
+
+## CLB-189 current Expat security reference
+
+The same fixed `20260930T120000Z` Ubuntu snapshot now supplies exactly
+`libexpat1=2.6.1-2ubuntu0.6` through a separate code-owned `expat-security`
+assignment. It reuses the independently verified noble-security/main signed
+index identity without changing the OpenSSL assignment. There are 17 logical
+index records / six source-qualified Release records, backed by the same five
+unique Release artifacts. All 59 remaining default DEB rows, both OpenSSL rows,
+the complete package-name set and accepted paths stay fixed. No candidate/latest
+fallback exists. Missing package/index, altered hashes and wrong source refuse.
+
+See the [current operational comparison](../../../docs/ops/release-rollback.md#clb-189-local-expat-reconciliation-2026-10-06)
+and [retained comparison fixture](../fixtures/clb189-expat-comparison.json).
+The new manifests replace only the Expat library digest. Native rootfs hashes
+are deterministic leaf reconstruction evidence, not a rebuilt image or native
+positive semantic PASS. Historical native results do not approve these bytes.
+Run `python3 -I -S -B scripts/tests/test_expat_rebaseline.py` (the APT simulation
+selector requires disposable Linux) and the existing dual-snapshot tests.

@@ -1,0 +1,380 @@
+{
+  "environment": "Ubuntu 24.04 amd64 under Docker Desktop Rosetta; dpkg-deb extraction, GNU readelf 2.42; no install",
+  "packages": {
+    "5": {
+      "control": "Package: libexpat1\nSource: expat\nVersion: 2.6.1-2ubuntu0.5\nArchitecture: amd64\nMaintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>\nInstalled-Size: 416\nDepends: libc6 (>= 2.38)\nSection: libs\nPriority: optional\nMulti-Arch: same\nHomepage: https://libexpat.github.io/\nDescription: XML parsing C library - runtime library\n This package contains the runtime, shared library of expat, the C\n library for parsing XML. Expat is a stream-oriented parser in\n which an application registers handlers for things the parser\n might find in the XML document (like start tags).\nOriginal-Maintainer: Laszlo Boszormenyi (GCS) <gcs@debian.org>\n",
+      "control_files": {
+        "control": "2df9d9a5687add927f3f75611085d73befe352192d6f290b862cac88ae77e2cf",
+        "md5sums": "9bdde2a31ac3d81d83e9fecd525be0d700d4510bdab3088a96be78b52958b4a4",
+        "shlibs": "c2bf8adb4044b2770bfb9c375d386ee1f27a6b94832007a85b35c87e4eafc606",
+        "symbols": "0c24ebe7b22ec0017f9b238520f3b0f1d8a833b474789079639af68dabe9aa2e",
+        "triggers": "0f1eda96d7595190cc2d40a06fafff8def651d19ceb635292ae6104de50de218"
+      },
+      "deb_bytes": 95248,
+      "deb_sha256": "9e40c7f613631ffe5c22c3f61daa767d976bc8af5c9e2001a1981eb26f18befd",
+      "elf": {
+        "libexpat.so.1.9.1": {
+          "abi_surface_sha256": "efe8bce0f47ae2b9e3c45c87fdeae9674bf25cf44a23d1ba8a4006085020f4ae",
+          "dynamic_symbols": 95,
+          "needed": [
+            "libc.so.6"
+          ],
+          "sha256": "ec6c12d33bb8f9d0e90804121adf19930f36b1b2a4aeb6e1a454b89c7a50c801",
+          "size": 186624,
+          "soname": [
+            "libexpat.so.1"
+          ]
+        },
+        "libexpatw.so.1.9.1": {
+          "abi_surface_sha256": "de5e7ae6b96134205995937e962527808652f9746d8a0b6bb284258361dd005f",
+          "dynamic_symbols": 94,
+          "needed": [
+            "libc.so.6"
+          ],
+          "sha256": "5f2c4052c71e09e02daa6d9930ce3632172f775d2c3dd98e166f14e83fde7f02",
+          "size": 186616,
+          "soname": [
+            "libexpatw.so.1"
+          ]
+        }
+      },
+      "inventory": [
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": ".",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/lib",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/lib/x86_64-linux-gnu",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpat.so.1.9.1",
+          "sha256": "ec6c12d33bb8f9d0e90804121adf19930f36b1b2a4aeb6e1a454b89c7a50c801",
+          "size": 186624,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpatw.so.1.9.1",
+          "sha256": "5f2c4052c71e09e02daa6d9930ce3632172f775d2c3dd98e166f14e83fde7f02",
+          "size": 186616,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/share",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/share/doc",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/share/doc/libexpat1",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/share/doc/libexpat1/AUTHORS",
+          "sha256": "59f14371c6b75912cfebb46e6247ee5146766e803a0365b124e5d3011e7d0877",
+          "size": 142,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/share/doc/libexpat1/changelog.Debian.gz",
+          "sha256": "1d2ff07428419ebe2ffbd7abfead0af5e879902fd49e5f9d74dd615c8d7ff0c6",
+          "size": 5315,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/share/doc/libexpat1/copyright",
+          "sha256": "60919fe1a156395ff14511bb6ff79756c50ade2fff59ac60c9bae1d8a7fe6292",
+          "size": 1756,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "libexpat.so.1.9.1",
+          "mode": "0o777",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpat.so.1",
+          "size": 0,
+          "type": "2",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "libexpatw.so.1.9.1",
+          "mode": "0o777",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpatw.so.1",
+          "size": 0,
+          "type": "2",
+          "uid": 0
+        }
+      ],
+      "triggers": "# Triggers added by dh_makeshlibs/13.14.1ubuntu5\nactivate-noawait ldconfig\n"
+    },
+    "6": {
+      "control": "Package: libexpat1\nSource: expat\nVersion: 2.6.1-2ubuntu0.6\nArchitecture: amd64\nMaintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>\nInstalled-Size: 416\nDepends: libc6 (>= 2.38)\nSection: libs\nPriority: optional\nMulti-Arch: same\nHomepage: https://libexpat.github.io/\nDescription: XML parsing C library - runtime library\n This package contains the runtime, shared library of expat, the C\n library for parsing XML. Expat is a stream-oriented parser in\n which an application registers handlers for things the parser\n might find in the XML document (like start tags).\nOriginal-Maintainer: Laszlo Boszormenyi (GCS) <gcs@debian.org>\n",
+      "control_files": {
+        "control": "7791b1af43179a14aba9c47cd11551c7c819d52407da7ca5bfb62b3a2e68a9f1",
+        "md5sums": "9e74effceebbbe589e8213d681c7510be6ad2701f0b3f07d4e647ca27b37186a",
+        "shlibs": "c2bf8adb4044b2770bfb9c375d386ee1f27a6b94832007a85b35c87e4eafc606",
+        "symbols": "2e22e792fa1235b645d34623c6f95a6cf2a7c8a6674603b35cf45428b2f0d379",
+        "triggers": "0f1eda96d7595190cc2d40a06fafff8def651d19ceb635292ae6104de50de218"
+      },
+      "deb_bytes": 98940,
+      "deb_sha256": "494b8e672f722130c6bca6a7bc4cc31a43ca891a31d60d868bfdd699a3c20b13",
+      "elf": {
+        "libexpat.so.1.9.1": {
+          "abi_surface_sha256": "efe8bce0f47ae2b9e3c45c87fdeae9674bf25cf44a23d1ba8a4006085020f4ae",
+          "dynamic_symbols": 95,
+          "needed": [
+            "libc.so.6"
+          ],
+          "sha256": "286682ecbc5e59a638963b1a4e6351e65eb32fcf4bdcb9cb7569b6a61fe06a8d",
+          "size": 186624,
+          "soname": [
+            "libexpat.so.1"
+          ]
+        },
+        "libexpatw.so.1.9.1": {
+          "abi_surface_sha256": "de5e7ae6b96134205995937e962527808652f9746d8a0b6bb284258361dd005f",
+          "dynamic_symbols": 94,
+          "needed": [
+            "libc.so.6"
+          ],
+          "sha256": "a59f769029453eb83912725040086362c0a64bd08c74641d5b8f1966d4f4d70f",
+          "size": 186616,
+          "soname": [
+            "libexpatw.so.1"
+          ]
+        }
+      },
+      "inventory": [
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": ".",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/lib",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/lib/x86_64-linux-gnu",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpat.so.1.9.1",
+          "sha256": "286682ecbc5e59a638963b1a4e6351e65eb32fcf4bdcb9cb7569b6a61fe06a8d",
+          "size": 186624,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpatw.so.1.9.1",
+          "sha256": "a59f769029453eb83912725040086362c0a64bd08c74641d5b8f1966d4f4d70f",
+          "size": 186616,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/share",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/share/doc",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o755",
+          "path": "./usr/share/doc/libexpat1",
+          "size": 0,
+          "type": "5",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/share/doc/libexpat1/AUTHORS",
+          "sha256": "59f14371c6b75912cfebb46e6247ee5146766e803a0365b124e5d3011e7d0877",
+          "size": 142,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/share/doc/libexpat1/changelog.Debian.gz",
+          "sha256": "da761ccfc0fb3bce363872146346712f4438574c6abf442ccef3afbf52a13029",
+          "size": 6106,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "",
+          "mode": "0o644",
+          "path": "./usr/share/doc/libexpat1/copyright",
+          "sha256": "60919fe1a156395ff14511bb6ff79756c50ade2fff59ac60c9bae1d8a7fe6292",
+          "size": 1756,
+          "type": "0",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "libexpat.so.1.9.1",
+          "mode": "0o777",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpat.so.1",
+          "size": 0,
+          "type": "2",
+          "uid": 0
+        },
+        {
+          "gid": 0,
+          "link": "libexpatw.so.1.9.1",
+          "mode": "0o777",
+          "path": "./usr/lib/x86_64-linux-gnu/libexpatw.so.1",
+          "size": 0,
+          "type": "2",
+          "uid": 0
+        }
+      ],
+      "triggers": "# Triggers added by dh_makeshlibs/13.14.1ubuntu5\nactivate-noawait ldconfig\n"
+    }
+  },
+  "rootfs_reconstruction": {
+    "baseline": [
+      59392000,
+      "9ff206d6d59e722e5a6e7b97034c488d5ae9cb5367a1ef7677c456ebf2a172ad"
+    ],
+    "method": "USTAR reconstruction from every verified baseline leaf; one verified Expat library substituted; no package installation",
+    "reconciled": [
+      59392000,
+      "1174a11ee56a2874824aa09cbe5ea9442eafcdce527dcdafc47a6508b4137371"
+    ]
+  },
+  "schema": "clb189-expat-comparison-v1",
+  "signed_provenance": {
+    "InRelease_sha256": "ba88a6da0b679ab57efe1b2ec88f3451d877cb4c01eaa112965fe7aedd77a8bf",
+    "Packages_bytes": 5797350,
+    "Packages_sha256": "abfa0e7c57b579cf87e09b90501306dfb1bffcfbd4fee5be1c775a39adf1bd74",
+    "Packages_xz_bytes": 1066176,
+    "Packages_xz_sha256": "b9aa52a2bd0e42b0976036f59251c2bf9c76b20d7c6be96405b6290f38dff61f",
+    "component": "main",
+    "current_InRelease_sha256": "0adbe71ca584f2c794765cbf55b5c3073dd6ef9282f950ee4da8d2aa9db6b4de",
+    "current_Packages_sha256": "95d5fdb2a847309f97778e1654a095df9eb797c9381fbf079d3e57f4115e071e",
+    "current_Packages_xz_sha256": "6d557c679aac45cecf40d5dfbfeae9887345df6ea8dfd22a9b432c49c47ea6ff",
+    "signer": "F6ECB3762474EDA9D21B7022871920D1991BC93C",
+    "snapshot": "https://snapshot.ubuntu.com/ubuntu/20260930T120000Z/",
+    "suite": "noble-security"
+  },
+  "tool_debs": {
+    "binutils": "6503593d06ecd28e1e6ab061cc9eea39affd28e34c72fbc19142525ad313d838",
+    "libctf": "8ad7dc5c67d26bc499bb26ebd1de660ca0a4074ba75271d7bd167b8e2c26b84f",
+    "libsframe": "8e712517678ab1750f2ce52e9d54cb7adba25c01ed8b579f8678d031b813d084"
+  }
+}

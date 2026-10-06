@@ -1,5 +1,5 @@
 {
-  "approval_status": "CLB157_VERIFICATION_ONLY; exact candidate branch and one Tests dispatch; no stage authority",
+  "approval_status": "CLB189_LOCAL_ONLY; no publication, dispatch or stage authority",
   "archive_count": 62,
   "archive_limit_each": 67108864,
   "base": "docker.io/library/ubuntu@sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4",
@@ -20,10 +20,17 @@
   },
   "cosign_verifier": "gcr.io/projectsigstore/cosign@sha256:b03690aa52bfe94054187142fba24dc54137650682810633901767d8a3e15b31",
   "currently_performed_external_actions": [],
-  "expected_candidate_manifest_sha256": "8d75c3da0ed507cffc0ce5f0da05c6c03e7728bb65abe08c663c4e37e7906460",
+  "expat_supplemental_snapshot": {
+    "packages": [
+      "libexpat1=2.6.1-2ubuntu0.6"
+    ],
+    "snapshot": "https://snapshot.ubuntu.com/ubuntu/20260930T120000Z/",
+    "source": "expat-security"
+  },
+  "expected_candidate_manifest_sha256": "13901473be852a72cbe225e6d85c575f3bb6e5ed4433e36a60978d9bbb0749b7",
   "expected_rootfs": {
     "bytes": 59392000,
-    "sha256": "9ff206d6d59e722e5a6e7b97034c488d5ae9cb5367a1ef7677c456ebf2a172ad"
+    "sha256": "1174a11ee56a2874824aa09cbe5ea9442eafcdce527dcdafc47a6508b4137371"
   },
   "external_actions": [
     "manual exact-ref publication/dispatch",
@@ -33,8 +40,8 @@
     "one fixed privileged namespace adapter test if explicitly authorized",
     "bounded synthetic artifact upload retention 3 days"
   ],
-  "index_count": 16,
-  "release_count": 5,
+  "index_count": 17,
+  "release_count": 6,
   "route": "official_locked_rebuild_on_disposable_GitHub_hosted_VM",
   "snapshot": "https://snapshot.ubuntu.com/ubuntu/20260921T200000Z/",
   "supplemental_snapshot": {

@@ -100,6 +100,10 @@ class RequestTest(unittest.TestCase):
         self.assertEqual(hashlib.sha256((ROOT/r.WRAPPER).read_bytes()).hexdigest(), r.WRAPPER_SHA256)
         self.assertEqual(hashlib.sha256((ROOT/r.PACKAGE_RUNNER).read_bytes()).hexdigest(), r.PACKAGE_RUNNER_SHA256)
 
+    def test_wrong_package_runner_pin_refuses_before_loading(self):
+        with patch.object(r, 'PACKAGE_RUNNER_SHA256', '0' * 64), self.assertRaises(ValueError):
+            r.load_primitives()
+
     def test_target_user_host_pin(self):
         # Existing validator also refuses root, alternate host/port and bad pin.
         for user, host, port in [('root','178.20.209.5','22'), ('deploy','evil','22'),
