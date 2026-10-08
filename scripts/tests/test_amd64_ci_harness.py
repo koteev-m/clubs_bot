@@ -59,11 +59,12 @@ class HarnessTest(unittest.TestCase):
             '${{ runner.temp }}/clb91-adapter-inputs/evidence/status.json',
             *('${{ runner.temp }}/clb91-native-adapter/evidence/' + n for n in
               ('environment.json', 'result.json', 'commands.json', 'compiler.json')),
+            '${{ runner.temp }}/clb191-isolated-helper/result.json',
         ])
         # This is a candidate native adapter experiment, not the old 191/4 suite.
         # Explicit preparation/namespace markers do not themselves grant permission.
         prefix = 'scripts/tests/linux-semantic/native-adapter/'
-        self.assertEqual(len(steps), 6)
+        self.assertEqual(len(steps), 7)
         self.assertEqual(steps[1]['run'], 'python3 -I -S -B ' + prefix + 'ci/test-recipe.py')
         self.assertEqual(steps[2]['run'], 'python3 -I -S -B ' + prefix +
             'ci/prepare-native-inputs.py "${{ runner.temp }}/clb91-adapter-inputs" '
@@ -72,14 +73,24 @@ class HarnessTest(unittest.TestCase):
             'tests/native-driver.py --runtime-tar '
             '"${{ runner.temp }}/clb91-adapter-inputs/runtime/native/rootfs.tar" '
             '--work "${{ runner.temp }}/clb91-native-adapter" --authorized-native-test')
-        self.assertEqual(steps[4]['run'], 'python3 -I -S -B ' + prefix +
+        self.assertEqual(steps[4]['run'], 'python3 -I -S -B scripts/tests/linux-semantic/isolated-helper/native-ci.py '
+            '--prepared "${{ runner.temp }}/clb91-adapter-inputs" '
+            '--output "${{ runner.temp }}/clb191-isolated-helper"')
+        self.assertNotIn('if', steps[4])
+        self.assertNotIn('continue-on-error', steps[4])
+        self.assertEqual(steps[5]['run'], 'python3 -I -S -B ' + prefix +
             'ci/check-artifacts.py "${{ runner.temp }}"')
-        self.assertEqual(steps[4]['if'], 'always()')
-        self.assertEqual(steps[4]['id'], 'evidence')
+        self.assertEqual(steps[5]['if'], 'always()')
+        self.assertEqual(steps[5]['id'], 'evidence')
         self.assertEqual(steps[-1]['with']['if-no-files-found'], 'error')
         new_raw = raw[len(original):].decode()
         for forbidden in ('secrets.', 'environment:', 'continue-on-error', 'qemu', 'binfmt', 'sudo'):
             self.assertNotIn(forbidden, new_raw.lower())
+
+    def test_clb191_native_contract_controls(self):
+        result = subprocess.run([sys.executable, '-I', '-S', '-B',
+            str(HERE / 'isolated-helper/test-native-ci.py')], capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, 'CLB-191 native contract controls failed')
 
     def test_selfcheck_composition(self):
         text = (ROOT / 'scripts/selfcheck-quality-gates.sh').read_text()

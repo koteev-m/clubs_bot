@@ -326,6 +326,11 @@ jobs:
           python3 -I -S -B scripts/tests/linux-semantic/native-adapter/tests/native-driver.py
           --runtime-tar "${{ runner.temp }}/clb91-adapter-inputs/runtime/native/rootfs.tar"
           --work "${{ runner.temp }}/clb91-native-adapter" --authorized-native-test
+      - name: Native isolated semantic helper
+        run: >-
+          python3 -I -S -B scripts/tests/linux-semantic/isolated-helper/native-ci.py
+          --prepared "${{ runner.temp }}/clb91-adapter-inputs"
+          --output "${{ runner.temp }}/clb191-isolated-helper"
       - name: Check synthetic evidence allowlist and size
         if: always()
         id: evidence
@@ -345,3 +350,4 @@ jobs:
             ${{ runner.temp }}/clb91-native-adapter/evidence/result.json
             ${{ runner.temp }}/clb91-native-adapter/evidence/commands.json
             ${{ runner.temp }}/clb91-native-adapter/evidence/compiler.json
+            ${{ runner.temp }}/clb191-isolated-helper/result.json
