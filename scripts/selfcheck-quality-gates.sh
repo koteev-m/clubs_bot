@@ -8798,7 +8798,7 @@ assert_yaml_safety_fixture_valid() {
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
       "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "29"
+      "30"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
@@ -11757,6 +11757,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_pl
 echo "[selfcheck] fixed least-privilege APT metadata refresh (disposable root tests run separately)"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_apt_metadata_refresh.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_feasibility.py"
+PYTHONDONTWRITEBYTECODE=1 python3 -I -S -B "$ROOT_DIR/scripts/tests/test_stage_principal_uid.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check
 if [ "$CORRECTED_STAGE_SELFCHECK_MODE" = "full" ]; then

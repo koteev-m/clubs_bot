@@ -1266,7 +1266,7 @@ StageComposeDiagnosticWorkflow.validate(WorkflowCapabilityPolicy,w)
             self.assertIn(name, selfcheck)
         ruby = '''require "validate-workflow-yaml"; require "validate-workflow-capabilities";
 root=Pathname.new(ARGV[0]); paths=WorkflowYamlSafety.visible_workflows(root);
-raise "inventory: expected 29, actual #{paths.length}" unless paths.length == 29;
+raise "inventory: expected 30, actual #{paths.length}" unless paths.length == 30;
 raise "yaml" unless WorkflowYamlSafety.run(root) == 0;
 WorkflowCapabilityPolicy.run(root);
 '''

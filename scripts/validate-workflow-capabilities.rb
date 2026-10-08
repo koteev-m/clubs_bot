@@ -13,6 +13,7 @@ require_relative "validate-stage-runtime-inventory-workflow"
 require_relative "validate-stage-package-plan-workflow"
 require_relative "validate-stage-apt-metadata-refresh-workflow"
 require_relative "validate-stage-runtime-feasibility-workflow"
+require_relative "validate-stage-principal-uid-workflow"
 
 module WorkflowCapabilityPolicy
   module_function
@@ -1290,6 +1291,7 @@ module WorkflowCapabilityPolicy
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StagePackagePlanWorkflow::PATH, "collect"]
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StageAptMetadataRefreshWorkflow::PATH, "refresh"]
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
+    return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StagePrincipalUidWorkflow::PATH, "identity"]
     return RELEASE_STATUS_SECRETS | Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "execute"]
     return Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "validate"]
     return Set.new(["GITHUB_TOKEN"]) if key == [".github/workflows/release.yml", "release"]
@@ -1344,6 +1346,7 @@ module WorkflowCapabilityPolicy
     expected = "stage" if key == [StagePackagePlanWorkflow::PATH, "collect"]
     expected = "stage" if key == [StageAptMetadataRefreshWorkflow::PATH, "refresh"]
     expected = "stage" if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
+    expected = "stage" if key == [StagePrincipalUidWorkflow::PATH, "identity"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
     elsif !environment.nil?
@@ -2204,6 +2207,7 @@ module WorkflowCapabilityPolicy
       StagePackagePlanWorkflow.validate(self, workflow) if path == StagePackagePlanWorkflow::PATH
       StageAptMetadataRefreshWorkflow.validate(self, workflow) if path == StageAptMetadataRefreshWorkflow::PATH
       StageRuntimeFeasibilityWorkflow.validate(self, workflow) if path == StageRuntimeFeasibilityWorkflow::PATH
+      StagePrincipalUidWorkflow.validate(self, workflow) if path == StagePrincipalUidWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
       validate_release_status_contract(path, workflow, triggers, jobs, raw)
       top_level = workflow.reject { |key, _value| key == "jobs" }
