@@ -11757,6 +11757,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_pl
 echo "[selfcheck] fixed least-privilege APT metadata refresh (disposable root tests run separately)"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_apt_metadata_refresh.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_feasibility.py"
+PYTHONDONTWRITEBYTECODE=1 python3 -I -S -B "$ROOT_DIR/scripts/tests/test_stage_principal_uid.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check
 if [ "$CORRECTED_STAGE_SELFCHECK_MODE" = "full" ]; then
