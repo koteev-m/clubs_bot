@@ -320,13 +320,63 @@ checkout as in CLB-191 above. Use the same fixed image and isolation flags,
 test process; it clears its environment before the actual producer prerequisite.
 Run with `python3.12 -I -S -B`. For `UnsupportedBacking` use canonical tmpfs and
 its separate selector/environment flag. Exact production source/hash/runtime
-bindings stay unchanged. Only new test-only files, this README and ops checkpoint
-belong to CLB-192; no source pin or ledger update is needed.
+bindings stay unchanged. Production source pins and runtime ledgers remain unchanged. The native
+coordinator below adds exact bindings for its test-only source closure.
 
 One focused independent review found a supervisor TERM/HUP cleanup issue; its fix
 preserves cancellation through noninterruptible cleanup and stops further cases.
 The same reviewer confirmed no open security/implementation findings; the README
 wording finding is corrected. Final affected checks and the conditional single
-local commit are recorded in the task handoff. Next bounded outcome: native Linux amd64 end-to-end verification
-of these exact new bytes, with its own separately authorized execution; no dispatch,
-stage operation or next outcome is started here.
+local commit are recorded in the task handoff. The initial local candidate was committed as
+`a6a0120af534ceb9b1b78ef55ec6af10739135e9`; the continuation below is separately
+authorized for publication and one native dispatch.
+
+
+### CLB-192 native acceptance integration
+
+`native-handoff-ci.py` runs after the unchanged CLB-191 native check in the
+existing manual-only `amd64-runtime-prototype` job. It checks native Linux x86_64,
+exact checkout/run/attempt identity and test source hashes, then reuses the
+existing verified preparation image and runtime manifest. No Mac image identity,
+new download chain, additional container privilege or production fallback is used.
+
+Four required full-runtime cases (remove, explicit, different, present-empty)
+execute the original `handoff.py`: real synthetic ReadOnlyCapture on the observed
+anonymous-volume backing, one bounded FIFO, unchanged Runtime gate before input,
+real planner, bound public result, producer recheck and confirmed cleanup.
+Unsupported backing refuses. Additional controls exercise protocol/source/runtime
+refusal, canonical identity, file/lock drift, timeout/crash/cancellation, FD cleanup,
+TERM/HUP supervision, scoped outer cleanup after real host timeout/SIGKILL,
+isolation and rejection of unexpected output on either
+stdout or stderr. Component cases remain explicitly distinct from full Runtime
+acceptance; no skipped or failed case can produce native PASS.
+
+The host launcher accepts the preparation-verified image only through its Python
+integration API; the local command-line image selection is unchanged. Code-only
+exports are traversable by UID 1000 and their files are read-only. Runtime and
+snapshot bytes never enter public output. A strict additional artifact,
+`clb192-handoff/result.json` (maximum 4096 bytes), contains only commit/run/attempt,
+runtime/test-source identities, fixed stage verdicts and cleanup status. Its PASS
+must match the preceding CLB-191 and preparation evidence. The existing aggregate
+artifact bound and explicit upload list remain in force; malformed, extra,
+oversized and substituted evidence refuses.
+
+Local verification commands: `test-handoff.py Controls`, explicit Linux
+`Components`/`UnsupportedBacking`, `DockerComponents`, `test-native-handoff.py`,
+`test-native-ci.py`, `test_amd64_ci_harness.py`, existing native recipe/codegen/driver
+and workflow YAML/capability validators. The CI suite wrapper is also exercised
+against the real local Linux component fixtures. Rosetta's existing maps/syscall
+limitations remain unmodified: hosted native acceptance for the new exact commit
+is **UNVERIFIED** until terminal evidence is reviewed. Stage bootstrap trust,
+Docker daemon trust and stage rights are still unestablished; production
+runtime-before-private-env remains mandatory; `TRANSACTION_READINESS=NO`.
+
+The focused independent continuation review passed after fixing outer host-suite
+timeout cleanup. Real Docker regressions confirm label-scoped container/volume
+removal; source pins, strict evidence controls and affected harness checks pass.
+
+The user authorized one additional commit, normal push, Draft PR and one exact-ref
+manual Tests dispatch, including unchanged unit/integration jobs. Publication/run
+identities and review disposition are recorded in the task handoff. The only next
+step after bounded dispatch readback is to return terminal automatic PR CI and
+manual native Tests evidence to ChatGPT for review; no polling or stage action.

@@ -33,9 +33,12 @@ POLICY = ['--pull=never', '--platform=linux/amd64', '--log-driver=none', '--read
           '--security-opt=no-new-privileges', '--pids-limit=64', '--memory=768m']
 
 
-def command(name, export, code, nonce, case, *, transport=None):
+def command(name, export, code, nonce, case, *, transport=None, image=None):
     # Only a source digest and fixed loader travel in argv, never fixture values
     # or snapshot bytes. The reviewed supervisor exports this immutable code.
+    image = IMAGE if image is None else image
+    if not re.fullmatch('sha256:[0-9a-f]{64}', image):
+        raise ValueError('exact runtime image required')
     digest = hashlib.sha256(code.encode()).hexdigest()
     bootstrap = ("import os,stat,hashlib; "
         "p='/source/clb192-entry.py'; "
@@ -58,7 +61,8 @@ def command(name, export, code, nonce, case, *, transport=None):
                  '--tmpfs', '/opt/clubs-bot-stage:uid=1000,gid=1000,mode=0700,nosuid,nodev,noexec',
                  '--tmpfs', '/run/user/1000:uid=1000,gid=1000,mode=0700,nosuid,nodev,noexec']
         role = 'worker'
-    return args + ['--entrypoint', '/usr/bin/env', IMAGE, '-i', 'PATH=/usr/bin:/bin', 'LC_ALL=C',
+    return args + ['--entrypoint', '/bin/sh', image, '-c', 'exec "$@" 2>&1',
+                   'clb192-capture', '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', 'LC_ALL=C',
                    '/usr/bin/python3.12', '-I', '-S', '-B', '-c', bootstrap, role, nonce, case]
 
 
@@ -87,7 +91,7 @@ def collect(process, payload, timeout=5):
         selector.close()
 
 
-def run_case(h, p, op, export, code, case):
+def run_case(h, p, op, export, code, case, *, image=None, docker_env=None):
     entry = export/'clb192-entry.py'
     if entry.exists():
         if entry.read_bytes() != code.encode():
@@ -95,11 +99,15 @@ def run_case(h, p, op, export, code, case):
     else:
         with entry.open('xb') as stream:
             stream.write(code.encode())
+        entry.chmod(0o444)
     nonce = uuid.uuid4().hex
     names = ['clb192-producer-'+nonce, 'clb192-worker-'+nonce]
     volumes = []
     process = None
-    docker_env = {k: os.environ[k] for k in ('PATH', 'HOME')}
+    # Native coordinator supplies preparation's empty Docker home/config.
+    # No image/endpoint choice is accepted by the snapshot or local CLI.
+    if docker_env is None:
+        docker_env = {k: os.environ[k] for k in ('PATH', 'HOME')}
     def bounded(argv, payload=b'', timeout=10, limit=8192):
         result = op.D.capture_result(argv, payload=payload, env=docker_env, timeout=timeout, limit=limit)
         if result.failure is not None:
@@ -107,7 +115,7 @@ def run_case(h, p, op, export, code, case):
         return result
     result = p['public'](nonce)
     try:
-        created = bounded(command(names[0], export, code, nonce, case))
+        created = bounded(command(names[0], export, code, nonce, case, image=image))
         if created.code != 0:
             raise RuntimeError('producer creation failed')
         inspected = bounded(['docker', 'inspect', '--format', '{{json .Mounts}}', names[0]])
@@ -118,7 +126,7 @@ def run_case(h, p, op, export, code, case):
         if len(volumes) != 2 or any(not re.fullmatch('[0-9a-f]{64}', v) for v in volumes):
             raise RuntimeError('unexpected fixture volume identity')
         transport = next(m['Name'] for m in mounts if m['Destination'] == '/run/user/1000')
-        if bounded(command(names[1], export, code, nonce, case, transport=transport)).code != 0:
+        if bounded(command(names[1], export, code, nonce, case, transport=transport, image=image)).code != 0:
             raise RuntimeError('worker creation failed')
         process = subprocess.Popen(['docker', 'start', '-ai', names[0]], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=docker_env,
@@ -193,6 +201,7 @@ def main():
     op = h['sources'](ROOT/'scripts/deploy')
     with tempfile.TemporaryDirectory(prefix='clb192-export-') as temporary:
         export = Path(temporary).resolve()
+        export.chmod(0o755)  # Native Linux UID 1000 must traverse the code-only bind.
         sources = export/'scripts/deploy'
         sources.mkdir(parents=True)
         for name, digest in h['PINS'].items():

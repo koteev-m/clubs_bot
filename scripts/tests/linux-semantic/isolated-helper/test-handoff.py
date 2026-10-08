@@ -20,6 +20,26 @@ f = runpy.run_path(str(HERE/'test-helper.py'))
 NONCE = 'a'*32
 
 
+def launcher_module():
+    module = runpy.run_path(str(HERE/'run-handoff.py'))
+    # Only the native coordinator's verified preparation may supply this test
+    # fixture override via runpy init_globals; no deployed CLI override exists.
+    image = globals().get('CLB192_TEST_IMAGE')
+    if image is not None:
+        module['command'].__globals__['IMAGE'] = image
+    owner = globals().get('CLB192_TEST_OWNER')
+    if owner is not None:
+        import re
+        if not re.fullmatch('[0-9a-f]{32}', owner): raise ValueError('test_owner')
+        original = module['command']
+        def owned(*args, **kwargs):
+            argv = original(*args, **kwargs)
+            argv[2:2] = ['--label', 'clb192.native_suite='+owner]
+            return argv
+        module['run_case'].__globals__['command'] = owned
+    return module
+
+
 def request(op, case='remove'):
     old = json.loads(f['fixture'](op, case))
     return json.dumps(dict(format=1, request=NONCE,
@@ -135,7 +155,7 @@ class Controls(unittest.TestCase):
                 child.wait()
 
     def test_launcher_worker_cannot_mount_producer_originals_or_select_runtime(self):
-        launcher = runpy.run_path(str(HERE/'run-handoff.py'))
+        launcher = launcher_module()
         argv = launcher['command']('clb192-test', Path('/export'), 'code', NONCE, 'remove', transport='0'*64)
         for flag in ('--log-driver=none', '--network=none', '--read-only', '--cap-drop=ALL',
                      '--security-opt=no-new-privileges', '--user=1000:1000', '--pull=never'):
@@ -151,7 +171,7 @@ class Controls(unittest.TestCase):
     def test_cancellation_during_cleanup_cannot_publish_positive(self):
         import io
         import signal
-        launcher = runpy.run_path(str(HERE/'run-handoff.py'))
+        launcher = launcher_module()
         answer = p['public'](NONCE, 'equivalent', 'remove')
         mounts = [dict(Type='volume', Name='0'*64, Destination='/run/user/1000'),
                   dict(Type='volume', Name='1'*64, Destination=p['CANONICAL'])]
@@ -175,14 +195,14 @@ class Controls(unittest.TestCase):
                 subprocess=types.SimpleNamespace(Popen=lambda *args,**kwargs:fake,
                     PIPE=subprocess.PIPE, DEVNULL=subprocess.DEVNULL)):
             result = launcher['run_case'](h,p,types.SimpleNamespace(D=types.SimpleNamespace(capture_result=capture)),
-                Path(td),'synthetic code','remove')
+                Path(td),'synthetic code','remove', docker_env={'PATH': '/usr/bin:/bin'})
             self.assertTrue(launcher['run_case'].__globals__['CANCELLED'])
             self.assertEqual(result['result'], 'unavailable')
             self.assertEqual(result['cleanup'], 'confirmed_absent')
         self.assertEqual(signalled, [True])
 
     def test_parent_public_capture_bounded_and_child_reaped(self):
-        launcher = runpy.run_path(str(HERE/'run-handoff.py'))
+        launcher = launcher_module()
         for code, error in [('import os; os.read(0,512); os.write(1,b"x"*513)', ValueError),
                             ('import time; time.sleep(10)', TimeoutError)]:
             child = subprocess.Popen([sys.executable, '-I', '-S', '-B', '-c', code],
@@ -257,6 +277,16 @@ os.write(1,r)
         self.assertEqual(p['produce'](self.op, NONCE, 'remove', drift, lambda: False), p['public'](NONCE))
         self.assertEqual(self.exchanges, 1)
 
+    def test_real_lock_path_drift_after_worker_denies_success(self):
+        def drift(raw):
+            answer = self.exchange(raw)
+            lock = Path(p['CANONICAL'])/'.clubs-bot-release-state/application.lock'
+            lock.unlink()
+            lock.touch(mode=0o600)
+            return answer
+        self.assertEqual(p['produce'](self.op, NONCE, 'remove', drift, lambda: False), p['public'](NONCE))
+        self.assertEqual(self.exchanges, 1)
+
     def test_capture_cancellation_and_worker_crash(self):
         for cancelled in (True, False):
             def crash(raw):
@@ -317,11 +347,13 @@ class DockerComponents(unittest.TestCase):
     def test_supervisor_term_hup_remove_real_containers_and_volumes(self):
         import signal
         import time
+        bindings = {k: globals()[k] for k in ('CLB192_TEST_IMAGE', 'CLB192_TEST_OWNER') if k in globals()}
         driver = ("import runpy,sys\n"+
-            "m=runpy.run_path("+repr(str(HERE/'run-handoff.py'))+"); original=m['command']\n"+
+            "tests=runpy.run_path("+repr(str(HERE/'test-handoff.py'))+",init_globals="+repr(bindings)+")\n"+
+            "m=tests['launcher_module'](); original=m['run_case'].__globals__['command']\n"+
             "def slow(*args,**kwargs):\n"+
             " a=original(*args,**kwargs)\n"+
-            " if kwargs.get('transport') is not None: a[a.index('-c')+1]='import time; time.sleep(30)'\n"+
+            " if kwargs.get('transport') is not None: a[a.index('/usr/bin/python3.12')+5]='import time; time.sleep(30)'\n"+
             " return a\n"+
             "m['main'].__globals__['command']=slow\n"+
             "sys.exit(m['main']())\n")
@@ -368,7 +400,7 @@ class DockerComponents(unittest.TestCase):
                                    stderr=subprocess.DEVNULL, timeout=5)
 
     def test_two_containers_real_fifo_capture_planner_result_and_volume_cleanup(self):
-        launcher = runpy.run_path(str(HERE/'run-handoff.py'))
+        launcher = launcher_module()
         op = h['sources'](ROOT/'scripts/deploy')
         source = (HERE/'handoff.py').read_text()
         # Test-only component process: same capture and transport, direct real
@@ -384,6 +416,7 @@ class DockerComponents(unittest.TestCase):
                 "sys.exit(0 if json.loads(r)['result']=='equivalent' else 1)\n")
         with tempfile.TemporaryDirectory(prefix='clb192-component-export-') as td:
             export = Path(td).resolve()
+            export.chmod(0o755)
             (export/'scripts/deploy').mkdir(parents=True)
             for name in h['PINS']:
                 (export/'scripts/deploy'/name).write_bytes((ROOT/'scripts/deploy'/name).read_bytes())
@@ -398,6 +431,17 @@ class DockerComponents(unittest.TestCase):
                     self.assertEqual(result, dict(case=case, result=outcome, strategy=strategy,
                                                   cleanup='confirmed_absent'))
                     self.assertNotIn(p['CANARY'], json.dumps(result))
+            for role in ('worker', 'producer'):
+                # Real stderr noise is captured in the same bounded response;
+                # it cannot be discarded and still yield a positive result.
+                noise = "os.write(2,b'CLB192_STDERR_CANARY'); "
+                changed = (code.replace('os.write(1,r)', noise+'os.write(1,r)') if role == 'worker' else
+                           code.replace("if sys.argv[1]=='producer': ", "if sys.argv[1]=='producer': "+noise))
+                (export/'clb192-entry.py').unlink()
+                with self.subTest(stderr=role):
+                    result = launcher['run_case'](h,p,op,export,changed,'remove')
+                    self.assertEqual(result,dict(case='remove',result='unavailable',strategy=None,
+                                                 cleanup='confirmed_absent'))
 
 
 @unittest.skipUnless(sys.platform == 'linux' and os.environ.get('CLB192_CAPTURE_REFUSAL_TEST') == '1',
