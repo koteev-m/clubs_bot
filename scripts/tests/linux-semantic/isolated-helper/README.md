@@ -219,3 +219,164 @@ Final source-byte identities, runtime evidence and review disposition are in the
 CLB-191 handoff. Native post-guard stdin admission, Ruby mappings, positive helper
 end-to-end and native syscall audit remain unverified. Do not infer a complete
 negative matrix from the portable ordering tests or the earlier Rosetta refusal.
+
+## CLB-192 trusted snapshot handoff — local candidate
+
+`run-handoff.py` is a separate **synthetic-only** executable with no arguments,
+using the fixed cached image above (`--pull=never`). It leaves the original
+CLB-191 executable/test code, its CI evidence and production closures unchanged.
+Current boundary: **NATIVE_UNVERIFIED; TRANSACTION_READINESS=NO**.
+
+The local supervisor creates a disposable non-root synthetic producer container
+and one isolated worker per request. The producer's original fixtures live on an
+anonymous volume with **actually observed ext4 backing and UID 1000 ownership**.
+The unchanged `ReadOnlyCapture` validates principal, canonical descriptor graph,
+application/operation locks, owner/mode/link/device metadata, binding, real
+`findmnt` fingerprint, bounded reads and retained identities. No UID, mount or
+filesystem identity is patched. A tmpfs original-fixture mount really refuses.
+The producer takes the project from its validated binding (`clubs-bot-stage`);
+`clb191-synthetic` is rejected. This fixed synthetic profile does not accept
+caller-selected projects or existing stage inputs.
+
+```text
+local supervisor (trusted for this synthetic experiment)
+  -> synthetic producer: explicit local prerequisite -> unchanged capture
+  -> owned 0600 FIFO in private 0700 transport volume (one request, EOF)
+  -> isolated worker: pinned CLB-191 Runtime gate BEFORE opening/reading FIFO
+  -> production planner / Psych / Compose / sealed memfd / typed equivalence
+  -> bounded public response -> supervisor validates nonce/status/exit code
+  -> producer stdin -> captured-context/backing recheck -> descriptor close
+  -> supervisor removes exact containers/anonymous volumes, confirms absence
+  -> bounded public summary (positive only after successful cleanup)
+```
+
+The worker sees only the read-only source export and FIFO volume. Its canonical
+project directory is an independent empty tmpfs; **producer original fixtures are
+not mounted into the worker**. Relative path normalization retains the production
+canonical directory. Serialized snapshot bytes live only in process memory and
+the FIFO: no snapshot file, argv/environment transport, Docker logging, extra
+network channel or artifact. Fixture values are generated inside the producer;
+the command line carries only a fixed hash-checking source loader and public
+role/nonce/fixture enum. Source exports contain code, never captured inputs.
+Both containers retain network-none, read-only root, non-root UID, all capabilities
+dropped, no-new-privileges, default seccomp, 768 MiB/64 PID bounds and deadlines.
+No HOME, daemon socket, credentials or original checkout is mounted.
+
+`handoff.py` checks exact helper SHA-256
+`db2f01218abb739ec172d1c3ad037eb1efa2cd098db315b84d06dcaae73ea39e`
+before execution; that helper checks its unchanged five production source pins.
+The only adaptation is a fixed request evaluator supplied to the unchanged
+`execute()` function. Its complete Runtime guards, post-check and close remain.
+Even `different` returns through that post-check/close; cleanup errors refuse.
+Source hashes identify reviewed bytes; they do not attest the host or Docker.
+
+Ordered JSON request fields are `format=1`, `request` (32 lowercase hex),
+`project` (ordered `name`, `directory`), `base`, `dotenv`, `override`,
+`interpolation`. Maximum encoded frame: 196608 bytes; base/dotenv: 65536 each;
+override: 4096; interpolation retains the planner's 256-entry/65536-byte limits
+and all input/control-variable checks. Duplicate, unknown, absent, reordered,
+wrong-type, wrong-version/project/nonce, oversized and truncated fields refuse.
+Present empty dotenv is `""`; missing/null refuses. Canonical public JSON is at
+most 512 bytes and binds the nonce to `equivalent` with `remove`/`explicit`,
+`different`, or `unavailable`. It always retains `scope=snapshot`,
+`future=requires_recheck`, `application=not_authorized`. No production v1 frame,
+GitHub/SSH HMAC protocol or new stage authority is used.
+
+The local capture prerequisite checks actual non-root isolated Linux execution,
+clean environment, safe roots, no effective capabilities, no-new-privileges,
+seccomp, no external routes and no daemon socket **before fixture/snapshot work**.
+This is only a reviewed synthetic supervisor assumption. Independently trusted
+stage bootstrap/runtime identity, Docker daemon trust and stage principal rights
+remain **unestablished approval gates**. Architecture A does not replace the
+production full-runtime-before-private-env check.
+
+Verification on Darwin/Docker Desktop Rosetta:
+
+| Command / scope | Evidence |
+| --- | --- |
+| `python3 -I -S -B .../test-handoff.py Controls` | Portable protocol, source tamper, FIFO/FD, refusal ordering, output bounds PASS |
+| `CLB192_DOCKER_COMPONENT_TEST=1 python3 -I -S -B .../test-handoff.py DockerComponents` | Real two-container capture/FIFO/planner/result/cleanup: remove, explicit, different, empty PASS; supervisor TERM/HUP regression included |
+| `test-handoff.py Components` with `CLB192_COMPONENT_TEST=1`, ext4 anonymous original volume | Real capture, anonymous pipe child, planner, identity drift, lock retention/release, FD/cleanup, cancellation/crash and isolation PASS |
+| `test-handoff.py UnsupportedBacking` with `CLB192_CAPTURE_REFUSAL_TEST=1`, tmpfs originals | Actual backing refusal before snapshot handoff PASS |
+| `python3 -I -S -B .../run-handoff.py` | Full Runtime entrypoint: unavailable, exit 2; owned cleanup confirmed; **no native positive** |
+| Actual Runtime ordering probe using the new worker | `initial/maps`, reader not called, zero held FDs after cleanup |
+| Existing Linux `test-helper.py` / planner suite | 8/8 and 33/33 PASS |
+| Existing Linux context suite | 33 methods PASS; syscall audit FAIL with cascading error under Rosetta, retained as failed/unverified |
+| Existing semantic `RuntimeProfileTest ProtocolTest SourceTest`, native integration/codegen/driver/recipe controls | PASS; driver exact-runtime-tar test explicitly skipped (archive not supplied) |
+
+The Docker component test uses an explicit **test-only** direct `evaluate()`
+entrypoint to exercise real transfer and normalization despite Rosetta. It never
+claims Runtime acceptance and cannot be selected by `run-handoff.py`. No mock
+normalizer, modified runtime source or executable fallback exists. Native syscall
+exclusion of original-file reads remains unverified; network-none does not deny
+socket creation/loopback syscalls. Local isolation tests check denied external
+connection, absent daemon socket and read-only source/root, not a broader claim.
+
+For Linux component reproduction, export the current candidate outside the
+checkout as in CLB-191 above. Use the same fixed image and isolation flags,
+`/source:ro`, owned noexec tmpfs at `/run/user/1000` and `/work/runner-temp`, and
+`--mount type=volume,dst=/opt/clubs-bot-stage` instead of canonical tmpfs; Docker
+`--rm` removes that anonymous volume. Set `CLB192_COMPONENT_TEST=1` only on the
+test process; it clears its environment before the actual producer prerequisite.
+Run with `python3.12 -I -S -B`. For `UnsupportedBacking` use canonical tmpfs and
+its separate selector/environment flag. Exact production source/hash/runtime
+bindings stay unchanged. Production source pins and runtime ledgers remain unchanged. The native
+coordinator below adds exact bindings for its test-only source closure.
+
+One focused independent review found a supervisor TERM/HUP cleanup issue; its fix
+preserves cancellation through noninterruptible cleanup and stops further cases.
+The same reviewer confirmed no open security/implementation findings; the README
+wording finding is corrected. Final affected checks and the conditional single
+local commit are recorded in the task handoff. The initial local candidate was committed as
+`a6a0120af534ceb9b1b78ef55ec6af10739135e9`; the continuation below is separately
+authorized for publication and one native dispatch.
+
+
+### CLB-192 native acceptance integration
+
+`native-handoff-ci.py` runs after the unchanged CLB-191 native check in the
+existing manual-only `amd64-runtime-prototype` job. It checks native Linux x86_64,
+exact checkout/run/attempt identity and test source hashes, then reuses the
+existing verified preparation image and runtime manifest. No Mac image identity,
+new download chain, additional container privilege or production fallback is used.
+
+Four required full-runtime cases (remove, explicit, different, present-empty)
+execute the original `handoff.py`: real synthetic ReadOnlyCapture on the observed
+anonymous-volume backing, one bounded FIFO, unchanged Runtime gate before input,
+real planner, bound public result, producer recheck and confirmed cleanup.
+Unsupported backing refuses. Additional controls exercise protocol/source/runtime
+refusal, canonical identity, file/lock drift, timeout/crash/cancellation, FD cleanup,
+TERM/HUP supervision, scoped outer cleanup after real host timeout/SIGKILL,
+isolation and rejection of unexpected output on either
+stdout or stderr. Component cases remain explicitly distinct from full Runtime
+acceptance; no skipped or failed case can produce native PASS.
+
+The host launcher accepts the preparation-verified image only through its Python
+integration API; the local command-line image selection is unchanged. Code-only
+exports are traversable by UID 1000 and their files are read-only. Runtime and
+snapshot bytes never enter public output. A strict additional artifact,
+`clb192-handoff/result.json` (maximum 4096 bytes), contains only commit/run/attempt,
+runtime/test-source identities, fixed stage verdicts and cleanup status. Its PASS
+must match the preceding CLB-191 and preparation evidence. The existing aggregate
+artifact bound and explicit upload list remain in force; malformed, extra,
+oversized and substituted evidence refuses.
+
+Local verification commands: `test-handoff.py Controls`, explicit Linux
+`Components`/`UnsupportedBacking`, `DockerComponents`, `test-native-handoff.py`,
+`test-native-ci.py`, `test_amd64_ci_harness.py`, existing native recipe/codegen/driver
+and workflow YAML/capability validators. The CI suite wrapper is also exercised
+against the real local Linux component fixtures. Rosetta's existing maps/syscall
+limitations remain unmodified: hosted native acceptance for the new exact commit
+is **UNVERIFIED** until terminal evidence is reviewed. Stage bootstrap trust,
+Docker daemon trust and stage rights are still unestablished; production
+runtime-before-private-env remains mandatory; `TRANSACTION_READINESS=NO`.
+
+The focused independent continuation review passed after fixing outer host-suite
+timeout cleanup. Real Docker regressions confirm label-scoped container/volume
+removal; source pins, strict evidence controls and affected harness checks pass.
+
+The user authorized one additional commit, normal push, Draft PR and one exact-ref
+manual Tests dispatch, including unchanged unit/integration jobs. Publication/run
+identities and review disposition are recorded in the task handoff. The only next
+step after bounded dispatch readback is to return terminal automatic PR CI and
+manual native Tests evidence to ChatGPT for review; no polling or stage action.
