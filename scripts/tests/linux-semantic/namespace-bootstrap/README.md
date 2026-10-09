@@ -68,8 +68,16 @@ withheld child stderr. The follow-up candidate emits only a checked suite verdic
 and fixed test method names to stdout. The coordinator accepts PASS only with the
 complete 14-test report and exit zero; on failure it prints a bounded method name
 or `UNKNOWN`. It still withholds assertion text, child stderr and private values.
-This diagnostic does not establish the Ubuntu failure cause by itself. The
-authorized single follow-up Tests run may identify the failing Ubuntu predicate.
+Tests run 37965271312 identified
+`test_generated_common_c_core_real_lifecycle` as the failing Ubuntu test, but
+its bounded output cannot distinguish materialization, compilation, execution,
+stderr, timeout or summary failure. The follow-up local candidate marks the
+first failing stage with a fixed `c_stage` category in the portable V2 report.
+The coordinator validates that category and the exit code before publishing it;
+it never publishes compiler output, process stderr or assertion text. This is
+diagnosis only: the same C assertions and native PASS gates remain required.
+Linux GCC behavior and the exact defect remain unverified until the authorized
+single native run of these changed bytes.
 
 ## One future manual Tests run
 

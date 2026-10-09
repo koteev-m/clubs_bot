@@ -193,16 +193,45 @@ class Tests(unittest.TestCase):
 
     def test_portable_report_is_bounded_and_cannot_turn_failure_into_pass(self):
         cases={'test_generated_common_c_core_real_lifecycle'}
-        pass_line=b'CLB195_PORTABLE_V1 status=PASS tests=14 failed=none\n'
-        failure=b'CLB195_PORTABLE_V1 status=FAIL tests=14 failed=test_generated_common_c_core_real_lifecycle\n'
-        self.assertEqual(ci.portable_result(pass_line,0,cases),(True,'none'))
+        pass_line=b'CLB195_PORTABLE_V2 status=PASS tests=14 failed=none c_stage=none\n'
+        failure=(b'CLB195_PORTABLE_V2 status=FAIL tests=14 '
+                 b'failed=test_generated_common_c_core_real_lifecycle c_stage=compile_nonzero\n')
+        self.assertEqual(ci.portable_result(pass_line,0,cases),(True,'none','none'))
         self.assertEqual(ci.portable_result(failure,1,cases),
-                         (False,'test_generated_common_c_core_real_lifecycle'))
+                         (False,'test_generated_common_c_core_real_lifecycle','compile_nonzero'))
         for raw,code in [(pass_line,1),(failure,0),(pass_line+b'PRIVATE_CANARY',0),
-                         (b'CLB195_PORTABLE_V1 status=FAIL tests=14 failed=none\n',1),
-                         (b'CLB195_PORTABLE_V1 status=FAIL tests=14 failed=test_unknown\n',1)]:
+                         (b'CLB195_PORTABLE_V2 status=FAIL tests=14 failed=none c_stage=none\n',1),
+                         (b'CLB195_PORTABLE_V2 status=FAIL tests=14 failed=test_unknown c_stage=none\n',1),
+                         (b'CLB195_PORTABLE_V2 status=PASS tests=14 failed=none c_stage=compile_nonzero\n',0),
+                         (failure.replace(b'compile_nonzero',b'PRIVATE_CANARY'),1)]:
             with self.subTest(raw=raw[:45],code=code):
                 self.assertFalse(ci.portable_result(raw,code,cases)[0])
+        for stage, outcomes in (
+            ('compile_timeout', [subprocess.TimeoutExpired('cc',45)]),
+            ('compile_nonzero', [subprocess.CompletedProcess([],1,b'',b'PRIVATE_CANARY')]),
+            ('core_exit_nonzero', [subprocess.CompletedProcess([],0,b'',b''),
+                                   subprocess.CompletedProcess([],1,b'',b'')]),
+            ('core_timeout', [subprocess.CompletedProcess([],0,b'',b''),
+                              subprocess.TimeoutExpired('core',10)]),
+            ('core_stderr_nonempty', [subprocess.CompletedProcess([],0,b'',b''),
+                                      subprocess.CompletedProcess([],0,b'',b'PRIVATE_CANARY')]),
+            ('core_stdout_bounds', [subprocess.CompletedProcess([],0,b'',b''),
+                                    subprocess.CompletedProcess([],0,b'x'*16384,b'')]),
+            ('summary_parse', [subprocess.CompletedProcess([],0,b'',b''),
+                               subprocess.CompletedProcess([],0,b'not-json\n',b'')]),
+            ('summary_schema', [subprocess.CompletedProcess([],0,b'',b''),
+                                subprocess.CompletedProcess([],0,b'{}\n',b'')]),
+            ('summary_failed', [subprocess.CompletedProcess([],0,b'',b''),
+                                subprocess.CompletedProcess([],0,
+                                    b'{"summary":{"failed":1,"native_namespace":"NOT_RUN"}}\n',b'')]),
+            ('summary_namespace', [subprocess.CompletedProcess([],0,b'',b''),
+                                   subprocess.CompletedProcess([],0,
+                                       b'{"summary":{"failed":0,"native_namespace":"BAD"}}\n',b'')])):
+            case=Tests('test_generated_common_c_core_real_lifecycle')
+            with self.subTest(stage=stage),patch.object(subprocess,'run',side_effect=outcomes),\
+                    self.assertRaises((AssertionError,subprocess.TimeoutExpired,ValueError,KeyError)):
+                case.test_generated_common_c_core_real_lifecycle()
+            self.assertEqual(case.c_core_stage,stage)
 
     def test_artifact_boundary_rejects_leaks_stale_identity_and_missing_prior(self):
         checker=runpy.run_path(str(build.NATIVE/'ci/check-artifacts.py'))['check']
@@ -234,21 +263,36 @@ class Tests(unittest.TestCase):
         # Actual common native-adapter C primitives on the host, no namespaces/root.
         # This checks the newly generated variant's framing, held-file drift,
         # real child timeout/signal and owned cleanup; never a native PASS.
+        self.c_core_stage='source_load'
         driver=runpy.run_path(str(build.NATIVE/'tests/native-driver.py'))
         with tempfile.TemporaryDirectory() as td:
+            self.c_core_stage='materialize'
             root=Path(td);build.materialize(root/'variant',driver)
             command=['cc','-std=c11','-O1','-Wall','-Wextra','-Werror',
                      '-Wno-unused-function','-Wno-misleading-indentation',
                      str(root/'variant/adapter/core-tests.c'),'-o',str(root/'core')]
+            self.c_core_stage='compile_timeout'
             compiled=subprocess.run(command,capture_output=True,timeout=45)
-            self.assertEqual(compiled.returncode,0,compiled.stderr.decode()[:2048])
+            self.c_core_stage='compile_nonzero'
+            self.assertEqual(compiled.returncode,0,compiled.stderr.decode(errors='replace')[:2048])
+            self.c_core_stage='core_timeout'
             result=subprocess.run([str(root/'core')],capture_output=True,timeout=10)
+            self.c_core_stage='core_exit_nonzero'
             self.assertEqual(result.returncode,0)
+            self.c_core_stage='core_stderr_nonempty'
             self.assertEqual(result.stderr,b'')
+            self.c_core_stage='core_stdout_bounds'
             self.assertLess(len(result.stdout),16384)
+            self.c_core_stage='summary_parse'
             records=[json.loads(line) for line in result.stdout.splitlines()]
-            self.assertEqual(records[-1]['summary']['failed'],0)
-            self.assertEqual(records[-1]['summary']['native_namespace'],'NOT_RUN')
+            self.c_core_stage='summary_schema'
+            summary=records[-1]['summary']
+            failed=summary['failed']
+            self.c_core_stage='summary_failed'
+            self.assertEqual(failed,0)
+            self.c_core_stage='summary_namespace'
+            self.assertEqual(summary['native_namespace'],'NOT_RUN')
+        self.c_core_stage='none'
 
     def test_native_isolation_source_contract(self):
         text=(HERE/'namespace.h').read_text()
@@ -263,15 +307,31 @@ class Tests(unittest.TestCase):
 
 
 if __name__=='__main__':
-    # CI exposes only fixed test identifiers, never assertion text or child stderr.
+    # CI exposes only fixed test identifiers/stages, never assertion text or child stderr.
+    class BoundedResult(unittest.TestResult):
+        c_core_stage='none'
+
+        def addFailure(self,test,err):
+            super().addFailure(test,err)
+            if test._testMethodName == 'test_generated_common_c_core_real_lifecycle':
+                stage=getattr(test,'c_core_stage','unclassified')
+                self.c_core_stage=stage if stage in ci.C_STAGES else 'unclassified'
+
+        def addError(self,test,err):
+            super().addError(test,err)
+            if test._testMethodName == 'test_generated_common_c_core_real_lifecycle':
+                stage=getattr(test,'c_core_stage','unclassified')
+                self.c_core_stage=stage if stage in ci.C_STAGES else 'unclassified'
+
     cases = unittest.defaultTestLoader.loadTestsFromTestCase(Tests)
-    result = unittest.TestResult()
+    result = BoundedResult()
     cases.run(result)
     failed = sorted({test._testMethodName for test, _ in result.failures + result.errors})
     complete = (result.testsRun == 14 and len(cases._tests) == 14 and
                 not result.skipped and not result.expectedFailures and
                 not result.unexpectedSuccesses and not result.shouldStop)
     verdict = 'PASS' if result.wasSuccessful() and complete else 'FAIL'
-    print('CLB195_PORTABLE_V1 status='+verdict+' tests='+str(result.testsRun)+
-          ' failed='+(','.join(failed) if failed else 'none'))
+    print('CLB195_PORTABLE_V2 status='+verdict+' tests='+str(result.testsRun)+
+          ' failed='+(','.join(failed) if failed else 'none')+
+          ' c_stage='+result.c_core_stage)
     raise SystemExit(0 if verdict == 'PASS' else 1)

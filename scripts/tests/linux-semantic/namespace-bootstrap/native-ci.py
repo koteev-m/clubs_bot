@@ -12,6 +12,10 @@ HERE = Path(__file__).resolve().parent
 BOUND = 4096
 CONTROLS = ('positive', 'wrong_uid', 'symlink', 'runtime_hash', 'actual_tmpfs_backing')
 PHASES = ('prior', 'source', 'portable', 'runtime', 'build', 'core', 'capture', 'cleanup', 'complete')
+C_STAGES = ('unclassified', 'source_load', 'materialize', 'compile_timeout', 'compile_nonzero',
+            'core_timeout', 'core_exit_nonzero', 'core_stderr_nonempty',
+            'core_stdout_bounds', 'summary_parse', 'summary_schema',
+            'summary_failed', 'summary_namespace')
 
 
 def need(value):
@@ -61,16 +65,24 @@ def native_result(report, exit_code):
 
 
 def portable_result(answer, exit_code, available):
-    """Return only a checked verdict and fixed test names; never child stderr."""
-    match = re.fullmatch(rb'CLB195_PORTABLE_V1 status=(PASS|FAIL) tests=14 failed=(none|test_[a-z_]+(?:,test_[a-z_]+)*)\n', answer)
+    """Return only checked fixed test names and C stage; never child stderr."""
+    match = re.fullmatch(rb'CLB195_PORTABLE_V2 status=(PASS|FAIL) tests=14 '
+                         rb'failed=(none|test_[a-z_]+(?:,test_[a-z_]+)*) '
+                         rb'c_stage=([a-z_]+)\n', answer)
     if match is None:
-        return False, 'UNKNOWN'
+        return False, 'UNKNOWN', 'UNKNOWN'
+    stage = match[3].decode('ascii')
     if match[1] == b'PASS':
-        return exit_code == 0 and match[2] == b'none', 'none'
+        if stage != 'none':
+            return False, 'UNKNOWN', 'UNKNOWN'
+        return exit_code == 0 and match[2] == b'none', 'none', 'none'
     names = match[2].decode('ascii').split(',')
-    if names == ['none'] or len(names) != len(set(names)) or set(names) - available:
-        return False, 'UNKNOWN'
-    return False, ','.join(names)
+    if (exit_code == 0 or names == ['none'] or len(names) != len(set(names)) or
+            set(names) - available or
+            (stage in C_STAGES) != ('test_generated_common_c_core_real_lifecycle' in names) or
+            stage not in C_STAGES + ('none',)):
+        return False, 'UNKNOWN', 'UNKNOWN'
+    return False, ','.join(names), stage
 
 
 def main():
@@ -102,6 +114,7 @@ def main():
     commands = []
     privileged = False
     portable_failed = 'UNKNOWN'
+    portable_stage = 'UNKNOWN'
     try:
         previous = runpy.run_path(str(HERE.parent/'isolated-helper/native-handoff-ci.py'))
         oldhelper = runpy.run_path(str(HERE.parent/'isolated-helper/native-ci.py'))
@@ -127,8 +140,8 @@ def main():
                          require_exit=False)
         portable_source = build['checked'](HERE/'test-bootstrap.py',record['sources']['test-bootstrap.py'])
         available = set(re.findall(rb'^\s+def (test_[a-z_]+)\(', portable_source, re.M))
-        passed, portable_failed = portable_result(answer, commands[-1].get('exit'),
-                                                 {name.decode('ascii') for name in available})
+        passed, portable_failed, portable_stage = portable_result(
+            answer, commands[-1].get('exit'), {name.decode('ascii') for name in available})
         need(passed)
         record['steps']['portable'] = 'PASS'
         record['phase'] = 'runtime'
@@ -189,7 +202,8 @@ def main():
             need(os.write(fd,encoded) == len(encoded))
         finally:
             os.close(fd)
-    suffix = ' portable_test='+portable_failed if record['verdict'] == 'FAIL' and record['phase'] == 'portable' else ''
+    suffix = (' portable_test='+portable_failed+' c_stage='+portable_stage
+              if record['verdict'] == 'FAIL' and record['phase'] == 'portable' else '')
     print('CLB195_NAMESPACE_'+record['verdict']+suffix)
     return 0 if record['verdict'] == 'PASS' else 1
 
