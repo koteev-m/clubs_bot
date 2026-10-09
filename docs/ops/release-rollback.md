@@ -125,6 +125,30 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
+### CLB-195 synthetic namespace candidate (2026-10-09)
+
+The CLB-195 implementation uses the user-selected existing manual
+Tests / ubuntu-24.04 job for future native verification; the Darwin limitation
+no longer blocks source development. The [synthetic namespace-bootstrap candidate](../../scripts/tests/linux-semantic/namespace-bootstrap/README.md)
+is implemented locally. It reuses the pinned native-adapter for original-object
+leases/mounts and makes a fixed producer/worker variant without editing production
+Runtime, planner, release state machine or CLB-192 sources. Producer completes the
+full Runtime before snapshot capture; worker has its own mount/PID/network view,
+empty canonical directory, closed original FDs and pipe-only snapshot input.
+Full interpolation is enforced for the fixed synthetic exec environment only.
+The existing manual job gains one bounded step and one <=4096-byte result under
+the unchanged artifact cap, permissions and global job timeouts. Portable checks
+are local evidence; the new Linux static build and namespace execution are
+**NATIVE_PENDING**. Old CLB-192 native PASS is reused, not promoted to new behavior.
+The user authorized focused review, fixes, one thematic branch with minimal
+commit/push, one Draft PR and one exact-ref manual Tests run, with no rerun or
+deployment. Review found and fixed PID1 default-signal timeout handling and
+incomplete negative-control evidence acceptance. Public evidence now requires
+the exact native control inventory, original recheck and cleanup, and records a
+bounded execution phase. Publication/run identities and actual outcome belong
+in the handoff; local checks do not establish native acceptance. No stage
+capture, writer, migration or resume is introduced.
+
 ### CLB-91 local private-snapshot env-file proposal (no live writer)
 
 User-provided terminal evidence for [run 35371386455](https://github.com/koteev-m/clubs_bot/actions/runs/35371386455),
