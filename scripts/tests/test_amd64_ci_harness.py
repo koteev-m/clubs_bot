@@ -8,6 +8,7 @@ import shutil
 import signal
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,26 @@ def load(name, file):
 
 ci = load('amd64_ci', 'run-amd64-ci.py')
 downloads = load('amd64_downloads', 'prepare-amd64-downloads.py')
+GCC_WARNINGS = frozenset(('array-bounds', 'discarded-qualifiers', 'format',
+    'format-overflow', 'format-truncation', 'implicit-function-declaration',
+    'incompatible-pointer-types', 'int-conversion', 'maybe-uninitialized',
+    'restrict', 'return-type', 'sign-compare', 'sizeof-pointer-memaccess',
+    'stringop-overflow', 'stringop-truncation', 'type-limits',
+    'uninitialized', 'unused-but-set-variable', 'unused-function',
+    'unused-parameter', 'unused-variable', 'none', 'other', 'UNKNOWN'))
+
+
+def bounded_clb195_gcc(stderr):
+    """Do not relay arbitrary portable-test stderr into the Lint log."""
+    match = re.fullmatch(rb'CLB195_GCC_DIAG '
+        rb'source=(adapter\.c|core-tests\.c|generated_contract\.h|UNKNOWN) '
+        rb'line=(0|[1-9][0-9]{0,5}) warning=([a-z-]+|UNKNOWN)\n', stderr)
+    if match is None:
+        return 'CLB195_GCC_DIAG source=UNKNOWN line=0 warning=UNKNOWN'
+    source, line, warning = match.groups()
+    if warning.decode('ascii') not in GCC_WARNINGS or ((source == b'UNKNOWN') != (line == b'0')):
+        return 'CLB195_GCC_DIAG source=UNKNOWN line=0 warning=UNKNOWN'
+    return match[0].decode('ascii').strip()
 
 
 class HarnessTest(unittest.TestCase):
@@ -111,9 +132,14 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, 'CLB-192 native contract controls failed')
 
     def test_clb195_namespace_portable_controls(self):
+        sample=b'CLB195_GCC_DIAG source=adapter.c line=123 warning=unused-variable\n'
+        self.assertEqual(bounded_clb195_gcc(sample),sample.decode().strip())
+        self.assertEqual(bounded_clb195_gcc(sample+b'PRIVATE_CANARY'),
+                         'CLB195_GCC_DIAG source=UNKNOWN line=0 warning=UNKNOWN')
         result = subprocess.run([sys.executable, '-I', '-S', '-B',
             str(HERE / 'namespace-bootstrap/test-bootstrap.py')], capture_output=True, timeout=90)
-        self.assertEqual(result.returncode, 0, 'CLB-195 namespace controls failed')
+        self.assertEqual(result.returncode, 0,
+                         'CLB-195 namespace controls failed: '+bounded_clb195_gcc(result.stderr))
 
     def test_selfcheck_composition(self):
         text = (ROOT / 'scripts/selfcheck-quality-gates.sh').read_text()

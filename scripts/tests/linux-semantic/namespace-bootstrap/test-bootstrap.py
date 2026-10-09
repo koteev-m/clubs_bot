@@ -29,6 +29,30 @@ ci = load('native-ci')
 p = runpy.run_path(str(build.HELPER/'handoff.py'))
 NONCE = 'a'*32
 ENV = {'PATH':'/usr/bin:/bin','HOME':'/run/user/1000','LC_ALL':'C'}
+GCC_WARNINGS = frozenset(('array-bounds', 'discarded-qualifiers', 'format',
+    'format-overflow', 'format-truncation', 'implicit-function-declaration',
+    'incompatible-pointer-types', 'int-conversion', 'maybe-uninitialized',
+    'restrict', 'return-type', 'sign-compare', 'sizeof-pointer-memaccess',
+    'stringop-overflow', 'stringop-truncation', 'type-limits',
+    'uninitialized', 'unused-but-set-variable', 'unused-function',
+    'unused-parameter', 'unused-variable'))
+
+
+def gcc_diagnostic(stderr):
+    """Publish only a source identity, bounded line and fixed warning name."""
+    for line in stderr[:65536].splitlines():
+        match = re.fullmatch(
+            rb'(?:[^\r\n]*[/\\])?(adapter\.c|core-tests\.c|generated_contract\.h)'
+            rb':([1-9][0-9]{0,5})(?::[1-9][0-9]{0,3})?: (?:fatal )?error: [^\r\n]*',
+            line)
+        if match is None:
+            continue
+        option = re.search(rb'\[-Werror=([a-z0-9-]{1,48})\]$', line)
+        warning = option[1].decode('ascii') if option else 'none'
+        if warning not in GCC_WARNINGS and warning != 'none':
+            warning = 'other'
+        return (match[1].decode('ascii'), int(match[2]), warning)
+    return ('UNKNOWN', 0, 'UNKNOWN')
 
 
 class Tests(unittest.TestCase):
@@ -192,6 +216,13 @@ class Tests(unittest.TestCase):
         with self.assertRaises(Exception):ci.native_result(good,1)
 
     def test_portable_report_is_bounded_and_cannot_turn_failure_into_pass(self):
+        diagnostic=(b'/tmp/PRIVATE_CANARY/variant/adapter/adapter.c:123:4: error: '
+                    b'PRIVATE_CANARY [-Werror=unused-variable]\n')
+        self.assertEqual(gcc_diagnostic(diagnostic),('adapter.c',123,'unused-variable'))
+        self.assertEqual(gcc_diagnostic(b'/tmp/PRIVATE_CANARY:1: error: PRIVATE_CANARY\n'),
+                         ('UNKNOWN',0,'UNKNOWN'))
+        self.assertEqual(gcc_diagnostic(diagnostic.replace(b'unused-variable',b'PRIVATE_CANARY')),
+                         ('adapter.c',123,'none'))
         cases={'test_generated_common_c_core_real_lifecycle'}
         pass_line=b'CLB195_PORTABLE_V2 status=PASS tests=14 failed=none c_stage=none\n'
         failure=(b'CLB195_PORTABLE_V2 status=FAIL tests=14 '
@@ -274,6 +305,8 @@ class Tests(unittest.TestCase):
             self.c_core_stage='compile_timeout'
             compiled=subprocess.run(command,capture_output=True,timeout=45)
             self.c_core_stage='compile_nonzero'
+            if compiled.returncode:
+                self.c_core_gcc_diag=gcc_diagnostic(compiled.stderr)
             self.assertEqual(compiled.returncode,0,compiled.stderr.decode(errors='replace')[:2048])
             self.c_core_stage='core_timeout'
             result=subprocess.run([str(root/'core')],capture_output=True,timeout=10)
@@ -307,21 +340,24 @@ class Tests(unittest.TestCase):
 
 
 if __name__=='__main__':
-    # CI exposes only fixed test identifiers/stages, never assertion text or child stderr.
+    # CI exposes fixed identifiers/stages and a bounded GCC location, never raw stderr.
     class BoundedResult(unittest.TestResult):
         c_core_stage='none'
+        c_core_gcc_diag=('UNKNOWN',0,'UNKNOWN')
 
         def addFailure(self,test,err):
             super().addFailure(test,err)
             if test._testMethodName == 'test_generated_common_c_core_real_lifecycle':
                 stage=getattr(test,'c_core_stage','unclassified')
                 self.c_core_stage=stage if stage in ci.C_STAGES else 'unclassified'
+                self.c_core_gcc_diag=getattr(test,'c_core_gcc_diag',('UNKNOWN',0,'UNKNOWN'))
 
         def addError(self,test,err):
             super().addError(test,err)
             if test._testMethodName == 'test_generated_common_c_core_real_lifecycle':
                 stage=getattr(test,'c_core_stage','unclassified')
                 self.c_core_stage=stage if stage in ci.C_STAGES else 'unclassified'
+                self.c_core_gcc_diag=getattr(test,'c_core_gcc_diag',('UNKNOWN',0,'UNKNOWN'))
 
     cases = unittest.defaultTestLoader.loadTestsFromTestCase(Tests)
     result = BoundedResult()
@@ -334,4 +370,8 @@ if __name__=='__main__':
     print('CLB195_PORTABLE_V2 status='+verdict+' tests='+str(result.testsRun)+
           ' failed='+(','.join(failed) if failed else 'none')+
           ' c_stage='+result.c_core_stage)
+    if verdict == 'FAIL' and result.c_core_stage == 'compile_nonzero':
+        source, line, warning = result.c_core_gcc_diag
+        print('CLB195_GCC_DIAG source='+source+' line='+str(line)+
+              ' warning='+warning, file=sys.stderr)
     raise SystemExit(0 if verdict == 'PASS' else 1)

@@ -74,10 +74,16 @@ its bounded output cannot distinguish materialization, compilation, execution,
 stderr, timeout or summary failure. The follow-up local candidate marks the
 first failing stage with a fixed `c_stage` category in the portable V2 report.
 The coordinator validates that category and the exit code before publishing it;
-it never publishes compiler output, process stderr or assertion text. This is
+it never publishes raw compiler output, process stderr or assertion text. This is
 diagnosis only: the same C assertions and native PASS gates remain required.
-Linux GCC behavior and the exact defect remain unverified until the authorized
-single native run of these changed bytes.
+Linux GCC behavior and the exact defect remain unverified until the automatic
+PR Lint runs these changed bytes.
+
+The automatic PR Lint runs the existing portable suite through its CI harness.
+On a C compile failure, that harness now publishes only an allowlisted C source
+name, bounded line number and fixed GCC warning category. The test still fails;
+raw compiler output, source paths and assertion text stay private. This diagnoses
+the Linux compiler refusal without running the native namespace step.
 
 ## One future manual Tests run
 
