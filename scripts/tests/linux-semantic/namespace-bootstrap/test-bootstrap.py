@@ -191,6 +191,19 @@ class Tests(unittest.TestCase):
             with self.assertRaises(Exception):ci.native_result(bad,0)
         with self.assertRaises(Exception):ci.native_result(good,1)
 
+    def test_portable_report_is_bounded_and_cannot_turn_failure_into_pass(self):
+        cases={'test_generated_common_c_core_real_lifecycle'}
+        pass_line=b'CLB195_PORTABLE_V1 status=PASS tests=14 failed=none\n'
+        failure=b'CLB195_PORTABLE_V1 status=FAIL tests=14 failed=test_generated_common_c_core_real_lifecycle\n'
+        self.assertEqual(ci.portable_result(pass_line,0,cases),(True,'none'))
+        self.assertEqual(ci.portable_result(failure,1,cases),
+                         (False,'test_generated_common_c_core_real_lifecycle'))
+        for raw,code in [(pass_line,1),(failure,0),(pass_line+b'PRIVATE_CANARY',0),
+                         (b'CLB195_PORTABLE_V1 status=FAIL tests=14 failed=none\n',1),
+                         (b'CLB195_PORTABLE_V1 status=FAIL tests=14 failed=test_unknown\n',1)]:
+            with self.subTest(raw=raw[:45],code=code):
+                self.assertFalse(ci.portable_result(raw,code,cases)[0])
+
     def test_artifact_boundary_rejects_leaks_stale_identity_and_missing_prior(self):
         checker=runpy.run_path(str(build.NATIVE/'ci/check-artifacts.py'))['check']
         data=dict(format=1,verdict='FAIL',sha='a'*40,run_id='1',attempt='1',
@@ -250,4 +263,15 @@ class Tests(unittest.TestCase):
 
 
 if __name__=='__main__':
-    unittest.main()
+    # CI exposes only fixed test identifiers, never assertion text or child stderr.
+    cases = unittest.defaultTestLoader.loadTestsFromTestCase(Tests)
+    result = unittest.TestResult()
+    cases.run(result)
+    failed = sorted({test._testMethodName for test, _ in result.failures + result.errors})
+    complete = (result.testsRun == 14 and len(cases._tests) == 14 and
+                not result.skipped and not result.expectedFailures and
+                not result.unexpectedSuccesses and not result.shouldStop)
+    verdict = 'PASS' if result.wasSuccessful() and complete else 'FAIL'
+    print('CLB195_PORTABLE_V1 status='+verdict+' tests='+str(result.testsRun)+
+          ' failed='+(','.join(failed) if failed else 'none'))
+    raise SystemExit(0 if verdict == 'PASS' else 1)

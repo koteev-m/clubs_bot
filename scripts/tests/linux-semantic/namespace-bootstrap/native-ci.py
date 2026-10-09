@@ -60,6 +60,19 @@ def native_result(report, exit_code):
     return {name:'PASS' for name in CONTROLS}
 
 
+def portable_result(answer, exit_code, available):
+    """Return only a checked verdict and fixed test names; never child stderr."""
+    match = re.fullmatch(rb'CLB195_PORTABLE_V1 status=(PASS|FAIL) tests=14 failed=(none|test_[a-z_]+(?:,test_[a-z_]+)*)\n', answer)
+    if match is None:
+        return False, 'UNKNOWN'
+    if match[1] == b'PASS':
+        return exit_code == 0 and match[2] == b'none', 'none'
+    names = match[2].decode('ascii').split(',')
+    if names == ['none'] or len(names) != len(set(names)) or set(names) - available:
+        return False, 'UNKNOWN'
+    return False, ','.join(names)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--prepared', required=True)
@@ -88,6 +101,7 @@ def main():
     inventory = None
     commands = []
     privileged = False
+    portable_failed = 'UNKNOWN'
     try:
         previous = runpy.run_path(str(HERE.parent/'isolated-helper/native-handoff-ci.py'))
         oldhelper = runpy.run_path(str(HERE.parent/'isolated-helper/native-ci.py'))
@@ -109,7 +123,13 @@ def main():
             blob = capture(['/usr/bin/git','-C',str(repo),'show',record['sha']+':'+relative],10,commands)
             need(build['sha'](blob) == digest)
         record['phase'] = 'portable'
-        capture(['/usr/bin/python3','-I','-S','-B',str(HERE/'test-bootstrap.py')],90,commands)
+        answer = capture(['/usr/bin/python3','-I','-S','-B',str(HERE/'test-bootstrap.py')],90,commands,
+                         require_exit=False)
+        portable_source = build['checked'](HERE/'test-bootstrap.py',record['sources']['test-bootstrap.py'])
+        available = set(re.findall(rb'^\s+def (test_[a-z_]+)\(', portable_source, re.M))
+        passed, portable_failed = portable_result(answer, commands[-1].get('exit'),
+                                                 {name.decode('ascii') for name in available})
+        need(passed)
         record['steps']['portable'] = 'PASS'
         record['phase'] = 'runtime'
         raw, entries = old['validate_tar'](prepared/'runtime/native/rootfs.tar')
@@ -169,7 +189,8 @@ def main():
             need(os.write(fd,encoded) == len(encoded))
         finally:
             os.close(fd)
-    print('CLB195_NAMESPACE_'+record['verdict'])
+    suffix = ' portable_test='+portable_failed if record['verdict'] == 'FAIL' and record['phase'] == 'portable' else ''
+    print('CLB195_NAMESPACE_'+record['verdict']+suffix)
     return 0 if record['verdict'] == 'PASS' else 1
 
 

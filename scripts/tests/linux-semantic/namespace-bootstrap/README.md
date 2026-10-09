@@ -62,6 +62,15 @@ not a real namespace. Pipe timeout and generated common C lifecycle tests execut
 actual OS operations without root. Native namespace execution and Linux static
 linking remain pending; no privileged test runs on Darwin/Rosetta.
 
+Run 37949150044 stopped in `portable` before static build or namespace execution.
+Its published evidence did not identify the failing test because the coordinator
+withheld child stderr. The follow-up candidate emits only a checked suite verdict
+and fixed test method names to stdout. The coordinator accepts PASS only with the
+complete 14-test report and exit zero; on failure it prints a bounded method name
+or `UNKNOWN`. It still withholds assertion text, child stderr and private values.
+This diagnostic does not establish the Ubuntu failure cause by itself. The
+authorized single follow-up Tests run may identify the failing Ubuntu predicate.
+
 ## One future manual Tests run
 
 After separately authorized publication and dispatch, the existing
