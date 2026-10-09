@@ -336,6 +336,13 @@ jobs:
           python3 -I -S -B scripts/tests/linux-semantic/isolated-helper/native-handoff-ci.py
           --prepared "${{ runner.temp }}/clb91-adapter-inputs"
           --output "${{ runner.temp }}/clb192-handoff"
+      - name: Native namespace capture to isolated normalizer
+        # Synthetic-only, fixed one-shot namespace setup; separate run authorization.
+        timeout-minutes: 15
+        run: >-
+          python3 -I -S -B scripts/tests/linux-semantic/namespace-bootstrap/native-ci.py
+          --prepared "${{ runner.temp }}/clb91-adapter-inputs"
+          --output "${{ runner.temp }}/clb195-namespace"
       - name: Check synthetic evidence allowlist and size
         if: always()
         id: evidence
@@ -357,3 +364,4 @@ jobs:
             ${{ runner.temp }}/clb91-native-adapter/evidence/compiler.json
             ${{ runner.temp }}/clb191-isolated-helper/result.json
             ${{ runner.temp }}/clb192-handoff/result.json
+            ${{ runner.temp }}/clb195-namespace/result.json

@@ -61,11 +61,12 @@ class HarnessTest(unittest.TestCase):
               ('environment.json', 'result.json', 'commands.json', 'compiler.json')),
             '${{ runner.temp }}/clb191-isolated-helper/result.json',
             '${{ runner.temp }}/clb192-handoff/result.json',
+            '${{ runner.temp }}/clb195-namespace/result.json',
         ])
         # This is a candidate native adapter experiment, not the old 191/4 suite.
         # Explicit preparation/namespace markers do not themselves grant permission.
         prefix = 'scripts/tests/linux-semantic/native-adapter/'
-        self.assertEqual(len(steps), 8)
+        self.assertEqual(len(steps), 9)
         self.assertEqual(steps[1]['run'], 'python3 -I -S -B ' + prefix + 'ci/test-recipe.py')
         self.assertEqual(steps[2]['run'], 'python3 -I -S -B ' + prefix +
             'ci/prepare-native-inputs.py "${{ runner.temp }}/clb91-adapter-inputs" '
@@ -84,10 +85,16 @@ class HarnessTest(unittest.TestCase):
             '--output "${{ runner.temp }}/clb192-handoff"')
         self.assertNotIn('if', steps[5])
         self.assertNotIn('continue-on-error', steps[5])
-        self.assertEqual(steps[6]['run'], 'python3 -I -S -B ' + prefix +
+        self.assertEqual(steps[6]['run'], 'python3 -I -S -B scripts/tests/linux-semantic/namespace-bootstrap/native-ci.py '
+            '--prepared "${{ runner.temp }}/clb91-adapter-inputs" '
+            '--output "${{ runner.temp }}/clb195-namespace"')
+        self.assertEqual(steps[6]['timeout-minutes'], 15)
+        self.assertNotIn('if', steps[6])
+        self.assertNotIn('continue-on-error', steps[6])
+        self.assertEqual(steps[7]['run'], 'python3 -I -S -B ' + prefix +
             'ci/check-artifacts.py "${{ runner.temp }}"')
-        self.assertEqual(steps[6]['if'], 'always()')
-        self.assertEqual(steps[6]['id'], 'evidence')
+        self.assertEqual(steps[7]['if'], 'always()')
+        self.assertEqual(steps[7]['id'], 'evidence')
         self.assertEqual(steps[-1]['with']['if-no-files-found'], 'error')
         new_raw = raw[len(original):].decode()
         for forbidden in ('secrets.', 'environment:', 'continue-on-error', 'qemu', 'binfmt', 'sudo'):
@@ -102,6 +109,11 @@ class HarnessTest(unittest.TestCase):
         result = subprocess.run([sys.executable, '-I', '-S', '-B',
             str(HERE / 'isolated-helper/test-native-handoff.py')], capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 0, 'CLB-192 native contract controls failed')
+
+    def test_clb195_namespace_portable_controls(self):
+        result = subprocess.run([sys.executable, '-I', '-S', '-B',
+            str(HERE / 'namespace-bootstrap/test-bootstrap.py')], capture_output=True, timeout=90)
+        self.assertEqual(result.returncode, 0, 'CLB-195 namespace controls failed')
 
     def test_selfcheck_composition(self):
         text = (ROOT / 'scripts/selfcheck-quality-gates.sh').read_text()
