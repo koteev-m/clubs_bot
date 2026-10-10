@@ -166,6 +166,15 @@ class Tests(unittest.TestCase):
             start=original.index('static void namespace_child(')
             end=original.index('static int namespace_start(',start)
             self.assertEqual(generated,original[:start]+(HERE/'namespace.h').read_text()+'\n'+original[end:])
+            original_core=(build.NATIVE/'adapter/core-tests.c').read_text()
+            generated_core=(dest/'adapter/core-tests.c').read_text()
+            self.assertEqual(hashlib.sha256(generated_core.encode()).hexdigest(),info['core_tests'])
+            for line in original_core.splitlines():
+                if line.lstrip().startswith('check('):
+                    self.assertIn(line,generated_core)
+            for changed in (original_core.replace('symlinkat("input"','symlinkat("other"'),
+                            original_core+'\n  symlinkat("old",d,"link");\n'):
+                with self.assertRaises(ValueError):build.core_test_variant(changed)
             header=(dest/'adapter/generated_contract.h').read_text()
             raw=re.search(r'BOOTSTRAP\[\] = \{(.*?)\n\};',header,re.S)[1]
             raw=bytes(int(x,16) for x in re.findall(r'0x([0-9a-f]{2})',raw))[:-1]
@@ -325,6 +334,72 @@ class Tests(unittest.TestCase):
             self.assertEqual(failed,0)
             self.c_core_stage='summary_namespace'
             self.assertEqual(summary['native_namespace'],'NOT_RUN')
+            core_path=root/'variant/adapter/core-tests.c'
+            original_core=core_path.read_text()
+            # Enforce result-use on both libc profiles; this is not Ubuntu acceptance.
+            annotations=('extern int symlinkat(const char *,int,const char *) '
+                         '__attribute__((warn_unused_result));\n'
+                         'extern int pipe(int [2]) __attribute__((warn_unused_result));\n'
+                         'extern ssize_t write(int,const void *,size_t) '
+                         '__attribute__((warn_unused_result));\n'
+                         'extern ssize_t pwrite(int,const void *,size_t,off_t) '
+                         '__attribute__((warn_unused_result));\n')
+            for source,passes in (((build.NATIVE/'adapter/core-tests.c').read_text(),False),
+                                  (original_core,True)):
+                core_path.write_text(source.replace('#include "adapter.c"\n',
+                                                   '#include "adapter.c"\n'+annotations))
+                self.c_core_stage='compile_timeout'
+                compiled=subprocess.run(command,capture_output=True,timeout=45)
+                self.c_core_stage='unclassified'
+                self.assertEqual(compiled.returncode==0,passes)
+                if not passes:self.assertIn(b'unused-result',compiled.stderr)
+            # A failed replacement must not pass merely because recheck sees absence.
+            faults=[]
+            for target,control in (('input','symlink_fixture_created'),
+                                   ('old','symlink_fixture_replaced')):
+                shim=('static int fail_symlink(const char *target,int fd,const char *name) {\n'
+                      '  if(!strcmp(target,"'+target+'")) {errno=EIO;return -1;}\n'
+                      '  return symlinkat(target,fd,name);\n}\n'
+                      '#define symlinkat fail_symlink\n')
+                faults.append((shim,control))
+            faults.extend((
+                ('static int fail_pipe(int fd[2]) {\n  static unsigned calls;\n'
+                 '  if(++calls==2) {errno=EMFILE;return -1;}\n  return pipe(fd);\n}\n'
+                 '#define pipe fail_pipe\n','actual_partial_output_refused'),
+                ('static pid_t fail_fork(void) {errno=EAGAIN;return -1;}\n'
+                 '#define fork fail_fork\n','actual_partial_output_refused'),
+                ('static ssize_t short_write(int fd,const void *data,size_t size) {\n'
+                 '  if(fd==1&&size==7)return 0;\n  return write(fd,data,size);\n}\n'
+                 '#define write short_write\n','actual_partial_output_refused'),
+                ('static ssize_t fail_pwrite(int fd,const void *data,size_t size,off_t offset) {\n'
+                 '  if(size==1&&offset==0) {errno=EIO;return -1;}\n'
+                 '  return pwrite(fd,data,size,offset);\n}\n'
+                 '#define pwrite fail_pwrite\n','held_file_mutation_written'),
+            ))
+            for shim,control in faults:
+                core_path.write_text(original_core.replace('#include "adapter.c"\n',
+                                                           '#include "adapter.c"\n'+shim))
+                self.c_core_stage='compile_timeout'
+                compiled=subprocess.run(command,capture_output=True,timeout=45)
+                self.c_core_stage='compile_nonzero'
+                if compiled.returncode:self.c_core_gcc_diag=gcc_diagnostic(compiled.stderr)
+                self.assertEqual(compiled.returncode,0)
+                self.c_core_stage='core_timeout'
+                result=subprocess.run([str(root/'core')],capture_output=True,timeout=10)
+                self.c_core_stage='core_exit_nonzero'
+                self.assertEqual(result.returncode,1)
+                self.c_core_stage='core_stderr_nonempty'
+                self.assertEqual(result.stderr,b'')
+                self.c_core_stage='core_stdout_bounds'
+                self.assertLess(len(result.stdout),16384)
+                self.c_core_stage='summary_parse'
+                records=[json.loads(line) for line in result.stdout.splitlines()]
+                self.c_core_stage='summary_failed'
+                self.assertGreater(records[-1]['summary']['failed'],0)
+                self.assertIn({'test':control,'pass':False},records)
+                self.assertIn({'test':'owned_fixture_cleanup','pass':True},records)
+                self.c_core_stage='summary_namespace'
+                self.assertEqual(records[-1]['summary']['native_namespace'],'NOT_RUN')
         self.c_core_stage='none'
 
     def test_native_isolation_source_contract(self):

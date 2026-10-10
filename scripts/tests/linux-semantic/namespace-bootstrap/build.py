@@ -45,8 +45,41 @@ def array(name, raw):
             '#define '+name+'_LEN (sizeof('+name+')-1)')
 
 
+def core_test_variant(source):
+    """Check fixture syscalls in this variant, without rewriting prior source pins."""
+    patches = (
+        ('  struct captured r;\n  pipe(a);\n  pipe(b);\n  pipe(c);\n  p=fork();',
+         '  struct captured r={0};\n  r.primary="fixture_setup";r.code=2;\n'
+         '  if(pipe(a))return r;\n'
+         '  if(pipe(b)) {close(a[0]);close(a[1]);return r;}\n'
+         '  if(pipe(c)) {close(a[0]);close(a[1]);close(b[0]);close(b[1]);return r;}\n'
+         '  p=fork();\n'
+         '  if(p<0) {close(a[0]);close(a[1]);close(b[0]);close(b[1]);\n'
+         '    close(c[0]);close(c[1]);return r;}'),
+        ('    if(kind==0)write(1,"partial",7);',
+         '    if(kind==0) {if(write(1,"partial",7)!=7)_exit(2);}'),
+        ('      write(1,data,sizeof data);',
+         '      if(write(1,data,sizeof data)!=(ssize_t)sizeof data)_exit(2);'),
+        ('      write(1,"partial",7);',
+         '      if(write(1,"partial",7)!=7)_exit(2);'),
+        ('      write(2,"PRIVATE-CANARY-DO-NOT-PUBLISH",27);',
+         '      if(write(2,"PRIVATE-CANARY-DO-NOT-PUBLISH",27)!=27)_exit(2);'),
+        ('  symlinkat("input",d,"link");',
+         '  check(!symlinkat("input",d,"link"),"symlink_fixture_created");'),
+        ('  symlinkat("old",d,"link");',
+         '  check(!symlinkat("old",d,"link"),"symlink_fixture_replaced");'),
+        ('    pwrite(f,"X",1,0);',
+         '    check(pwrite(f,"X",1,0)==1,"held_file_mutation_written");'),
+    )
+    for before, after in patches:
+        if source.count(before) != 1:
+            raise ValueError('core_test_shape')
+        source = source.replace(before, after)
+    return source
+
+
 def materialize(dest, driver, expected=None):
-    """Only the reviewed namespace body and embedded bootstrap change."""
+    """Fixed namespace/bootstrap and test-fixture checks; original pins stay exact."""
     driver['source_identity']()  # original reference ledger/rootfs/codegen pins
     raw = {name: checked(NATIVE/name, digest) for name, digest in PINS.items()}
     helpers = {name: checked(HELPER/name, digest) for name, digest in HELPER_PINS.items()}
@@ -85,8 +118,10 @@ def materialize(dest, driver, expected=None):
         (dest/name).mkdir()
     (dest/'adapter/adapter.c').write_text(text)
     (dest/'adapter/generated_contract.h').write_text(header)
-    # Reuse exact original core/lifecycle and synthetic original-object tests.
-    for name in ('adapter/fd-budget.h', 'adapter/core-tests.c', 'tests/native-fixture-runner.c',
+    # Retain every original core assertion; check this variant's fixture operations.
+    core = core_test_variant(raw['adapter/core-tests.c'].decode())
+    (dest/'adapter/core-tests.c').write_text(core)
+    for name in ('adapter/fd-budget.h', 'tests/native-fixture-runner.c',
                  'tests/fixture-bind-probe.h', 'tests/fixture-namespace-handles.h', 'tests/fixture-resource-envelope.h'):
         (dest/name).write_bytes(raw[name])
     fixture = raw['tests/native-fixture-runner.c'].decode()
@@ -94,6 +129,6 @@ def materialize(dest, driver, expected=None):
         raise ValueError('fixture_project')
     (dest/'tests/native-fixture-runner.c').write_text(
         fixture.replace('compose_project=clb91-prototype', 'compose_project=clubs-bot-stage'))
-    return dict(bundle=sha(encoded), bootstrap=sha(bootstrap.encode()),
+    return dict(bundle=sha(encoded), bootstrap=sha(bootstrap.encode()), core_tests=sha(core.encode()),
                 adapter=sha(text.encode()), header=sha(header.encode()),
                 local_sources={n:sha(raw) for n,raw in local.items()})

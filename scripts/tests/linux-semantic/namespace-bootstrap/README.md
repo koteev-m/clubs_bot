@@ -6,8 +6,11 @@ writer or release operation. CLB-192 native run 37757252333 / attempt 1 /
 It does not establish acceptance of this new integration.
 
 `build.py` verifies the existing native-adapter source/reference pins and makes a
-temporary test variant. Only its `namespace_child` body and embedded bootstrap/
-request arrays change. No original adapter, Runtime, planner, CLB-192 source or
+temporary test variant. Its `namespace_child` body, embedded bootstrap/request
+arrays and copied common C test's fixture syscall checks change. The input core
+test remains bound to its original hash; shape-checked substitutions retain every
+original assertion and expose the generated core source hash. No original
+adapter, Runtime, planner, CLB-192 source or
 production manifest is edited. The existing native fixture's project name becomes
 `clubs-bot-stage` when that fixture is created, before its first capture; no saved
 stage binding is rewritten. Generated source and header hashes are reviewable.
@@ -61,6 +64,17 @@ Python boundary fault injection proves ordering/refusal/cleanup orchestration,
 not a real namespace. Pipe timeout and generated common C lifecycle tests execute
 actual OS operations without root. Native namespace execution and Linux static
 linking remain pending; no privileged test runs on Darwin/Rosetta.
+
+The user-supplied Lint diagnostic located an unchecked `symlinkat` at core source
+line 98; `warning=other` does not prove the exact GCC warning or fortify setting.
+The generated CLB-195 core checks both symlink operations and the analogous
+pipe/write/pwrite results. Pipe/fork setup failure closes acquired descriptors;
+short child writes exit unsuccessfully. Fault injections for initial/replacement
+symlinks, pipe/fork failure, short write and failed pwrite must produce a failed
+summary and confirmed owned-fixture cleanup. Compiler flags stay unchanged.
+Portable compilation also marks these calls `warn_unused_result`: the original
+core must refuse for unused results and the checked variant must compile. This
+tests the result-use contract without proving the exact Ubuntu diagnostic.
 
 Run 37949150044 stopped in `portable` before static build or namespace execution.
 Its published evidence did not identify the failing test because the coordinator
