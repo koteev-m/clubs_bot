@@ -7,8 +7,9 @@ It does not establish acceptance of this new integration.
 
 `build.py` verifies the existing native-adapter source/reference pins and makes a
 temporary test variant. Its `namespace_child` body, embedded bootstrap/request
-arrays and copied common C test's fixture syscall checks change. The input core
-test remains bound to its original hash; shape-checked substitutions retain every
+arrays, `child_fail` diagnostic writes and copied common C test's fixture syscall
+checks change. The input core test remains bound to its original hash;
+shape-checked substitutions retain every
 original assertion and expose the generated core source hash. No original
 adapter, Runtime, planner, CLB-192 source or
 production manifest is edited. The existing native fixture's project name becomes
@@ -128,6 +129,19 @@ allowlisting; it does not execute a native namespace. Local Apple Clang cannot
 establish Ubuntu GCC static acceptance. New native behavior remains NATIVE_PENDING.
 
 ## One future manual Tests run
+
+User-confirmed run 38236374063 / attempt 1 / commit
+60d19d4c187ed4d8196710ab033bc4b89eefd6d1 reported `adapter_compile` /
+`command_nonzero`, `adapter.c:931`, `unused-result`. The CLB-195 generator now
+shape-checks and replaces only the two unchecked diagnostic writes in `child_fail`.
+Cleanup still happens once before output, the fixed reason/optional
+`+child_cleanup` messages remain, and failed or short writes exit 120, as does the
+completed failure path. No warning suppression or historical pin update is used.
+Portable regression compiles the exact extracted old/generated function with an
+explicit `warn_unused_result` attribute: old refuses, generated compiles. Synthetic
+write errors/short results test both calls, cleanup ordering and exit 120 without
+privilege or namespaces. Local Apple Clang evidence is not Ubuntu GCC 13 static
+acceptance; the full adapter build and native namespace remain NATIVE_PENDING.
 
 Run 38230093134 / attempt 1 / commit
 14fee9a9eba70ecdf768d311b7836b7c7aae2077 confirmed `adapter_compile` /

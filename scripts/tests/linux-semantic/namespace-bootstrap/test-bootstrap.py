@@ -165,7 +165,21 @@ class Tests(unittest.TestCase):
             generated=(dest/'adapter/adapter.c').read_text()
             start=original.index('static void namespace_child(')
             end=original.index('static int namespace_start(',start)
-            self.assertEqual(generated,original[:start]+(HERE/'namespace.h').read_text()+'\n'+original[end:])
+            before=('  write(2,reason,strlen(reason));\n'
+                    '  if(cleanup)write(2,"+child_cleanup",14);')
+            after=('  size_t reason_len=strlen(reason);\n'
+                   '  if(write(2,reason,reason_len)!=(ssize_t)reason_len)_exit(120);\n'
+                   '  if(cleanup&&write(2,"+child_cleanup",14)!=14)_exit(120);')
+            expected=original[:start]+(HERE/'namespace.h').read_text()+'\n'+original[end:]
+            self.assertEqual(expected.count(before),1)
+            self.assertEqual(generated,expected.replace(before,after,1))
+            self.assertEqual(hashlib.sha256(generated.encode()).hexdigest(),info['adapter'])
+            for changed in (original.replace('write(2,reason,strlen(reason));','write(2,reason,1);'),
+                            original.replace('if(cleanup)write(2,"+child_cleanup",14);',
+                                             'if(cleanup)write(2,"+child_cleanup",13);'),
+                            original+'\n'+before+'\n'):
+                with self.assertRaises(ValueError):build.adapter_variant(changed)
+            self.check_child_fail_contract(original,generated,Path(td))
             original_core=(build.NATIVE/'adapter/core-tests.c').read_text()
             generated_core=(dest/'adapter/core-tests.c').read_text()
             self.assertEqual(hashlib.sha256(generated_core.encode()).hexdigest(),info['core_tests'])
@@ -192,6 +206,62 @@ class Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path=Path(td)/'source';path.write_bytes(b'tampered')
             with self.assertRaises(ValueError):build.checked(path,'0'*64)
+
+    def check_child_fail_contract(self,original,generated,root):
+        # Extract the exact generated function. Synthetic handles/write fault injection
+        # runs without root or namespaces; an explicit attribute covers both libc profiles.
+        def function(source):
+            start=source.index('static void child_fail(const char*reason)')
+            return source[start:source.index('static void close_extra_fds(',start)]
+        prefix='''#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+struct child_handles {int unused;};
+static struct child_handles handles,*active_child_handles=&handles;
+static int cleanup,fault,short_result,closed,calls;
+static int child_handles_close(struct child_handles *h) {
+  if(h!=&handles||active_child_handles||closed++)_exit(90);
+  if(write(1,"C",1)!=1)_exit(91);
+  return cleanup;
+}
+static ssize_t checked_write(int,const void *,size_t) __attribute__((warn_unused_result));
+static ssize_t checked_write(int fd,const void *data,size_t size) {
+  ++calls;
+  if(fd!=2||closed!=1||active_child_handles)_exit(92);
+  if(calls==1) {if(size!=5||memcmp(data,"pipes",5))_exit(93);}
+  else if(calls==2) {if(!cleanup||size!=14||memcmp(data,"+child_cleanup",14))_exit(94);}
+  else _exit(95);
+  if(write(1,calls==1?"1":"2",1)!=1)_exit(96);
+  if(calls==fault) {errno=EIO;return short_result?(ssize_t)size-1:-1;}
+  return write(fd,data,size);
+}
+#define write checked_write
+'''
+        suffix='''int main(int argc,char **argv) {
+  if(argc!=4)return 97;
+  cleanup=atoi(argv[1]);fault=atoi(argv[2]);short_result=atoi(argv[3]);
+  child_fail("pipes");return 98;
+}
+'''
+        source=root/'child-fail.c';binary=root/'child-fail'
+        command=['cc','-std=c11','-O2','-D_FORTIFY_SOURCE=2','-Wall','-Wextra','-Werror',
+                 str(source),'-o',str(binary)]
+        for text,passes in ((original,False),(generated,True)):
+            source.write_text(prefix+function(text)+suffix)
+            result=subprocess.run(command,capture_output=True,timeout=45)
+            self.assertEqual(result.returncode==0,passes)
+            if not passes:self.assertGreaterEqual(result.stderr.count(b'unused-result'),2)
+            else:self.assertEqual(result.stderr,b'')
+        for cleanup in (0,1):
+            for fault in range(cleanup+2):
+                for short_result in (0,1):
+                    result=subprocess.run([str(binary),str(cleanup),str(fault),str(short_result)],
+                                          capture_output=True,timeout=5)
+                    self.assertEqual(result.returncode,120)
+                    self.assertEqual(result.stdout,b'C1' if fault==1 or not cleanup else b'C12')
+                    self.assertEqual(result.stderr,b'' if fault==1 else
+                                     b'pipes' if fault==2 or not cleanup else b'pipes+child_cleanup')
 
     def test_evidence_cannot_turn_pending_cleanup_into_pass(self):
         data=dict(format=1,verdict='PASS',sha='a'*40,run_id='1',attempt='1',
