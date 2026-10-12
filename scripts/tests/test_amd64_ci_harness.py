@@ -8,6 +8,7 @@ import shutil
 import signal
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,26 @@ def load(name, file):
 
 ci = load('amd64_ci', 'run-amd64-ci.py')
 downloads = load('amd64_downloads', 'prepare-amd64-downloads.py')
+GCC_WARNINGS = frozenset(('array-bounds', 'discarded-qualifiers', 'format',
+    'format-overflow', 'format-truncation', 'implicit-function-declaration',
+    'incompatible-pointer-types', 'int-conversion', 'maybe-uninitialized',
+    'restrict', 'return-type', 'sign-compare', 'sizeof-pointer-memaccess',
+    'stringop-overflow', 'stringop-truncation', 'type-limits',
+    'uninitialized', 'unused-but-set-variable', 'unused-function',
+    'unused-parameter', 'unused-variable', 'none', 'other', 'UNKNOWN'))
+
+
+def bounded_clb195_gcc(stderr):
+    """Do not relay arbitrary portable-test stderr into the Lint log."""
+    match = re.fullmatch(rb'CLB195_GCC_DIAG '
+        rb'source=(adapter\.c|core-tests\.c|generated_contract\.h|UNKNOWN) '
+        rb'line=(0|[1-9][0-9]{0,5}) warning=([a-z-]+|UNKNOWN)\n', stderr)
+    if match is None:
+        return 'CLB195_GCC_DIAG source=UNKNOWN line=0 warning=UNKNOWN'
+    source, line, warning = match.groups()
+    if warning.decode('ascii') not in GCC_WARNINGS or ((source == b'UNKNOWN') != (line == b'0')):
+        return 'CLB195_GCC_DIAG source=UNKNOWN line=0 warning=UNKNOWN'
+    return match[0].decode('ascii').strip()
 
 
 class HarnessTest(unittest.TestCase):
@@ -61,11 +82,12 @@ class HarnessTest(unittest.TestCase):
               ('environment.json', 'result.json', 'commands.json', 'compiler.json')),
             '${{ runner.temp }}/clb191-isolated-helper/result.json',
             '${{ runner.temp }}/clb192-handoff/result.json',
+            '${{ runner.temp }}/clb195-namespace/result.json',
         ])
         # This is a candidate native adapter experiment, not the old 191/4 suite.
         # Explicit preparation/namespace markers do not themselves grant permission.
         prefix = 'scripts/tests/linux-semantic/native-adapter/'
-        self.assertEqual(len(steps), 8)
+        self.assertEqual(len(steps), 9)
         self.assertEqual(steps[1]['run'], 'python3 -I -S -B ' + prefix + 'ci/test-recipe.py')
         self.assertEqual(steps[2]['run'], 'python3 -I -S -B ' + prefix +
             'ci/prepare-native-inputs.py "${{ runner.temp }}/clb91-adapter-inputs" '
@@ -84,10 +106,16 @@ class HarnessTest(unittest.TestCase):
             '--output "${{ runner.temp }}/clb192-handoff"')
         self.assertNotIn('if', steps[5])
         self.assertNotIn('continue-on-error', steps[5])
-        self.assertEqual(steps[6]['run'], 'python3 -I -S -B ' + prefix +
+        self.assertEqual(steps[6]['run'], 'python3 -I -S -B scripts/tests/linux-semantic/namespace-bootstrap/native-ci.py '
+            '--prepared "${{ runner.temp }}/clb91-adapter-inputs" '
+            '--output "${{ runner.temp }}/clb195-namespace"')
+        self.assertEqual(steps[6]['timeout-minutes'], 15)
+        self.assertNotIn('if', steps[6])
+        self.assertNotIn('continue-on-error', steps[6])
+        self.assertEqual(steps[7]['run'], 'python3 -I -S -B ' + prefix +
             'ci/check-artifacts.py "${{ runner.temp }}"')
-        self.assertEqual(steps[6]['if'], 'always()')
-        self.assertEqual(steps[6]['id'], 'evidence')
+        self.assertEqual(steps[7]['if'], 'always()')
+        self.assertEqual(steps[7]['id'], 'evidence')
         self.assertEqual(steps[-1]['with']['if-no-files-found'], 'error')
         new_raw = raw[len(original):].decode()
         for forbidden in ('secrets.', 'environment:', 'continue-on-error', 'qemu', 'binfmt', 'sudo'):
@@ -102,6 +130,16 @@ class HarnessTest(unittest.TestCase):
         result = subprocess.run([sys.executable, '-I', '-S', '-B',
             str(HERE / 'isolated-helper/test-native-handoff.py')], capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 0, 'CLB-192 native contract controls failed')
+
+    def test_clb195_namespace_portable_controls(self):
+        sample=b'CLB195_GCC_DIAG source=adapter.c line=123 warning=unused-variable\n'
+        self.assertEqual(bounded_clb195_gcc(sample),sample.decode().strip())
+        self.assertEqual(bounded_clb195_gcc(sample+b'PRIVATE_CANARY'),
+                         'CLB195_GCC_DIAG source=UNKNOWN line=0 warning=UNKNOWN')
+        result = subprocess.run([sys.executable, '-I', '-S', '-B',
+            str(HERE / 'namespace-bootstrap/test-bootstrap.py')], capture_output=True, timeout=90)
+        self.assertEqual(result.returncode, 0,
+                         'CLB-195 namespace controls failed: '+bounded_clb195_gcc(result.stderr))
 
     def test_selfcheck_composition(self):
         text = (ROOT / 'scripts/selfcheck-quality-gates.sh').read_text()

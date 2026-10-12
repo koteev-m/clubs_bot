@@ -22,16 +22,29 @@ def check(root):
  root=P(root)
  if not root.is_absolute() or root.is_symlink():raise ValueError('artifact_root')
  entries=[]
- for base,names in ((root/'clb91-adapter-inputs/evidence',('status.json',)),(root/'clb91-native-adapter/evidence',NATIVE),(root/'clb191-isolated-helper',('result.json',)),(root/'clb192-handoff',('result.json',))):
+ for base,names in ((root/'clb91-adapter-inputs/evidence',('status.json',)),(root/'clb91-native-adapter/evidence',NATIVE),(root/'clb191-isolated-helper',('result.json',)),(root/'clb192-handoff',('result.json',)),(root/'clb195-namespace',('result.json',))):
   for p in (base.parent,base):
    if p.exists() and (p.is_symlink() or not p.is_dir()):raise ValueError('artifact_directory_type')
   if not base.exists():continue
-  if (base.parent.name=='clb91-native-adapter' or base.name in ('clb191-isolated-helper','clb192-handoff')) and set(x.name for x in base.iterdir())-set(names):raise ValueError('artifact_allowlist')
+  if (base.parent.name=='clb91-native-adapter' or base.name in ('clb191-isolated-helper','clb192-handoff','clb195-namespace')) and set(x.name for x in base.iterdir())-set(names):raise ValueError('artifact_allowlist')
   for name in names:
    p=base/name
    if p.is_symlink():raise ValueError('artifact_symlink')
    if p.exists():
     entries.append((str(p),checked_file(p)))
+    if base.name=='clb195-namespace':
+     contract=runpy.run_path(str(P(__file__).resolve().parents[2]/'namespace-bootstrap/native-ci.py'))
+     if p.stat().st_size>contract['BOUND']:raise ValueError('namespace_evidence_bound')
+     old=runpy.run_path(str(P(__file__).resolve().parents[2]/'isolated-helper/native-ci.py'))
+     data=old['read_json'](p,contract['BOUND'])
+     keys={'sha':'GITHUB_SHA','run_id':'GITHUB_RUN_ID','attempt':'GITHUB_RUN_ATTEMPT'}
+     expected={k:os.environ.get(v,'') for k,v in keys.items()} if any(v in os.environ for v in keys.values()) else None
+     contract['validate_evidence'](data,expected)
+     if data['verdict']=='PASS':
+      prior=old['read_json'](root/'clb192-handoff/result.json',4096)
+      validator=runpy.run_path(str(P(__file__).resolve().parents[2]/'isolated-helper/native-handoff-ci.py'))
+      validator['validate_evidence'](prior,{k:data[k] for k in keys})
+      if prior['verdict']!='PASS':raise ValueError('namespace_prior_failure')
     if base.name=='clb191-isolated-helper':
      contract=runpy.run_path(str(P(__file__).resolve().parents[2]/'isolated-helper/native-ci.py'))
      contract['validate_evidence'](contract['read_json'](p,contract['BOUND']))
