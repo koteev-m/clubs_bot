@@ -8,6 +8,31 @@ import re
 import runpy
 import tempfile
 
+GCC_WARNINGS = frozenset(('array-bounds', 'discarded-qualifiers', 'format',
+    'format-overflow', 'format-truncation', 'implicit-function-declaration',
+    'incompatible-pointer-types', 'int-conversion', 'maybe-uninitialized',
+    'restrict', 'return-type', 'sign-compare', 'sizeof-pointer-memaccess',
+    'stringop-overflow', 'stringop-truncation', 'type-limits',
+    'uninitialized', 'unused-but-set-variable', 'unused-function',
+    'unused-parameter', 'unused-variable', 'unused-result'))
+
+
+def gcc_diagnostic(stderr):
+    if type(stderr) is not bytes or len(stderr) > 65536 or b'\x1b' in stderr:
+        return ('UNKNOWN', 0, 'UNKNOWN')
+    for line in stderr.splitlines():
+        match = re.fullmatch(
+            rb'(?:[^\r\n]*[/\\])?(adapter\.c|core-tests\.c|generated_contract\.h|fd-budget\.h)'
+            rb':([1-9][0-9]{0,5})(?::[1-9][0-9]{0,3})?: (?:fatal )?error: [^\r\n]*', line)
+        if match is None:
+            continue
+        option = re.search(rb'\[-Werror=([a-z0-9-]{1,48})\]$', line)
+        warning = option[1].decode('ascii') if option else 'none'
+        if warning not in GCC_WARNINGS and warning != 'none':
+            warning = 'other'
+        return (match[1].decode('ascii'), int(match[2]), warning)
+    return ('UNKNOWN', 0, 'UNKNOWN')
+
 HERE = Path(__file__).resolve().parent
 BOUND = 4096
 CONTROLS = ('positive', 'wrong_uid', 'symlink', 'runtime_hash', 'actual_tmpfs_backing')
@@ -59,12 +84,44 @@ def build_suffix(diagnostic):
     return ' build_stage='+stage+' build_reason='+reason
 
 
+def adapter_capture(old, argv, seconds, commands, diagnostic):
+    """Pinned capture variant: observe bounded stderr without changing transport gates."""
+    build = runpy.run_path(str(HERE/'build.py'))
+    raw = build['checked'](build['NATIVE']/'tests/native-driver.py',
+                           build['PINS']['tests/native-driver.py']).decode()
+    source = raw[raw.index('def capture('):raw.index('def compiler_inputs(')]
+    marker = "        if primary: raise Refused('command_'+primary)"
+    need(source.count(marker) == 1)
+    source = source.replace(marker,
+        '        if primary is None and proc.returncode:\n'
+        '            compiler_diagnostic(bytes(err))\n'+marker, 1)
+    namespace = dict(old)
+    namespace['compiler_diagnostic'] = lambda err: diagnostic.update(gcc=gcc_diagnostic(err))
+    exec(compile(source, 'clb195-compiler-capture', 'exec'), namespace)
+    return namespace['capture'](argv, seconds, commands)
+
+
+def gcc_suffix(diagnostic):
+    value = diagnostic.get('gcc', ('UNKNOWN', 0, 'UNKNOWN'))
+    if (type(value) is not tuple or len(value) != 3 or
+            type(value[0]) is not str or type(value[2]) is not str or
+            value[0] not in ('adapter.c','core-tests.c','generated_contract.h','fd-budget.h','UNKNOWN') or
+            type(value[1]) is not int or not 0 <= value[1] <= 999999 or
+            value[2] not in GCC_WARNINGS | {'none','other','UNKNOWN'} or
+            (value[0] == 'UNKNOWN' and value[1:] != (0,'UNKNOWN')) or
+            (value[0] != 'UNKNOWN' and (value[1] == 0 or value[2] == 'UNKNOWN'))):
+        value = ('UNKNOWN', 0, 'UNKNOWN')
+    return ' gcc_source='+value[0]+' gcc_line='+str(value[1])+' gcc_warning='+value[2]
+
+
 def compile_static(tree, binaries, name, old, commands, diagnostic, extra=()):
     need(name in ('adapter', 'core-tests', 'fixture'))
     stage = 'core' if name == 'core-tests' else name
     source = tree/('tests/native-fixture-runner.c' if name == 'fixture' else 'adapter/'+name+'.c')
+    capture = (lambda argv, seconds, records: adapter_capture(old, argv, seconds, records, diagnostic)
+               ) if name == 'adapter' else old['capture']
     build_step(diagnostic, stage+'_compile',
-               lambda: old['capture'](list(STATIC_FLAGS)+[str(source), '-o', str(binaries/name)]+list(extra),
+               lambda: capture(list(STATIC_FLAGS)+[str(source), '-o', str(binaries/name)]+list(extra),
                                       60, commands), commands)
     raw = build_step(diagnostic, stage+'_read',
                      lambda: old['read_exact'](binaries/name, 16*1024*1024))
@@ -254,6 +311,8 @@ def main():
               if record['verdict'] == 'FAIL' and record['phase'] == 'portable' else '')
     if record['verdict'] == 'FAIL' and record['phase'] == 'build':
         suffix = build_suffix(build_diagnostic)
+        if build_diagnostic.get('stage') == 'adapter_compile' and build_diagnostic.get('reason') == 'command_nonzero':
+            suffix += gcc_suffix(build_diagnostic)
     print('CLB195_NAMESPACE_'+record['verdict']+suffix)
     return 0 if record['verdict'] == 'PASS' else 1
 

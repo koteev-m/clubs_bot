@@ -129,6 +129,22 @@ establish Ubuntu GCC static acceptance. New native behavior remains NATIVE_PENDI
 
 ## One future manual Tests run
 
+Run 38230093134 / attempt 1 / commit
+14fee9a9eba70ecdf768d311b7836b7c7aae2077 confirmed `adapter_compile` /
+`command_nonzero`, after preparation, prior checks and portable PASS. Exact GCC
+warning, source error or linker failure remains UNKNOWN. The separate unit job's
+wrapper-validation network failure is unrelated; no wrapper or gate is changed.
+The coordinator's adapter-only compiler capture now adds an observer to a
+shape-checked in-memory copy of the pinned capture function. Transport deadlines,
+bounds, cancellation, process cleanup and nonzero refusal remain intact; historical
+driver bytes/pins are unchanged. The observer retains only an allowlisted source
+basename, bounded line and fixed warning category. Console-only fields are
+`gcc_source`, `gcc_line`, `gcc_warning`; raw compiler output and exception text
+remain private. Linker-only, colored or unsupported diagnostics give UNKNOWN.
+Artifact schema/limits and native PASS predicates are unchanged. Real synthetic
+unprivileged processes test nonzero refusal, successful transport and timeout;
+these checks are not Ubuntu GCC compilation or native namespace acceptance.
+
 After separately authorized publication and dispatch, the existing
 `amd64-runtime-prototype` job on ubuntu-24.04 runs unchanged preparation, original
 native adapter and CLB-191/192 checks, then:

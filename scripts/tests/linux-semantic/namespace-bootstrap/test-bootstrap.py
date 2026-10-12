@@ -454,8 +454,9 @@ class Tests(unittest.TestCase):
             old={'capture':capture,'read_exact':read,'elf_static':elf}
             extra=['-DADAPTER_EXEC_SHA256="'+'a'*64+'"']
             def run():
-                ci.build_programs(tree,binaries,{'materialize':materialize},old,commands,sources,diagnostic)
-                return ci.compile_static(tree,binaries,'fixture',old,commands,diagnostic,extra)
+                with patch.object(ci,'adapter_capture',side_effect=lambda o,a,s,c,d:o['capture'](a,s,c)):
+                    ci.build_programs(tree,binaries,{'materialize':materialize},old,commands,sources,diagnostic)
+                    return ci.compile_static(tree,binaries,'fixture',old,commands,diagnostic,extra)
             with self.subTest(fault=fault):
                 if fault is None:
                     self.assertEqual(run(),{'sha256':'a'*64})
@@ -493,6 +494,41 @@ class Tests(unittest.TestCase):
         for bad in ({},{'stage':'PRIVATE_CANARY','reason':'timeout'},
                     {'stage':'adapter_compile','reason':'PRIVATE_CANARY'}):
             self.assertEqual(ci.build_suffix(bad),' build_stage=UNKNOWN build_reason=UNKNOWN')
+        warning=(b'/private/CANARY/adapter.c:1000:2: error: CANARY [-Werror=unused-result]\n')
+        self.assertEqual(ci.gcc_diagnostic(warning),('adapter.c',1000,'unused-result'))
+        for raw in (b'CANARY', b'/private/CANARY/other.c:2: error: CANARY\n',
+                    warning.replace(b':1000:',b':1000000:'), warning+b'x'*65536,
+                    b'\x1b[31m'+warning, 'CANARY', None):
+            self.assertEqual(ci.gcc_diagnostic(raw),('UNKNOWN',0,'UNKNOWN'))
+        self.assertEqual(ci.gcc_diagnostic(warning.replace(b'unused-result',b'unsupported-warning')),
+                         ('adapter.c',1000,'other'))
+        unknown=' gcc_source=UNKNOWN gcc_line=0 gcc_warning=UNKNOWN'
+        for value in (('CANARY',3,'none'),('adapter.c',True,'none'),
+                      ('adapter.c',1000000,'none'),('adapter.c',3,'CANARY'),None):
+            self.assertEqual(ci.gcc_suffix({'gcc':value}),unknown)
+        # Real unprivileged bounded transport, synthetic process only. No GCC/root/namespace.
+        driver=runpy.run_path(str(build.NATIVE/'tests/native-driver.py'))
+        for stderr,code in ((warning,1),(b'CANARY',1),(warning,0)):
+            commands=[]; diagnostic={}
+            command=[sys.executable,'-I','-S','-B','-c',
+                     'import os;os.write(2,'+repr(stderr)+');raise SystemExit('+str(code)+')']
+            if code:
+                with self.assertRaises(driver['Refused']):
+                    ci.adapter_capture(driver,command,5,commands,diagnostic)
+                self.assertEqual(diagnostic['gcc'],ci.gcc_diagnostic(stderr))
+                self.assertNotIn('CANARY',ci.gcc_suffix(diagnostic))
+            else:
+                self.assertEqual(ci.adapter_capture(driver,command,5,commands,diagnostic),b'')
+                self.assertNotIn('gcc',diagnostic)
+            self.assertEqual(commands[-1]['exit'],code)
+            self.assertNotIn('stderr',commands[-1])
+        commands=[];diagnostic={}
+        with self.assertRaises(driver['Refused']):
+            ci.adapter_capture(driver,[sys.executable,'-I','-S','-B','-c',
+                                       'import time;time.sleep(5)'],0.05,commands,diagnostic)
+        self.assertEqual(commands[-1]['primary'],'timeout')
+        self.assertNotIn('gcc',diagnostic)
+        self.assertEqual(ci.gcc_suffix(diagnostic),unknown)
 
 
 if __name__=='__main__':
