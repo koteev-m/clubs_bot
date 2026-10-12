@@ -524,9 +524,15 @@ static ssize_t checked_write(int fd,const void *data,size_t size) {
             old={'capture':capture,'read_exact':read,'elf_static':elf}
             extra=['-DADAPTER_EXEC_SHA256="'+'a'*64+'"']
             def run():
-                with patch.object(ci,'adapter_capture',side_effect=lambda o,a,s,c,d:o['capture'](a,s,c)):
-                    ci.build_programs(tree,binaries,{'materialize':materialize},old,commands,sources,diagnostic)
-                    return ci.compile_static(tree,binaries,'fixture',old,commands,diagnostic,extra)
+                with patch.object(ci,'adapter_capture',side_effect=lambda o,a,s,c,d:o['capture'](a,s,c)) as observed:
+                    try:
+                        ci.build_programs(tree,binaries,{'materialize':materialize},old,commands,sources,diagnostic)
+                        return ci.compile_static(tree,binaries,'fixture',old,commands,diagnostic,extra)
+                    finally:
+                        self.assertEqual([Path(call.args[1][len(expected_flags)]).name
+                                          for call in observed.call_args_list],
+                                         [name for stage,name in (('adapter_compile','adapter.c'),
+                                             ('fixture_compile','native-fixture-runner.c')) if stage in events])
             with self.subTest(fault=fault):
                 if fault is None:
                     self.assertEqual(run(),{'sha256':'a'*64})
@@ -566,6 +572,13 @@ static ssize_t checked_write(int fd,const void *data,size_t size) {
             self.assertEqual(ci.build_suffix(bad),' build_stage=UNKNOWN build_reason=UNKNOWN')
         warning=(b'/private/CANARY/adapter.c:1000:2: error: CANARY [-Werror=unused-result]\n')
         self.assertEqual(ci.gcc_diagnostic(warning),('adapter.c',1000,'unused-result'))
+        fixture_warning=warning.replace(b'adapter.c',b'native-fixture-runner.c')
+        for name in ('native-fixture-runner.c','fixture-bind-probe.h',
+                     'fixture-namespace-handles.h','fixture-resource-envelope.h'):
+            self.assertEqual(ci.gcc_diagnostic(warning.replace(b'adapter.c',name.encode())),
+                             (name,1000,'unused-result'))
+            self.assertEqual(ci.gcc_suffix({'gcc':(name,1000,'unused-result')}),
+                             ' gcc_source='+name+' gcc_line=1000 gcc_warning=unused-result')
         for raw in (b'CANARY', b'/private/CANARY/other.c:2: error: CANARY\n',
                     warning.replace(b':1000:',b':1000000:'), warning+b'x'*65536,
                     b'\x1b[31m'+warning, 'CANARY', None):
@@ -578,7 +591,7 @@ static ssize_t checked_write(int fd,const void *data,size_t size) {
             self.assertEqual(ci.gcc_suffix({'gcc':value}),unknown)
         # Real unprivileged bounded transport, synthetic process only. No GCC/root/namespace.
         driver=runpy.run_path(str(build.NATIVE/'tests/native-driver.py'))
-        for stderr,code in ((warning,1),(b'CANARY',1),(warning,0)):
+        for stderr,code in ((warning,1),(fixture_warning,1),(b'CANARY',1),(warning,0),(fixture_warning,0)):
             commands=[]; diagnostic={}
             command=[sys.executable,'-I','-S','-B','-c',
                      'import os;os.write(2,'+repr(stderr)+');raise SystemExit('+str(code)+')']

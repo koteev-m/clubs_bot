@@ -22,7 +22,8 @@ def gcc_diagnostic(stderr):
         return ('UNKNOWN', 0, 'UNKNOWN')
     for line in stderr.splitlines():
         match = re.fullmatch(
-            rb'(?:[^\r\n]*[/\\])?(adapter\.c|core-tests\.c|generated_contract\.h|fd-budget\.h)'
+            rb'(?:[^\r\n]*[/\\])?(adapter\.c|core-tests\.c|generated_contract\.h|fd-budget\.h|'
+            rb'native-fixture-runner\.c|fixture-bind-probe\.h|fixture-namespace-handles\.h|fixture-resource-envelope\.h)'
             rb':([1-9][0-9]{0,5})(?::[1-9][0-9]{0,3})?: (?:fatal )?error: [^\r\n]*', line)
         if match is None:
             continue
@@ -105,7 +106,9 @@ def gcc_suffix(diagnostic):
     value = diagnostic.get('gcc', ('UNKNOWN', 0, 'UNKNOWN'))
     if (type(value) is not tuple or len(value) != 3 or
             type(value[0]) is not str or type(value[2]) is not str or
-            value[0] not in ('adapter.c','core-tests.c','generated_contract.h','fd-budget.h','UNKNOWN') or
+            value[0] not in ('adapter.c','core-tests.c','generated_contract.h','fd-budget.h',
+                            'native-fixture-runner.c','fixture-bind-probe.h',
+                            'fixture-namespace-handles.h','fixture-resource-envelope.h','UNKNOWN') or
             type(value[1]) is not int or not 0 <= value[1] <= 999999 or
             value[2] not in GCC_WARNINGS | {'none','other','UNKNOWN'} or
             (value[0] == 'UNKNOWN' and value[1:] != (0,'UNKNOWN')) or
@@ -119,7 +122,7 @@ def compile_static(tree, binaries, name, old, commands, diagnostic, extra=()):
     stage = 'core' if name == 'core-tests' else name
     source = tree/('tests/native-fixture-runner.c' if name == 'fixture' else 'adapter/'+name+'.c')
     capture = (lambda argv, seconds, records: adapter_capture(old, argv, seconds, records, diagnostic)
-               ) if name == 'adapter' else old['capture']
+               ) if name in ('adapter', 'fixture') else old['capture']
     build_step(diagnostic, stage+'_compile',
                lambda: capture(list(STATIC_FLAGS)+[str(source), '-o', str(binaries/name)]+list(extra),
                                       60, commands), commands)
@@ -311,7 +314,7 @@ def main():
               if record['verdict'] == 'FAIL' and record['phase'] == 'portable' else '')
     if record['verdict'] == 'FAIL' and record['phase'] == 'build':
         suffix = build_suffix(build_diagnostic)
-        if build_diagnostic.get('stage') == 'adapter_compile' and build_diagnostic.get('reason') == 'command_nonzero':
+        if build_diagnostic.get('stage') in ('adapter_compile', 'fixture_compile') and build_diagnostic.get('reason') == 'command_nonzero':
             suffix += gcc_suffix(build_diagnostic)
     print('CLB195_NAMESPACE_'+record['verdict']+suffix)
     return 0 if record['verdict'] == 'PASS' else 1

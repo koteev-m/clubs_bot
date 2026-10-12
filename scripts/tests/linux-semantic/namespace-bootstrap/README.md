@@ -130,6 +130,18 @@ establish Ubuntu GCC static acceptance. New native behavior remains NATIVE_PENDI
 
 ## One future manual Tests run
 
+Run 38239985347 / attempt 1 / commit
+06b8d55ebeff4d8fa64ee4584a5728b238beacdd passed adapter compilation and core,
+then refused at `fixture_compile` / `command_nonzero` before capture/cleanup.
+Artifact 11742932203 matches the local source hashes. Exact GCC/linker cause is
+UNKNOWN; this follow-up extends the existing bounded compiler observer to fixture
+compilation only. It additionally permits `native-fixture-runner.c` and the three
+fixed fixture headers as source basenames. Line/warning validation, transport
+refusal/timeout/cleanup, strict flags and artifact/PASS contracts are unchanged.
+Unsupported linker or compiler output remains UNKNOWN. Portable routing/parser
+and real synthetic transport regressions do not establish Ubuntu compilation or
+native namespace acceptance. No fixture source/pin is changed.
+
 User-confirmed run 38236374063 / attempt 1 / commit
 60d19d4c187ed4d8196710ab033bc4b89eefd6d1 reported `adapter_compile` /
 `command_nonzero`, `adapter.c:931`, `unused-result`. The CLB-195 generator now
