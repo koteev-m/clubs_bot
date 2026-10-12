@@ -55,6 +55,18 @@ def gcc_diagnostic(stderr):
     return ('UNKNOWN', 0, 'UNKNOWN')
 
 
+def linux_generated_compile(tree, binaries, driver):
+    """Full static compilation only; never execute either generated binary."""
+    if sys.platform != 'linux':
+        return False
+    ci.need(os.geteuid() != 0)
+    commands=[];diagnostic={}
+    adapter=ci.compile_static(tree,binaries,'adapter',driver,commands,diagnostic)
+    ci.compile_static(tree,binaries,'fixture',driver,commands,diagnostic,
+                      ('-DADAPTER_EXEC_SHA256="'+adapter['sha256']+'"',))
+    return True
+
+
 class Tests(unittest.TestCase):
     def boundary(self, fault=None, reply=None):
         events = []
@@ -165,7 +177,57 @@ class Tests(unittest.TestCase):
             generated=(dest/'adapter/adapter.c').read_text()
             start=original.index('static void namespace_child(')
             end=original.index('static int namespace_start(',start)
-            self.assertEqual(generated,original[:start]+(HERE/'namespace.h').read_text()+'\n'+original[end:])
+            before=('  write(2,reason,strlen(reason));\n'
+                    '  if(cleanup)write(2,"+child_cleanup",14);')
+            after=('  size_t reason_len=strlen(reason);\n'
+                   '  if(write(2,reason,reason_len)!=(ssize_t)reason_len)_exit(120);\n'
+                   '  if(cleanup&&write(2,"+child_cleanup",14)!=14)_exit(120);')
+            expected=original[:start]+(HERE/'namespace.h').read_text()+'\n'+original[end:]
+            self.assertEqual(expected.count(before),1)
+            self.assertEqual(generated,expected.replace(before,after,1))
+            self.assertEqual(hashlib.sha256(generated.encode()).hexdigest(),info['adapter'])
+            for changed in (original.replace('write(2,reason,strlen(reason));','write(2,reason,1);'),
+                            original.replace('if(cleanup)write(2,"+child_cleanup",14);',
+                                             'if(cleanup)write(2,"+child_cleanup",13);'),
+                            original+'\n'+before+'\n'):
+                with self.assertRaises(ValueError):build.adapter_variant(changed)
+            self.check_child_fail_contract(original,generated,Path(td))
+            fixture=(build.NATIVE/'tests/native-fixture-runner.c').read_text()
+            generated_fixture=(dest/'tests/native-fixture-runner.c').read_text()
+            before='runtime,runtimefd,sourcefd,outer,stdoutp[1],stderrp[1]'
+            self.assertEqual(generated_fixture,fixture.replace(before,before+',{0},{0}',1)
+                             .replace('compose_project=clb91-prototype','compose_project=clubs-bot-stage'))
+            for changed in (fixture.replace(before,before+',0'),fixture+fixture):
+                with self.assertRaises(ValueError):build.fixture_variant(changed)
+            # Exact struct and initializer, with portable public types/inputs only.
+            struct=fixture[fixture.index('struct probe_args  {'):fixture.index('static int probe_start(')]
+            prefix='#include <sys/stat.h>\n'+struct
+            prefix+='void probe(const char *runtime,int runtimefd,int sourcefd,const struct mount_tuple *outer) {\n'
+            prefix+='int stdoutp[2]={0},stderrp[2]={0};struct probe_args a;\n'
+            for text,passes in ((fixture,False),(generated_fixture,True)):
+                start=text.index('  a=(struct probe_args)')
+                initializer=text[start:text.index('  if(fstat(',start)]
+                source=Path(td)/'initializer.c'
+                source.write_text(prefix+initializer+'(void)a;\n}\n')
+                result=subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',
+                    '-fsyntax-only',str(source)],capture_output=True,timeout=20)
+                self.assertEqual(result.returncode==0,passes)
+                if not passes:self.assertIn(b'missing-field-initializers',result.stderr)
+            self.assertEqual(linux_generated_compile(dest,Path(td),driver),sys.platform=='linux')
+            # Exercise Linux scheduling/refusal on every host without executing C.
+            for fault in (None,'adapter','fixture'):
+                calls=[]
+                def compile_only(tree,binaries,name,old,commands,diagnostic,extra=()):
+                    calls.append((name,extra))
+                    if name==fault:raise ValueError('synthetic_compile_failure')
+                    return {'sha256':'a'*64}
+                with patch.object(sys,'platform','linux'),patch.object(os,'geteuid',return_value=1000),\
+                        patch.object(ci,'compile_static',side_effect=compile_only):
+                    if fault:
+                        with self.assertRaises(ValueError):linux_generated_compile(dest,Path(td),driver)
+                    else:self.assertTrue(linux_generated_compile(dest,Path(td),driver))
+                self.assertEqual(calls,[('adapter',())] if fault=='adapter' else
+                    [('adapter',()),('fixture',('-DADAPTER_EXEC_SHA256="'+'a'*64+'"',))])
             original_core=(build.NATIVE/'adapter/core-tests.c').read_text()
             generated_core=(dest/'adapter/core-tests.c').read_text()
             self.assertEqual(hashlib.sha256(generated_core.encode()).hexdigest(),info['core_tests'])
@@ -192,6 +254,62 @@ class Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path=Path(td)/'source';path.write_bytes(b'tampered')
             with self.assertRaises(ValueError):build.checked(path,'0'*64)
+
+    def check_child_fail_contract(self,original,generated,root):
+        # Extract the exact generated function. Synthetic handles/write fault injection
+        # runs without root or namespaces; an explicit attribute covers both libc profiles.
+        def function(source):
+            start=source.index('static void child_fail(const char*reason)')
+            return source[start:source.index('static void close_extra_fds(',start)]
+        prefix='''#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+struct child_handles {int unused;};
+static struct child_handles handles,*active_child_handles=&handles;
+static int cleanup,fault,short_result,closed,calls;
+static int child_handles_close(struct child_handles *h) {
+  if(h!=&handles||active_child_handles||closed++)_exit(90);
+  if(write(1,"C",1)!=1)_exit(91);
+  return cleanup;
+}
+static ssize_t checked_write(int,const void *,size_t) __attribute__((warn_unused_result));
+static ssize_t checked_write(int fd,const void *data,size_t size) {
+  ++calls;
+  if(fd!=2||closed!=1||active_child_handles)_exit(92);
+  if(calls==1) {if(size!=5||memcmp(data,"pipes",5))_exit(93);}
+  else if(calls==2) {if(!cleanup||size!=14||memcmp(data,"+child_cleanup",14))_exit(94);}
+  else _exit(95);
+  if(write(1,calls==1?"1":"2",1)!=1)_exit(96);
+  if(calls==fault) {errno=EIO;return short_result?(ssize_t)size-1:-1;}
+  return write(fd,data,size);
+}
+#define write checked_write
+'''
+        suffix='''int main(int argc,char **argv) {
+  if(argc!=4)return 97;
+  cleanup=atoi(argv[1]);fault=atoi(argv[2]);short_result=atoi(argv[3]);
+  child_fail("pipes");return 98;
+}
+'''
+        source=root/'child-fail.c';binary=root/'child-fail'
+        command=['cc','-std=c11','-O2','-D_FORTIFY_SOURCE=2','-Wall','-Wextra','-Werror',
+                 str(source),'-o',str(binary)]
+        for text,passes in ((original,False),(generated,True)):
+            source.write_text(prefix+function(text)+suffix)
+            result=subprocess.run(command,capture_output=True,timeout=45)
+            self.assertEqual(result.returncode==0,passes)
+            if not passes:self.assertGreaterEqual(result.stderr.count(b'unused-result'),2)
+            else:self.assertEqual(result.stderr,b'')
+        for cleanup in (0,1):
+            for fault in range(cleanup+2):
+                for short_result in (0,1):
+                    result=subprocess.run([str(binary),str(cleanup),str(fault),str(short_result)],
+                                          capture_output=True,timeout=5)
+                    self.assertEqual(result.returncode,120)
+                    self.assertEqual(result.stdout,b'C1' if fault==1 or not cleanup else b'C12')
+                    self.assertEqual(result.stderr,b'' if fault==1 else
+                                     b'pipes' if fault==2 or not cleanup else b'pipes+child_cleanup')
 
     def test_evidence_cannot_turn_pending_cleanup_into_pass(self):
         data=dict(format=1,verdict='PASS',sha='a'*40,run_id='1',attempt='1',
@@ -412,6 +530,136 @@ class Tests(unittest.TestCase):
             self.assertIn(word,text)
         for forbidden in ('system(', 'popen(', '/var/run/docker.sock', 'setns('):
             self.assertNotIn(forbidden,text)
+        # Exercise the real build orchestration with synthetic operations only.
+        # This proves attribution and fail-closed propagation, not native execution.
+        stages=('materialize','adapter_compile','adapter_read','adapter_elf',
+                'core_compile','core_read','core_elf',
+                'fixture_compile','fixture_read','fixture_elf')
+        expected_flags=['/usr/bin/gcc','-std=c11','-O2','-static','-fno-pie','-no-pie',
+                        '-fstack-protector-strong','-D_FORTIFY_SOURCE=2','-Wl,--build-id=none',
+                        '-Wall','-Wextra','-Werror','-Wno-unused-function',
+                        '-Wno-misleading-indentation']
+        self.assertEqual(list(ci.STATIC_FLAGS),expected_flags)
+        for fault in (None,)+stages:
+            events=[]; commands=[{'exit':1,'primary':'timeout'}]; diagnostic={}
+            tree=Path('/synthetic/source'); binaries=Path('/synthetic/bin'); sources={}
+            class BuildFailure(Exception): pass
+            def event(stage):
+                events.append(stage)
+                if stage==fault:
+                    raise BuildFailure('PRIVATE_CANARY /private/path')
+            def materialize(dest,old,identities):
+                self.assertEqual((dest,identities),(tree,sources));event('materialize')
+            def capture(argv,seconds,records):
+                self.assertEqual(argv[:len(expected_flags)],expected_flags)
+                self.assertEqual(seconds,60)
+                name=Path(argv[argv.index('-o')+1]).name
+                stage='core' if name=='core-tests' else name
+                source=tree/('tests/native-fixture-runner.c' if name=='fixture' else 'adapter/'+name+'.c')
+                self.assertEqual(argv[len(expected_flags):len(expected_flags)+3],
+                                 [str(source),'-o',str(binaries/name)])
+                self.assertEqual(argv[len(expected_flags)+3:],extra if name=='fixture' else [])
+                records.append({'exit':1 if fault==stage+'_compile' else 0,'primary':None,
+                                'stderr':'PRIVATE_CANARY','argv':argv})
+                event(stage+'_compile')
+                return b''
+            def read(path,bound):
+                self.assertEqual(bound,16*1024*1024)
+                stage='core' if path.name=='core-tests' else path.name
+                event(stage+'_read');return stage.encode()
+            def elf(raw):
+                event(raw.decode()+'_elf');return {'sha256':'a'*64}
+            old={'capture':capture,'read_exact':read,'elf_static':elf}
+            extra=['-DADAPTER_EXEC_SHA256="'+'a'*64+'"']
+            def run():
+                with patch.object(ci,'adapter_capture',side_effect=lambda o,a,s,c,d:o['capture'](a,s,c)) as observed:
+                    try:
+                        ci.build_programs(tree,binaries,{'materialize':materialize},old,commands,sources,diagnostic)
+                        return ci.compile_static(tree,binaries,'fixture',old,commands,diagnostic,extra)
+                    finally:
+                        self.assertEqual([Path(call.args[1][len(expected_flags)]).name
+                                          for call in observed.call_args_list],
+                                         [name for stage,name in (('adapter_compile','adapter.c'),
+                                             ('fixture_compile','native-fixture-runner.c')) if stage in events])
+            with self.subTest(fault=fault):
+                if fault is None:
+                    self.assertEqual(run(),{'sha256':'a'*64})
+                    self.assertEqual(events,list(stages))
+                    self.assertEqual(diagnostic,{'stage':'none','reason':'none'})
+                else:
+                    with self.assertRaises(BuildFailure):run()
+                    self.assertEqual(events,list(stages[:stages.index(fault)+1]))
+                    reason='command_nonzero' if fault.endswith('_compile') else 'operation_failed'
+                    self.assertEqual(ci.build_suffix(diagnostic),
+                                     ' build_stage='+fault+' build_reason='+reason)
+        # Only a new, bounded transport record may classify a command failure.
+        for primary,exit_code,reason in (
+                ('timeout',-15,'timeout'),('cancelled',-15,'cancelled'),
+                ('output_bound',1,'output_bound'),('process_unconfirmed',None,'process_unconfirmed'),
+                (None,2,'command_nonzero'),('PRIVATE_CANARY',2,'operation_failed'),
+                (None,True,'operation_failed'),(None,0,'operation_failed')):
+            commands=[];diagnostic={}
+            def fail():
+                commands.append({'primary':primary,'exit':exit_code,'stderr':'PRIVATE_CANARY'})
+                raise BuildFailure('PRIVATE_CANARY')
+            with self.subTest(primary=primary,exit=exit_code),self.assertRaises(BuildFailure):
+                ci.build_step(diagnostic,'adapter_compile',fail,commands)
+            self.assertEqual(diagnostic['reason'],reason)
+        for stage in ci.BUILD_STAGES:
+            diagnostic={}
+            def fail():raise BuildFailure('PRIVATE_CANARY')
+            with self.assertRaises(BuildFailure):ci.build_step(diagnostic,stage,fail)
+            self.assertEqual(diagnostic,{'stage':stage,'reason':'operation_failed'})
+        for error in (KeyboardInterrupt('PRIVATE_CANARY'),SystemExit('PRIVATE_CANARY')):
+            diagnostic={}
+            def fail():raise error
+            with self.assertRaises(type(error)):ci.build_step(diagnostic,'materialize',fail)
+            self.assertEqual(diagnostic['reason'],'operation_failed')
+        for bad in ({},{'stage':'PRIVATE_CANARY','reason':'timeout'},
+                    {'stage':'adapter_compile','reason':'PRIVATE_CANARY'}):
+            self.assertEqual(ci.build_suffix(bad),' build_stage=UNKNOWN build_reason=UNKNOWN')
+        warning=(b'/private/CANARY/adapter.c:1000:2: error: CANARY [-Werror=unused-result]\n')
+        self.assertEqual(ci.gcc_diagnostic(warning),('adapter.c',1000,'unused-result'))
+        fixture_warning=warning.replace(b'adapter.c',b'native-fixture-runner.c')
+        for name in ('native-fixture-runner.c','fixture-bind-probe.h',
+                     'fixture-namespace-handles.h','fixture-resource-envelope.h'):
+            self.assertEqual(ci.gcc_diagnostic(warning.replace(b'adapter.c',name.encode())),
+                             (name,1000,'unused-result'))
+            self.assertEqual(ci.gcc_suffix({'gcc':(name,1000,'unused-result')}),
+                             ' gcc_source='+name+' gcc_line=1000 gcc_warning=unused-result')
+        for raw in (b'CANARY', b'/private/CANARY/other.c:2: error: CANARY\n',
+                    warning.replace(b':1000:',b':1000000:'), warning+b'x'*65536,
+                    b'\x1b[31m'+warning, 'CANARY', None):
+            self.assertEqual(ci.gcc_diagnostic(raw),('UNKNOWN',0,'UNKNOWN'))
+        self.assertEqual(ci.gcc_diagnostic(warning.replace(b'unused-result',b'unsupported-warning')),
+                         ('adapter.c',1000,'other'))
+        unknown=' gcc_source=UNKNOWN gcc_line=0 gcc_warning=UNKNOWN'
+        for value in (('CANARY',3,'none'),('adapter.c',True,'none'),
+                      ('adapter.c',1000000,'none'),('adapter.c',3,'CANARY'),None):
+            self.assertEqual(ci.gcc_suffix({'gcc':value}),unknown)
+        # Real unprivileged bounded transport, synthetic process only. No GCC/root/namespace.
+        driver=runpy.run_path(str(build.NATIVE/'tests/native-driver.py'))
+        for stderr,code in ((warning,1),(fixture_warning,1),(b'CANARY',1),(warning,0),(fixture_warning,0)):
+            commands=[]; diagnostic={}
+            command=[sys.executable,'-I','-S','-B','-c',
+                     'import os;os.write(2,'+repr(stderr)+');raise SystemExit('+str(code)+')']
+            if code:
+                with self.assertRaises(driver['Refused']):
+                    ci.adapter_capture(driver,command,5,commands,diagnostic)
+                self.assertEqual(diagnostic['gcc'],ci.gcc_diagnostic(stderr))
+                self.assertNotIn('CANARY',ci.gcc_suffix(diagnostic))
+            else:
+                self.assertEqual(ci.adapter_capture(driver,command,5,commands,diagnostic),b'')
+                self.assertNotIn('gcc',diagnostic)
+            self.assertEqual(commands[-1]['exit'],code)
+            self.assertNotIn('stderr',commands[-1])
+        commands=[];diagnostic={}
+        with self.assertRaises(driver['Refused']):
+            ci.adapter_capture(driver,[sys.executable,'-I','-S','-B','-c',
+                                       'import time;time.sleep(5)'],0.05,commands,diagnostic)
+        self.assertEqual(commands[-1]['primary'],'timeout')
+        self.assertNotIn('gcc',diagnostic)
+        self.assertEqual(ci.gcc_suffix(diagnostic),unknown)
 
 
 if __name__=='__main__':

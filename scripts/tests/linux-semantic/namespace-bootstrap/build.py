@@ -78,6 +78,27 @@ def core_test_variant(source):
     return source
 
 
+def adapter_variant(source):
+    """Check fixed child diagnostics in this copy; preserve the historical source."""
+    before = ('  write(2,reason,strlen(reason));\n'
+              '  if(cleanup)write(2,"+child_cleanup",14);')
+    after = ('  size_t reason_len=strlen(reason);\n'
+             '  if(write(2,reason,reason_len)!=(ssize_t)reason_len)_exit(120);\n'
+             '  if(cleanup&&write(2,"+child_cleanup",14)!=14)_exit(120);')
+    if source.count(before) != 1:
+        raise ValueError('adapter_child_fail_shape')
+    return source.replace(before, after, 1)
+
+
+def fixture_variant(source):
+    before = ('  a=(struct probe_args)  {\n'
+              '    runtime,runtimefd,sourcefd,outer,stdoutp[1],stderrp[1]\n  };')
+    after = before.replace('stderrp[1]\n', 'stderrp[1],{0},{0}\n')
+    if source.count(before) != 1:
+        raise ValueError('fixture_initializer_shape')
+    return source.replace(before, after, 1)
+
+
 def materialize(dest, driver, expected=None):
     """Fixed namespace/bootstrap and test-fixture checks; original pins stay exact."""
     driver['source_identity']()  # original reference ledger/rootfs/codegen pins
@@ -102,7 +123,7 @@ def materialize(dest, driver, expected=None):
     compile(bootstrap, 'clb195-bootstrap', 'exec')
     if len(bootstrap.encode()) > 16384 or len(tail) > 525316:
         raise ValueError('contract_bound')
-    text = raw['adapter/adapter.c'].decode()
+    text = adapter_variant(raw['adapter/adapter.c'].decode())
     start = text.index('static void namespace_child(const struct namespace_args *a)')
     end = text.index('static int namespace_start(void*opaque)', start)
     # Old function closes immediately before namespace_start; replacement is fixed.
@@ -124,7 +145,7 @@ def materialize(dest, driver, expected=None):
     for name in ('adapter/fd-budget.h', 'tests/native-fixture-runner.c',
                  'tests/fixture-bind-probe.h', 'tests/fixture-namespace-handles.h', 'tests/fixture-resource-envelope.h'):
         (dest/name).write_bytes(raw[name])
-    fixture = raw['tests/native-fixture-runner.c'].decode()
+    fixture = fixture_variant(raw['tests/native-fixture-runner.c'].decode())
     if fixture.count('compose_project=clb91-prototype') != 1:
         raise ValueError('fixture_project')
     (dest/'tests/native-fixture-runner.c').write_text(

@@ -7,8 +7,9 @@ It does not establish acceptance of this new integration.
 
 `build.py` verifies the existing native-adapter source/reference pins and makes a
 temporary test variant. Its `namespace_child` body, embedded bootstrap/request
-arrays and copied common C test's fixture syscall checks change. The input core
-test remains bound to its original hash; shape-checked substitutions retain every
+arrays, `child_fail` diagnostic writes and copied common C test's fixture syscall
+checks change. The input core test remains bound to its original hash;
+shape-checked substitutions retain every
 original assertion and expose the generated core source hash. No original
 adapter, Runtime, planner, CLB-192 source or
 production manifest is edited. The existing native fixture's project name becomes
@@ -99,7 +100,95 @@ name, bounded line number and fixed GCC warning category. The test still fails;
 raw compiler output, source paths and assertion text stay private. This diagnoses
 the Linux compiler refusal without running the native namespace step.
 
+## Native build failure attribution
+
+Terminal main run 38215257414 / attempt 1 / commit
+ecdc977e0eb74ce5b216c007f24b13ff97c1dd49 passed prior CLB-191/192 checks and
+the complete portable suite, then stopped at `phase=build`, with `build={}`,
+core/capture/cleanup and native controls NOT_RUN. Its five source hashes match
+the local candidate before this diagnostic change. The log contains only
+`CLB195_NAMESPACE_FAIL`; it does not establish a compiler, namespace or privilege
+failure. The first build interval covers materialization, adapter and core C
+compilation, bounded binary reads and static ELF validation. Fixture compilation
+comes after successful core execution and cannot explain this observed record.
+
+On a build refusal the coordinator now appends only fixed `build_stage` and
+`build_reason` categories to that console marker. Stages identify `materialize`,
+adapter/core/fixture `compile`, `read` or `elf`. Reasons distinguish a recorded command
+nonzero exit, timeout, cancellation, output bound or unconfirmed process from a
+generic `operation_failed`; unavailable attribution yields `UNKNOWN`. Only the
+new capture record for that operation may supply a transport reason. No exception
+text, argv, compiler output or private path is published. `command_nonzero` would
+prove that the compiler/linker command failed, not its precise diagnostic.
+
+The bounded artifact schema and PASS predicates are unchanged. Every exception
+still propagates to FAIL, static flags and deadlines are unchanged, and no new
+artifact is uploaded. Portable fault injection checks actual orchestration order,
+every instrumented build operation, transport attribution, cancellation propagation and output
+allowlisting; it does not execute a native namespace. Local Apple Clang cannot
+establish Ubuntu GCC static acceptance. New native behavior remains NATIVE_PENDING.
+
 ## One future manual Tests run
+
+User-supplied run 38245291104 identifies `native-fixture-runner.c:149`, warning
+category `other`. The incomplete eight-field `probe_args` initializer is reproduced
+as `missing-field-initializers` by the supplied Linux GCC experiment and a local
+portable compiler regression. The generator now shape-checks the initializer and
+adds `{0},{0}` for the two trailing `struct stat` fields. All six original values,
+checked `fstat` assignments, clone/identity/cleanup code and historical pins remain.
+
+The existing 14-test portable suite now performs full static GCC compilation of
+both generated adapter and fixture on Linux, using `native-ci.py`'s exact flags,
+bounded capture and static ELF x86_64 checks. The fixture receives the hash of the
+just-built adapter. Neither binary is executed. Root is refused; no runtime image,
+Docker, namespace or external preparation is needed. Missing GCC/static libraries
+or any compile/link failure fails the suite, without a weaker fallback. Automatic
+Lint already invokes this suite through `test_amd64_ci_harness.py` and
+`selfcheck-quality-gates.sh`; no workflow is added. Existing 60-second compile and
+90-second outer portable limits remain. Non-Linux hosts omit only this Linux
+compile check; their portable PASS is not Linux/static/native acceptance. The new
+full Ubuntu GCC 13 build remains unverified until CI.
+
+Run 38239985347 / attempt 1 / commit
+06b8d55ebeff4d8fa64ee4584a5728b238beacdd passed adapter compilation and core,
+then refused at `fixture_compile` / `command_nonzero` before capture/cleanup.
+Artifact 11742932203 matches the local source hashes. Exact GCC/linker cause is
+UNKNOWN; this follow-up extends the existing bounded compiler observer to fixture
+compilation only. It additionally permits `native-fixture-runner.c` and the three
+fixed fixture headers as source basenames. Line/warning validation, transport
+refusal/timeout/cleanup, strict flags and artifact/PASS contracts are unchanged.
+Unsupported linker or compiler output remains UNKNOWN. Portable routing/parser
+and real synthetic transport regressions do not establish Ubuntu compilation or
+native namespace acceptance. No fixture source/pin is changed.
+
+User-confirmed run 38236374063 / attempt 1 / commit
+60d19d4c187ed4d8196710ab033bc4b89eefd6d1 reported `adapter_compile` /
+`command_nonzero`, `adapter.c:931`, `unused-result`. The CLB-195 generator now
+shape-checks and replaces only the two unchecked diagnostic writes in `child_fail`.
+Cleanup still happens once before output, the fixed reason/optional
+`+child_cleanup` messages remain, and failed or short writes exit 120, as does the
+completed failure path. No warning suppression or historical pin update is used.
+Portable regression compiles the exact extracted old/generated function with an
+explicit `warn_unused_result` attribute: old refuses, generated compiles. Synthetic
+write errors/short results test both calls, cleanup ordering and exit 120 without
+privilege or namespaces. Local Apple Clang evidence is not Ubuntu GCC 13 static
+acceptance; the full adapter build and native namespace remain NATIVE_PENDING.
+
+Run 38230093134 / attempt 1 / commit
+14fee9a9eba70ecdf768d311b7836b7c7aae2077 confirmed `adapter_compile` /
+`command_nonzero`, after preparation, prior checks and portable PASS. Exact GCC
+warning, source error or linker failure remains UNKNOWN. The separate unit job's
+wrapper-validation network failure is unrelated; no wrapper or gate is changed.
+The coordinator's adapter-only compiler capture now adds an observer to a
+shape-checked in-memory copy of the pinned capture function. Transport deadlines,
+bounds, cancellation, process cleanup and nonzero refusal remain intact; historical
+driver bytes/pins are unchanged. The observer retains only an allowlisted source
+basename, bounded line and fixed warning category. Console-only fields are
+`gcc_source`, `gcc_line`, `gcc_warning`; raw compiler output and exception text
+remain private. Linker-only, colored or unsupported diagnostics give UNKNOWN.
+Artifact schema/limits and native PASS predicates are unchanged. Real synthetic
+unprivileged processes test nonzero refusal, successful transport and timeout;
+these checks are not Ubuntu GCC compilation or native namespace acceptance.
 
 After separately authorized publication and dispatch, the existing
 `amd64-runtime-prototype` job on ubuntu-24.04 runs unchanged preparation, original
