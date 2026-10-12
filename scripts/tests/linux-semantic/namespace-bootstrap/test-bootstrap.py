@@ -412,6 +412,87 @@ class Tests(unittest.TestCase):
             self.assertIn(word,text)
         for forbidden in ('system(', 'popen(', '/var/run/docker.sock', 'setns('):
             self.assertNotIn(forbidden,text)
+        # Exercise the real build orchestration with synthetic operations only.
+        # This proves attribution and fail-closed propagation, not native execution.
+        stages=('materialize','adapter_compile','adapter_read','adapter_elf',
+                'core_compile','core_read','core_elf',
+                'fixture_compile','fixture_read','fixture_elf')
+        expected_flags=['/usr/bin/gcc','-std=c11','-O2','-static','-fno-pie','-no-pie',
+                        '-fstack-protector-strong','-D_FORTIFY_SOURCE=2','-Wl,--build-id=none',
+                        '-Wall','-Wextra','-Werror','-Wno-unused-function',
+                        '-Wno-misleading-indentation']
+        self.assertEqual(list(ci.STATIC_FLAGS),expected_flags)
+        for fault in (None,)+stages:
+            events=[]; commands=[{'exit':1,'primary':'timeout'}]; diagnostic={}
+            tree=Path('/synthetic/source'); binaries=Path('/synthetic/bin'); sources={}
+            class BuildFailure(Exception): pass
+            def event(stage):
+                events.append(stage)
+                if stage==fault:
+                    raise BuildFailure('PRIVATE_CANARY /private/path')
+            def materialize(dest,old,identities):
+                self.assertEqual((dest,identities),(tree,sources));event('materialize')
+            def capture(argv,seconds,records):
+                self.assertEqual(argv[:len(expected_flags)],expected_flags)
+                self.assertEqual(seconds,60)
+                name=Path(argv[argv.index('-o')+1]).name
+                stage='core' if name=='core-tests' else name
+                source=tree/('tests/native-fixture-runner.c' if name=='fixture' else 'adapter/'+name+'.c')
+                self.assertEqual(argv[len(expected_flags):len(expected_flags)+3],
+                                 [str(source),'-o',str(binaries/name)])
+                self.assertEqual(argv[len(expected_flags)+3:],extra if name=='fixture' else [])
+                records.append({'exit':1 if fault==stage+'_compile' else 0,'primary':None,
+                                'stderr':'PRIVATE_CANARY','argv':argv})
+                event(stage+'_compile')
+                return b''
+            def read(path,bound):
+                self.assertEqual(bound,16*1024*1024)
+                stage='core' if path.name=='core-tests' else path.name
+                event(stage+'_read');return stage.encode()
+            def elf(raw):
+                event(raw.decode()+'_elf');return {'sha256':'a'*64}
+            old={'capture':capture,'read_exact':read,'elf_static':elf}
+            extra=['-DADAPTER_EXEC_SHA256="'+'a'*64+'"']
+            def run():
+                ci.build_programs(tree,binaries,{'materialize':materialize},old,commands,sources,diagnostic)
+                return ci.compile_static(tree,binaries,'fixture',old,commands,diagnostic,extra)
+            with self.subTest(fault=fault):
+                if fault is None:
+                    self.assertEqual(run(),{'sha256':'a'*64})
+                    self.assertEqual(events,list(stages))
+                    self.assertEqual(diagnostic,{'stage':'none','reason':'none'})
+                else:
+                    with self.assertRaises(BuildFailure):run()
+                    self.assertEqual(events,list(stages[:stages.index(fault)+1]))
+                    reason='command_nonzero' if fault.endswith('_compile') else 'operation_failed'
+                    self.assertEqual(ci.build_suffix(diagnostic),
+                                     ' build_stage='+fault+' build_reason='+reason)
+        # Only a new, bounded transport record may classify a command failure.
+        for primary,exit_code,reason in (
+                ('timeout',-15,'timeout'),('cancelled',-15,'cancelled'),
+                ('output_bound',1,'output_bound'),('process_unconfirmed',None,'process_unconfirmed'),
+                (None,2,'command_nonzero'),('PRIVATE_CANARY',2,'operation_failed'),
+                (None,True,'operation_failed'),(None,0,'operation_failed')):
+            commands=[];diagnostic={}
+            def fail():
+                commands.append({'primary':primary,'exit':exit_code,'stderr':'PRIVATE_CANARY'})
+                raise BuildFailure('PRIVATE_CANARY')
+            with self.subTest(primary=primary,exit=exit_code),self.assertRaises(BuildFailure):
+                ci.build_step(diagnostic,'adapter_compile',fail,commands)
+            self.assertEqual(diagnostic['reason'],reason)
+        for stage in ci.BUILD_STAGES:
+            diagnostic={}
+            def fail():raise BuildFailure('PRIVATE_CANARY')
+            with self.assertRaises(BuildFailure):ci.build_step(diagnostic,stage,fail)
+            self.assertEqual(diagnostic,{'stage':stage,'reason':'operation_failed'})
+        for error in (KeyboardInterrupt('PRIVATE_CANARY'),SystemExit('PRIVATE_CANARY')):
+            diagnostic={}
+            def fail():raise error
+            with self.assertRaises(type(error)):ci.build_step(diagnostic,'materialize',fail)
+            self.assertEqual(diagnostic['reason'],'operation_failed')
+        for bad in ({},{'stage':'PRIVATE_CANARY','reason':'timeout'},
+                    {'stage':'adapter_compile','reason':'PRIVATE_CANARY'}):
+            self.assertEqual(ci.build_suffix(bad),' build_stage=UNKNOWN build_reason=UNKNOWN')
 
 
 if __name__=='__main__':

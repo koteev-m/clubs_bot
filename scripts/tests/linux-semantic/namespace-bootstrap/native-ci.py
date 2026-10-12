@@ -16,11 +16,65 @@ C_STAGES = ('unclassified', 'source_load', 'materialize', 'compile_timeout', 'co
             'core_timeout', 'core_exit_nonzero', 'core_stderr_nonempty',
             'core_stdout_bounds', 'summary_parse', 'summary_schema',
             'summary_failed', 'summary_namespace')
+BUILD_STAGES = ('materialize', 'adapter_compile', 'adapter_read', 'adapter_elf',
+                'core_compile', 'core_read', 'core_elf',
+                'fixture_compile', 'fixture_read', 'fixture_elf')
+BUILD_REASONS = ('operation_failed', 'command_nonzero', 'timeout', 'cancelled',
+                 'output_bound', 'process_unconfirmed')
+STATIC_FLAGS = ('/usr/bin/gcc', '-std=c11', '-O2', '-static', '-fno-pie', '-no-pie',
+                '-fstack-protector-strong', '-D_FORTIFY_SOURCE=2', '-Wl,--build-id=none',
+                '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
+                '-Wno-misleading-indentation')
 
 
 def need(value):
     if not value:
         raise ValueError('clb195_native_refused')
+
+
+def build_step(diagnostic, stage, operation, commands=None):
+    """Keep only fixed operation/reason names; never inspect exception text or argv."""
+    need(stage in BUILD_STAGES)
+    diagnostic.update(stage=stage, reason='operation_failed')
+    before = len(commands) if commands is not None else 0
+    try:
+        result = operation()
+    except BaseException:
+        if commands is not None and len(commands) == before + 1:
+            command = commands[-1]
+            primary = command.get('primary')
+            if primary in ('timeout', 'cancelled', 'output_bound', 'process_unconfirmed'):
+                diagnostic['reason'] = primary
+            elif primary is None and type(command.get('exit')) is int and command['exit'] != 0:
+                diagnostic['reason'] = 'command_nonzero'
+        raise
+    diagnostic.update(stage='none', reason='none')
+    return result
+
+
+def build_suffix(diagnostic):
+    stage, reason = diagnostic.get('stage'), diagnostic.get('reason')
+    if stage not in BUILD_STAGES or reason not in BUILD_REASONS:
+        stage, reason = 'UNKNOWN', 'UNKNOWN'
+    return ' build_stage='+stage+' build_reason='+reason
+
+
+def compile_static(tree, binaries, name, old, commands, diagnostic, extra=()):
+    need(name in ('adapter', 'core-tests', 'fixture'))
+    stage = 'core' if name == 'core-tests' else name
+    source = tree/('tests/native-fixture-runner.c' if name == 'fixture' else 'adapter/'+name+'.c')
+    build_step(diagnostic, stage+'_compile',
+               lambda: old['capture'](list(STATIC_FLAGS)+[str(source), '-o', str(binaries/name)]+list(extra),
+                                      60, commands), commands)
+    raw = build_step(diagnostic, stage+'_read',
+                     lambda: old['read_exact'](binaries/name, 16*1024*1024))
+    return build_step(diagnostic, stage+'_elf', lambda: old['elf_static'](raw))
+
+
+def build_programs(tree, binaries, build, old, commands, sources, diagnostic):
+    build_step(diagnostic, 'materialize', lambda: build['materialize'](tree, old, sources))
+    for name in ('adapter', 'core-tests'):
+        compile_static(tree, binaries, name, old, commands, diagnostic)
 
 
 def validate_evidence(data, identity=None):
@@ -115,6 +169,7 @@ def main():
     privileged = False
     portable_failed = 'UNKNOWN'
     portable_stage = 'UNKNOWN'
+    build_diagnostic = {}
     try:
         previous = runpy.run_path(str(HERE.parent/'isolated-helper/native-handoff-ci.py'))
         oldhelper = runpy.run_path(str(HERE.parent/'isolated-helper/native-ci.py'))
@@ -149,23 +204,16 @@ def main():
         with tempfile.TemporaryDirectory(prefix='clb195-build-',dir=runner) as td:
             tree = Path(td)/'source'
             record['phase'] = 'build'
-            build['materialize'](tree, old,record['sources'])
-            flags = ['/usr/bin/gcc','-std=c11','-O2','-static','-fno-pie','-no-pie',
-                     '-fstack-protector-strong','-D_FORTIFY_SOURCE=2','-Wl,--build-id=none',
-                     '-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation']
             binaries = Path(td)
-            for name in ('adapter','core-tests'):
-                capture(flags+[str(tree/'adapter'/(name+'.c')),'-o',str(binaries/name)],60,commands)
-                old['elf_static'](old['read_exact'](binaries/name,16*1024*1024))
+            build_programs(tree, binaries, build, old, commands, record['sources'], build_diagnostic)
             record['phase'] = 'core'
             core = [json.loads(line) for line in capture([str(binaries/'core-tests')],20,commands).splitlines()]
             need(core and core[-1]['summary']['failed'] == 0)
             record['steps']['core'] = 'PASS'
             record['build']['adapter'] = build['sha']((binaries/'adapter').read_bytes())
             record['phase'] = 'build'
-            capture(flags+[str(tree/'tests/native-fixture-runner.c'),'-o',str(binaries/'fixture'),
-                    '-DADAPTER_EXEC_SHA256="'+record['build']['adapter']+'"'],60,commands)
-            elf = old['elf_static'](old['read_exact'](binaries/'fixture',16*1024*1024))
+            elf = compile_static(tree, binaries, 'fixture', old, commands, build_diagnostic,
+                                 ('-DADAPTER_EXEC_SHA256="'+record['build']['adapter']+'"',))
             record['build']['fixture'] = elf['sha256']
             fixture = Path(tempfile.mkdtemp(prefix='clb91-native-',dir='/tmp'))
             identity = fixture.stat()
@@ -204,6 +252,8 @@ def main():
             os.close(fd)
     suffix = (' portable_test='+portable_failed+' c_stage='+portable_stage
               if record['verdict'] == 'FAIL' and record['phase'] == 'portable' else '')
+    if record['verdict'] == 'FAIL' and record['phase'] == 'build':
+        suffix = build_suffix(build_diagnostic)
     print('CLB195_NAMESPACE_'+record['verdict']+suffix)
     return 0 if record['verdict'] == 'PASS' else 1
 

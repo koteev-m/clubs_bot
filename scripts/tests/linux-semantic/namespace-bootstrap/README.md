@@ -99,6 +99,34 @@ name, bounded line number and fixed GCC warning category. The test still fails;
 raw compiler output, source paths and assertion text stay private. This diagnoses
 the Linux compiler refusal without running the native namespace step.
 
+## Native build failure attribution
+
+Terminal main run 38215257414 / attempt 1 / commit
+ecdc977e0eb74ce5b216c007f24b13ff97c1dd49 passed prior CLB-191/192 checks and
+the complete portable suite, then stopped at `phase=build`, with `build={}`,
+core/capture/cleanup and native controls NOT_RUN. Its five source hashes match
+the local candidate before this diagnostic change. The log contains only
+`CLB195_NAMESPACE_FAIL`; it does not establish a compiler, namespace or privilege
+failure. The first build interval covers materialization, adapter and core C
+compilation, bounded binary reads and static ELF validation. Fixture compilation
+comes after successful core execution and cannot explain this observed record.
+
+On a build refusal the coordinator now appends only fixed `build_stage` and
+`build_reason` categories to that console marker. Stages identify `materialize`,
+adapter/core/fixture `compile`, `read` or `elf`. Reasons distinguish a recorded command
+nonzero exit, timeout, cancellation, output bound or unconfirmed process from a
+generic `operation_failed`; unavailable attribution yields `UNKNOWN`. Only the
+new capture record for that operation may supply a transport reason. No exception
+text, argv, compiler output or private path is published. `command_nonzero` would
+prove that the compiler/linker command failed, not its precise diagnostic.
+
+The bounded artifact schema and PASS predicates are unchanged. Every exception
+still propagates to FAIL, static flags and deadlines are unchanged, and no new
+artifact is uploaded. Portable fault injection checks actual orchestration order,
+every instrumented build operation, transport attribution, cancellation propagation and output
+allowlisting; it does not execute a native namespace. Local Apple Clang cannot
+establish Ubuntu GCC static acceptance. New native behavior remains NATIVE_PENDING.
+
 ## One future manual Tests run
 
 After separately authorized publication and dispatch, the existing
