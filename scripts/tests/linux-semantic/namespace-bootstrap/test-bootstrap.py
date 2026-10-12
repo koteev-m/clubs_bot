@@ -55,6 +55,18 @@ def gcc_diagnostic(stderr):
     return ('UNKNOWN', 0, 'UNKNOWN')
 
 
+def linux_generated_compile(tree, binaries, driver):
+    """Full static compilation only; never execute either generated binary."""
+    if sys.platform != 'linux':
+        return False
+    ci.need(os.geteuid() != 0)
+    commands=[];diagnostic={}
+    adapter=ci.compile_static(tree,binaries,'adapter',driver,commands,diagnostic)
+    ci.compile_static(tree,binaries,'fixture',driver,commands,diagnostic,
+                      ('-DADAPTER_EXEC_SHA256="'+adapter['sha256']+'"',))
+    return True
+
+
 class Tests(unittest.TestCase):
     def boundary(self, fault=None, reply=None):
         events = []
@@ -180,6 +192,42 @@ class Tests(unittest.TestCase):
                             original+'\n'+before+'\n'):
                 with self.assertRaises(ValueError):build.adapter_variant(changed)
             self.check_child_fail_contract(original,generated,Path(td))
+            fixture=(build.NATIVE/'tests/native-fixture-runner.c').read_text()
+            generated_fixture=(dest/'tests/native-fixture-runner.c').read_text()
+            before='runtime,runtimefd,sourcefd,outer,stdoutp[1],stderrp[1]'
+            self.assertEqual(generated_fixture,fixture.replace(before,before+',{0},{0}',1)
+                             .replace('compose_project=clb91-prototype','compose_project=clubs-bot-stage'))
+            for changed in (fixture.replace(before,before+',0'),fixture+fixture):
+                with self.assertRaises(ValueError):build.fixture_variant(changed)
+            # Exact struct and initializer, with portable public types/inputs only.
+            struct=fixture[fixture.index('struct probe_args  {'):fixture.index('static int probe_start(')]
+            prefix='#include <sys/stat.h>\n'+struct
+            prefix+='void probe(const char *runtime,int runtimefd,int sourcefd,const struct mount_tuple *outer) {\n'
+            prefix+='int stdoutp[2]={0},stderrp[2]={0};struct probe_args a;\n'
+            for text,passes in ((fixture,False),(generated_fixture,True)):
+                start=text.index('  a=(struct probe_args)')
+                initializer=text[start:text.index('  if(fstat(',start)]
+                source=Path(td)/'initializer.c'
+                source.write_text(prefix+initializer+'(void)a;\n}\n')
+                result=subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',
+                    '-fsyntax-only',str(source)],capture_output=True,timeout=20)
+                self.assertEqual(result.returncode==0,passes)
+                if not passes:self.assertIn(b'missing-field-initializers',result.stderr)
+            self.assertEqual(linux_generated_compile(dest,Path(td),driver),sys.platform=='linux')
+            # Exercise Linux scheduling/refusal on every host without executing C.
+            for fault in (None,'adapter','fixture'):
+                calls=[]
+                def compile_only(tree,binaries,name,old,commands,diagnostic,extra=()):
+                    calls.append((name,extra))
+                    if name==fault:raise ValueError('synthetic_compile_failure')
+                    return {'sha256':'a'*64}
+                with patch.object(sys,'platform','linux'),patch.object(os,'geteuid',return_value=1000),\
+                        patch.object(ci,'compile_static',side_effect=compile_only):
+                    if fault:
+                        with self.assertRaises(ValueError):linux_generated_compile(dest,Path(td),driver)
+                    else:self.assertTrue(linux_generated_compile(dest,Path(td),driver))
+                self.assertEqual(calls,[('adapter',())] if fault=='adapter' else
+                    [('adapter',()),('fixture',('-DADAPTER_EXEC_SHA256="'+'a'*64+'"',))])
             original_core=(build.NATIVE/'adapter/core-tests.c').read_text()
             generated_core=(dest/'adapter/core-tests.c').read_text()
             self.assertEqual(hashlib.sha256(generated_core.encode()).hexdigest(),info['core_tests'])

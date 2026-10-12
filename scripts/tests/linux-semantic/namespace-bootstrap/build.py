@@ -90,6 +90,15 @@ def adapter_variant(source):
     return source.replace(before, after, 1)
 
 
+def fixture_variant(source):
+    before = ('  a=(struct probe_args)  {\n'
+              '    runtime,runtimefd,sourcefd,outer,stdoutp[1],stderrp[1]\n  };')
+    after = before.replace('stderrp[1]\n', 'stderrp[1],{0},{0}\n')
+    if source.count(before) != 1:
+        raise ValueError('fixture_initializer_shape')
+    return source.replace(before, after, 1)
+
+
 def materialize(dest, driver, expected=None):
     """Fixed namespace/bootstrap and test-fixture checks; original pins stay exact."""
     driver['source_identity']()  # original reference ledger/rootfs/codegen pins
@@ -136,7 +145,7 @@ def materialize(dest, driver, expected=None):
     for name in ('adapter/fd-budget.h', 'tests/native-fixture-runner.c',
                  'tests/fixture-bind-probe.h', 'tests/fixture-namespace-handles.h', 'tests/fixture-resource-envelope.h'):
         (dest/name).write_bytes(raw[name])
-    fixture = raw['tests/native-fixture-runner.c'].decode()
+    fixture = fixture_variant(raw['tests/native-fixture-runner.c'].decode())
     if fixture.count('compose_project=clb91-prototype') != 1:
         raise ValueError('fixture_project')
     (dest/'tests/native-fixture-runner.c').write_text(

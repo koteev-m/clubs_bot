@@ -130,6 +130,25 @@ establish Ubuntu GCC static acceptance. New native behavior remains NATIVE_PENDI
 
 ## One future manual Tests run
 
+User-supplied run 38245291104 identifies `native-fixture-runner.c:149`, warning
+category `other`. The incomplete eight-field `probe_args` initializer is reproduced
+as `missing-field-initializers` by the supplied Linux GCC experiment and a local
+portable compiler regression. The generator now shape-checks the initializer and
+adds `{0},{0}` for the two trailing `struct stat` fields. All six original values,
+checked `fstat` assignments, clone/identity/cleanup code and historical pins remain.
+
+The existing 14-test portable suite now performs full static GCC compilation of
+both generated adapter and fixture on Linux, using `native-ci.py`'s exact flags,
+bounded capture and static ELF x86_64 checks. The fixture receives the hash of the
+just-built adapter. Neither binary is executed. Root is refused; no runtime image,
+Docker, namespace or external preparation is needed. Missing GCC/static libraries
+or any compile/link failure fails the suite, without a weaker fallback. Automatic
+Lint already invokes this suite through `test_amd64_ci_harness.py` and
+`selfcheck-quality-gates.sh`; no workflow is added. Existing 60-second compile and
+90-second outer portable limits remain. Non-Linux hosts omit only this Linux
+compile check; their portable PASS is not Linux/static/native acceptance. The new
+full Ubuntu GCC 13 build remains unverified until CI.
+
 Run 38239985347 / attempt 1 / commit
 06b8d55ebeff4d8fa64ee4584a5728b238beacdd passed adapter compilation and core,
 then refused at `fixture_compile` / `command_nonzero` before capture/cleanup.
