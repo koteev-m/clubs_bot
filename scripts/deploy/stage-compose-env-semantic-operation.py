@@ -119,6 +119,9 @@ class Runtime:
     Root/kernel remain trusted. Failed independent checks may be collected, but
     no subprocess or target capture is allowed until the entire initial gate passes.
     """
+    FILE_BYTES = 33554432
+    TOTAL_BYTES = 134217728
+
     def __init__(self, cancelled, evidence=None):
         self.cancelled, self.held = cancelled, []
         self.evidence = evidence or Evidence()
@@ -193,7 +196,7 @@ class Runtime:
             def metadata():
                 value = os.fstat(fd)
                 self.check(stat.S_ISREG(value.st_mode) and value.st_uid == 0 and not value.st_mode & 0o022
-                           and value.st_size <= 33554432)
+                           and value.st_size <= self.FILE_BYTES)
             if not self.observe('path_safety', metadata):
                 self.evidence.record('integrity', 'not_evaluated')
                 continue
@@ -202,10 +205,10 @@ class Runtime:
                 while True:
                     self.check(True)
                     # Shared budget remains finite even after a failed/oversized file.
-                    self.check(self.total <= 134217728)
-                    data = os.read(fd, min(65536, 134217729 - self.total))
+                    self.check(self.total <= self.TOTAL_BYTES)
+                    data = os.read(fd, min(65536, self.TOTAL_BYTES + 1 - self.total))
                     self.total += len(data)
-                    self.check(self.total <= 134217728)
+                    self.check(self.total <= self.TOTAL_BYTES)
                     if not data:
                         break
                     actual.update(data)

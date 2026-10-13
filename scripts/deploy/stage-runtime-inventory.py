@@ -32,18 +32,21 @@ FRAME_LIMIT = 12288
 WATCHED = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
 REFERENCE_PATH = 'scripts/deploy/stage-compose-env-semantic-runtime.json'
 LOCAL_SOURCES = (RUNNER_PATH, 'scripts/deploy/corrected-stage-release.py',
-                 'scripts/deploy/release_private_root.py', 'scripts/deploy/release_authority.py', REFERENCE_PATH)
+                 'scripts/deploy/release_private_root.py', 'scripts/deploy/release_authority.py',
+                 'scripts/deploy/root_binding_review.py', REFERENCE_PATH)
 REMOTE_SOURCES = (REMOTE_PATH, REFERENCE_PATH)
 
 
-# Fixed, stdlib-only source closure of the unchanged corrected transport.
+# Fixed, stdlib-only source closure of the current corrected transport.
 # Pins restrict the loader adapter below to precisely these reviewed modules.
 TRANSPORT_PATH = 'scripts/deploy/corrected-stage-release.py'
-DEPENDENCY_PATHS = ('scripts/deploy/release_private_root.py', 'scripts/deploy/release_authority.py')
+DEPENDENCY_PATHS = ('scripts/deploy/release_private_root.py', 'scripts/deploy/release_authority.py',
+                    'scripts/deploy/root_binding_review.py')
 SOURCE_PINS = {
-    TRANSPORT_PATH: 'f7717f5cb41ad56a74c397000a44112d622e5aa040175abe5ce4d0921b88add2',
+    TRANSPORT_PATH: '05b4578e6ab9d05fd85c303159162c8e3f1e7297f4207eee69bd44fcdeba7720',
     DEPENDENCY_PATHS[0]: '250d359d114779ddcc12c38bc64dc7015d5679f0ffce12a859f007810726cdba',
     DEPENDENCY_PATHS[1]: '83c8c81adeffc0ba7bb97d499ac3d8077950593ab03875856e17feccc8540216',
+    DEPENDENCY_PATHS[2]: 'd2175f0751f049eb587710ae5bade38a110f5f36dd493125d996d2e8fe7d7e2a',
     REFERENCE_PATH: '7ec2c9354972024933677eaf752768820d17577f6fd5fd3491c2d7ce85b7b342',
 }
 
@@ -64,7 +67,7 @@ def load_transport(sources, cancelled):
     loaders = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'source_module']
     require(len(loaders) == 1)
     # The sole adaptation of the pinned source: omit its pathname loader and
-    # supply the same two-name API from captured bytes. All other AST nodes are
+    # supply the same three-name API from captured bytes. All other AST nodes are
     # untouched. No import hooks, sys.path, .pyc, fallback or working-copy reread.
     tree.body.remove(loaders[0])
     compiled = {path: compile(sources[path], str(ROOT / path), 'exec') for path in DEPENDENCY_PATHS}
@@ -80,7 +83,7 @@ def load_transport(sources, cancelled):
 
     def captured_module(name):
         active(cancelled)
-        require(name in ('release_private_root', 'release_authority'))
+        require(name in ('release_private_root', 'release_authority', 'root_binding_review'))
         return modules[name]
 
     active(cancelled)
@@ -327,14 +330,14 @@ def interrupted(_signum, _frame):
     raise CaptureInterrupted
 
 
-def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):
     """Keep the existing tuple API, including its legacy 124/125 conventions."""
     result = capture_result(argv, payload, timeout=timeout, limit=limit, env=env,
-                            pass_fds=pass_fds, spawn_failed=spawn_failed)
+                            pass_fds=pass_fds, spawn_failed=spawn_failed, cwd_fd=cwd_fd)
     return result.code, result.output
 
 
-def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):
     """Own cancellation before spawn, through cleanup, until outcome selection."""
     global _capture_cancellation
     cancellation = [False]
@@ -343,7 +346,7 @@ def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass
     _capture_cancellation = cancellation
     try:
         result = _capture_owned(argv, payload, timeout=timeout, limit=limit, env=env,
-                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation)
+                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation, cwd_fd=cwd_fd)
     except BaseException as error:
         failure = error
     finally:
@@ -362,15 +365,19 @@ def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass
     return result
 
 
-def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation):
+def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation, cwd_fd):
     """No named stdout/stderr captures; bounded memory and bounded process lifetime."""
     output = bytearray()
     offset = 0
     deadline = time.monotonic() + timeout
+    # A verified caller may retain its canonical cwd FD; no shell or HOME
+    # substitution is needed, and the original directory stays leased.
+    def held_cwd():
+        os.fchdir(cwd_fd)
     try:
         child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds,
-                                 start_new_session=True)
+                                 start_new_session=True, preexec_fn=held_cwd if cwd_fd is not None else None)
     except OSError:
         if spawn_failed is not None:
             spawn_failed()

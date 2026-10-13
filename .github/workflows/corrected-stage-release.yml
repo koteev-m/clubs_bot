@@ -48,12 +48,7 @@ name: Corrected Stage Release (manual)
         default: ''
         required: true
         type: string
-      authorization:
-        description: Exact action authorization from runbook, bound to this workflow
-          run number, implementation and protected root-binding digest
-        required: false
-        default: ''
-        type: string
+
 permissions:
   contents: read
 concurrency:
@@ -75,7 +70,6 @@ jobs:
       IMAGE_DIGEST: "${{ steps.validate.outputs.IMAGE_DIGEST }}"
       IMPLEMENTATION: "${{ steps.validate.outputs.IMPLEMENTATION }}"
       ACTION: "${{ steps.validate.outputs.ACTION }}"
-      AUTHORIZATION: "${{ steps.validate.outputs.AUTHORIZATION }}"
       PRIOR_STATUS: "${{ steps.validate.outputs.PRIOR_STATUS }}"
     steps:
     - name: Checkout exact workflow revision
@@ -97,7 +91,6 @@ jobs:
         IMAGE_DIGEST: "${{ inputs.image_digest }}"
         IMPLEMENTATION: "${{ inputs.implementation }}"
         ACTION: "${{ inputs.action }}"
-        AUTHORIZATION: "${{ inputs.authorization }}"
         PRIOR_STATUS: "${{ inputs.prior_status }}"
       run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --validate
     - name: Verify original status evidence through GitHub
@@ -113,7 +106,6 @@ jobs:
         IMAGE_DIGEST: "${{ steps.validate.outputs.IMAGE_DIGEST }}"
         IMPLEMENTATION: "${{ steps.validate.outputs.IMPLEMENTATION }}"
         ACTION: "${{ steps.validate.outputs.ACTION }}"
-        AUTHORIZATION: "${{ steps.validate.outputs.AUTHORIZATION }}"
         PRIOR_STATUS: "${{ steps.validate.outputs.PRIOR_STATUS }}"
       run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --verify-prior
   execute:
@@ -144,10 +136,13 @@ jobs:
         IMAGE_DIGEST: "${{ needs.validate.outputs.IMAGE_DIGEST }}"
         IMPLEMENTATION: "${{ needs.validate.outputs.IMPLEMENTATION }}"
         ACTION: "${{ needs.validate.outputs.ACTION }}"
-        AUTHORIZATION: "${{ needs.validate.outputs.AUTHORIZATION }}"
         PRIOR_STATUS: "${{ needs.validate.outputs.PRIOR_STATUS }}"
+        TMPDIR: "${{ runner.temp }}"
         CLB82_APPROVED_IMPLEMENTATION: "${{ vars.CLB82_APPROVED_IMPLEMENTATION }}"
-        CLB82_AUTHORIZED_ROOT_BINDING: "${{ vars.CLB82_AUTHORIZED_ROOT_BINDING }}"
+        CLB91_REVIEWED_ROOT_APPROVAL: "${{ secrets.CLB91_REVIEWED_ROOT_APPROVAL }}"
+        CLB91_GPG_PROFILE: "${{ vars.CLB91_GPG_PROFILE }}"
+        CLB91_REVIEWER_PUBLIC_KEY: "${{ vars.CLB91_REVIEWER_PUBLIC_KEY }}"
+        CLB91_REVIEWER_FINGERPRINT: "${{ vars.CLB91_REVIEWER_FINGERPRINT }}"
       run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --validate-execution
     - name: Setup deployment SSH principal
       uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555
@@ -165,7 +160,6 @@ jobs:
         IMAGE_DIGEST: "${{ needs.validate.outputs.IMAGE_DIGEST }}"
         IMPLEMENTATION: "${{ needs.validate.outputs.IMPLEMENTATION }}"
         ACTION: "${{ needs.validate.outputs.ACTION }}"
-        AUTHORIZATION: "${{ needs.validate.outputs.AUTHORIZATION }}"
         PRIOR_STATUS: "${{ needs.validate.outputs.PRIOR_STATUS }}"
         GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         TMPDIR: "${{ runner.temp }}"
@@ -175,5 +169,26 @@ jobs:
         COMPOSE_PATH: "${{ secrets.COMPOSE_PATH }}"
         SSH_KNOWN_HOSTS: "${{ secrets.SSH_KNOWN_HOSTS }}"
         CLB82_APPROVED_IMPLEMENTATION: "${{ vars.CLB82_APPROVED_IMPLEMENTATION }}"
-        CLB82_AUTHORIZED_ROOT_BINDING: "${{ vars.CLB82_AUTHORIZED_ROOT_BINDING }}"
+        CLB91_REVIEWED_ROOT_APPROVAL: "${{ secrets.CLB91_REVIEWED_ROOT_APPROVAL }}"
+        CLB91_GPG_PROFILE: "${{ vars.CLB91_GPG_PROFILE }}"
+        CLB91_REVIEWER_PUBLIC_KEY: "${{ vars.CLB91_REVIEWER_PUBLIC_KEY }}"
+        CLB91_REVIEWER_FINGERPRINT: "${{ vars.CLB91_REVIEWER_FINGERPRINT }}"
       run: python3 -I -S -B scripts/deploy/corrected-stage-release.py
+    - name: Publish encrypted binding evidence
+      if: success() && needs.validate.outputs.ACTION == 'inspect'
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+      with:
+        name: clb91-binding-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/clb91-binding-evidence/binding.pgp
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 0
+        overwrite: false
+        include-hidden-files: false
+    - name: Clean owned encrypted evidence
+      if: always()
+      shell: bash
+      env:
+        TMPDIR: "${{ runner.temp }}"
+        PYTHONDONTWRITEBYTECODE: '1'
+      run: python3 -I -S -B scripts/deploy/corrected-stage-release.py --cleanup-evidence

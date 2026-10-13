@@ -24,7 +24,25 @@ def evidence():
 class NativeControls(unittest.TestCase):
     def test_original_helper_bytes_and_source_pins(self):
         self.assertEqual(hashlib.sha256((HERE/'helper.py').read_bytes()).hexdigest(),m['HELPER'])
-        runpy.run_path(str(HERE/'helper.py'))['sources'](m['ROOT']/'scripts/deploy')
+        helper=runpy.run_path(str(HERE/'helper.py'))
+        # CLB-191 evidence covers its pinned historical sources only. Current
+        # planner/runtime edits must still be refused by that unchanged helper.
+        with self.assertRaises(helper['Refused']):
+            helper['sources'](m['ROOT']/'scripts/deploy')
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td).resolve()
+            baseline='c4f4ce26b8452b31ee0e27e5511a117baa0a5d06'
+            for name,digest in helper['PINS'].items():
+                raw=subprocess.check_output(['git','-C',str(m['ROOT']),'show',
+                    baseline+':scripts/deploy/'+name])
+                self.assertEqual(hashlib.sha256(raw).hexdigest(),digest)
+                (root/name).write_bytes(raw)
+            helper['sources'](root)
+            for name in helper['PINS']:
+                path=root/name;raw=path.read_bytes();path.write_bytes(raw+b'\n')
+                with self.subTest(changed=name),self.assertRaises(helper['Refused']):
+                    helper['sources'](root)
+                path.write_bytes(raw)
 
     def test_native_emulation_and_identity_fail_closed(self):
         env=dict(GITHUB_SHA='a'*40,GITHUB_RUN_ID='12',GITHUB_RUN_ATTEMPT='1',RUNNER_ARCH='X64',GITHUB_EVENT_NAME='workflow_dispatch')

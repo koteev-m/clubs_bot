@@ -213,8 +213,18 @@ class HarnessTest(unittest.TestCase):
             export = Path(directory)
             folder = export / 'scripts/deploy'
             folder.mkdir(parents=True)
+            # This experiment is historical. Keep its original source pins and
+            # prove later production edits cannot inherit its native evidence.
             for name in ci.ORIGINAL:
                 (folder / name).write_bytes((ROOT / 'scripts/deploy' / name).read_bytes())
+            candidate = (HERE / 'amd64-runtime-candidate.json').read_bytes()
+            with self.assertRaisesRegex(ValueError, 'integrated source precondition'):
+                ci.integrated_diff(export, candidate)
+            baseline = 'c4f4ce26b8452b31ee0e27e5511a117baa0a5d06'
+            for name in ci.ORIGINAL:
+                raw = subprocess.check_output(['git', '-C', str(ROOT), 'show',
+                    baseline + ':scripts/deploy/' + name])
+                (folder / name).write_bytes(raw)
             candidate = (HERE / 'amd64-runtime-candidate.json').read_bytes()
             actual = {name: (folder / name).read_bytes() for name in ci.ORIGINAL}
             integrated = ci.integrated_diff(export, candidate)

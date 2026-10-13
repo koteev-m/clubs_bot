@@ -11743,6 +11743,12 @@ echo "quality-gate: Docker workflow/context contract verified"
 
 # Corrected-stage delegation is permitted only by the validated full topology.
 ruby "$ROOT_DIR/scripts/validate-corrected-stage-workflow.rb" "$ROOT_DIR"
+python3 -B "$ROOT_DIR/scripts/tests/test_root_binding_review.py"
+python3 -I -S -B "$ROOT_DIR/scripts/tests/test_root_binding_crypto.py"
+python3 -B "$ROOT_DIR/scripts/deploy/embed-corrected-compose.py" --check "$ROOT_DIR"
+python3 -B "$ROOT_DIR/scripts/tests/test_stage_docker_compose_runtime.py"
+python3 -B "$ROOT_DIR/scripts/tests/test_stage_compose_helper_plan.py"
+python3 -B "$ROOT_DIR/scripts/tests/test_corrected_compose_capture.py"
 ruby "$ROOT_DIR/scripts/validate-lint-workflow.rb" "$ROOT_DIR/.github/workflows/lint.yml"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_mode_repair.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_compose_diagnostic.py"

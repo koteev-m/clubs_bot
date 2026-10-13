@@ -1292,7 +1292,7 @@ module WorkflowCapabilityPolicy
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StageAptMetadataRefreshWorkflow::PATH, "refresh"]
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
     return RELEASE_STATUS_SECRETS - Set.new(["COMPOSE_PATH"]) if key == [StagePrincipalUidWorkflow::PATH, "identity"]
-    return RELEASE_STATUS_SECRETS | Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "execute"]
+    return RELEASE_STATUS_SECRETS | Set.new(["GITHUB_TOKEN", "CLB91_REVIEWED_ROOT_APPROVAL"]) if key == [CorrectedStageWorkflow::PATH, "execute"]
     return Set.new(["GITHUB_TOKEN"]) if key == [CorrectedStageWorkflow::PATH, "validate"]
     return Set.new(["GITHUB_TOKEN"]) if key == [".github/workflows/release.yml", "release"]
     Set.new

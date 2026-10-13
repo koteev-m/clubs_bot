@@ -3345,6 +3345,7 @@ import stat
 import struct
 import subprocess
 import sys
+import time
 import tempfile
 
 
@@ -3356,7 +3357,7 @@ INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'c
     'compose_file', 'compose_file_type', 'compose_file_owner', 'compose_file_nlink',
     'compose_file_mode', 'compose_file_device', 'compose_file_size', 'compose_subset',
     'override', 'dotenv', 'compose_command', 'compose_model',
-    'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
+    'runtime', 'semantic_equivalence', 'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
     'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
     'status_classification', 'status_read', 'inspect_output', 'finalize', 'interrupted', 'internal'))
 INSPECT_FAILURES = frozenset(('invalid', 'mismatch', 'missing', 'permission', 'busy',
@@ -3474,9 +3475,37 @@ def fdpath(fd):
     return path
 
 
+# BEGIN CLB91 FIXED EXECUTOR SOURCES
+import types
+CLB91_PLAN = {}
+exec(compile('import json, math, re\nLINUX_RUBY_LOAD = "$LOAD_PATH.replace([\'/usr/lib/ruby/3.2.0\', \'/usr/lib/x86_64-linux-gnu/ruby/3.2.0\']);\\n"\nFILE_LIMIT = 65536\nMODEL_LIMIT = 262144\nNAME = re.compile(\'[A-Za-z_][A-Za-z0-9_]*\\\\Z\')\nREASONS = frozenset((\'input\', \'unsupported\', \'version\', \'parser\', \'model\', \'different\', \'io\', \'cleanup\', \'interrupted\', \'bounds\'))\nCONTROL_KEYS = frozenset((\'HOME\', \'PATH\', \'TMPDIR\', \'TMP\', \'TEMP\', \'ENV\', \'BASH_ENV\', \'SHELLOPTS\', \'BASHOPTS\', \'CDPATH\', \'RUBYOPT\', \'RUBYLIB\', \'GEM_HOME\', \'GEM_PATH\', \'LD_PRELOAD\', \'LD_LIBRARY_PATH\', \'PWD\', \'OLDPWD\', \'SHLVL\', \'_\', \'IFS\', \'OPTIND\', \'OPTARG\', \'PPID\', \'UID\', \'EUID\', \'RANDOM\', \'SECONDS\', \'LINENO\'))\nOUTLINE = \'\\nrequire \\\'psych\\\'; require \\\'json\\\'\\nbegin\\n  raise unless ARGV.empty? || ARGV == [\\\'helper-one-dotenv\\\']\\n  strict_helper = ARGV == [\\\'helper-one-dotenv\\\']\\n  raw = STDIN.read(65537)\\n  raise unless raw.bytesize <= 65536 && raw.valid_encoding?\\n  tree = Psych.parse_stream(raw)\\n  raise unless tree.children.size == 1\\n  count = 0\\n  references = []\\n  walk = lambda do |n, depth, scope|\\n    count += 1\\n    raise if count > 4096 || depth > 32\\n    raise unless [Psych::Nodes::Stream, Psych::Nodes::Document, Psych::Nodes::Mapping,\\n                  Psych::Nodes::Sequence, Psych::Nodes::Scalar].include?(n.class)\\n    raise if (n.respond_to?(:anchor) && n.anchor) || (n.respond_to?(:tag) && n.tag)\\n    if n.is_a?(Psych::Nodes::Scalar)\\n      # YAML escapes can synthesize \\\'$\\\' or variable-name letters. Apply the\\n      # Python control-name policy to decoded references in EVERY scalar scope.\\n      references.concat(n.value.scan(/\\\\$\\\\{?([A-Za-z_][A-Za-z0-9_]*)/).flatten)\\n    end\\n    if n.is_a?(Psych::Nodes::Mapping)\\n      raise unless n.style == Psych::Nodes::Mapping::BLOCK\\n      seen = {}\\n      n.children.each_slice(2) do |k,v|\\n        raise unless k.is_a?(Psych::Nodes::Scalar) && k.plain &&\\n                     k.value.match?(/\\\\A[A-Za-z0-9_.-]+\\\\z/) && !seen[k.value]\\n        if strict_helper\\n          raise if %w[build include extends secrets configs external].include?(k.value)\\n          raise if k.value == \\\'env_file\\\' && scope != %w[services app]\\n        end\\n        seen[k.value] = true\\n        walk.call(k, depth + 1, scope + [k.value])\\n        walk.call(v, depth + 1, scope + [k.value])\\n      end\\n    else\\n      (n.children || []).each { |child| walk.call(child, depth + 1, scope) }\\n    end\\n  end\\n  walk.call(tree, 0, [])\\n  mapping = lambda do |n|\\n    raise unless n.is_a?(Psych::Nodes::Mapping)\\n    n.children.each_slice(2).to_h { |k,v| [k.value, [k,v]] }\\n  end\\n  root = mapping.call(tree.children[0].root)\\n  raise unless (root.keys - %w[services volumes networks version name]).empty?\\n  services = mapping.call(root.fetch(\\\'services\\\')[1])\\n  allowed = %w[image container_name depends_on environment healthcheck volumes ports restart\\n               expose command entrypoint networks working_dir user read_only init labels\\n               stop_grace_period env_file]\\n  environment_names = []\\n  services.each do |name, pair|\\n    fields = mapping.call(pair[1])\\n    raise unless (fields.keys - allowed).empty?\\n    raise if name != \\\'app\\\' && fields.key?(\\\'env_file\\\')\\n    if fields.key?(\\\'environment\\\')\\n      entries = mapping.call(fields[\\\'environment\\\'][1])\\n      raise if entries.empty?\\n      entries.each do |variable, entry|\\n        raise unless variable.match?(/\\\\A[A-Za-z_][A-Za-z0-9_]*\\\\z/) &&\\n                     entry[1].is_a?(Psych::Nodes::Scalar) && entry[1].start_line == entry[1].end_line\\n      end\\n      environment_names.concat(entries.keys)\\n    end\\n    if fields.key?(\\\'volumes\\\')\\n      mounts = fields[\\\'volumes\\\'][1]\\n      raise unless mounts.is_a?(Psych::Nodes::Sequence)\\n      mounts.children.each do |mount|\\n        # A tilde bind depends on parser HOME/user lookup, outside the supplied\\n        # non-control interpolation context. Restrict this check to sources;\\n        # ordinary environment strings containing \\\'~\\\' retain their semantics.\\n        raise unless mount.is_a?(Psych::Nodes::Scalar) && mount.start_line == mount.end_line\\n        # An interpolated source could become \\\'~...\\\' only after expansion;\\n        # decline dynamic sources instead of adding another interpolation parser.\\n        source = mount.value.split(\\\':\\\', 2)[0]\\n        raise if source.start_with?(\\\'~\\\') || source.include?(\\\'$\\\')\\n      end\\n    end\\n  end\\n  app = mapping.call(services.fetch(\\\'app\\\')[1])\\n  key, refs = app.fetch(\\\'env_file\\\')\\n  raise unless refs.is_a?(Psych::Nodes::Sequence) && refs.children.size.between?(1,16)\\n  raise if strict_helper && refs.children.size != 1\\n  refs.children.each do |item|\\n    raise unless item.is_a?(Psych::Nodes::Scalar) && %w[.env ./.env].include?(item.value) &&\\n                 item.start_line == item.end_line\\n    if strict_helper\\n      token = raw.lines[item.start_line].each_char.to_a[item.start_column...item.end_column].join\\n      raise unless item.value == \\\'.env\\\' && [\\\'.env\\\', "\\\'.env\\\'", \\\'".env"\\\'].include?(token)\\n    end\\n  end\\n  last_line = refs.style == Psych::Nodes::Sequence::FLOW ? refs.end_line : refs.children[-1].end_line\\n  raise if refs.style == Psych::Nodes::Sequence::FLOW && refs.start_line != refs.end_line\\n  env = app[\\\'environment\\\']\\n  names = []; insert = key.start_line; indent = key.start_column + 2\\n  if env\\n    env_fields = mapping.call(env[1])\\n    names = env_fields.keys\\n    insert = env_fields.values[-1][1].end_line + 1\\n    indent = env_fields.values[0][0].start_column\\n  end\\n  puts JSON.generate({remove: [key.start_line,last_line+1], insert: insert,\\n                      indent: indent, has_environment: !!env, names: names,\\n                      environment_names: environment_names, references: references.uniq,\\n                      dotenv_spans: refs.children.map { |n| [n.start_line,n.start_column,n.end_column] }})\\nrescue Exception\\n  exit 1\\nend\\n\'\nHELPER_OUTLINE = "ARGV.replace([\'helper-one-dotenv\']);\\n" + OUTLINE\n\nclass Refused(Exception):\n\n    def __init__(self, reason):\n        self.reason = reason if reason in REASONS else \'input\'\n        super().__init__(self.reason)\n\ndef need(ok, reason=\'input\'):\n    if not ok:\n        raise Refused(reason)\n\nclass Plan:\n    __slots__ = (\'candidate\', \'strategy\')\n\n    def __init__(self, candidate, strategy):\n        self.candidate, self.strategy = (candidate, strategy)\n\n    def __repr__(self):\n        return \'<private CLB-91 plan; revalidation required>\'\n\n    def public(self):\n        return \'compose-env-file-plan:v=1 result=equivalent strategy=\' + self.strategy + \' scope=snapshot future=requires_recheck application=not_authorized\'\n\nclass HelperPlan(Plan):\n    __slots__ = (\'model\',)\n\n    def __init__(self, candidate, strategy, model):\n        super().__init__(candidate, strategy)\n        self.model = model\n\ndef controlled(name):\n    return name in CONTROL_KEYS or name.startswith((\'COMPOSE_\', \'DOCKER_\', \'PYTHON\', \'BASH\', \'DYLD_\', \'LD_\', \'RUBY\', \'GEM_\', \'GO\', \'OTEL_\'))\n\ndef unique(pairs):\n    result = {}\n    for key, value in pairs:\n        need(key not in result, \'model\')\n        result[key] = value\n    return result\n\ndef same_json(left, right):\n\n    def identity(value):\n        kind = type(value)\n        if kind is type(None):\n            return (\'null\',)\n        if kind is bool:\n            return (\'boolean\', value)\n        if kind is int:\n            return (\'integer\', value)\n        if kind is float:\n            need(math.isfinite(value), \'model\')\n            return (\'float\', value.hex())\n        if kind is str:\n            return (\'string\', value)\n        if kind is list:\n            return (\'array\', tuple((identity(item) for item in value)))\n        if kind is dict:\n            need(all((type(key) is str for key in value)), \'model\')\n            return (\'object\', tuple(((key, identity(value[key])) for key in sorted(value))))\n        raise Refused(\'model\')\n    try:\n        return identity(left) == identity(right)\n    except RecursionError:\n        raise Refused(\'model\') from None\n\ndef transform(base, outline, additions=(), *, candidate_check=None, allow_controls=False):\n    lines = base.splitlines(keepends=True)\n    start, end = outline[\'remove\']\n    inserted = []\n    if additions:\n        if not outline[\'has_environment\']:\n            inserted.append(b\' \' * (outline[\'indent\'] - 2) + b\'environment:\\n\')\n        for name in additions:\n            need(NAME.fullmatch(name) and (allow_controls or not controlled(name)), \'unsupported\')\n            inserted.append((\' \' * outline[\'indent\'] + name + \': ${\' + name + \'?CLB91 required contribution}\\n\').encode())\n    result = []\n    for index in range(len(lines) + 1):\n        if index == outline[\'insert\']:\n            if result and (not result[-1].endswith(b\'\\n\')):\n                result[-1] += b\'\\n\'\n            result.extend(inserted)\n        if index < len(lines) and (not start <= index < end):\n            result.append(lines[index])\n    candidate = b\'\'.join(result)\n    need(len(candidate) <= FILE_LIMIT, \'bounds\')\n    if candidate_check is None:\n        need(not DIAGNOSTIC[\'scan\'](candidate)[\'violations\'], \'unsupported\')\n    else:\n        need(candidate_check(candidate) is True, \'unsupported\')\n    return candidate\n\ndef environment(model):\n    app = model.get(\'services\', {}).get(\'app\')\n    need(type(app) is dict and \'env_file\' not in app, \'model\')\n    values = app.get(\'environment\', {})\n    need(type(values) is dict and all((type(k) is str and NAME.fullmatch(k) and (v is None or type(v) is str) for k, v in values.items())), \'model\')\n    return values\n\ndef project_dotenv(base, outline, reference):\n    need(re.fullmatch(\'/proc/[1-9][0-9]*/fd/[0-9]+\', reference), \'unsupported\')\n    lines = base.decode(\'utf-8\').splitlines(keepends=True)\n    spans = outline[\'dotenv_spans\']\n    need(1 <= len(spans) <= 16 and len({tuple(s) for s in spans}) == len(spans), \'unsupported\')\n    for line, start, end in sorted(spans, reverse=True):\n        need(0 <= line < len(lines) and 0 <= start < end <= len(lines[line]), \'unsupported\')\n        lines[line] = lines[line][:start] + json.dumps(reference) + lines[line][end:]\n    projected = \'\'.join(lines).encode()\n    need(len(projected) <= FILE_LIMIT, \'bounds\')\n    return projected\n\ndef frozen_model(model):\n    need(type(model) is dict, \'model\')\n    same_json(model, model)\n    environment(model)\n    raw = json.dumps(model, sort_keys=True, separators=(\',\', \':\'), allow_nan=False).encode()\n    need(len(raw) <= MODEL_LIMIT, \'bounds\')\n    return json.loads(raw, object_pairs_hook=unique)\n\ndef decode_model(raw):\n    try:\n        need(type(raw) is bytes and 0 < len(raw) <= MODEL_LIMIT, \'bounds\')\n        model = json.loads(raw, object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(Refused(\'model\')))\n        return frozen_model(model)\n    except Refused:\n        raise\n    except (KeyboardInterrupt, InterruptedError):\n        raise Refused(\'interrupted\') from None\n    except BaseException:\n        raise Refused(\'model\') from None\n\ndef prove_semantics(base, outline, before_input, normalize, *, candidate_check=None, allow_controls=False):\n\n    def model(data, with_override=True):\n        return frozen_model(normalize(data, with_override))\n    before = model(before_input)\n    candidate = transform(base, outline, candidate_check=candidate_check, allow_controls=allow_controls)\n    after = model(candidate)\n    strategy = \'remove\'\n    if not same_json(before, after):\n        old, new = (environment(before), environment(after))\n        additions = sorted(old.keys() - new.keys())\n        need(0 < len(additions) <= 256 and all((old[k] is not None for k in additions)), \'different\')\n        need(not set(additions).intersection(outline[\'names\']), \'different\')\n        candidate = transform(base, outline, additions, candidate_check=candidate_check, allow_controls=allow_controls)\n        after = model(candidate)\n        strategy = \'explicit\'\n    need(same_json(before, after), \'different\')\n    encoded = lambda value: json.dumps(value, sort_keys=True, separators=(\',\', \':\')).encode()\n    need(same_json(model(encoded(before), False), before), \'model\')\n    need(same_json(model(encoded(after), False), after), \'model\')\n    return (Plan(candidate, strategy), before, after)\n\ndef helper_prepare(base, *, dotenv_reference, effective_environment, outline_parser, normalize, candidate_check):\n    try:\n        need(type(base) is bytes and 0 < len(base) <= FILE_LIMIT, \'bounds\')\n        need(b\'\\x00\' not in base and b\'\\r\' not in base, \'unsupported\')\n        need(type(effective_environment) is dict and len(effective_environment) <= 4096)\n        need(all((type(k) is str and k and (\'=\' not in k) and (\'\\x00\' not in k) and (type(v) is str) and (\'\\x00\' not in v) for k, v in effective_environment.items())))\n        need(sum((len(k.encode()) + len(v.encode()) for k, v in effective_environment.items())) <= MODEL_LIMIT, \'bounds\')\n        snapshot = dict(effective_environment)\n        raw = outline_parser(HELPER_OUTLINE, base)\n        need(type(raw) is bytes and 0 < len(raw) <= FILE_LIMIT, \'parser\')\n        outline = json.loads(raw, object_pairs_hook=unique)\n        need(type(outline) is dict and set(outline) == {\'remove\', \'insert\', \'indent\', \'has_environment\', \'names\', \'environment_names\', \'references\', \'dotenv_spans\'}, \'parser\')\n        need(type(outline[\'dotenv_spans\']) is list and len(outline[\'dotenv_spans\']) == 1, \'unsupported\')\n        transform(base, outline, candidate_check=candidate_check, allow_controls=True)\n        projected = project_dotenv(base, outline, dotenv_reference)\n\n        def actual_normalize(data, with_override):\n            need(effective_environment == snapshot, \'input\')\n            result = normalize(data, with_override, effective_environment)\n            need(effective_environment == snapshot, \'input\')\n            return result\n        plan, _, after = prove_semantics(base, outline, projected, actual_normalize, candidate_check=candidate_check, allow_controls=True)\n        need(effective_environment == snapshot, \'input\')\n        return HelperPlan(plan.candidate, plan.strategy, after)\n    except Refused:\n        raise\n    except (KeyboardInterrupt, InterruptedError):\n        raise Refused(\'interrupted\') from None\n    except BaseException:\n        raise Refused(\'input\') from None\n', '<clb91-planner>', 'exec'), CLB91_PLAN)
+CLB91_CAPTURE = {}
+exec(compile("import os, selectors, signal, subprocess, time\ndef identity(value):\n    return (value.st_dev, value.st_ino, value.st_uid, value.st_gid, value.st_mode, value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)\n\nclass CaptureResult:\n    __slots__ = ('code', 'output', 'failure')\n\n    def __init__(self, code, output, failure=None):\n        self.code, self.output, self.failure = (code, output, failure)\n\nclass CaptureInterrupted(BaseException):\n    pass\n\nclass CaptureCleanupError(OSError):\n    pass\n_capture_cancellation = None\n\ndef interrupted(_signum, _frame):\n    if _capture_cancellation is not None:\n        _capture_cancellation[0] = True\n        return\n    for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):\n        signal.signal(watched, signal.SIG_IGN)\n    raise CaptureInterrupted\n\ndef capture(argv, payload=b'', *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):\n    result = capture_result(argv, payload, timeout=timeout, limit=limit, env=env, pass_fds=pass_fds, spawn_failed=spawn_failed, cwd_fd=cwd_fd)\n    return (result.code, result.output)\n\ndef capture_result(argv, payload=b'', *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):\n    global _capture_cancellation\n    cancellation = [False]\n    previous = _capture_cancellation\n    result, failure = (None, None)\n    _capture_cancellation = cancellation\n    try:\n        result = _capture_owned(argv, payload, timeout=timeout, limit=limit, env=env, pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation, cwd_fd=cwd_fd)\n    except BaseException as error:\n        failure = error\n    finally:\n        _capture_cancellation = previous\n    if isinstance(failure, CaptureCleanupError):\n        raise failure\n    if cancellation[0]:\n        if previous is not None:\n            previous[0] = True\n        return CaptureResult(124, result.output if result is not None else b'', 'capture_interrupted')\n    if failure is not None:\n        raise failure\n    return result\n\ndef _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation, cwd_fd):\n    output = bytearray()\n    offset = 0\n    deadline = time.monotonic() + timeout\n\n    def held_cwd():\n        os.fchdir(cwd_fd)\n    try:\n        child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds, start_new_session=True, preexec_fn=held_cwd if cwd_fd is not None else None)\n    except OSError:\n        if spawn_failed is not None:\n            spawn_failed()\n        raise\n    group = child.pid\n    try:\n        with selectors.DefaultSelector() as poll:\n            os.set_blocking(child.stdin.fileno(), False)\n            os.set_blocking(child.stdout.fileno(), False)\n            poll.register(child.stdout, selectors.EVENT_READ)\n            if payload:\n                poll.register(child.stdin, selectors.EVENT_WRITE)\n            else:\n                child.stdin.close()\n            while poll.get_map():\n                if cancellation[0]:\n                    return CaptureResult(124, bytes(output), 'capture_interrupted')\n                remaining = deadline - time.monotonic()\n                if remaining <= 0:\n                    return CaptureResult(124, bytes(output), 'capture_timeout')\n                for key, _ in poll.select(min(remaining, 0.2)):\n                    if key.fileobj is child.stdin:\n                        try:\n                            offset += os.write(child.stdin.fileno(), payload[offset:offset + 4096])\n                        except BrokenPipeError:\n                            offset = len(payload)\n                        if offset == len(payload):\n                            poll.unregister(child.stdin)\n                            child.stdin.close()\n                    else:\n                        chunk = os.read(child.stdout.fileno(), 4096)\n                        if not chunk:\n                            poll.unregister(child.stdout)\n                        else:\n                            output.extend(chunk)\n                            if len(output) > limit:\n                                return CaptureResult(125, b'', 'capture_output_limit')\n            while True:\n                if cancellation[0]:\n                    return CaptureResult(124, bytes(output), 'capture_interrupted')\n                exited = os.waitid(os.P_PID, group, os.WEXITED | os.WNOHANG | os.WNOWAIT)\n                if exited is not None:\n                    code = exited.si_status if exited.si_code == os.CLD_EXITED else -exited.si_status\n                    return CaptureResult(code, bytes(output))\n                remaining = deadline - time.monotonic()\n                if remaining <= 0:\n                    return CaptureResult(124, bytes(output), 'capture_timeout')\n                time.sleep(min(remaining, 0.01))\n    except subprocess.TimeoutExpired:\n        return CaptureResult(124, bytes(output), 'capture_timeout')\n    except (InterruptedError, CaptureInterrupted):\n        return CaptureResult(124, bytes(output), 'capture_interrupted')\n    finally:\n        cleanup_failed = False\n        permission_denied = False\n        try:\n            os.killpg(group, signal.SIGKILL)\n        except ProcessLookupError:\n            pass\n        except PermissionError:\n            permission_denied = True\n        except OSError:\n            cleanup_failed = True\n        try:\n            child.wait(timeout=2)\n        except (OSError, subprocess.TimeoutExpired):\n            cleanup_failed = True\n        finally:\n            for stream in (child.stdin, child.stdout):\n                try:\n                    if not stream.closed:\n                        stream.close()\n                except OSError:\n                    cleanup_failed = True\n        if permission_denied:\n            try:\n                os.killpg(group, 0)\n            except ProcessLookupError:\n                pass\n            except OSError:\n                cleanup_failed = True\n            else:\n                cleanup_failed = True\n        if cleanup_failed:\n            raise CaptureCleanupError() from None\n", '<clb91-capture>', 'exec'), CLB91_CAPTURE)
+CLB91_SEMANTIC = {}
+exec(compile('import hashlib, json, os, platform, re, stat, sys\nfrom pathlib import Path\nPREREQUISITES = (\'platform\', \'manifest\', \'availability\', \'path_safety\', \'integrity\', \'interpreter\', \'modules\', \'aliases\', \'maps\', \'descriptors\', \'private_root\', \'ruby\')\nPHASES = (\'initial\', \'pre_capture\', \'post_open\', \'capture\', \'prepare\', \'post_prepare\', \'finalize\')\nSTATUSES = (\'pass\', \'fail\', \'not_evaluated\')\n\nclass Evidence:\n\n    def __init__(self):\n        self.phase, self.capture = (\'initial\', \'not_started\')\n        self.first = None\n        self.observations = {key: [] for key in PREREQUISITES}\n\n    def record(self, guard, status):\n        self.observations[guard].append(status)\n        if status == \'fail\' and self.first is None:\n            self.first = (self.phase, guard)\n\nclass RuntimeMismatch(Exception):\n    pass\n\nclass Runtime:\n    FILE_BYTES = 33554432\n    TOTAL_BYTES = 134217728\n\n    def __init__(self, cancelled, evidence=None):\n        self.cancelled, self.held = (cancelled, [])\n        self.evidence = evidence or Evidence()\n        self.total = 0\n\n    def check(self, ok):\n        if self.cancelled():\n            raise P.Refused(\'interrupted\')\n        if not ok:\n            raise RuntimeMismatch()\n\n    def observe(self, guard, check):\n        self.check(True)\n        try:\n            check()\n        except P.Refused:\n            raise\n        except (KeyboardInterrupt, InterruptedError):\n            raise\n        except Exception:\n            self.evidence.record(guard, \'fail\')\n            return False\n        self.evidence.record(guard, \'pass\')\n        return True\n\n    def require_compatible(self):\n        self.check(True)\n        if self.evidence.first is not None:\n            raise RuntimeMismatch()\n\n    def manifest(self):\n        self.check(type(MANIFEST) is dict and MANIFEST.get(\'format\') == 1)\n        files = MANIFEST[\'files\']\n        self.check(type(files) is dict and 1 <= len(files) <= 256 and (COMPOSE in files))\n        self.check(all((type(path) is str and type(digest) is str and re.fullmatch(\'[0-9a-f]{64}\', digest) for path, digest in files.items())))\n        aliases = MANIFEST[\'aliases\']\n        self.check(type(aliases) is dict and len(aliases) <= 256 and all((type(k) is str and type(v) is str for k, v in aliases.items())))\n\n    def open(self):\n        self.observe(\'platform\', lambda: self.check(sys.platform == \'linux\' and platform.machine() == \'x86_64\' and sys.flags.isolated and sys.flags.no_site))\n        if not self.observe(\'manifest\', self.manifest):\n            self.require_compatible()\n        files = MANIFEST[\'files\']\n        for path, digest in files.items():\n\n            def safe_path():\n                self.check(path == os.path.realpath(path) and os.path.isabs(path))\n                for parent in Path(path).parents:\n                    value = parent.stat()\n                    self.check(value.st_uid == 0 and stat.S_ISDIR(value.st_mode) and (not value.st_mode & 18))\n            available = self.observe(\'availability\', lambda: os.stat(path, follow_symlinks=False))\n            safe = self.observe(\'path_safety\', safe_path)\n            if not (available and safe):\n                self.evidence.record(\'path_safety\', \'not_evaluated\')\n                self.evidence.record(\'integrity\', \'not_evaluated\')\n                continue\n            fd = None\n\n            def acquire():\n                nonlocal fd\n                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)\n                self.held.append((path, fd, None))\n                value = os.fstat(fd)\n                self.held[-1] = (path, fd, D.identity(value))\n            if not self.observe(\'availability\', acquire):\n                self.evidence.record(\'path_safety\', \'not_evaluated\')\n                self.evidence.record(\'integrity\', \'not_evaluated\')\n                continue\n\n            def metadata():\n                value = os.fstat(fd)\n                self.check(stat.S_ISREG(value.st_mode) and value.st_uid == 0 and (not value.st_mode & 18) and (value.st_size <= self.FILE_BYTES))\n            if not self.observe(\'path_safety\', metadata):\n                self.evidence.record(\'integrity\', \'not_evaluated\')\n                continue\n\n            def hash_file():\n                actual = hashlib.sha256()\n                while True:\n                    self.check(True)\n                    self.check(self.total <= self.TOTAL_BYTES)\n                    data = os.read(fd, min(65536, self.TOTAL_BYTES + 1 - self.total))\n                    self.total += len(data)\n                    self.check(self.total <= self.TOTAL_BYTES)\n                    if not data:\n                        break\n                    actual.update(data)\n                self.check(actual.hexdigest() == digest)\n            self.observe(\'integrity\', hash_file)\n        self.observe(\'interpreter\', lambda: self.check(os.path.realpath(\'/proc/self/exe\') in files))\n        self.observe(\'modules\', self.modules)\n        self.recheck()\n\n    def modules(self):\n        for module in tuple(sys.modules.values()):\n            for attribute in (\'__file__\', \'__cached__\'):\n                path = getattr(module, attribute, None)\n                if path:\n                    if attribute == \'__file__\':\n                        self.check(Path(path).is_file())\n                    if Path(path).is_file():\n                        self.check(os.path.realpath(path) in MANIFEST[\'files\'])\n\n    def mapped_files(self):\n        with open(\'/proc/self/maps\', \'rb\') as stream:\n            raw = stream.read(65537)\n        self.check(len(raw) <= 65536)\n        for line in raw.decode(\'utf-8\').splitlines():\n            fields = line.split(None, 5)\n            if len(fields) == 6 and fields[-1].startswith(\'/\'):\n                self.check(fields[-1] in MANIFEST[\'files\'])\n\n    def ruby_probe(self, temporary_root):\n        self.require_compatible()\n        script = P.LINUX_RUBY_LOAD + "require \'psych\'; require \'json\'\\nmaps=File.read(\'/proc/self/maps\',65537)\\nraise unless maps.bytesize<=65536\\npaths=maps.lines.filter_map { |l| p=l.split(nil,6)[5]&.strip; p if p&.start_with?(\'/\') }\\nputs JSON.generate({ruby:RUBY_VERSION,psych:Psych::VERSION,files:($LOADED_FEATURES.grep(%r{^/})+paths).uniq})\\n"\n\n        def probe():\n            try:\n                result = D.capture_result([\'/usr/bin/ruby\', \'--disable-gems\', \'-e\', script], env=dict(PATH=\'/usr/bin:/bin\', HOME=temporary_root, LC_ALL=\'C\'), timeout=5, limit=32768)\n            except D.CaptureCleanupError:\n                raise P.Refused(\'cleanup\') from None\n            if result.failure == \'capture_interrupted\':\n                raise P.Refused(\'interrupted\')\n            self.check(result.failure is None and result.code == 0)\n            data = json.loads(result.output)\n            self.check(set(data) == {\'ruby\', \'psych\', \'files\'} and data[\'ruby\'] == MANIFEST[\'ruby\'] and (data[\'psych\'] == MANIFEST[\'psych\']) and (type(data[\'files\']) is list) and (len(data[\'files\']) <= 256))\n            self.check(all((type(path) is str and os.path.realpath(path) in MANIFEST[\'files\'] for path in data[\'files\'])))\n        self.observe(\'ruby\', probe)\n        self.recheck()\n\n    def recheck(self):\n        self.observe(\'maps\', self.mapped_files)\n\n        def aliases():\n            for alias, expected in MANIFEST[\'aliases\'].items():\n                self.check(os.path.realpath(alias) == expected)\n        self.observe(\'aliases\', aliases)\n\n        def descriptors():\n            for path, fd, value in self.held:\n                self.check(value is not None and D.identity(os.fstat(fd)) == value and (D.identity(os.stat(path, follow_symlinks=False)) == value))\n        self.observe(\'descriptors\', descriptors)\n        self.require_compatible()\n\n    def close(self):\n        failed = False\n        for _, fd, _ in reversed(self.held):\n            try:\n                os.close(fd)\n            except BaseException:\n                failed = True\n        self.held.clear()\n        if failed:\n            raise P.Refused(\'cleanup\')\n', '<clb91-runtime>', 'exec'), CLB91_SEMANTIC)
+CLB91_EXECUTOR = {}
+exec(compile("import os\nimport re\nimport resource\nimport stat\nD = E = P = S = PROFILE = None\nCLI = '/usr/bin/docker'\nPLUGIN = '/usr/libexec/docker/cli-plugins/docker-compose'\nCONTRACT = 'clb91-cli29.3.1-compose5.1.1-config-v1'\nCLI_SHA256 = '18c2a16d6aa0331bbd78b93e0a57f344c62bda0be52c054d4ee80e11176b0c30'\nPLUGIN_SHA256 = '2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5'\nSYSTEM_PLUGIN_DIRS = ('/usr/local/lib/docker/cli-plugins', '/usr/local/libexec/docker/cli-plugins', '/usr/lib/docker/cli-plugins', '/usr/libexec/docker/cli-plugins')\nREMOVED_PREFIXES = ('COMPOSE_', 'DOCKER_', 'PYTHON', 'BASH_FUNC_')\nREMOVED_NAMES = frozenset(('BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS', 'CDPATH'))\nHOOK_PREFIXES = ('LD_', 'DYLD_', 'RUBY', 'GEM_', 'BUNDLE_', 'OTEL_', 'OTLP_', 'GRPC_', 'GO')\nHOOK_NAMES = frozenset(('SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'ALL_PROXY', 'all_proxy', 'HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR', 'TZ', 'TMPDIR', 'TMP', 'TEMP', 'IRBRC', 'LOCPATH', 'NLSPATH', 'TERMINFO', 'TERMINFO_DIRS'))\n\nclass GateUnavailable(Exception):\n    pass\n\ndef docker_environment(environ):\n    return {k: v for k, v in environ.items() if not k.startswith(REMOVED_PREFIXES) and k not in REMOVED_NAMES}\n\nclass PipelineGate:\n\n    def __init__(self, cancelled):\n        self.cancelled = cancelled\n        self.runtime = None\n        self.held, self.negative, self.directories = ([], [], {})\n        self.alias_leases = {}\n        self.environment = None\n        self.config_fd = None\n        self.principal_name = None\n        self.initialized, self.bound, self.closed = (False, False, False)\n\n    def require(self, condition):\n        if self.cancelled():\n            raise P.Refused('interrupted') from None\n        if not condition:\n            raise GateUnavailable() from None\n\n    def profile(self):\n        self.require(type(PROFILE) is dict and set(PROFILE) == {'format', 'contract', 'runtime', 'cli', 'compose'})\n        self.require(type(PROFILE['format']) is int and PROFILE['format'] == 1 and (PROFILE['contract'] == CONTRACT))\n        for name, path, version, digest, size in (('cli', CLI, '29.3.1', CLI_SHA256, 44320674), ('compose', PLUGIN, '5.1.1', PLUGIN_SHA256, 31557130)):\n            value = PROFILE[name]\n            self.require(type(value) is dict and set(value) == {'path', 'version', 'sha256', 'size'})\n            self.require(value == dict(path=path, version=version, sha256=digest, size=size) and type(value['size']) is int)\n        manifest = PROFILE['runtime']\n        self.require(type(manifest) is dict and type(manifest.get('format')) is int and (manifest['format'] == 1) and (type(manifest.get('files')) is dict))\n        self.require(manifest['files'].get(CLI) == CLI_SHA256 and manifest['files'].get(PLUGIN) == PLUGIN_SHA256)\n        namespace = E.Runtime.manifest.__globals__\n        self.require(namespace.get('MANIFEST') is manifest and namespace.get('COMPOSE') == PLUGIN and (namespace.get('D') is D) and (namespace.get('P') is P) and (namespace.get('S') is S))\n        self.require(E.Runtime.FILE_BYTES == 33554432 and E.Runtime.TOTAL_BYTES == 134217728)\n\n    def aliases(self):\n        for alias, expected in PROFILE['runtime']['aliases'].items():\n            self.require(type(alias) is str and alias.startswith('/') and (os.path.realpath(alias) == expected))\n            current = ''\n            for part in alias.split('/')[1:]:\n                self.require(part not in ('', '.', '..'))\n                current += '/' + part\n                info = os.stat(current, follow_symlinks=False)\n                self.require(info.st_uid == 0 and (stat.S_ISLNK(info.st_mode) or not info.st_mode & 18))\n                value = self.identity(info)\n                self.require(current not in self.alias_leases or self.alias_leases[current] == value)\n                self.alias_leases[current] = value\n\n    def core_policy(self, install=False):\n        if install:\n            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n        self.require(resource.getrlimit(resource.RLIMIT_CORE) == (0, 0))\n        with open('/proc/sys/kernel/core_pattern', 'rb') as stream:\n            pattern = stream.read(4097)\n        self.require(0 < len(pattern) <= 4096 and b'\\x00' not in pattern and (not pattern.startswith(b'|')))\n\n    def initial(self):\n        self.require(not self.closed and (not self.initialized))\n        try:\n            self.profile()\n\n            class FixedRuntime(E.Runtime):\n                FILE_BYTES, TOTAL_BYTES = (67108864, 201326592)\n            self.runtime = FixedRuntime(self.cancelled)\n            self.runtime.open()\n            self.runtime.require_compatible()\n            self.require(all((os.fstat(fd).st_nlink == 1 for _, fd, _ in self.runtime.held)))\n            self.aliases()\n            self.core_policy(install=True)\n            self.runtime.ruby_probe('/')\n            self.runtime.recheck()\n            self.initialized = True\n        except BaseException:\n            self.close()\n            raise\n\n    def keep(self, fd, path):\n        entry = [path, fd, None]\n        self.held.append(entry)\n        self.require(len(self.held) <= 48)\n        info = os.fstat(fd)\n        entry[2] = self.identity(info)\n        return (fd, info)\n\n    @staticmethod\n    def identity(info):\n        value = D.identity(info)\n        return value[:6] if stat.S_ISDIR(info.st_mode) else value\n\n    def directory(self, path, temporary=False):\n        self.require(type(path) is str and path.startswith('/') and all((part not in ('', '.', '..') for part in path.split('/')[1:])))\n        if path in self.directories:\n            return self.directories[path]\n        if '/' not in self.directories:\n            fd, info = self.keep(os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW), '/')\n            self.require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and (not info.st_mode & 18))\n            self.directories['/'] = fd\n        parent, current = (self.directories['/'], '')\n        for part in path.split('/')[1:]:\n            current += '/' + part\n            if current in self.directories:\n                parent = self.directories[current]\n                if parent is None:\n                    return None\n                continue\n            try:\n                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)\n            except FileNotFoundError:\n                self.negative.append((parent, part))\n                self.directories[current] = None\n                return None\n            fd, info = self.keep(child, current)\n            self.require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0)\n            self.require(not info.st_mode & 18 or (temporary and current == '/tmp' and info.st_mode & stat.S_ISVTX))\n            self.require(len(self.held) <= 48 and len(self.negative) <= 48)\n            self.directories[current] = fd\n            parent = fd\n        return parent\n\n    def absent(self, parent, name):\n        try:\n            os.stat(name, dir_fd=parent, follow_symlinks=False)\n        except FileNotFoundError:\n            self.negative.append((parent, name))\n            self.require(len(self.negative) <= 48)\n            return\n        raise GateUnavailable() from None\n\n    def executable(self, path):\n        values = [entry for entry in self.runtime.held if entry[0] == path]\n        self.require(len(values) == 1)\n        _, fd, identity = values[0]\n        info = os.fstat(fd)\n        self.require(D.identity(info) == identity and stat.S_ISREG(info.st_mode) and (info.st_uid == 0) and (not info.st_mode & 18) and info.st_mode & 73 and (info.st_nlink == 1) and (info.st_size == PROFILE['cli' if path == CLI else 'compose']['size']))\n\n    def public_account_file(self, name):\n        parent = self.directory('/etc')\n        self.require(parent is not None and name in ('passwd', 'nsswitch.conf'))\n        fd, info = self.keep(os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent), '/etc/' + name)\n        self.require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and (stat.S_IMODE(info.st_mode) in (384, 420)) and (info.st_nlink == 1) and (0 < info.st_size <= 65536))\n        output = bytearray()\n        while True:\n            self.require(len(output) <= 65536)\n            chunk = os.read(fd, min(4096, 65537 - len(output)))\n            if not chunk:\n                break\n            output.extend(chunk)\n        self.require(len(output) == info.st_size and D.identity(os.fstat(fd)) == D.identity(info))\n        self.require(b'\\x00' not in output and b'\\r' not in output)\n        return bytes(output).decode('utf-8')\n\n    def principal(self, expected):\n        self.require(self.initialized and (not self.closed) and (self.principal_name is None))\n        self.require(type(expected) is str and re.fullmatch('[a-z_][a-z0-9_-]{0,31}', expected) and (expected not in ('root', 'hookah-staging')))\n        self.require(os.getuid() == os.geteuid() != 0 and os.getgid() == os.getegid())\n        nss = self.public_account_file('nsswitch.conf')\n        passwd_rules = []\n        for line in nss.splitlines():\n            line = line.split('#', 1)[0].strip()\n            if line and line.split(':', 1)[0].strip() == 'passwd':\n                passwd_rules.append(line)\n        self.require(len(passwd_rules) == 1 and re.fullmatch('passwd\\\\s*:\\\\s*files\\\\s*', passwd_rules[0]))\n        passwd = self.public_account_file('passwd')\n        matches = []\n        for line in passwd.splitlines():\n            if not line or line.startswith('#'):\n                continue\n            fields = line.split(':')\n            self.require(len(fields) == 7 and re.fullmatch('[0-9]+', fields[2]) and re.fullmatch('[0-9]+', fields[3]))\n            if fields[0] == expected or int(fields[2]) == os.geteuid():\n                matches.append(fields)\n        self.require(len(matches) == 1 and matches[0][0] == expected and (int(matches[0][2]) == os.geteuid()) and (int(matches[0][3]) == os.getegid()))\n        self.principal_name = expected\n        self.recheck()\n        return expected\n\n    def command_environment(self, value):\n        self.require(self.bound and self.principal_name is not None and (type(value) is dict) and (value == self.environment))\n        self.recheck()\n        return value\n\n    def path_selection(self, value):\n        self.require(type(value) is str)\n        elements = value.split(':')\n        self.require(1 <= len(elements) <= 16 and all(elements))\n        selected = False\n        for element in elements:\n            directory = self.directory(element)\n            if directory is None:\n                continue\n            if element == '/usr/bin':\n                self.executable(CLI)\n                selected = True\n                break\n            self.absent(directory, 'docker')\n        self.require(selected)\n\n    def make_config(self):\n        parent = self.directory('/tmp', temporary=True)\n        self.require(parent is not None and os.geteuid() != 0)\n        name = '.clubs-bound-docker-' + os.urandom(16).hex()\n        created = False\n        try:\n            os.mkdir(name, 448, dir_fd=parent)\n            created = True\n            fd, info = self.keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent), '<anonymous-config>')\n            self.config_fd = fd\n            self.require(info.st_uid == os.geteuid() and info.st_gid == os.getegid() and (stat.S_IMODE(info.st_mode) == 448))\n            os.rmdir(name, dir_fd=parent)\n            created = False\n            for entry in self.held:\n                if entry[1] in (parent, fd):\n                    entry[2] = self.identity(os.fstat(entry[1]))\n        finally:\n            if created:\n                try:\n                    os.rmdir(name, dir_fd=parent)\n                except OSError:\n                    raise P.Refused('cleanup') from None\n\n    def plugin_selection(self):\n        self.require(self.config_fd is not None and os.listdir(self.config_fd) == [])\n        info = os.fstat(self.config_fd)\n        self.require(info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 448 and (info.st_nlink == 0))\n        for path in SYSTEM_PLUGIN_DIRS:\n            directory = self.directory(path)\n            if directory is None:\n                continue\n            if path == SYSTEM_PLUGIN_DIRS[-1]:\n                self.executable(PLUGIN)\n                return\n            self.absent(directory, 'docker-compose')\n        raise GateUnavailable() from None\n\n    def bind(self, environ):\n        self.require(self.initialized and (not self.closed) and (not self.bound))\n        try:\n            self.require(type(environ) is dict and len(environ) <= 256)\n            self.require(all((type(k) is str and P.NAME.fullmatch(k) and (type(v) is str) and ('\\x00' not in v) for k, v in environ.items())))\n            self.require(sum((len(k.encode()) + len(v.encode()) for k, v in environ.items())) <= 65536)\n            environment = docker_environment(environ)\n            self.require(not any((k.startswith(HOOK_PREFIXES) or k in HOOK_NAMES for k in environment)))\n            self.require(type(environment.get('HOME')) is str and environment['HOME'].startswith('/'))\n            for key, value in environment.items():\n                if key == 'LANG' or key.startswith('LC_'):\n                    accepted = ('C', 'POSIX', '')\n                    if key == 'LC_CTYPE':\n                        accepted += ('C.UTF-8', 'C.utf8')\n                    self.require(value in accepted)\n            self.path_selection(environment.get('PATH'))\n            self.make_config()\n            self.plugin_selection()\n            environment['DOCKER_CONFIG'] = '/proc/' + str(os.getpid()) + '/fd/' + str(self.config_fd)\n            environment['DOCKER_HOST'] = 'unix:///var/run/docker.sock'\n            self.environment = environment\n            self.bound = True\n            self.recheck()\n            return dict(environment)\n        except BaseException:\n            self.close()\n            raise\n\n    def recheck(self):\n        self.require(self.initialized and (not self.closed))\n        self.runtime.recheck()\n        self.aliases()\n        self.core_policy()\n        for path, fd, value in self.held:\n            self.require(value is not None and self.identity(os.fstat(fd)) == value)\n            if path != '<anonymous-config>':\n                self.require(self.identity(os.stat(path, follow_symlinks=False)) == value)\n        for parent, name in self.negative:\n            try:\n                os.stat(name, dir_fd=parent, follow_symlinks=False)\n            except FileNotFoundError:\n                continue\n            raise GateUnavailable() from None\n        if self.bound:\n            self.executable(CLI)\n            self.executable(PLUGIN)\n            self.require(os.listdir(self.config_fd) == [])\n\n    def close(self):\n        if self.closed:\n            return\n        self.closed = True\n        failed = False\n        for _, fd, _ in reversed(self.held):\n            try:\n                os.close(fd)\n            except BaseException:\n                failed = True\n        if self.runtime is not None:\n            try:\n                self.runtime.close()\n            except BaseException:\n                failed = True\n        if failed:\n            raise P.Refused('cleanup') from None\nGate = PipelineGate\n", '<clb91-pipeline>', 'exec'), CLB91_EXECUTOR)
+CLB91_PROFILE = {'cli': {'path': '/usr/bin/docker', 'sha256': '18c2a16d6aa0331bbd78b93e0a57f344c62bda0be52c054d4ee80e11176b0c30', 'size': 44320674, 'version': '29.3.1'}, 'compose': {'path': '/usr/libexec/docker/cli-plugins/docker-compose', 'sha256': '2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5', 'size': 31557130, 'version': '5.1.1'}, 'contract': 'clb91-cli29.3.1-compose5.1.1-config-v1', 'format': 1, 'runtime': {'aliases': {'/bin/bash': '/usr/bin/bash', '/bin/findmnt': '/usr/bin/findmnt', '/bin/sh': '/usr/bin/dash', '/lib64/ld-linux-x86-64.so.2': '/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2', '/usr/bin/python3': '/usr/bin/python3.12', '/usr/bin/ruby': '/usr/bin/ruby3.2', '/usr/lib/x86_64-linux-gnu/libtinfo.so.6': '/usr/lib/x86_64-linux-gnu/libtinfo.so.6.4'}, 'architecture': 'x86_64', 'compose': '5.1.1', 'format': 1, 'psych': '5.0.1', 'python': '3.12.3', 'ruby': '3.2.3', 'files': {}}}
+CLB91_PROFILE['runtime']['files'] = {prefix + leaf: digest for prefix, entries in [('/etc/', [('ld.so.cache', '908d819959326e7985be9b61f5e4eb5cec503057830453e05879c6687b17c771')]), ('/usr/bin/', [('bash', 'bc5945feb8bd26203ebfafea5ce1878bb2e32cb8fb50ab7ae395cfb1e1aaaef1'), ('dash', '86d31f6fb799e91fa21bad341484564510ca287703a16e9e46c53338776f4f42'), ('docker', '18c2a16d6aa0331bbd78b93e0a57f344c62bda0be52c054d4ee80e11176b0c30'), ('findmnt', '08652d0a79159c9d5b73f9181d3436bf044466e8efffecd0feef5c4cbb4e7670'), ('python3.12', 'e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f'), ('ruby3.2', 'ead53704d7da35c85a28db19070d34e7ecef9461ecf8ae5e9d51ae79125bb731')]), ('/usr/lib/locale/C.utf8/', [('LC_CTYPE', '59015993b1b671273461ef1167d7a9ad76dc090d521c91102e962217ed6b6dba')]), ('/usr/lib/python3.12/', [('_collections_abc.py', '90324ee3e1c4ca5319f7242d4b7c1e90eb8418b3f999d07c853aa488356282e6'), ('_compression.py', '3ad5d60627477a60939ee44fc1bb3a05dbe8fb52f0f75039b8f5d8f1a278b981'), ('_weakrefset.py', '91895a451d06e9f521a1171b31b9b19bc9740f35af00d4fa106338ab7167c9ac'), ('abc.py', 'e558702a95cdce3febd289da021715d2b92bc43995b8a1bc58dfa1c3d8010287'), ('ast.py', 'd16626aa5c054bcc45221e56f84e55051b046caf0f8be1fe4902ea71534fb735'), ('base64.py', '65c70b5b6361c6f7a71ecc2df0f55315474b669221dd8d81d7c1ae8d56748ada'), ('bisect.py', 'f1cf7b85fc36b5da249813fc5ab97d9464f8cc1bc817f7146206fa2713e35999'), ('bz2.py', '76ab3252924e71e859d7d90e8d3db13b6554975cfcac0fdadced4de7f8779330'), ('codecs.py', '7b7839e53a77961153240aecfe11edc8054d05b1dedd83894450dae21ec05785'), ('contextlib.py', '8b7a477f978a8532852fd81e241c78182516bc4975d672d580a5848a76e11eb6'), ('copyreg.py', 'c8eda41f05c6bf95a4da4726a530409d2485ae060b8d019b3a8034389a15d3e9'), ('enum.py', 'c8ead615c159598370295649eb296819ad4b40d50b200c4fec2d4269bf7af9ae'), ('fnmatch.py', '6683da36e47af523f3f41e18ad244d837783e19e98911cc0b7415dea81494ebc'), ('functools.py', 'cca971c456e1bec8b751aecdf41466f34dbf72321ee0840627280ba2ccf9d033'), ('genericpath.py', '2b0b35d2206778af4081cf81dd9b513876e72c35a55bec941402e1fa62b1f1aa'), ('hashlib.py', '6dbdebf270868b391080e21dc9687eddfaf321c965ad979f68d3f5c423c613ab'), ('hmac.py', '7facd1330e5487ed995eda5c8619df0d3e32f69cb619f97662372fb76325746e'), ('io.py', '7cec3cb8ac004058dd0a5af246e6d950fb59c7ddd0058fda48bcb3fcb98d8822'), ('ipaddress.py', 'cc9831e239bd81c1480a12733bded744002d93815fd0d083c77aea348c956e67'), ('keyword.py', '18c2be738c04ad20ad375f6a71db34b3823c7f40b0340f5294d0e89f3c9b093b'), ('locale.py', 'd1134b7212bad37b7b81339061dc37a19a194aa183ec2cb60412cf365993b151'), ('lzma.py', '58fb9d2fdc8a8af7b25e218f17ea3b51bdfa53bdf40f440ab33c605974ca5c2e'), ('ntpath.py', 'c4dd79bf103677daaad873952b89fc1f973425e7b250006cc35af4c164181da8'), ('operator.py', 'b2af20f67667203c1730e686cc5d0427becc94db4c97f1d3efe3ed2158473f6a'), ('os.py', '316d1b7307fd851bded3423c9d437e0a383c725d993f0fcff2e8b749fe560b62'), ('pathlib.py', 'b43e134bf7479759838b4ecec3d78e0e67fdfde2d671c5c2d7886a47da93885d'), ('platform.py', 'ed0defe8ff7c116710493ffd099b566d3de686ab1b431a3d5401056798e59341'), ('posixpath.py', 'c443d7b8afad1717e7060ce49b3e04423058de56cd4246ee6bcc1ac962eb5c2b'), ('random.py', '0693d4ded36916f5b07d6c395cc331dbf1011bb70e90daaa29eaa32490a09425'), ('reprlib.py', '8da31054076803065758311f54b18b8a616824941977d907dc3ee729228e9015'), ('secrets.py', '277000574358a6ecda4bb40e73332ae81a3bc1c8e1fa36f50e5c6a7d4d3f0f17'), ('selectors.py', '1eeb102373e18c96311203f30c516e785bd8642275aa0bd66e43a284c9692385'), ('shlex.py', 'f927227de5ba5b1b2bdd75e3d9c8cb72b602b3bba3cc8edbf8fb554de0dc1fd7'), ('shutil.py', '819e518cb7a539d09b2526138015541b34d2646afb9c2f6ae4ffd476d6a0fcf4'), ('signal.py', '0363c964c90ac0b3e515de5749205e6e6454051a1211058375d84d91eab6071a'), ('socket.py', 'b59366f7c35583a274c8031351c146d9c64c4e680adf45d99a3335536a20a6cc'), ('stat.py', '052af0327eae6941b69b05c088b3e748f79995635f80ac4cc7125eb333eb4c77'), ('struct.py', '9c231f9497caf513a22dee8f790b07f969b0e45854a0bdd6dd84b492e08c2856'), ('subprocess.py', 'baa9f9138d8d20df6284f67e7d2e790f847f65e2c5370de322d54cccd737f2d9'), ('tempfile.py', '8c8033ed1426ace79e07a6608887d2a1694d817d63d61b04c3d59339f24b4269'), ('threading.py', '8273b4cf5b6f274b4993f5cae08634dd272c6952af9867ff9aa13ed446f1549b'), ('types.py', '345474ef027a1273f353da9bdc1f7c18f65335e72e681bcc0376774cc51f2405'), ('warnings.py', '8eb1bb88d0beb82ebecfe7ee5cf54ed9b77b4a7acee1989e392a65de42017c49'), ('weakref.py', '56f8d313fb74019e53eb9287400702fbce788b7fe30e097b0b6e06296f3f080c'), ('zipimport.py', '4ac94d92219c2e1c0d67ad3fff3753ec3a3756af62a36a2f696f02cd12d518f0')]), ('/usr/lib/python3.12/__pycache__/', [('_compression.cpython-312.pyc', 'fc09d120e985361378c4a62fea5fbbf4abc73b4622e872bc1a78271383cad8e6'), ('_weakrefset.cpython-312.pyc', 'df29445e1dc662eb6d6cfa4432ad8908e452bd29e8c54687d7103bf599d94a36'), ('ast.cpython-312.pyc', '326bf9acecf3937bcbe587ea2846af5d911b6d9b28585dbcae7cc967e8336b82'), ('base64.cpython-312.pyc', '94397a6e320709cde9e93b00bd626fe99b67899e1cf2ab4d3b020187029ecd5e'), ('bisect.cpython-312.pyc', '3d9e757cb04022cd9af59093f41e1a97d135f5c5eb09c2933dee11c609572596'), ('bz2.cpython-312.pyc', 'fe78f3c58f7774cbb407262fe60062c69bb6f0963753117b154d6293216f7594'), ('contextlib.cpython-312.pyc', 'e29b80e8619204a18dd338fe80562b116d6ced5d42361f7255958c23a0bf08a9'), ('copyreg.cpython-312.pyc', '57d508d756385d7e5fd85b4cb31a7e5f92cace2a289789b18d5401999a639bf3'), ('enum.cpython-312.pyc', 'bc788b9ee5c315cce928b93f9893441babad4b516a989b8c4d009512d8e57b9b'), ('fnmatch.cpython-312.pyc', '9315c79ca0d436b91421752f16643eb381068c4ff7b85f6a513c646e03debdb7'), ('functools.cpython-312.pyc', '94518b56bf294cfe53c3aad9b0fffc00c9b4c552cccf324bd359e1c4997a82b2'), ('hashlib.cpython-312.pyc', '3dc801740aa60d230e0dc5763efb8e91641b1a65f6d6cd310fce63e41a583a13'), ('hmac.cpython-312.pyc', '0273925109de28686b8891e4a52f152bcb2f5f759d468ce453908e45cf021455'), ('ipaddress.cpython-312.pyc', '6fda67f5b738c392c16745f54f08738c886f497dfdb828d5d69fa4052d04fcd4'), ('keyword.cpython-312.pyc', 'a7198c5b71ffd719308fe066b89cc98bbbc48bc6574ab879a5866626b184572b'), ('locale.cpython-312.pyc', '702676dd32e0438e9f26c82d2fdf34fa0008e9891b57c50345c448dc12946135'), ('lzma.cpython-312.pyc', '3d87e452ecb6698231bd8e793169dcfe855464385d655d5752889f0be212ea77'), ('operator.cpython-312.pyc', '2d9b59f83698f6db890176d5b6a512a0fbcec615ab9beb25b40759711e706ea7'), ('pathlib.cpython-312.pyc', '36343243103f01defe27ace47b429b5f521b0099a548d6ec7f5ab6df7389f60a'), ('platform.cpython-312.pyc', 'ef152e74c5c1da54ae384c456ba2d71a603423892ec29ad91ffe7caf535bcf96'), ('random.cpython-312.pyc', '18ac3259296573a543457628a299a859daf463e0bb0e4a09806c95892d821b19'), ('reprlib.cpython-312.pyc', '58a389f9c7b10ec4d9a88283aa1e051f7ba1d8a6f5ca489cb7dee5d9adb2b6ff'), ('secrets.cpython-312.pyc', '08cd4dd20cb98e58ed935d9353928e74a80b17ea3412a9d6009431249cefbff6'), ('selectors.cpython-312.pyc', 'a1ad705b11f0540b41830144c712d84c416e35d84915fcc4d141aaca5d810a37'), ('shlex.cpython-312.pyc', 'd85e54f66fef4a91ebd89d6539bbc48f01ee4414a8dcd210df381621d9e92043'), ('shutil.cpython-312.pyc', 'ceb08a3f6bc41f55a48e1248a294ef62dae237b5045a3b9947c3d179753a7afc'), ('signal.cpython-312.pyc', '54808b67661ce4f592ce2789288276808a30992932ab1a3674340831522eabeb'), ('struct.cpython-312.pyc', 'f0cc87ea2a221b5316238b69404c430e5aa2ebe89dd68b7dc11474cce8158359'), ('subprocess.cpython-312.pyc', 'df3e4bcb2f74a25645e122c9e7ec654a2215b7d237ffb1405ce64654053253c9'), ('tempfile.cpython-312.pyc', '1f6720e5cac5cd6e2d2e9e2bb32d0c1ec47136c0f3fd3a67408633328b3c5197'), ('threading.cpython-312.pyc', '8e8f323ad7643cb4671f460b77dafca43c243ad545a40bb6759314b504b8dc3b'), ('types.cpython-312.pyc', 'b7f2eb13f227d3731278f2e33fe5a3e447cb988852a43f053d5447485e199cab'), ('warnings.cpython-312.pyc', '38f38ecbad459a9652351455d9e19bf138ccbfc15c89c6fa3f028b10d6bac2df'), ('weakref.cpython-312.pyc', 'd960e9d74c9e0c179d7f8ddd0e7d842d0b863ed47b1cd1f9ee880b052798b402')]), ('/usr/lib/python3.12/collections/', [('__init__.py', '0af967cd58036507b3d0fbc33b7a996c61dbb52a94b0b738c8bef12cd4cc7dd4'), ('abc.py', '9cb4208f99128a0489b6c8e6c61637617dd7d4250c59e065491957eda084dd10')]), ('/usr/lib/python3.12/collections/__pycache__/', [('__init__.cpython-312.pyc', 'efe104840c7b718e97185b155f875e330f6bc67687182e7322fae642d6f7f39e'), ('abc.cpython-312.pyc', 'c7e98f4ddd778e38762c32b98aebde9d74586d9c508a1b61cf6e950b93cc7928')]), ('/usr/lib/python3.12/encodings/', [('__init__.py', '78c4744d407690f321565488710b5aaf6486b5afa8d185637aa1e7633ab59cd8'), ('aliases.py', '6fdcc49ba23a0203ae6cf28e608f8e6297d7c4d77d52e651db3cb49b9564c6d2'), ('utf_8.py', 'ba0cac060269583523ca9506473a755203037c57d466a11aa89a30a5f6756f3d')]), ('/usr/lib/python3.12/encodings/__pycache__/', [('__init__.cpython-312.pyc', '18d8731b4d889615980443d2e9bdb10fb0a34381f83e4ed0c66538753fcab5e5'), ('aliases.cpython-312.pyc', '43acf0e938ff18d8a0c661a66176f7ee6fb92b148b8b5deabc629245eaaeff52'), ('utf_8.cpython-312.pyc', '7ee12571aca7bbdad4c746390eb9bf97207b602be09cb8646a4421957e71f08a')]), ('/usr/lib/python3.12/importlib/', [('_bootstrap_external.py', '97c6211750d63067712ad2cd74d50be33337f1fb1cd2c769022ced9b401edd92')]), ('/usr/lib/python3.12/json/', [('__init__.py', 'd5d41e2c29049515d295d81a6d40b4890fbec8d8482cfb401630f8ef2f77e4d5'), ('decoder.py', '9f02654649816145bc76f8c210a5fe3ba1de142d4d97a1c93105732e747c285b'), ('encoder.py', 'af7bd40a0d0d0a3e726a9b4b3a2a543019f6ab97a340d0162a9c29ca9da97869'), ('scanner.py', '8604d9d03786d0d509abb49e9f069337278ea988c244069ae8ca2c89acc2cb08')]), ('/usr/lib/python3.12/json/__pycache__/', [('__init__.cpython-312.pyc', '609186801a9f5bfcd98edc1f1889bcc09ea27c80bee5c05ba616a144a516386c'), ('decoder.cpython-312.pyc', '2a395b844d38720fa81e3bb9a2339216b0a73b1a953d77f60e268b54d2a1942b'), ('encoder.cpython-312.pyc', '624944282c63628b98740f780feb8c80313159d097b078397c7f48e0aaad7cef'), ('scanner.cpython-312.pyc', '3022d00d435a2050180413b9e5545f8a4bc18b167c1d204d188d86da3ad3f598')]), ('/usr/lib/python3.12/lib-dynload/', [('_bz2.cpython-312-x86_64-linux-gnu.so', 'eff8df23cdc54d38ce9ca600d07c21ccfd7f22bd52a0720e599e6828d3e2eb76'), ('_hashlib.cpython-312-x86_64-linux-gnu.so', '8dc6cda6dd9495b95a2bfb5b26e8cf06b72f36dc0213d958b9277a958287f0fe'), ('_json.cpython-312-x86_64-linux-gnu.so', 'ca8e35c58f7bc8e27258c4af43651c941413bc6318903621253485b0395758a3'), ('_lzma.cpython-312-x86_64-linux-gnu.so', 'cb298120e40f064dc047e638d911f8b3b0abf625bf1d6bd07902b46efd820fd7'), ('resource.cpython-312-x86_64-linux-gnu.so', 'c8cc35580b497bf128cf8bb0e25efc36573a4f21a1c6877a91737fcd52e24907')]), ('/usr/lib/python3.12/re/', [('__init__.py', '8ff3c37c63b917fcf8dc8d50993a502292a3dc159e41de4f4018c72a53d1c07b'), ('_casefix.py', '41572ac50cf96b04496e676d8a6708898bb8e752e06dad34ed4c50c5d8f1fe40'), ('_compiler.py', 'c05067f8bfa4c13cbbf1eedc4d5cafc9b621bcb6ebc5771ba0518a18095af15a'), ('_constants.py', 'fa4fdb200f238f9e7817b63892b0d69833d8165134801e775e10cc113348a375'), ('_parser.py', 'a51a85b37cf3f44ba7ff25754da5f31306e4ccfa6eb3c017f9d37bdf4e770840')]), ('/usr/lib/python3.12/re/__pycache__/', [('__init__.cpython-312.pyc', 'b232ef42dd5d80b09ab397af6404026058d8cc97cca5b365b3391d8d1ab7f403'), ('_casefix.cpython-312.pyc', '85b48befe0a5e98154845fb0fb3b756725b93396d228de31a08a3114ebd67d98'), ('_compiler.cpython-312.pyc', 'e05c7e067749d8d0337f675399d00f65ecf7370c5379ef6673969233df211fab'), ('_constants.cpython-312.pyc', '62c9814158634a6fc6c59a3d20b27c2555ca18fea2ba79e0ffe6df89ac5beff3'), ('_parser.cpython-312.pyc', '44a9d0f2b4cd55fcac2012c2c0fad2b5457fa0e56cd12b12276921ab85c05f59')]), ('/usr/lib/python3.12/urllib/', [('__init__.py', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'), ('parse.py', 'a67b5694763137dbac085adbf0c22821d435ec8ca22d3bd3786d2c9f4ee748d5')]), ('/usr/lib/python3.12/urllib/__pycache__/', [('__init__.cpython-312.pyc', '26bd006e2ede1f41ad38e11ccf872f3dcb6176df7690fef59cc835337212e6a6'), ('parse.cpython-312.pyc', '3b52f22720797fca18fabd57a95d19a373cf9e151052a833894a7bff1f3842e7')]), ('/usr/lib/ruby/3.2.0/', [('forwardable.rb', 'be418c80d2c9a24931e1836e3c21f4aa8e235d098d1d3c7b893b39c8564c8dc3'), ('json.rb', 'a7ad5916dd8ba6343ffcb522ef6a95bf874d3b42d50710e00b017af2171cf64c'), ('ostruct.rb', 'ec8d9d6505a6c03fe8cee85eff5934a2d0feab7705d2ec5cf252165280fc0a64'), ('psych.rb', '7a310e88a37bd3dc3c205ec57f0c312cbb89c78f72654be1340d77cbf02b0a07')]), ('/usr/lib/ruby/3.2.0/forwardable/', [('impl.rb', '729ea83da5d77a626bcf464185a98bc48b0c0b7fcd80d93e91d3906b24c7ecf0')]), ('/usr/lib/ruby/3.2.0/json/', [('common.rb', '851433b677cc1bbd581f28ce3291e61b267b14956c00b6775e1cc011aef5368a'), ('ext.rb', '6759cf47337135c9954218820995d1f1337395906a1881264bba6c0cdb5d61cb'), ('generic_object.rb', '74244c827f6c26ac278dbfcd819fb0bde8572650a525de9b390ff5f672feb0f2'), ('version.rb', '7ac661296386f9e0c8e7ce2acfdb3d12abbd7070900f16595e319b7b8fc5cdf1')]), ('/usr/lib/ruby/3.2.0/psych/', [('class_loader.rb', '2d412885a944bb723496a01ef8a4b08a9af45e72f602ae426c9c95aff7626702'), ('coder.rb', '7ff649678ec23bc8e319d0094ff18ed5305acf953fe0a94ab4073e74f615f76b'), ('core_ext.rb', '21532f69b1707344e4451bccae4ddb21e608d5bccb88a1ac56ef5b62cda08ebd'), ('exception.rb', 'fbdb3fb7131fee55b0de3c8accfc3ec64e623cd6010cd9dfaac050f9a8282354'), ('handler.rb', '7b965ad569001b5f60f17fa02997f5948438a8c6339f3290701923e584d674f0'), ('nodes.rb', 'd010c2fedbbdf01d659ce9fd514d49a76fc24ae7811e3a3d8d319488c3e3e647'), ('omap.rb', '46b4f6a76bad47f1ec500a593e960208ac305059581ad5a550ee24405e1c5da2'), ('parser.rb', '2fe03afaea70edbb61332e01d53d326b72d9acda69cacb980f16226e94803a42'), ('scalar_scanner.rb', 'bf40983c97bd26c89730c4f8fbbaa7f01cf4bbae6e1582252c2a40e5c9e8f015'), ('set.rb', 'a68b59ff0ba2dc050c5d224e3cc35b62d2cc5c02ea23aaec825ef20864a54c99'), ('stream.rb', '41d5f3932308ad69f77eddaa2515bcdc71a03756f358c4776f75a4fabce3d4bc'), ('streaming.rb', '5e59508cbf646b61d72ac85daeab1f273e68055d62947321f1a491ce1c63ef12'), ('syntax_error.rb', 'ba9893a790d34ec2183ee63f2802c69f4217855bef363b7ba84f6c40bb83dd7e'), ('tree_builder.rb', '9552a428400b3b544d2c2eea67060a11e8cbf3490bfda5630b57b86ab2943006'), ('versions.rb', '0443b1b29ca10d64388f2b5498d5ab740db5257d6103f96752ebd1b7da5a2afe'), ('visitors.rb', 'cb8b0cf0275320afaa2f657502338702f0edf7372c10ff38725cd8a19ee06ab3')]), ('/usr/lib/ruby/3.2.0/psych/handlers/', [('document_stream.rb', '16053c6c1db36a09300410b9a5471e5642b8c7968337e852960603ab531fe555')]), ('/usr/lib/ruby/3.2.0/psych/json/', [('ruby_events.rb', '9b2f7cf5982e1cf62159e6245ad3eee83b67245a84d0f1cbb701f48da3930789'), ('stream.rb', '212ec3ddaa0e455f9ded6af80714dab8f4c72f78044df8fcd6bee9eabe4a3c2b'), ('tree_builder.rb', 'b4754d3e84ef607899305fc8153436e63a937d0631c1833f401e7cf75a098dd9'), ('yaml_events.rb', 'fca4f80d7eba13c4475014f3b584008c20d15e48323ccf21d4cc961b024d68ab')]), ('/usr/lib/ruby/3.2.0/psych/nodes/', [('alias.rb', 'd245a4c422b561833f58f2545d7765f96293f0fd792aff9830730133151a802d'), ('document.rb', '658473e658a1c5641780f1846a942fbf9f4e3013658f554cc6c6e48d5ec748d1'), ('mapping.rb', 'e6ec0a89fd9e457cbbd382bf47f4dfd89359296576e77a6a18c0c6555dc97186'), ('node.rb', '5b3397dbacc683500436609da4d3baf89eb4e0f45547098e285fe717182b979b'), ('scalar.rb', '3a09f664986f3863f7b700bd35292664515e6c56eb17d722ed44303dd95dd312'), ('sequence.rb', 'bddaca0894fc93670d5e50ed250a6ca119e78176ca96053654ddbbd49ce1fcfe'), ('stream.rb', '3cc408cf801d3dd16a44b9eff86661ea8d3ab592ec8505f084da7d6675fb40b2')]), ('/usr/lib/ruby/3.2.0/psych/visitors/', [('depth_first.rb', '2687c15cde420b1cb1e5214bc6286215159c97a0688cf975920cc2563faf838d'), ('emitter.rb', '1fa562fa5649ed57d5161c35e9a85ffc137422739d0ef8fce5428c4db1fb519b'), ('json_tree.rb', '22156c136dbd69ff05f7cdf1d4282232a501c1e67bdf011b72cc258a0fc7a3a5'), ('to_ruby.rb', '92c0e260ff1c6639f1893bcd49f1eafadd628ea1ef7f645ea07e7bb193c3ee9a'), ('visitor.rb', '22eb6b08e4ec1abb6e0495d7d51241f4fe6b5c4e87a3a49ea3ecc3ef01e90870'), ('yaml_tree.rb', 'c4f39d78c83c9b537b9fefb3022765b329f307565f5a62b066eb00fa4df398d8')]), ('/usr/lib/x86_64-linux-gnu/', [('ld-linux-x86-64.so.2', 'c20a2dc8917c755f02b94049356320fe1f62ac7d9f8994731f807d9df39302da'), ('libblkid.so.1.1.0', '9c3860ffab5422410ff9e073d3e82267f00bc68ff1248cbb191640ee2ff045bc'), ('libbz2.so.1.0.4', 'cc08c9f50a8009ffd6391e0116a100369b11ca9238fa52392c019e6645b122a1'), ('libc.so.6', '3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf'), ('libcap.so.2.66', '6ac6abc86ac891c6e13486470e26f1d939f47fda9e6b5d5508a7f5ec881adc84'), ('libcrypt.so.1.1.0', '1502636e3be8232c9cf801dfb533694aea985d449904f3e1295db26d7b348946'), ('libcrypto.so.3', '6866ed711dab8927e1bf82bf1cd30e828bdfc34f3cc1e83b1c9eb01ce6c37d9a'), ('libexpat.so.1.9.1', '286682ecbc5e59a638963b1a4e6351e65eb32fcf4bdcb9cb7569b6a61fe06a8d'), ('libgmp.so.10.5.0', '0ccdfb6d6f5c039465f6d002cf7e4c072d48ac6a2cffc8dd6c748dec31592804'), ('liblzma.so.5.4.5', '696e868dd0700a19a6d65fc01608ec2d70d3cb91f65710e89180cd2e688f30cb'), ('libm.so.6', 'fce00b6f25f459cf4ae0b7fae4257909a1a8a86f9149e7c029a5d617baf1ccd0'), ('libmount.so.1.1.0', '7472255ae5799059b37ddd544788f5665dbd3e1cb78259f52180293039efc2a5'), ('libpcre2-8.so.0.11.2', 'e00576d71d81d3ba0cfa4903c835a44a8723aac96f72f79ff75200b4cff9071b'), ('libruby-3.2.so.3.2.3', 'c7cab7e35d136ad18c97040b12f15c64f820ba19dcccd42ed43ac9154e6f28c2'), ('libselinux.so.1', '0ec0843463f90e227b0e138e1f379774f50b5514bd7f5dbd4c8a87aca0aa6670'), ('libsmartcols.so.1.1.0', '0560fded774642441657d3cf3125ac62234545dbe30725ed97cc6a79ba45791b'), ('libtinfo.so.6.4', 'e6089d7bb95eee5b545f3770dd69095b0bca47d26701cad145af429561d16306'), ('libudev.so.1.7.8', '4298228175fa62a36af88b1afd4406cdd8b1bf166621f957d0dbbde45a698fe5'), ('libyaml-0.so.2.0.9', 'a518a0ec7ee915fbeabe80551b8c9573b34e37b9402cc3e3eeab0fe346ba6ef0'), ('libz.so.1.3', '86200da370f20476a2507e9097a789b5ef97269b4ca8d5e164ad82dab9d99892')]), ('/usr/lib/x86_64-linux-gnu/gconv/', [('gconv-modules.cache', '52c227df9d53248238602c1ddaccd2c8ddc4cc6a61aa45d7c425af590b8806a5')]), ('/usr/lib/x86_64-linux-gnu/ruby/3.2.0/', [('psych.so', '282900b1f9f495f9fac0cd6c8954773a53d60d8636335d132599d1c4cd4bc523'), ('stringio.so', 'a091ef5633ba31048efbdc80a7eef13cb702ed84ff9fab42e22cd0d553c15393')]), ('/usr/lib/x86_64-linux-gnu/ruby/3.2.0/enc/', [('encdb.so', '059c6cc3358b56ade7178635ba1a53a596498674cba7841b30e5c89c1aeb4d77')]), ('/usr/lib/x86_64-linux-gnu/ruby/3.2.0/enc/trans/', [('transdb.so', '9f9afac310ff81490b55280d2c72b4795eb83ad65726e41bbedbd5c77afc91e6')]), ('/usr/lib/x86_64-linux-gnu/ruby/3.2.0/json/ext/', [('generator.so', '00af1d33235b80654d29f70ec3a6c54ae46cf890248ea1bd836efb778f6adefc'), ('parser.so', 'a5132616d829bc49cc2db1f14928a31baaabb8981e4e6f6ae3758c07647fe504')]), ('/usr/libexec/docker/cli-plugins/', [('docker-compose', '2ac954c9d506b912a12477d72f01601dc72ec918c429c7bae48fd707bdf0f3e5')])] for leaf, digest in entries}
+CLB91_CAPTURE_OBJECT = types.SimpleNamespace(**CLB91_CAPTURE)
+CLB91_PLAN_OBJECT = types.SimpleNamespace(**CLB91_PLAN)
+CLB91_SEMANTIC.update(D=CLB91_CAPTURE_OBJECT, P=CLB91_PLAN_OBJECT, S=None, MANIFEST=CLB91_PROFILE['runtime'], COMPOSE='/usr/libexec/docker/cli-plugins/docker-compose')
+CLB91_EXECUTOR.update(D=CLB91_CAPTURE_OBJECT, E=types.SimpleNamespace(**CLB91_SEMANTIC), P=CLB91_PLAN_OBJECT, S=None, PROFILE=CLB91_PROFILE)
+# END CLB91 FIXED EXECUTOR SOURCES
+
+
 class BoundContext:
     def __init__(self, owner, environment, compose, revision, image, phase, control):
+        # Ownership is initialized before any gate so a rejected constructor
+        # still reaches the same mandatory finalizer.
+        self.phase, self.fds, self.config_fds = phase, [], []
+        self.config_leases = []
+        check(getattr(self, 'runtime', None) is not None)
+        self.active = self.completed = False
+        check(not self.signaled)
         with inspect_guard('input'):
+            check(owner == '33468965282-1' and revision == '44497dcd28139cef865c3f98ac3f2c4a5afac636')
+            check(image == 'ghcr.io/koteev-m/clubs_bot/app-bot@sha256:ddf5486e02835855178cc3b30bd2f22899335131e6dc388def20feac328016fe')
             check(environment == 'stage' and phase in ('inspect', 'claim', 'resume-start', 'reconcile'))
             check(re.fullmatch(r'[0-9]{1,20}-[0-9]{1,20}', owner))
             check(re.fullmatch(r'[0-9a-f]{40}', revision))
@@ -3485,8 +3514,8 @@ class BoundContext:
                   all(part not in ('', '.', '..') for part in compose.split('/')[1:]))
             check(not compose.startswith(('/tmp/', '/private/tmp/', '/run/', '/var/tmp/', '/dev/shm/')))
         with inspect_guard('control'):
-            check(set(control) == {'version', 'implementation', 'binding', 'authorization', 'token', 'principal'})
-            check(control['version'] == 1 and isinstance(control['implementation'], dict))
+            check(set(control) == {'version', 'implementation', 'binding', 'authorization', 'token', 'principal', 'authority'})
+            check(type(control['version']) is int and control['version'] == 2 and isinstance(control['implementation'], dict))
             impl = control['implementation']
             check(set(impl) == {'revision', 'blob', 'sha256', 'size', 'path', 'mode', 'type'})
             check(impl['path'] == 'scripts/deploy/remote-compose-release.sh' and impl['mode'] == '100644' and impl['type'] == 'blob')
@@ -3495,10 +3524,13 @@ class BoundContext:
         self.owner, self.environment, self.compose, self.revision, self.image, self.phase = owner, environment, compose, revision, image, phase
         self.control, self.fds, self.directories, self.edges, self.objects = control, [], {}, [], {}
         self.metadata = {}
-        self.active, self.completed, self.signaled = False, False, False
+        self.active, self.completed = False, False
+        with inspect_guard('runtime'):
+            self.runtime.recheck()
+            self.docker_config_fd = self.runtime.config_fd
         with inspect_guard('principal', 'mismatch'):
             self.uid = os.geteuid()
-            principal = subprocess.check_output(['id', '-un'], stderr=subprocess.DEVNULL).decode().strip()
+            principal = self.runtime.principal(control['principal'])
             check(self.uid != 0 and principal not in ('root', 'hookah-staging') and control['principal'] == principal)
         self.incident = dict(owner=owner, environment=environment, revision=revision, image=image)
         self.path_hash = sha(compose.encode())
@@ -3517,24 +3549,9 @@ class BoundContext:
         with inspect_guard('application_binding', 'mismatch'):
             check(self.binding_record == dict(binding_version='3', environment='stage', compose_path_hash=self.path_hash,
                   mount_fingerprint_version='2', mount_fingerprint=self.backing, compose_project=self.project, compose_service='app'))
-        self.docker_environment = {k:v for k,v in os.environ.items() if not k.startswith(('COMPOSE_', 'DOCKER_', 'PYTHON', 'BASH_FUNC_'))
-                                   and k not in ('BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS', 'CDPATH')}
-        # Only local, already present images are used. No ambient Docker context,
-        # credentials helpers, TLS files or client config may redirect this path.
-        with inspect_guard('configuration_capture'):
-            temporary_root = os.path.realpath('/tmp')
-            temporary_info = os.stat(temporary_root, follow_symlinks=False)
-            check(stat.S_ISDIR(temporary_info.st_mode) and temporary_info.st_uid == 0 and temporary_info.st_mode & stat.S_ISVTX)
-            temporary_fd = self.keep(os.open(temporary_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
-            name = '.clubs-bound-docker-' + os.urandom(16).hex()
-            os.mkdir(name, 0o700, dir_fd=temporary_fd)
-            self.docker_config_fd = self.keep(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=temporary_fd))
-            check(os.fstat(self.docker_config_fd).st_uid == self.uid and stat.S_IMODE(os.fstat(self.docker_config_fd).st_mode) == 0o700)
-            os.rmdir(name, dir_fd=temporary_fd)
-            self.docker_environment['DOCKER_CONFIG'] = fdpath(self.docker_config_fd)
-            self.docker_environment['DOCKER_HOST'] = 'unix:///var/run/docker.sock'
         self.config_fds = []
-        self.capture_configuration()
+        with inspect_guard('configuration_capture'):
+            self.capture_configuration()
         with inspect_guard('binding_candidate', 'mismatch'):
             self.candidate = dict(version=1, incident=self.incident, implementation=impl,
                                   principal=dict(name=principal, uid=self.uid),
@@ -3587,7 +3604,8 @@ class BoundContext:
                 self.directories[key] = child
         with inspect_guard('binding_candidate', 'mismatch'):
             if self.pin is not None:
-                check(self.pin.get('objects') == self.objects)
+                check(isinstance(self.pin.get('objects'), dict) and
+                      all(self.pin['objects'].get(k) == v for k, v in self.objects.items()))
 
     @inspect_guarded('lock_shared')
     def lock_context(self):
@@ -3599,6 +3617,8 @@ class BoundContext:
     def check_edges(self):
         # Observed rename is rejected; safety does not depend on advisory locks
         # preventing rename. All subsequent accesses use these retained objects.
+        for fd, expected in getattr(self, 'config_leases', ()):
+            check(CLB91_CAPTURE['identity'](os.fstat(fd)) == expected)
         for parent, name, child in self.edges:
             value = os.stat(name, dir_fd=parent, follow_symlinks=False)
             held = os.fstat(child)
@@ -3642,11 +3662,11 @@ class BoundContext:
         for key in ('compose', 'parent', 'root', 'state', 'results', 'ledger', 'application_lock', 'operation_lock'):
             with inspect_guard('mount_query', 'command'):
                 fd = self.directories[key]
-                result = subprocess.run(['findmnt', '--noheadings', '--pairs', '--output', 'FSTYPE,SOURCE,FSROOT,TARGET',
-                                         '--target', fdpath(fd)], capture_output=True, pass_fds=(fd,))
-                check(result.returncode == 0 and len(result.stdout) <= 4096)
+                result = self.private_call(['/usr/bin/findmnt', '--noheadings', '--pairs', '--output', 'FSTYPE,SOURCE,FSROOT,TARGET',
+                                            '--target', fdpath(fd)], limit=4096, timeout=5)
+                check(result.code == 0 and len(result.output) <= 4096)
             with inspect_guard('mount_identity'):
-                line = result.stdout.decode('ascii').strip()
+                line = result.output.decode('ascii').strip()
                 match = re.fullmatch(r'FSTYPE="([^"\s]+)" SOURCE="([^"\s]+)" FSROOT="([^"\s]+)" TARGET="([^"\s]+)"', line)
                 check(match)
                 values = []
@@ -3666,49 +3686,74 @@ class BoundContext:
     @inspect_guarded('configuration_capture')
     def capture(self, data):
         if hasattr(os, 'memfd_create'):
-            fd = os.memfd_create('clubs-bound-capture', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+            # Own every acquired FD before any fallible private operation.
+            fd = self.keep(os.memfd_create('clubs-bound-capture', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING))
             os.fchmod(fd, 0o600)
             stream = os.fdopen(fd, 'rb+')
-            write_all(fd, data)
-            fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+            self.config_fds.append(stream)
+            self.fds.remove(fd)  # Ownership has moved to the registered stream.
         else:
             stream = tempfile.TemporaryFile(dir=os.path.realpath('/tmp'))
-            write_all(stream.fileno(), data)
-        info = os.fstat(stream.fileno())
+            self.config_fds.append(stream)
+            fd = stream.fileno()
+        write_all(fd, data)
+        if hasattr(os, 'memfd_create'):
+            seals = fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+            fcntl.fcntl(fd, fcntl.F_ADD_SEALS, seals)
+            check(fcntl.fcntl(fd, fcntl.F_GET_SEALS) == seals)
+        info = os.fstat(fd)
         check(stat.S_ISREG(info.st_mode) and info.st_uid == self.uid and info.st_nlink == 0 and stat.S_IMODE(info.st_mode) == 0o600)
         stream.seek(0)
-        self.config_fds.append(stream)
-        return fdpath(stream.fileno())
+        return fdpath(fd)
+
+    def captured_file(self, directory, name, *, mode=(0o600,), required=True, limit=65536):
+        # The original object remains leased. Only metadata is queried through
+        # its pathname afterwards; normalizers receive anonymous sealed copies.
+        base = self.directories[directory]
+        try:
+            fd = self.keep(os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=base))
+        except FileNotFoundError:
+            if required: raise
+            return b''
+        info = os.fstat(fd)
+        with inspect_guard('compose_file_type'):
+            check(stat.S_ISREG(info.st_mode))
+        with inspect_guard('compose_file_owner'):
+            check(info.st_uid == self.uid)
+        with inspect_guard('compose_file_nlink'):
+            check(info.st_nlink == 1)
+        with inspect_guard('compose_file_mode'):
+            check(stat.S_IMODE(info.st_mode) in mode)
+        with inspect_guard('compose_file_device'):
+            check(info.st_dev == os.fstat(base).st_dev)
+        with inspect_guard('compose_file_size'):
+            check(0 <= info.st_size <= limit)
+        expected = CLB91_CAPTURE['identity'](info)
+        self.edges.append((base, name, fd))
+        self.config_leases.append((fd, expected))
+        self.objects['configuration/' + name] = identity(fd)
+        # Keep I/O attribution in the caller's original compose_file/dotenv
+        # guard; only the bounded-size predicate has its own subguard.
+        data = bytearray()
+        while True:
+            chunk = os.read(fd, min(65536, limit + 1 - len(data)))
+            if not chunk:
+                data = bytes(data)
+                break
+            data.extend(chunk)
+            with inspect_guard('compose_file_size'):
+                check(len(data) <= limit)
+        check(len(data) == info.st_size and CLB91_CAPTURE['identity'](os.fstat(fd)) == expected)
+        self.check_edges()
+        return data
 
     def capture_configuration(self):
-        # This incident path supports the repository's plain YAML mapping subset.
-        # Reject constructs that can cause Compose to read another file before
-        # handing any bytes to Compose. No generic YAML evaluator is introduced.
         with inspect_guard('compose_file'):
-            main_fd = self.keep(os.open('docker-compose.yml', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-                                        dir_fd=self.directories['compose']))
-            info = os.fstat(main_fd)
-            with inspect_guard('compose_file_type'):
-                check(stat.S_ISREG(info.st_mode))
-            with inspect_guard('compose_file_owner'):
-                check(info.st_uid == self.uid)
-            with inspect_guard('compose_file_nlink'):
-                check(info.st_nlink == 1)
-            with inspect_guard('compose_file_mode'):
-                check(stat.S_IMODE(info.st_mode) in (0o600, 0o644))
-            compose_info = os.fstat(self.directories['compose'])
-            with inspect_guard('compose_file_device'):
-                check(info.st_dev == compose_info.st_dev)
-            main = bytearray()
-            while True:
-                chunk = os.read(main_fd, min(65536, 65537 - len(main)))
-                if not chunk:
-                    main = bytes(main)
-                    break
-                main.extend(chunk)
-                with inspect_guard('compose_file_size'):
-                    check(len(main) <= 65536)
+            main = self.captured_file('compose', 'docker-compose.yml', mode=(0o600, 0o644))
+        # Retain the original lexical exclusions. AST confirmation below is the
+        # sole exception for env_file, never historical diagnostic enums.
         with inspect_guard('compose_subset'):
+            has_env_file = False
             for line in main.decode('utf-8').splitlines():
                 stripped = line.strip()
                 if not stripped or stripped.startswith('#'):
@@ -3720,22 +3765,21 @@ class BoundContext:
                 match = re.match(r'([A-Za-z0-9_.-]+):(?:\s+(.*))?$', stripped)
                 check(match)
                 key, value = match[1], match[2] or ''
-                check(key not in ('include', 'extends', 'env_file', 'label_file', 'build', 'configs', 'secrets', 'develop', 'provider', 'models')
+                has_env_file |= key == 'env_file'
+                check(key not in ('include', 'extends', 'label_file', 'build', 'configs', 'secrets', 'develop', 'provider', 'models')
                       and not value.startswith(('!', '&', '*', '|', '>', '{')))
                 if not line.startswith(' '):
                     check(key in ('services', 'volumes', 'version', 'name', 'networks'))
+            # A small AST tool, not a generic YAML evaluator. For legacy inputs
+            # without env_file the original subset remains unchanged.
+            outline = self.outline(main) if has_env_file else None
         with inspect_guard('override', 'mismatch'):
-            override = self.read('compose', 'docker-compose.override.yml')
-            release = self.read('state', 'docker-compose.release.yml')
+            override = self.captured_file('compose', 'docker-compose.override.yml', limit=4096)
+            release = self.captured_file('state', 'docker-compose.release.yml', limit=4096)
             expected = f'# clubs-bot-managed-quiesced-release\n# revision: {self.revision}\nservices:\n  app:\n    image: {self.image}\n'.encode()
             check(override == expected and release == expected)
         with inspect_guard('dotenv'):
-            try:
-                dotenv = self.read('compose', '.env', 65536)
-            except FileNotFoundError:
-                dotenv = b''
-            # COMPOSE_* in .env can select other files; Docker client configuration
-            # is explicitly isolated. Ordinary interpolation remains Compose-owned.
+            dotenv = self.captured_file('compose', '.env', required=has_env_file)
             for line in dotenv.decode('utf-8').splitlines():
                 line = line.strip()
                 if not line or line.startswith('#'):
@@ -3743,36 +3787,80 @@ class BoundContext:
                 match = re.fullmatch(r'(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=.*', line)
                 check(match and not match[1].startswith(('COMPOSE_', 'DOCKER_')))
         self.config_hashes = dict(main=sha(main), override=sha(override), release=sha(release), dotenv=sha(dotenv))
-        self.main_capture, self.override_capture, self.env_capture = map(self.capture, (main, override, dotenv))
-        with inspect_guard('compose_command', 'command'):
-            self.normalized = self.compose_call(['config', '--format', 'json'], normalize=True)
-            check(self.normalized[0] == 0)
+        self.env_capture = self.capture(dotenv)
+        self.override_capture = self.capture(override)
+        if has_env_file:
+            check(sys.platform == 'linux' and hasattr(os, 'memfd_create'))
+            with inspect_guard('semantic_equivalence'):
+                plan = CLB91_PLAN['helper_prepare'](main, dotenv_reference=self.env_capture,
+                    effective_environment=self.docker_environment, outline_parser=lambda _script, _base: canonical(outline),
+                    normalize=self.normalize_input, candidate_check=self.candidate_subset)
+                # Private proposal is retained only for computation/review. It is
+                # never written/applied to canonical stage Compose files.
+                self.private_plan = plan
+                model = plan.model
+        else:
+            self.main_capture = self.capture(main)
+            with inspect_guard('compose_command', 'command'):
+                self.normalized = self.compose_call(['config', '--format', 'json'], normalize=True)
+                check(self.normalized[0] == 0)
+            with inspect_guard('compose_model'):
+                model = CLB91_PLAN['decode_model'](self.normalized[1])
         with inspect_guard('compose_model'):
-            model = json.loads(self.normalized[1], object_pairs_hook=unique)
             app = model.get('services', {}).get('app', {})
             check(app.get('image') == self.image and not any(k in app for k in ('build', 'env_file', 'configs', 'secrets', 'label_file')))
             check(all(isinstance(v, dict) and v.get('type') == 'volume' for v in app.get('volumes', [])))
             self.config_hashes['resolved'] = sha(canonical(model))
-            # Compose config already serializes literal dollars for reuse as input.
-            # Re-escaping would change application environment values on the next call.
             self.resolved_capture = self.capture(canonical(model))
-
-    @inspect_guarded('compose_command', 'command')
-    def compose_call(self, args, normalize=False):
         self.check_edges()
-        files = ['-f', self.main_capture, '-f', self.override_capture] if normalize else ['-f', self.resolved_capture]
-        argv = ['docker', 'compose', '--project-name', self.project, '--project-directory', self.compose,
-                '--env-file', self.env_capture, *files, *args]
+
+    def outline(self, main):
+        script = CLB91_PLAN['LINUX_RUBY_LOAD'] + CLB91_PLAN['HELPER_OUTLINE']
+        raw = self.private_call(['/usr/bin/ruby', '--disable-gems', '-e', script], main, limit=65536)
+        check(raw.code == 0 and raw.failure is None)
+        return json.loads(raw.output, object_pairs_hook=unique)
+
+    def candidate_subset(self, candidate):
+        # Reuse the same accepted AST without env_file via the pure planner's
+        # checked transformation; no new permissive parser or lexical fallback.
+        check(type(candidate) is bytes and len(candidate) <= 65536)
+        check(not re.search(rb'(?m)^ *env_file:', candidate))
+        return True
+
+    def normalize_input(self, data, with_override, environment):
+        check(environment is self.docker_environment)
+        path = self.capture(data)
+        options = ['-f', path]
+        if with_override:
+            options += ['-f', self.override_capture]
+        result = self.private_call(self.compose_argv(options) + ['config', '--format', 'json'])
+        check(result.failure is None and result.code == 0)
+        return CLB91_PLAN['decode_model'](result.output)
+
+    def compose_argv(self, files):
+        return ['/usr/bin/docker', 'compose', '--project-name', self.project,
+                '--project-directory', self.compose, '--env-file', self.env_capture, *files]
+
+    def private_call(self, argv, payload=b'', limit=262144, timeout=90):
+        self.check_edges()
+        self.runtime.command_environment(self.docker_environment)
         for stream in self.config_fds:
             stream.seek(0)
         fds = tuple(stream.fileno() for stream in self.config_fds) + (self.directories['compose'], self.docker_config_fd)
-        def cwd():
-            os.fchdir(self.directories['compose'])
-        result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self.docker_environment,
-                                pass_fds=fds, preexec_fn=cwd, timeout=90)
-        check(len(result.stdout) <= 262144)
+        result = CLB91_CAPTURE['capture_result'](argv, payload, timeout=timeout, limit=limit,
+            env=self.docker_environment, pass_fds=fds, cwd_fd=self.directories['compose'])
+        check(result.failure is None)
+        self.runtime.recheck()
         self.check_edges()
-        return result.returncode, result.stdout
+        self.check_interruption()
+        return result
+
+    @inspect_guarded('compose_command', 'command')
+    def compose_call(self, args, normalize=False):
+        files = ['-f', self.main_capture, '-f', self.override_capture] if normalize else ['-f', self.resolved_capture]
+        if args and args[0] == 'up': self.check_authority()
+        result = self.private_call(self.compose_argv(files) + args)
+        return result.code, result.output
 
     def check_evidence(self):
         self.check_edges()
@@ -3860,15 +3948,38 @@ class BoundContext:
 
     def claim_record(self):
         return dict(version=1, consumed=True, incident=self.incident, implementation=self.control['implementation'], binding_sha256=self.binding_digest,
-                    authorization_sha256=sha(self.control['authorization'].encode()), token_sha256=sha(self.control['token'].encode()))
+                    authorization_sha256=sha(self.control['authorization'].encode()), token_sha256=sha(self.control['token'].encode()),
+                    authority_sha256=sha(canonical(self.control['authority'])))
 
     def check_authority(self):
         check(self.pin is not None and re.fullmatch('[0-9a-f]{64}', self.control['token']))
         check(re.fullmatch('[0-9a-f]{64}', self.control['authorization']))
+        authority = self.control['authority']
+        check(isinstance(authority, dict) and set(authority) == {'reviewed_at', 'expires_at', 'execution', 'evidence', 'receiver'})
+        reviewed, expires = authority['reviewed_at'], authority['expires_at']
+        check(type(reviewed) is int and type(expires) is int and 0 <= reviewed <= int(time.time()) < expires
+              and 0 < expires-reviewed <= 86400)
+        target, evidence = authority['execution'], authority['evidence']
+        check(isinstance(target, dict) and set(target) == {'action', 'run_number', 'attempt', 'source_revision'})
+        check(target['action'] == 'resume-start' and target['attempt'] == '1'
+              and re.fullmatch('[1-9][0-9]{0,19}', target['run_number'])
+              and re.fullmatch('[0-9a-f]{40}', target['source_revision']))
+        check(isinstance(evidence, dict) and set(evidence) == {'repository', 'workflow', 'run_id', 'attempt', 'source_revision',
+              'artifact_id', 'ciphertext_sha256', 'run_number', 'created_at', 'expires_at'})
+        check(evidence['repository'] == 'koteev-m/clubs_bot' and evidence['workflow'] == '.github/workflows/corrected-stage-release.yml'
+              and evidence['source_revision'] == target['source_revision']
+              and all(re.fullmatch('[1-9][0-9]{0,19}', evidence[k]) for k in ('run_id','attempt','artifact_id','run_number'))
+              and int(target['run_number']) > int(evidence['run_number'])
+              and re.fullmatch('[0-9a-f]{64}', evidence['ciphertext_sha256'])
+              and re.fullmatch('[0-9A-F]{40}', authority['receiver']))
+        check(type(evidence['created_at']) is int and type(evidence['expires_at']) is int
+              and evidence['created_at'] <= reviewed and expires <= evidence['expires_at']
+              and 0 < evidence['expires_at']-evidence['created_at'] <= 86400)
 
     def claim(self):
         self.check_authority(); self.ready()
         self.check_edges()
+        self.check_authority()
         fd = os.open('.clb82-resume-start-33468965282-1.consumed', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o600, dir_fd=self.directories['root'])
         try:
@@ -3891,6 +4002,7 @@ class BoundContext:
         record = json.loads(self.read('root', '.clb82-resume-start-33468965282-1.consumed', 8192), object_pairs_hook=unique)
         check(record == self.claim_record())
         self.ready()
+        self.check_authority()
         self.active = True
         self.operation_result('incomplete_unknown', 'operation_in_progress')
         code, output = self.worker('resume')
@@ -3901,7 +4013,7 @@ class BoundContext:
         return b'release-operation:v=1 result=success\n'
 
     def check_interruption(self):
-        if self.phase == 'inspect' and self.signaled:
+        if self.signaled:
             raise InterruptedError
 
     @inspect_guarded('status_read')
@@ -3945,87 +4057,140 @@ class BoundContext:
             check(self.phase == 'resume-start' and self.active)
             check((before, after) in (('migration_completed', 'candidate_start_begun'), ('candidate_start_begun', 'candidate_healthy')))
             self.check_evidence(); check(self.value('checkpoint') == before)
-            self.check_edges(); self.replace('state', 'checkpoint', after.encode()); self.check_edges()
+            self.check_edges()
+            if after == 'candidate_start_begun': self.check_authority()
+            self.replace('state', 'checkpoint', after.encode()); self.check_edges()
             return 0, b''
         if command == 'compose':
+            if args and args[0] == 'up': self.check_authority()
             return self.compose_call(args)
         raise RuntimeError('invalid internal operation')
 
     @inspect_guarded('worker_capture')
     def worker(self, action):
         self.check_interruption()
-        parent, child = socket.socketpair()
-        worker_env = dict(self.docker_environment, CLB82_RPC_FD=str(child.fileno()))
-        script = FUNCTIONS + '\n' + WORKER
-        script += '\n' + {'ready': 'bound_ready', 'resume': 'start_and_probe_app "$compose_path" "$digest" "$expected_revision" yes',
-                           'classify': 'classify_app_state "$compose_path" "$digest" "$expected_revision"',
-                           'healthy': 'probe_candidate "$compose_path" "$digest" "$expected_revision"; probe_readiness_and_health "$compose_path"'}[action] + '\n'
-        process = subprocess.Popen(['bash', '--noprofile', '--norc', '-s', '--', self.owner, self.compose, self.revision, self.image],
-                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                   pass_fds=(child.fileno(), self.docker_config_fd), env=worker_env)
-        child.close(); process.stdin.write(script.encode()); process.stdin.close()
-        output = bytearray()
+        self.runtime.command_environment(self.docker_environment)
+        self.worker_owned = True
+        parent = child = process = None
+        failure = None
         try:
+            parent, child = socket.socketpair()
+            worker_env = dict(self.docker_environment, CLB82_RPC_FD=str(child.fileno()))
+            script = FUNCTIONS + '\n' + WORKER
+            script += '\n' + {'ready': 'bound_ready', 'resume': 'start_and_probe_app "$compose_path" "$digest" "$expected_revision" yes',
+                               'classify': 'classify_app_state "$compose_path" "$digest" "$expected_revision"',
+                               'healthy': 'probe_candidate "$compose_path" "$digest" "$expected_revision"; probe_readiness_and_health "$compose_path"'}[action] + '\n'
+            process = subprocess.Popen(['/bin/bash', '--noprofile', '--norc', '-s', '--', self.owner, self.compose, self.revision, self.image],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                pass_fds=(child.fileno(), self.docker_config_fd), env=worker_env, start_new_session=True)
+            child.close()
+            parent.setblocking(False)
+            os.set_blocking(process.stdout.fileno(), False)
+            os.set_blocking(process.stdin.fileno(), False)
+            outgoing, incoming, pending = bytearray(), bytearray(), bytearray(script.encode())
+            output = bytearray()
+            deadline = time.monotonic() + 600
             with selectors.DefaultSelector() as poll:
-                poll.register(parent, selectors.EVENT_READ); poll.register(process.stdout, selectors.EVENT_READ)
-                while process.poll() is None or poll.get_map():
+                poll.register(parent, selectors.EVENT_READ)
+                poll.register(process.stdout, selectors.EVENT_READ)
+                poll.register(process.stdin, selectors.EVENT_WRITE)
+                while poll.get_map():
                     self.check_interruption()
-                    for key, _ in poll.select(.1):
-                        if key.fileobj is parent:
-                            with inspect_guard('worker_protocol', 'protocol'):
-                                header = parent.recv(4)
-                                if not header:
+                    check(time.monotonic() < deadline)
+                    for key, events in poll.select(.1):
+                        if key.fileobj is process.stdin:
+                            try:
+                                count = os.write(process.stdin.fileno(), pending[:4096])
+                            except BlockingIOError:
+                                continue
+                            check(count > 0); del pending[:count]
+                            if not pending:
+                                poll.unregister(process.stdin); process.stdin.close()
+                        elif key.fileobj is parent:
+                            if events & selectors.EVENT_WRITE:
+                                try: count = parent.send(outgoing)
+                                except BlockingIOError: count = 0
+                                del outgoing[:count]
+                                if not outgoing: poll.modify(parent, selectors.EVENT_READ)
+                            if events & selectors.EVENT_READ:
+                                try: data = parent.recv(8196)
+                                except BlockingIOError: continue
+                                if not data:
+                                    check(not incoming and not outgoing)
                                     poll.unregister(parent); continue
-                                check(len(header) == 4)
-                                size = struct.unpack('!I', header)[0]; check(size <= 8192)
-                                data = bytearray()
-                                while len(data) < size:
-                                    part = parent.recv(size - len(data)); check(part); data.extend(part)
-                                try:
-                                    code, value = self.rpc(json.loads(data))
-                                except Exception:
-                                    code, value = 1, b''
-                                # Recoverable RPC errors must not swallow a
-                                # cancellation recorded by the signal handler.
-                                self.check_interruption()
-                                answer = canonical([code, base64.b64encode(value).decode()])
-                                parent.sendall(struct.pack('!I', len(answer)) + answer)
+                                incoming.extend(data); check(len(incoming) <= 8196)
+                                if len(incoming) < 4: continue
+                                with inspect_guard('worker_protocol', 'protocol'):
+                                    size = struct.unpack('!I', incoming[:4])[0]; check(0 < size <= 8192)
+                                    if len(incoming) < size + 4: continue
+                                    check(len(incoming) == size + 4 and not outgoing)
+                                    request = json.loads(incoming[4:]); incoming.clear()
+                                    check(type(request) is list and request and all(type(x) is str for x in request))
+                                    try: code, value = self.rpc(request)
+                                    except Exception: code, value = 1, b''
+                                    self.check_interruption()
+                                    answer = canonical([code, base64.b64encode(value).decode()])
+                                    check(len(answer) <= 524288)
+                                    outgoing.extend(struct.pack('!I', len(answer)) + answer)
+                                    poll.modify(parent, selectors.EVENT_READ | selectors.EVENT_WRITE)
                         else:
-                            data = os.read(process.stdout.fileno(), 4096)
-                            if not data:
-                                poll.unregister(process.stdout)
-                            else:
-                                output.extend(data); check(len(output) <= 4096)
-                return process.wait(), bytes(output)
+                            try: data = os.read(process.stdout.fileno(), 4096)
+                            except BlockingIOError: continue
+                            if not data: poll.unregister(process.stdout)
+                            else: output.extend(data); check(len(output) <= 4096)
+            # Preserve the unreaped leader until group cleanup; avoid PID reuse.
+            while os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+                self.check_interruption(); check(time.monotonic() < deadline); time.sleep(.01)
+            self.runtime.recheck(); self.check_edges()
+            result = (process.returncode, bytes(output))
+        except BaseException as error:
+            failure = error
         finally:
-            if process.poll() is None:
-                process.kill(); process.wait()
-            parent.close(); process.stdout.close()
+            if process is not None:
+                try: os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                except BaseException as error:
+                    if failure is None: failure = error
+                try:
+                    code = process.wait(timeout=2)
+                    if failure is None: result = (code, bytes(output))
+                except BaseException as error:
+                    if failure is None: failure = error
+            streams = [parent, child]
+            if process is not None: streams += [process.stdin, process.stdout]
+            for stream in streams:
+                if stream is not None:
+                    try: stream.close()
+                    except BaseException as error:
+                        if failure is None: failure = error
+            self.worker_owned = False
+        if failure is not None: raise failure
+        self.check_interruption()
+        return result
 
     def close(self):
-        if self.phase == 'inspect':
-            failure = None
-            # Attempt every owned resource once, preserving the first failure.
-            # The inspect handler records signals throughout this finalization.
-            for stream in getattr(self, 'config_fds', []):
-                try:
-                    stream.close()
-                except BaseException as error:
-                    if failure is None:
-                        failure = error
-            for fd in reversed(self.fds):
-                try:
-                    os.close(fd)
-                except BaseException as error:
-                    if failure is None:
-                        failure = error
-            if failure is not None:
-                raise failure
+        if getattr(self, 'closed', False):
             return
+        self.closed = True
+        failure = None
         for stream in getattr(self, 'config_fds', []):
-            stream.close()
-        for fd in reversed(self.fds):
-            os.close(fd)
+            try:
+                stream.close()
+            except BaseException as error:
+                if failure is None: failure = error
+        for fd in reversed(getattr(self, 'fds', [])):
+            try:
+                os.close(fd)
+            except BaseException as error:
+                if failure is None: failure = error
+        runtime = getattr(self, 'runtime', None)
+        if runtime is not None:
+            try:
+                runtime.close()
+            except BaseException as error:
+                if failure is None: failure = error
+        if failure is not None:
+            raise failure
 
 
 FUNCTIONS = sys.stdin.read(65537)
@@ -4034,8 +4199,12 @@ WORKER = r'''
 set -euo pipefail
 owner="$1"; compose_path="$2"; expected_revision="$3"; digest="$4"
 operation_compose_path="$compose_path"; app_env=stage; failure_category=unexpected
+# Fixed executors/builtins for the unchanged readiness loop. Never PATH tools.
+docker() { /usr/bin/docker "$@"; }
+seq() { [ "$*" = "1 60" ] || return 1; local i; for ((i=1;i<=60;i++)); do printf '%s\n' "$i"; done; }
+sleep() { [ "$*" = "1" ] || return 1; /usr/bin/python3 -I -S -B -c 'import time;time.sleep(1)'; }
 bound_rpc() {
-  python3 -I -S -B -c 'import os,socket,json,struct,sys,base64
+  /usr/bin/python3 -I -S -B -c 'import os,socket,json,struct,sys,base64
 s=socket.socket(fileno=os.dup(int(os.environ["CLB82_RPC_FD"])))
 b=json.dumps(sys.argv[1:]).encode();s.sendall(struct.pack("!I",len(b))+b)
 def receive(n):
@@ -4079,18 +4248,32 @@ bound_ready() {
 '''
 context = None
 try:
-    with inspect_guard('control'):
-        control = json.loads(read_all(4, 32768), object_pairs_hook=unique)
-    context = BoundContext(*sys.argv[1:], control)
-    # Armed before installing the handler: no signal can unwind an inspect
-    # ownership handoff or its finalizer. Worker/status safe points observe it.
-    inspect_owned = context.phase == 'inspect'
+    context = BoundContext.__new__(BoundContext)
+    context.phase = sys.argv[6]
+    context.signaled = context.active = context.completed = False
+    context.fds, context.config_fds, context.runtime = [], [], None
+    inspect_owned = True  # Defer signals through acquisition/ownership transfer.
+    inspect_finalized = False
     def interrupted(signum, frame):
         context.signaled = True
-        if not inspect_owned:
+        cancellation = CLB91_CAPTURE['_capture_cancellation']
+        if cancellation is not None:
+            cancellation[0] = True
+            return
+        if not inspect_owned and not getattr(context, 'worker_owned', False):
             raise InterruptedError
     for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(number, interrupted)
+    # Even private control v2 is unread until the source-owned Runtime gate.
+    with inspect_guard('runtime'):
+        context.runtime = CLB91_EXECUTOR['Gate'](lambda: context.signaled)
+        context.runtime.initial()
+        context.docker_environment = context.runtime.bind(dict(os.environ))
+    with inspect_guard('control'):
+        control = json.loads(read_all(4, 32768), object_pairs_hook=unique)
+    BoundContext.__init__(context, *sys.argv[1:], control)
+    context.check_interruption()
+    inspect_owned = context.phase == 'inspect'
     if context.phase == 'inspect':
         failure = None
         try:
@@ -4104,6 +4287,7 @@ try:
             try:
                 with inspect_guard('finalize'):
                     context.close()
+                    inspect_finalized = True
             except BaseException as error:
                 if failure is None:
                     failure = error
@@ -4119,6 +4303,11 @@ try:
         output = context.claim()
     else:
         output = context.resume()
+    if not inspect_finalized:
+        with inspect_guard('finalize'):
+            context.close()
+            inspect_finalized = True
+    context.check_interruption()
     with inspect_guard('inspect_output'):
         sys.stdout.buffer.write(output); sys.stdout.flush()
 except BaseException as failure:
@@ -4128,12 +4317,23 @@ except BaseException as failure:
                                      'interrupted' if context.signaled else getattr(context, 'worker_failure', 'unexpected'))
         except BaseException:
             pass
+    # Refused/partially initialized scopes still finalize before fixed failure
+    # publication. Never allow a cleanup traceback onto public stderr.
+    if context is not None:
+        try:
+            context.close()
+        except BaseException:
+            pass  # The outcome is already FAIL; cleanup cannot promote it.
     diagnostic = inspect_diagnostic(failure) if INSPECT_MODE else ''
     print(diagnostic + 'corrected-start:v=1 result=blocked', flush=True)
     sys.exit(1)
 finally:
-    if context is not None and context.phase != 'inspect':
-        context.close()
+    if context is not None and not locals().get('inspect_finalized', False):
+        try:
+            context.close()
+        except BaseException:
+            print('corrected-start:v=1 result=blocked', flush=True)
+            sys.exit(1)
 CLB82_BOUND_PYTHON
   declare -f sha256_text image_revision current_compose_container_id inspect_container_value \
     classify_app_state assert_app_absent probe_candidate probe_readiness_and_health start_and_probe_app |

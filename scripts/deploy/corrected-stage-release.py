@@ -38,6 +38,7 @@ def source_module(name):
 
 open_canonical_root = source_module("release_private_root").open_canonical_root
 _authority = source_module("release_authority")
+_review = source_module("root_binding_review")
 AuthorityError, REFERENCE, verify_prior = (
     _authority.AuthorityError, _authority.REFERENCE, _authority.verify_prior)
 
@@ -46,9 +47,9 @@ HELPER_PATH = "scripts/deploy/remote-compose-release.sh"
 # Working implementation identity. No unpublished/future commit is invented.
 # A separately approved stage configuration must bind these bytes to a real
 # Git commit before execution. Fixtures supply their own isolated Git objects.
-IMPLEMENTATION_BLOB = "162c2fba50ce84019de9fb0151491e518cca95ca"
-IMPLEMENTATION_SHA256 = "54839fcfa543888cc4613d2af480d85aee07ab8dd6b4a2bf879e64d501577809"
-IMPLEMENTATION_SIZE = 183462
+IMPLEMENTATION_BLOB = "2e6cdff01ad04fec9a8a31fbf1a47daf729cc86f"
+IMPLEMENTATION_SHA256 = "0f047ecccb1e420b5abfdf7455d51d73d4e7f6ea7fbcf13e55e34fd8556fc43f"
+IMPLEMENTATION_SIZE = 259043
 IMPLEMENTATION_PATTERN = r"([0-9a-f]{40}):" + IMPLEMENTATION_BLOB + ":" + IMPLEMENTATION_SHA256
 INCIDENT = _authority.INCIDENT
 COMPOSE_PATH = "/opt/clubs-bot-stage"
@@ -83,14 +84,9 @@ def validate_request(env):
     require(re.fullmatch(REFERENCE, env.get("PRIOR_STATUS", "")), "PRIOR_STATUS_REFERENCE_REQUIRED")
     for key in ("GITHUB_RUN_ID", "GITHUB_RUN_NUMBER", "GITHUB_RUN_ATTEMPT"):
         require(re.fullmatch(r"[1-9][0-9]{0,19}", env.get(key, "")), "RUN_INVALID")
+    require(not env.get("AUTHORIZATION") and not env.get("CLB82_AUTHORIZED_ROOT_BINDING"), "LEGACY_AUTHORITY_FORBIDDEN")
     if env.get("ACTION", "inspect") == "resume-start":
         require(env["GITHUB_RUN_ATTEMPT"] == "1", "RERUN_FORBIDDEN")
-        parts = env.get("AUTHORIZATION", "").split("|")
-        require(len(parts) == 10 and re.fullmatch(r"[0-9a-f]{64}", parts[-2])
-                and env["AUTHORIZATION"] == authorization(env["GITHUB_RUN_NUMBER"], env["IMPLEMENTATION"], parts[-2]),
-                "AUTHORIZATION_REQUIRED")
-    else:
-        require(not env.get("AUTHORIZATION"), "INSPECT_AUTHORIZATION_INVALID")
 
 
 class CaptureResult:
@@ -124,14 +120,14 @@ def interrupted(_signum, _frame):
     raise CaptureInterrupted
 
 
-def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):
     """Keep the existing tuple API, including its legacy 124/125 conventions."""
     result = capture_result(argv, payload, timeout=timeout, limit=limit, env=env,
-                            pass_fds=pass_fds, spawn_failed=spawn_failed)
+                            pass_fds=pass_fds, spawn_failed=spawn_failed, cwd_fd=cwd_fd)
     return result.code, result.output
 
 
-def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):
     """Own cancellation before spawn, through cleanup, until outcome selection."""
     global _capture_cancellation
     cancellation = [False]
@@ -140,7 +136,7 @@ def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass
     _capture_cancellation = cancellation
     try:
         result = _capture_owned(argv, payload, timeout=timeout, limit=limit, env=env,
-                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation)
+                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation, cwd_fd=cwd_fd)
     except BaseException as error:
         failure = error
     finally:
@@ -159,15 +155,19 @@ def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass
     return result
 
 
-def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation):
+def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation, cwd_fd):
     """No named stdout/stderr captures; bounded memory and bounded process lifetime."""
     output = bytearray()
     offset = 0
     deadline = time.monotonic() + timeout
+    # A verified caller may retain its canonical cwd FD; no shell or HOME
+    # substitution is needed, and the original directory stays leased.
+    def held_cwd():
+        os.fchdir(cwd_fd)
     try:
         child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds,
-                                 start_new_session=True)
+                                 start_new_session=True, preexec_fn=held_cwd if cwd_fd is not None else None)
     except OSError:
         if spawn_failed is not None:
             spawn_failed()
@@ -408,7 +408,7 @@ def trusted(status):
 def validate_binding(value, env, implementation):
     require(isinstance(value, dict) and set(value) ==
             {"version", "incident", "implementation", "principal", "compose", "backing", "objects", "configuration"}, "ROOT_BINDING_INVALID")
-    require(value["version"] == 1 and value["implementation"] == implementation
+    require(type(value["version"]) is int and value["version"] == 1 and value["implementation"] == implementation
             and value["incident"] == dict(owner=env["RELEASE_OWNER"], environment="stage", revision=env["EXPECTED_REVISION"], image=env["IMAGE_DIGEST"]),
             "ROOT_BINDING_INVALID")
     principal, compose, objects, config = (value[key] for key in ("principal", "compose", "objects", "configuration"))
@@ -431,29 +431,23 @@ def validate_binding(value, env, implementation):
 
 
 def binding_control(env, snapshot):
-    approved = env.get("CLB82_APPROVED_IMPLEMENTATION", "")
-    require(approved == env["IMPLEMENTATION"], "IMPLEMENTATION_NOT_APPROVED")
-    revision, blob, digest = approved.split(":")
-    pin = env.get("CLB82_AUTHORIZED_ROOT_BINDING", "")
-    require(len(pin) <= 24576, "ROOT_BINDING_INVALID")
-    try:
-        binding = json.loads(pin, object_pairs_hook=_authority.unique_object) if pin else None
-    except Exception:
-        raise Rejected("ROOT_BINDING_INVALID") from None
-    require(binding is None or (isinstance(binding, dict) and set(binding) ==
-            {"version", "incident", "implementation", "principal", "compose", "backing", "objects", "configuration"}),
-            "ROOT_BINDING_INVALID")
+    require(env.get("CLB82_APPROVED_IMPLEMENTATION") == env["IMPLEMENTATION"], "IMPLEMENTATION_NOT_APPROVED")
+    require(not env.get("AUTHORIZATION") and not env.get("CLB82_AUTHORIZED_ROOT_BINDING"), "LEGACY_AUTHORITY_FORBIDDEN")
+    revision, blob, digest = env["IMPLEMENTATION"].split(":")
     implementation = dict(revision=revision, blob=blob, sha256=digest, size=len(snapshot), path=HELPER_PATH, mode="100644", type="blob")
-    if binding is not None:
-        validate_binding(binding, env, implementation)
+    value = None
     if env.get("ACTION", "inspect") == "resume-start":
-        require(binding is not None, "ROOT_BINDING_REQUIRED")
-        digest_pin = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        require(env["AUTHORIZATION"] == authorization(env["GITHUB_RUN_NUMBER"], approved, digest_pin), "AUTHORIZATION_REQUIRED")
-    return dict(version=1, implementation=dict(revision=revision, blob=blob, sha256=digest, size=len(snapshot),
-                path=HELPER_PATH, mode="100644", type="blob"), binding=binding,
-                authorization=hashlib.sha256(env.get("AUTHORIZATION", "").encode()).hexdigest(),
-                token=secrets.token_hex(32), principal=env["SSH_USER"])
+        value = _review.approval(env, validate_binding, implementation, INCIDENT, COMPOSE_PATH)
+    return dict(version=2, implementation=implementation, binding=value["binding"] if value else None,
+        authorization=hashlib.sha256(_review.encoded(value) if value else b"").hexdigest(),
+        authority=_review.private_authority(value) if value else None,
+        token=secrets.token_hex(32), principal=env["SSH_USER"])
+
+
+def require_current_approval(env, control):
+    value = _review.approval(env, validate_binding, control["implementation"], INCIDENT, COMPOSE_PATH)
+    require(value["binding"] == control["binding"] and _review.private_authority(value) == control["authority"]
+        and hashlib.sha256(_review.encoded(value)).hexdigest() == control["authorization"], "APPROVAL_CHANGED")
 
 
 # Per-transport authenticated framing, removed before status/ACK parsing.
@@ -466,7 +460,7 @@ INSPECT_GUARDS = frozenset(('control', 'input', 'principal', 'compose_chain', 'c
     'compose_file', 'compose_file_type', 'compose_file_owner', 'compose_file_nlink',
     'compose_file_mode', 'compose_file_device', 'compose_file_size', 'compose_subset',
     'override', 'dotenv', 'compose_command', 'compose_model',
-    'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
+    'runtime', 'semantic_equivalence', 'binding_candidate', 'retained_layout', 'retained_identity', 'retained_checkpoint',
     'prior_override', 'migration_records', 'result_record', 'worker_protocol', 'worker_capture',
     'status_classification', 'status_read', 'inspect_output', 'finalize', 'interrupted', 'internal'))
 INSPECT_FAILURES = frozenset(('invalid', 'mismatch', 'missing', 'permission', 'busy',
@@ -591,9 +585,16 @@ with tempfile.TemporaryFile(dir=os.path.realpath('/tmp')) as data:
 """
 
 
-def execute(env, snapshot, remote, control):
+def execute(env, snapshot, remote, control, *, evidence=None):
     """One durable claim, one separate resume submission, bounded reconciliation."""
+    if env.get("ACTION", "inspect") == "resume-start":
+        require_current_approval(env, control)
+    else:
+        require(callable(evidence), "PRIVATE_EVIDENCE_REQUIRED")
+
     def phase(name, timeout):
+        if name == "claim":
+            require_current_approval(env, control)
         return remote(snapshot, ["corrected-start", env["RELEASE_OWNER"], "stage", env["COMPOSE_PATH"],
                                  env["EXPECTED_REVISION"], env["IMAGE_DIGEST"], name], timeout, control)
 
@@ -612,13 +613,10 @@ def execute(env, snapshot, remote, control):
             except Exception:
                 raise Rejected("ROOT_BINDING_INVALID") from None
             validate_binding(candidate, env, control["implementation"])
-            # The captured response is private. SSH_USER is protected input;
-            # expose its hash for review, never the username in logs/artifacts.
-            # This public observation is deliberately not an authorized pin.
-            public_candidate = {**candidate, "principal": {
-                "name_sha256": hashlib.sha256(candidate["principal"]["name"].encode()).hexdigest(),
-                "uid": candidate["principal"]["uid"]}}
-            print(prefix.decode() + json.dumps(public_candidate, sort_keys=True, separators=(",", ":")), flush=True)
+            if env.get("ACTION", "inspect") == "inspect":
+                evidence(candidate)
+            else:
+                require(candidate == control["binding"], "ROOT_BINDING_MISMATCH")
         print(f"corrected-stage-observation:v=1 requested_operation={'resume-start' if name == 'reconcile' else 'start'}", flush=True)
         print(lines[0].decode(), end="", flush=True)
         return parsed
@@ -632,6 +630,11 @@ def execute(env, snapshot, remote, control):
     code, acknowledgement = phase("claim", 90)
     require(code == 0 and acknowledgement == b"release-authorization:v=1 consumed=yes\n", "AUTHORIZATION_CONSUMED_OR_UNKNOWN")
     print("corrected-stage-authorization:v=1 consumed=yes", flush=True)
+    try:
+        require_current_approval(env, control)
+    except _review.Refused:
+        status("reconcile")
+        raise
     print("corrected-stage-submission:v=1 requested_operation=resume-start attempted=yes", flush=True)
     code, acknowledgement = phase("resume-start", 180)
     after = status("reconcile")
@@ -642,7 +645,7 @@ def execute(env, snapshot, remote, control):
     raise Rejected("SEPARATE_DECISION_REQUIRED")
 
 
-def main():
+def dispatch(evidence=None):
     os.umask(0o077)
     for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(watched, interrupted)
@@ -651,7 +654,7 @@ def main():
     require(sys.argv[1:] in ([], ["--validate"], ["--verify-prior"], ["--validate-execution"]), "INPUT_INVALID")
     if sys.argv[1:] == ["--validate"]:
         with open(env["GITHUB_OUTPUT"], "a") as output:
-            for key in (*INCIDENT, "IMPLEMENTATION", "ACTION", "AUTHORIZATION", "PRIOR_STATUS"):
+            for key in (*INCIDENT, "IMPLEMENTATION", "ACTION", "PRIOR_STATUS"):
                 value = env.get(key, "inspect" if key == "ACTION" else "")
                 output.write(f"{key}={value}\n")
         return "SYNTAX_VALIDATED"
@@ -696,20 +699,82 @@ def main():
             payload = nonce + struct.pack("!II", len(control_bytes), len(data)) + control_bytes + data
             return transport(payload, shlex.join(["python3", "-I", "-S", "-B", "-c", REMOTE_BOUND_BOOTSTRAP, *argv]), timeout, nonce)
 
-        print("corrected-stage-provenance:" + json.dumps({**INCIDENT,
-              "implementation": control["implementation"], "binding_sha256": (hashlib.sha256(json.dumps(control["binding"], sort_keys=True, separators=(",", ":")).encode()).hexdigest() if control["binding"] else None),
-              "implementation_path": HELPER_PATH, "implementation_size": len(snapshot),
-              "principal_sha256": hashlib.sha256(env["SSH_USER"].encode()).hexdigest(),
-              "run_id": env["GITHUB_RUN_ID"], "run_number": env["GITHUB_RUN_NUMBER"],
-              "attempt": env["GITHUB_RUN_ATTEMPT"], "action": env.get("ACTION", "inspect"),
-              "prior_status": prior}, sort_keys=True), flush=True)
-        return execute(env, snapshot, remote, control)
+        print("corrected-stage-provenance:" + json.dumps(_review.producer(env), sort_keys=True), flush=True)
+        return execute(env, snapshot, remote, control, evidence=evidence)
+
+
+
+def crypto_context(env):
+    return _review.Crypto(env.get("CLB91_GPG_PROFILE", ""), env.get("CLB91_REVIEWER_PUBLIC_KEY", "").encode(),
+        env.get("CLB91_REVIEWER_FINGERPRINT", ""), capture, open_canonical_root,
+        env.get("TMPDIR") or env.get("RUNNER_TEMP", ""))
+
+
+def main():
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    os.umask(0o077)
+    for watched in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        signal.signal(watched, interrupted)
+    env = os.environ.copy()
+    if sys.argv[1:] == ["--cleanup-evidence"]:
+        root = env.get("TMPDIR") or env.get("RUNNER_TEMP", "")
+        base = open_canonical_root(root)
+        directory = None
+        try:
+            try:
+                directory = os.open("clb91-binding-evidence", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=base)
+            except FileNotFoundError:
+                return "EVIDENCE_CLEANED"
+            info = os.fstat(directory)
+            require(info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o700
+                    and set(os.listdir(directory)) <= {"binding.pgp"}, "PRIVATE_BOUNDARY")
+            try:
+                data = os.stat("binding.pgp", dir_fd=directory, follow_symlinks=False)
+                require(stat.S_ISREG(data.st_mode) and data.st_uid == os.geteuid()
+                        and data.st_nlink == 1 and stat.S_IMODE(data.st_mode) == 0o600, "PRIVATE_BOUNDARY")
+                os.unlink("binding.pgp", dir_fd=directory)
+            except FileNotFoundError:
+                pass
+            os.fsync(directory)
+            os.close(directory); directory = None
+            os.rmdir("clb91-binding-evidence", dir_fd=base); os.fsync(base)
+        finally:
+            if directory is not None: os.close(directory)
+            os.close(base)
+        return "EVIDENCE_CLEANED"
+    validate_request(env)
+    if sys.argv[1:] in (["--validate"], ["--verify-prior"]):
+        return dispatch()
+    _review.producer(env)
+    if env.get("ACTION", "inspect") != "inspect":
+        return dispatch()
+    ciphertext = None
+    with crypto_context(env) as crypto:
+        def evidence(candidate):
+            nonlocal ciphertext
+            require(ciphertext is None, "PRIVATE_EVIDENCE_DUPLICATED")
+            message = _review.envelope(candidate, _review.producer(env), crypto.fingerprint)
+            ciphertext = crypto.encrypt(_review.encoded(message))
+        result = dispatch(evidence)
+    if sys.argv[1:] == ["--validate-execution"]:
+        return result
+    require(ciphertext is not None and result == "INSPECTED", "PRIVATE_EVIDENCE_REQUIRED")
+    root = env.get("TMPDIR") or env.get("RUNNER_TEMP", "")
+    descriptor = open_canonical_root(root)
+    try:
+        os.mkdir("clb91-binding-evidence", 0o700, dir_fd=descriptor)
+    finally:
+        os.close(descriptor)
+    _review.write_private(str(Path(root)/"clb91-binding-evidence"), "binding.pgp", ciphertext, open_canonical_root)
+    print("corrected-stage-evidence:v=2 ciphertext_sha256=" + hashlib.sha256(ciphertext).hexdigest(), flush=True)
+    return result
 
 
 if __name__ == "__main__":
     try:
         result = main()
-    except (Rejected, AuthorityError) as failure:
+    except (Rejected, AuthorityError, _review.Refused) as failure:
         print("corrected-stage:v=1 result=blocked category=" + str(failure))
         sys.exit(1)
     except BaseException:
