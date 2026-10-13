@@ -1254,7 +1254,7 @@ Corrected inspect не закрывает этот gate задним число�
 проверки источника. Остальные live trust gates и отдельную execution authority проверяет оператор до dispatch. Root observer и наблюдение UID 1000
 не являются доказательством identity deployment principal.
 
-**Historical v1 contract below is superseded locally by [CLB-91 private review v2](#clb-91-private-root-binding-review-v2).** Public authorization/root-binding vars must not be used by the new candidate; publication and provisioning remain unauthorized.
+**Historical v1 contract below is superseded locally by [CLB-91 private review v2](#clb-91-private-root-binding-review-v2).** Public authorization/root-binding vars must not be used by the candidate published in [Draft PR #538](https://github.com/koteev-m/clubs_bot/pull/538); provisioning and stage execution still require separate authorization.
 
 Workflow принимает девять inputs: `environment` (только `stage`), `incident_tag`, `release_owner`,
 `expected_revision`, `image_digest`, `implementation` (`revision:blob:sha256`), `action`, `authorization` и `prior_status`.
@@ -2405,10 +2405,10 @@ separate authorization.
 
 ## CLB-91 private root-binding review v2
 
-Local-only candidate for the existing `deploy-stage-44497dc` incident and release
-owner `33468965282-1`. This supersedes the v1 public-candidate/public-authorization
+Published local candidate in [Draft PR #538](https://github.com/koteev-m/clubs_bot/pull/538)
+for the existing `deploy-stage-44497dc` incident and release owner `33468965282-1`. This supersedes the v1 public-candidate/public-authorization
 instructions above, including the description of the root binding as non-secret.
-At that checkpoint the Compose adapter was not implemented. The fixed CLI/plugin
+At the earlier private-review-only checkpoint the Compose adapter was not implemented. The fixed CLI/plugin
 adapter below extends these retained v2 guarantees; current stage trust remains unverified.
 Historical incident revision, image, prior Release Status producer and evidence
 are unchanged. Source pins for the authority-strengthened helper describe its
@@ -2510,13 +2510,15 @@ predicates, one claim/one submission, lost-ACK refusal and existing recovery
 transitions remain. Nothing provisions/adopts a pin or resumes automatically.
 
 **External acceptance — NOT performed here.** Separate authorization is needed
-for publication, live protected-main/no-overlap policy verification, independent
+for merge, live protected-main/no-overlap policy verification, independent
 runner/Mac crypto and TLS runtime acceptance, actual reviewer public-key pin,
 retirement of legacy vars/pending v1 authority, exact stage Secret provisioning,
 any read-only inspect dispatch/Environment approval/SSH capture, and a later
 exact resume decision/dispatch. Environment approval alone is not substantive
-binding review. Current `compose_subset/invalid` still needs its own agreed
-Compose adapter task; this channel does not bypass it or prove live equivalence.
+binding review. The [fixed local executor and bounded Compose adapter](#clb-91-fixed-non-root-docker-cliplugin-candidate-local-only)
+already exist in Draft PR #538; no second adapter implementation is needed. The
+historical `compose_subset/invalid` observation is not fresh stage evidence, and
+the local implementation does not prove native acceptance or live equivalence.
 
 Affected local commands: `python3 -B scripts/tests/test_root_binding_review.py`,
 `python3 -I -S -B scripts/tests/test_root_binding_crypto.py` (portable refusals;
@@ -2528,11 +2530,18 @@ checks do not prove Linux/static/runtime or live stage acceptance.
 
 ### CLB-91 corrected Compose compatibility — local executor prerequisite
 
-The 2026-10-13 local continuation is **CLB91_HELPER_CAPTURE_BLOCKED** on
-**P1 LOCAL_EXECUTOR_CONTRACT_GAP**. The existing private review v2 remains intact;
-there is no Compose adapter or relaxed `env_file` guard in this candidate.
+**Historical snapshot — superseded by the [fixed local CLI/plugin contract](#clb-91-fixed-non-root-docker-cliplugin-candidate-local-only).**
+**LOCAL_EXECUTOR_CONTRACT_GAP is closed for the local implementation.** The fixed
+executor source contract and bounded `services.app.env_file` adapter are already
+implemented and published in Draft PR #538; they must not be implemented again.
+Native Compose/FD and live stage acceptance remain unverified.
 
-[`compose_call`](../../scripts/deploy/remote-compose-release.sh) uses PATH-resolved
+The following paragraphs preserve the pre-adapter evidence and prerequisites,
+not current implementation instructions. At that 2026-10-13 checkpoint the local
+continuation was **CLB91_HELPER_CAPTURE_BLOCKED** on **P1 LOCAL_EXECUTOR_CONTRACT_GAP**;
+private review v2 was intact, but no Compose adapter had yet been implemented.
+
+At that checkpoint, [`compose_call`](../../scripts/deploy/remote-compose-release.sh) used PATH-resolved
 `docker compose` under the helper's actual filtered `docker_environment` for both
 configuration normalization and resolved-model/lifecycle reuse. The existing
 [`Runtime`](../../scripts/deploy/stage-compose-env-semantic-operation.py) and
@@ -2544,8 +2553,8 @@ The [feasibility observer](../../scripts/deploy/stage-runtime-feasibility-operat
 explicitly does not approve its observed toolchain. Missing live proof alone is
 not a local implementation blocker; a fixed supported same-executor contract is.
 
-Before local adapter implementation continues, agree that exact executor and a
-complete independently accepted Runtime profile. Retaining Docker CLI requires
+The historical prerequisite was to agree that exact executor and a complete
+independently accepted Runtime profile before implementing the adapter. Retaining Docker CLI requires
 exact CLI provenance/identity/closure, protected PATH resolution and ordered
 plugin search/selection including absence or integrity of higher-priority slots,
 bound to the held empty Docker config and preserved actual environment. A switch
@@ -2566,12 +2575,14 @@ executor does not approve another. No candidate is applied automatically.
 This prerequisite was established by read-only source/profile analysis, not by
 reading private stage bytes or running Compose. Linux/FD/native and live stage
 acceptance remain NOT_RUN. Source/approval v2, incident and release predicates
-are unchanged; publication and every stage action still need separate authority.
+were unchanged. That publication prerequisite has since been satisfied by
+Draft PR #538; merge and every stage action still need separate authority.
 
 
 ### CLB-91 fixed non-root Docker CLI/plugin candidate (local only)
 
-This unpublished candidate extends only the existing corrected helper. It does
+The completed local candidate published in [Draft PR #538](https://github.com/koteev-m/clubs_bot/pull/538)
+extends only the existing corrected helper. It does
 not establish live stage trust or authorize capture, deployment, recovery or
 provisioning. The frozen namespace launcher remains separate and unchanged.
 The incident owner/revision/image, state transitions, migration evidence,
@@ -2662,7 +2673,7 @@ The retained completion/ack-loss recovery distinction still requires separate
 fresh reconcile proof under existing predicates; it does not approve a failed
 semantic capture or permit replay.
 
-Publication, protected receiver/implementation/profile acceptance, real Linux
+Merge, protected receiver/implementation/profile acceptance, real Linux
 Compose/FD tests, current host/bootstrap/executable/dependency/plugin/account/core
 and effective-context proof, encrypted live capture/human review, protected Secret
 provisioning and any eventual resume each need their applicable separate authority.
