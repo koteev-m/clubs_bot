@@ -3,7 +3,8 @@
 Load verified bytes and call prepare() with captured bytes and an explicit
 interpolation environment. Private Plan.candidate is NEVER a public patch. Only
 Plan.public() is reportable. The result proves one snapshot, not future .env edits
-or permission to apply it. Existing diagnostic/helper/authority remain unchanged.
+or permission to apply it. The standalone environment contract is unchanged;
+the callback API leaves capture, Runtime and authority gates to its verified helper.
 """
 import json
 import fcntl
@@ -39,13 +40,15 @@ CONTROL_KEYS = frozenset(('HOME', 'PATH', 'TMPDIR', 'TMP', 'TEMP', 'ENV', 'BASH_
 OUTLINE = r'''
 require 'psych'; require 'json'
 begin
+  raise unless ARGV.empty? || ARGV == ['helper-one-dotenv']
+  strict_helper = ARGV == ['helper-one-dotenv']
   raw = STDIN.read(65537)
   raise unless raw.bytesize <= 65536 && raw.valid_encoding?
   tree = Psych.parse_stream(raw)
   raise unless tree.children.size == 1
   count = 0
   references = []
-  walk = lambda do |n, depth|
+  walk = lambda do |n, depth, scope|
     count += 1
     raise if count > 4096 || depth > 32
     raise unless [Psych::Nodes::Stream, Psych::Nodes::Document, Psych::Nodes::Mapping,
@@ -62,12 +65,19 @@ begin
       n.children.each_slice(2) do |k,v|
         raise unless k.is_a?(Psych::Nodes::Scalar) && k.plain &&
                      k.value.match?(/\A[A-Za-z0-9_.-]+\z/) && !seen[k.value]
+        if strict_helper
+          raise if %w[build include extends secrets configs external].include?(k.value)
+          raise if k.value == 'env_file' && scope != %w[services app]
+        end
         seen[k.value] = true
+        walk.call(k, depth + 1, scope + [k.value])
+        walk.call(v, depth + 1, scope + [k.value])
       end
+    else
+      (n.children || []).each { |child| walk.call(child, depth + 1, scope) }
     end
-    (n.children || []).each { |child| walk.call(child, depth + 1) }
   end
-  walk.call(tree, 0)
+  walk.call(tree, 0, [])
   mapping = lambda do |n|
     raise unless n.is_a?(Psych::Nodes::Mapping)
     n.children.each_slice(2).to_h { |k,v| [k.value, [k,v]] }
@@ -110,9 +120,14 @@ begin
   app = mapping.call(services.fetch('app')[1])
   key, refs = app.fetch('env_file')
   raise unless refs.is_a?(Psych::Nodes::Sequence) && refs.children.size.between?(1,16)
+  raise if strict_helper && refs.children.size != 1
   refs.children.each do |item|
     raise unless item.is_a?(Psych::Nodes::Scalar) && %w[.env ./.env].include?(item.value) &&
                  item.start_line == item.end_line
+    if strict_helper
+      token = raw.lines[item.start_line].each_char.to_a[item.start_column...item.end_column].join
+      raise unless item.value == '.env' && ['.env', "'.env'", '".env"'].include?(token)
+    end
   end
   last_line = refs.style == Psych::Nodes::Sequence::FLOW ? refs.end_line : refs.children[-1].end_line
   raise if refs.style == Psych::Nodes::Sequence::FLOW && refs.start_line != refs.end_line
@@ -132,6 +147,9 @@ rescue Exception
   exit 1
 end
 '''
+
+# Same constrained parser with a fixed mode; no caller-selected Ruby program.
+HELPER_OUTLINE = "ARGV.replace(['helper-one-dotenv']);\n" + OUTLINE
 
 
 class Refused(Exception):
@@ -158,6 +176,15 @@ class Plan:
     def public(self):
         return ('compose-env-file-plan:v=1 result=equivalent strategy=' + self.strategy
                 + ' scope=snapshot future=requires_recheck application=not_authorized')
+
+
+class HelperPlan(Plan):
+    """Private model for existing helper reuse; never a server writer."""
+    __slots__ = ('model',)
+
+    def __init__(self, candidate, strategy, model):
+        super().__init__(candidate, strategy)
+        self.model = model
 
 
 def controlled(name):
@@ -249,7 +276,7 @@ def check_inputs(base, dotenv, override, interpolation, project):
     need(type(project) is str and re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,127}', project))
 
 
-def transform(base, outline, additions=()):
+def transform(base, outline, additions=(), *, candidate_check=None, allow_controls=False):
     lines = base.splitlines(keepends=True)
     start, end = outline['remove']
     inserted = []
@@ -257,7 +284,7 @@ def transform(base, outline, additions=()):
         if not outline['has_environment']:
             inserted.append(b' ' * (outline['indent'] - 2) + b'environment:\n')
         for name in additions:
-            need(NAME.fullmatch(name) and not controlled(name), 'unsupported')
+            need(NAME.fullmatch(name) and (allow_controls or not controlled(name)), 'unsupported')
             # Names only: never freeze .env values, nulls or serialized $$ output.
             inserted.append((' ' * outline['indent'] + name + ': ${' + name
                              + '?CLB91 required contribution}\n').encode())
@@ -271,7 +298,10 @@ def transform(base, outline, additions=()):
             result.append(lines[index])
     candidate = b''.join(result)
     need(len(candidate) <= FILE_LIMIT, 'bounds')
-    need(not DIAGNOSTIC['scan'](candidate)['violations'], 'unsupported')
+    if candidate_check is None:
+        need(not DIAGNOSTIC['scan'](candidate)['violations'], 'unsupported')
+    else:
+        need(candidate_check(candidate) is True, 'unsupported')
     return candidate
 
 
@@ -301,6 +331,118 @@ def project_dotenv(base, outline, reference):
     projected = ''.join(lines).encode()
     need(len(projected) <= FILE_LIMIT, 'bounds')
     return projected
+
+
+def frozen_model(model):
+    """Snapshot callback output before another normalization can mutate it."""
+    need(type(model) is dict, 'model')
+    same_json(model, model)  # Validate every typed field, not only app.environment.
+    environment(model)
+    raw = json.dumps(model, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+    need(len(raw) <= MODEL_LIMIT, 'bounds')
+    return json.loads(raw, object_pairs_hook=unique)
+
+
+def decode_model(raw):
+    """Bounded private JSON decode; duplicate/nonfinite/raw error refusal."""
+    try:
+        need(type(raw) is bytes and 0 < len(raw) <= MODEL_LIMIT, 'bounds')
+        model = json.loads(raw, object_pairs_hook=unique,
+            parse_constant=lambda _: (_ for _ in ()).throw(Refused('model')))
+        return frozen_model(model)
+    except Refused:
+        raise
+    except (KeyboardInterrupt, InterruptedError):
+        raise Refused('interrupted') from None
+    except BaseException:
+        raise Refused('model') from None
+
+
+def prove_semantics(base, outline, before_input, normalize, *, candidate_check=None,
+                    allow_controls=False):
+    """Shared pure remove -> explicit -> refuse proof; no discovery or executor."""
+    def model(data, with_override=True):
+        return frozen_model(normalize(data, with_override))
+
+    before = model(before_input)
+    candidate = transform(base, outline, candidate_check=candidate_check, allow_controls=allow_controls)
+    after = model(candidate)
+    strategy = 'remove'
+    if not same_json(before, after):
+        old, new = environment(before), environment(after)
+        additions = sorted(old.keys() - new.keys())
+        need(0 < len(additions) <= 256 and all(old[k] is not None for k in additions), 'different')
+        need(not set(additions).intersection(outline['names']), 'different')
+        candidate = transform(base, outline, additions, candidate_check=candidate_check,
+                              allow_controls=allow_controls)
+        after = model(candidate)
+        strategy = 'explicit'
+    need(same_json(before, after), 'different')
+    encoded = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
+    need(same_json(model(encoded(before), False), before), 'model')
+    need(same_json(model(encoded(after), False), after), 'model')
+    return Plan(candidate, strategy), before, after
+
+
+def helper_prepare(base, *, dotenv_reference, effective_environment, outline_parser,
+                   normalize, candidate_check):
+    """Pure helper proof using its exact complete effective environment.
+
+    The trusted helper supplies Runtime-approved callbacks and source-captured
+    bytes. outline_parser executes ONLY HELPER_OUTLINE against base and returns
+    its JSON bytes. normalize(data, with_override, effective_environment) must
+    use the same verified Compose executor, sealed dotenv, held canonical project
+    and override throughout. This API never constructs a process environment,
+    opens a pathname, launches a process, applies a candidate or proves host trust.
+    Completeness/provenance of effective_environment is the helper's prerequisite.
+    """
+    try:
+        need(type(base) is bytes and 0 < len(base) <= FILE_LIMIT, 'bounds')
+        need(b'\x00' not in base and b'\r' not in base, 'unsupported')
+        need(type(effective_environment) is dict and len(effective_environment) <= 4096)
+        need(all(type(k) is str and k and '=' not in k and '\x00' not in k
+                 and type(v) is str and '\x00' not in v for k,v in effective_environment.items()))
+        need(sum(len(k.encode()) + len(v.encode()) for k,v in effective_environment.items())
+             <= MODEL_LIMIT, 'bounds')
+        snapshot = dict(effective_environment)
+        raw = outline_parser(HELPER_OUTLINE, base)
+        need(type(raw) is bytes and 0 < len(raw) <= FILE_LIMIT, 'parser')
+        outline = json.loads(raw, object_pairs_hook=unique)
+        need(type(outline) is dict and set(outline) == {'remove', 'insert', 'indent', 'has_environment',
+             'names', 'environment_names', 'references', 'dotenv_spans'}, 'parser')
+        need(type(outline['dotenv_spans']) is list and len(outline['dotenv_spans']) == 1, 'unsupported')
+        # Enforce the remaining existing subset BEFORE any Compose callback.
+        # This projection-independent validator never receives private models.
+        transform(base, outline, candidate_check=candidate_check, allow_controls=True)
+        projected = project_dotenv(base, outline, dotenv_reference)
+
+        def actual_normalize(data, with_override):
+            need(effective_environment == snapshot, 'input')
+            result = normalize(data, with_override, effective_environment)
+            need(effective_environment == snapshot, 'input')
+            return result
+
+        plan, _, after = prove_semantics(base, outline, projected, actual_normalize,
+            candidate_check=candidate_check, allow_controls=True)
+        need(effective_environment == snapshot, 'input')
+        return HelperPlan(plan.candidate, plan.strategy, after)
+    except Refused:
+        raise
+    except (KeyboardInterrupt, InterruptedError):
+        raise Refused('interrupted') from None
+    except BaseException:
+        # No raw callback/parser error can reveal private bytes or become PASS.
+        raise Refused('input') from None
+
+
+# Source-owned AST node inventory for embedding in the approved helper blob.
+# Imports json/math/re are supplied explicitly by that isolated implementation;
+# no helper invocation needs DIAGNOSTIC, CAPTURE, SAFE_ROOT, files or imports from
+# checkout. The embedding validator must compare exact captured source nodes.
+HELPER_SOURCE_NODES = ('LINUX_RUBY_LOAD', 'FILE_LIMIT', 'MODEL_LIMIT', 'NAME', 'REASONS', 'CONTROL_KEYS',
+    'OUTLINE', 'HELPER_OUTLINE', 'Refused', 'need', 'Plan', 'HelperPlan', 'controlled',
+    'unique', 'same_json', 'transform', 'environment', 'project_dotenv', 'frozen_model', 'decode_model',
+    'prove_semantics', 'helper_prepare')
 
 
 class SealedInputs:
@@ -392,7 +534,16 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
             options = [compose, '--project-name', project, '--project-directory',
                        canonical_directory if sealed else workspace, '--env-file', dotenv_path]
 
-            def normalize(data, name, with_override=True):
+            input_sequence = resolved_sequence = 0
+
+            def normalize(data, with_override=True):
+                nonlocal input_sequence, resolved_sequence
+                if with_override:
+                    name = ('before.yml', 'removed.yml', 'explicit.yml')[input_sequence]
+                    input_sequence += 1
+                else:
+                    name = ('before-resolved.json', 'after-resolved.json')[resolved_sequence]
+                    resolved_sequence += 1
                 if sealed is None:
                     private_file(name, data)
                     path = str(root/name)
@@ -413,27 +564,9 @@ def prepare(base, dotenv, override, *, interpolation, project, compose, temporar
                 environment(model)
                 return model
 
-            before = normalize(before_input, 'before.yml')
-            candidate = transform(base, outline)
-            after = normalize(candidate, 'removed.yml')
-            strategy = 'remove'
-            if not same_json(before, after):
-                old, new = environment(before), environment(after)
-                # Replacement can only restore missing variables, never alter an
-                # existing environment entry, priority or another model field.
-                additions = sorted(old.keys() - new.keys())
-                need(0 < len(additions) <= 256 and all(old[k] is not None for k in additions), 'different')
-                need(not set(additions).intersection(outline['names']), 'different')
-                candidate = transform(base, outline, additions)
-                after = normalize(candidate, 'explicit.yml')
-                strategy = 'explicit'
-            need(same_json(before, after), 'different')
-            # Exercise the helper's resolved-JSON reuse, including literal dollars.
-            encoded = lambda model: json.dumps(model, sort_keys=True, separators=(',', ':')).encode()
-            need(same_json(normalize(encoded(before), 'before-resolved.json', False), before), 'model')
-            need(same_json(normalize(encoded(after), 'after-resolved.json', False), after), 'model')
-            # Values survive only in private memory; no public hash of secret data.
-            plan = Plan(candidate, strategy)
+            # Same complete typed-model proof as the callback-only helper API;
+            # this standalone executor/environment boundary remains unchanged.
+            plan, _, _ = prove_semantics(base, outline, before_input, normalize)
             if sealed is not None:
                 need(os.path.samestat(os.fstat(canonical_fd), os.stat(canonical_directory,
                      follow_symlinks=False)), 'io')

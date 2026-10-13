@@ -886,14 +886,14 @@ def interrupted(_signum, _frame):
     raise CaptureInterrupted
 
 
-def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+def capture(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):
     """Keep the existing tuple API, including its legacy 124/125 conventions."""
     result = capture_result(argv, payload, timeout=timeout, limit=limit, env=env,
-                            pass_fds=pass_fds, spawn_failed=spawn_failed)
+                            pass_fds=pass_fds, spawn_failed=spawn_failed, cwd_fd=cwd_fd)
     return result.code, result.output
 
 
-def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None):
+def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass_fds=(), spawn_failed=None, cwd_fd=None):
     """Own cancellation before spawn, through cleanup, until outcome selection."""
     global _capture_cancellation
     cancellation = [False]
@@ -902,7 +902,7 @@ def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass
     _capture_cancellation = cancellation
     try:
         result = _capture_owned(argv, payload, timeout=timeout, limit=limit, env=env,
-                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation)
+                                pass_fds=pass_fds, spawn_failed=spawn_failed, cancellation=cancellation, cwd_fd=cwd_fd)
     except BaseException as error:
         failure = error
     finally:
@@ -921,15 +921,19 @@ def capture_result(argv, payload=b"", *, timeout=30, limit=32768, env=None, pass
     return result
 
 
-def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation):
+def _capture_owned(argv, payload, *, timeout, limit, env, pass_fds, spawn_failed, cancellation, cwd_fd):
     """No named stdout/stderr captures; bounded memory and bounded process lifetime."""
     output = bytearray()
     offset = 0
     deadline = time.monotonic() + timeout
+    # A verified caller may retain its canonical cwd FD; no shell or HOME
+    # substitution is needed, and the original directory stays leased.
+    def held_cwd():
+        os.fchdir(cwd_fd)
     try:
         child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL, env=env, pass_fds=pass_fds,
-                                 start_new_session=True)
+                                 start_new_session=True, preexec_fn=held_cwd if cwd_fd is not None else None)
     except OSError:
         if spawn_failed is not None:
             spawn_failed()

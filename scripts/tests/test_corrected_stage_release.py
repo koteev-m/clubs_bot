@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable CLB-82 coverage. Every transport is synthetic; no real SSH target."""
+"""Corrected release coverage with synthetic transport/executors; no SSH target."""
 import ast
 import contextlib
 import hashlib
@@ -33,12 +33,36 @@ sys.path.insert(0, str(ROOT / 'scripts/tests'))
 import test_quiesced_release_state as state
 from test_read_only_release_status import status_record, RunnerHarness, channel
 import release_authority as authority
+import root_binding_review as review
 
 spec = importlib.util.spec_from_file_location('corrected', ROOT / 'scripts/deploy/corrected-stage-release.py')
 executor = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(executor)
 RUNNER = Path(spec.origin)
 WORKFLOW = ROOT / '.github/workflows/corrected-stage-release.yml'
+
+# This executable suite gives the shared disposable host fixture the exact
+# accepted incident tuple. The real helper's incident predicates are preserved;
+# only its canonical filesystem is mapped to an owned disposable fixture root.
+# The generic state suite runs in its separate process with its own constants.
+state.OWNER=executor.INCIDENT['RELEASE_OWNER']
+state.REVISION=executor.INCIDENT['EXPECTED_REVISION']
+state.DIGEST=executor.INCIDENT['IMAGE_DIGEST']
+state.IMAGE_REPOSITORY=state.DIGEST.split('@',1)[0]
+state.OLD_DIGEST=state.IMAGE_REPOSITORY+'@sha256:'+'d'*64
+
+# Python freezes keyword defaults when the generic module is imported. Bind
+# those five fixture methods to the same incident too; changing only globals
+# would mix two owners during migration/status and reject a valid setup.
+for _fixture_method in ('run', 'preflight', 'status', 'migration_ledger', 'migration_outcome_exists'):
+    _fixture_defaults = getattr(state.RemoteHarness, _fixture_method).__kwdefaults__
+    if _fixture_defaults is None:
+        # Positional defaults in the two migration evidence helpers.
+        getattr(state.RemoteHarness, _fixture_method).__defaults__ = (state.OWNER,)
+        continue
+    for _fixture_key, _fixture_value in dict(owner=state.OWNER, revision=state.REVISION, digest=state.DIGEST).items():
+        if _fixture_key in _fixture_defaults:
+            _fixture_defaults[_fixture_key] = _fixture_value
 
 
 # These Git objects exist only in a disposable repository, without touching the
@@ -56,7 +80,7 @@ _fixture_git = external_git_fixture('clb82-implementation-')
 atexit.register(_fixture_git.cleanup)
 FIXTURE_REPO = Path(_fixture_git.name)
 subprocess.run(['git', 'init', '--bare', '-q', str(FIXTURE_REPO/'.git')], check=True)
-for path in ('corrected-stage-release.py', 'release_authority.py', 'release_private_root.py', 'release-status.pattern'):
+for path in ('corrected-stage-release.py', 'root_binding_review.py', 'release_authority.py', 'release_private_root.py', 'release-status.pattern'):
     target = FIXTURE_REPO/'scripts/deploy'/path; target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT/'scripts/deploy'/path, target)
 for path in authority.PRODUCER_PATHS:
@@ -65,7 +89,7 @@ for path in authority.PRODUCER_PATHS:
 _helper_bytes = (ROOT/executor.HELPER_PATH).read_bytes()
 # Bind this executable suite invocation to the sources it actually loaded,
 # including when a long delegated selfcheck invokes the suite near its end.
-print('corrected-executor-snapshot:'+json.dumps({path:hashlib.sha256((ROOT/path).read_bytes()).hexdigest()
+print('corrected-executor-snapshot:'+json.dumps({path:hashlib.sha256((Path(__file__) if path=='scripts/tests/test_corrected_stage_release.py' else ROOT/path).read_bytes()).hexdigest()
     for path in sorted(set(authority.PRODUCER_PATHS) | {executor.HELPER_PATH,
         'scripts/deploy/corrected-stage-release.py','scripts/tests/test_corrected_stage_release.py',
         'scripts/tests/test_quiesced_release_state.py','scripts/tests/test_read_only_release_status.py',
@@ -88,9 +112,123 @@ def request(action='inspect'):
     return {**executor.INCIDENT, 'IMPLEMENTATION':IMPLEMENTATION, 'CLB82_APPROVED_IMPLEMENTATION':IMPLEMENTATION, 'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_REF': 'refs/heads/main',
             'GITHUB_REF_TYPE': 'branch', 'REPOSITORY_DEFAULT_BRANCH': 'main', 'GITHUB_REPOSITORY': 'koteev-m/clubs_bot',
             'GITHUB_RUN_ID': '987654', 'GITHUB_RUN_NUMBER': '7', 'GITHUB_RUN_ATTEMPT': '1', 'ACTION': action,
+            'GITHUB_SHA': 'e'*40, 'GITHUB_JOB':'execute',
+            'GITHUB_WORKFLOW_REF':review.REPOSITORY+'/'+review.WORKFLOW+'@refs/heads/main',
             'PRIOR_STATUS': '876543:1:' + 'b'*40,
-            'AUTHORIZATION': executor.authorization('7', IMPLEMENTATION, 'd'*64) if action == 'resume-start' else '',
+            'AUTHORIZATION': '',
             'COMPOSE_PATH': executor.COMPOSE_PATH, 'SSH_USER': 'deployment-fixture', 'SSH_HOST': 'fixture.invalid', 'SSH_PORT': '22'}
+
+
+def fixture_approval(binding, env, *, now=None):
+    """Explicit synthetic content review, separate from observing a candidate.
+
+    This fixture models a protected Secret already provisioned by the reviewer;
+    it never produces a public authorization input or adopts inspection output.
+    Live encryption/authenticated download is covered by the review-channel suite.
+    """
+    now = int(time.time()) if now is None else now
+    fingerprint = 'F'*40
+    provenance = review.producer({**env, 'GITHUB_RUN_ID':'987653',
+                                 'GITHUB_RUN_NUMBER':'6', 'GITHUB_RUN_ATTEMPT':'1'})
+    value = review.envelope(binding, provenance, fingerprint, now=now)
+    receipt = {key:provenance[key] for key in ('repository','workflow','run_id',
+                                             'attempt','source_revision','run_number')}
+    receipt.update(artifact_id='12345',ciphertext_sha256='c'*64,
+                   created_at=now,expires_at=now+review.TTL)
+    return review.make_approval(value,receipt,env['GITHUB_RUN_NUMBER'],
+                                'koteev-m',True,now=now)
+
+
+def approved_environment(binding, env):
+    value = fixture_approval(binding,env)
+    return {**env,'AUTHORIZATION':'','CLB82_AUTHORIZED_ROOT_BINDING':'',
+            'CLB91_REVIEWED_ROOT_APPROVAL':review.encoded(value).decode()}
+
+
+_crypto_fixture = None
+
+
+class SyntheticReviewer:
+    """Real GPG using only a fresh synthetic keyring; no ambient/user keys."""
+    def __init__(self, executable):
+        self.gpg = Path(executable).resolve(strict=True)
+        self.bin = self.gpg.parent
+        parent = Path(os.environ.get('CLB91_TEST_PRIVATE_TMP',tempfile.gettempdir())).resolve(strict=True)
+        # Native agent sockets must fit the host's AF_UNIX path limit even when
+        # the protected macOS temporary root has a long canonical pathname.
+        self.temporary = tempfile.TemporaryDirectory(prefix='s-',dir=parent)
+        self.home = Path(self.temporary.name); self.home.chmod(0o700)
+        atexit.register(self.close)
+        config = self.command(['--version']).splitlines()
+        if config[0] != ('gpg (GnuPG) '+review.VERSION).encode():
+            raise AssertionError('actual synthetic GPG version unsupported')
+        self.command(['--pinentry-mode','loopback','--passphrase','',
+                      '--quick-generate-key','CLB91 synthetic fixture <clb91@invalid.example>',
+                      'rsa3072','encr','1d'])
+        records=self.command(['--with-colons','--list-keys']).decode().splitlines()
+        self.fingerprint=next(row.split(':')[9] for row in records if row.startswith('fpr:'))
+        self.public=self.command(['--armor','--export',self.fingerprint]).decode()
+        self.stop_agent()
+        directories=subprocess.check_output([str(self.bin/'gpgconf'),'--list-dirs','sysconfdir'],
+            env={'PATH':'/usr/bin:/bin','GNUPGHOME':str(self.home),'LC_ALL':'C'}).decode().strip()
+        self.profile=dict(format=1,version=review.VERSION,gpg=str(self.gpg),
+            agent=str(self.bin/'gpg-agent'),gpgconf=str(self.bin/'gpgconf'),sysconfdir=directories,
+            files={str(self.bin/name):hashlib.sha256((self.bin/name).read_bytes()).hexdigest()
+                   for name in ('gpg','gpg-agent','gpgconf')})
+
+    def command(self, args):
+        result=subprocess.run([str(self.gpg),'--no-options','--homedir',str(self.home),
+            '--batch','--no-tty','--disable-dirmngr','--no-auto-key-retrieve',
+            '--auto-key-locate','clear','--agent-program',str(self.bin/'gpg-agent'),*args],
+            env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},capture_output=True,timeout=30)
+        if result.returncode: raise AssertionError('synthetic GPG fixture process refused')
+        return result.stdout
+
+    def stop_agent(self):
+        result=subprocess.run([str(self.bin/'gpgconf'),'--homedir',str(self.home),'--kill','gpg-agent'],
+                              env={'PATH':'/usr/bin:/bin','LC_ALL':'C'},capture_output=True,timeout=10)
+        if result.returncode: raise AssertionError('synthetic agent cleanup failed')
+
+    def decrypt(self,ciphertext):
+        with review.Crypto(self.profile,self.public.encode(),self.fingerprint,executor.capture,
+                          executor.open_canonical_root,str(self.home)) as crypto:
+            return review.decode(crypto.decrypt(ciphertext,str(self.home)))
+
+    def close(self):
+        if self.temporary:
+            self.stop_agent(); self.temporary.cleanup(); self.temporary=None
+
+
+def crypto_fixture():
+    global _crypto_fixture
+    executable=os.environ.get('CLB91_TEST_GPG')
+    if executable and _crypto_fixture is None: _crypto_fixture=SyntheticReviewer(executable)
+    return _crypto_fixture
+
+
+if not os.environ.get('CLB91_TEST_GPG'):
+    # Existing lifecycle tests require no installed crypto dependency. Mock only
+    # that boundary inside the disposable source fixture, never production code
+    # or a production environment switch. This is NOT encryption evidence. The
+    # separate review-channel suite exercises real GPG, keys and tamper refusal.
+    fixture_crypto_source=r'''
+class SyntheticCryptoBoundary:
+    def __init__(self,profile,public_key,fingerprint,*_):
+        self.trace=json.loads(profile)['fixture_trace']
+        self.fingerprint=fingerprint
+    def __enter__(self):return self
+    def __exit__(self,*_):return False
+    def encrypt(self,payload):
+        value=decode(payload)
+        need(value['format']==2 and type(value['binding']) is dict)
+        descriptor=os.open(self.trace,os.O_WRONLY|os.O_CREAT|os.O_APPEND|os.O_NOFOLLOW,0o600)
+        try:os.write(descriptor,encoded(value)+b'\n')
+        finally:os.close(descriptor)
+        return b'SYNTHETIC_CRYPTO_BOUNDARY_NOT_ENCRYPTION_EVIDENCE\n'+os.urandom(128)
+Crypto=SyntheticCryptoBoundary
+'''
+    with (FIXTURE_REPO/'scripts/deploy/root_binding_review.py').open('a') as fixture_source:
+        fixture_source.write(fixture_crypto_source)
 
 
 class PriorApiFixture:
@@ -242,7 +380,119 @@ def configure_bound_docker(harness):
                        FAKE_BOUND_PARSER_ERRORS=str(harness.root/'bound-parser-error.log'))
 
 
+
+# Explicit test-only host executor boundary. These fixtures are not runtime
+# acceptance and never appear in the shipped helper or workflow. BoundContext
+# FD/root, locks, source identity, private control v2 and FSM methods are retained.
+# Runtime and account lookup use this explicit synthetic Gate; profile/account
+# predicates are covered separately and are not proven by these fixture runs.
+SYNTHETIC_GATE_SOURCE = r"""
+_synthetic_native_killpg=os.killpg
+def synthetic_completed_killpg(pid,number):
+ try:return _synthetic_native_killpg(pid,number)
+ except PermissionError:
+  # Darwin reports EPERM for this fixture's completed, unreaped worker group.
+  # The fixed fixture is synchronous and never detaches descendants. Preserve
+  # PID lease; live/cancelled groups and Linux errors are never accepted here.
+  if sys.platform!='darwin' or number!=signal.SIGKILL:raise
+  info=os.waitid(os.P_PID,pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+  if info is None or info.si_pid!=pid or info.si_code!=os.CLD_EXITED:raise
+os.killpg=synthetic_completed_killpg
+class SyntheticExecutorGate:
+ def __init__(self,cancelled):
+  self.cancelled=cancelled;self.config_fd=None;self.closed=False;self.bound=None
+ def initial(self):
+  if self.cancelled():raise InterruptedError('synthetic interrupted')
+ def bind(self,environment):
+  if self.cancelled():raise InterruptedError('synthetic interrupted')
+  directory=tempfile.mkdtemp(prefix='synthetic-docker-config-')
+  os.chmod(directory,0o700)
+  self.config_fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+  os.rmdir(directory)
+  self.bound={k:v for k,v in environment.items() if not k.startswith(('COMPOSE_','DOCKER_','PYTHON','BASH_FUNC_')) and k not in ('BASH_ENV','ENV','SHELLOPTS','BASHOPTS','CDPATH')}
+  self.bound.update(DOCKER_CONFIG=fdpath(self.config_fd),DOCKER_HOST='unix:///var/run/docker.sock')
+  return self.bound
+ def principal(self,expected):
+  name=subprocess.check_output(['id','-un'],stderr=subprocess.DEVNULL).decode().strip()
+  uid=subprocess.check_output(['id','-u'],stderr=subprocess.DEVNULL).decode().strip()
+  check(name==expected and name not in ('root','hookah-staging') and uid==str(os.geteuid()) and os.geteuid()>0)
+  return name
+ def recheck(self):
+  if self.cancelled():raise InterruptedError('synthetic interrupted')
+ def command_environment(self,environment):
+  check(environment==self.bound);self.recheck();return environment
+ def close(self):
+  if self.closed:return
+  self.closed=True
+  if self.config_fd is not None:os.close(self.config_fd)
+CLB91_EXECUTOR['Gate']=SyntheticExecutorGate
+"""
+
+
+_native_fixture_killpg=os.killpg
+
+
+def completed_fixture_killpg(pid,number):
+    # Component-only counterpart of SYNTHETIC_GATE_SOURCE. No detached
+    # descendants are admitted by these fixed fixture scripts; no Linux proof.
+    try:return _native_fixture_killpg(pid,number)
+    except PermissionError:
+        if sys.platform!='darwin' or number!=signal.SIGKILL:raise
+        info=os.waitid(os.P_PID,pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+        if info is None or info.si_pid!=pid or info.si_code!=os.CLD_EXITED:raise
+
+
+def synthetic_executor_source(code, fake_bin):
+    """Map only accepted fixed external executables at the test interpreter seam."""
+    check = "context = None\ntry:"
+    if code.count(check) != 1:
+        raise AssertionError('synthetic interpreter seam changed')
+    code=code.replace(check,SYNTHETIC_GATE_SOURCE+'\n'+check,1)
+    for fixed,fixture in (('/usr/bin/docker','docker'),('/usr/bin/findmnt','findmnt'),
+                          ('/usr/bin/python3','python3')):
+        code=code.replace(fixed,str(Path(fake_bin)/fixture))
+    return code
+
+
+def synthetic_bootstrap(bootstrap, fake_bin):
+    # Source/hash validation still sees the original exact helper bytes. Only
+    # after that validation, select the disposable interpreter fixture instead
+    # of requiring a real Linux /usr/bin/python3 on the portable test host.
+    needle='child.communicate(helper)'
+    if bootstrap.count(needle)!=1:raise AssertionError('bootstrap executor seam changed')
+    replacement='child.communicate(helper.replace(b"/usr/bin/python3 -I -S -B",'+repr((str(Path(fake_bin)/'python3')+' -I -S -B').encode())+'))'
+    return bootstrap.replace(needle,replacement,1)
+
+
+def install_synthetic_executor(harness):
+    source='#!/usr/bin/env -S '+shlex.quote(sys.executable)+' -I -S -B\n'
+    source+='import os,sys,tempfile,subprocess\nfrom pathlib import Path\n'
+    source+='arguments=sys.argv[1:]\n'
+    source+='if len(arguments)>4 and arguments[:4]==["-I","-S","-B","-c"] and "class BoundContext:" in arguments[4]:\n'
+    source+=' code=arguments[4]\n'
+    source+=' needle="context = None\\ntry:"\n assert code.count(needle)==1\n'
+    source+=' code=code.replace(needle,'+repr(SYNTHETIC_GATE_SOURCE)+'+"\\n"+needle,1)\n'
+    for fixed,name in (('/usr/bin/docker','docker'),('/usr/bin/findmnt','findmnt'),('/usr/bin/python3','python3')):
+        source+=' code=code.replace('+repr(fixed)+','+repr(str(harness.fake_bin/name))+')\n'
+    source+=' arguments[4]=code\n'
+    source+='os.execv('+repr(sys.executable)+',['+repr(sys.executable)+',*arguments])\n'
+    state.write_executable(harness.fake_bin/'python3',source)
+
+
 class FixtureBootstrapTest(unittest.TestCase):
+    def test_private_parent_uses_only_guard_accepted_chain(self):
+        with tempfile.TemporaryDirectory(prefix='.private-parent-', dir=ROOT) as directory:
+            parent = Path(directory).resolve()
+            with patch.object(tempfile, 'gettempdir', return_value=str(parent)):
+                self.assertEqual(parent, fixture_private_parent())
+                parent.chmod(0o777)
+                self.assertEqual(ROOT, fixture_private_parent())
+                with patch.dict(fixture_private_parent.__globals__, ROOT=parent):
+                    with self.assertRaises(RuntimeError):
+                        fixture_private_parent()
+                parent.chmod(0o700)
+
+
     # Execute module initialization in a fresh interpreter, including actual
     # disposable Git object creation. No suite recursion or production mocks.
     PROBE = r'''
@@ -338,6 +588,10 @@ class CorrectedExecutorTest(unittest.TestCase):
         production = True
         harness = state.RemoteHarness(app_env='stage' if production else 'test')
         self.addCleanup(harness.close)
+        # The immutable synthetic Docker state has no asynchronous readiness.
+        # Retain all 60 old-helper attempts and its failure outcome; this fixture
+        # does not test timing and makes no native process or stage claim.
+        state.write_executable(harness.fake_bin/'sleep', '#!/bin/sh\n[ "$*" = "1" ] || exit 1\n')
         if production:
             # Existing stage fixtures keep state on the checkout's persistent
             # path. Permit only this synthetic owner's own 0600 migration log
@@ -380,37 +634,60 @@ class CorrectedExecutorTest(unittest.TestCase):
         self.assertEqual('app_identity_mismatch', harness.result()['failure_category'])
         harness.clear_command_logs()
         configure_bound_docker(harness)
-        env = {**request('resume-start'), 'RELEASE_OWNER': state.OWNER, 'EXPECTED_REVISION': state.REVISION,
-               'IMAGE_DIGEST': state.DIGEST, 'COMPOSE_PATH': str(harness.compose_path)}
+        install_synthetic_executor(harness)
+        env = request('resume-start')
         calls = []
 
         def remote(snapshot, argv, timeout, control):
             self.assertIs(snapshot, self.snapshot)
             calls.append(list(argv))
-            payload_control = json.dumps(control, sort_keys=True, separators=(',', ':')).encode()
+            # The fixed incident tuple is retained. The test transport maps the
+            # canonical Compose path to its disposable root and validates the
+            # delivered binding against that root's actual FD identity.
+            delivered=json.loads(json.dumps(control))
+            if delivered['binding'] is not None:
+                delivered['binding']['incident']=dict(owner=state.OWNER,environment='stage',
+                    revision=state.REVISION,image=state.DIGEST)
+                delivered['binding']['compose']['path']=str(harness.compose_path)
+            mapped=[{executor.COMPOSE_PATH:str(harness.compose_path),
+                     executor.INCIDENT['RELEASE_OWNER']:state.OWNER,
+                     executor.INCIDENT['EXPECTED_REVISION']:state.REVISION,
+                     executor.INCIDENT['IMAGE_DIGEST']:state.DIGEST}.get(item,item) for item in argv]
+            payload_control = json.dumps(delivered, sort_keys=True, separators=(',', ':')).encode()
             nonce = secrets.token_bytes(32)
             payload = nonce + struct.pack('!II', len(payload_control), len(snapshot)) + payload_control + snapshot
-            result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', executor.REMOTE_BOUND_BOOTSTRAP, *argv],
+            result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', synthetic_bootstrap(executor.REMOTE_BOUND_BOOTSTRAP,harness.fake_bin), *mapped],
                                              payload, timeout=timeout, env=harness.env)
-            # This fixture replaces SSH/principal checks, not bootstrap/helper.
-            return executor.ssh_result(result, nonce)
+            # Original source/hash verification and authenticated framing run
+            # before the explicit synthetic interpreter/Gate/executor seam.
+            # BoundContext control/FSM methods run with disposable host inputs;
+            # this fixture does not prove the production Runtime or account gate.
+            code,raw=executor.ssh_result(result, nonce)
+            if code==0 and argv[-1]=='inspect':
+                lines=raw.splitlines();candidate=json.loads(lines[1].split(b' ',1)[1])
+                candidate['incident']=dict(owner=executor.INCIDENT['RELEASE_OWNER'],environment='stage',
+                    revision=executor.INCIDENT['EXPECTED_REVISION'],image=executor.INCIDENT['IMAGE_DIGEST'])
+                candidate['compose']['path']=executor.COMPOSE_PATH
+                raw=lines[0]+b'\ncorrected-binding-candidate:v=1 '+review.encoded(candidate)+b'\n'
+            return code,raw
         control = executor.binding_control({**env, "ACTION":"inspect", "AUTHORIZATION":""}, self.snapshot)
         control['principal'] = 'deployment-fixture'
-        argv = ['corrected-start', state.OWNER, 'stage', str(harness.compose_path), state.REVISION, state.DIGEST, 'inspect']
+        argv = ['corrected-start',env['RELEASE_OWNER'],'stage',env['COMPOSE_PATH'],env['EXPECTED_REVISION'],env['IMAGE_DIGEST'],'inspect']
         code, raw = remote(self.snapshot, argv, 90, control)
         self.assertEqual(0, code, raw)
         control['binding'] = json.loads(raw.splitlines()[1].split(b' ', 1)[1])
-        env['CLB82_AUTHORIZED_ROOT_BINDING'] = json.dumps(control['binding'], sort_keys=True, separators=(',', ':'))
-        env['AUTHORIZATION'] = executor.authorization(env['GITHUB_RUN_NUMBER'], IMPLEMENTATION,
-            hashlib.sha256(env['CLB82_AUTHORIZED_ROOT_BINDING'].encode()).hexdigest())
-        control['authorization'] = hashlib.sha256(env['AUTHORIZATION'].encode()).hexdigest()
+        env = approved_environment(control['binding'],env)
+        control = executor.binding_control(env,self.snapshot)
         self.fixture_control = control
         calls.clear(); harness.clear_command_logs()
         return harness, env, calls, remote
 
     def execute(self, env, remote):
+        captured = []
         with contextlib.redirect_stdout(io.StringIO()) as output:
-            result = executor.execute(env, self.snapshot, remote, getattr(self, 'fixture_control', {}))
+            result = executor.execute(env, self.snapshot, remote, getattr(self, 'fixture_control', {}),
+                                      evidence=captured.append)
+        self.assertEqual(1 if env.get('ACTION','inspect')=='inspect' else 0,len(captured))
         for secret in state.SENSITIVE_VALUES:
             self.assertNotIn(secret, output.getvalue())
         self.assertNotIn('corrected-remote-boundary:', output.getvalue())
@@ -445,12 +722,12 @@ class CorrectedExecutorTest(unittest.TestCase):
 
     def test_authorization_exact_tuple_run_number_and_rerun(self):
         executor.validate_request(request('resume-start'))
-        for key, value in [('AUTHORIZATION', ''), ('AUTHORIZATION', 'yes'), ('GITHUB_RUN_ATTEMPT', '2'),
-                           ('GITHUB_RUN_NUMBER', '8'), ('AUTHORIZATION', executor.authorization('6', IMPLEMENTATION, 'd'*64))]:
+        for key, value in [('AUTHORIZATION', 'yes'), ('GITHUB_RUN_ATTEMPT', '2'),
+                           ('CLB82_AUTHORIZED_ROOT_BINDING', '{}'), ('AUTHORIZATION', 'authorize-resume-start|legacy')]:
             with self.subTest(key=key, value=value):
                 env = request('resume-start'); env[key] = value
                 with self.assertRaises(executor.Rejected): executor.validate_request(env)
-        self.rejected('INSPECT_AUTHORIZATION_INVALID', lambda: executor.validate_request({**request(), 'AUTHORIZATION':'yes'}))
+        self.rejected('LEGACY_AUTHORITY_FORBIDDEN', lambda: executor.validate_request({**request(), 'AUTHORIZATION':'yes'}))
 
     def test_exact_git_snapshot_and_replace_environment(self):
         with patch.dict(os.environ, {'GIT_REPLACE_REF_BASE': 'refs/evil/', 'GIT_OBJECT_DIRECTORY': '/missing',
@@ -508,7 +785,9 @@ class CorrectedExecutorTest(unittest.TestCase):
         self.assertEqual('SUCCESS', self.execute(env, remote))
         self.assertEqual(['inspect','claim','resume-start','reconcile'], [c[-1] for c in calls])
         self.assertEqual('inspect', calls[0][-1]); self.assertEqual('reconcile', calls[-1][-1])
-        self.assertEqual(['corrected-start', state.OWNER, 'stage', str(h.compose_path), state.REVISION, state.DIGEST, 'resume-start'], calls[2])
+        self.assertEqual(['corrected-start', executor.INCIDENT['RELEASE_OWNER'], 'stage',
+                          executor.COMPOSE_PATH, executor.INCIDENT['EXPECTED_REVISION'],
+                          executor.INCIDENT['IMAGE_DIGEST'], 'resume-start'], calls[2])
         current = h.docker_state()
         self.assertEqual(1, current['start_invocations']); self.assertEqual(1, current['migration_invocations'])
         self.assertEqual(0, current['migration_removals']); self.assertTrue(current['migration_exists'])
@@ -554,6 +833,8 @@ class CorrectedExecutorTest(unittest.TestCase):
             compose=dict(path=env['COMPOSE_PATH'],project='clubs',service='app'),backing='mount-v2:'+'a'*64,
             objects={k:[1,2] for k in ('/','parent','root','state','results','ledger','application_lock','operation_lock')},
             configuration={k:'a'*64 for k in ('main','override','release','dotenv','resolved')})
+        env = approved_environment(candidate,env)
+        control = executor.binding_control(env,self.snapshot)
         suffix=b'corrected-binding-candidate:v=1 '+json.dumps(candidate).encode()+b'\n'
         baseline=status_record(checkpoint='migration_completed',app_state='absent',operation_result='remote_failure',resume_permitted='yes')
         cases=[b'bad\n',baseline+b'secret\n',baseline.replace(b'owner_match=yes',b'owner_match=no'),
@@ -743,6 +1024,7 @@ class CorrectedExecutorTest(unittest.TestCase):
                 for option in ('StrictHostKeyChecking=yes','GlobalKnownHostsFile=/dev/null','KnownHostsCommand=none','ConnectionAttempts=1','VerifyHostKeyDNS=no','UpdateHostKeys=no'):
                     self.assertIn(option,args)
                 self.assertEqual([],list(f.private.iterdir()))
+        entries=[json.loads(line) for line in f.audit.read_text().splitlines()]
         self.assertEqual(3, sum(entry['kind']=='ssh_options' for entry in entries))
         self.assertEqual(0,f.counts()['resume']);self.assertEqual(0,f.counts()['claim'])
 
@@ -782,7 +1064,8 @@ class CorrectedExecutorTest(unittest.TestCase):
                    ('persist-credentials: false','persist-credentials: true'),
                    ('python3 -I -S -B scripts/deploy/corrected-stage-release.py','python3 -S -B scripts/deploy/corrected-stage-release.py'),
                    ('python3 -I -S -B scripts/deploy/corrected-stage-release.py','python3 -I -B scripts/deploy/corrected-stage-release.py'),
-                   ('${{ vars.CLB82_AUTHORIZED_ROOT_BINDING }}','${{ inputs.authorization }}'),
+                   ('${{ secrets.CLB91_REVIEWED_ROOT_APPROVAL }}','${{ inputs.authorization }}'),
+                   ('secrets.CLB91_REVIEWED_ROOT_APPROVAL','vars.CLB91_REVIEWED_ROOT_APPROVAL'),
                    ('${{ vars.CLB82_APPROVED_IMPLEMENTATION }}','${{ inputs.implementation }}'),
                    ('--validate-execution','--validate')]
         # Use the existing safe YAML reader API, as the global capability gate does.
@@ -799,6 +1082,7 @@ class CorrectedExecutorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
             for name in ('scripts/deploy/remote-compose-release.sh','scripts/deploy/corrected-stage-release.py',
+                         'scripts/deploy/root_binding_review.py',
                          'scripts/tests/test_corrected_stage_release.py'):
                 target=root/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(ROOT/name,target)
             command=['ruby',str(ROOT/'scripts/validate-corrected-stage-workflow.rb'),str(root)]
@@ -814,14 +1098,35 @@ class CorrectedExecutorTest(unittest.TestCase):
                 target.write_text(original)
 
 
+def fixture_private_parent():
+    # Linux's /tmp is intentionally refused by the production ancestor guard.
+    # Prefer the short native temp parent only when that exact guard accepts it;
+    # otherwise use the owned checkout fixture boundary, without bypassing it.
+    parent = Path(tempfile.gettempdir()).resolve(strict=True)
+    try:
+        descriptor = executor.open_canonical_root(str(parent))
+    except RuntimeError:
+        parent = ROOT
+        descriptor = executor.open_canonical_root(str(parent))
+    os.close(descriptor)
+    return parent
+
+
 class AuthorityCliFixture:
-    """Production CLI + actual bound helper; only transports and Engine are fake."""
+    """Production CLI/control/FSM with explicit synthetic transport/host executors."""
     def __init__(self, case, actual=True):
+        self.case=case
         self.temporary = tempfile.TemporaryDirectory(prefix='.clb82-authority-', dir=ROOT)
         case.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.bin = self.root/'bin'; self.bin.mkdir()
-        self.private = self.root/'private'; self.private.mkdir(mode=0o700)
+        # Keep the owned temporary root outside the long checkout pathname so
+        # real GPG's Unix-domain agent address fits on macOS. The production
+        # canonical-root/ownership checks still validate this actual directory.
+        self.private_parent = fixture_private_parent()
+        self.private_temporary = tempfile.TemporaryDirectory(prefix='p-',dir=self.private_parent)
+        case.addCleanup(self.private_temporary.cleanup)
+        self.private = Path(self.private_temporary.name); self.private.chmod(0o700)
         self.control = self.root/'control.json'; self.audit = self.root/'audit.jsonl'; self.audit.touch()
         helper_case = CorrectedExecutorTest(); helper_case.setUpClass(); case.addCleanup(helper_case.doCleanups)
         self.helper, helper_env, _, _ = helper_case.fixture(production=True)
@@ -830,18 +1135,29 @@ class AuthorityCliFixture:
         self.config = dict(fault='', actual=True, audit=str(self.audit), root=str(self.remote_root), compose=str(self.helper.compose_path),
                            owner=state.OWNER, revision=state.REVISION, image=state.DIGEST,
                            helper_env={k:v for k,v in self.helper.env.items() if k.startswith(('FAKE_', 'REMOTE_')) or k == 'PATH'},
-                           helper_sha=executor.IMPLEMENTATION_SHA256, bootstrap=executor.REMOTE_BOUND_BOOTSTRAP)
+                           helper_sha=executor.IMPLEMENTATION_SHA256, bootstrap=executor.REMOTE_BOUND_BOOTSTRAP, fake_bin=str(self.helper.fake_bin))
         self.save()
         key=self.root/'synthetic-key'
         subprocess.run(['ssh-keygen','-q','-t','ed25519','-N','','-f',str(key)],check=True,capture_output=True)
         self.env={**os.environ, **request('resume-start'), 'TMPDIR':str(self.private),
                   'SSH_KNOWN_HOSTS':'fixture.invalid '+key.with_suffix('.pub').read_text(),
                   'PATH':str(self.bin)+os.pathsep+os.environ['PATH'], 'UNRELATED_SECRET':'synthetic-private-value',
-                  'CLB82_AUTHORIZED_ROOT_BINDING': helper_env['CLB82_AUTHORIZED_ROOT_BINDING']}
-        binding=json.loads(self.env['CLB82_AUTHORIZED_ROOT_BINDING'])
+                  'CLB91_REVIEWED_ROOT_APPROVAL': helper_env['CLB91_REVIEWED_ROOT_APPROVAL']}
+        binding=json.loads(self.env['CLB91_REVIEWED_ROOT_APPROVAL'])['binding']
         binding['incident']=dict(owner=executor.INCIDENT['RELEASE_OWNER'],environment='stage',revision=executor.INCIDENT['EXPECTED_REVISION'],image=executor.INCIDENT['IMAGE_DIGEST'])
         binding['compose']['path']=executor.COMPOSE_PATH
-        self.env['CLB82_AUTHORIZED_ROOT_BINDING']=json.dumps(binding,sort_keys=True,separators=(',',':'))
+        self.binding=binding
+        self.crypto=crypto_fixture()
+        self.synthetic_envelopes=self.root/'synthetic-private-envelopes.jsonl'
+        if self.crypto:
+            self.env.update(CLB91_GPG_PROFILE=json.dumps(self.crypto.profile),
+                            CLB91_REVIEWER_PUBLIC_KEY=self.crypto.public,
+                            CLB91_REVIEWER_FINGERPRINT=self.crypto.fingerprint)
+        else:
+            self.env.update(CLB91_GPG_PROFILE=json.dumps({'fixture_trace':str(self.synthetic_envelopes)}),
+                            CLB91_REVIEWER_PUBLIC_KEY='synthetic-public-key-boundary',
+                            CLB91_REVIEWER_FINGERPRINT='F'*40)
+        self.last_envelope=None;self.last_ciphertext=None
         self.authorize()
         self.api=PriorApiFixture(self.root,self.bin,self.env)
         source=r'''#!/usr/bin/env -S python3 -I -S -B
@@ -893,6 +1209,8 @@ if (phase=='claim' and fault in ('root-swap','parent-swap','copy-swap','missing-
 argv=[{'/opt/clubs-bot-stage':config['compose'],INCIDENT_OWNER:config['owner'],
        INCIDENT_REVISION:config['revision'],INCIDENT_IMAGE:config['image']}.get(a,a) for a in argv]
 env=config['helper_env'].copy(); env['FAKE_FLOCK_REAL']='yes'
+fixture_bootstrap=config['bootstrap'].replace('child.communicate(helper)',
+ 'child.communicate(helper.replace(b"/usr/bin/python3 -I -S -B",'+repr((str(Path(config['fake_bin'])/'python3')+' -I -S -B').encode())+'))')
 if phase=='claim' and fault=='late-compete' and not leader:env['FIXTURE_LATE_CLAIM']='yes'
 # Faults enter at an explicit test interpreter boundary. Poison imports stay on
 # disk and are not used to inject faults into the isolated production startup.
@@ -902,7 +1220,7 @@ if request['binding'] is not None:
 request_bytes=json.dumps(request,separators=(',',':')).encode()
 payload=nonce+struct.pack('!II',len(request_bytes),len(helper))+request_bytes+helper
 record('helper',phase=phase)
-result=subprocess.run([REAL_PYTHON,'-I','-S','-B','-c',config['bootstrap'],*argv],input=payload,
+result=subprocess.run([REAL_PYTHON,'-I','-S','-B','-c',fixture_bootstrap,*argv],input=payload,
                       env=env,cwd=config.get('cwd'),capture_output=True)
 record('phase_result',phase=phase,code=result.returncode)
 if phase=='claim' and fault=='compete':
@@ -955,8 +1273,21 @@ sys.stdout.buffer.write(output);raise SystemExit(result.returncode)
 
     def authorize(self, run_number=None):
         if run_number is not None:self.env['GITHUB_RUN_NUMBER']=run_number
-        digest=hashlib.sha256(json.dumps(json.loads(self.env['CLB82_AUTHORIZED_ROOT_BINDING']),sort_keys=True,separators=(',',':')).encode()).hexdigest()
-        self.env['AUTHORIZATION']=executor.authorization(self.env['GITHUB_RUN_NUMBER'],IMPLEMENTATION,digest)
+        self.env=approved_environment(self.binding,self.env)
+
+    def review_candidate(self):
+        """Explicit test reviewer action; receiving/decrypting is not approval."""
+        if self.last_envelope is None:raise AssertionError('no captured private fixture candidate')
+        self.binding=self.last_envelope['binding']
+        provenance=self.last_envelope['producer']; now=int(time.time())
+        receipt={key:provenance[key] for key in ('repository','workflow','run_id','run_number','attempt','source_revision')}
+        receipt.update(artifact_id='12345',ciphertext_sha256=hashlib.sha256(self.last_ciphertext).hexdigest(),
+                       created_at=self.last_envelope['issued_at'],expires_at=self.last_envelope['expires_at'])
+        self.env['GITHUB_RUN_NUMBER']=str(int(provenance['run_number'])+1)
+        approved=review.make_approval(self.last_envelope,receipt,self.env['GITHUB_RUN_NUMBER'],
+                                     'koteev-m',True,now=now)
+        self.env['CLB91_REVIEWED_ROOT_APPROVAL']=review.encoded(approved).decode()
+        return self.binding
 
     def install_interpreter_fixture(self):
         source=r'''#!/usr/bin/env -S REAL_PYTHON -I -S -B
@@ -966,6 +1297,9 @@ arguments=sys.argv[1:]
 config=json.loads(Path(CONTROL_PATH).read_text());fault=config['fault']
 if arguments[:5]==['-I','-S','-B','-c',arguments[4] if len(arguments)>4 else None] and 'class BoundContext:' in arguments[4]:
  code=arguments[4]
+ code=code.replace('context = None\ntry:',SYNTHETIC_GATE+'\ncontext = None\ntry:',1)
+ for fixed,name in (('/usr/bin/docker','docker'),('/usr/bin/findmnt','findmnt'),('/usr/bin/python3','python3')):
+  code=code.replace(fixed,str(Path(FAKE_BIN)/name))
  if arguments[-1]=='claim' and os.environ.get('FIXTURE_LATE_CLAIM')=='yes':
   # Pause the late real claim inside ready(), after helper-owned lock acquire.
   # The real resume must fail busy, consume no additional authority and never
@@ -983,7 +1317,8 @@ def delayed_ready(self):
 BoundContext.ready=delayed_ready
 """.replace('AUDIT',repr(config['audit']))
   code=code.replace('context = None\ntry:',injection+'\ncontext = None\ntry:')
- # All overrides are test-only Python source injections, restricted to claim.
+ # Additional write/fsync fault injections below apply only to claim; the
+ # explicit synthetic host executor above applies to every fixture phase.
  if arguments[-1]=='claim' and fault in ('write','fsync','parent-fsync','short-write'):
   prefix="import os,stat\n_marker="+repr(str(Path(config['root'])/'.clb82-resume-start-33468965282-1.consumed'))+"\n_root="+repr(config['root'])+"\n"
   prefix+="def selected(fd,path):\n try:return os.fstat(fd).st_ino==os.stat(path).st_ino\n except FileNotFoundError:return False\n"
@@ -1055,6 +1390,7 @@ os.execv(REAL_PYTHON,[REAL_PYTHON,*arguments])
         # env -S splits the single optional shebang argument used by Linux.
         # The absolute interpreter avoids recursively finding this wrapper.
         source=source.replace('REAL_PYTHON',repr(sys.executable)).replace('CONTROL_PATH',repr(str(self.control)))
+        source=source.replace('SYNTHETIC_GATE',repr(SYNTHETIC_GATE_SOURCE)).replace('FAKE_BIN',repr(str(self.helper.fake_bin)))
         state.write_executable(self.helper.fake_bin/'python3',source)
 
     def save(self, fault=None):
@@ -1062,7 +1398,34 @@ os.execv(REAL_PYTHON,[REAL_PYTHON,*arguments])
         self.control.write_text(json.dumps(self.config))
 
     def run(self, *arguments, **changes):
-        return subprocess.run([sys.executable,'-I','-S','-B',str(RUNNER),*arguments],env={**self.env,**changes},capture_output=True,timeout=180)
+        env={**self.env,**changes}
+        if env.get('ACTION')=='inspect' and not arguments:
+            self.last_envelope=None;self.last_ciphertext=None
+            with tempfile.TemporaryDirectory(prefix='i-',dir=self.private_parent) as private:
+                env['TMPDIR']=private
+                result=subprocess.run([sys.executable,'-I','-S','-B',str(RUNNER),*arguments],
+                                      env=env,capture_output=True,timeout=180)
+                path=Path(private)/'clb91-binding-evidence/binding.pgp'
+                if result.returncode==0:
+                    self.case.assertTrue(path.is_file(),'successful inspection requires private ciphertext evidence')
+                    self.last_ciphertext=path.read_bytes()
+                    if self.crypto:self.last_envelope=self.crypto.decrypt(self.last_ciphertext)
+                    else:self.last_envelope=json.loads(self.synthetic_envelopes.read_text().splitlines()[-1])
+                else:self.case.assertFalse(path.exists(),'failed inspection must not publish ciphertext')
+        else:
+            result=subprocess.run([sys.executable,'-I','-S','-B',str(RUNNER),*arguments],
+                                  env=env,capture_output=True,timeout=180)
+        public=result.stdout+result.stderr
+        forbidden=[env.get('CLB91_REVIEWED_ROOT_APPROVAL',''),env.get('SSH_KNOWN_HOSTS',''),
+                   self.binding['principal']['name'],self.binding['compose']['path'],
+                   *self.binding['configuration'].values()]
+        if env.get('CLB91_REVIEWED_ROOT_APPROVAL'):
+            forbidden.append(hashlib.sha256(env['CLB91_REVIEWED_ROOT_APPROVAL'].encode()).hexdigest())
+        for private in forbidden:
+            if private:self.case.assertNotIn(private.encode(),public)
+        self.case.assertNotIn(b'corrected-binding-candidate:',public)
+        self.case.assertNotIn(b'binding_sha256',public)
+        return result
 
     def counts(self):
         entries=[json.loads(line)['kind'] for line in self.audit.read_text().splitlines()]
@@ -1092,9 +1455,15 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
         # descriptor-consuming entrypoint. No guard predicate is replaced.
         source = _helper_bytes.decode().split("<<'CLB82_BOUND_PYTHON' || true\n", 1)[1].split('\nCLB82_BOUND_PYTHON', 1)[0]
         tree = ast.parse(source)
-        definitions = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom,
-            ast.FunctionDef, ast.ClassDef, ast.Assign)) and not (isinstance(node, ast.Assign) and
-            any(isinstance(target, ast.Name) and target.id in ('FUNCTIONS', 'context') for target in node.targets))]
+        definitions = [node for node in tree.body if
+            (isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.ClassDef, ast.Assign))
+             and not (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name)
+                 and target.id in ('FUNCTIONS', 'context') for target in node.targets)))
+            or (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                and ((isinstance(node.value.func, ast.Name) and node.value.func.id == 'exec')
+                     or (isinstance(node.value.func, ast.Attribute) and node.value.func.attr == 'update'
+                         and isinstance(node.value.func.value, ast.Name)
+                         and node.value.func.value.id.startswith('CLB91_'))))]
         namespace = {}
         with patch.object(sys, 'argv', ['helper', state.OWNER, 'stage', '/srv/fixture', state.REVISION, state.DIGEST, phase]):
             exec(compile(ast.Module(body=definitions, type_ignores=[]), '<approved-helper-definitions>', 'exec'), namespace)
@@ -1136,7 +1505,22 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
                 with helper['inspect_guard']('retained_identity', 'mismatch'):
                     helper['check'](False)
             ctx.check_evidence = rejected_evidence
-        helper.update(context=None, BoundContext=lambda *args:ctx, read_all=lambda *args:b'{}')
+        class RetainedContext:
+            def __new__(cls): return ctx
+            def __init__(self, *_):
+                self.config_fds = [stream]; self.fds = descriptors
+        helper.update(context=None, BoundContext=RetainedContext, read_all=lambda *args:b'{}')
+        class FixtureGate:
+            def __init__(self, cancelled): self.cancelled=cancelled
+            def initial(self): pass
+            def bind(self, _): return ctx.docker_environment
+            def command_environment(self, environment):
+                self_case.assertIs(environment, ctx.docker_environment)
+                return environment
+            def recheck(self): pass
+            def close(self): pass
+        self_case=self
+        helper['CLB91_EXECUTOR']['Gate']=FixtureGate
         events = []; publications = []; closes = []
         stream = tempfile.TemporaryFile()
         descriptors = [os.open(os.devnull, os.O_RDONLY), os.open(os.devnull, os.O_RDONLY)]
@@ -1157,26 +1541,30 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
             if scenario == 'rpc_signal': signal.raise_signal(signal.SIGTERM)
             if scenario in ('rpc_signal', 'rpc_negative'):
                 raise InterruptedError(self.private) if scenario == 'rpc_signal' else OSError(self.private)
-            return SimpleNamespace(returncode=0, stdout=b'')
+            return SimpleNamespace(failure=None, code=0, output=b'')
         real_close = os.close
         def close_fd(fd):
             closes.append(fd); real_close(fd)
             if scenario in ('close_error', 'primary_and_cleanup') and fd == descriptors[-1]:
                 raise OSError(self.private)
+        close_frames=set()
         def trace(frame, event, arg):
             if frame.f_code is B.close.__code__:
-                if event == 'call':
+                if event == 'call' and not getattr(ctx,'closed',False):
+                    close_frames.add(id(frame))
                     events.append('close')
                     if scenario == 'close_signal':
                         signal.raise_signal(signal.SIGTERM); signal.raise_signal(signal.SIGHUP)
-                elif event == 'return' and scenario == 'handoff_signal':
+                elif event == 'return' and id(frame) in close_frames and scenario == 'handoff_signal':
                     events.append('handoff_signal'); signal.raise_signal(signal.SIGTERM)
             return trace
         old_handlers = {num:signal.getsignal(num) for num in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
         old_trace = sys.gettrace(); started = time.monotonic()
         try:
-            with open(os.devnull, 'rb') as config, patch.object(helper['subprocess'], 'run', compose), \
+            with open(os.devnull, 'rb') as config, patch.dict(helper['CLB91_CAPTURE'], capture_result=compose), \
+                 patch.object(helper['os'],'killpg',side_effect=completed_fixture_killpg), \
                  patch.object(helper['os'], 'close', close_fd), patch.object(sys, 'stdout', public), \
+                 patch.object(sys,'argv',['helper',state.OWNER,'stage','/srv/fixture',state.REVISION,state.DIGEST,phase]), \
                  contextlib.redirect_stderr(stderr):
                 ctx.docker_config_fd = config.fileno(); sys.settrace(trace)
                 try: exec(entry, helper); code = 0
@@ -1196,7 +1584,8 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
                 phases.append(argv[-1])
                 return executor.ssh_result(executor.CaptureResult(code, self.prefix + raw), self.nonce)
             with contextlib.redirect_stdout(logs):
-                try: category = executor.execute(env, b'', remote, dict(implementation=implementation))
+                try: category = executor.execute(env, b'', remote, dict(implementation=implementation),
+                                                 evidence=lambda candidate: None)
                 except executor.Rejected as error: category = str(error)
             self.assertEqual(['inspect'], phases)
         else: category = None
@@ -1216,6 +1605,150 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
         self.assertTrue(value['closed']); self.assertEqual([1, 1], value['closes'])
         for token in ('INSPECTED', 'release-status:', 'corrected-binding-candidate:', 'corrected-stage-observation:'):
             self.assertNotIn(token, value['raw'].decode() + value['logs'])
+
+    def test_runtime_failure_and_cancellation_precede_private_control_or_context(self):
+        # Execute the actual entrypoint; the rejected initial host runtime is an
+        # explicit external fixture. No principal/root/private source gate runs.
+        for operation,error in (('initial',OSError(self.private)),
+                                ('bind',OSError(self.private)),
+                                ('initial',InterruptedError(self.private))):
+            with self.subTest(operation=operation,error=type(error).__name__):
+                tree,helper=self.helper_namespace()
+                entry=compile(ast.Module(body=[next(n for n in tree.body if isinstance(n,ast.Try))],
+                    type_ignores=[]),'<approved-helper-pre-private>','exec')
+                events=[]
+                class RejectedGate:
+                    def __init__(self,cancelled): pass
+                    def initial(self):
+                        events.append('initial')
+                        if operation=='initial':raise error
+                    def bind(self,environment):
+                        events.append('bind');raise error
+                    def close(self):events.append('runtime_close')
+                helper['CLB91_EXECUTOR']['Gate']=RejectedGate
+                helper['read_all']=lambda *_:events.append('private_control')
+                class Public(io.StringIO):
+                    @property
+                    def buffer(self):return self
+                stdout,stderr=Public(),io.StringIO()
+                handlers={number:signal.getsignal(number) for number in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP)}
+                try:
+                    with patch.object(sys,'argv',['helper',state.OWNER,'stage','/srv/fixture',state.REVISION,state.DIGEST,'inspect']), \
+                         patch.object(sys,'stdout',stdout),contextlib.redirect_stderr(stderr), \
+                         self.assertRaises(SystemExit) as failed:
+                        exec(entry,helper)
+                finally:
+                    for number,handler in handlers.items():signal.signal(number,handler)
+                self.assertEqual(1,failed.exception.code)
+                self.assertNotIn('private_control',events)
+                self.assertEqual(1,events.count('runtime_close'))
+                self.assertNotIn(self.private.decode(),stdout.getvalue()+stderr.getvalue())
+                self.assertNotIn('release-status:',stdout.getvalue())
+                self.assertNotIn('corrected-binding-candidate:',stdout.getvalue())
+                self.assertTrue(stdout.getvalue().endswith(executor.HELPER_BLOCKED.decode()))
+
+    def test_runtime_gate_order_and_generated_source_closure_are_fixed(self):
+        tree,helper=self.helper_namespace()
+        entry=next(n for n in tree.body if isinstance(n,ast.Try))
+        guards=[n for n in ast.walk(entry) if isinstance(n,ast.With)
+            and isinstance(n.items[0].context_expr,ast.Call)
+            and isinstance(n.items[0].context_expr.func,ast.Name)
+            and n.items[0].context_expr.func.id=='inspect_guard']
+        runtime=min(n.lineno for n in guards if n.items[0].context_expr.args[0].value=='runtime')
+        control=min(n.lineno for n in guards if n.items[0].context_expr.args[0].value=='control')
+        self.assertLess(runtime,control)
+        profile=helper['CLB91_PROFILE'];self.assertEqual('29.3.1',profile['cli']['version'])
+        self.assertEqual('5.1.1',profile['compose']['version'])
+        self.assertIs(profile['runtime'],helper['CLB91_SEMANTIC']['MANIFEST'])
+        self.assertIs(helper['CLB91_EXECUTOR']['PROFILE'],profile)
+        self.assertIn('helper_prepare',helper['CLB91_PLAN'])
+        self.assertIn('capture_result',helper['CLB91_CAPTURE'])
+
+    def test_private_capture_acquisition_is_registered_before_every_failure(self):
+        # Portable original-object ownership/fault test. A real anonymous file
+        # stands in for Linux memfd, and fcntl sealing is explicitly synthetic.
+        # This proves Python ownership transfer, not Linux seal acceptance.
+        for fault in ('fchmod','fdopen','write','seal','fstat','seek'):
+            with self.subTest(fault=fault):
+                _,helper=self.helper_namespace();B=helper['BoundContext'];ctx=B.__new__(B)
+                ctx.uid=os.geteuid();ctx.fds=[];ctx.config_fds=[];ctx.runtime=None
+                private=b'SYNTHETIC_CAPTURE_CANARY';real_fstat=os.fstat
+                with tempfile.TemporaryFile() as original:
+                    fd=os.dup(original.fileno())
+                    real_fdopen=os.fdopen;real_fchmod=os.fchmod
+                    def chmod(selected,mode):
+                        self.assertIn(selected,ctx.fds)
+                        if fault=='fchmod':raise OSError(self.private)
+                        return real_fchmod(selected,mode)
+                    def fdopen(selected,*args):
+                        self.assertIn(selected,ctx.fds)
+                        if fault=='fdopen':raise OSError(self.private)
+                        stream=real_fdopen(selected,*args)
+                        if fault!='seek':return stream
+                        return SimpleNamespace(fileno=stream.fileno,close=stream.close,
+                            seek=lambda *_:(_ for _ in ()).throw(OSError(self.private)))
+                    def write(selected,data):
+                        self.assertNotIn(selected,ctx.fds)
+                        self.assertTrue(any(stream.fileno()==selected for stream in ctx.config_fds))
+                        os.write(selected,data)
+                        if fault=='write':raise OSError(self.private)
+                    def seals(selected,command,*args):
+                        if fault=='seal':raise OSError(self.private)
+                        return 15
+                    def metadata(selected):
+                        if fault=='fstat' and selected==fd:raise OSError(self.private)
+                        return real_fstat(selected)
+                    with patch.object(helper['os'],'memfd_create',return_value=fd,create=True), \
+                         patch.object(helper['os'],'MFD_CLOEXEC',1,create=True), \
+                         patch.object(helper['os'],'MFD_ALLOW_SEALING',2,create=True), \
+                         patch.object(helper['os'],'fchmod',side_effect=chmod), \
+                         patch.object(helper['os'],'fdopen',side_effect=fdopen), \
+                         patch.object(helper['os'],'fstat',side_effect=metadata), \
+                         patch.object(helper['fcntl'],'F_ADD_SEALS',1033,create=True), \
+                         patch.object(helper['fcntl'],'F_GET_SEALS',1034,create=True), \
+                         patch.object(helper['fcntl'],'F_SEAL_WRITE',8,create=True), \
+                         patch.object(helper['fcntl'],'F_SEAL_GROW',4,create=True), \
+                         patch.object(helper['fcntl'],'F_SEAL_SHRINK',2,create=True), \
+                         patch.object(helper['fcntl'],'F_SEAL_SEAL',1,create=True), \
+                         patch.object(helper['fcntl'],'fcntl',side_effect=seals), \
+                         patch.dict(helper,write_all=write):
+                        with self.assertRaises(helper['InspectFailure']) as failed:
+                            with helper['inspect_guard']('compose_file'):
+                                B.capture(ctx,private)
+                        diagnostic=helper['inspect_diagnostic'](failed.exception)
+                        self.assertNotIn(self.private.decode(),diagnostic)
+                        B.close(ctx)
+                    with self.assertRaises(OSError):real_fstat(fd)
+                    self.assertTrue(ctx.closed)
+
+    def test_private_close_attempts_every_owned_stream_fd_and_runtime(self):
+        _,helper=self.helper_namespace();B=helper['BoundContext'];ctx=B.__new__(B);events=[]
+        def fail(name):
+            events.append(name);raise OSError(self.private)
+        ctx.config_fds=[SimpleNamespace(close=lambda:fail('stream1')),SimpleNamespace(close=lambda:events.append('stream2'))]
+        ctx.fds=[71,72];ctx.runtime=SimpleNamespace(close=lambda:fail('runtime'))
+        with patch.object(helper['os'],'close',side_effect=lambda fd:fail('fd'+str(fd))):
+            with self.assertRaises(helper['InspectFailure']) as failed:
+                with helper['inspect_guard']('finalize'):B.close(ctx)
+        self.assertEqual(['stream1','stream2','fd72','fd71','runtime'],events)
+        self.assertNotIn(self.private.decode(),helper['inspect_diagnostic'](failed.exception))
+        B.close(ctx);self.assertEqual(5,len(events))
+
+    def test_worker_spawn_failure_closes_both_acquired_socket_ends(self):
+        _,helper=self.helper_namespace();B=helper['BoundContext'];ctx=B.__new__(B)
+        ctx.phase='inspect';ctx.signaled=False;ctx.docker_environment={};ctx.docker_config_fd=77
+        ctx.owner=state.OWNER;ctx.compose='/srv/fixture';ctx.revision=state.REVISION;ctx.image=state.DIGEST
+        ctx.runtime=SimpleNamespace(command_environment=lambda environment:environment)
+        events=[]
+        left=SimpleNamespace(close=lambda:events.append('parent'))
+        right=SimpleNamespace(fileno=lambda:77,close=lambda:events.append('child'))
+        with patch.dict(helper,FUNCTIONS=''),patch.object(helper['socket'],'socketpair',return_value=(left,right)), \
+             patch.object(helper['subprocess'],'Popen',side_effect=OSError(self.private)), \
+             self.assertRaises(helper['InspectFailure']) as failed:
+            B.worker(ctx,'classify')
+        self.assertCountEqual(['child','parent'],events)
+        self.assertFalse(ctx.worker_owned)
+        self.assertNotIn(self.private.decode(),helper['inspect_diagnostic'](failed.exception))
 
     def test_inspect_rpc_recorded_cancellation_is_terminal(self):
         value = self.inspect_terminal_fixture('rpc_signal')
@@ -1260,7 +1793,7 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
                 self.assertEqual(0, value['code']); self.assertTrue(value['raw'].startswith(prefix))
                 self.assertNotIn(b'corrected-inspect:', value['raw'])
                 self.assertNotIn(b'corrected-binding-candidate:', value['raw'])
-                self.assertEqual([(False, False)], value['publications'])
+                self.assertEqual([(True, True)], value['publications'])
                 self.assertTrue(value['closed']); self.assertEqual([1, 1], value['closes'])
                 self.assertEqual(1, value['events'].count('close'))
 
@@ -1341,32 +1874,28 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
             self.assertEqual('corrected-inspect:v=1 guard=interrupted failure=interrupted\n', diagnostic(caught.exception))
 
     def test_compose_file_predicates_have_exact_subguards_without_changing_io_mapping(self):
-        tree, helper = self.helper_namespace()
-        compose_scope = next(node for node in ast.walk(tree) if isinstance(node, ast.With)
-            and isinstance(node.items[0].context_expr, ast.Call)
-            and isinstance(node.items[0].context_expr.func, ast.Name)
-            and node.items[0].context_expr.func.id == 'inspect_guard'
-            and node.items[0].context_expr.args
-            and isinstance(node.items[0].context_expr.args[0], ast.Constant)
-            and node.items[0].context_expr.args[0].value == 'compose_file')
-        code = compile(ast.fix_missing_locations(ast.Module(body=[compose_scope], type_ignores=[])),
-                       '<approved-helper-compose-file>', 'exec')
+        _, helper = self.helper_namespace()
+        B=helper['BoundContext']
         file_descriptor, directory_descriptor = 71, 72
-        file_info = dict(st_mode=helper['stat'].S_IFREG | 0o644, st_uid=501, st_nlink=1, st_dev=9)
+        file_info = dict(st_mode=helper['stat'].S_IFREG | 0o644, st_uid=501,
+            st_gid=501,st_nlink=1,st_dev=9,st_ino=21,st_size=0,st_mtime_ns=11,st_ctime_ns=12)
         directory_info = SimpleNamespace(st_dev=9)
 
         def execute(changes=None, reads=(b'',), open_error=None, read_error=None):
-            context = SimpleNamespace(uid=501, directories={'compose': directory_descriptor}, keep=lambda fd:fd)
-            values = dict(helper, self=context)
-            info = SimpleNamespace(**{**file_info, **(changes or {})})
+            context=B.__new__(B)
+            context.uid=501;context.directories={'compose':directory_descriptor}
+            context.keep=lambda fd:fd;context.edges=[];context.config_leases=[];context.objects={}
+            context.check_edges=lambda:None
+            size=min(65536,sum(len(part) for part in reads))
+            info=SimpleNamespace(**{**file_info,'st_size':size,**(changes or {})})
             open_effect = open_error if open_error is not None else file_descriptor
             read_effect = read_error if read_error is not None else list(reads)
             with patch.object(helper['os'], 'open', side_effect=open_effect if isinstance(open_effect, BaseException) else None,
                               return_value=None if isinstance(open_effect, BaseException) else open_effect), \
-                 patch.object(helper['os'], 'fstat', side_effect=[info, directory_info]), \
+                 patch.object(helper['os'], 'fstat', side_effect=[info,directory_info,info,info]), \
                  patch.object(helper['os'], 'read', side_effect=read_effect if isinstance(read_effect, BaseException) else list(read_effect)):
-                exec(code, values)
-            return values.get('main')
+                with helper['inspect_guard']('compose_file'):
+                    return B.captured_file(context,'compose','docker-compose.yml',mode=(0o600,0o644))
 
         rejected = (
             ({'st_mode': helper['stat'].S_IFDIR | 0o644}, 'compose_file_type'),
@@ -1419,7 +1948,10 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
         ctx.path_hash = 'a'*64; ctx.project = 'fixture'; ctx.config_hashes = {'override':'a'*64}
         ctx.incident = {}; ctx.objects = {}; ctx.directories = {key: 77 for key in
             ('compose', 'parent', 'root', 'state', 'ledger', 'results', 'application_lock', 'operation_lock')}
-        ctx.edges = []; ctx.metadata = {}; ctx.fds = []; ctx.config_fds = []
+        ctx.edges = []; ctx.metadata = {}; ctx.fds = []; ctx.config_fds = [];ctx.config_leases=[]
+        ctx.docker_environment={};ctx.docker_config_fd=77
+        ctx.runtime=SimpleNamespace(recheck=lambda:helper['check'](False),
+            principal=lambda expected:helper['check'](False))
         ctx.keep = lambda fd: fd
         ctx.read = lambda *args: b'invalid'
         ctx.record = lambda *args: {}
@@ -1430,7 +1962,8 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
         values = dict(helper, self=ctx, context=ctx, control={}, environment='wrong', phase='inspect',
                       compose=ctx.compose, revision=state.REVISION, image=state.DIGEST, owner=state.OWNER,
                       parent=77, info=SimpleNamespace(st_dev=2), main=b'include: secret\n', impl={},
-                      principal='fixture', key='compose', child=77, output=b'')
+                      principal='fixture', key='compose', child=77, output=b'',mode=(0o600,0o644),base=77,limit=65536,
+                      model={},outline={},has_env_file=True)
         seen = set()
         def run(guard, operation, expected='invalid'):
             with self.subTest(guard=guard):
@@ -1446,9 +1979,14 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
                          '<approved-helper-guard>', 'exec'), values)
         run('input', lambda: block('input'))
         run('control', lambda: block('control'))
+        run('runtime',lambda:block('runtime'))
+        values['control']={'principal':'fixture'}
         with patch.object(helper['os'], 'geteuid', return_value=0), patch.object(helper['subprocess'], 'check_output', return_value=b'root\n'):
             run('principal', lambda: block('principal'), 'mismatch')
         ctx.uid = 501
+        ctx.runtime=SimpleNamespace(principal=lambda expected:(_ for _ in ()).throw(RuntimeError(self.private)),
+            command_environment=lambda env:env, recheck=lambda:None)
+        values['context'].runtime=ctx.runtime
         with patch.object(helper['os'], 'open', side_effect=FileNotFoundError(self.private)):
             run('compose_chain', lambda: block('compose_chain'), 'missing')
             run('protocol_layout', lambda: block('protocol_layout'), 'missing')
@@ -1466,8 +2004,9 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
                                          st_uid=501, st_nlink=1, st_dev=1)
         run('compose_file_mode', lambda: block('compose_file_mode'))
         values['info'] = SimpleNamespace(st_dev=1); values['compose_info'] = SimpleNamespace(st_dev=2)
-        run('compose_file_device', lambda: block('compose_file_device'))
-        values['main'] = b'x' * 65537
+        with patch.object(helper['os'],'fstat',return_value=SimpleNamespace(st_dev=2)):
+            run('compose_file_device', lambda: block('compose_file_device'))
+        values['info']=SimpleNamespace(st_size=65537)
         run('compose_file_size', lambda: block('compose_file_size'))
         values['info'] = SimpleNamespace(st_dev=2)
         info = SimpleNamespace(st_uid=0, st_dev=1)
@@ -1481,19 +2020,26 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
         ctx.edges = [(77, 'fixture', 77)]
         with patch.object(helper['os'], 'stat', side_effect=FileNotFoundError(self.private)):
             run('context_edges', lambda: B.check_edges(ctx), 'missing')
-            run('configuration_capture', lambda: block('configuration_capture'), 'missing')
+        with patch.object(helper['os'],'memfd_create',side_effect=FileNotFoundError(self.private),create=True), \
+             patch.object(helper['os'],'MFD_CLOEXEC',1,create=True), \
+             patch.object(helper['os'],'MFD_ALLOW_SEALING',2,create=True):
+            run('configuration_capture',lambda:B.capture(ctx,b'synthetic'),'missing')
+        ctx.captured_file=lambda *args,**kwargs:b'invalid'
         ctx.edges = []
         run('application_binding', lambda: block('application_binding'))
-        with patch.dict(helper, fdpath=lambda fd:'/dev/null'), patch.object(helper['subprocess'], 'run', return_value=SimpleNamespace(returncode=1, stdout=self.private)):
+        with patch.dict(helper, fdpath=lambda fd:'/dev/null'), patch.dict(helper['CLB91_CAPTURE'],
+                capture_result=lambda *args,**kwargs:SimpleNamespace(code=1,output=self.private,failure=None)):
             run('mount_query', lambda: block('mount_query'), 'command')
-        values['result'] = SimpleNamespace(stdout=self.private)
+        values['result'] = SimpleNamespace(output=self.private,code=0,failure=None)
         run('mount_identity', lambda: block('mount_identity'))
         run('compose_subset', lambda: block('compose_subset'))
         run('override', lambda: block('override'), 'mismatch')
         run('dotenv', lambda: block('dotenv'))
         run('compose_command', lambda: block('compose_command'), 'command')
         ctx.normalized = (0, b'{}')
-        run('compose_model', lambda: block('compose_model'))
+        values['main']=b'services: {}\n';ctx.env_capture='/dev/null';ctx.docker_environment={}
+        run('semantic_equivalence',lambda:block('semantic_equivalence'),'internal')
+        run('compose_model', lambda: block('compose_model'),'internal')
         ctx.pin = {}; ctx.backing = 'fixture'
         run('binding_candidate', lambda: block('binding_candidate'), 'mismatch')
         with patch.object(helper['os'], 'listdir', return_value=['active-candidate.anchor']):
@@ -1511,11 +2057,12 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
         ctx.worker = lambda action: (0, b'ambiguous')
         with patch.object(ctx, 'value', side_effect=PermissionError(self.private)):
             run('status_read', lambda: B.status(ctx), 'permission')
-        values['parent'] = SimpleNamespace(recv=lambda size: b'!')
+        values['incoming']=bytearray(struct.pack('!I',8193));values['outgoing']=bytearray()
         run('worker_protocol', lambda: block('worker_protocol'), 'protocol')
         ctx.docker_environment = {}; ctx.docker_config_fd = 77
+        ctx.runtime=SimpleNamespace(command_environment=lambda env:env, recheck=lambda:None)
         with patch.dict(helper, FUNCTIONS=''), \
-             patch.object(helper['socket'], 'socketpair', return_value=(SimpleNamespace(), SimpleNamespace(fileno=lambda:77))), \
+             patch.object(helper['socket'], 'socketpair', return_value=(SimpleNamespace(close=lambda:None), SimpleNamespace(fileno=lambda:77,close=lambda:None))), \
              patch.object(helper['subprocess'], 'Popen', side_effect=FileNotFoundError(self.private)):
             run('worker_capture', lambda: B.worker(ctx, 'classify'), 'missing')
         with patch.object(ctx, 'close', side_effect=OSError(self.private)):
@@ -1539,10 +2086,12 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
                 helper['INSPECT_MODE'] = phase == 'inspect'
                 helper['context'] = None
                 helper['read_all'] = lambda *args: b'{}'
-                def broken(*args): raise RuntimeError(self.private)
-                helper['BoundContext'] = broken
+                class BrokenContext:
+                    def __new__(cls): raise RuntimeError(self.private)
+                helper['BoundContext'] = BrokenContext
                 output = Public()
-                with patch.object(sys, 'stdout', output), self.assertRaises(SystemExit) as terminal:
+                with patch.object(sys,'argv',['helper',state.OWNER,'stage','/srv/fixture',state.REVISION,state.DIGEST,phase]), \
+                     patch.object(sys, 'stdout', output), self.assertRaises(SystemExit) as terminal:
                     exec(code, helper)
                 expected = (b'corrected-inspect:v=1 guard=internal failure=internal\n' if phase == 'inspect' else b'') + executor.HELPER_BLOCKED
                 self.assertEqual(expected, output.getvalue()); self.assertEqual(1, terminal.exception.code)
@@ -1551,11 +2100,20 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
             def interrupted_status():
                 signal.raise_signal(signal.SIGTERM)
             ctx = SimpleNamespace(phase='inspect', active=False, completed=False, signaled=False,
-                                  status=interrupted_status, close=lambda:closed.append(True))
+                                  status=interrupted_status)
+            def close_once():
+                if not getattr(ctx,'closed',False):ctx.closed=True;closed.append(True)
+            ctx.close=close_once
             ctx.check_interruption = lambda: real_context.check_interruption(ctx)
-            helper['BoundContext'] = lambda *args:ctx
+            class InterruptedContext:
+                def __new__(cls): return ctx
+                def __init__(self,*_): pass
+            helper['BoundContext']=InterruptedContext
+            helper['CLB91_EXECUTOR']['Gate']=lambda cancelled:SimpleNamespace(initial=lambda:None,
+                bind=lambda environment:environment,close=lambda:None)
             output = Public()
-            with patch.object(sys, 'stdout', output), self.assertRaises(SystemExit):
+            with patch.object(sys,'argv',['helper',state.OWNER,'stage','/srv/fixture',state.REVISION,state.DIGEST,'inspect']), \
+                 patch.object(sys, 'stdout', output), self.assertRaises(SystemExit):
                 exec(code, helper)
             self.assertEqual(b'corrected-inspect:v=1 guard=interrupted failure=interrupted\n' + executor.HELPER_BLOCKED, output.getvalue())
             self.assertEqual([True], closed)
@@ -1592,12 +2150,14 @@ class SshBoundaryDiagnosticsTest(unittest.TestCase):
         B = helper['BoundContext']; ctx = B.__new__(B)
         ctx.owner = state.OWNER; ctx.compose = '/srv/fixture'; ctx.revision = state.REVISION; ctx.image = state.DIGEST
         ctx.phase = 'inspect'; ctx.signaled = False
-        ctx.docker_environment = dict(os.environ); ctx.check_evidence = lambda:None
+        ctx.docker_environment = dict(os.environ); ctx.check_evidence = lambda:None;ctx.check_edges=lambda:None
+        ctx.runtime=SimpleNamespace(command_environment=lambda env:env, recheck=lambda:None)
         spoof = b'corrected-inspect:v=1 guard=principal failure=mismatch\n' + executor.HELPER_BLOCKED
         helper['FUNCTIONS'] = 'classify_app_state() { printf %s ' + shlex.quote(spoof.decode()) + '; }'
         with open(os.devnull, 'rb') as config:
             ctx.docker_config_fd = config.fileno()
-            with self.assertRaises(helper['InspectFailure']) as caught:
+            with patch.object(helper['os'],'killpg',side_effect=completed_fixture_killpg), \
+                 self.assertRaises(helper['InspectFailure']) as caught:
                 B.status(ctx)
         self.assertEqual('corrected-inspect:v=1 guard=status_classification failure=invalid\n',
                          helper['inspect_diagnostic'](caught.exception))
@@ -1732,14 +2292,14 @@ assert m.ssh_result(result,bytes([167])*32)==(124,b'')
                             'bootstrap_ready', 'helper_not_reached')
 
     def test_real_approved_helper_blocked_marker_without_state_access(self):
-        # Invalid public compose prefix stops before opening any incident root.
+        # Real source/bootstrap framing on this portable host refuses at Runtime
+        # before private control/context reads; this is not native acceptance.
         self.classified(self.bootstrap(self.helper_payload()), 'helper_started', 'helper_blocked',
-                        'corrected-inspect:v=1 guard=input failure=invalid\n')
-        self.assertEqual(183462, len(_helper_bytes))
-        self.assertEqual('54839fcfa543888cc4613d2af480d85aee07ab8dd6b4a2bf879e64d501577809',
-                         hashlib.sha256(_helper_bytes).hexdigest())
-        self.assertEqual('162c2fba50ce84019de9fb0151491e518cca95ca',
-                         hashlib.sha1(b'blob 183462\0' + _helper_bytes).hexdigest())
+                        'corrected-inspect:v=1 guard=runtime failure=internal\n')
+        self.assertEqual(executor.IMPLEMENTATION_SIZE,len(_helper_bytes))
+        self.assertEqual(executor.IMPLEMENTATION_SHA256,hashlib.sha256(_helper_bytes).hexdigest())
+        self.assertEqual(executor.IMPLEMENTATION_BLOB,
+            hashlib.sha1(('blob '+str(len(_helper_bytes))+'\0').encode()+_helper_bytes).hexdigest())
 
     def test_nonce_authentication_and_all_malformed_frames_fail_closed(self):
         old = b''.join(('corrected-remote-boundary:v=1 '+v+'\n').encode()
@@ -1799,7 +2359,8 @@ raise SystemExit(1)
             with contextlib.redirect_stdout(io.StringIO()) as public, \
                  patch.object(executor, 'parse_status', side_effect=AssertionError('nonzero must not parse')):
                 with self.assertRaisesRegex(executor.Rejected, '^STATUS_UNAVAILABLE$'):
-                    executor.execute(request(), _helper_bytes, remote, {})
+                    executor.execute(request(), _helper_bytes, remote, {},
+                                     evidence=lambda candidate: self.fail('failed inspect must not emit evidence'))
             self.assertEqual(['inspect'], calls)
             self.assertEqual(1, public.getvalue().count('corrected-ssh:v=1 '))
             self.assertNotIn(self.private.decode(), public.getvalue())
@@ -2156,7 +2717,10 @@ class PriorApiDiagnosticsTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.bin = self.root / 'bin'; self.bin.mkdir()
-        self.env = {**request(), 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
+        # The execution callsite now has an encryption preflight for inspect.
+        # Exercise resume-start's actual prior-verifier boundary: invalid prior
+        # evidence must still stop before snapshot, binding, hosts or execution.
+        self.env = {**request('resume-start'), 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
                     'UNRELATED_SECRET': self.HOSTILE}
         self.api = PriorApiFixture(self.root, self.bin, self.env)
         revision = self.env['PRIOR_STATUS'].split(':')[2]
@@ -2728,7 +3292,7 @@ class AuthorityRegressionTest(unittest.TestCase):
         result=f.run(ACTION='inspect',AUTHORIZATION='')
         self.assertEqual(0,result.returncode,result.stdout)
         self.assertEqual(0,f.counts()['claim'])
-        self.assert_blocked(f,f.run(AUTHORIZATION=''))
+        self.assert_blocked(f,f.run(CLB91_REVIEWED_ROOT_APPROVAL=''))
         f.helper.update_docker_state(app_state='replaced')
         self.assert_blocked(f,f.run())
         self.assertEqual(0,f.counts()['claim'])
@@ -2765,8 +3329,9 @@ class AuthorityRegressionTest(unittest.TestCase):
                 self.assertEqual(saved,f.marker.read_bytes())
                 self.assertEqual(0,f.counts()['resume'])
                 self.assert_blocked(f,f.run(GITHUB_RUN_ATTEMPT='2'))
+                later=approved_environment(f.binding,{**f.env,'GITHUB_RUN_NUMBER':'8'})
                 self.assert_blocked(f,f.run(GITHUB_RUN_ID='987656',GITHUB_RUN_NUMBER='8',
-                                            AUTHORIZATION=executor.authorization('8', IMPLEMENTATION, hashlib.sha256(json.dumps(json.loads(f.env['CLB82_AUTHORIZED_ROOT_BINDING']),sort_keys=True,separators=(',',':')).encode()).hexdigest())))
+                                            CLB91_REVIEWED_ROOT_APPROVAL=later['CLB91_REVIEWED_ROOT_APPROVAL']))
         f=AuthorityCliFixture(self);f.save('missing-root')
         self.assert_blocked(f,f.run());self.assertFalse(f.remote_root.exists())
         f.save('');self.assert_blocked(f,f.run());self.assertFalse(f.remote_root.exists())
@@ -2866,7 +3431,8 @@ class ImportRootRegressionTest(unittest.TestCase):
 
     def prior_checkout(self, f):
         prior = f.root/'prior-checkout'
-        for path in (*authority.PRODUCER_PATHS, 'scripts/deploy/corrected-stage-release.py'):
+        for path in (*authority.PRODUCER_PATHS, 'scripts/deploy/corrected-stage-release.py',
+                     'scripts/deploy/root_binding_review.py'):
             dest = prior/path; dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT/path, dest)
         return prior
@@ -2948,7 +3514,7 @@ sys.modules['json']=real
     def test_own_dependencies_bypass_pyc_and_all_producer_sources_are_verified(self):
         import py_compile
         f = AuthorityCliFixture(self); prior = self.prior_checkout(f)
-        for name in ('release_authority.py', 'release_private_root.py'):
+        for name in ('release_authority.py', 'release_private_root.py', 'root_binding_review.py'):
             source = prior/'scripts/deploy'/name
             poison = f.root/(name+'.poison')
             poison.write_text("print('forged cached module'); raise SystemExit(0)\n")
@@ -2962,7 +3528,7 @@ sys.modules['json']=real
         self.assertIn(b'PRIOR_STATUS_VERIFIED', raw.stdout); self.assertNotIn(b'forged', raw.stdout)
         alias = f.root/'entry-alias'; alias.mkdir()
         (alias/'corrected.py').symlink_to(prior/'scripts/deploy/corrected-stage-release.py')
-        for name in ('release_authority.py', 'release_private_root.py'):
+        for name in ('release_authority.py', 'release_private_root.py', 'root_binding_review.py'):
             (alias/name).write_text("print('forged alias dependency'); raise SystemExit(0)\n")
         aliased = subprocess.run([sys.executable, '-I', '-S', '-B', str(alias/'corrected.py'), '--verify-prior'],
                                  env=f.env, capture_output=True)
@@ -3071,28 +3637,27 @@ sys.modules['json']=real
 
     def test_fixed_binding_missing_malformed_and_candidate_is_not_authority(self):
         f=AuthorityCliFixture(self)
-        invalid_principal=json.loads(f.env['CLB82_AUTHORIZED_ROOT_BINDING']);invalid_principal['principal']['uid']=0
+        invalid_principal=json.loads(f.env['CLB91_REVIEWED_ROOT_APPROVAL'])
+        invalid_principal['binding']['principal']['uid']=0
         for pin in ('','{}','null','malformed',json.dumps(invalid_principal)):
             with self.subTest(pin=pin[:12]):
-                result=f.run(CLB82_AUTHORIZED_ROOT_BINDING=pin)
+                result=f.run(CLB91_REVIEWED_ROOT_APPROVAL=pin)
                 self.assertNotEqual(0,result.returncode);self.assertEqual(0,f.counts()['resume'])
-        result=f.run(ACTION='inspect',AUTHORIZATION='',CLB82_AUTHORIZED_ROOT_BINDING='')
+        result=f.run(ACTION='inspect',CLB91_REVIEWED_ROOT_APPROVAL='')
         self.assertEqual(0,result.returncode,result.stdout)
-        self.assertIn(b'corrected-binding-candidate:v=1',result.stdout)
+        self.assertNotIn(b'corrected-binding-candidate:',result.stdout+result.stderr)
         self.assertNotIn(f.env['SSH_USER'].encode(),result.stdout+result.stderr)
-        observed=next(line.split(b' ',1)[1] for line in result.stdout.splitlines() if line.startswith(b'corrected-binding-candidate:v=1 '))
-        candidate=json.loads(observed)
-        self.assertEqual({'name_sha256':hashlib.sha256(f.env['SSH_USER'].encode()).hexdigest(),'uid':os.geteuid()},candidate['principal'])
-        public_auth=executor.authorization(f.env['GITHUB_RUN_NUMBER'],IMPLEMENTATION,hashlib.sha256(observed).hexdigest())
-        rejected=f.run(CLB82_AUTHORIZED_ROOT_BINDING=observed.decode(),AUTHORIZATION=public_auth)
+        candidate=f.last_envelope['binding']
+        self.assertEqual({'name':f.env['SSH_USER'],'uid':os.geteuid()},candidate['principal'])
+        # Capturing/decrypting a candidate cannot authorize the mutation.
+        self.assertNotEqual(0,f.run(CLB91_REVIEWED_ROOT_APPROVAL='').returncode)
+        rejected=f.run(CLB82_AUTHORIZED_ROOT_BINDING=review.encoded(candidate).decode(),AUTHORIZATION='legacy')
         self.assertNotEqual(0,rejected.returncode)
-        self.assertIn(b'ROOT_BINDING_INVALID',rejected.stdout)
+        self.assertIn(b'LEGACY_AUTHORITY_FORBIDDEN',rejected.stdout)
         self.assertFalse(f.marker.exists())
-        # A subsequent mutation without fixed configuration cannot adopt output.
-        self.assertNotEqual(0,f.run(CLB82_AUTHORIZED_ROOT_BINDING='').returncode)
         self.assertEqual(0,f.counts()['claim_attempt'])
-        value=json.loads(f.env['CLB82_AUTHORIZED_ROOT_BINDING']);value['objects']['root'][1]+=1
-        f.env['CLB82_AUTHORIZED_ROOT_BINDING']=json.dumps(value);f.authorize()
+        f.review_candidate()
+        f.binding['objects']['root'][1]+=1;f.authorize()
         self.assertNotEqual(0,f.run().returncode);self.assertFalse(f.marker.exists())
 
     def test_context_swap_at_configuration_read_is_rejected_before_claim(self):
@@ -3185,16 +3750,13 @@ sys.modules['json']=real
         literal='synthetic$literal${still-literal}'
         (compose/'.env').write_text("BOUND_LITERAL='"+literal+"'\n");(compose/'.env').chmod(0o600)
         (compose/'Caddyfile').write_text('fixture only\n')
-        observed=f.run(ACTION='inspect',AUTHORIZATION='',CLB82_AUTHORIZED_ROOT_BINDING='')
+        observed=f.run(ACTION='inspect',CLB91_REVIEWED_ROOT_APPROVAL='')
         self.assertEqual(0,observed.returncode,observed.stdout)
-        line=next(line for line in observed.stdout.decode().splitlines() if line.startswith('corrected-binding-candidate:v=1 '))
-        # Explicit fixture provisioning is separate from the production CLI.
-        candidate=json.loads(line.split(' ',1)[1])
-        self.assertEqual(hashlib.sha256(f.env['SSH_USER'].encode()).hexdigest(),candidate['principal']['name_sha256'])
-        # An explicit fixture authority decision supplies the separately known
-        # principal; the production CLI never turns public output into a pin.
-        candidate['principal']={'name':f.env['SSH_USER'],'uid':candidate['principal']['uid']}
-        f.env['CLB82_AUTHORIZED_ROOT_BINDING']=json.dumps(candidate,sort_keys=True,separators=(',',':'));f.authorize()
+        self.assertNotIn(b'corrected-binding-candidate:',observed.stdout+observed.stderr)
+        # Full private binding review and explicit fixture Secret provisioning
+        # remain separate from obtaining an inspection result.
+        candidate=f.review_candidate()
+        self.assertEqual(f.env['SSH_USER'],candidate['principal']['name'])
         source=(f.helper.fake_bin/'docker').read_text()
         source=source.replace('if command == "compose":','''if command == "compose":
     if "up" in args:
@@ -3208,7 +3770,15 @@ sys.modules['json']=real
         self.assertIn(b'STATUS_UNAVAILABLE',result.stdout)
         self.assertEqual(1,f.counts()['claim']);self.assertEqual(1,f.counts()['resume'])
         self.assertEqual(1,f.helper.docker_state()['start_invocations']);self.assertEqual(1,f.helper.docker_state()['migration_invocations'])
-        self.assertEqual('success',f.helper.result()['result'])
+        # Up already ran against the sealed model, but the original dotenv
+        # edge changed before its result was accepted. Never acknowledge success
+        # or advance healthy; retain the consumed claim and reject replay.
+        self.assertEqual('remote_failure',f.helper.result()['result'])
+        self.assertEqual('candidate_start_failed',f.helper.result()['failure_category'])
+        self.assertEqual('candidate_start_begun',f.helper.checkpoint())
+        self.assertTrue(f.marker.is_file())
+        self.assertNotIn(executor.ACK,result.stdout)
+        self.assertNotIn(b'COMPLETED_ACK_LOST',result.stdout)
         rows=[json.loads(line) for line in (f.helper.root/'bound-compose-captures.jsonl').read_text().splitlines()]
         parsed=[row['parsed'] for row in rows if 'parsed' in row and 'BOUND_VALUE' in row['parsed']['services']['app'].get('environment',{})]
         self.assertTrue(parsed)

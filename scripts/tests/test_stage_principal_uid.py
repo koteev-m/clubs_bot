@@ -179,6 +179,11 @@ class SourceTest(unittest.TestCase):
             with self.assertRaises(ValueError): r.snapshot(env,primitive,[False])
 
     def test_wrong_pin_or_symlink_refuses_before_dependency_execution(self):
+        with patch.object(r, 'PRIMITIVE_SHA',
+                          '45598cb97b84158ea0fcb60d7f291eda32e83fda15463fd98f63f7737a2328c1'), \
+                patch.object(r, 'exec', create=True) as execute:
+            with self.assertRaises(ValueError): r.load_primitive()
+            execute.assert_not_called()
         with patch.object(r,'read_source',return_value=b'poison'),patch.object(r,'exec',create=True) as execute:
             with self.assertRaises(ValueError): r.load_primitive()
             execute.assert_not_called()

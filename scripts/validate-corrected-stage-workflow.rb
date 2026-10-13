@@ -7,7 +7,7 @@ module CorrectedStageWorkflow
     "APP_ENV" => "environment", "INCIDENT_TAG" => "incident_tag",
     "RELEASE_OWNER" => "release_owner", "EXPECTED_REVISION" => "expected_revision",
     "IMAGE_DIGEST" => "image_digest", "IMPLEMENTATION" => "implementation",
-    "ACTION" => "action", "AUTHORIZATION" => "authorization", "PRIOR_STATUS" => "prior_status",
+    "ACTION" => "action", "PRIOR_STATUS" => "prior_status",
   }.freeze
 
   def self.validate(policy, workflow)
@@ -26,11 +26,11 @@ module CorrectedStageWorkflow
       choice = %w[action environment].include?(key)
       fields = %w[description required default type] + (choice ? ["options"] : [])
       reject.call("input contract changed") unless input.keys.sort == fields.sort &&
-        input["description"].is_a?(String) && input["required"] == (key != "authorization") &&
+        input["description"].is_a?(String) && input["required"] == true &&
         input["type"] == (choice ? "choice" : "string") && input["default"].is_a?(String)
     end
     reject.call("inspect default changed") unless inputs["action"]["default"] == "inspect" &&
-      inputs["action"]["options"] == ["inspect", "resume-start"] && inputs["authorization"]["default"] == ""
+      inputs["action"]["options"] == ["inspect", "resume-start"]
     reject.call("stage boundary changed") unless inputs["environment"]["default"] == "stage" && inputs["environment"]["options"] == ["stage"]
 
     checkout = {
@@ -39,7 +39,10 @@ module CorrectedStageWorkflow
     }
     base_env = {"REPOSITORY_DEFAULT_BRANCH" => "${{ github.event.repository.default_branch }}", "PYTHONDONTWRITEBYTECODE" => "1"}
     authority_env = {"CLB82_APPROVED_IMPLEMENTATION" => "${{ vars.CLB82_APPROVED_IMPLEMENTATION }}",
-                     "CLB82_AUTHORIZED_ROOT_BINDING" => "${{ vars.CLB82_AUTHORIZED_ROOT_BINDING }}"}
+                     "CLB91_REVIEWED_ROOT_APPROVAL" => "${{ secrets.CLB91_REVIEWED_ROOT_APPROVAL }}",
+                     "CLB91_GPG_PROFILE" => "${{ vars.CLB91_GPG_PROFILE }}",
+                     "CLB91_REVIEWER_PUBLIC_KEY" => "${{ vars.CLB91_REVIEWER_PUBLIC_KEY }}",
+                     "CLB91_REVIEWER_FINGERPRINT" => "${{ vars.CLB91_REVIEWER_FINGERPRINT }}"}
     reject.call("unpublished implementation default changed") unless inputs["implementation"]["default"] == ""
     expected = {
       "validate" => {
@@ -63,7 +66,7 @@ module CorrectedStageWorkflow
         "timeout-minutes" => 10, "permissions" => {"contents" => "read", "actions" => "read"}, "environment" => "stage",
         "steps" => [checkout, {
           "name" => "Revalidate attempt before SSH credentials", "shell" => "bash",
-          "env" => base_env.merge(KEYS.to_h { |key, _| [key, "${{ needs.validate.outputs.#{key} }}"] }).merge(authority_env),
+          "env" => base_env.merge(KEYS.to_h { |key, _| [key, "${{ needs.validate.outputs.#{key} }}"] }).merge(authority_env).merge("TMPDIR" => "${{ runner.temp }}"),
           "run" => "python3 -I -S -B scripts/deploy/corrected-stage-release.py --validate-execution",
         }, {
           "name" => "Setup deployment SSH principal", "uses" => policy::SSH_AGENT_ACTION,
@@ -77,6 +80,17 @@ module CorrectedStageWorkflow
             "COMPOSE_PATH" => "${{ secrets.COMPOSE_PATH }}", "SSH_KNOWN_HOSTS" => "${{ secrets.SSH_KNOWN_HOSTS }}"
           ).merge(authority_env),
           "run" => "python3 -I -S -B scripts/deploy/corrected-stage-release.py",
+        }, {
+          "name" => "Publish encrypted binding evidence",
+          "if" => "success() && needs.validate.outputs.ACTION == 'inspect'",
+          "uses" => policy::UPLOAD_ARTIFACT_ACTION,
+          "with" => {"name" => "clb91-binding-${{ github.run_id }}-${{ github.run_attempt }}",
+            "path" => "${{ runner.temp }}/clb91-binding-evidence/binding.pgp", "if-no-files-found" => "error",
+            "retention-days" => 1, "compression-level" => 0, "overwrite" => false, "include-hidden-files" => false},
+        }, {
+          "name" => "Clean owned encrypted evidence", "if" => "always()", "shell" => "bash",
+          "env" => {"TMPDIR" => "${{ runner.temp }}", "PYTHONDONTWRITEBYTECODE" => "1"},
+          "run" => "python3 -I -S -B scripts/deploy/corrected-stage-release.py --cleanup-evidence",
         }],
       },
     }
@@ -111,7 +125,7 @@ if $PROGRAM_NAME == __FILE__
   end
   ["dir_fd=self.directories['root']", "src_dir_fd=base, dst_dir_fd=base", "os.O_NOFOLLOW",
    "os.fsync(self.directories['root'])", "fcntl.LOCK_NB", "self.ready()", "self.claim_record()",
-   "self.resolved_capture", "os.fchdir(self.directories['compose'])"].each do |contract|
+   "self.resolved_capture", "cwd_fd=self.directories['compose']", "os.fchdir(cwd_fd)"].each do |contract|
     reject_bound.call("missing descriptor/claim contract") unless helper.include?(contract)
   end
   reject_bound.call("standalone claim transport returned") if runner.include?("REMOTE_CLAIM")

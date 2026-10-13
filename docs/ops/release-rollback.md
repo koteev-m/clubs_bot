@@ -1254,6 +1254,8 @@ Corrected inspect не закрывает этот gate задним число�
 проверки источника. Остальные live trust gates и отдельную execution authority проверяет оператор до dispatch. Root observer и наблюдение UID 1000
 не являются доказательством identity deployment principal.
 
+**Historical v1 contract below is superseded locally by [CLB-91 private review v2](#clb-91-private-root-binding-review-v2).** Public authorization/root-binding vars must not be used by the new candidate; publication and provisioning remain unauthorized.
+
 Workflow принимает девять inputs: `environment` (только `stage`), `incident_tag`, `release_owner`,
 `expected_revision`, `image_digest`, `implementation` (`revision:blob:sha256`), `action`, `authorization` и `prior_status`.
 Incident inputs должны точно совпасть с constants runner; implementation — с текущими bytes и отдельно принятой
@@ -2399,3 +2401,270 @@ remain the immediate resolver blocker. CLB-175 is local-only, unprovisioned and
 unexecuted. The read-only package-plan channel and its 21 targets remain unchanged.
 Transaction readiness remains NO; refresh and later collection each require
 separate authorization.
+
+
+## CLB-91 private root-binding review v2
+
+Local-only candidate for the existing `deploy-stage-44497dc` incident and release
+owner `33468965282-1`. This supersedes the v1 public-candidate/public-authorization
+instructions above, including the description of the root binding as non-secret.
+At that checkpoint the Compose adapter was not implemented. The fixed CLI/plugin
+adapter below extends these retained v2 guarantees; current stage trust remains unverified.
+Historical incident revision, image, prior Release Status producer and evidence
+are unchanged. Source pins for the authority-strengthened helper describe its
+new working bytes; no future commit or approved implementation is invented.
+
+**Private boundary.** Protected `stage` runner memory/anonymous captures may hold
+the full binding. An independently accepted GnuPG 2.5.24 runtime encrypts it for
+one separately verified public primary fingerprint and exactly one usable
+selected encryption fingerprint (`!`), using AES256/OCB AEAD and no compression.
+Only `binding.pgp` is uploaded, under fixed `clb91-binding-RUN_ID-ATTEMPT`, retention
+one day. Public records contain finite categories, repository/workflow/run/attempt,
+exact Git source and ciphertext identity. Binding/config/principal digests,
+object identities, paths, normalized configuration and plaintext never enter
+workflow inputs/outputs/logs/annotations/artifacts. Ciphertext identity is an
+identity of randomized encrypted bytes, not a binding/configuration hash.
+
+Runtime/public-key profile comes only from separately accepted protected
+configuration: `CLB91_GPG_PROFILE`, `CLB91_REVIEWER_PUBLIC_KEY`,
+`CLB91_REVIEWER_FINGERPRINT`. The profile has exact format/version, canonical
+absolute `gpg`/`agent`/`gpgconf` paths, compiled `sysconfdir` and SHA256 for each
+executable. These are public runtime bytes, not secret-derived hashes. Approving
+these fields requires independent source/build/configuration verification; the
+program never learns them from a candidate. GNU dependency closure must be
+static (Linux has no dynamic/interpreter segment; thin Mac executable has only
+OS libraries and no rpath). OS/kernel/Python/system CA store and the protected
+owner are trusted host prerequisites. Runtime parents/files are no-follow,
+protected and held/rechecked. Both compiled system configuration inventory and
+homedir `common.conf`/GPG configuration must be absent; `--no-options` alone does
+not establish that. Network key discovery, autostart and pinentry prompts are
+disabled. An unsupported interactive/passphrase key requirement refuses; this
+candidate does not add an unverified pinentry or key-cache fallback. Actual
+receiver key generation/choice/runtime acceptance belong to the human, never
+Codex. The test build is temporary, not provisioned trusted runtime.
+
+**Mac reviewer.** Owner `koteev-m` independently approves the immutable consumer
+source/Git revision and crypto runtime/key fingerprint. The human-only
+`scripts/deploy/review-root-binding.py` accepts fixed `review`, `approve` or
+`reject` actions plus exact expected run ID, attempt, source revision, artifact
+ID, implementation, owner-only directory, profile/public-key/fingerprint and a
+dedicated local keyring. It does not use the default keyring. Run it as
+`python3 -I -S -B`, outside Codex when actual private keys are involved. Public
+output is a fixed category; file locations are operator-supplied private inputs.
+No private file should be pasted into chat, Actions inputs, issues or logs.
+
+Before decrypt, fixed authenticated GETs verify successful main/manual exact
+run/attempt/repository/workflow, the unique protected execute/upload steps,
+approved producer source bytes against immutable local Git objects, artifact
+name/ID/head, creation inside that attempt's upload interval, expiry, archive
+digest and a single bounded `binding.pgp` entry. REST artifact metadata itself
+has no attempt field; temporal and exact-source upload naming checks establish
+that binding. There is no latest-artifact lookup, TOFU or API-source adoption.
+GitHub token goes only to `api.github.com`; artifact redirects receive no token,
+proxy/CA/keylog overrides refuse, and total GET lifetime/output are bounded by
+the existing owned process-group capture. OpenPGP is not sender authentication.
+A separate accepted GitHub/Python/system TLS trust basis is still necessary.
+
+Decrypt requires exact receiver and accepted AEAD status plus successful GPG
+exit; partial output, malformed evidence, wrong source/receiver/attempt, expired
+or incomplete binding all refuse. A supervised owned agent has no network or
+prompt fallback. `review` stores full envelope/provenance in owner-only
+`review.json` (directory 0700, file 0600). The human must independently inspect
+ALL binding fields: incident/implementation, principal, canonical Compose
+path/project/service, persistent backing, stable object identities and complete
+configuration fingerprints. Decryption is not approval. `approve` repeats
+source/artifact/decryption/binding checks, checks the held reviewed document,
+then requires exact `/dev/tty` confirmation of artifact/ciphertext and target
+run number. A CLI flag cannot approve. This records local intent, not automatic
+proof of GitHub account ownership. Protected secret provisioning must separately
+verify the owner/account and review outcome. `reject` creates an exclusive
+non-approval decision. Local decision locks/exclusive outputs refuse replay and
+concurrency; cleanup/recheck/catchable cancellation failures revoke only their
+own unpublished decision. Crash/unknown termination is not a successful review;
+no provisioning may use a file without a successful exact review outcome.
+
+**Authorization change / no downgrade.** Public dispatch now has EIGHT inputs:
+`environment`, `incident_tag`, `release_owner`, `expected_revision`, `image_digest`,
+`implementation`, `action`, `prior_status`. `authorization` input and all
+`AUTHORIZATION` outputs/environment wiring are removed. Nonempty legacy
+`AUTHORIZATION` or `CLB82_AUTHORIZED_ROOT_BINDING` refuses; there is no vars/hash
+fallback. Resume requires **stage Environment Secret**
+`CLB91_REVIEWED_ROOT_APPROVAL`, strict private format 2, `decision=approve`,
+`reviewer=koteev-m`, receiver, reviewed/expiry timestamps, exact evidence receipt,
+FULL reviewed binding and execution tuple (`resume-start`, ONE run_number,
+attempt 1, exact source revision matching producer). Default approval validity
+is one hour, bounded by evidence expiry (at most one day). Missing/changed/
+expired/unapproved/legacy authority refuses. Public syntax validation conveys
+no authority; protected execution validation occurs before SSH credentials.
+`CLB82_APPROVED_IMPLEMENTATION` remains a separate exact source pin.
+
+The runner compares fresh private candidate to the reviewed complete binding
+before claim and rechecks approval. Private control version 2 binds full approval
+and metadata; helper v1 control is rejected. The helper checks trusted-clock
+expiry immediately before durable claim, start checkpoint and Compose `up`
+admission. Read-only reconciliation remains possible after expiry; expiry does
+not reset consumed authority. The immutable consumed marker additionally binds
+private authority metadata, so extensions or source/run changes cannot reuse a
+claim. Application→operation locks, source/root equality, fresh migration/state
+predicates, one claim/one submission, lost-ACK refusal and existing recovery
+transitions remain. Nothing provisions/adopts a pin or resumes automatically.
+
+**External acceptance — NOT performed here.** Separate authorization is needed
+for publication, live protected-main/no-overlap policy verification, independent
+runner/Mac crypto and TLS runtime acceptance, actual reviewer public-key pin,
+retirement of legacy vars/pending v1 authority, exact stage Secret provisioning,
+any read-only inspect dispatch/Environment approval/SSH capture, and a later
+exact resume decision/dispatch. Environment approval alone is not substantive
+binding review. Current `compose_subset/invalid` still needs its own agreed
+Compose adapter task; this channel does not bypass it or prove live equivalence.
+
+Affected local commands: `python3 -B scripts/tests/test_root_binding_review.py`,
+`python3 -I -S -B scripts/tests/test_root_binding_crypto.py` (portable refusals;
+real crypto runs only when `CLB91_TEST_GPG` points to the independently checked
+disposable runtime, reports NOT_RUN otherwise), existing corrected-stage shards,
+source/structure/quiesced/workflow/capability validators and `git diff --check`.
+Only temporary synthetic keypairs are permitted in automated tests. Darwin GPG
+checks do not prove Linux/static/runtime or live stage acceptance.
+
+### CLB-91 corrected Compose compatibility — local executor prerequisite
+
+The 2026-10-13 local continuation is **CLB91_HELPER_CAPTURE_BLOCKED** on
+**P1 LOCAL_EXECUTOR_CONTRACT_GAP**. The existing private review v2 remains intact;
+there is no Compose adapter or relaxed `env_file` guard in this candidate.
+
+[`compose_call`](../../scripts/deploy/remote-compose-release.sh) uses PATH-resolved
+`docker compose` under the helper's actual filtered `docker_environment` for both
+configuration normalization and resolved-model/lifecycle reuse. The existing
+[`Runtime`](../../scripts/deploy/stage-compose-env-semantic-operation.py) and
+its [191-file reference profile](../../scripts/deploy/stage-compose-env-semantic-runtime.json)
+pin standalone `/usr/local/bin/docker-compose` 5.1.1. They do not pin the Docker
+CLI, its selected plugin or plugin search policy; the profile also omits `socket`
+used by the corrected helper and is not a complete whole-helper closure.
+The [feasibility observer](../../scripts/deploy/stage-runtime-feasibility-operation.py)
+explicitly does not approve its observed toolchain. Missing live proof alone is
+not a local implementation blocker; a fixed supported same-executor contract is.
+
+Before local adapter implementation continues, agree that exact executor and a
+complete independently accepted Runtime profile. Retaining Docker CLI requires
+exact CLI provenance/identity/closure, protected PATH resolution and ordered
+plugin search/selection including absence or integrity of higher-priority slots,
+bound to the held empty Docker config and preserved actual environment. A switch
+to the existing standalone executor for ALL calls would need explicit contract
+selection and complete applicable helper closure; it must not be silently made.
+No observed stage hash, version string or root ownership alone adopts a pin.
+
+Reuse the planner through a caller normalization boundary: its standalone
+[`prepare`](../../scripts/deploy/stage-compose-env-file-plan.py) wrapper replaces
+PATH/HOME/TMPDIR/DOCKER_CONFIG/DOCKER_HOST and is not the helper's effective
+context. One captured sealed dotenv input must serve both the sole AST-validated
+`services.app.env_file: [.env]` projection and CLI `--env-file`; keep the original
+object leases, locks, canonical path/name, other services and all actual semantic
+inputs. Full typed BEFORE/AFTER and both resolved-model re-normalizations must
+use the SAME accepted executor/context as later reuse. Comparing under one
+executor does not approve another. No candidate is applied automatically.
+
+This prerequisite was established by read-only source/profile analysis, not by
+reading private stage bytes or running Compose. Linux/FD/native and live stage
+acceptance remain NOT_RUN. Source/approval v2, incident and release predicates
+are unchanged; publication and every stage action still need separate authority.
+
+
+### CLB-91 fixed non-root Docker CLI/plugin candidate (local only)
+
+This unpublished candidate extends only the existing corrected helper. It does
+not establish live stage trust or authorize capture, deployment, recovery or
+provisioning. The frozen namespace launcher remains separate and unchanged.
+The incident owner/revision/image, state transitions, migration evidence,
+resume predicates and durable one-shot claim remain fixed.
+
+`stage-docker-compose-profile.json` is a fixed **candidate**, derived from public
+artifacts rather than observed server hashes. The approved helper embeds its
+entire profile and the existing Runtime/capture/planner code; private review v2
+therefore binds the new closure to the exact implementation blob. Regenerate
+locally with `python3 -B scripts/deploy/embed-corrected-compose.py --write .`,
+then synchronize current implementation/transport pins. Its `--check` belongs
+to the existing test path. Neither transport cap (262144 bytes) nor Linux single
+argument cap (131072 bytes) may be widened to fit source drift.
+
+Public provenance for the fixed profile:
+
+| Component | Accepted public source |
+| --- | --- |
+| `/usr/bin/docker` 29.3.1 | Docker signed noble/stable Packages, exact `docker-ce-cli_29.3.1-1~ubuntu.24.04~noble_amd64.deb` SHA256 `c887a1fef3fa7a26d1a645592670db4b6bbd792134e07ce09999b2f7692496bb`; ELF depends only on the pinned libc/loader. |
+| Compose plugin 5.1.1 | Same verified static Linux amd64 artifact and Sigstore/provenance reference already recorded in `scripts/tests/linux-semantic/amd64-inputs.json`; placed only at `/usr/libexec/docker/cli-plugins/docker-compose`. No new Sigstore or native execution is inferred. |
+| Bash 5.2.21-2ubuntu4 | Exact signed noble/main snapshot package SHA256 `73de311a21e094e29ac01527d2b52226cc87fde0a5b57032902251b426d92c66`; `/bin/bash` must resolve to pinned `/usr/bin/bash`. |
+| libtinfo6 6.4+20240113-1ubuntu2.2 | Exact signed noble-updates/main snapshot package SHA256 `b67a6df2bdab61d273eabebd208bb6a3fb12618a390a067e1ee305a409ff03d9`; pinned canonical leaf/SONAME alias, libc only. |
+| Remaining closure | Existing accepted Ubuntu 24.04 amd64 manifest, unchanged reference leaves, plus exact locked Python socket.py/resource extension; static interpreter builtin inventory proves `_socket`, math and array. No invented extension or generated bytecode pin. |
+
+Docker signature verification used a dedicated public-only temporary keyring,
+primary fingerprint `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`, signing fingerprint
+`D3306A018370199E527AE7997EA0A9C3F273FCD8`. The exact signed raw Packages hash was
+`8cbb461bdda89c1b92d67b55118a671c8993b81e368b42b170f22301fa349da2`.
+Ubuntu snapshot index digests reuse the existing accepted signed reference:
+noble/main `8f6f71ae839c8cba390a7643fcbbdacddb0bc7d12c1583a2dd80a1f8443a30e5`,
+noble-updates/main `28e8f68108a8f79c0a0e8994570a8a10c0b215eb4749a5e1eda07d07f1d61f4c`.
+Downloaded/decompressed public bytes matched those indices; binaries were not
+executed or installed. These facts establish candidate provenance, not host
+acceptance. Historical diagnostic/native/reference pins remain historical.
+
+The startup/effect contract is version-specific:
+[Docker CLI 29.3.1 plugin manager](https://github.com/docker/cli/blob/v29.3.1/cli-plugins/manager/manager.go)
+actually searches extra dirs, config-dir plugins, then four system directories;
+its comments must not replace the implementation order. The helper supplies a
+held, unlinked, empty private Docker config directory and rejects all earlier
+Compose candidates, user/additional paths, runtime hooks and identity drift.
+No fallback selects a different executor. All executable/loader/library leaves
+and aliases must be root-owned/protected and match the fixed closure before
+private control or configuration reads. Initial SSH/bootstrap interpreter and
+root/kernel are retained independent host prerequisites, not proven by this gate.
+
+[CLI command startup](https://github.com/docker/cli/blob/v29.3.1/cmd/docker/docker.go)
+does not enumerate unrelated plugin hooks on the non-terminal capture path.
+[Compose 5.1.1 config](https://github.com/docker/compose/blob/v5.1.1/cmd/compose/config.go)
+without image digest-resolution/output options uses no Engine operation.
+[Its pre-run](https://github.com/docker/compose/blob/v5.1.1/cmd/compose/compose.go)
+only promotes `COMPOSE_` dotenv controls to process environment; those and
+`DOCKER_` dotenv keys remain refused.
+[compose-go 2.10.1](https://github.com/compose-spec/compose-go/blob/v2.10.1/cli/options.go)
+uses supplied nonempty EnvFiles and skips implicit original `.env` discovery.
+These are source conclusions requiring real unprivileged Linux acceptance.
+
+The helper keeps its actual effective `docker_environment` (including actual
+PATH/HOME/application values), never a synthetic planner environment. Unsupported
+hooks, extra config/plugins, piped kernel core handlers, unknown account resolvers,
+or incomplete/drifting context refuse before private reads. The fixed account
+profile supports only `passwd: files`; exact UID/GID/name are checked from bounded
+root-owned public files. Supported effective locales are C/POSIX/empty; only
+LC_CTYPE additionally permits the pinned C.UTF-8/C.utf8 leaf. Values are preserved,
+never silently rewritten to make a profile pass.
+
+Only one AST-confirmed `services.app.env_file` sequence containing literal `.env`
+is added. Other forms/services/files, aliases/tags, include/build/extends,
+secrets/configs and external inputs remain refused. A present canonical dotenv
+is required for that path. Application then operation locks and no-follow
+original-object leases precede bounded capture; replacement, metadata/content
+change, short read, busy lock or cleanup failure block the result.
+
+The projection redirects only that service reference to sealed captured input;
+CLI `--env-file` references the same capture. Normalizers receive no original
+file FD/pathname, use the held canonical working/project directory and bound
+project name, and preserve the complete effective environment. The existing
+remove → explicit → refuse planner proves full typed models and both normalized
+round trips, including other services, null/absence/empty values and dollars.
+`Plan.candidate` remains private and unapplied; no canonical stage file writer is
+added. Original configuration object IDs and hashes stay only in private binding.
+
+Worker/RPC executors are fixed Bash/Python/Docker; readiness iteration/count/delay
+predicates are unchanged. Bounded nonblocking IPC/output, process-group ownership,
+recorded cancellation and attempted-all FD/stream cleanup precede inspect success.
+No failed inspection can mint ciphertext evidence or reviewed authorization.
+The retained completion/ack-loss recovery distinction still requires separate
+fresh reconcile proof under existing predicates; it does not approve a failed
+semantic capture or permit replay.
+
+Publication, protected receiver/implementation/profile acceptance, real Linux
+Compose/FD tests, current host/bootstrap/executable/dependency/plugin/account/core
+and effective-context proof, encrypted live capture/human review, protected Secret
+provisioning and any eventual resume each need their applicable separate authority.
+Historical `compose_subset/invalid` and synthetic CLB-195 PASS establish none of
+these current host facts. `STAGE_TRUST=UNVERIFIED`; `TRANSACTION_READINESS=NO`.

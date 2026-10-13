@@ -35,12 +35,103 @@ def load(name):
 
 operation = load('stage-compose-diagnostic-operation')
 runner = load('stage-compose-diagnostic')
-HELPER = (ROOT / 'scripts/deploy/remote-compose-release.sh').read_bytes()
-assert len(HELPER) == 183462 and hashlib.sha256(HELPER).hexdigest() == '54839fcfa543888cc4613d2af480d85aee07ab8dd6b4a2bf879e64d501577809'
-EMBEDDED = HELPER.decode().split("<<'CLB82_BOUND_PYTHON' || true\n", 1)[1].split('\nCLB82_BOUND_PYTHON', 1)[0]
-ORIGINAL_TREE = ast.parse(EMBEDDED)
-ORIGINAL_CLASS = next(n for n in ORIGINAL_TREE.body if isinstance(n, ast.ClassDef) and n.name == 'BoundContext')
+# Immutable original guard oracle extracted from the complete helper at main
+# c4f4ce26b8452b31ee0e27e5511a117baa0a5d06 (183462 bytes; SHA256 below).
+# Only the exact historical unique/record/value and eight reviewed guard AST
+# scopes are retained. This avoids mutable current-helper and shallow-Git reads;
+# it does not claim these historical predicates prove current stage readiness.
+HISTORICAL_HELPER_SHA256 = '54839fcfa543888cc4613d2af480d85aee07ab8dd6b4a2bf879e64d501577809'
+HISTORICAL_ORACLE_SHA256 = 'ef2aa92f07269e11d1a589b05fab911b4b973486ff80984a511220c1f0cd4015'
+HISTORICAL_ORACLE_SOURCE = r'''def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        check(key not in result)
+        result[key] = value
+    return result
 
+class BoundContext:
+
+    def record(self, directory, name, count):
+        data = self.read(directory, name, 2048).decode('ascii')
+        check(len(data.splitlines()) == count and (not data.endswith('\n')))
+        pairs = [line.split('=', 1) for line in data.split('\n')]
+        check(all((len(pair) == 2 and pair[0] and pair[1] for pair in pairs)))
+        return unique(pairs)
+
+    def value(self, key):
+        check(key in self.state_keys)
+        data = self.read('state', key)
+        check(data and b'\n' not in data and all((32 <= b <= 126 for b in data)))
+        return data.decode('ascii')
+
+    def capture_configuration(self):
+        with inspect_guard('compose_subset'):
+            for line in main.decode('utf-8').splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith('#'):
+                    continue
+                check('\t' not in line and (not stripped.startswith(('---', '...', '%', '!', '&', '*', '{', '['))))
+                if stripped.startswith('- '):
+                    check(not stripped[2:].startswith(('!', '&', '*', '{')))
+                    continue
+                match = re.match('([A-Za-z0-9_.-]+):(?:\\s+(.*))?$', stripped)
+                check(match)
+                key, value = (match[1], match[2] or '')
+                check(key not in ('include', 'extends', 'env_file', 'label_file', 'build', 'configs', 'secrets', 'develop', 'provider', 'models') and (not value.startswith(('!', '&', '*', '|', '>', '{'))))
+                if not line.startswith(' '):
+                    check(key in ('services', 'volumes', 'version', 'name', 'networks'))
+        with inspect_guard('override', 'mismatch'):
+            override = self.read('compose', 'docker-compose.override.yml')
+            release = self.read('state', 'docker-compose.release.yml')
+            expected = f'# clubs-bot-managed-quiesced-release\n# revision: {self.revision}\nservices:\n  app:\n    image: {self.image}\n'.encode()
+            check(override == expected and release == expected)
+
+    def check_evidence(self):
+        with inspect_guard('retained_layout'):
+            check('active-candidate.anchor' not in os.listdir(self.directories['parent']))
+            root_entries = set(os.listdir(self.directories['root']))
+            check(root_entries <= {'clubs-bot-schema-stage.lock', 'clubs-bot-schema-stage.results', 'clubs-bot-schema-stage.migration-ledgers', '.clb82-resume-start-33468965282-1.consumed'})
+            check(set(os.listdir(self.directories['state'])) == self.state_keys | {'docker-compose.release.yml', 'prior-override'})
+        with inspect_guard('retained_identity', 'mismatch'):
+            for key, value in dict(owner=self.owner, expected_revision=self.revision, image_digest=self.image, compose_path_hash=self.path_hash, compose_project=self.project, compose_service='app', migration_image_digest=self.image).items():
+                check(self.value(key) == value)
+        with inspect_guard('retained_checkpoint'):
+            check(self.value('checkpoint') in ('migration_completed', 'candidate_start_begun', 'candidate_healthy'))
+            check(re.fullmatch('sha256:[0-9a-f]{64}', self.value('migration_image_id')))
+        with inspect_guard('prior_override', 'mismatch'):
+            prior = self.read('state', 'prior-override', 1024)
+            check(sha(prior) == self.value('prior_override_sha256'))
+            if self.value('prior_override_exists') == 'no':
+                check(prior == b'absent')
+            else:
+                check(self.value('prior_override_exists') == 'yes')
+                old_image, old_revision = (self.value('old_app_digest'), self.value('old_app_revision'))
+                check(re.fullmatch('ghcr\\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}', old_image) and re.fullmatch('[0-9a-f]{40}', old_revision))
+                prefix = '# clubs-bot-managed-quiesced-release\n'
+                check(prior in ((prefix + f'# revision: {old_revision}\nservices:\n  app:\n    image: {old_image}\n').encode(), (prefix + f'services:\n  app:\n    image: {old_image}\n').encode()))
+            check(self.value('candidate_override_sha256') == self.config_hashes['override'])
+        with inspect_guard('migration_records'):
+            common = dict(owner=self.owner, environment='stage', expected_revision=self.revision, image_digest=self.image, compose_path_hash=self.path_hash, operation='migration', invocation_fingerprint=sha(f'v1|stage|{self.owner}|{self.revision}|{self.image}|{self.path_hash}'.encode()))
+            ledger = self.record('ledger', self.owner + '.ledger', 13)
+            outcome = self.record('ledger', self.owner + '.outcome', 12)
+            check(set(os.listdir(self.directories['ledger'])) == {self.owner + '.ledger', self.owner + '.outcome'})
+            for value, required, epochs in ((ledger, dict(ledger_version='1', state='completed', result='completed', completion_checkpoint='migration_completed'), ('created_epoch', 'completed_epoch')), (outcome, dict(outcome_version='1', state='succeeded', bounded_result='migration_succeeded', completion_checkpoint='migration_process_succeeded'), ('recorded_epoch',))):
+                check(set(value) == set(common) | set(required) | set(epochs))
+                check(all((value.get(k) == v for k, v in {**common, **required}.items())))
+                check(all((re.fullmatch('[0-9]{1,12}', value[k]) for k in epochs)))
+        with inspect_guard('result_record'):
+            result = self.record('results', self.owner + '.result', 10)
+            check(set(result) == set('result_version owner requested_operation checkpoint_before checkpoint_after result failure_category expected_revision image_digest compose_path_hash'.split()))
+            check(all((result.get(k) == v for k, v in dict(result_version='1', owner=self.owner, expected_revision=self.revision, image_digest=self.image, compose_path_hash=self.path_hash).items())))
+            check(result['requested_operation'] in ('start', 'resume-start'))
+            check(result['checkpoint_before'] in ('migration_completed', 'candidate_start_begun', 'candidate_healthy'))
+            check(result['checkpoint_after'] in ('migration_completed', 'candidate_start_begun', 'candidate_healthy', 'unavailable'))
+            check((result['result'], result['failure_category']) in (('success', 'success'), ('remote_failure', 'app_identity_mismatch'), ('remote_failure', 'candidate_start_failed'), ('remote_failure', 'readiness_failed'), ('remote_failure', 'health_failed'), ('remote_failure', 'unexpected'), ('remote_failure', 'child_exit_255'), ('remote_failure', 'durability_failure'), ('incomplete_unknown', 'operation_in_progress'), ('incomplete_unknown', 'interrupted')))
+            self.result = result
+'''
+assert hashlib.sha256(HISTORICAL_ORACLE_SOURCE.encode()).hexdigest() == HISTORICAL_ORACLE_SHA256
+ORIGINAL_TREE = ast.parse(HISTORICAL_ORACLE_SOURCE)
+ORIGINAL_CLASS = next(n for n in ORIGINAL_TREE.body if isinstance(n, ast.ClassDef) and n.name == 'BoundContext')
 
 def scope(method, guard):
     function = next(n for n in ORIGINAL_CLASS.body if isinstance(n, ast.FunctionDef) and n.name == method)
@@ -1147,7 +1238,7 @@ class RunnerTest(unittest.TestCase):
         tree = ast.parse(sources[runner.TRANSPORT_PATH])
         calls = [node.args[0].value for node in ast.walk(tree) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Name) and node.func.id == 'source_module']
-        self.assertEqual(sorted(calls), ['release_authority', 'release_private_root'])
+        self.assertEqual(sorted(calls), ['release_authority', 'release_private_root', 'root_binding_review'])
         # Dependencies have no transitive project import or source loader.
         for path in runner.DEPENDENCY_PATHS:
             dependency = ast.parse(sources[path])
@@ -1168,8 +1259,38 @@ class RunnerTest(unittest.TestCase):
              patch.object(runner, 'compile', side_effect=compiling, create=True):
             transport = runner.load_transport(sources, [False])
             self.assertTrue(callable(transport.pinned_hosts))
+            self.assertIs(transport._review, transport.source_module('root_binding_review'))
+            self.assertEqual(transport._review.encoded.__code__.co_filename,
+                             str(ROOT / 'scripts/deploy/root_binding_review.py'))
             with self.assertRaises(ValueError): transport.source_module('unapproved')
         self.assertEqual(observed, [ast.dump(tree)])
+
+    def test_all_current_frontends_capture_exact_third_dependency_without_path_reread(self):
+        dependencies = ('scripts/deploy/release_private_root.py',
+                        'scripts/deploy/release_authority.py',
+                        'scripts/deploy/root_binding_review.py')
+        for name in ('stage-compose-diagnostic', 'stage-compose-env-semantic',
+                     'stage-runtime-inventory', 'stage-runtime-feasibility', 'stage-package-plan'):
+            with self.subTest(frontend=name):
+                frontend = load(name)
+                self.assertEqual(frontend.DEPENDENCY_PATHS, dependencies)
+                self.assertTrue(set(dependencies).issubset(frontend.LOCAL_SOURCES))
+                self.assertEqual(frontend.LOCAL_SOURCES.count(dependencies[2]), 1)
+                self.assertIn(dependencies[2], frontend.SOURCE_PINS)
+                paths = frontend.LOCAL_SOURCES if name == 'stage-package-plan' else (*frontend.LOCAL_SOURCES, frontend.REMOTE_PATH)
+                snapshot = {path: (ROOT / path).read_bytes() for path in paths}
+                with patch.object(frontend.os, 'open', side_effect=AssertionError('project source reopened')):
+                    transport = frontend.load_transport(snapshot, [False])
+                self.assertIs(transport._review, transport.source_module('root_binding_review'))
+                for unapproved in ('root_binding_review.py', 'review-root-binding', '../root_binding_review', ''):
+                    with self.assertRaises(ValueError): transport.source_module(unapproved)
+                for mutation in ('missing', 'substitution'):
+                    bad = dict(snapshot)
+                    if mutation == 'missing': del bad[dependencies[2]]
+                    else: bad[dependencies[2]] = b'print("PRIVATE_SOURCE_CANARY")'
+                    with patch.object(frontend, 'exec', create=True) as execute:
+                        with self.assertRaises(ValueError): frontend.load_transport(bad, [False])
+                        execute.assert_not_called()
 
     def test_actual_capture_output_timeout_and_process_cleanup(self):
         success = operation.capture_result([sys.executable, '-I', '-S', '-B', '-c', 'print("bounded")'], limit=8)
