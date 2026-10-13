@@ -347,9 +347,68 @@ class Authority(unittest.TestCase):
                 incident,executor.COMPOSE_PATH,now=NOW))
 
 
+def fixture_private_parent():
+    # Use the same real ancestor guard as corrected-stage fixtures. Never create
+    # private inputs under a rejected temp parent; the checkout is also checked.
+    parent = Path(tempfile.gettempdir()).resolve(strict=True)
+    try:
+        descriptor = executor.open_canonical_root(str(parent))
+    except RuntimeError:
+        parent = ROOT
+        descriptor = executor.open_canonical_root(str(parent))
+    os.close(descriptor)
+    return parent
+
+
+class FixtureBoundary(unittest.TestCase):
+    def test_parent_guards_and_owned_cleanup(self):
+        parent = fixture_private_parent()
+        fd = executor.open_canonical_root(str(parent)); os.close(fd)
+        with tempfile.TemporaryDirectory(dir=parent) as container:
+            root = Path(container); sentinel = root/'sentinel'; sentinel.write_text('keep')
+            safe = root/'safe'; safe.mkdir(mode=0o700)
+            child = safe/'child'; child.mkdir(mode=0o700)
+            with patch.object(tempfile, 'gettempdir', return_value=str(safe)):
+                self.assertEqual(safe, fixture_private_parent())
+                safe.chmod(0o777)
+                with self.assertRaises(RuntimeError): executor.open_canonical_root(str(child))
+                self.assertEqual(ROOT, fixture_private_parent())
+                with patch.dict(fixture_private_parent.__globals__, ROOT=safe):
+                    with self.assertRaises(RuntimeError): fixture_private_parent()
+                safe.chmod(0o700)
+            alias = root/'alias'; alias.symlink_to(safe, target_is_directory=True)
+            with self.assertRaises(RuntimeError): executor.open_canonical_root(str(alias))
+            original = os.fstat
+            def foreign_owner(fd):
+                values = list(original(fd)); values[4] = os.geteuid()+100000
+                return os.stat_result(values)
+            with patch.object(os, 'fstat', side_effect=foreign_owner):
+                with self.assertRaises(RuntimeError): executor.open_canonical_root(str(safe))
+            temporary = tempfile.TemporaryDirectory(dir=safe)
+            owned = Path(temporary.name); (owned/'synthetic').write_text('fixture')
+            temporary.cleanup()
+            self.assertFalse(owned.exists()); self.assertEqual(sentinel.read_text(), 'keep')
+
+    def test_directory_identity_swap_cannot_publish_or_remove_replacement(self):
+        with tempfile.TemporaryDirectory(dir=fixture_private_parent()) as container:
+            root = Path(container); selected = root/'private'; selected.mkdir(mode=0o700)
+            moved = root/'held'; original = os.fsync; swapped = False
+            def swap(fd):
+                nonlocal swapped
+                if not swapped:
+                    swapped = True; selected.rename(moved); selected.mkdir(mode=0o700)
+                    (selected/'sentinel').write_text('replacement')
+                return original(fd)
+            with patch.object(os, 'fsync', side_effect=swap), self.assertRaises(FileNotFoundError):
+                review.write_private(str(selected), 'review.json', b'synthetic', executor.open_canonical_root)
+            self.assertTrue(swapped)
+            self.assertEqual((selected/'sentinel').read_text(), 'replacement')
+            self.assertFalse((selected/'review.json').exists())
+
+
 class PrivatePublication(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
+        self.temporary = tempfile.TemporaryDirectory(dir=fixture_private_parent())
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name).resolve()
         self.directory.chmod(0o700)
