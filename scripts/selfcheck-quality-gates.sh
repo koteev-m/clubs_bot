@@ -7174,6 +7174,22 @@ copy_workflow_capability_fixture() {
       ':(glob).github/workflows/*.yml' \
       ':(glob).github/workflows/*.yaml'
   )
+  # This exact workflow is source-bound even in synthetic capability fixtures.
+  # Reuse its validator's closure; never substitute a permissive fixture manifest.
+  local native_source_list="$TMP_DIR/native-sources-$fixture_name"
+  ruby -I"$ROOT_DIR/scripts" -rvalidate-workflow-capabilities \
+    - "$ROOT_DIR" >"$native_source_list" <<'RUBY' ||
+require 'pathname'
+root = Pathname.new(ARGV.fetch(0))
+Clb91BNativeWorkflow.sources(WorkflowCapabilityPolicy, root)
+puts Clb91BNativeWorkflow::FILES
+puts Clb91BNativeWorkflow::HERE + 'workflow-sources.json'
+RUBY
+    fail "native capability fixture source closure is invalid"
+  while IFS= read -r native_source; do
+    mkdir -p "$(dirname "$fixture_root/$native_source")"
+    cp "$ROOT_DIR/$native_source" "$fixture_root/$native_source"
+  done <"$native_source_list"
   cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/verify-oci-provenance.py" "$fixture_root/scripts/"
@@ -8798,7 +8814,7 @@ assert_yaml_safety_fixture_valid() {
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
       "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "30"
+      "31"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
@@ -11763,6 +11779,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_package_pl
 echo "[selfcheck] fixed least-privilege APT metadata refresh (disposable root tests run separately)"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_apt_metadata_refresh.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_feasibility.py"
+python3 -B "$ROOT_DIR/scripts/tests/linux-semantic/b-launch/test-workflow.py"
 PYTHONDONTWRITEBYTECODE=1 python3 -I -S -B "$ROOT_DIR/scripts/tests/test_stage_principal_uid.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check

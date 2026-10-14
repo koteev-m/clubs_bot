@@ -151,6 +151,71 @@ class Source(unittest.TestCase):
         self.assertNotEqual(check(),0)
 
 
+class CapabilityFixture(unittest.TestCase):
+    """Exercise the real selfcheck copier and parser against disposable Git trees."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        source=(ROOT/'scripts/selfcheck-quality-gates.sh').read_text()
+        copier=source[source.index('copy_workflow_capability_fixture() {'):
+                      source.index('\nmutate_workflow_capability_fixture() {')]
+        script='set -euo pipefail\nfail() { echo "$1" >&2; exit 1; }\n'+copier+'\ncopy_workflow_capability_fixture regression\n'
+        result=subprocess.run(['bash','-c',script],env={**os.environ,'ROOT_DIR':str(ROOT),'TMP_DIR':self.temp.name},
+                              capture_output=True,text=True,timeout=15)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.fixture=Path(result.stdout.strip())
+
+    def validate(self):
+        return subprocess.run(['ruby',str(ROOT/'scripts/validate-workflow-capabilities.rb'),str(self.fixture)],
+                              capture_output=True,text=True,timeout=5)
+
+    def test_complete_verified_closure_and_visible_inventory(self):
+        self.assertEqual(self.validate().returncode,0)
+        for name in D.SOURCES+(D.MANIFEST,):
+            self.assertEqual((self.fixture/name).read_bytes(),(ROOT/name).read_bytes())
+        self.assertEqual({p.name for p in (self.fixture/D.DRIVER).parent.iterdir()},
+                         {Path(p).name for p in D.SOURCES+(D.MANIFEST,) if p.startswith(D.HERE)})
+        args=['git','-C',str(self.fixture),'ls-files']
+        tracked=subprocess.check_output(args,text=True).splitlines()
+        untracked=subprocess.check_output(args+['--others','--exclude-standard'],text=True).splitlines()
+        expected={'.github/workflows/release-status.yml','.github/workflows/corrected-stage-release.yml'}
+        self.assertEqual(set(untracked),expected)
+        self.assertFalse(expected.intersection(tracked))
+        self.assertEqual(sum(p.startswith('.github/workflows/') for p in tracked+untracked),31)
+
+    def test_each_missing_pinned_source_refuses(self):
+        for name in D.SOURCES+(D.MANIFEST,):
+            with self.subTest(name=name):
+                path=self.fixture/name;raw=path.read_bytes();path.unlink()
+                self.assertNotEqual(self.validate().returncode,0)
+                path.write_bytes(raw)
+
+    def test_each_modified_pinned_source_refuses(self):
+        for name in D.SOURCES:
+            with self.subTest(name=name):
+                path=self.fixture/name;raw=path.read_bytes();path.write_bytes(raw+b'\n')
+                self.assertNotEqual(self.validate().returncode,0)
+                path.write_bytes(raw)
+
+    def test_manifest_mismatch_and_ambiguous_schema_refuse(self):
+        path=self.fixture/D.MANIFEST;raw=path.read_bytes();model=json.loads(raw)
+        model['files'][D.DRIVER]='0'*64
+        for changed in ((json.dumps(model,indent=2)+'\n').encode(),b'{"format":1,'+raw[1:],b'{}\n'):
+            path.write_bytes(changed)
+            self.assertNotEqual(self.validate().returncode,0)
+
+    def test_malformed_and_unexpected_workflow_refuse(self):
+        path=self.fixture/D.WORKFLOW
+        for raw in (b'jobs: [\n',b'name: unexpected\non: push\npermissions: write-all\njobs: {}\n'):
+            path.write_bytes(raw)
+            self.assertNotEqual(self.validate().returncode,0)
+
+    def test_other_capability_negatives_remain_enforced(self):
+        path=self.fixture/'.github/workflows/unexpected.yml'
+        for field in ('permissions: write-all','permissions: {}'):
+            path.write_text('name: unexpected\non: push\n'+field+'\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo synthetic\n')
+            self.assertNotEqual(self.validate().returncode,0)
+
+
 class Policy(unittest.TestCase):
     def test_exact_workflow_passes(self):
         self.assertEqual(validate_workflow(workflow()).returncode,0)
