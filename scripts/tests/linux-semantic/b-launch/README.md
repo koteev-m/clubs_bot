@@ -1,7 +1,10 @@
 # CLB-91 same-user mount-view candidate — test only
 
-Local source candidate on main `34460528411d377528dd963f0e482ee06a861afe`,
-tree `3101ddd39e3258f144ca586b1b95841d4d987a0f`. This is a synthetic kernel
+Historical construction base: `34460528411d377528dd963f0e482ee06a861afe`,
+tree `3101ddd39e3258f144ca586b1b95841d4d987a0f`. The first workflow candidate
+was merged at `95b1fbdb50e1fbd5ca84206ebcd096d49664a44c`; the approval-v2
+changes below are local, unpublished bytes and need a new independent source
+approval after publication. This is a synthetic kernel
 experiment candidate, not a stage launcher, installer or release authority.
 Native Linux and stage acceptance are **NOT_RUN**. No Engine reader is included.
 
@@ -35,8 +38,9 @@ reviewed, separately authorized disposable native harness. It returns only
 It is not safe to run merely because the caller is root. The future harness must
 independently establish the disposable host, exact source, Python/libc/bootstrap
 and fixture identities before any root execution. This task grants none of that
-future execution authority. A dedicated unpublished manual workflow candidate now
-invokes the fixed harness; no published workflow has run it.
+future execution authority. The dedicated manual workflow invokes the fixed harness only after its external
+protection/approval contract. Local tests never dispatch it or establish that
+those GitHub protections exist.
 
 ## Fixed topology and source boundary
 
@@ -202,92 +206,188 @@ missing evidence cannot be promoted to PASS.
 
 [CLB-91 B Native Acceptance](../../../../.github/workflows/clb91-b-native-acceptance.yml)
 has exactly one `workflow_dispatch` job on a GitHub-hosted `ubuntu-24.04` x64 VM,
-`contents: read`, no Environment, Secrets, OIDC, service/container or credentials.
-Only repository `koteev-m/clubs_bot`, `main`, owner `koteev-m`, initial attempt 1
-and the explicitly approved exact revision can proceed. Checkout is SHA-bound,
-with persisted credentials disabled. Existing Tests and deployment workflows
-are unchanged; their extra jobs/downloads/image builds do not run here.
+`contents: read`, no Secrets, OIDC, service/container, stage credentials or new
+release authority. Only repository `koteev-m/clubs_bot`, `main`, actor and
+triggering actor `koteev-m`, initial attempt 1 and an explicitly approved exact
+revision can proceed. Checkout is SHA-bound, with persisted credentials disabled.
+Existing Tests and deployment workflows remain unchanged.
 
-**Future independent source approval is not configured.** Before any future
-dispatch, separately authorize provision of public repository variable
-`CLB91_B_NATIVE_APPROVAL`, containing exactly:
+### Protected Environment and external acceptance — NOT_PROVISIONED
+
+The **whole native job**, including checkout and driver startup, references only
+`clb91-b-native-test`, with `deployment: false`. This uses Environment protection
+without creating a GitHub deployment object. Required reviewers and branch rules
+still apply; custom deployment protection apps are incompatible with this mode.
+See [GitHub's deployment-false contract](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments#using-environments-without-deployments).
+
+The workflow declaration does **not** prove that the Environment exists or is
+protected. GitHub can implicitly create an unprotected Environment. Before any
+future dispatch, a separately authorized operator must independently verify and
+retain non-secret configuration evidence for this exact repository:
+
+- the exact existing Environment identity/name, not `stage` or `prod`;
+- required reviewers enabled, with an explicitly chosen eligible reviewer other
+  than the dispatch actor; `prevent_self_review: true` and admin bypass disabled;
+- custom branch policy permitting only branch `main`, with no tag or additional
+  branch policy; no custom deployment-protection apps;
+- no Environment Secrets/credentials for this synthetic test;
+- the v2 approval exists only as an **Environment-scoped public variable**;
+  no same-name repository/organization variable or workflow/job-level binding;
+- no old pending/in-progress native run, and no competing coordinator/dispatch.
+
+Reviewer identity/eligibility, plan support, protection rules, variable scope and
+post-dispatch variable delivery need independent live GitHub configuration
+acceptance. This task has not inspected or configured them. If any is absent,
+unknown, changed or unsupported, the operator **must not dispatch or approve**.
+An Environment variable is not cryptographic evidence of its origin; the driver
+cannot authenticate settings, reviewer or variable scope from process environment.
+Those are explicit external trust prerequisites, not synthetic test PASS.
+
+The approval is bound at the **driver step**, after Environment release, using
+`${{ vars.CLB91_B_NATIVE_APPROVAL_V2 }}`. It is not evaluated as a workflow/job
+`env` value or job `if` condition. GitHub documents environment configuration
+variables as available after the environment is declared by the runner; verify
+that an update made while this run is Waiting is delivered after review. Stale,
+missing or wrong-run data causes refusal before sudo, never a fallback or rerun.
+See [variable timing](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#configuration-variable-precedence)
+and [vars context](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#vars-context).
+
+Future configuration permissions are separate from job permissions. Using
+existing human GitHub access (no new PAT/App/service), Environment/protection
+creation or updates require repository admin authority (REST `Administration:
+write`); public Environment variable creation/update/deletion uses `Environments:
+write`. Dispatch/cancellation uses operator `Actions: write`. A chosen eligible
+required reviewer releases only the selected job; the corresponding REST review
+API requires `Deployments: write`. None of these write permissions is added to
+the workflow token, which remains `contents: read`, and none is granted here.
+See [Environment configuration API](https://docs.github.com/en/rest/deployments/environments#create-or-update-an-environment),
+[Environment variable API](https://docs.github.com/en/rest/actions/variables#create-an-environment-variable)
+and [review API](https://docs.github.com/en/rest/actions/workflow-runs#review-pending-deployments-for-a-workflow-run).
+
+### Post-dispatch approval v2 — no v1 fallback
+
+The separate public Environment variable `CLB91_B_NATIVE_APPROVAL_V2` must contain
+exactly the following schema (illustration only, **not executable approval**):
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "repository": "koteev-m/clubs_bot",
   "workflow": ".github/workflows/clb91-b-native-acceptance.yml",
-  "revision": "<future independently reviewed published 40-hex commit>",
-  "closure_sha256": "<public workflow-sources.json SHA256>",
-  "native_sha256": "<public native-sources.json SHA256>",
-  "run_number": "<one separately authorized next workflow run number>",
+  "revision": "<independently approved published 40-hex commit>",
+  "closure_sha256": "<approved workflow-sources.json SHA256>",
+  "native_sha256": "<approved native-sources.json SHA256>",
+  "run_id": "<actual selected workflow run ID after dispatch>",
+  "run_number": "<actual selected workflow run number after dispatch>",
+  "attempt": 1,
   "expires_at": 0
 }
 ```
 
-This is a schema illustration, **not executable approval**. Expiry must be an
-integer UTC epoch in the next hour, with trusted clock checks before native
-handoff. No actual approval record, future revision, variable or secret was
-provisioned. The base/tree in `native-sources.json` records the historical
-construction baseline, not authority for these unpublished bytes. A new main
-commit, missing/expired record, changed source, wrong run number or attempt
-refuses; no auto-adoption, retry or unsafe fallback exists. Run numbers belong to
-the workflow, not global repository numbering. No release FSM/claim is involved.
+Both run identities are canonical nonzero decimal **strings**, at most 20 digits;
+`format`, `attempt` and UTC epoch `expires_at` are integers, never booleans.
+Expiry must satisfy `now < expires_at <= now+3600` at each authorization check.
+It is an admission deadline, not a kill timer for an already admitted worker;
+the separate native operation budget still applies.
+All fields are mandatory; duplicate/extra fields, v1, wrong types, changed
+source/revision/run/attempt, missing or expired approval refuse. The old
+`CLB91_B_NATIVE_APPROVAL` repository variable is never read. A new main or a
+replacement run requires new independent approval; there is no auto-adoption.
 
 `workflow-sources.json` pins the seven executable/manifest/workflow inputs.
-`workflow-driver.py` verifies that closure before and after execution. The
-manifest cannot approve itself: its exact digest and future commit require
-independent review and separately controlled public configuration. Keep this
-variable limited to public source/run metadata; never place credentials or
-private evidence in it. Repository settings write authority remains an external
-trust assumption, and requires separate authorization.
+`workflow-driver.py` verifies that closure before and after execution. The native
+manifest's historical base/tree do not approve the current sources. The manifest
+cannot approve itself: both exact digests and the future published commit need
+independent review. No sensitive data belongs in the public approval. Settings
+write authority, GitHub run identity/attempt uniqueness and protection enforcement
+remain external trust assumptions. This adds no release FSM or durable claim.
 
-The driver calls sudo once, with a **fixed reviewed Python bootstrap**, exact
-approved driver hash and bounded public context. No caller program, source
-path, shell fragment, mount target or private bytes reach sudo. The bootstrap
-captures the one fixed driver through no-follow FD, rechecks identity and hash,
-then executes that captured approved buffer. The root driver revalidates the
-entire source closure and read-only native prerequisites before creating the
-exclusive protected source copy and synthetic fixture. It removes only its
-owned source objects and does not release native PASS before that cleanup.
-The native operation still performs the same 24 controls. Partial/unknown
-cleanup blocks acceptance and requires discarding the disposable VM.
+### Future one-shot coordinator contract — NOT_AUTHORIZED
 
-**This is a source-restricted workflow, not an OS-enforced sudo mediation
-boundary.** Hosted-runner passwordless sudo, initial Python/sudo/loader supplier
-and protected host image remain separately accepted prerequisites. No new sudo
-rule, grant, setuid binary, capability, package or host policy is installed.
-ELF/ownership/environment checks cannot independently authenticate that initial
-bootstrap or prove absence of emulation. An unsuitable capability/LSM/seccomp,
-procfs/backing context must refuse, with no repair/fallback. Root's synthetic
-worker receives only validated public execution context, never inherited tokens
-or Secrets. The real stage helper environment is not changed or simulated.
+1. Independently approve the exact **published** revision and complete source
+   closure, both manifest digests, bootstrap/runner trust and bounded root test.
+   The current base is not authority for these unpublished v2 changes.
+2. Verify the Environment configuration above, no approval from an older run,
+   no pending/running duplicate, and an exclusive coordinator window. Obtain
+   separate permission for configuration, one dispatch and one VM root test.
+3. Submit **one** dispatch of this exact workflow on `main`, with only
+   `approved_revision`; obtain the created run details. A lost/ambiguous response
+   permits read-only reconciliation only, never automatic redispatch. Do not
+   guess a run number or approve any run until identity is established.
+4. Independently retrieve that run and verify repository, numeric workflow ID
+   mapped to the exact path, run ID/number, SHA, event, branch, actor,
+   triggering actor, attempt 1 and the sole native job's **Waiting** state for
+   the exact Environment. Main must still match the approved revision. Any
+   duplicate, cancellation, replacement, drift or ambiguity stops this attempt.
+5. Provision only the selected run's v2 record as the exact Environment variable
+   **after dispatch**, with fresh bounded expiry, and verify its value/scope.
+   Do not provision repository/org fallback, Secret, token, PAT or GitHub App.
+6. Immediately before release, repeat the run/job, pending/duplicate, source,
+   variable and Environment checks. The chosen required reviewer reviews the
+   full source/run record and explicitly approves **only that run's** waiting
+   job. Approval by itself is not source review; never bypass protection rules.
+7. Driver validates the exact v2 record before sudo and at the final pre-sudo
+   gate. Root validates it on entry and again before native handoff. One run's
+   record cannot authorize a different run, even at the same revision/number.
+   Reruns (attempt >1) refuse. A cancellation signal observed before spawn
+   prevents sudo; cancellation racing spawn follows bounded supervision/refusal.
+8. Verify the selected run's exact source/run-bound native protocol, all 24
+   controls and cleanup. Job success, skipped work or synthetic tests do not
+   substitute for native PASS. Unknown cleanup requires VM disposal, no retry.
+9. Revoke the Environment approval after any terminal/canceled/refused outcome,
+   or immediately on uncertainty (plus separately authorized cancellation if
+   needed); verify revocation. Revocation is not a kill switch for a worker
+   already handed off: it cannot retroactively revoke a captured record.
 
-Operation budget remains 120 seconds, capture deadline 150 seconds with bounded
-termination/reap, and job timeout 10 minutes including checkout/evidence. One
-VM, one experiment, no retries. A lost root descendant cannot be assumed reaped
-by the unprivileged wrapper: no artifact/PASS is accepted, and external VM
-teardown is mandatory. Privileged setup/actual sudo signal behavior remains
-NOT_RUN, to be checked in the separately authorized native execution.
+No different run inherits approval after cancellation or pending replacement:
+its run ID fails even if revision matches. Concurrency is serialization, not
+reservation or approval. Group `clb91-b-native-acceptance-single-v1` retains
+`cancel-in-progress: false`; a new queued run can replace an existing pending
+run. If this occurs, abort/revoke rather than approving the replacement. See
+[GitHub concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+The exact run ID removes the old pre-dispatch next-number race; an exclusive
+coordinator window remains necessary for operational coordination and settings.
 
-Unique concurrency group `clb91-b-native-acceptance-single-v1` uses
-`cancel-in-progress: false`; it does not interact with Tests/release/stage.
-GitHub's default allows one running and one pending run, and a newer queued run
-can replace an older pending run even with this setting. Before dispatch,
-independently check for duplicate/pending/conflicting native experiments; do not
-treat concurrency as one-shot authorization. See [official concurrency rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+### Root, supervision and public evidence boundary
+
+The driver calls sudo once with a fixed reviewed Python bootstrap, approved
+driver hash and bounded public context. No caller program, source path, shell
+fragment, mount target or private bytes reach sudo. The bootstrap captures the
+fixed driver through no-follow FD, rechecks identity/hash and executes only the
+captured buffer. Root revalidates the source closure and read-only prerequisites
+before creating the exclusive source copy and synthetic fixture. It removes
+only owned objects and releases no native PASS before source-copy cleanup.
+
+This is a **source-restricted workflow**, not OS-enforced sudo confinement.
+Hosted-runner passwordless sudo, initial Python/sudo/loader supplier and host
+image remain separately accepted prerequisites. No sudo rule, grant, setuid,
+capability, package or host policy is installed. Structural checks cannot
+independently authenticate bootstrap provenance or absence of emulation.
+Unsupported capability/LSM/seccomp, procfs/backing must refuse without repair.
+Only validated public execution context reaches the synthetic worker.
+
+Budgets remain 120 seconds for the native operation, 150 seconds capture with
+bounded termination/reap, and 10 minutes job execution after Environment release.
+Waiting for review is controlled by GitHub and approval expiry must be set close
+to review, not at dispatch. There is one VM/experiment, no retries. An unreaped
+root descendant cannot be assumed cleaned by the unprivileged wrapper: no
+artifact/PASS is accepted and disposable VM teardown is mandatory.
 
 Only strict protocol-validated JSON <=4096 bytes is eligible for the fixed
-artifact, retention 3 days. Upload uses a validated output marker and is disabled
-on cancellation; no wildcard paths/raw stderr/environment/fixture are uploaded.
-Failure remains job failure even if a valid FAIL diagnostic is uploaded. A
-skipped/green job without the exact validated native PASS record proves nothing.
-Cancellation during final validation/publication refuses and rolls back owned
-partial evidence. File-command layout is checked against [Actions runner
-v2.328.0](https://github.com/actions/runner/blob/v2.328.0/src/Runner.Worker/FileCommandManager.cs#L29);
-unknown layouts refuse. Publication, public approval provisioning, runner/image
-and root test acceptance, exactly one future dispatch plus Git checkout/artifact
-network traffic and Actions cost all require separate permissions.
+artifact with retention 3 days. Upload requires the validated marker and is
+disabled on cancellation. No raw stdout/stderr, credentials, environment,
+filesystem identities or fixture paths are uploaded/logged. A valid FAIL
+artifact does not make the job succeed. Cleanup uncertainty cannot yield PASS.
+File-command layout remains checked against
+[Actions runner v2.328.0](https://github.com/actions/runner/blob/v2.328.0/src/Runner.Worker/FileCommandManager.cs#L29).
+
+Local tests verify schema/source/workflow/refusal behavior only. Actual GitHub
+Environment protection, variable delivery, native kernel acceptance and stage
+compatibility remain **NOT_RUN**. Publication, exact Environment configuration,
+public approval provisioning/revocation, reviewer release, hosted-runner/root
+acceptance, one future dispatch, checkout/artifact network and Actions cost all
+require separate authorization. Native PASS would still not prove the actual
+196-leaf Runtime, paired A-to-B stage resources or release/recovery readiness.
 
 References only: [existing Tests workflow](../../../../.github/workflows/tests.yml),
 [native adapter](../native-adapter/README.md),
