@@ -1387,12 +1387,39 @@ StageComposeDiagnosticWorkflow.validate(WorkflowCapabilityPolicy,w)
             self.assertIn(name, selfcheck)
         ruby = '''require "validate-workflow-yaml"; require "validate-workflow-capabilities";
 root=Pathname.new(ARGV[0]); paths=WorkflowYamlSafety.visible_workflows(root);
-raise "inventory: expected 30, actual #{paths.length}" unless paths.length == 30;
+raise "inventory: expected 31, actual #{paths.length}" unless paths.length == 31;
 raise "yaml" unless WorkflowYamlSafety.run(root) == 0;
 WorkflowCapabilityPolicy.run(root);
 '''
-        child = subprocess.run(['ruby', '-I', str(ROOT / 'scripts'), '-e', ruby, str(ROOT)], capture_output=True, text=True, timeout=30)
+        def validate(root):
+            return subprocess.run(['ruby', '-I', str(ROOT / 'scripts'), '-e', ruby, str(root)],
+                                  capture_output=True, text=True, timeout=30)
+        child = validate(ROOT)
         self.assertEqual(child.returncode, 0, child.stderr)
+        # Exercise the same fixed-count guard on real Git-visible inventories.
+        # Negative fixtures must fail at inventory, not a later missing source pin.
+        paths = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',
+            ':(glob).github/workflows/*.yml', ':(glob).github/workflows/*.yaml'], cwd=ROOT).split(b'\0')
+        with fixture_temporary_directory('clb91-workflow-inventory-') as directory:
+            fixture = Path(directory)
+            subprocess.run(['git', 'init', '-q', str(fixture)], check=True, capture_output=True, timeout=10)
+            for name in filter(None, paths):
+                path = Path(os.fsdecode(name)); target = fixture / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((ROOT / path).read_bytes())
+            removed = fixture / os.fsdecode(next(filter(None, paths)))
+            retained = removed.read_bytes(); removed.unlink()
+            with self.subTest(inventory='missing-one'):
+                child = validate(fixture)
+                self.assertNotEqual(child.returncode, 0)
+                self.assertIn('inventory: expected 31, actual 30', child.stderr)
+            removed.write_bytes(retained)
+            extra = fixture / '.github/workflows/clb91-unexpected-inventory.yml'
+            self.assertFalse(extra.exists()); extra.write_bytes(retained)
+            with self.subTest(inventory='extra-one'):
+                child = validate(fixture)
+                self.assertNotEqual(child.returncode, 0)
+                self.assertIn('inventory: expected 31, actual 32', child.stderr)
 
 
 class EndToEndTest(unittest.TestCase):
