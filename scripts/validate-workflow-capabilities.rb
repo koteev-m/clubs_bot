@@ -14,6 +14,7 @@ require_relative "validate-stage-package-plan-workflow"
 require_relative "validate-stage-apt-metadata-refresh-workflow"
 require_relative "validate-stage-runtime-feasibility-workflow"
 require_relative "validate-stage-principal-uid-workflow"
+require_relative "validate-clb91-b-native-workflow"
 
 module WorkflowCapabilityPolicy
   module_function
@@ -2208,6 +2209,8 @@ module WorkflowCapabilityPolicy
       StageAptMetadataRefreshWorkflow.validate(self, workflow) if path == StageAptMetadataRefreshWorkflow::PATH
       StageRuntimeFeasibilityWorkflow.validate(self, workflow) if path == StageRuntimeFeasibilityWorkflow::PATH
       StagePrincipalUidWorkflow.validate(self, workflow) if path == StagePrincipalUidWorkflow::PATH
+      Clb91BNativeWorkflow.validate(self, workflow) if path == Clb91BNativeWorkflow::PATH
+      Clb91BNativeWorkflow.sources(self, root) if path == Clb91BNativeWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
       validate_release_status_contract(path, workflow, triggers, jobs, raw)
       top_level = workflow.reject { |key, _value| key == "jobs" }
@@ -2275,7 +2278,8 @@ module WorkflowCapabilityPolicy
         # One manual, uncredentialed native prototype pins the standard x64 OS.
         # Effective permissions remain the existing exact contents: read policy.
         native_prototype = path == ".github/workflows/tests.yml" && job_name == "amd64-runtime-prototype"
-        expected_runner = native_prototype ? "ubuntu-24.04" : "ubuntu-latest"
+        dedicated_native = path == Clb91BNativeWorkflow::PATH && job_name == "native"
+        expected_runner = (native_prototype || dedicated_native) ? "ubuntu-24.04" : "ubuntu-latest"
         if native_prototype && job["if"] != "github.event_name == 'workflow_dispatch'"
           reject("#{context}: native prototype must be manual-only")
         end

@@ -1,0 +1,11 @@
+{
+  "base": "34460528411d377528dd963f0e482ee06a861afe",
+  "files": {
+    "native-entry.py": "7705489c8487b08fef1ccce004db321a928ce408e114580295da5bcf7a5913fc",
+    "native-harness.py": "34691ce52126e5626be992d366f949b96593a5a5ad5a83b2b24e0f1b77b3b9dd",
+    "native-protocol.py": "03b1784ae10ce8e785b321d350edf5003706313e6bf7a1f35c8a4da946276d76",
+    "prototype.py": "527b7794055a04e4989b915649ebe90977fd69c9b7b67bd868166532421a1f64"
+  },
+  "format": 1,
+  "tree": "3101ddd39e3258f144ca586b1b95841d4d987a0f"
+}
