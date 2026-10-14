@@ -1,0 +1,12 @@
+{
+  "files": {
+    ".github/workflows/clb91-b-native-acceptance.yml": "d9885b9fa91367548b7ac2fc2c9a314491adbe976efa2ad48c98f4bbf22dafb8",
+    "scripts/tests/linux-semantic/b-launch/native-entry.py": "7705489c8487b08fef1ccce004db321a928ce408e114580295da5bcf7a5913fc",
+    "scripts/tests/linux-semantic/b-launch/native-harness.py": "34691ce52126e5626be992d366f949b96593a5a5ad5a83b2b24e0f1b77b3b9dd",
+    "scripts/tests/linux-semantic/b-launch/native-protocol.py": "03b1784ae10ce8e785b321d350edf5003706313e6bf7a1f35c8a4da946276d76",
+    "scripts/tests/linux-semantic/b-launch/native-sources.json": "8762fa5df29f59b853977417d56fa8f23110cb4d0ecb294e1c5b4465fc90ad33",
+    "scripts/tests/linux-semantic/b-launch/prototype.py": "527b7794055a04e4989b915649ebe90977fd69c9b7b67bd868166532421a1f64",
+    "scripts/tests/linux-semantic/b-launch/workflow-driver.py": "d45bc164c379e31be120dc7e663b8be09c51197d1c0066399f24c79c7ba68abb"
+  },
+  "format": 1
+}
