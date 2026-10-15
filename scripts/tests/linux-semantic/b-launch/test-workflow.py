@@ -401,6 +401,23 @@ class Artifact(unittest.TestCase):
         with patch.dict(os.environ,self.env):
             with self.assertRaises(FileExistsError):self.publish(self.evidence())
 
+    def test_backing_diagnostics_publish_only_as_validated_failures(self):
+        for reason in R.BACKING_REASONS:
+            with self.subTest(reason=reason):
+                value=R.new(accepted()['revision'],accepted()['native_sha256'])
+                value.update(verdict='FAIL',reason=reason)
+                value['prerequisites']['source']='PASS'
+                value['prerequisites']['backing']='FAIL'
+                raw=R.encode(value)
+                with patch.dict(os.environ,self.env):
+                    with self.assertRaises(R.Invalid):self.publish(raw,0)
+                    self.assertFalse(Path(D.ARTIFACT).exists())
+                    self.assertEqual(self.output.read_bytes(),b'')
+                    self.publish(raw,1)
+                self.assertEqual(Path(D.ARTIFACT).read_bytes(),raw)
+                self.assertEqual(self.output.read_bytes(),b'evidence=validated\n')
+                Path(D.ARTIFACT).unlink();self.output.write_bytes(b'')
+
     def test_bounds_missing_result_and_symlink_refusal(self):
         with patch.dict(os.environ,self.env):
             for data in (b'x'*4097,b'{}',b'CANARY-PRIVATE',self.evidence()+self.evidence()):

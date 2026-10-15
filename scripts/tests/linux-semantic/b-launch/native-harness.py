@@ -80,6 +80,43 @@ def execution(report):
     P.require(not any(k.startswith(('LD_', 'DYLD_', 'PYTHON')) for k in env))
 
 
+def check_backing(kernel, report):
+    """Same read-only admission predicates; only fixed refusal attribution."""
+    reason = 'backing_diagnostic'
+    try:
+        try:
+            fd = os.open('/opt', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except OSError:
+            reason = 'backing_open'
+            raise
+        try:
+            info = os.fstat(fd)
+            try:
+                P.require(info.st_uid == info.st_gid == 0 and stat.S_IMODE(info.st_mode) == 0o755)
+            except P.Refused:
+                reason = 'backing_metadata'
+                raise
+            try:
+                filesystem = P.backing(fd, kernel.table())[3]
+            except BaseException:
+                reason = 'backing_lookup'
+                raise
+            try:
+                P.require(filesystem in ALLOWED_FS)
+            except P.Refused:
+                reason = 'backing_filesystem'
+                raise
+        finally:
+            try: os.close(fd)
+            except BaseException:
+                reason = 'backing_diagnostic'
+                raise
+    except BaseException:
+        report['prerequisites']['backing'] = 'FAIL'
+        raise Prerequisite(reason) from None
+    report['prerequisites']['backing'] = 'PASS'
+
+
 def preflight(report):
     check('platform', lambda: P.require(sys.platform == 'linux' and platform.machine() == 'x86_64'
         and sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode
@@ -107,14 +144,7 @@ def preflight(report):
         try: P.backing(fd, kernel.table())
         finally: os.close(fd)
     check('procfs', procfs, report)
-    def backing():
-        fd = os.open('/opt', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            info = os.fstat(fd)
-            P.require(info.st_uid == info.st_gid == 0 and stat.S_IMODE(info.st_mode) == 0o755)
-            P.require(P.backing(fd, kernel.table())[3] in ALLOWED_FS)
-        finally: os.close(fd)
-    check('backing', backing, report)
+    check_backing(kernel, report)
     libc = ctypes.CDLL(None, use_errno=True)
     def lsm():
         lsm_policy(read('/sys/kernel/security/lsm', 256), read('/proc/self/attr/current', 256),

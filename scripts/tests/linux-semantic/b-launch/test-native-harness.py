@@ -4,6 +4,10 @@ No namespace, mount, credentials, capabilities, LSM or Linux syscalls execute.
 Real unprivileged fork/mmap/FD/cleanup controls complement adversarial inputs.
 """
 import ast
+from contextlib import ExitStack, redirect_stdout, redirect_stderr
+import errno
+import io
+from types import SimpleNamespace
 from copy import deepcopy
 import hashlib
 import importlib.util
@@ -16,7 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parent
 
@@ -163,6 +167,135 @@ class Protocol(unittest.TestCase):
         self.assertEqual(value['verdict'],'FAIL')
         self.assertEqual(value['controls'][R.CONTROLS[0]],'FAIL')
         R.parse(R.encode(value),1,REV,DIGEST)
+
+
+class BackingDiagnostic(unittest.TestCase):
+    """Real parser/report routing with synthetic stat/FD reads, never /opt/Linux setup."""
+    CANARY = 'PRIVATE-MOUNT-SOURCE-UID-PATH'
+
+    def exercise(self, *, uid=0, gid=0, mode=0o755, filesystem='ext4',
+                 fdinfo=b'mnt_id: 10\n', open_error=None, stat_error=None,
+                 table_error=None, close_error=None, success=False):
+        kernel = Mock()
+        kernel.table.return_value = P.mount_table(
+            ('10 1 8:1 / / rw - '+filesystem+' /'+self.CANARY+' rw\n').encode())
+        if table_error is not None: kernel.table.side_effect = table_error
+        info = SimpleNamespace(st_uid=uid,st_gid=gid,st_mode=mode)
+        def private_read(path, operation):
+            self.assertEqual((path,operation),('/proc/self/fdinfo/91','rb'))
+            if isinstance(fdinfo,BaseException): raise fdinfo
+            return io.BytesIO(fdinfo)
+        value = report();value['prerequisites'].update(source='PASS',procfs='PASS')
+        before = deepcopy(value['prerequisites'])
+        stdout,stderr = io.StringIO(),io.StringIO()
+        with ExitStack() as stack:
+            opened = stack.enter_context(patch.object(H.os,'open',return_value=91,side_effect=open_error))
+            stack.enter_context(patch.object(H.os,'fstat',return_value=info,side_effect=stat_error))
+            closed = stack.enter_context(patch.object(H.os,'close',side_effect=close_error))
+            stack.enter_context(patch('builtins.open',side_effect=private_read))
+            stack.enter_context(redirect_stdout(stdout));stack.enter_context(redirect_stderr(stderr))
+            if success:
+                H.check_backing(kernel,value)
+            else:
+                stack.enter_context(patch.object(H,'preflight',side_effect=lambda v:H.check_backing(kernel,v)))
+                run_case = stack.enter_context(patch.object(H,'run_case'))
+                H.run(value)
+                run_case.assert_not_called()
+        opened.assert_called_once_with('/opt',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        if open_error is None: closed.assert_called_once_with(91)
+        else: closed.assert_not_called()
+        self.assertEqual(stdout.getvalue()+stderr.getvalue(),'')
+        self.assertEqual({k:v for k,v in value['prerequisites'].items() if k!='backing'},
+                         {k:v for k,v in before.items() if k!='backing'})
+        if success:
+            self.assertEqual(value['prerequisites']['backing'],'PASS')
+            self.assertEqual(value['execution'],'NOT_RUN')
+        else:
+            self.assertEqual(value['verdict'],'FAIL')
+            self.assertEqual(value['prerequisites']['backing'],'FAIL')
+            self.assertEqual(value['execution'],'NOT_RUN')
+            self.assertEqual(value['cleanup'],'NOT_RUN')
+            self.assertEqual(len(value['controls']),24)
+            self.assertEqual(set(value['controls'].values()),{'NOT_RUN'})
+            raw = R.encode(value);self.assertEqual(R.parse(raw,1,REV,DIGEST),value)
+            for forbidden in (self.CANARY,b'/opt',b'Traceback',b'PermissionError',b'st_uid'):
+                if isinstance(forbidden,str):forbidden=forbidden.encode()
+                self.assertNotIn(forbidden,raw)
+            self.assertLessEqual(len(raw),4096)
+        return value,kernel
+
+    def test_exact_allowed_filesystems_and_metadata_still_pass(self):
+        self.assertEqual(H.ALLOWED_FS,('ext2','ext3','ext4','xfs','btrfs','zfs','f2fs'))
+        for filesystem in H.ALLOWED_FS:
+            with self.subTest(filesystem=filesystem): self.exercise(filesystem=filesystem,success=True)
+
+    def test_open_failure_no_retry_or_fallback(self):
+        for error in (errno.EACCES,errno.ENOENT,errno.ELOOP,errno.ENOTDIR):
+            with self.subTest(errno=error):
+                value,kernel=self.exercise(open_error=OSError(error,self.CANARY))
+                self.assertEqual(value['reason'],'backing_open');kernel.table.assert_not_called()
+
+    def test_uid_gid_mode_each_refuse_before_backing_lookup(self):
+        for fields in (dict(uid=1701),dict(gid=2701),dict(mode=0o777),dict(mode=0o750),dict(mode=0o2755)):
+            with self.subTest(fields=fields):
+                value,kernel=self.exercise(**fields)
+                self.assertEqual(value['reason'],'backing_metadata');kernel.table.assert_not_called()
+
+    def test_fdinfo_missing_ambiguous_oversize_and_unknown_mount_refuse(self):
+        for raw in (b'',b'mnt_id: 10\nmnt_id: 10\n',b'mnt_id: 99\n',b'X'*4097):
+            with self.subTest(size=len(raw)):
+                value,kernel=self.exercise(fdinfo=raw)
+                self.assertEqual(value['reason'],'backing_lookup');kernel.table.assert_called_once()
+
+    def test_mountinfo_read_and_parse_failures_refuse(self):
+        for error in (OSError(errno.EIO,self.CANARY),P.Refused(),UnicodeError(self.CANARY)):
+            value,kernel=self.exercise(table_error=error)
+            self.assertEqual(value['reason'],'backing_lookup');kernel.table.assert_called_once()
+
+    def test_fdinfo_read_error_remains_lookup_failure(self):
+        value,kernel=self.exercise(fdinfo=OSError(errno.EIO,self.CANARY))
+        self.assertEqual(value['reason'],'backing_lookup');kernel.table.assert_called_once()
+
+    def test_cancellation_during_backing_closes_fd_and_remains_interrupted(self):
+        before=signal.getsignal(signal.SIGTERM)
+        value,_=self.exercise(stat_error=lambda _:os.kill(os.getpid(),signal.SIGTERM))
+        self.assertEqual(value['reason'],'interrupted')
+        self.assertEqual(signal.getsignal(signal.SIGTERM),before)
+
+    def test_disallowed_filesystems_never_pass_or_reveal_type(self):
+        for filesystem in ('overlay','tmpfs',self.CANARY):
+            value,kernel=self.exercise(filesystem=filesystem)
+            self.assertEqual(value['reason'],'backing_filesystem');kernel.table.assert_called_once()
+
+    def test_unexpected_open_and_metadata_errors_are_fixed_refusal(self):
+        for fields in (dict(open_error=RuntimeError(self.CANARY)),
+                       dict(stat_error=OSError(errno.EIO,self.CANARY)),
+                       dict(stat_error=RuntimeError(self.CANARY))):
+            value,kernel=self.exercise(**fields)
+            self.assertEqual(value['reason'],'backing_diagnostic');kernel.table.assert_not_called()
+
+    def test_close_error_after_success_cannot_pass(self):
+        value,_=self.exercise(close_error=OSError(errno.EBADF,self.CANARY))
+        self.assertEqual(value['reason'],'backing_diagnostic')
+
+    def test_close_error_after_mismatch_remains_fail(self):
+        value,_=self.exercise(uid=1701,close_error=OSError(errno.EBADF,self.CANARY))
+        self.assertEqual(value['reason'],'backing_diagnostic')
+
+    def test_detailed_reason_protocol_is_pre_execution_fail_only(self):
+        for reason in R.BACKING_REASONS:
+            value=report();value.update(verdict='FAIL',reason=reason)
+            value['prerequisites']['backing']='FAIL'
+            self.assertEqual(R.parse(R.encode(value),1,REV,DIGEST),value)
+            for field,bad in (('execution','NATIVE'),('verdict','PASS'),('cleanup','PASS')):
+                changed=deepcopy(value);changed[field]=bad
+                with self.assertRaises(R.Invalid):R.encode(changed)
+            value['prerequisites']['backing']='PASS'
+            value['prerequisites']['lsm']='FAIL'
+            with self.assertRaises(R.Invalid):R.encode(value)
+        value=report();value.update(verdict='FAIL',reason='backing_'+self.CANARY)
+        value['prerequisites']['backing']='FAIL'
+        with self.assertRaises(R.Invalid):R.encode(value)
 
 
 class Sources(unittest.TestCase):
