@@ -1,5 +1,48 @@
 # CLB-91 same-user mount-view candidate — test only
 
+## Bounded backing diagnostic — local, unpublished
+
+[Native run 38733750694](https://github.com/koteev-m/clubs_bot/actions/runs/38733750694),
+number 2 / attempt 1 at `4104bab2444f31eebca0d8d9f641bb2ca0133f20`,
+reached the read-only root preflight and refused `backing`. The validated artifact
+`11970639043` reports `procfs=PASS`, `backing=FAIL`, execution/24 controls/cleanup
+`NOT_RUN`. It does not distinguish the failing backing subcheck. The logs name
+[runner image ubuntu24/20261004.327](https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md);
+its public inventory/build recipe is not evidence of this job's actual parent
+ownership, mode or mount backing. No particular filesystem or owner is established.
+
+The local diagnostic preserves the same no-follow open, root/root and 0755
+predicate, backing lookup and exact `ALLOWED_FS` tuple. It only separates fixed
+public `reason` categories:
+
+| Reason | Refusal attribution |
+| --- | --- |
+| `backing_open` | Fixed parent open raises an OS error; no retry/fallback |
+| `backing_metadata` | Existing owner/group/mode predicate rejects |
+| `backing_lookup` | fdinfo/mountinfo lookup, parsing or lookup read fails |
+| `backing_filesystem` | Existing filesystem allowlist rejects |
+| `backing_diagnostic` | Unexpected read-only diagnostic or FD close failure |
+
+JSON shape/format, the ten prerequisite fields, 24 controls, PASS/FAIL and exit
+requirements, 4096-byte bound and cleanup/cancellation boundaries stay intact.
+New reasons are valid only with `backing=FAIL`, execution/controls/cleanup NOT_RUN
+and verdict FAIL. Historical generic `backing` evidence remains parseable.
+No raw identities, filesystem names/sources, paths beyond the fixed contract,
+exception strings or traceback are added. A read or close error cannot pass.
+Both manifests are repinned for these local bytes; the former run's revoked
+approval does not approve them. Independent source review/publication and a new
+explicit one-shot authorization are required before any further experiment.
+No new dispatch, approval, variable write, root/native execution or publication
+is authorized by this diagnostic task; these local changes have no native proof.
+
+Separately, the failed job's service step-environment log contains the complete
+public approval-v2 JSON. This is confirmed logging of a public authorization
+record, not a secret disclosure or a new active grant: its Environment variable
+was deleted and the run is terminal. Workflow/driver authorization delivery is
+unchanged in this task; this observation is separate from the backing refusal.
+
+### Historical construction snapshot
+
 Historical construction base: `34460528411d377528dd963f0e482ee06a861afe`,
 tree `3101ddd39e3258f144ca586b1b95841d4d987a0f`. The first workflow candidate
 was merged at `95b1fbdb50e1fbd5ca84206ebcd096d49664a44c`; the approval-v2

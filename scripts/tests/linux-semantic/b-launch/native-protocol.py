@@ -11,9 +11,11 @@ CONTROLS = ('positive_a', 'positive_b', 'missing_kill', 'missing_setgid',
     'unsafe_propagation', 'wrong_backing', 'symlink', 'path_replacement', 'owner',
     'mode', 'principal', 'incomplete_observation', 'setup_failure', 'partial_init',
     'worker_failure', 'timeout', 'cancellation', 'cleanup_failure', 'lsm_denial', 'parent_death')
+BACKING_REASONS = ('backing_open', 'backing_metadata', 'backing_lookup',
+                   'backing_filesystem', 'backing_diagnostic')
 REASONS = ('none', 'authorization', 'source', 'platform', 'execution', 'namespaces',
            'capabilities', 'backing', 'lsm', 'procfs', 'fixture', 'bootstrap',
-           'control', 'interrupted', 'cleanup', 'protocol')
+           'control', 'interrupted', 'cleanup', 'protocol') + BACKING_REASONS
 STATUSES = ('PASS', 'FAIL', 'NOT_RUN')
 LIMIT = 4096
 
@@ -61,6 +63,9 @@ def validate(value, revision, source_contract):
     for key, expected in (('prerequisites', PREREQUISITES), ('controls', CONTROLS)):
         need(type(value[key]) is dict and set(value[key]) == set(expected))
         need(all(type(v) is str and v in STATUSES for v in value[key].values()))
+    if value['reason'] in BACKING_REASONS:
+        need(value['verdict'] == 'FAIL' and value['execution'] == 'NOT_RUN'
+             and value['prerequisites']['backing'] == 'FAIL' and value['cleanup'] == 'NOT_RUN')
     if value['execution'] == 'NATIVE':
         need(type(value['run_id']) is str and re.fullmatch('[1-9][0-9]{0,19}', value['run_id']))
         need(value['attempt'] == '1')
