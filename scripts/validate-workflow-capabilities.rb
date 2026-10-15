@@ -15,6 +15,7 @@ require_relative "validate-stage-apt-metadata-refresh-workflow"
 require_relative "validate-stage-runtime-feasibility-workflow"
 require_relative "validate-stage-principal-uid-workflow"
 require_relative "validate-clb91-b-native-workflow"
+require_relative "validate-clb91-b-postwait-canary-workflow"
 
 module WorkflowCapabilityPolicy
   module_function
@@ -1349,6 +1350,7 @@ module WorkflowCapabilityPolicy
     expected = "stage" if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
     expected = "stage" if key == [StagePrincipalUidWorkflow::PATH, "identity"]
     expected = Clb91BNativeWorkflow::ENVIRONMENT if key == [Clb91BNativeWorkflow::PATH, "native"]
+    expected = Clb91BPostwaitCanaryWorkflow::ENVIRONMENT if key == [Clb91BPostwaitCanaryWorkflow::PATH, "canary"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
     elsif !environment.nil?
@@ -2210,6 +2212,7 @@ module WorkflowCapabilityPolicy
       StageAptMetadataRefreshWorkflow.validate(self, workflow) if path == StageAptMetadataRefreshWorkflow::PATH
       StageRuntimeFeasibilityWorkflow.validate(self, workflow) if path == StageRuntimeFeasibilityWorkflow::PATH
       StagePrincipalUidWorkflow.validate(self, workflow) if path == StagePrincipalUidWorkflow::PATH
+      Clb91BPostwaitCanaryWorkflow.validate(self, workflow) if path == Clb91BPostwaitCanaryWorkflow::PATH
       Clb91BNativeWorkflow.validate(self, workflow) if path == Clb91BNativeWorkflow::PATH
       Clb91BNativeWorkflow.sources(self, root) if path == Clb91BNativeWorkflow::PATH
       validate_privileged_trigger(path, triggers, jobs)
