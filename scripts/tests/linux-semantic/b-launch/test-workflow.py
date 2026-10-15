@@ -29,10 +29,10 @@ def context():
         RUNNER_OS='Linux',RUNNER_ARCH='X64',RUNNER_ENVIRONMENT='github-hosted')
 
 def accepted():
-    return dict(format=1,repository=D.REPO,workflow=D.WORKFLOW,revision='a'*40,
+    return dict(format=2,repository=D.REPO,workflow=D.WORKFLOW,revision='a'*40,
         closure_sha256=hashlib.sha256((HERE/'workflow-sources.json').read_bytes()).hexdigest(),
         native_sha256=hashlib.sha256((HERE/'native-sources.json').read_bytes()).hexdigest(),
-        run_number='1',expires_at=2000)
+        run_id='1234',run_number='1',attempt=1,expires_at=2000)
 
 
 def validate_workflow(value):
@@ -54,7 +54,8 @@ class Approval(unittest.TestCase):
         self.assertEqual(D.approval(json.dumps(accepted()),context(),'a'*40,1001),accepted())
 
     def test_missing_duplicate_unknown_approval(self):
-        for raw in ('','{}','{"format":1,"format":1}',json.dumps(dict(accepted(),secret='CANARY'))):
+        duplicate=json.dumps(accepted()).replace('"format": 2','"format": 2, "format": 2')
+        for raw in ('','{}',duplicate,json.dumps(dict(accepted(),secret='CANARY'))):
             with self.assertRaises((D.Refused,ValueError,KeyError)):
                 D.approval(raw,context(),'a'*40,1001)
 
@@ -63,7 +64,7 @@ class Approval(unittest.TestCase):
         with self.assertRaises(D.Refused):D.approval(json.dumps(accepted()),value,'b'*40,1001)
 
     def test_exact_run_attempt_actor_and_host(self):
-        for key,value in (('GITHUB_RUN_NUMBER','2'),('GITHUB_RUN_ATTEMPT','2'),
+        for key,value in (('GITHUB_RUN_ID','1235'),('GITHUB_RUN_NUMBER','2'),('GITHUB_RUN_ATTEMPT','2'),
             ('GITHUB_EVENT_NAME','push'),('GITHUB_REF','refs/heads/other'),
             ('GITHUB_REPOSITORY','foreign/repo'),('GITHUB_WORKFLOW','Tests'),
             ('GITHUB_ACTOR','another'),('GITHUB_TRIGGERING_ACTOR','another'),
@@ -75,9 +76,86 @@ class Approval(unittest.TestCase):
 
     def test_expiry_and_typed_identity(self):
         for key,value in (('expires_at',1000),('expires_at',5000),('expires_at',True),
-            ('format',True),('run_number',1),('closure_sha256','a'*63),('native_sha256','unknown')):
+            ('format',True),('run_id',1234),('run_number',1),('attempt',True),('attempt','1'),('attempt',2),('closure_sha256','a'*63),('native_sha256','unknown')):
             changed=accepted();changed[key]=value
             with self.assertRaises(D.Refused):D.approval(json.dumps(changed),context(),'a'*40,1001)
+
+    def test_every_v2_field_is_required(self):
+        for key in accepted():
+            changed=accepted();del changed[key]
+            with self.subTest(key=key),self.assertRaises(D.Refused):
+                D.approval(json.dumps(changed),context(),'a'*40,1001)
+
+    def test_v1_is_not_an_authorization_fallback(self):
+        legacy=accepted();legacy['format']=1
+        del legacy['run_id'];del legacy['attempt']
+        for value in (legacy,dict(accepted(),format=1)):
+            with self.assertRaises(D.Refused):D.approval(json.dumps(value),context(),'a'*40,1001)
+        with patch.dict(os.environ,dict(context(),CLB91_B_NATIVE_APPROVAL=json.dumps(legacy)),clear=True):
+            with patch.object(sys,'argv',['driver']),patch.object(D,'capture') as capture:
+                with patch('sys.stdout',new_callable=io.StringIO) as output:
+                    self.assertEqual(D.main(),1)
+        capture.assert_not_called();self.assertEqual(output.getvalue(),'CLB91_B_NATIVE_REFUSED\n')
+
+    def test_run_identifiers_are_canonical_typed_decimal(self):
+        for key in ('run_id','run_number'):
+            for bad in (True,1,0,None,'','0','01','-1','1\n','1'*21):
+                with self.subTest(key=key,bad=bad),self.assertRaises(D.Refused):
+                    D.approval(json.dumps(dict(accepted(),**{key:bad})),context(),'a'*40,1001)
+
+    def test_replaced_or_canceled_run_does_not_transfer_approval(self):
+        # Contexts represent possible replacement runs, not a mock of GitHub's gate.
+        # Even if number/revision match, a different run ID cannot reuse this record.
+        for number in ('1','2'):
+            replacement=dict(context(),GITHUB_RUN_ID='5678',GITHUB_RUN_NUMBER=number)
+            with self.assertRaises(D.Refused):
+                D.approval(json.dumps(accepted()),replacement,'a'*40,1001)
+        # Revocation/absence also refuses the formerly selected run.
+        with self.assertRaises(D.Refused):D.approval('',context(),'a'*40,1001)
+
+    def test_each_wrong_run_refuses_before_sudo(self):
+        for key,bad in (('GITHUB_RUN_ID','5678'),('GITHUB_RUN_NUMBER','2'),('GITHUB_RUN_ATTEMPT','2')):
+            env=dict(context(),CLB91_B_NATIVE_APPROVAL_V2=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40)
+            env[key]=bad
+            with patch.dict(os.environ,env,clear=True),patch.object(sys,'argv',['driver']):
+                with patch.object(D.time,'time',return_value=1001),patch.object(D,'capture') as capture:
+                    with patch('sys.stdout',new_callable=io.StringIO) as output:
+                        self.assertEqual(D.main(),1)
+            capture.assert_not_called();self.assertEqual(output.getvalue(),'CLB91_B_NATIVE_REFUSED\n')
+
+    def test_invalid_approval_never_leaks_through_main(self):
+        value=dict(accepted(),extra='CANARY-PRIVATE-APPROVAL')
+        env=dict(context(),CLB91_B_NATIVE_APPROVAL_V2=json.dumps(value),CLB91_APPROVED_REVISION='a'*40)
+        with patch.dict(os.environ,env,clear=True),patch.object(sys,'argv',['driver']):
+            with patch.object(D.time,'time',return_value=1001),patch.object(D,'capture') as capture:
+                with patch('sys.stdout',new_callable=io.StringIO) as out,patch('sys.stderr',new_callable=io.StringIO) as err:
+                    self.assertEqual(D.main(),1)
+        capture.assert_not_called();self.assertEqual(out.getvalue(),'CLB91_B_NATIVE_REFUSED\n')
+        self.assertEqual(err.getvalue(),'')
+
+    def test_expiry_is_rechecked_immediately_before_sudo(self):
+        original=Path.cwd();os.chdir(ROOT)
+        self.addCleanup(os.chdir,original)
+        env=dict(context(),CLB91_B_NATIVE_APPROVAL_V2=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40)
+        with patch.dict(os.environ,env,clear=True),patch.object(sys,'argv',['driver']):
+            with patch.object(D.time,'time',side_effect=[1001,2000]):
+                with patch.object(D,'host_tools',return_value=[]),patch.object(D,'recheck_tools'):
+                    with patch.object(D,'capture') as capture,patch('sys.stdout',new_callable=io.StringIO) as output:
+                        self.assertEqual(D.main(),1)
+        capture.assert_not_called();self.assertEqual(output.getvalue(),'CLB91_B_NATIVE_REFUSED\n')
+
+    def test_cancellation_at_final_pre_sudo_gate_refuses(self):
+        original=Path.cwd();os.chdir(ROOT)
+        self.addCleanup(os.chdir,original)
+        before=signal.getsignal(signal.SIGTERM)
+        env=dict(context(),CLB91_B_NATIVE_APPROVAL_V2=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40)
+        with patch.dict(os.environ,env,clear=True),patch.object(sys,'argv',['driver']):
+            with patch.object(D.time,'time',return_value=1001),patch.object(D,'host_tools',return_value=[]):
+                with patch.object(D,'recheck_tools',side_effect=lambda _:os.kill(os.getpid(),signal.SIGTERM)):
+                    with patch.object(D,'capture') as capture,patch('sys.stdout',new_callable=io.StringIO) as output:
+                        self.assertEqual(D.main(),1)
+        capture.assert_not_called();self.assertEqual(output.getvalue(),'CLB91_B_NATIVE_REFUSED\n')
+        self.assertEqual(signal.getsignal(signal.SIGTERM),before)
 
     def test_missing_record_refuses_without_privilege_call(self):
         with patch.dict(os.environ,context(),clear=True),patch.object(sys,'argv',['driver']):
@@ -242,6 +320,33 @@ class Policy(unittest.TestCase):
         changed=deepcopy(value);changed['jobs']['native']['steps'][1]['run']='sudo sh -c "${{ inputs.script }}"'
         self.assertNotEqual(validate_workflow(changed).returncode,0)
 
+    def test_exact_environment_gate_is_mandatory_for_the_whole_job(self):
+        value=workflow()
+        self.assertEqual(value['jobs']['native']['environment'],
+                         {'name':'clb91-b-native-test','deployment':False})
+        for replacement in (None,'clb91-b-native-test',{'name':'stage','deployment':False},
+                            {'name':'prod','deployment':False},
+                            {'name':'clb91-b-native-test','deployment':True},
+                            {'name':'${{ inputs.environment }}','deployment':False}):
+            changed=deepcopy(value)
+            if replacement is None:del changed['jobs']['native']['environment']
+            else:changed['jobs']['native']['environment']=replacement
+            self.assertNotEqual(validate_workflow(changed).returncode,0)
+        # This proves YAML/validator policy only. Actual required reviewers,
+        # bypass and branch rules require live GitHub configuration acceptance.
+
+    def test_v2_is_a_step_level_environment_variable_without_legacy_or_secret_fallback(self):
+        value=workflow();job=value['jobs']['native']
+        env=job['steps'][1]['env']
+        self.assertEqual(env['CLB91_B_NATIVE_APPROVAL_V2'],'${{ vars.CLB91_B_NATIVE_APPROVAL_V2 }}')
+        self.assertNotIn('env',value);self.assertNotIn('env',job)
+        for replacement in ('${{ vars.CLB91_B_NATIVE_APPROVAL }}',
+                            '${{ secrets.CLB91_B_NATIVE_APPROVAL_V2 }}',
+                            '${{ inputs.approval }}'):
+            changed=deepcopy(value)
+            changed['jobs']['native']['steps'][1]['env']['CLB91_B_NATIVE_APPROVAL_V2']=replacement
+            self.assertNotEqual(validate_workflow(changed).returncode,0)
+
     def test_concurrency_timeout_and_artifact_gate(self):
         value=workflow()
         self.assertEqual(value['concurrency'],{'group':'clb91-b-native-acceptance-single-v1','cancel-in-progress':False})
@@ -305,6 +410,53 @@ class Artifact(unittest.TestCase):
             with self.assertRaises(OSError):self.publish(self.evidence())
         self.assertEqual(self.output.read_bytes(),b'')
 
+    def test_cleanup_uncertainty_cannot_publish_a_pass(self):
+        value=R.new(accepted()['revision'],accepted()['native_sha256'])
+        value.update(execution='NATIVE',run_id='1234',attempt='1',verdict='PASS',reason='none')
+        value['prerequisites']=dict.fromkeys(R.PREREQUISITES,'PASS')
+        value['controls']=dict.fromkeys(R.CONTROLS,'PASS')
+        for cleanup in ('NOT_RUN','FAIL','UNCONFIRMED'):
+            value['cleanup']=cleanup
+            with patch.dict(os.environ,self.env),self.assertRaises(R.Invalid):
+                self.publish(json.dumps(value).encode(),0)
+            self.assertFalse(Path(D.ARTIFACT).exists())
+            self.assertEqual(self.output.read_bytes(),b'')
+
+    def test_wrong_run_evidence_cannot_publish(self):
+        value=R.new(accepted()['revision'],accepted()['native_sha256'])
+        value.update(execution='NATIVE',run_id='5678',attempt='1',verdict='FAIL',reason='control',cleanup='PASS')
+        value['prerequisites']=dict.fromkeys(R.PREREQUISITES,'PASS')
+        value['controls'][R.CONTROLS[0]]='FAIL'
+        with patch.dict(os.environ,self.env),self.assertRaises(D.Refused):
+            self.publish(R.encode(value),1)
+        self.assertFalse(Path(D.ARTIFACT).exists());self.assertEqual(self.output.read_bytes(),b'')
+
+    def test_exact_v2_run_can_pass_only_with_a_complete_validated_protocol(self):
+        # The result is fabricated deliberately: this tests driver/protocol flow,
+        # never claims kernel acceptance. No sudo/root execution takes place.
+        value=R.new(accepted()['revision'],accepted()['native_sha256'])
+        value.update(execution='NATIVE',run_id='1234',attempt='1',verdict='PASS',reason='none',cleanup='PASS')
+        value['prerequisites']=dict.fromkeys(R.PREREQUISITES,'PASS')
+        value['controls']=dict.fromkeys(R.CONTROLS,'PASS')
+        env=dict(context(),**self.env,CLB91_B_NATIVE_APPROVAL_V2=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40)
+        with patch.dict(os.environ,env,clear=True),patch.object(sys,'argv',['driver']):
+            with patch.object(D.time,'time',return_value=1001),patch.object(D,'host_tools',return_value=[]):
+                with patch.object(D,'recheck_tools'),patch.object(D,'capture',return_value=(0,R.encode(value))) as capture:
+                    with patch('sys.stdout',new_callable=io.StringIO) as output:
+                        os.chdir(ROOT)
+                        try:
+                            # Publish to the existing disposable Artifact fixture.
+                            original=D.publish
+                            def publish(*args):
+                                os.chdir(self.temp.name)
+                                return original(*args)
+                            with patch.object(D,'publish',side_effect=publish):self.assertEqual(D.main(),0)
+                        finally:os.chdir(self.temp.name)
+        capture.assert_called_once()
+        self.assertEqual(output.getvalue(),'CLB91_B_NATIVE_PASS\n')
+        self.assertEqual(self.output.read_bytes(),b'evidence=validated\n')
+        self.assertEqual(Path(D.ARTIFACT).read_bytes(),R.encode(value))
+
     def test_sibling_file_command_directory_is_refused(self):
         sibling=Path(self.env['RUNNER_TEMP']).parent/'_runner_file_commands'
         sibling.mkdir();outside=sibling/'set_output_other';outside.touch()
@@ -336,7 +488,7 @@ class Artifact(unittest.TestCase):
                 result=original(record);calls.append(True)
                 if phase=='source' and len(calls)==2:os.kill(os.getpid(),signal.SIGTERM)
                 return result
-            with patch.dict(os.environ,dict(context(),CLB91_B_NATIVE_APPROVAL=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40),clear=True):
+            with patch.dict(os.environ,dict(context(),CLB91_B_NATIVE_APPROVAL_V2=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40),clear=True):
                 with patch.object(sys,'argv',['driver']),patch.object(D.time,'time',return_value=1001):
                     with patch.object(D,'host_tools',return_value=[]),patch.object(D,'recheck_tools'),patch.object(D,'closure',side_effect=closure):
                         with patch.object(D,'capture',return_value=(0,R.encode(value))):
@@ -350,7 +502,7 @@ class Artifact(unittest.TestCase):
             self.assertEqual(signal.getsignal(signal.SIGTERM),before)
 
     def test_raw_root_output_never_published_by_main(self):
-        with patch.dict(os.environ,dict(context(),CLB91_B_NATIVE_APPROVAL=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40),clear=True):
+        with patch.dict(os.environ,dict(context(),CLB91_B_NATIVE_APPROVAL_V2=json.dumps(accepted()),CLB91_APPROVED_REVISION='a'*40),clear=True):
             with patch.object(sys,'argv',['driver']),patch.object(D.time,'time',return_value=1001):
                 with patch.object(D,'host_tools',return_value=[]),patch.object(D,'recheck_tools'):
                     with patch.object(D,'capture',return_value=(0,b'CANARY-PRIVATE-RAW')):
@@ -365,17 +517,30 @@ class PortableTransport(unittest.TestCase):
     """Substitute ONLY Popen with a real ordinary Python child, never sudo."""
     def capture(self,script,cancelled=lambda:False,clock=None):
         original=subprocess.Popen
+        children=[]
         def spawn(argv,**kwargs):
             self.assertEqual(argv[0],'/usr/bin/sudo')
-            return original([sys.executable,'-I','-S','-B','-c',script],**kwargs)
+            child=original([sys.executable,'-I','-S','-B','-c',script],**kwargs)
+            children.append(child)
+            return child
         args=['/usr/bin/sudo','-n','--','/usr/bin/python3','-I','-S','-B','-c',D.BOOTSTRAP,'a'*64,'{}']
         with patch.object(D.subprocess,'Popen',side_effect=spawn):
-            if clock is None:return D.capture(args,cancelled)
-            with patch.object(D.time,'monotonic',side_effect=clock):return D.capture(args,cancelled)
+            try:
+                if clock is None:return D.capture(args,cancelled)
+                with patch.object(D.time,'monotonic',side_effect=clock):return D.capture(args,cancelled)
+            finally:
+                self.assertEqual(len(children),1)
+                self.assertIsNotNone(children[0].returncode)  # actual reap, not just a sent signal
 
     def test_real_bounded_capture_nonzero_not_promoted(self):
         code,data=self.capture('import os;os.write(1,b"synthetic");raise SystemExit(1)')
         self.assertEqual((code,data),(1,b'synthetic'))
+
+    def test_observed_pre_spawn_cancellation_never_starts_sudo(self):
+        args=['/usr/bin/sudo','-n','--','/usr/bin/python3','-I','-S','-B','-c',D.BOOTSTRAP,'a'*64,'{}']
+        with patch.object(D.subprocess,'Popen') as spawn,self.assertRaises(D.Refused):
+            D.capture(args,lambda:True)
+        spawn.assert_not_called()
 
     def test_stderr_and_oversized_output_refuse(self):
         for code in ('import os;os.write(2,b"CANARY-PRIVATE-ERROR")',
@@ -384,7 +549,12 @@ class PortableTransport(unittest.TestCase):
             self.assertEqual(str(failure.exception),'')
 
     def test_actual_owned_child_cancellation_and_timeout(self):
-        with self.assertRaises(D.Refused):self.capture('import time;time.sleep(5)',lambda:True)
+        seen=[]
+        def cancelled():
+            seen.append(True)
+            return len(seen)>1  # spawn once, then exercise real cancellation/reap
+        with self.assertRaises(D.Refused):self.capture('import time;time.sleep(5)',cancelled)
+        self.assertGreaterEqual(len(seen),2)
         ticks=iter([0,151])
         with self.assertRaises(D.Refused):
             self.capture('import time;time.sleep(5)',clock=lambda:next(ticks,151))

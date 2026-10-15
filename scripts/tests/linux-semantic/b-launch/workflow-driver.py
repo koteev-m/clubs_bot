@@ -27,6 +27,7 @@ SOURCES = tuple(HERE+n for n in ('native-entry.py','native-protocol.py','native-
 MANIFEST = HERE+'workflow-sources.json'
 ROOT = '/opt/clb91-b-native-sources'
 ARTIFACT = 'clb91-b-native-result.json'
+APPROVAL_VARIABLE = 'CLB91_B_NATIVE_APPROVAL_V2'
 CONTEXT_KEYS = ('GITHUB_REPOSITORY','GITHUB_WORKFLOW','GITHUB_WORKFLOW_REF','GITHUB_SHA',
     'GITHUB_RUN_ID','GITHUB_RUN_NUMBER','GITHUB_RUN_ATTEMPT','GITHUB_EVENT_NAME','GITHUB_REF',
     'GITHUB_ACTOR','GITHUB_TRIGGERING_ACTOR','RUNNER_OS','RUNNER_ARCH','RUNNER_ENVIRONMENT')
@@ -83,15 +84,17 @@ def decode(raw):
 def approval(raw,context,requested,now):
     value = decode(raw)
     need(type(value) is dict and set(value) == {'format','repository','workflow','revision',
-        'closure_sha256','native_sha256','run_number','expires_at'})
-    need(type(value['format']) is int and value['format'] == 1)
+        'closure_sha256','native_sha256','run_id','run_number','attempt','expires_at'})
+    need(type(value['format']) is int and value['format'] == 2)
     need(value['repository'] == REPO and value['workflow'] == WORKFLOW)
     need(type(value['revision']) is str and re.fullmatch('[0-9a-f]{40}',value['revision']))
     need(value['revision'] == requested == context['GITHUB_SHA'])
     for key in ('closure_sha256','native_sha256'):
         need(type(value[key]) is str and re.fullmatch('[0-9a-f]{64}',value[key]))
-    need(type(value['run_number']) is str and re.fullmatch('[1-9][0-9]{0,19}',value['run_number']))
-    need(value['run_number'] == context['GITHUB_RUN_NUMBER'])
+    for key,context_key in (('run_id','GITHUB_RUN_ID'),('run_number','GITHUB_RUN_NUMBER')):
+        need(type(value[key]) is str and re.fullmatch('[1-9][0-9]{0,19}',value[key]))
+        need(value[key] == context[context_key])
+    need(type(value['attempt']) is int and value['attempt'] == 1)
     need(type(value['expires_at']) is int and now < value['expires_at'] <= now+3600)
     expected = dict(GITHUB_REPOSITORY=REPO,GITHUB_WORKFLOW=NAME,
         GITHUB_WORKFLOW_REF=REPO+'/'+WORKFLOW+'@refs/heads/main',GITHUB_REF='refs/heads/main',
@@ -275,6 +278,7 @@ def capture(argv,cancelled):
     """
     need(argv[:7] == ['/usr/bin/sudo','-n','--','/usr/bin/python3','-I','-S','-B'])
     need(len(argv) == 11 and argv[7:9] == ['-c',BOOTSTRAP])
+    need(not cancelled())  # observed cancellation must not start sudo
     proc = subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,start_new_session=True,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'})
     selector = selectors.DefaultSelector(); output,errors = bytearray(),bytearray()
@@ -358,7 +362,7 @@ def main():
     try:
         need(sys.argv[1:] == [] and os.getuid() == os.geteuid() != 0)
         context = {name:os.environ[name] for name in CONTEXT_KEYS}
-        raw = os.environ.get('CLB91_B_NATIVE_APPROVAL','')
+        raw = os.environ.get(APPROVAL_VARIABLE,'')
         requested = os.environ.get('CLB91_APPROVED_REVISION','')
         accepted = approval(raw,context,requested,int(time.time()))
         model,buffers = closure(accepted)
@@ -372,6 +376,8 @@ def main():
         argv = ['/usr/bin/sudo','-n','--','/usr/bin/python3','-I','-S','-B','-c',BOOTSTRAP,
                 model['files'][DRIVER],request]
         recheck_tools(tools)
+        approval(raw,context,requested,int(time.time()))
+        need(not interrupted)
         running = True
         try: code,data = capture(argv,lambda:bool(interrupted))
         finally: running = False

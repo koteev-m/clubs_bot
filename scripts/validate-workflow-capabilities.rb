@@ -1348,6 +1348,7 @@ module WorkflowCapabilityPolicy
     expected = "stage" if key == [StageAptMetadataRefreshWorkflow::PATH, "refresh"]
     expected = "stage" if key == [StageRuntimeFeasibilityWorkflow::PATH, "feasibility"]
     expected = "stage" if key == [StagePrincipalUidWorkflow::PATH, "identity"]
+    expected = Clb91BNativeWorkflow::ENVIRONMENT if key == [Clb91BNativeWorkflow::PATH, "native"]
     if expected
       reject("#{path}/#{job_name}: protected environment contract changed") unless environment == expected
     elsif !environment.nil?

@@ -125,6 +125,28 @@ metadata-for-metadata неизменным.
 `unknown`, `malformed` или identity mismatch (owner/revision/digest/path) никогда не разрешают mutation; в частности
 malformed operation result всегда принудительно выставляет оба permissions=`no`.
 
+### CLB-91 B native approval v2 — local candidate, no execution authority
+
+The [test-only B coordinator contract](../../scripts/tests/linux-semantic/b-launch/README.md#future-one-shot-coordinator-contract--not_authorized)
+uses the dedicated `clb91-b-native-test` Environment (`deployment: false`) to
+hold the complete native job for required review. Its separate public
+Environment variable `CLB91_B_NATIVE_APPROVAL_V2` binds the exact **already
+created** run ID/number, attempt 1, independently reviewed published revision,
+both source manifests and bounded expiry. Pre-dispatch guessing of a run number
+and the v1 repository-variable fallback are superseded and rejected.
+
+The Environment declaration is not proof of configured protections. Actual
+required reviewer eligibility, main-only branch policy, self-review prevention,
+no admin bypass, variable scope/delivery and absence of duplicate runs require
+independent GitHub configuration acceptance before dispatch/release. The local
+candidate does not provision any of them. No native execution, GitHub mutation,
+stage access or change to release FSM/authority is authorized. One ambiguous
+response permits read-only reconciliation only; no automatic redispatch.
+Cancellation/replacement cannot transfer a run-specific approval; uncertain
+cleanup cannot yield PASS. Publication/configuration/dispatch/reviewer approval,
+VM root test and approval revocation require separate permissions.
+**STAGE_TRUST=UNVERIFIED; TRANSACTION_READINESS=NO.**
+
 ### CLB-195 synthetic namespace candidate (2026-10-09)
 
 The CLB-195 implementation uses the user-selected existing manual

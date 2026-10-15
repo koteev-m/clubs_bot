@@ -4,6 +4,7 @@ require 'json'
 module Clb91BNativeWorkflow
   PATH = '.github/workflows/clb91-b-native-acceptance.yml'
   HERE = 'scripts/tests/linux-semantic/b-launch/'
+  ENVIRONMENT = {'name' => 'clb91-b-native-test', 'deployment' => false}.freeze
   FILES = %w[native-entry.py native-protocol.py native-harness.py prototype.py native-sources.json workflow-driver.py].map { |n| HERE+n }.push(PATH).freeze
 
   def self.validate(policy, workflow)
@@ -16,13 +17,13 @@ module Clb91BNativeWorkflow
       'concurrency' => {'group' => 'clb91-b-native-acceptance-single-v1', 'cancel-in-progress' => false},
       'jobs' => {'native' => {
         'if' => "github.repository == 'koteev-m/clubs_bot' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && github.actor == 'koteev-m' && github.triggering_actor == 'koteev-m' && github.sha == inputs.approved_revision",
-        'runs-on' => 'ubuntu-24.04', 'timeout-minutes' => 10,
+        'runs-on' => 'ubuntu-24.04', 'environment' => ENVIRONMENT, 'timeout-minutes' => 10,
         'steps' => [
           {'name' => 'Checkout exact approved revision', 'uses' => policy::CHECKOUT_ACTION,
            'with' => {'ref' => '${{ inputs.approved_revision }}', 'persist-credentials' => false}},
           {'name' => 'One source-bound synthetic native operation', 'id' => 'acceptance', 'shell' => 'bash',
            'env' => {'CLB91_APPROVED_REVISION' => '${{ inputs.approved_revision }}',
-                     'CLB91_B_NATIVE_APPROVAL' => '${{ vars.CLB91_B_NATIVE_APPROVAL }}',
+                     'CLB91_B_NATIVE_APPROVAL_V2' => '${{ vars.CLB91_B_NATIVE_APPROVAL_V2 }}',
                      'RUNNER_ENVIRONMENT' => '${{ runner.environment }}'},
            'run' => '/usr/bin/python3 -I -S -B scripts/tests/linux-semantic/b-launch/workflow-driver.py'},
           {'name' => 'Upload only validated bounded evidence',

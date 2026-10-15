@@ -23,6 +23,9 @@ jobs:
       github.triggering_actor == 'koteev-m' &&
       github.sha == inputs.approved_revision
     runs-on: ubuntu-24.04
+    environment:
+      name: clb91-b-native-test
+      deployment: false
     timeout-minutes: 10
     steps:
     - name: Checkout exact approved revision
@@ -35,7 +38,7 @@ jobs:
       shell: bash
       env:
         CLB91_APPROVED_REVISION: "${{ inputs.approved_revision }}"
-        CLB91_B_NATIVE_APPROVAL: "${{ vars.CLB91_B_NATIVE_APPROVAL }}"
+        CLB91_B_NATIVE_APPROVAL_V2: "${{ vars.CLB91_B_NATIVE_APPROVAL_V2 }}"
         RUNNER_ENVIRONMENT: "${{ runner.environment }}"
       run: /usr/bin/python3 -I -S -B scripts/tests/linux-semantic/b-launch/workflow-driver.py
     - name: Upload only validated bounded evidence
