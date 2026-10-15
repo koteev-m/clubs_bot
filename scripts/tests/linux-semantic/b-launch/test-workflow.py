@@ -258,7 +258,7 @@ class CapabilityFixture(unittest.TestCase):
         expected={'.github/workflows/release-status.yml','.github/workflows/corrected-stage-release.yml'}
         self.assertEqual(set(untracked),expected)
         self.assertFalse(expected.intersection(tracked))
-        self.assertEqual(sum(p.startswith('.github/workflows/') for p in tracked+untracked),31)
+        self.assertEqual(sum(p.startswith('.github/workflows/') for p in tracked+untracked),32)
 
     def test_each_missing_pinned_source_refuses(self):
         for name in D.SOURCES+(D.MANIFEST,):

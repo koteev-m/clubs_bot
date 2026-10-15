@@ -8814,7 +8814,7 @@ assert_yaml_safety_fixture_valid() {
   if [ "$fixture_name" = "valid-current-alias-inventory" ]; then
     assert_eq \
       "$(git -C "$fixture_root" ls-files --cached --others --exclude-standard -- '.github/workflows/*.yml' '.github/workflows/*.yaml' | wc -l | tr -d ' ')" \
-      "31"
+      "32"
     assert_eq \
       "$(git -C "$fixture_root" ls-files --others --exclude-standard -- .github/workflows/release-status.yml)" \
       ".github/workflows/release-status.yml"
@@ -11780,6 +11780,7 @@ echo "[selfcheck] fixed least-privilege APT metadata refresh (disposable root te
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_apt_metadata_refresh.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_feasibility.py"
 python3 -B "$ROOT_DIR/scripts/tests/linux-semantic/b-launch/test-workflow.py"
+python3 -I -S -B "$ROOT_DIR/scripts/tests/test_clb91_b_postwait_canary.py"
 PYTHONDONTWRITEBYTECODE=1 python3 -I -S -B "$ROOT_DIR/scripts/tests/test_stage_principal_uid.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check
