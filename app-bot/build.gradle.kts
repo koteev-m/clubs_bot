@@ -292,6 +292,29 @@ tasks.named("installDist") {
     }
 }
 
+tasks.named("installDist") {
+    inputs.property("expectedSchemaValidationLauncher", file("src/main/dist/bin/app-bot-validate-schema").readText())
+    doLast {
+        val distribution = outputs.files.singleFile
+        val validator = distribution.resolve("bin/app-bot-validate-schema")
+        check(validator.isFile && validator.canExecute()) { "schema validator launcher is missing" }
+        check(validator.readText() == inputs.properties.getValue("expectedSchemaValidationLauncher")) {
+            "schema validator launcher differs from the fixed public boundary"
+        }
+        JarFile(distribution.resolve("lib/app-bot.jar")).use { jar ->
+            check(jar.getEntry("com/example/bot/tools/BootstrapValidateMainKt.class") != null)
+            check(jar.getEntry("bootstrap-validation-logback.xml") != null)
+        }
+        JarFile(distribution.resolve("lib/core-data.jar")).use { jar ->
+            for (location in listOf("postgresql", "common")) {
+                check(jar.entries().asSequence().any { it.name.startsWith("db/migration/$location/V") }) {
+                    "packaged migration evidence is missing"
+                }
+            }
+        }
+    }
+}
+
 /**
  * Утилита для запуска миграций из рантайма приложения.
  */

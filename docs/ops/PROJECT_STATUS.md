@@ -6,6 +6,24 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-91 safe bootstrap validation, LOCAL ONLY (2026-10-19): **CLB_AEZA_VALIDATE_ONLY_LOCAL_READY**.
+  Actual execution cwd is `/Users/maksimmartynov/.codex/worktrees/clb-miniapp-main-smoke/clubs_bot`,
+  unchanged detached HEAD/base and verified remote main `58234a609604194f7b8e0bf4762adbea11776ee4`;
+  `PROJECT_IDENTITY_OK`, active foreign instructions=0. No cwd/ref/worktree repair or publication.
+  [Implementation and exact evidence](CLB-91-bootstrap-schema-validation.md): independent packaged
+  PostgreSQL validate-only launcher, strict stage/prod config, fixed classpath migrations, read-only
+  connections, pending/history/checksum refusal, bounded safe output and fixed JVM boundary.
+  Existing quiesced migration/release FSM bytes are unchanged. Full unit/quality gate: 1181 PASS,
+  one existing disabled test skipped, failures/errors 0; final synthetic PostgreSQL 16 IT PASS with
+  unchanged full dumps across 10 in-process and 8 child-JVM scenarios. Detekt, ktlint, logs policy,
+  required payment runtime, strict production dependency/installDist and release structural gates PASS.
+  Actual local linux/arm64 Docker build and 14 launcher injection/logging regressions PASS.
+  Real restored-schema/image compatibility, amd64, stage/prod and AEZA remain unverified.
+  Local edits/tests only; no SSH/VPS, external backup disk, real DB/integrations, GitHub Secrets or
+  Environments, commit/push/PR, dispatch, deployment or operational database migration.
+  One next action: review the local CLB-91 diff. **AEZA_REINSTALL=NO_GO;
+  STAGE_TRUST=UNVERIFIED; TRANSACTION_READINESS=NO.**
+
 - CLB-91 bounded backing diagnostic, LOCAL ONLY (2026-10-15): verified remote main `4104bab2444f31eebca0d8d9f641bb2ca0133f20`; existing registered `clb91-b-postwait-canary/clubs_bot` worktree HEAD `33459361b272d7c2a77457321c904e057894fdae` has the identical committed tree `536e43440ababeffbcdd18f9e6d4daac3c3c4ea5`. PROJECT_IDENTITY_OK; active foreign instructions=0. No checkout/ref/worktree repair or publication in this task.
 - Exact native [run 38733750694](https://github.com/koteev-m/clubs_bot/actions/runs/38733750694), number 2 / attempt 1, job `116417709189`, artifact `11970639043`: terminal failure with valid bounded protocol, read-only root prerequisite `backing=FAIL`, preceding `procfs=PASS`; execution/all 24 controls/cleanup NOT_RUN. The exact backing subcheck remains UNKNOWN. The earlier canary succeeded and was cleaned; older native run `38710873064` is cancelled. Native approval V2 deletion was confirmed and remains absent; this task grants no new execution/configuration permission.
 - [Local bounded diagnostic](../../scripts/tests/linux-semantic/b-launch/README.md#bounded-backing-diagnostic--local-unpublished) adds only five fixed backing refusal reasons, portable negative regressions and dependent manifest pins. Original no-follow open, root/root/0755 predicate, filesystem allowlist, principal/privilege boundaries, 24 controls, artifact bound, cancellation/cleanup and production release behavior remain unchanged. New local source identities require independent review and a separate publication/execution decision; no previous approval transfers.

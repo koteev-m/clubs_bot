@@ -1,0 +1,21 @@
+#!/bin/sh
+set -u
+
+reject() {
+    printf '%s\n' 'schema-validation:v=1 result=rejected'
+    exit 1
+}
+
+[ "$#" -eq 0 ] || reject
+unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS DEFAULT_JVM_OPTS
+unset APP_BOT_OPTS APP_BOT_VALIDATE_SCHEMA_OPTS CLASSPATH JAVA_HOME
+JAVA_HOME=/opt/java/openjdk
+PATH=/opt/java/openjdk/bin:/usr/bin:/bin
+export JAVA_HOME PATH
+[ -x /opt/java/openjdk/bin/java ] || reject
+
+# Fixed JVM, classpath and main; no eval, generated option parser, arguments or env options.
+exec /opt/java/openjdk/bin/java -Dfile.encoding=UTF-8 \
+    -Dlogback.configurationFile=bootstrap-validation-logback.xml \
+    -Dlogback.statusListenerClass=ch.qos.logback.core.status.NopStatusListener \
+    -cp '/opt/app/lib/*' com.example.bot.tools.BootstrapValidateMainKt 2>/dev/null
