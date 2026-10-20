@@ -931,6 +931,7 @@ assert_order() {
 
 release_body="$(extract_function run_release "$runner_script")"
 expected_release_body="$(printf '%s\n' \
+  '  start_host_session' \
   '  upload_remote_helper' \
   '  preflight_remote_release' \
   '  execute_release_operation prepare "$COMPOSE_PATH" "$verified_digest" "$EXPECTED_REVISION"' \

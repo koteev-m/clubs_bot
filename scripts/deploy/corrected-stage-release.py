@@ -47,9 +47,9 @@ HELPER_PATH = "scripts/deploy/remote-compose-release.sh"
 # Working implementation identity. No unpublished/future commit is invented.
 # A separately approved stage configuration must bind these bytes to a real
 # Git commit before execution. Fixtures supply their own isolated Git objects.
-IMPLEMENTATION_BLOB = "2e6cdff01ad04fec9a8a31fbf1a47daf729cc86f"
-IMPLEMENTATION_SHA256 = "0f047ecccb1e420b5abfdf7455d51d73d4e7f6ea7fbcf13e55e34fd8556fc43f"
-IMPLEMENTATION_SIZE = 259043
+IMPLEMENTATION_BLOB = "a5019aae994b34ce37acf4887cab15faef170152"
+IMPLEMENTATION_SHA256 = "8f81877efe0b53acb2e518cc96cfe763fef896032a41c7cb605de813afe885c6"
+IMPLEMENTATION_SIZE = 261199
 IMPLEMENTATION_PATTERN = r"([0-9a-f]{40}):" + IMPLEMENTATION_BLOB + ":" + IMPLEMENTATION_SHA256
 INCIDENT = _authority.INCIDENT
 COMPOSE_PATH = "/opt/clubs-bot-stage"

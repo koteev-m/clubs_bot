@@ -6,6 +6,7 @@ No SSH, restore, migration, pull, ingress, sudo, release-state or automatic reco
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,12 @@ import stat
 import subprocess
 import sys
 import time
+
+# Resolve only the reviewed sibling bundle; isolated Python ignores PYTHONPATH.
+_lock_spec = importlib.util.spec_from_file_location(
+    'shared_staging_flock', Path(__file__).resolve().parents[1] / 'shared_staging_flock.py')
+_lock_module = importlib.util.module_from_spec(_lock_spec)
+_lock_spec.loader.exec_module(_lock_module)
 
 PROJECT = 'clubs-bot-stage'
 TEMPLATE = Path(__file__).resolve().parent
@@ -96,6 +103,7 @@ def configuration(root):
 class Install:
     def __init__(self, root):
         self.root = root = compose_root(root)
+        self.host_lock = None
         self.deadline = time.monotonic() + 300
         self.env, self.binding = configuration(root)
         self.state = root / '.first-install'
@@ -109,6 +117,8 @@ class Install:
         # Darwin can reject killpg on a zombie-only group with EPERM, which must
         # not be ignored as if cleanup of arbitrary descendants were confirmed.
         require(sys.platform == 'linux', 'command_platform')
+        if self.host_lock is not None:
+            self.host_lock.check()
         remaining = self.deadline - time.monotonic()
         require(remaining > 0, 'phase_deadline')
         timeout = min(timeout, remaining)
@@ -133,12 +143,15 @@ class Install:
                 try:
                     process = subprocess.Popen(args, env=self.child_env, stdin=subprocess.DEVNULL,
                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                               start_new_session=True, bufsize=0)
+                                               start_new_session=True, bufsize=0,
+                                               pass_fds=(() if self.host_lock is None else (self.host_lock.fd,)))
                     for name, stream in (('stdout', process.stdout), ('stderr', process.stderr)):
                         os.set_blocking(stream.fileno(), False)
                         reader.register(stream, selectors.EVENT_READ, name)
                     while True:
                         require(not interrupted, 'interrupted')
+                        if self.host_lock is not None:
+                            self.host_lock.check()
                         remaining = deadline - time.monotonic()
                         require(remaining > 0, 'command_timeout')
                         for key, _ in reader.select(min(remaining, 0.05)):
@@ -175,6 +188,8 @@ class Install:
                             process.stderr.close()
             require(not interrupted, 'interrupted')
             require(process.returncode == 0, 'command_failed')
+            if self.host_lock is not None:
+                self.host_lock.check()
             return bytes(output)
         finally:
             for signum, handler in handlers.items():
@@ -282,7 +297,11 @@ class Install:
             self.run(self.compose + ['up', '-d', '--no-deps', '--pull', 'never', '--wait', '--wait-timeout', '90', 'app'], 110)
             baseline = self.baseline()
             self.mark('baseline-observed', baseline)
-        except BaseException:
+        except BaseException as exc:
+            # Transport/process ambiguity is UNKNOWN: no automatic Docker stop.
+            if not isinstance(exc, Refused) or str(exc) in (
+                    'interrupted', 'command_timeout', 'phase_deadline', 'output_limit', 'command_cleanup', 'command_failed'):
+                raise
             # Best effort containment; never remove or adopt the ambiguous bootstrap.
             # A killed process/Engine disconnect still requires operator reconciliation.
             self.stop_failed_app(saved['id'])
@@ -338,16 +357,19 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     try:
-        install = Install(args.root)
-        if args.phase == 'check':
-            install.image_check()
-        else:
-            getattr(install, args.phase)()
+        with _lock_module.HostLock() as lock:
+            install = Install(args.root)
+            install.host_lock = lock
+            if args.phase == 'check':
+                install.image_check()
+            else:
+                getattr(install, args.phase)()
+            lock.check()
         print('first-install:' + args.phase + ':PASS')
         return 0
-    except (Refused, OSError, ValueError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+    except (Refused, _lock_module.Refused, OSError, ValueError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
         # Never echo Engine/Compose output, environment values, SQL or exceptions.
-        reason = str(exc) if isinstance(exc, Refused) else 'unavailable'
+        reason = str(exc) if isinstance(exc, (Refused, _lock_module.Refused)) else 'unavailable'
         print('first-install:' + args.phase + ':REFUSED:' + reason)
         return 1
 

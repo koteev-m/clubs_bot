@@ -28,6 +28,58 @@ if [[ ! "$owner" =~ ^[0-9]+-[0-9]+$ ]]; then
   exit 2
 fi
 
+# Status keeps its existing read-only contract. Every mutating entrypoint,
+# including explicit recovery, requires kernel evidence of the inherited host
+# lock before any project lock/root/intent. No flag or pathname override.
+if [ "$mode" != "status" ] && {
+  [ "$mode" != "corrected-start" ] || { [ "${7:-}" != "inspect" ] && [ "${7:-}" != "reconcile" ]; }
+}; then
+  python3 -I -S -B -c "$(cat <<'CLB_HOST_LOCK'
+import os, stat, sys
+from pathlib import Path
+LOCK_PATH = '/run/lock/shared-staging-docker.lock'
+LOCK_FD = 19
+LOCK_OWNER_UID = 0
+class Refused(Exception): pass
+def require(condition):
+    if not condition:
+        raise Refused('untrusted_lock_or_protocol')
+
+
+def lock_identity(fd, path=LOCK_PATH):
+    require(sys.platform == 'linux')
+    # Root-owned sticky /run/lock is supported. Operators must never replace the
+    # file while participants are active. Deploy users cannot unlink this inode.
+    for parent in Path(path).parents:
+        info = parent.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0, LOCK_OWNER_UID))
+        require(not info.st_mode & 0o022 or info.st_mode & stat.S_ISVTX)
+    info, named = os.fstat(fd), os.lstat(path)
+    require(stat.S_ISREG(info.st_mode) and stat.S_ISREG(named.st_mode))
+    require(info.st_uid == LOCK_OWNER_UID and info.st_nlink == 1)
+    require(stat.S_IMODE(info.st_mode) == 0o660)
+    require((info.st_dev, info.st_ino) == (named.st_dev, named.st_ino))
+    require(not os.listxattr(fd))  # no hidden ACL granting broader access
+    return info.st_dev, info.st_ino
+
+
+def verify_held(fd=LOCK_FD, path=LOCK_PATH):
+    lock_identity(fd, path)
+    # Kernel evidence on this open file description, not a PID/existence test
+    # and not a second flock acquisition (which could deadlock or mint proof).
+    lines = Path(f'/proc/self/fdinfo/{fd}').read_text().splitlines()
+    require(any(line.startswith('lock:') and ' FLOCK  ADVISORY  WRITE ' in line
+                and line.endswith(' 0 EOF') for line in lines))
+
+verify_held()
+
+CLB_HOST_LOCK
+)" 2>/dev/null || {
+    echo "remote-release: shared host lock required; read-only reconciliation only" >&2
+    exit 75
+  }
+fi
+
 # Child stderr is never part of the public protocol. Keep one private descriptor
 # solely for the bounded migration events emitted below and discard every raw
 # child diagnostic, including filesystem and Docker implementation details.
