@@ -46,6 +46,7 @@ COPY --from=builder /app/app-bot/build/install/app-bot /opt/app
 RUN test -x /opt/app/bin/app-bot \
  && test -x /opt/app/bin/app-bot-migrate \
  && test -x /opt/app/bin/app-bot-migrate-java \
+ && test -x /opt/app/bin/app-bot-validate-schema \
  && test ! -e /opt/app/gradlew \
  && chmod -R a-w /opt/app \
  && mkdir -p /var/cache/app \

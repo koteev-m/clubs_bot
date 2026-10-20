@@ -1,0 +1,86 @@
+# Install as docker-compose.yml in a new operator-owned Clubs application root.
+# No implicit overrides; first startup must use first-install.py.
+name: clubs-bot-stage
+services:
+  db:
+    image: ${CLB_PG_IMAGE:?immutable PostgreSQL 16 image required}
+    platform: ${CLB_PLATFORM:?verified target platform required}
+    pull_policy: never
+    environment:
+      POSTGRES_DB: clubs
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      CLB_INIT_PASSWORD: ${CLB_DB_PASSWORD:?required}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets: [postgres_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./10-clubs-role.sql:/docker-entrypoint-initdb.d/10-clubs-role.sql:ro
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d clubs"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  app:
+    image: ${CLB_APP_IMAGE:?immutable GHCR image required}
+    platform: ${CLB_PLATFORM:?verified target platform required}
+    pull_policy: never
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp, '/var/cache/app:uid=10001,gid=10001,mode=0700']
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: stage
+      APP_PROFILE: stage
+      PORT: '8080'
+      DATABASE_URL: jdbc:postgresql://db:5432/clubs
+      DATABASE_USER: clubs
+      DATABASE_PASSWORD: ${CLB_DB_PASSWORD:?required}
+      FLYWAY_ENABLED: 'true'
+      FLYWAY_MODE: validate
+      FLYWAY_BASELINE_ON_MIGRATE: 'false'
+      FLYWAY_OUT_OF_ORDER: 'false'
+      FLYWAY_LOCATIONS: classpath:db/migration/postgresql,classpath:db/migration/common
+      RBAC_ENABLED: 'true'
+      TELEGRAM_BOT_TOKEN: ${CLB_BOT_TOKEN:?required}
+      BOT_TOKEN: ${CLB_BOT_TOKEN:?required}
+      TELEGRAM_USE_POLLING: 'false'
+      TELEGRAM_WEBHOOK_SECRET: ${CLB_WEBHOOK_SECRET:?required}
+      WEBHOOK_SECRET_TOKEN: ${CLB_WEBHOOK_SECRET:?required}
+      TELEGRAM_WEBHOOK_PUBLIC_PATH: /telegram/webhook
+      OWNER_TELEGRAM_ID: ${CLB_OWNER_ID:?required}
+      QR_SECRET: ${CLB_QR_SECRET:?required}
+      PHONE_ENCRYPTION_KEY: ${CLB_PHONE_KEY:?required}
+      BASE_URL: https://stage.nightconcierge.help
+      WEBAPP_ORIGIN: https://stage.nightconcierge.help
+      MINI_APP_URL: https://stage.nightconcierge.help/app
+      CORS_ALLOWED_ORIGINS: https://stage.nightconcierge.help,https://t.me,https://web.telegram.org
+      # Activation of integrations is a separate operational step.
+      NOTIFICATIONS_ENABLED: 'false'
+      USE_NOTIFY_SENDER: 'false'
+      OPS_NOTIFY_ENABLED: 'false'
+      REFUND_WORKER_ENABLED: 'false'
+      TRACING_ENABLED: 'false'
+    networks: [database, application]
+    ports: ['127.0.0.1:8081:8080']
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS --max-time 2 http://127.0.0.1:8080/ready >/dev/null && curl -fsS --max-time 2 http://127.0.0.1:8080/health >/dev/null']
+      interval: 3s
+      timeout: 5s
+      retries: 25
+    restart: unless-stopped
+networks:
+  database:
+    internal: true
+  application: {}
+volumes:
+  pgdata: {}
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password

@@ -28,6 +28,9 @@
 - Ответственность: инициирует платформа/infra-команда совместно с владельцами приложения; отчёты складываются во внутренний wiki/Confluence/Notion.
 
 ## Политика миграций (Flyway)
+- Отдельный packaged `/opt/app/bin/app-bot-validate-schema` проверяет существующую PostgreSQL history
+  без старта приложения и применения миграций; strict config и локальное evidence описаны в
+  [CLB-91 bootstrap validation](ops/CLB-91-bootstrap-schema-validation.md). Release FSM не меняется.
 - Окружение определяется по `APP_ENV` (или `APP_PROFILE`, если `APP_ENV` не задан): `prod`/`production`, `stage`/`staging`, `dev`, `local`; остальные значения считаются непроизводственными.
 - Режим задаётся `FLYWAY_MODE`: `validate`, `migrate-and-validate`, `off`. Значения по умолчанию: prod/stage → `validate`, dev/local → `migrate-and-validate`. Legacy-флаг `FLYWAY_VALIDATE_ONLY=true` принудительно ставит `validate`.
 - В prod/stage приложение на старте только валидирует схему (`flyway.validate()`), не вызывает `migrate()` и падает при наличии pending миграций — деплой не должен поднимать устаревшую схему.
