@@ -21,7 +21,7 @@ ROOT = Path(__file__).absolute().parents[2]
 RUNNER = 'scripts/deploy/stage-principal-uid.py'
 WORKFLOW = '.github/workflows/stage-principal-uid.yml'
 PRIMITIVE = 'scripts/deploy/stage-runtime-feasibility.py'
-PRIMITIVE_SHA = 'e3d3002c37a6a0646c6969e1299a3d8696625b82f8bb6898c22abc96eb3d77d7'
+PRIMITIVE_SHA = '46898b86c43000da5b42e4852cb50f15af36bdd1665e0a23b7d35c600bba0591'
 CONFIRMATION = 'CLB-194:principal-uid'
 PREFIX = b'principal-uid:v=1 '
 FRAME_PREFIX = b'clb194-uid-auth:v=1 '

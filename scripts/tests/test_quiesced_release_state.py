@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import hashlib
 import os
 from pathlib import Path
@@ -624,40 +625,42 @@ log_path = Path(os.environ["FAKE_SSH_LOG"])
 config = json.loads(config_path.read_text(encoding="utf-8"))
 command = sys.argv[-1]
 parts = shlex.split(command)
-mode = parts[2] if len(parts) >= 3 and parts[0] == "bash" else "unknown"
-entry = {
-    "mode": mode,
-    "command": command,
-    "registry_token_present": "REGISTRY_READ_TOKEN" in os.environ,
-}
-with log_path.open("a", encoding="utf-8") as log:
-    log.write(json.dumps(entry, separators=(",", ":")) + "\n")
-
 sensitive = config.get("sensitive_stderr", "")
 if sensitive:
     print(sensitive, file=sys.stderr)
 
-if mode == "status":
+def log_mode(mode):
+    with log_path.open("a", encoding="utf-8") as log:
+        log.write(json.dumps({"mode": mode, "command": "synthetic-session",
+                             "registry_token_present": "REGISTRY_READ_TOKEN" in os.environ}) + "\n")
+
+if parts[0] == "bash":
+    mode = parts[2]
+    assert mode == "status"
+    log_mode(mode)
     if config.get("status_stdout"):
         print(config["status_stdout"])
     raise SystemExit(int(config.get("status_exit", 0)))
 
-if mode == config.get("fail_mode"):
-    behavior = config.get("failure_behavior")
-    if behavior == "exit1":
-        raise SystemExit(1)
+assert parts[:4] == ["python3", "-I", "-S", "-B"]
+log_mode("host-session")
+print(json.dumps({"ready": True}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    mode = request["args"][0]
+    log_mode(mode)
+    behavior = config.get("failure_behavior") if mode == config.get("fail_mode") else ""
     if behavior == "exit255":
         raise SystemExit(255)
+    output = (f"release-operation:v=1 result=success digest={os.environ['FAKE_DIGEST']}\n"
+              if mode == "preflight" else "release-operation:v=1 result=success\n")
     if behavior == "malformed_ack":
-        print("untrusted malformed acknowledgement")
-        raise SystemExit(0)
+        output = "untrusted malformed acknowledgement\n"
+    print(json.dumps([1 if behavior == "exit1" else 0, output,
+                      config.get("sensitive_stderr", "")]), flush=True)
+    if behavior or mode == "helper-cleanup":
+        break
 
-if mode == "preflight":
-    print(f"release-operation:v=1 result=success digest={os.environ['FAKE_DIGEST']}")
-elif mode in {"prepare", "publish", "quiesce", "migrate", "start", "cleanup", "helper-cleanup"}:
-    print("release-operation:v=1 result=success")
-else:
-    raise SystemExit(98)
 '''
 
 
@@ -729,6 +732,29 @@ class RemoteHarness:
             dir=temporary_parent,
         )
         self.root = Path(self.temporary_directory.name).resolve()
+        # Test-only copied source substitutes an isolated root-owned lock. No
+        # production CLI/environment override is added to obtain test admission.
+        self.host_lock = self.root / "shared.lock"
+        self.host_lock.touch(mode=0o660)
+        self.host_lock.chmod(0o660)
+        self.helper = self.root / "remote-helper.sh"
+        self.helper.write_text(REMOTE_HELPER.read_text().replace(
+            "/run/lock/shared-staging-docker.lock", str(self.host_lock)).replace(
+                "LOCK_OWNER_UID = 0", f"LOCK_OWNER_UID = {os.getuid()}"))
+        self.locked_helper = self.root / "locked-helper.sh"
+        module_path = REPOSITORY_ROOT / "scripts/deploy/shared_staging_flock.py"
+        code = (
+            "import importlib.util,sys,subprocess,time,os; "
+            f"spec=importlib.util.spec_from_file_location('lock', {str(module_path)!r}); "
+            "m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); m.LOCK_OWNER_UID=os.getuid(); "
+            f"command=['bash', {str(self.helper)!r}, *sys.argv[1:]]; "
+            "\nif sys.argv[1]=='status': sys.exit(subprocess.call(command))\n"
+            f"with m.HostLock({str(self.host_lock)!r}) as lock:\n"
+            " result=m.run_owned(command,sys.stdin.buffer.read(),lock,time.monotonic()+120)\n"
+            " sys.stdout.write(result[1]); sys.stderr.write(result[2]); sys.exit(result[0])\n"
+        )
+        self.locked_helper.write_text("#!/usr/bin/env bash\nexec python3 -I -S -B -c "
+                                      + shlex.quote(code) + ' "$@"\n')
         self.volatile_root = self.root / "volatile"
         self.compose_path = self.root / "compose"
         self.fake_bin = self.root / "bin"
@@ -1079,7 +1105,7 @@ class RemoteHarness:
             environment_values["BASH_ENV"] = str(self.status_write_audit)
             environment_values["FAKE_STATUS_WRITE_AUDIT_ENABLED"] = "yes"
         return subprocess.run(
-            ["bash", str(REMOTE_HELPER), remote_mode, owner, environment or self.app_env, *arguments],
+            ["bash", str(self.locked_helper), remote_mode, owner, environment or self.app_env, *arguments],
             cwd=REPOSITORY_ROOT,
             env=environment_values,
             input=input_text,
@@ -2989,7 +3015,7 @@ class PersistentRootAndBindingTest(unittest.TestCase):
             def command(environment: str, owner: str) -> list[str]:
                 return [
                     "bash",
-                    str(REMOTE_HELPER),
+                    str(harness.locked_helper),
                     "preflight",
                     owner,
                     environment,
@@ -3345,7 +3371,7 @@ prune_terminal_artifacts
             result = subprocess.run(
                 [
                     "bash",
-                    str(REMOTE_HELPER),
+                    str(harness.locked_helper),
                     "preflight",
                     stage_owner,
                     "stage",
@@ -3719,6 +3745,7 @@ class RunnerClassificationTest(unittest.TestCase):
                 "helper-cleanup",
             ):
                 self.assertEqual(1, counts.get(expected_mode), counts)
+            self.assertEqual(1, counts.get("host-session"), counts)
             self.assertNotIn("status", counts)
             self.assertNotIn("abort", counts)
             self.assertNotIn("resume", counts)
@@ -3871,12 +3898,12 @@ class RunnerClassificationTest(unittest.TestCase):
                 self.assert_one_mutation_and_one_status(harness, "prepare")
                 self.assert_redacted(result)
 
-    def test_scp_failure_is_redacted_and_does_not_attempt_ssh(self) -> None:
+    def test_scp_failure_is_redacted_and_does_not_attempt_lifecycle(self) -> None:
         with RunnerHarness(scp_exit=255) as harness:
             result = harness.run()
             self.assertEqual(1, result.returncode)
             self.assertIn("outcome=status_unavailable operation=upload", result.stderr)
-            self.assertEqual([], harness.ssh_entries())
+            self.assertEqual({"host-session": 1}, harness.mode_counts())
             self.assert_redacted(result)
 
 

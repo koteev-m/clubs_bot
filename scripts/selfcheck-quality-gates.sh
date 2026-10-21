@@ -7192,6 +7192,7 @@ RUBY
   done <"$native_source_list"
   cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$fixture_root/scripts/deploy/"
+  cp "$ROOT_DIR/scripts/deploy/shared_staging_flock.py" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/verify-oci-provenance.py" "$fixture_root/scripts/"
   cp "$ROOT_DIR/gradle/verification-metadata.xml" "$fixture_root/gradle/"
   cp "$ROOT_DIR/docs/ops/secrets-rotation.md" "$fixture_root/docs/ops/"
@@ -9121,6 +9122,10 @@ for capability_fixture in \
 done
 
 validate_temporary_remote_docker_credentials() {
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "quality-gate: temporary remote Docker credentials NOT_RUN: real flock fixture requires Linux"
+    return 0
+  fi
   local fixture_root="$TMP_DIR/temporary-remote-docker-credentials"
   local fake_bin="$fixture_root/bin"
   local fake_home="$fixture_root/home"
@@ -9241,6 +9246,28 @@ esac
 SH
   chmod 700 "$fake_bin/docker"
 
+  # A disposable test-owned flock wraps the real helper, preserving credential
+  # assertions without adding a production bypass or requiring privileged CI.
+  local locked_fixture="$fixture_root/locked-helper.py"
+  cat >"$locked_fixture" <<'PY_FLOCK_FIXTURE'
+import importlib.util, os, pathlib, subprocess, sys, tempfile, time
+root, helper, *args = sys.argv[1:]
+spec = importlib.util.spec_from_file_location('host_lock', pathlib.Path(root) / 'scripts/deploy/shared_staging_flock.py')
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.LOCK_OWNER_UID = os.getuid()
+with tempfile.TemporaryDirectory(dir=pathlib.Path(__file__).parent) as temp:
+    temp = pathlib.Path(temp)
+    lockfile = temp / 'shared.lock'; lockfile.touch(); lockfile.chmod(0o660)
+    copied = temp / 'helper.sh'
+    copied.write_text(pathlib.Path(helper).read_text().replace(
+        '/run/lock/shared-staging-docker.lock', str(lockfile)).replace(
+        'LOCK_OWNER_UID = 0', 'LOCK_OWNER_UID = '+str(os.getuid())))
+    with m.HostLock(lockfile) as lock:
+        code, out, err = m.run_owned(['bash', str(copied), *args], sys.stdin.buffer.read(), lock, time.monotonic()+60)
+        sys.stdout.write(out); sys.stderr.write(err)
+        raise SystemExit(code)
+PY_FLOCK_FIXTURE
+
   default_before="$(shasum -a 256 "$default_config")"
   default_mode_before="$(stat -c '%a' "$default_config" 2>/dev/null || stat -f '%Lp' "$default_config")"
 
@@ -9267,7 +9294,8 @@ SH
         FAKE_FAILURE="$case_name" \
         REMOTE_RELEASE_TESTING=enabled \
         REMOTE_RELEASE_TEST_ROOT="$case_state_root" \
-        bash "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" \
+        python3 -I -S -B "$locked_fixture" "$ROOT_DIR" \
+          "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" \
           preflight \
           123-1 \
           test \
@@ -9692,6 +9720,7 @@ payment_hardening_files=(
   "scripts/validate-quiesced-deployment.sh"
   "scripts/deploy/quiesced-release.sh"
   "scripts/deploy/remote-compose-release.sh"
+  "scripts/deploy/shared_staging_flock.py"
 )
 for relative_path in "${payment_hardening_files[@]}"; do
   mkdir -p "$payment_hardening_fixture_base/$(dirname "$relative_path")"

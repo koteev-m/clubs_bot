@@ -40,6 +40,18 @@ New files only:
 - [Opt-in synthetic rehearsal](../../scripts/tests/rehearse_aeza_first_install.py).
 - This report/runbook.
 
+## Current shared flock addition (CLB-91)
+
+The [shared staging flock runbook](CLB-91-shared-staging-flock.md) adds the
+operator-provisioned `/run/lock/shared-staging-docker.lock` around each phase,
+including coordinated read-only probes. Successful phases release it before
+manual waiting; future separately approved Docker-based restore work must also
+honor the same lock. Transport/process ambiguity retains attempt markers and
+requires reconciliation without automatic Docker stop or replay. Bundle the
+reviewed sibling `shared_staging_flock.py` with `aeza-initial/`.
+The historical local validation and unresolved app-baseline acceptance below
+remain historical evidence; flock tests do not change their status.
+
 ## Host and configuration contract
 
 The host operator owns Caddy, TLS, ports 80/443, OS/firewall, persistent storage,
@@ -133,8 +145,9 @@ Each phase has a five-minute command budget; ordinary commands timeout at 30s, v
 A failed phase stops progression. Private `.first-install/` records prevent automatic replay;
 they are not FSM state, an authorization token, or proof of crash-safe privileged confinement.
 
-The command runner requires Linux process semantics; unsupported platforms refuse with
-`command_platform` before spawning. Each command runs in its own session/process group,
+The CLI's shared-lock gate requires Linux before phase admission; the command runner
+also refuses unsupported process semantics with `command_platform` before spawning.
+Each command runs in its own session/process group,
 with stdin closed. stdout and stderr are drained concurrently through nonblocking pipes.
 Each stream has a separate 1,048,576-byte limit enforced during reading: exactly that
 many bytes are accepted, the next byte refuses with `output_limit`. Reads are at most
@@ -153,8 +166,11 @@ host loss and unconfirmed cleanup still require the UNKNOWN-state handling below
 
 1. Operator prerequisites: approve exact host/root/Engine/image identities and architecture,
    establish persistent storage and exclusive access, review configuration/secrets, keep ingress
-   closed, and independently satisfy image/security and host trust gates.
-2. `python3 -I -S -B /reviewed/bundle/first-install.py check --root /approved/clubs/root`:
+   closed, independently satisfy image/security and host trust gates, and provision the
+   shared lock according to the [current contract](CLB-91-shared-staging-flock.md).
+   Preserve the bundle layout: `bundle/shared_staging_flock.py` beside
+   `bundle/aeza-initial/` with its four reviewed recipe/template files.
+2. `python3 -I -S -B /reviewed/bundle/aeza-initial/first-install.py check --root /approved/clubs/root`:
    validate exact templates/configuration/image metadata and run Compose `config --quiet`.
 3. Run the same command with `database`: require no project containers/networks/volumes,
    no colliding resource names and no prior bootstrap marker; create an exclusive attempt marker,
@@ -177,9 +193,10 @@ host loss and unconfirmed cleanup still require the UNKNOWN-state handling below
 
 Failure handling: do not delete markers, rerun an attempted phase, invoke old incident recovery,
 create fake release-state, or reset the database. Validator failure leaves DB and attempt evidence,
-with no app startup. App-start/probe failure attempts to stop only the positively identified new
-ordinary app, leaving it and DB for reconciliation. Timeout, signal/process kill, Engine loss or
-unconfirmed containment may leave resources running: report state UNKNOWN, keep ingress closed,
+with no app startup. A confirmed unhealthy baseline attempts to stop only the positively
+identified new ordinary app, leaving it and DB for reconciliation. Nonzero Docker exit,
+timeout, signal/process kill, lock identity loss, Engine loss or unconfirmed containment
+does not trigger an automatic stop and may leave resources running: report state UNKNOWN, keep ingress closed,
 and let the authorized operator inspect exact owned IDs before any cleanup/retry decision. The
 recipe never deletes server data/volumes or runs automatic rollback. Review changes to configuration
 or schema after any attempt separately; old evidence cannot be reused for new bytes.

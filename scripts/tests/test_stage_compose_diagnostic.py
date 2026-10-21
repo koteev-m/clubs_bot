@@ -1279,18 +1279,24 @@ class RunnerTest(unittest.TestCase):
                 self.assertIn(dependencies[2], frontend.SOURCE_PINS)
                 paths = frontend.LOCAL_SOURCES if name == 'stage-package-plan' else (*frontend.LOCAL_SOURCES, frontend.REMOTE_PATH)
                 snapshot = {path: (ROOT / path).read_bytes() for path in paths}
+                self.assertTrue(set((frontend.TRANSPORT_PATH, *dependencies)).issubset(frontend.SOURCE_PINS))
+                for path, digest in frontend.SOURCE_PINS.items():
+                    self.assertEqual(hashlib.sha256(snapshot[path]).hexdigest(), digest, path)
                 with patch.object(frontend.os, 'open', side_effect=AssertionError('project source reopened')):
                     transport = frontend.load_transport(snapshot, [False])
                 self.assertIs(transport._review, transport.source_module('root_binding_review'))
                 for unapproved in ('root_binding_review.py', 'review-root-binding', '../root_binding_review', ''):
                     with self.assertRaises(ValueError): transport.source_module(unapproved)
-                for mutation in ('missing', 'substitution'):
-                    bad = dict(snapshot)
-                    if mutation == 'missing': del bad[dependencies[2]]
-                    else: bad[dependencies[2]] = b'print("PRIVATE_SOURCE_CANARY")'
-                    with patch.object(frontend, 'exec', create=True) as execute:
-                        with self.assertRaises(ValueError): frontend.load_transport(bad, [False])
-                        execute.assert_not_called()
+                for path in frontend.SOURCE_PINS:
+                    for mutation in ('missing', 'substitution', 'changed_byte'):
+                        bad = dict(snapshot)
+                        if mutation == 'missing': del bad[path]
+                        elif mutation == 'substitution': bad[path] = b'print("PRIVATE_SOURCE_CANARY")'
+                        else: bad[path] = bytes([snapshot[path][0] ^ 1]) + snapshot[path][1:]
+                        with self.subTest(path=path, mutation=mutation), \
+                             patch.object(frontend, 'exec', create=True) as execute:
+                            with self.assertRaises(ValueError): frontend.load_transport(bad, [False])
+                            execute.assert_not_called()
 
     def test_actual_capture_output_timeout_and_process_cleanup(self):
         success = operation.capture_result([sys.executable, '-I', '-S', '-B', '-c', 'print("bounded")'], limit=8)

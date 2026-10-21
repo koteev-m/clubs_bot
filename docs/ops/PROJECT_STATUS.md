@@ -6,6 +6,24 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-91 simple shared staging flock, LOCAL VERIFIED (2026-10-20):
+  **CLB_SHARED_STAGING_FLOCK_LOCAL_VERIFIED**. Isolated branch
+  `codex/clb91-staging-shared-flock`, worktree `/private/tmp/clb91-staging-shared-flock`,
+  exact base/fresh main `b35409bfbee5a6eca8af38253d2da2f504bea940`.
+  `PROJECT_IDENTITY_OK`; active foreign instructions=0. Original six unpublished
+  HDC/2 worktree files preserved. [Contract and local evidence](CLB-91-shared-staging-flock.md):
+  one host flock across the ordinary SSH release; separate locks per first-install
+  phase; BUSY before effects; no automatic UNKNOWN recovery. Linux flock 23/23,
+  first-install 34/34, strict FSM 73/73, status 80 methods/322 subtests and
+  corrected shards 122/122 PASS, no skips. Packaged validator 14/14; actual
+  PG16 neighbor isolation 4/4 and existing validate-only rehearsal 9 checks PASS.
+  Independent volume data/resource identities preserved; owned fixtures cleaned.
+  Affected structural/credential gates, syntax and new/changed links PASS.
+  Server/native acceptance and actual restored app baseline remain unverified.
+  No commit/push/PR, dispatch, server, real DB, restore or deployment authority used.
+  Next: review the local CLB-91 diff.
+  **AEZA_REINSTALL=NO_GO; STAGE_TRUST=UNVERIFIED; TRANSACTION_READINESS=NO.**
+
 - CLB-91 safe bootstrap validation, LOCAL ONLY (2026-10-19): **CLB_AEZA_VALIDATE_ONLY_LOCAL_READY**.
   Actual execution cwd is `/Users/maksimmartynov/.codex/worktrees/clb-miniapp-main-smoke/clubs_bot`,
   unchanged detached HEAD/base and verified remote main `58234a609604194f7b8e0bf4762adbea11776ee4`;

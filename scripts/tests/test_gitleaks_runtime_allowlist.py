@@ -89,7 +89,7 @@ def embedded_public_fragment():
     # The unterminated final line uses the fragment's start index. Bind every byte;
     # a changed fragment boundary refuses rather than widening the exception.
     raw = (ROOT / HELPER).read_bytes()
-    fragment = raw[161864:190536].decode('ascii')
+    fragment = raw[165960:194632].decode('ascii')
     if (len(fragment) != 28672 or raw.count(fragment.encode()) != 1
             or "CLB91_PROFILE['runtime']['files'] = " not in fragment):
         raise AssertionError('public scanner fragment identity refused')
@@ -513,7 +513,7 @@ class DockerEmbeddedAllowlistTest(unittest.TestCase):
         git(repo, 'add', '--', '.'); git(repo, 'commit', '-q', '-m', 'complete synthetic old policy')
         expected = [('generic-api-key', str(DOCKER_PROFILE), 59),
                     ('generic-api-key', str(DOCKER_PROFILE), 135),
-                    ('generic-api-key', str(HELPER), 3489), ('generic-api-key', str(HELPER), 3489)]
+                    ('generic-api-key', str(HELPER), 3541), ('generic-api-key', str(HELPER), 3541)]
         for mode, (code, findings) in self.both(repo, 'complete-before'):
             self.assertEqual(code, 1); self.assertCountEqual(findings, expected, mode)
         write(repo, Path('.gitleaks.toml'), self.config)

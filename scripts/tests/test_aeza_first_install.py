@@ -72,7 +72,7 @@ class Engine(M.Install):
                     Config={'Image': ENV['CLB_APP_IMAGE'] if app else ENV['CLB_PG_IMAGE'],
                             'Labels': {'com.docker.compose.project': M.PROJECT, 'com.docker.compose.service': service,
                                        'com.docker.compose.oneoff': 'False'}},
-                    State={'Running': not (app and self.stopped), 'Health': {'Status': 'healthy'}, 'StartedAt': '2026-10-19T00:00:00Z'},
+                    State={'Running': not (app and self.stopped), 'Health': {'Status': 'unhealthy' if app and self.invalid == 'health' else 'healthy'}, 'StartedAt': '2026-10-19T00:00:00Z'},
                     RestartCount=0, HostConfig={'PortBindings': {'8080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8081'}]} if app else {}},
                     NetworkSettings={'Networks': {M.PROJECT + '_database': {}}},
                     Mounts=[{'Destination': '/var/lib/postgresql/data', 'Type': 'volume', 'Name': M.PROJECT + '_pgdata'}])
@@ -238,9 +238,9 @@ class FirstInstallTest(unittest.TestCase):
         with self.assertRaisesRegex(M.Refused, 'template_changed'):
             Engine(self.root)
 
-    def test_start_failure_stops_only_new_app_and_blocks_retry(self):
+    def test_confirmed_unhealthy_app_stops_only_new_app_and_blocks_retry(self):
         self.engine.database()
-        self.engine.phase_failure = 'start'
+        self.engine.invalid = 'health'
         with self.assertRaises(M.Refused):
             self.engine.application()
         self.assertTrue(self.engine.stopped)
@@ -248,6 +248,17 @@ class FirstInstallTest(unittest.TestCase):
                          [['docker', 'stop', '--time', '10', 'c' * 64]])
         self.assertFalse((self.engine.state / 'baseline-observed').exists())
         with self.assertRaises(M.Refused):
+            self.engine.application()
+
+    def test_nonzero_docker_start_is_unknown_and_never_stops_or_retries(self):
+        self.engine.database()
+        self.engine.phase_failure = 'start'
+        with self.assertRaisesRegex(M.Refused, '^command_failed$'):
+            self.engine.application()
+        self.assertFalse(self.engine.stopped)
+        self.assertFalse(any(a[:2] == ['docker', 'stop'] for a in self.engine.calls))
+        self.assertTrue((self.engine.state / 'application-attempt').exists())
+        with self.assertRaisesRegex(M.Refused, '^partial_or_repeated_install$'):
             self.engine.application()
 
     def test_unlabelled_name_collision_is_refused(self):
@@ -501,7 +512,7 @@ while not Path({str(pids)!r}).exists(): time.sleep(0.005)
                 with self.assertRaisesRegex(M.Refused, '^partial_or_repeated_install$'):
                     engine.application()
 
-    def test_real_app_start_overflow_preserves_owned_app_stop(self):
+    def test_real_app_start_overflow_is_unknown_without_automatic_stop(self):
         engine = Engine(self.root)
         engine.database()
         fake_run = engine.run
@@ -515,12 +526,21 @@ while not Path({str(pids)!r}).exists(): time.sleep(0.005)
         engine.run = run
         with self.assertRaisesRegex(M.Refused, '^output_limit$'):
             engine.application()
-        self.assertTrue(engine.stopped)
-        self.assertEqual([a for a in engine.calls if a[:2] == ['docker', 'stop']],
-                         [['docker', 'stop', '--time', '10', 'c' * 64]])
+        self.assertFalse(engine.stopped)
+        self.assertEqual([a for a in engine.calls if a[:2] == ['docker', 'stop']], [])
         self.assertFalse((engine.state / 'baseline-observed').exists())
 
     def test_cli_rejects_raw_paths_and_never_publishes_private_output(self):
+        import shutil
+        bundle = self.root.parent / 'bundle'
+        shutil.copytree(M.TEMPLATE, bundle / 'aeza-initial')
+        lockfile = self.root.parent / 'shared.lock'
+        lockfile.touch(mode=0o660)
+        lockfile.chmod(0o660)
+        (bundle / 'shared_staging_flock.py').write_text(
+            (M.TEMPLATE.parent / 'shared_staging_flock.py').read_text().replace(
+                '/run/lock/shared-staging-docker.lock', str(lockfile)).replace(
+                    'LOCK_OWNER_UID = 0', f'LOCK_OWNER_UID = {os.getuid()}'))
         bin_dir = self.root.parent / 'bin'
         bin_dir.mkdir()
         docker = bin_dir / 'docker'
@@ -531,7 +551,7 @@ while not Path({str(pids)!r}).exists(): time.sleep(0.005)
             with self.subTest(reason=reason):
                 docker.write_text('#!' + sys.executable + '\nimport os, time, signal\n' + source + '\n')
                 docker.chmod(0o700)
-                command = [sys.executable, '-I', '-S', '-B', str(M.TEMPLATE / 'first-install.py'),
+                command = [sys.executable, '-I', '-S', '-B', str(bundle / 'aeza-initial/first-install.py'),
                            'check', '--root', str(self.root)]
                 with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
                     result = subprocess.run(command, env=self.install.child_env, stdout=out, stderr=err, timeout=5)
@@ -542,7 +562,7 @@ while not Path({str(pids)!r}).exists(): time.sleep(0.005)
                     self.assertEqual(out.read(128), ('first-install:check:REFUSED:' + reason + '\n').encode())
         # argparse must not convert the string to Path before admission.
         for value in (str(self.root) + '//', str(self.root) + '/.', str(self.root) + '/../root'):
-            command = [sys.executable, '-I', '-S', '-B', str(M.TEMPLATE / 'first-install.py'),
+            command = [sys.executable, '-I', '-S', '-B', str(bundle / 'aeza-initial/first-install.py'),
                        'database', '--root', value]
             result = subprocess.run(command, env=self.install.child_env, capture_output=True, timeout=5)
             self.assertEqual(result.returncode, 1)

@@ -82,6 +82,7 @@ status_operation_result="unavailable"
 status_available="no"
 status_abort_permitted="no"
 status_resume_permitted="no"
+session_pid=""
 
 umask 077
 
@@ -91,7 +92,43 @@ remote_command() {
   local command_parts=(bash "$remote_script" "$remote_mode" "$remote_owner" "$APP_ENV" "$@")
   local quoted_command
   printf -v quoted_command '%q ' "${command_parts[@]}"
-  ssh -p "$SSH_PORT" "$ssh_target" "$quoted_command"
+  if [ "$remote_mode" = "status" ]; then
+    # A fresh read-only connection is allowed after transport ambiguity.
+    ssh -p "$SSH_PORT" "$ssh_target" "$quoted_command"
+  else
+    python3 -I -S -B "$repository_root/scripts/deploy/shared_staging_flock.py" \
+      request "$remote_mode" "$remote_owner" "$APP_ENV" "$@"
+  fi
+}
+
+start_host_session() {
+  local session_command
+  session_command="$(python3 -I -S -B "$repository_root/scripts/deploy/shared_staging_flock.py" \
+    command "$remote_script" "$remote_owner" "$APP_ENV")"
+  # One server process owns one open file description across every request.
+  coproc HOST_SESSION { exec ssh -T -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+    -p "$SSH_PORT" "$ssh_target" "$session_command" 2>/dev/null; }
+  session_pid="$HOST_SESSION_PID"
+  # Reopen only these owned pipes: Bash preserves CLOEXEC on coproc dup FDs.
+  exec 20</proc/self/fd/"${HOST_SESSION[0]}" 21>/proc/self/fd/"${HOST_SESSION[1]}"
+  local ready_exit=0
+  python3 -I -S -B "$repository_root/scripts/deploy/shared_staging_flock.py" ready || ready_exit=$?
+  if [ "$ready_exit" = "75" ]; then
+    stop_with_outcome "busy" "host-lock" "run-explicit-read-only-status"
+  elif [ "$ready_exit" != "0" ]; then
+    stop_with_outcome "status_unavailable" "host-lock" "run-explicit-read-only-status"
+  fi
+}
+
+close_host_session() {
+  if [ -n "$session_pid" ]; then
+    exec 20<&- 21>&-
+    # Closing every client writer lets the server see EOF; no remote cleanup,
+    # abort or retry is requested. Terminate only this owned SSH transport.
+    kill -KILL "$session_pid" 2>/dev/null || true
+    wait "$session_pid" 2>/dev/null || true
+    session_pid=""
+  fi
 }
 
 cleanup_local_files() {
@@ -109,6 +146,7 @@ cleanup_local_files() {
 cleanup_on_exit() {
   local exit_status=$?
   trap - EXIT
+  close_host_session
   cleanup_local_files
   exit "$exit_status"
 }
@@ -308,7 +346,7 @@ upload_remote_helper() {
   scp_stderr="$(mktemp "${TMPDIR:-/tmp}/clubs-release-scp-error.XXXXXX")"
   chmod 600 "$scp_stdout" "$scp_stderr"
   set +e
-scp -P "$SSH_PORT" \
+timeout --signal=KILL 20s scp -P "$SSH_PORT" \
     "$repository_root/scripts/deploy/remote-compose-release.sh" \
     "$ssh_target:$remote_script" >"$scp_stdout" 2>"$scp_stderr"
   scp_exit=$?
@@ -321,6 +359,7 @@ scp -P "$SSH_PORT" \
 }
 
 run_release() {
+  start_host_session
   upload_remote_helper
   preflight_remote_release
   execute_release_operation prepare "$COMPOSE_PATH" "$verified_digest" "$EXPECTED_REVISION"
@@ -333,6 +372,7 @@ run_release() {
 }
 
 run_release
+close_host_session
 trap - EXIT
 cleanup_local_files
 

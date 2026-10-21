@@ -1958,16 +1958,23 @@ module WorkflowCapabilityPolicy
   def validate_remote_credential_contract(root)
     runner_path = "scripts/deploy/quiesced-release.sh"
     remote_path = "scripts/deploy/remote-compose-release.sh"
+    session_path = "scripts/deploy/shared_staging_flock.py"
     tracked, _stderr, status = Open3.capture3(
-      "git", "-C", root.to_s, "ls-files", "-z", "--", runner_path, remote_path
+      "git", "-C", root.to_s, "ls-files", "-z", "--", runner_path, remote_path, session_path
     )
     reject("deploy script inventory failed") unless status.success?
     inventory = tracked.split("\0", -1)
     inventory.pop
-    reject("deploy scripts must be tracked") unless inventory.sort == [remote_path, runner_path].sort
-    [runner_path, remote_path].each { |path| ensure_regular_path(root, path) }
+    reject("deploy scripts must be tracked") unless inventory.sort == [remote_path, runner_path, session_path].sort
+    [runner_path, remote_path, session_path].each { |path| ensure_regular_path(root, path) }
     runner = File.binread(root.join(runner_path))
     remote = File.binread(root.join(remote_path))
+    session = File.binread(root.join(session_path))
+    ["data = sys.stdin.read(4097) if args[0] == 'preflight' else ''",
+     "frame_write(21, {'args': args, 'input': data})",
+     "run_owned(['bash', helper, *args], data.encode(), lock,"].each do |literal|
+      reject("session stdin-only credential contract changed") unless session.include?(literal)
+    end
 
     reject("runner retains legacy GHCR credential contract") if runner.match?(/GHCR_(?:TOKEN|USERNAME)/)
     %w[REGISTRY_USERNAME REGISTRY_READ_TOKEN].each do |name|
@@ -1995,7 +2002,10 @@ module WorkflowCapabilityPolicy
     end
     capture_index = runner.index('registry_read_token="$REGISTRY_READ_TOKEN"')
     drop_index = runner.index("unset REGISTRY_READ_TOKEN")
-    first_child_index = [runner.index("\nscp "), runner.index("\nssh ")].compact.min
+    session_child = runner.index("  coproc HOST_SESSION { exec ssh -T")
+    upload_child = runner.index('timeout --signal=KILL 20s scp -P "$SSH_PORT"')
+    reject("bounded session/upload transport contract changed") unless session_child && upload_child
+    first_child_index = [session_child, upload_child].min
     unless capture_index && drop_index && first_child_index &&
            capture_index < drop_index && drop_index < first_child_index
       reject("runner must remove the exported token before its first scp/ssh child")

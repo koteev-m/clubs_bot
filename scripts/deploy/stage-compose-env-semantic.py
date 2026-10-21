@@ -48,7 +48,7 @@ TRANSPORT_PATH = 'scripts/deploy/corrected-stage-release.py'
 DEPENDENCY_PATHS = ('scripts/deploy/release_private_root.py', 'scripts/deploy/release_authority.py',
                     'scripts/deploy/root_binding_review.py')
 SOURCE_PINS = {
-    TRANSPORT_PATH: '05b4578e6ab9d05fd85c303159162c8e3f1e7297f4207eee69bd44fcdeba7720',
+    TRANSPORT_PATH: 'c52d017fc7b4a859295dac136b9263fe6162be725945da9aa257255840b7728c',
     DEPENDENCY_PATHS[0]: '250d359d114779ddcc12c38bc64dc7015d5679f0ffce12a859f007810726cdba',
     DEPENDENCY_PATHS[1]: '83c8c81adeffc0ba7bb97d499ac3d8077950593ab03875856e17feccc8540216',
     DEPENDENCY_PATHS[2]: 'd2175f0751f049eb587710ae5bade38a110f5f36dd493125d996d2e8fe7d7e2a',

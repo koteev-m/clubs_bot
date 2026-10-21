@@ -454,14 +454,46 @@ def synthetic_executor_source(code, fake_bin):
     return code
 
 
-def synthetic_bootstrap(bootstrap, fake_bin):
+def synthetic_bootstrap(bootstrap, fake_bin, *, project_lock_regression=False):
     # Source/hash validation still sees the original exact helper bytes. Only
     # after that validation, select the disposable interpreter fixture instead
     # of requiring a real Linux /usr/bin/python3 on the portable test host.
     needle='child.communicate(helper)'
     if bootstrap.count(needle)!=1:raise AssertionError('bootstrap executor seam changed')
-    replacement='child.communicate(helper.replace(b"/usr/bin/python3 -I -S -B",'+repr((str(Path(fake_bin)/'python3')+' -I -S -B').encode())+'))'
-    return bootstrap.replace(needle,replacement,1)
+    lock_path = str(Path(fake_bin).parent / 'shared.lock')
+    # After original source/hash verification, the synthetic transport owns a
+    # real test flock for the whole helper invocation. Production recovery
+    # bootstrap intentionally still cannot supply/authorize this descriptor.
+    replacement = ('child.communicate(helper.replace(b"/usr/bin/python3 -I -S -B",'
+                   + repr((str(Path(fake_bin)/'python3')+' -I -S -B').encode())
+                   + ').replace(b"/run/lock/shared-staging-docker.lock",fixture_lock_path.encode()'
+                   + ').replace(b"LOCK_OWNER_UID = 0",'
+                   + repr(('LOCK_OWNER_UID = '+str(os.getuid())).encode()) + '))')
+    bootstrap = bootstrap.replace(needle, replacement, 1)
+    admission = (
+        ' import importlib.util\n'
+        ' spec=importlib.util.spec_from_file_location("fixture_flock",'
+        + repr(str(ROOT / 'scripts/deploy/shared_staging_flock.py')) + ')\n'
+        ' lock_module=importlib.util.module_from_spec(spec); spec.loader.exec_module(lock_module)\n'
+        ' lock_module.LOCK_OWNER_UID=os.getuid()\n'
+        ' fixture_lock_path=' + repr(lock_path) + '\n')
+    if project_lock_regression:
+        # These historical tests intentionally race the *project* locks. Give
+        # each synthetic transport a separate real test flock so the new outer
+        # serialization does not hide those original CAS/claim assertions.
+        # Shared-host contention is exercised by test_shared_staging_flock.py.
+        admission += (
+            ' import tempfile,atexit\n'
+            ' fixture_fd,fixture_lock_path=tempfile.mkstemp(prefix="project-lock-regression-",dir='
+            + repr(str(Path(fake_bin).parent)) + ')\n'
+            ' os.fchmod(fixture_fd,0o660);os.close(fixture_fd)\n'
+            ' atexit.register(os.unlink,fixture_lock_path)\n')
+    admission += (
+        ' host_lock=lock_module.HostLock(fixture_lock_path); host_lock.__enter__()\n'
+        ' os.dup2(host_lock.fd,19,inheritable=True)\n')
+    bootstrap = bootstrap.replace(' with subprocess.Popen(', admission + ' with subprocess.Popen(', 1)
+    return bootstrap.replace('pass_fds=(4,),env=env', 'pass_fds=(4,19),env=env', 1)
+
 
 
 def install_synthetic_executor(harness):
@@ -584,7 +616,7 @@ class CorrectedExecutorTest(unittest.TestCase):
         with self.assertRaisesRegex(executor.Rejected, '^' + category + '$'):
             callback()
 
-    def fixture(self, production=True):
+    def fixture(self, production=True, *, project_lock_regression=False):
         production = True
         harness = state.RemoteHarness(app_env='stage' if production else 'test')
         self.addCleanup(harness.close)
@@ -656,7 +688,9 @@ class CorrectedExecutorTest(unittest.TestCase):
             payload_control = json.dumps(delivered, sort_keys=True, separators=(',', ':')).encode()
             nonce = secrets.token_bytes(32)
             payload = nonce + struct.pack('!II', len(payload_control), len(snapshot)) + payload_control + snapshot
-            result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', synthetic_bootstrap(executor.REMOTE_BOUND_BOOTSTRAP,harness.fake_bin), *mapped],
+            result = executor.capture_result([sys.executable, '-I', '-S', '-B', '-c', synthetic_bootstrap(
+                executor.REMOTE_BOUND_BOOTSTRAP, harness.fake_bin,
+                project_lock_regression=project_lock_regression), *mapped],
                                              payload, timeout=timeout, env=harness.env)
             # Original source/hash verification and authenticated framing run
             # before the explicit synthetic interpreter/Gate/executor seam.
@@ -906,7 +940,7 @@ class CorrectedExecutorTest(unittest.TestCase):
                 if partial:self.assertEqual('candidate_start_begun',h.checkpoint())
 
     def test_competing_submissions_use_existing_real_locks(self):
-        h, env, calls, remote = self.fixture()
+        h, env, calls, remote = self.fixture(project_lock_regression=True)
         h.env['FAKE_FLOCK_REAL']='yes'
         gate = threading.Barrier(2)
         claimed = threading.Barrier(2)
@@ -1135,7 +1169,9 @@ class AuthorityCliFixture:
         self.config = dict(fault='', actual=True, audit=str(self.audit), root=str(self.remote_root), compose=str(self.helper.compose_path),
                            owner=state.OWNER, revision=state.REVISION, image=state.DIGEST,
                            helper_env={k:v for k,v in self.helper.env.items() if k.startswith(('FAKE_', 'REMOTE_')) or k == 'PATH'},
-                           helper_sha=executor.IMPLEMENTATION_SHA256, bootstrap=executor.REMOTE_BOUND_BOOTSTRAP, fake_bin=str(self.helper.fake_bin))
+                           helper_sha=executor.IMPLEMENTATION_SHA256, bootstrap=executor.REMOTE_BOUND_BOOTSTRAP, fake_bin=str(self.helper.fake_bin),
+                           fixture_bootstrap=synthetic_bootstrap(executor.REMOTE_BOUND_BOOTSTRAP, self.helper.fake_bin,
+                                                                 project_lock_regression=True))
         self.save()
         key=self.root/'synthetic-key'
         subprocess.run(['ssh-keygen','-q','-t','ed25519','-N','','-f',str(key)],check=True,capture_output=True)
@@ -1209,8 +1245,7 @@ if (phase=='claim' and fault in ('root-swap','parent-swap','copy-swap','missing-
 argv=[{'/opt/clubs-bot-stage':config['compose'],INCIDENT_OWNER:config['owner'],
        INCIDENT_REVISION:config['revision'],INCIDENT_IMAGE:config['image']}.get(a,a) for a in argv]
 env=config['helper_env'].copy(); env['FAKE_FLOCK_REAL']='yes'
-fixture_bootstrap=config['bootstrap'].replace('child.communicate(helper)',
- 'child.communicate(helper.replace(b"/usr/bin/python3 -I -S -B",'+repr((str(Path(config['fake_bin'])/'python3')+' -I -S -B').encode())+'))')
+fixture_bootstrap=config['fixture_bootstrap']
 if phase=='claim' and fault=='late-compete' and not leader:env['FIXTURE_LATE_CLAIM']='yes'
 # Faults enter at an explicit test interpreter boundary. Poison imports stay on
 # disk and are not used to inject faults into the isolated production startup.

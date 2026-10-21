@@ -7,6 +7,16 @@
 Этот документ также фиксирует repository contract для управляемого quiesced release. Он не является
 свидетельством того, что deploy, recovery, migration или staging operation фактически выполнялись.
 
+## Current shared-host staging coordination
+
+CLB-91 uses the [simple shared flock contract](CLB-91-shared-staging-flock.md):
+`/run/lock/shared-staging-docker.lock`, one bounded server-side owner across
+upload/preflight and all ordinary release operations, before existing project
+locks. BUSY refuses before effects; SSH ambiguity requires read-only reconciliation.
+The existing durable FSM below remains authoritative for project outcomes.
+Historical HDC and incident-recovery evidence is unchanged; old recovery paths
+are not authorized by this simpler staging model.
+
 ## Durable release state
 
 Каждый active release привязан к точным `owner`, full revision, immutable candidate digest и hash ожидаемой
