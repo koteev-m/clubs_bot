@@ -55,6 +55,11 @@ services:
       WEBHOOK_SECRET_TOKEN: ${CLB_WEBHOOK_SECRET:?required}
       TELEGRAM_WEBHOOK_PUBLIC_PATH: /telegram/webhook
       OWNER_TELEGRAM_ID: ${CLB_OWNER_ID:?required}
+      HQ_CHAT_ID: ${CLB_HQ_CHAT_ID:?required}
+      CLUB1_CHAT_ID: ${CLB_CLUB1_CHAT_ID:?required}
+      CLUB2_CHAT_ID: ${CLB_CLUB2_CHAT_ID:?required}
+      CLUB3_CHAT_ID: ${CLB_CLUB3_CHAT_ID:?required}
+      CLUB4_CHAT_ID: ${CLB_CLUB4_CHAT_ID:?required}
       QR_SECRET: ${CLB_QR_SECRET:?required}
       PHONE_ENCRYPTION_KEY: ${CLB_PHONE_KEY:?required}
       BASE_URL: https://stage.nightconcierge.help
