@@ -6,6 +6,121 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-91 independent P1 verification recorded and main integration assessed, LOCAL ONLY (2026-10-22):
+  **CLB91_NETWORK_P1_INDEPENDENT_VERIFIED**.
+  **CLB91_P1_RECORDED_MAIN_INTEGRATION_ASSESSED** records this checkpoint-only follow-up;
+  it does not close all of CLB-91. Worktree `/private/tmp/clb91-staging-shared-flock`,
+  branch `codex/clb91-staging-shared-flock`, unchanged HEAD
+  `2bd87bbbab514ca237211005dbf40e489cb7e60a`. `PROJECT_IDENTITY_OK`;
+  active foreign instructions=0 separately attested. All seven incoming file SHA-256 values
+  matched the verified candidate; index clean, no untracked files. Only this checkpoint
+  changes in this follow-up; the other six candidate files remain byte/mode-identical.
+  Evidence is retained from the executor and independent-reviewer reports in the task
+  conversation, not a test rerun here: Compose2403NetworkTest **3/3 PASS**, the two recovery
+  Linux FlockTest cases **2/2 PASS**, **0 FAIL / 0 SKIP**; preceding independent
+  RecoveryTest **24/24 PASS** and ComposeRuntimeTest **2/2 PASS** are reused.
+  No new P0/P1 findings were reported. Official Compose **2.40.3**, ELF64 Linux AArch64,
+  SHA-256 `d26373b19e89160546d15407516cc59f453030d9bc5b43ba7faf16f7b4980137`,
+  was verified against the official release and inside the isolated Ubuntu 24.04 ARM64 runner.
+  Linux/netlink and Docker inspect jointly confirmed network=none, only loopback addresses
+  and usable routes, DOWN/unaddressed fallback tunnel devices, no external connections,
+  no Docker sockets, no published ports or persistent volumes; worktree/rootfs read-only,
+  tmpfs test files, capabilities dropped, no-new-privileges and no privileged/host-network mode.
+  Optional fallback sysctl was NOT_AVAILABLE. Compose used only the loopback mock Engine:
+  both expected hashes matched NetworkCreate, matching hashes avoided network mutations,
+  wrong hashes on either network caused a denied DELETE attempt. Flock covered receipt,
+  files, validator, start and baseline; BUSY refused before Install construction/attempt.
+  Runner exit and both test-command exits were 0; --rm cleanup was independently confirmed.
+  These are mock/process and bounded runtime-contract results, not live AEZA acceptance:
+  real CHAT_ID validity, deployed version/hashes, actual app replacement, DB/data continuity
+  and healthy live baseline remain unverified. Publication=NOT_AUTHORIZED;
+  live recovery=NOT_AUTHORIZED. No Docker/server operation or test rerun occurred here.
+  Read-only `git ls-remote` confirmed main `77e0635a4e43df03eb1bbec7acf91bf832966aa3`.
+  The commit is absent locally; GitHub's commit API confirmed its tree equals local HEAD:
+  `031b0701392a6e794d066f3d8ace64ce3ad7f241`. Thus no upstream content divergence
+  or textual integration conflict exists against this exact main. Effective delta is the
+  existing seven-file unstaged diff plus this checkpoint entry, not the already published
+  shared-flock implementation: five CHAT_ID Compose mappings and env inputs; installer
+  validation/bounded recovery/network-hash admission; first-install/recovery/Compose tests;
+  two recovery flock tests; runbook and checkpoint. No changed file is already wholly
+  present in main. Shared helper, role SQL, DB service/network/volume/port definitions,
+  application/DB configuration code and other-project contracts remain unchanged.
+  A later authorized integration must recheck main identity and resulting byte equivalence,
+  retain original-revision/template pins and sibling shared-helper layout, verify the diff,
+  and satisfy applicable release/security/CI gates. Reuse unchanged-byte local evidence;
+  recheck affected tests if bytes, inputs or environment change. No transfer was performed.
+  Next: obtain separate authorization for local integration of only this effective delta;
+  publication and live recovery remain NOT_AUTHORIZED.
+
+- Preceding CLB-91 bounded recovery P1 network reconciliation, LOCAL ONLY (2026-10-22):
+  **CLB91_NETWORK_P1_LOCAL_FIXED**. Incoming seven-file candidate exactly matched its
+  retained SHA-256 manifest; same branch/worktree/HEAD as below, clean index, no untracked
+  or foreign edits. `PROJECT_IDENTITY_OK`; active foreign instructions=0 separately attested.
+  Independent review reported P0=0/P1=1: Compose `run --no-deps` can reconcile divergent
+  networks before a later continuity check. [Targeted correction and evidence](CLB-91-aeza-first-install.md#p1-network-reconciliation-admission--compose-2403)
+  requires Compose **2.40.3**, the exact trusted two-network model, independently derived
+  NetworkHash values and exact IDs/names/labels on both networks **before receipt/effects**.
+  Empty/missing/wrong hashes and unsupported versions/models refuse without run/up/stop/rm,
+  new markers, DB or volume changes. Ordinary phases, B0/B1 history, one-use receipt,
+  stopped-app/healthy-DB checks, shared flock and UNKNOWN replay refusal remain intact.
+  Official v2.40.3 binary (release SHA-256 verified), isolated loopback mock Engine: **3/3 PASS**;
+  actual NetworkCreate labels match derived hashes for old/new models; wrong hash on either
+  network triggers a denied DELETE request even with no-deps. No real Engine lifecycle in this probe.
+  Linux first-install/recovery/process **62/62**, full flock **25/25**, existing local
+  Compose/JVM **3/3**, release structural/syntax/diff/changed-links checks PASS.
+  Compose 5.5.1 is not the v2.40.3 semantic oracle. No plugin installation/replacement,
+  SSH/AEZA, real configuration/secrets/DB changes, publication or live recovery occurred.
+  Only installer, first-install tests, runbook and this checkpoint changed in this follow-up;
+  the other three candidate files are byte-identical. Live version/hashes remain unverified.
+  Next: focused re-review of this P1 correction; publication/live execution remain separately authorized.
+
+- Preceding CLB-91 bounded initial app recovery, LOCAL ONLY (2026-10-22):
+  **CLB91_BOUNDED_RECOVERY_LOCAL_READY**. Same worktree/branch and unchanged HEAD
+  `2bd87bbbab514ca237211005dbf40e489cb7e60a`; its tree equals published base
+  `77e0635a4e43df03eb1bbec7acf91bf832966aa3`. Incoming six-file runtime candidate
+  retained; seven intended unstaged files now, clean index and no untracked residue.
+  `PROJECT_IDENTITY_OK`; active foreign instructions=0 separately attested.
+  [Implemented contract and future operator order](CLB-91-aeza-first-install.md#bounded-continuation-of-the-existing-failed-install):
+  explicit `recover-application`, original published-template pins/B0/four-marker history,
+  only five added CHAT_ID inputs, exact stopped app + unchanged healthy DB/resources,
+  durable private one-use attempt before per-file atomic config replacement, fresh
+  validate-only, service-scoped app replacement, observed baseline and normal read-only verify.
+  Old markers are never rewritten. Receipt retains secret-bearing old env bytes privately;
+  B0 and B1 are recomputed, not accepted as caller assertions. Error/UNKNOWN/interruption
+  never triggers replay, rollback, reset or containment stop. Shared host flock spans all effects.
+  Final Linux first-install/recovery/process tests **57/57 PASS**; actual Compose/JVM **3/3 PASS**;
+  complete Linux flock **25/25 PASS**, plus affected recovery cases **2/2 PASS** after the final
+  bundle-evidence change. Linux structural gate, syntax, diff and changed links PASS.
+  No actual Docker app replacement, real restored-data recheck, native amd64 or live recovery
+  occurred. Caddy/neighbor preservation remains a future operator observation, not a local claim.
+  Real CHAT_ID and live metadata are unverified; metadata disagreement must refuse, never relax guards.
+  No SSH, real configuration/secrets/DB changes, Git refs/GitHub publication or deployment.
+  Next: focused review of this local candidate; publication and exact live execution require
+  separate owner authorization.
+
+- Preceding CLB-91 initial-install runtime contract, LOCAL ONLY (2026-10-22):
+  **CLB91_RUNTIME_CONTRACT_LOCAL_READY**. Worktree `/private/tmp/clb91-staging-shared-flock`,
+  branch `codex/clb91-staging-shared-flock`, unchanged HEAD
+  `2bd87bbbab514ca237211005dbf40e489cb7e60a`; clean at entry and tree-identical to published
+  `77e0635a4e43df03eb1bbec7acf91bf832966aa3` (tree `031b0701392a6e794d066f3d8ace64ce3ad7f241`).
+  `PROJECT_IDENTITY_OK`; active foreign instructions=0. Five mandatory chat inputs now
+  pass from private config to Compose with nonzero signed-Long admission. DB, volume,
+  ports, networks, shared flock, runtime integrations and logging are unchanged.
+  Linux first-install/process tests 38/38 and real Compose/isolated AppConfig+Logback
+  probes 2/2 PASS; dependent flock cases 23/23 after correcting only fixture permissions/
+  writable test location. Linux release structural gate, syntax, diff and links PASS.
+  File appender failure is reproduced as nonfatal; CONSOLE remains started.
+  The local arm64 candidate JVM probe is not a deployed amd64/full application health test.
+  Owner-provided live continuation state: restored healthy DB, stopped app, four attempt/
+  schema markers, no baseline. No SSH or new server observation in this local task.
+  Existing guards still refuse replay; changing config would invalidate the original binding.
+  [Recovery contract, subsequently implemented above](CLB-91-aeza-first-install.md#bounded-continuation-of-the-existing-failed-install)
+  retains historical markers/B0, admits only the five-input B1 delta, requires fresh validate-only
+  and explicit replacement of only the stopped app. At this earlier checkpoint implementation
+  was still awaiting the owner decision now recorded above.
+  No real inputs/secrets, backup, Git refs, GitHub, AEZA, DB, Caddy or neighbor resources changed.
+  Historical next step was the owner decision; current next step is stated above.
+
 - CLB-91 simple shared staging flock, LOCAL VERIFIED (2026-10-20):
   **CLB_SHARED_STAGING_FLOCK_LOCAL_VERIFIED**. Isolated branch
   `codex/clb91-staging-shared-flock`, worktree `/private/tmp/clb91-staging-shared-flock`,

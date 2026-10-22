@@ -211,6 +211,45 @@ class FlockTest(unittest.TestCase):
             construct.assert_not_called()
         self.assertFalse((root / '.first-install').exists())
 
+    def test_recovery_holds_host_flock_through_files_validator_start_and_baseline(self):
+        root = self.root / 'install'
+        engine, target = I.recovery_fixture(root)
+        observations = []
+
+        def observed(operation, original):
+            def call(*args, **kwargs):
+                observations.append((operation, contender(self.path).returncode))
+                return original(*args, **kwargs)
+            return call
+
+        for name in ('run', 'mark', 'replace_recovery_file'):
+            setattr(engine, name, observed(name, getattr(engine, name)))
+        argv = ['first-install', 'recover-application', '--root', str(root), '--recovery-env', str(target),
+                '--stopped-app-id', 'c' * 64, '--database-id', 'd' * 64]
+        with mock.patch.object(I.M._lock_module, 'HostLock', lambda: M.HostLock(self.path)), \
+                mock.patch.object(I.M._lock_module, 'Refused', M.Refused), \
+                mock.patch.object(I.M, 'Install', lambda _, **kwargs: engine), \
+                mock.patch.object(I.M.time, 'sleep'), mock.patch.object(sys, 'argv', argv), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, I.M.main())
+        self.assertEqual({'run', 'mark', 'replace_recovery_file'}, {op for op, _ in observations})
+        self.assertEqual({75}, {status for _, status in observations})
+        self.assertEqual(0, contender(self.path).returncode)
+
+    def test_recovery_busy_never_constructs_or_writes_attempt(self):
+        root = self.root / 'install'
+        engine, target = I.recovery_fixture(root)
+        argv = ['first-install', 'recover-application', '--root', str(root), '--recovery-env', str(target),
+                '--stopped-app-id', 'c' * 64, '--database-id', 'd' * 64]
+        with M.HostLock(self.path), \
+                mock.patch.object(I.M._lock_module, 'HostLock', lambda: M.HostLock(self.path)), \
+                mock.patch.object(I.M._lock_module, 'Refused', M.Refused), \
+                mock.patch.object(I.M, 'Install') as construct, mock.patch.object(sys, 'argv', argv), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(1, I.M.main())
+            construct.assert_not_called()
+        self.assertFalse((engine.state / I.M.RECOVERY_ATTEMPT).exists())
+
     def test_root_owned_lock_is_usable_by_operator_group_without_root(self):
         os.chown(self.root, 0, 1000)
         self.root.chmod(0o750)

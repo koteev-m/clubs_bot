@@ -1,11 +1,277 @@
 # CLB-91 — clean shared-host first-install candidate
 
-**LOCAL ONLY — CLB_AEZA_FIRST_INSTALL_P2_FIXED_LOCAL.** Both P2 fixes are verified;
-overall initial-install acceptance remains blocked: a healthy initial application/FSM
-baseline is not yet demonstrated. No server execution,
-publication, restore or operational migration is authorized by this document.
+**LOCAL ONLY — bounded recovery implementation (2026-10-22).** The five-input runtime
+candidate is preserved. `recover-application` implements one explicit continuation of the
+known failed install; ordinary phases cannot replay it. Publication and live execution
+require separate authorization. No SSH, server recovery, restore or migration was performed.
+Healthy live baseline remains unverified.
 
 `AEZA_REINSTALL=NO_GO`; `STAGE_TRUST=UNVERIFIED`; `TRANSACTION_READINESS=NO`.
+
+## Runtime contract correction, 2026-10-22
+
+Execution worktree `/private/tmp/clb91-staging-shared-flock` was clean before editing.
+Local HEAD `2bd87bbbab514ca237211005dbf40e489cb7e60a` and published commit
+`77e0635a4e43df03eb1bbec7acf91bf832966aa3` have the same tree
+`031b0701392a6e794d066f3d8ace64ce3ad7f241`; the published tree was read through GitHub API.
+No checkout/reset/rebase/ref change was needed. `PROJECT_IDENTITY_OK`; active foreign
+instructions=0 separately attested. The older identity and validation sections below are history.
+
+Root cause: `AppConfig.fromEnv()` unconditionally requires `HQ_CHAT_ID` and
+`CLUB1_CHAT_ID` through `CLUB4_CHAT_ID`, even with polling and notifications disabled.
+The initial Compose omitted all five. The private `.env` now requires the corresponding
+`CLB_HQ_CHAT_ID` and `CLB_CLUB1_CHAT_ID` through `CLB_CLUB4_CHAT_ID`; Compose passes
+them explicitly, without defaults. Admission accepts an optional sign and 1..19 ASCII
+decimal digits in `[-9223372036854775808, 9223372036854775807]`, excluding zero.
+Missing/empty/overflow/malformed values refuse before any Engine operation. Chat values
+are not echoed in refusals. The example remains blank: operators supply confirmed values.
+Zero placeholders have not been proven safe and are refused. Notification flags alone
+are not a network boundary; the application has other startup/ingress workers.
+
+Required-input review: all direct mandatory `envRequired`/numeric reads in
+`AppConfig.fromEnv()` are now present; stage also receives `MINI_APP_URL`, webhook/token
+aliases, DB credentials, `CORS_ALLOWED_ORIGINS`, `RBAC_ENABLED=true`, `QR_SECRET` and
+`PHONE_ENCRYPTION_KEY`. DB config's required credentials are the same mapped values.
+Optional thread IDs, bot username and worker defaults remain optional; disabled local
+Bot API, tracing and legacy booking features do not require activation credentials.
+No additional missing mandatory input was found in these startup guards. This is not
+proof of a full healthy application or of credential validity/external integrations.
+
+Logging: the FILE appender is instantiated even when its event filter denies stage
+events. It attempts to open relative `logs/app.log` on the read-only container root;
+failure leaves that appender unstarted. In the isolated JVM probe the exact
+`FileNotFoundException: logs/app.log` occurs, CONSOLE starts, `AppConfig.fromEnv()`
+accepts the rendered synthetic environment and the process exits 0. It is a nonfatal
+Logback appender-initialization error, not the observed startup blocker. Logging bytes,
+writable mounts and filesystem permissions are unchanged. File logging remains unavailable.
+
+Local verification: 38/38 existing/expanded first-install and Linux process-boundary
+tests passed; 2/2 opt-in real Compose/JVM tests passed. The JVM probe uses existing local
+image `sha256:810731421097b8cc8d91a0a2b5d4139a1ea10c8cea3b6081c70c6d70ac53e1a1`
+(linux/arm64, local candidate, not the deployed amd64 image), synthetic values, network
+none, read-only root and no DB, Docker socket or real configuration mount. It calls
+AppConfig and logging directly, not Application.module(). It does not certify live health.
+The Linux runner uses the existing image documented in P2 evidence below. Commands:
+
+- Linux disposable runner: `python3 -I -S -B scripts/tests/test_aeza_first_install.py FirstInstallTest SubprocessBoundaryTest -v`.
+- Mac local Engine: set `CLB91_COMPOSE_TEST=1` and `CLB91_RUNTIME_IMAGE` to the local
+  image above, then `python3 -I -S -B scripts/tests/test_aeza_first_install.py ComposeRuntimeTest -v`.
+
+Tests cover all five required mappings, signed boundaries and refusal cases, actual
+Compose/AppConfig agreement, unchanged DB/volume/network/port isolation, changed-binding
+refusal and exact failed-install markers blocking database/application/verify replay.
+The dependent shared-flock suite also passed all 23 cases: 22 in the read-only source
+mount, and the stage runner case after rerunning only that case against a writable copy
+of `scripts/` in disposable `/work` tmpfs. Its first failure was an unwritable fixture
+directory, not a code failure; the earlier non-root launch refused before running tests.
+`validate-quiesced-deployment.sh` passed in Linux/Bash 5 (Mac Bash 3.2 cannot parse the
+existing `coproc`), as did Python syntax, `git diff --check`, repository-relative links
+and the new anchor. Source/AST comparisons confirm unchanged phase guards, role SQL,
+shared lock and logging; removing exactly the five added mappings reproduces the original
+Compose bytes. No Gradle/full application/real-DB/live recovery claim is made.
+
+## Bounded continuation of the existing failed install
+
+The owner approved **local implementation/tests/docs only**. The incoming six-file runtime
+candidate was preserved; the current worktree/HEAD remain as identified above. The owner's
+live state is a stopped ordinary app, healthy restored DB, exactly `database-attempt`,
+`database-ready`, `application-attempt`, `schema-compatible`, and no `baseline-observed`.
+This local task performs no SSH and does not refresh that evidence. Expected live targets:
+
+- Project/root: `clubs-bot-stage`, `/opt/clubs-bot-stage`, AEZA `178.20.209.5`.
+- Stopped app: `07c8aeb68f0130583a6704ea81cceb73dc6bd1c1a79369687090df5f1b59ca6a`.
+- DB: `c25a5b59d1995fca1ceb3b12add2e6dc558fb92fd975c3f27ad17689a35df7e7`;
+  volume `clubs-bot-stage_pgdata`; running/healthy, restart count 0.
+- Source/app revision: `77e0635a4e43df03eb1bbec7acf91bf832966aa3`.
+- App: `ghcr.io/koteev-m/clubs_bot/app-bot@sha256:1113570fc72001f761aa4f93444ad2e0b65779fe533da0d8a60ca06155230a1e`.
+- PG16: `postgres@sha256:f9d1e581cde3e4c8bc696b07e6f7b7aea1d41014b33a52b27990762daae61beb`.
+
+These targets do not authorize adopting a replacement DB/app. Never delete/rewrite the
+four markers, manually overwrite the original `.env`/Compose, replay database/restore/
+application, fabricate a baseline, or invoke incident-specific release recovery.
+
+### Exact implemented contract
+
+The explicit `recover-application` phase requires `--root`, `--recovery-env`,
+`--stopped-app-id` and `--database-id`. Recovery arguments are refused on other phases.
+It is bounded to the old published template and the five CHAT_ID correction; there is no
+new service, coordinator, general resume mechanism, retry loop or release FSM.
+
+1. The existing host flock is acquired before installer construction and held until the
+   entire phase finishes. No nested acquisition or new project lock is added. The existing
+   ordering (host lock before any project operation/locks) is preserved. All commands use
+   the existing bounded process runner, inherited lock descriptor and 300-second phase budget.
+2. Original Compose bytes must match SHA-256
+   `204807d80a65980a043ce0bf367ed2d4dc4db185a0a2877f4d855b00f7cc8fcd`;
+   original role SQL must match
+   `333da4091f5a3b8c20441f69ce478687f11650f5ddcae44dd4be4d00891dab21`.
+   Removing exactly the five specified mappings from the corrected template must reproduce
+   the published Compose hash. B0 is recomputed from actual original `.env` bytes, unchanged
+   admin password (existing trailing-newline normalization), and original Compose bytes.
+   All three original binding markers must equal B0; DB ID comes from `database-ready` and
+   must equal the explicit CLI target. A caller-supplied binding is never accepted.
+3. The target is one private, owned, mode-0600 regular env file outside project/template
+   roots, using a canonical path without symlinks. Old/target env inputs are bounded to
+   16 KiB each. The only added keys are the five nonzero signed-Long CHAT_ID inputs.
+   Every original parsed value must stay equal, including credentials, cryptographic
+   secrets, images/platform/revision and owner. Formatting/comments may differ; their
+   exact old/new bytes are separately bound. Existing admin credentials/SQL are untouched.
+4. Read-only inspection requires exactly the original DB and explicitly identified stopped
+   app; exact project/service/oneoff/root labels, image/revision, rendered environment and
+   image entrypoint/command/user; unchanged loopback port and security/mount controls.
+   The original app must be exited, not running/restarting, with stable identity/state in
+   two observations five seconds apart. DB must be healthy, not restarting, restart count
+   zero, same ID/image/volume, with no published port. Only the two named bridge networks
+   and one named local volume are admitted, with project labels and recorded DB network
+   continuity. Stable DB configuration/start/mount metadata, network identities/settings
+   and volume metadata are compared throughout. No other project is enumerated or mutated.
+5. Before any file/Engine mutation, create/fsync the exclusive private
+   `.first-install/application-recovery-attempt`. It retains **the literal old env bytes**,
+   B0/B1, original marker hashes, stopped-app fingerprint, app/DB/resource identities and
+   hashes of the corrected installer/templates/shared helper. This is secret-bearing private
+   evidence: do not print, publish, attach to issues or include in public diagnostics.
+   Original Compose is reproducible from pinned template bytes; original four marker bytes
+   and inodes are retained. DB configuration is retained as a private hash, not raw inspect.
+6. Recheck stopped app/resources/old evidence before each configuration replacement.
+   Write/fsync pending files inside `.first-install`, atomically replace `.env` (0600) and
+   `docker-compose.yml` (0644) individually, and fsync directories. There is deliberately no
+   claim of a two-file atomic transaction. Any interruption leaves the exclusive attempt,
+   possibly pending/mixed files; all attempted recovery replay is refused.
+7. Check B1/images, recheck stopped app/DB, then run the existing launcher once:
+   `compose run --rm --no-deps --pull never --entrypoint /opt/app/bin/app-bot-validate-schema app`.
+   Require exit 0 and exactly `schema-validation:v=1 result=compatible\n`. Old
+   `schema-compatible` remains historical B0 evidence, not a new validation result. No
+   migration, baseline, repair, clean, SQL restore or DB lifecycle operation is supplied.
+8. Recheck B1, stopped app and original resources again. Only then execute
+   `compose up -d --no-deps --force-recreate --pull never --wait --wait-timeout 90 app`.
+   Compose replaces only that confirmed stopped ordinary app. No separate rm/down/stop,
+   policy edit, image pull, DB recreate or volume operation is performed.
+9. Require a different app ID, exact image/revision/labels/runtime/security/network controls,
+   running/healthy, restart count zero, only `127.0.0.1:8081`, and both health endpoints
+   inside the container **and from the host loopback**. Recheck unchanged healthy DB/resource
+   identities and B1/history, then exclusively write/fsync the real `baseline-observed`.
+   This records the new result and never converts the previous failed attempt into success.
+10. Normal `verify` recognizes only the exact six-marker recovery shape. It independently
+    recomputes B0 from retained original bytes/current unchanged admin secret, validates the
+    original marker hashes, bundle hashes and B1/current bytes, then checks resource continuity,
+    exact observed baseline and both endpoints. Other normal phase guards are unchanged;
+    none initiate recovery. A second recovery is refused, including after success.
+
+### P1 network reconciliation admission — Compose 2.40.3
+
+Independent review found that the original recovery receipt/continuity checks came too late
+for network drift: `run --no-deps` can reconcile networks before the next observation.
+The local P1 correction admits **only Compose 2.40.3** and checks both networks before
+receipt creation, then again at the existing resource-continuity boundaries. Ordinary
+`database`/`application` behavior is unchanged.
+
+The source chain is [run.go at v2.40.3](https://github.com/docker/compose/blob/v2.40.3/pkg/compose/run.go)
+(`startDependencies` calls `Create`),
+[create.go at v2.40.3](https://github.com/docker/compose/blob/v2.40.3/pkg/compose/create.go)
+(`prepareNetworks`, `ensureNetworks`, `resolveOrCreateNetwork`, `removeDivergedNetwork`),
+[NetworkHash](https://github.com/docker/compose/blob/v2.40.3/pkg/compose/hash.go), and
+[compose-go v2.9.1 NetworkConfig/IPAMConfig](https://github.com/compose-spec/compose-go/blob/v2.9.1/types/types.go),
+the version pinned by Compose's go.mod. A nonempty mismatching hash can trigger network
+removal/recreation; `--no-deps` does not disable it. Upstream accepts an empty hash, but
+this recovery deliberately refuses empty/missing hashes because identity is unconfirmed.
+
+Expected hashes are independently derived from the trusted, pinned template's rendered
+`config --format json` model, never from inspect or from comparing the two networks.
+Admission requires exact project/network names and exactly this supported network model:
+
+- `application`: name `clubs-bot-stage_application`, empty `ipam`.
+- `database`: name `clubs-bot-stage_database`, empty `ipam`, `internal: true`.
+
+Unknown fields, topology or Compose versions refuse. The bounded serializer reproduces
+Go struct order (`name`, `ipam`, then optional `internal`) and compact JSON. Empty IPAM is
+an embedded struct and remains `{}` despite `omitempty`; no default `driver` is inserted.
+`prepareNetworks` adds project/network/version CustomLabels, but `json:"-"` excludes them
+from NetworkHash. Thus this calculation is specific to the proven model and version,
+not a generic approximation based on sorted arbitrary Compose JSON.
+
+Each inspected network must have its full 64-hex ID, exact name, bridge/internal identity,
+and exactly the project/network/version/config-hash labels expected from that model.
+Both IDs must be distinct and retain the existing DB/app attachment and recorded network
+continuity. Wrong/nonempty, empty, missing, malformed or swapped hashes refuse **before**
+receipt, configuration replacement, validator `run`, `up`, stop/rm/recreate. Historical
+markers, B0/B1, healthy original DB/volume, host flock and UNKNOWN refusal remain intact.
+
+Actual-version evidence uses the official `docker-compose-darwin-aarch64` v2.40.3 release
+asset, SHA-256 `8cd7eb5f95bacb536cc407111662e2c205d67d9abfea5dcb8400be8418db60d1`,
+verified against the GitHub release asset digest. It was run against a disposable loopback
+HTTP Engine fixture with an empty temporary HOME and explicit DOCKER_HOST. No real Docker
+socket/resources are available to that fixture. The actual binary emitted NetworkCreate
+hashes matching the derived values for both old and corrected project models; matching
+labels produced no network mutation request. Wrong hashes for each network produced a
+DELETE request even with `--no-deps`; the fixture denied deletion and container creation.
+This proves the relevant CLI/reconciliation path, not actual Engine removal or live recovery.
+Local Compose 5.5.1 is used only for the pre-existing Compose/JVM checks, not as evidence
+of v2.40.3 reconciliation semantics. No local/global Compose installation was replaced.
+
+Reproduction commands (synthetic inputs only):
+
+- Linux fixture runner: `python3 -I -S -B scripts/tests/test_aeza_first_install.py FirstInstallTest RecoveryTest SubprocessBoundaryTest -v` — 62/62 PASS.
+- `CLB91_COMPOSE_2403_BINARY=/private/path/to/verified/v2.40.3 python3 -I -S -B scripts/tests/test_aeza_first_install.py Compose2403NetworkTest -v` — 3/3 PASS; exact release digest required, no real Engine.
+- Existing local Compose/JVM command from the runtime section — 3/3 PASS.
+- Linux `python3 -I -S -B scripts/tests/test_shared_staging_flock.py -v` — final result recorded in checkpoint.
+
+Live hashes/version remain unobserved in this task. A failed admission is an operator
+reconciliation blocker; do not repair labels, recreate networks, upgrade Compose or bypass
+this predicate under the recovery permission.
+
+### Future application order — separate authorization required
+
+1. Review/publish the exact local candidate separately. Obtain one-use live permission
+   naming this operation, corrected bundle, exact host/root/Engine, images and original IDs.
+   Preserve sibling layout `bundle/shared_staging_flock.py` + `bundle/aeza-initial/`.
+   Do not substitute the corrected project Compose before admission.
+2. Reconfirm host identity, trusted local Engine context on AEZA, Compose **2.40.3**, shared flock, stopped app,
+   healthy original DB, original four markers, unchanged restore evidence and closed ingress.
+   Retained restore evidence must still cover 81 tables, Flyway 60/0, 343 constraints,
+   235 indexes and 57 sequences. This entrypoint validates schema, not data row checksums.
+   Caddy must remain masked/inactive. Exclude concurrent operators/writers; flock is advisory,
+   not fencing of a privileged actor who ignores it. No changes to users/privileges are needed.
+3. In an approved private staging directory prepare `recovery.env` from the original env,
+   adding the five owner-confirmed values only. Preserve all existing secrets. No guessed or
+   zero CHAT_ID; use a private editor/channel, not CLI values or printed Compose output.
+4. Invoke once, from the newly reviewed bundle, with unchanged original project files:
+
+   ```sh
+   python3 -I -S -B /reviewed/bundle/aeza-initial/first-install.py recover-application \
+     --root /opt/clubs-bot-stage \
+     --recovery-env /approved/private/recovery.env \
+     --stopped-app-id 07c8aeb68f0130583a6704ea81cceb73dc6bd1c1a79369687090df5f1b59ca6a \
+     --database-id c25a5b59d1995fca1ceb3b12add2e6dc558fb92fd975c3f27ad17689a35df7e7
+   ```
+
+5. On confirmed success, run the same bundle's `verify --root /opt/clubs-bot-stage`.
+   Independently confirm unchanged Caddy/neighbor state and DB evidence without printing
+   private configuration. Public routing, TLS, polling/webhooks/notifications remain separate.
+
+Stop on any mismatch, nonzero command, timeout, signal, lock loss or ambiguous Engine result.
+After the attempt exists there is **no automatic retry, rollback, containment stop or reset**.
+Keep all files/resources for authorized read-only reconciliation; Docker may have completed
+an operation despite losing its reply. A failure before baseline leaves no success marker.
+Lost acknowledgement after a durable baseline can be investigated with read-only verify;
+it never permits replay. Pending/malformed/mixed state cannot be adopted by this command.
+Any subsequent mutation, including stopping a failed replacement, needs a separate decision.
+
+### Local recovery verification
+
+The existing synthetic Engine harness covers the old-to-new transition, independent old/new
+binding checks, marker bytes/inodes, unrelated secret/image/platform/DB/network/volume/port
+refusals, running/wrong app, DB health/continuity, preserved foreign fixtures, interruption
+at each file boundary, malformed attempt, validator refusal, Docker error/timeout/UNKNOWN,
+new-app restart refusal, no replay/automatic stop, and successful fresh-instance verify.
+The actual Linux flock tests observe BUSY during receipt/files/validator/start/baseline and
+refuse before construction when occupied. Real Compose compares the entire rendered old/new
+model, permitting only the five app environment entries. Packaged AppConfig/Logback remains
+an isolated arm64 probe, not a real app start or deployed amd64 recovery.
+
+Final command counts/results are recorded in the current checkpoint. No live restore/data
+recheck, actual Docker app replacement, native amd64 run, Caddy inspection or external
+integration was performed in this local task. Future admission may refuse if actual Engine
+metadata differs; that is a blocker for inspection, never authority to relax the predicates.
 
 ## Identity and preserved work
 
@@ -106,6 +372,9 @@ public channel. Use `config --quiet` for ordinary validation.
   explicit runtime inputs. Token shape, positive owner ID, secret lengths and webhook alphabet
   are checked; validity of real credentials is not tested. The two app token aliases and two
   webhook aliases use the same source value. Local tests use fabricated strings, not live tokens.
+- `CLB_HQ_CHAT_ID`, `CLB_CLUB1_CHAT_ID`, `CLB_CLUB2_CHAT_ID`, `CLB_CLUB3_CHAT_ID`,
+  `CLB_CLUB4_CHAT_ID`: operator-confirmed nonzero signed Long values; all required,
+  private, no defaults. See the current runtime correction above for exact syntax/range.
 
 On a genuinely empty owned volume, official PostgreSQL initialization creates only the database
 and a `clubs` login with NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOREPLICATION. The role owns `public`;
