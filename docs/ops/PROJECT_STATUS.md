@@ -6,6 +6,31 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-198 CI fixture optimization, LOCAL ONLY (2026-10-26):
+  **CLB198_LOCAL_VERIFIED_HOSTED_TIMING_PENDING**. New isolated worktree
+  `/Users/maksimmartynov/.codex/worktrees/clb198-ci-critical-path/clubs_bot`, detached HEAD/base
+  `23a6f70fb04dd438a5fba269271f6e252978b15a` (merged PR #546). Existing primary
+  AGENTS/status edits and other worktrees preserved. ID absent in checked pre-existing
+  local history/refs/docs and bounded GitHub issues/PR/branches. `PROJECT_IDENTITY_OK`;
+  active clubs-owned instructions, active foreign=0.
+  [Analysis, measured timings and commands](CLB-198-ci-critical-path.md) and
+  [exact method inventory/evidence](evidence/CLB-198-ci-measurements.json).
+  Test-only Linux stat dispatch preserves fresh mode/uid/nlink and identity-triplet
+  semantics; original Python fallback, timestamps and Darwin behavior retained.
+  All existing 73 release-state + 122 corrected-stage method IDs/bodies unchanged.
+  Matched offline non-root Linux arm64 2-CPU sweeps: **195/195 PASS before and after**,
+  no skips/errors/failures or missing/duplicate IDs. Local release worker wall time
+  768.359 -> 532.365 s; slowest among these five workers 811.653 -> 761.913 s
+  (6.13%). These exclude lint-core and do not prove hosted CI acceleration.
+  New stat regressions 9/9 on Linux and Darwin; existing topology/shard suite 17/17,
+  Linux lint/quiesced/corrected validators, syntax/body accounting and diff checks PASS.
+  Independent focused read-only source/test review: actionable P0/P1/P2=0.
+  Workflow topology, mandatory gates, production/deploy scripts, DB/migrations and
+  global configuration untouched; no full JVM/browser or complete Gradle selfcheck rerun.
+  Physical/runtime/hosted x86_64 performance is unverified. No commit/publication,
+  workflow dispatch/rerun, SSH or server action. Next: separately authorize publication
+  of this local candidate for a comparable GitHub-hosted Lint measurement.
+
 - CLB-197 PR #546 Trivy dependency fix, LOCAL ONLY (2026-10-26):
   **CLB197_TRIVY_FIX_LOCAL_READY**. Existing worktree
   `/Users/maksimmartynov/.codex/worktrees/clb196-platform-owner-ui/clubs_bot`, branch

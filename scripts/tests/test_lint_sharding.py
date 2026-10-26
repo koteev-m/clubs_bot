@@ -311,6 +311,7 @@ class LintTopologyTest(unittest.TestCase):
                     #!/bin/bash
                     printf '%s %s\\n' "${0##*/}" "$*" >> "$PROBE_LOG"
                     if [[ "$*" == *validate-lint-workflow.rb* ]]; then exit "${TOPOLOGY_EXIT:-0}"; fi
+                    if [[ "$*" == *test_stat_fixture.py* ]]; then exit "${STAT_FIXTURE_EXIT:-0}"; fi
                     if [[ "$*" == *test_lint_sharding.py* ]]; then exit "${REGRESSION_EXIT:-0}"; fi
                     if [[ "$*" == *run-corrected-stage-shard.py* ]]; then exit "${INVENTORY_EXIT:-0}"; fi
                     if [[ "$*" == *test_corrected_stage_release.py* ]]; then exit "${SUITE_EXIT:-0}"; fi
@@ -328,9 +329,11 @@ class LintTopologyTest(unittest.TestCase):
                                             env={**env, "SUITE_EXIT": str(status)}, capture_output=True)
                     self.assertEqual(status, result.returncode)
                     self.assertEqual(1, log.read_text().count(full))
+                    self.assertEqual(1, log.read_text().count("test_stat_fixture.py"))
             args = ["--ci-delegated-release-state-and-corrected-stage"]
             for override, status in (({}, 0), ({"TOPOLOGY_EXIT": "31"}, 31),
-                                     ({"REGRESSION_EXIT": "32"}, 32), ({"INVENTORY_EXIT": "33"}, 33)):
+                                     ({"REGRESSION_EXIT": "32"}, 32), ({"INVENTORY_EXIT": "33"}, 33),
+                                     ({"STAT_FIXTURE_EXIT": "34"}, 34)):
                 log.write_text("")
                 result = subprocess.run(["bash", "-e", "-u", "-o", "pipefail", "-c", script, "probe", *args],
                                         env={**env, **override}, capture_output=True)
