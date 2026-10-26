@@ -33,7 +33,7 @@ module WorkflowCapabilityPolicy
       "${{ github.event_name == 'push' && 'prod' || inputs.environment }}",
   }.freeze
   DEPLOY_SECRETS = Set.new(
-    %w[COMPOSE_PATH SSH_HOST SSH_PORT SSH_PRIVATE_KEY SSH_USER]
+    %w[COMPOSE_PATH SSH_HOST SSH_KNOWN_HOSTS SSH_PORT SSH_PRIVATE_KEY SSH_USER]
   ).freeze
   RELEASE_STATUS_SECRETS = Set.new(
     %w[COMPOSE_PATH SSH_HOST SSH_KNOWN_HOSTS SSH_PORT SSH_PRIVATE_KEY SSH_USER]
@@ -96,6 +96,7 @@ module WorkflowCapabilityPolicy
   DEPLOY_ORCHESTRATOR_ENV = {
     "SSH_USER" => "${{ secrets.SSH_USER }}",
     "SSH_HOST" => "${{ secrets.SSH_HOST }}",
+    "SSH_KNOWN_HOSTS" => "${{ secrets.SSH_KNOWN_HOSTS }}",
     "SSH_PORT" => "${{ secrets.SSH_PORT || '22' }}",
     "COMPOSE_PATH" => "${{ secrets.COMPOSE_PATH }}",
     "REGISTRY_USERNAME" => "${{ github.actor }}",
@@ -135,17 +136,20 @@ module WorkflowCapabilityPolicy
           BASH
         },
         {
+          "name" => "Validate pinned SSH host",
+          "shell" => "bash",
+          "env" => {
+            "SSH_USER" => "${{ secrets.SSH_USER }}",
+            "SSH_HOST" => "${{ secrets.SSH_HOST }}",
+            "SSH_PORT" => "${{ secrets.SSH_PORT || '22' }}",
+            "SSH_KNOWN_HOSTS" => "${{ secrets.SSH_KNOWN_HOSTS }}",
+          },
+          "run" => "python3 -I -S -B scripts/deploy/release_ssh_pin.py --validate",
+        },
+        {
           "name" => "Setup SSH agent",
           "uses" => SSH_AGENT_ACTION,
           "with" => {"ssh-private-key" => "${{ secrets.SSH_PRIVATE_KEY }}"},
-        },
-        {
-          "name" => "Add host to known_hosts",
-          "shell" => "bash",
-          "run" => <<~'BASH',
-            set -euo pipefail
-            ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts"
-          BASH
         },
         {
           "name" => "Quiesce, migrate and start verified image",
@@ -181,17 +185,20 @@ module WorkflowCapabilityPolicy
           "with" => {"persist-credentials" => false},
         },
         {
+          "name" => "Validate pinned SSH host",
+          "shell" => "bash",
+          "env" => {
+            "SSH_USER" => "${{ secrets.SSH_USER }}",
+            "SSH_HOST" => "${{ secrets.SSH_HOST }}",
+            "SSH_PORT" => "${{ secrets.SSH_PORT || '22' }}",
+            "SSH_KNOWN_HOSTS" => "${{ secrets.SSH_KNOWN_HOSTS }}",
+          },
+          "run" => "python3 -I -S -B scripts/deploy/release_ssh_pin.py --validate",
+        },
+        {
           "name" => "Setup SSH agent",
           "uses" => SSH_AGENT_ACTION,
           "with" => {"ssh-private-key" => "${{ secrets.SSH_PRIVATE_KEY }}"},
-        },
-        {
-          "name" => "Add host to known_hosts",
-          "shell" => "bash",
-          "run" => <<~'BASH',
-            set -euo pipefail
-            ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts"
-          BASH
         },
         {
           "name" => "Quiesce, migrate and start verified image",
@@ -1968,6 +1975,38 @@ module WorkflowCapabilityPolicy
     reject("deploy scripts must be tracked") unless inventory.sort == [remote_path, runner_path, session_path].sort
     [runner_path, remote_path, session_path].each { |path| ensure_regular_path(root, path) }
     runner = File.binread(root.join(runner_path))
+    %w[scripts/deploy/release_ssh_pin.py scripts/deploy/release_private_root.py].each do |path|
+      ensure_regular_path(root, path)
+    end
+    pin = File.binread(root.join("scripts/deploy/release_ssh_pin.py"))
+    ["STAGE_FINGERPRINT = 'SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk'",
+     "require(host == STAGE_HOST and port == '22' and fingerprint == STAGE_FINGERPRINT)",
+     "require(host != STAGE_HOST and fingerprint != STAGE_FINGERPRINT)",
+     "child_env = dict(env, CLUBS_RELEASE_PIN_FD=str(PIN_FD))",
+     "check_fd(child_env)"].each do |literal|
+      reject("release pin admission contract changed") unless pin.include?(literal)
+    end
+    expected_options = <<~'BASH'
+      readonly -a ssh_options=(
+        -F /dev/null
+        -o "UserKnownHostsFile=$pin_reference" -o GlobalKnownHostsFile=/dev/null
+        -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519
+        -o KnownHostsCommand=none -o VerifyHostKeyDNS=no -o UpdateHostKeys=no
+        -o ProxyCommand=none -o ProxyJump=none -o PermitLocalCommand=no
+        -o ControlMaster=no -o ControlPath=none -o ControlPersist=no
+        -o CanonicalizeHostname=no -o BatchMode=yes -o ConnectionAttempts=1
+        -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+        -o PreferredAuthentications=publickey -o IdentityFile=none -o CertificateFile=none
+      )
+    BASH
+    reject("runner strict SSH options changed") unless runner.include?(expected_options)
+    ['exec python3 -I -S -B "$repository_root/scripts/deploy/release_ssh_pin.py" --bootstrap',
+     'python3 -I -S -B "$repository_root/scripts/deploy/release_ssh_pin.py" --check-fd',
+     'readonly pin_reference="/proc/$$/fd/18"',
+     'unset SSH_KNOWN_HOSTS CLUBS_RELEASE_PIN_FD',
+     'ssh "${ssh_options[@]}" -p "$SSH_PORT" "$ssh_target" "$quoted_command"'].each do |literal|
+      reject("runner pin handoff contract changed") unless runner.include?(literal)
+    end
     remote = File.binread(root.join(remote_path))
     session = File.binread(root.join(session_path))
     ["data = sys.stdin.read(4097) if args[0] == 'preflight' else ''",
@@ -2002,8 +2041,8 @@ module WorkflowCapabilityPolicy
     end
     capture_index = runner.index('registry_read_token="$REGISTRY_READ_TOKEN"')
     drop_index = runner.index("unset REGISTRY_READ_TOKEN")
-    session_child = runner.index("  coproc HOST_SESSION { exec ssh -T")
-    upload_child = runner.index('timeout --signal=KILL 20s scp -P "$SSH_PORT"')
+    session_child = runner.index('  coproc HOST_SESSION { exec ssh "${ssh_options[@]}" -T')
+    upload_child = runner.index('timeout --signal=KILL 20s scp "${ssh_options[@]}" -P "$SSH_PORT"')
     reject("bounded session/upload transport contract changed") unless session_child && upload_child
     first_child_index = [session_child, upload_child].min
     unless capture_index && drop_index && first_child_index &&

@@ -6,6 +6,63 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-91 ordinary-release SSH pin, LOCAL ONLY (2026-10-26):
+  **CLB91_RELEASE_SSH_PIN_LOCAL_REVIEW_PASS**. Separate persistent worktree
+  `/Users/maksimmartynov/.codex/worktrees/clb91-release-ssh-pin/clubs_bot`, detached
+  HEAD/base `00759b8ebf86414b349aa390097e63f8fd6a0293`; exact-base identity PASS,
+  active clubs-owned instructions, active foreign instructions=0. Primary dirty
+  AGENTS/status and the separate docs PR #548 worktree remain untouched.
+- Both privileged ordinary-release workflows now validate the selected Environment's
+  `SSH_KNOWN_HOSTS` before SSH-agent access; the shared runner revalidates an
+  anonymous/root-chain-checked, runner-owned, mode-0600, unlinked, read-only FD18.
+  Stage admits only `178.20.209.5:22`, Ed25519 and the owner's VNC-confirmed
+  `SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk`. Prod requires its own
+  Environment endpoint/key and refuses stage's. All three SSH/SCP sites use the
+  same fixed strict options: no key discovery, user/global config, proxy, DNS trust,
+  trust updates, connection multiplexing, password fallback or default identity files.
+  Shared lock/FSM, token stdin-only flow and action/permission/concurrency gates remain.
+- Fresh offline local Linux ARM64 / CPython 3.12 tests: pin admission/forged-FD/strict
+  transport **13/13 PASS**, runner classification **12/12 PASS**, full root-owned
+  flock/process/session **25/25 PASS**; full release-state `--strict-ci`
+  **73/73 PASS**, 442.327 s, zero failures/errors/skips/expected failures/unexpected
+  successes. All original 73 test method ASTs remain identical. Execution used
+  disposable local containers, network none, source/rootfs read-only, tmpfs fixtures,
+  no Docker socket or credentials. Only root-owned flock fixtures received CHOWN/
+  SETUID/SETGID capabilities inside their isolated container; no privileged/host mode.
+- YAML and capability validators see **32/32 workflows**; corrected-bound and complete
+  release structural validators PASS. Entire existing capability positive/negative
+  mutation block PASS; lint topology/accounting **17/17 PASS**. SSH-agent VM suite
+  **4/4 PASS** on native Darwin/Node; independent native pin suite **8 PASS + 5 explicit
+  Linux-only skips** (13 total). Payment/security validator PASS for 424 Kotlin files,
+  **STRUCTURAL_ONLY_NON_AUTHORITATIVE**; no JVM/payment runtime claim. Pinned Gitleaks
+  scoped scan of changed paths found zero leaks; no scanner exceptions were changed.
+  Focused independent code and provisioning/revision-doc review: **P0/P1/P2=0/0/0**.
+- Development/verification errors are not hidden: an env-dict duplicate-key error in
+  the new test was fixed; initial Linux tmpfs noexec prevented the fake SSH fixture
+  and was rerun with explicit exec on fixture tmpfs. Full flock needs disposable
+  root-owned fixtures, not the nonroot pin runner. An old structural SCP needle was
+  updated to require the strict options while preserving exactly one upload. Node
+  is absent in the Linux reference image; the unchanged VM tests passed on the
+  installed native Node instead. No production guard or accounting was relaxed.
+- [Pin provisioning contract](secrets-rotation.md#ordinary-release-ssh-pin--clb-91-local-preparation-2026-10-26):
+  actual stage Environment secret contents and live policy/principal are **UNVERIFIED**;
+  no secret was read/provisioned/rotated. Old historical pins/diagnostic channels and
+  DEC-038 bytes on base main are unchanged; the accepted dated replacement remains
+  in unmerged [Draft PR #548](https://github.com/koteev-m/clubs_bot/pull/548).
+- [Revision/run-identity boundary](release-rollback.md#ordinary-release-ssh-pin-candidate-and-revision-binding--2026-10-26):
+  `EXPECTED_REVISION=github.sha` and owner `${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`
+  remain mandatory. The old published `fd39b782...` image belongs to `00759b8...`
+  and cannot be substituted for the new workflow's future post-merge SHA. The
+  existing-contract path is a separately approved new main/new signed image target
+  after normal publication/provenance checks, then one separately authorized stage
+  release after fresh runtime/resource/flock/schema admission. No new target is chosen.
+- Local publication readiness: **GO for separately authorized publication/review**;
+  hosted Ubuntu x86_64 CI, Environment provisioning and live stage release remain
+  NOT_RUN. No commit/push/PR/merge, Actions dispatch/rerun, SSH connection or server,
+  application/DB/migration/Caddy/Hookah/prod operation occurred in this task. Next:
+  obtain separate authorization to publish this exact reviewed local candidate;
+  no execution permission transfers from earlier target-specific requests.
+
 - CLB-198 CI fixture optimization, LOCAL ONLY (2026-10-26):
   **CLB198_LOCAL_VERIFIED_HOSTED_TIMING_PENDING**. New isolated worktree
   `/Users/maksimmartynov/.codex/worktrees/clb198-ci-critical-path/clubs_bot`, detached HEAD/base
