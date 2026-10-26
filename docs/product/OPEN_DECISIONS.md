@@ -928,6 +928,11 @@
 
 ## DEC-038 — stage SSH host-trust exception for one exact retained Ed25519 key
 
+> Historical acceptance dated 2026-09-09. The original record below is retained
+> verbatim; its key is superseded for the current endpoint by the separately accepted
+> VNC-authenticated replacement dated 2026-10-26 below. It must not authorize the old
+> key against the reinstalled server. This dated amendment adds no product decision.
+
 - **Context:** CLB-86 could not obtain independent provider/VNC evidence. The user therefore explicitly accepted a narrowly scoped retained-key trust basis instead of that prerequisite, while preserving strict host-key checking and every later execution gate.
 - **Source tension:** immutable `CONCEPT_SOURCE.md` and the 170 source requirements do not define SSH host trust. This is an operational security/governance decision, not a product capability or source requirement; it does not alter `PRODUCT_SPEC.md` or the accepted product slice.
 - **Code/runtime tension:** repository/runbook wiring requires a canonical pinned `SSH_KNOWN_HOSTS` payload with strict checking, but it neither proves that a pin is provisioned nor that a status workflow has run. This record changes no executable guard, workflow, server, secret or runtime state.
@@ -951,6 +956,33 @@
   - `SSH_KNOWN_HOSTS` provisioning until the separately required live policy and secret-scope gates are satisfied and a distinct provisioning authority exists;
   - Release Status dispatch, deployment, resume, rollback and recovery until all ordered gates and their separate authorities are satisfied.
 - **Status:** `ACCEPTED_DECISION`.
+
+### Accepted replacement — authenticated AEZA VNC, 2026-10-26
+
+- **Decision source:** direct owner instruction in the CLB-91 continuation on 2026-10-26.
+  The owner states that Ubuntu was reinstalled and the new key was confirmed through
+  an authenticated AEZA VNC console. The agent did not independently operate that console.
+- **Accepted by:** user.
+- **Accepted at:** 2026-10-26.
+- **Accepted contract:** only repository `koteev-m/clubs_bot`, environment `stage`,
+  endpoint `178.20.209.5:22`, algorithm `ssh-ed25519`, fingerprint
+  `SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk`.
+  This replaces the historical retained-key trust basis above for the current server;
+  it is not an exception authorizing arbitrary newly observed keys.
+- **Observed binding:** existing local known_hosts matches the accepted fingerprint;
+  bounded read-only SSH on 2026-10-26 used strict Ed25519 checking with no keyscan,
+  accept-new, trust update, alternative algorithm, proxy or fallback. No pin was rewritten.
+- **Preserved gates:** exact endpoint/key matching, protected deployment principal,
+  live Environment policy, source/image signature/provenance, shared flock, resource,
+  schema and release FSM admission remain required. Another key/endpoint fails closed.
+  No old incident authority or prod permission is transferred.
+- **Execution boundary:** the owner separately authorized one exact ordinary stage
+  update only after all mandatory admission gates, plus four-file docs publication.
+  The current workflow's unverified keyscan prevents its use; no dispatch or runtime
+  mutation occurred. Documentation acceptance does not make that workflow trusted
+  or authorize a replacement implementation. Recovery/restore/Caddy/DNS/Hookah changes
+  remain prohibited; future authorization cannot be inferred from this historical record.
+- **Status:** `ACCEPTED_DECISION` (dated replacement within DEC-038).
 
 ## DEC-039 — Telegram identity владельца платформы
 

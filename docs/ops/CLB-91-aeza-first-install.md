@@ -1,5 +1,45 @@
 # CLB-91 — clean shared-host first-install candidate
 
+## Current stage continuation — 2026-10-26
+
+The bounded recovery is **already complete**. The owner and
+[Clubs project journal](https://docs.google.com/document/d/1I4m-kQvDjQ6xTNXh5t6pcdtrpNn9dGSVSgOGuWwwtQ4/edit) report one `recover-application` PASS,
+first-install `verify` PASS and preserved PostgreSQL/resources on 2026-10-23.
+A later shared-host operation activated Caddy/HTTPS; the owner opened the Mini App
+through `@NightConcierge_Bot`. Do not repeat recovery, initial-install, restore,
+marker creation or the historical Caddy-masked prerequisite below. Those were
+conditions of the completed operation, not instructions to deactivate current ingress.
+
+[Current checkpoint](PROJECT_STATUS.md#current-operational-state) records the bounded
+2026-10-26 observations: recovered app running/healthy at revision
+`77e0635a4e43df03eb1bbec7acf91bf832966aa3`, original healthy PostgreSQL 16.15,
+original volume/networks, recovery receipt/baseline present, active Caddy and
+HTTPS health/ready/app 200. No installer/verify command was rerun. Owner/five-chat
+configuration presence is observed; real Telegram credentials/identity were not tested.
+The owner accepted the VNC-authenticated replacement key in
+[DEC-038](../product/OPEN_DECISIONS.md#accepted-replacement--authenticated-aeza-vnc-2026-10-26).
+
+PRs #545–547 are merged. Delivery target is main
+`00759b8ebf86414b349aa390097e63f8fd6a0293`, immutable image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`.
+It is **not deployed**. The next delivery must use the ordinary protected quiesced
+release/FSM, capture the recovered app as prior baseline and preserve project/root,
+DB, networks and volume. No historical incident recovery state is imported.
+
+**Current delivery blocker:** `.github/workflows/deploy-ssh.yml` uses unverified
+`ssh-keyscan` trust bootstrapping and is prohibited by the owner's current request.
+No release was dispatched or run. The target image is not preloaded; live schema,
+protected deployment-principal/Environment and complete release admission remain
+unchecked. Current HTTPS HTML for `mode=platform-owner` is not evidence that the
+new cabinet was deployed: the old backend returns 404 for `/api/platform/access`.
+See [ordinary stage delivery gates](release-rollback.md#current-clb-91-stage-delivery-boundary--2026-10-26).
+
+## Historical local preparation and recovery contract — 2026-10-22
+
+The local-only, unverified-live and future-execution statements below describe
+that preparation date. Retain the exact recovery guards/evidence as history;
+this section grants no new recovery or infrastructure authority.
+
 **LOCAL ONLY — bounded recovery implementation (2026-10-22).** The five-input runtime
 candidate is preserved. `recover-application` implements one explicit continuation of the
 known failed install; ordinary phases cannot replay it. Publication and live execution

@@ -7,6 +7,59 @@
 Этот документ также фиксирует repository contract для управляемого quiesced release. Он не является
 свидетельством того, что deploy, recovery, migration или staging operation фактически выполнялись.
 
+## Current CLB-91 stage delivery boundary — 2026-10-26
+
+The owner/journal report the 2026-10-23 bounded recovery and subsequent HTTPS
+activation as completed; [fresh observations and source attribution](PROJECT_STATUS.md#current-operational-state)
+confirm the recovered backend is currently healthy. The next operation is an
+ordinary stage update, never another recovery/restore/initial-install or Caddy setup.
+Old incident executor identities and historical local-only readiness entries below
+are not the current stage baseline or reusable execution permissions.
+
+Current SSH trust is the owner's authenticated AEZA VNC replacement decision in
+[DEC-038](../product/OPEN_DECISIONS.md#accepted-replacement--authenticated-aeza-vnc-2026-10-26):
+only `koteev-m/clubs_bot` / `stage` / `178.20.209.5:22`, Ed25519
+`SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk`.
+The old retained key is historical. Require a pre-established exact matching pin
+and strict host checking; no keyscan, accept-new, automatic replacement or fallback.
+Root observer access does not establish the protected deployment principal or live
+Environment gates. No protected secret or known_hosts was changed in this continuation.
+
+The owner conditionally authorized **one** ordinary update to exact revision
+`00759b8ebf86414b349aa390097e63f8fd6a0293`, image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`.
+PRs #545–547 are merged; all 15 target push workflows succeeded. Docker Publish
+[40349552528](https://github.com/koteev-m/clubs_bot/actions/runs/40349552528)
+verified its signature/OCI/SLSA graph. Publication does not prove stage acceptance.
+
+**First blocker — no runtime operation attempted:** the current
+[deploy workflow](../../.github/workflows/deploy-ssh.yml) appends `ssh-keyscan`
+output without validating the accepted pin. Do not dispatch it. Changing workflow
+code requires a separate scope; do not replace the protected contract with ad-hoc
+Docker commands, a local runner or a fabricated GitHub run identity.
+
+After a separately reviewed trusted-pin delivery path exists, fresh admission must
+establish the exact image/revision/platform/provenance, protected stage principal,
+Environment policy, persistent root/backing and current resource baseline; validate
+the shared flock including ownership/ACL/xattrs and exclude concurrent operators;
+check first-use/durable FSM state and live schema with **no pending migrations**.
+No changed migration files were found between the old revision and target, but
+that is not a live schema validation. Stop on any failed/unverified gate or unexpected
+runtime; the historical Hookah backend ID was absent during this observation and
+its current identity must be reconciled before claiming neighbor continuity.
+The old Hookah DB and its HTTP health were observed healthy; no neighbor mutation occurred.
+
+Use the existing shared-host-lock/FSM order and all migration/security/health gates;
+no retry or rollback after UNKNOWN. Keep PostgreSQL, Hookah, Caddy, DNS and prod
+outside the mutation scope. Confirm exact new app revision/digest, restart/health,
+unchanged DB/resources, HTTPS health/ready and packaged Mini App before success.
+A real Telegram smoke then requires the owner to open the same bot's HTTPS
+`/app?mode=platform-owner`, use fresh header-only initData and confirm allowed access;
+another identity must remain denied. Presence of a positive configured owner ID or
+an HTML 200 alone proves neither the bot/owner pairing nor authorization. Never
+print initData, bot tokens, private IDs or other credentials. Owner/device interaction
+is a separate manual smoke step; it was not performed here.
+
 ## Current shared-host staging coordination
 
 CLB-91 uses the [simple shared flock contract](CLB-91-shared-staging-flock.md):
