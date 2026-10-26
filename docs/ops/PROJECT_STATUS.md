@@ -6,6 +6,33 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-197 PR #546 Trivy dependency fix, LOCAL ONLY (2026-10-26):
+  **CLB197_TRIVY_FIX_LOCAL_READY**. Existing worktree
+  `/Users/maksimmartynov/.codex/worktrees/clb196-platform-owner-ui/clubs_bot`, branch
+  `codex/clb196-clb197-platform-owner`, unchanged HEAD
+  `e314560d23e4182875d2da0d2afead4831bdb9b3`; published [Draft PR #546](https://github.com/koteev-m/clubs_bot/pull/546)
+  contains CLB-196/197. `PROJECT_IDENTITY_OK`; active clubs-owned instructions,
+  active foreign=0. User-confirmed Security Scan evidence: run `40315994545`,
+  attempt 1, job `121548609203`, failed Trivy filesystem step; one HIGH
+  `CVE-2023-54404` for npm `zod@3.25.76` in `miniapp/pnpm-lock.yaml`.
+  Scoped source/test/tooling search found no zod imports or API usage; `pnpm why zod`
+  confirmed only the direct miniapp dependency, already present in the base commit.
+  pnpm 11.25.0 removed that dependency and its importer/package/snapshot entries.
+  Exact diff checks confirm no other manifest or lockfile drift; no ignore, severity,
+  workflow or security-gate changes. Frozen install and supply-chain policy PASS
+  (488 entries); offline validation initially lacked cached metadata, then the normal
+  network-backed policy check passed with install scripts disabled and no version changes.
+  Fresh local verification: Vitest **158/158** (24 files), TypeScript, strict ESLint,
+  production build and `git diff --check` PASS. Installed lockfile matches the repository
+  lockfile; all six rebuilt dist files are byte-identical to HEAD. Backend and runtime
+  source are unchanged, so existing JVM 1,189 PASS, Playwright 9 PASS and focused
+  `CLB197_SECURITY_REVIEW_PASS` evidence remain applicable to the unchanged functionality;
+  JVM/browser suites were not repeated. Local edits are package.json, pnpm-lock.yaml and
+  this checkpoint only. No commit, push, PR update, CI rerun or runtime/config change.
+  Trivy on the updated lockfile remains unverified in GitHub until publication.
+  Next: obtain separate authorization for commit/push to PR #546 and fresh automatic CI;
+  physical Telegram/HTTPS/staging smoke and deployment remain outside this task.
+
 - CLB-197 Platform Owner Telegram Identity, LOCAL ONLY (2026-10-26):
   **PLATFORM_OWNER_AUTH_LOCAL_READY**. Same CLB-196 worktree, detached unchanged
   HEAD/base `af6c74888fa026b1f95833d12b0070d3f5ed6df7`; CLB-196 UI/tests preserved.
