@@ -7,6 +7,65 @@
 Этот документ также фиксирует repository contract для управляемого quiesced release. Он не является
 свидетельством того, что deploy, recovery, migration или staging operation фактически выполнялись.
 
+## Current CLB-91 stage delivery boundary — 2026-10-26
+
+The owner/journal report the 2026-10-23 bounded recovery and subsequent HTTPS
+activation as completed; [the last recorded observation and source attribution](PROJECT_STATUS.md#current-operational-state)
+reported a healthy recovered backend at that time. This documentation reconciliation
+makes no new stage observation. The next operation is an
+ordinary stage update, never another recovery/restore/initial-install or Caddy setup.
+Old incident executor identities and historical local-only readiness entries below
+are not the current stage baseline or reusable execution permissions.
+
+Current SSH trust is the owner's authenticated AEZA VNC replacement decision in
+[DEC-038](../product/OPEN_DECISIONS.md#accepted-replacement--authenticated-aeza-vnc-2026-10-26):
+only `koteev-m/clubs_bot` / `stage` / `178.20.209.5:22`, Ed25519
+`SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk`.
+The old retained key is historical. Require a pre-established exact matching pin
+and strict host checking; no keyscan, accept-new, automatic replacement or fallback.
+Root observer access does not establish the protected deployment principal or live
+Environment gates. No protected secret or known_hosts was changed in this continuation.
+
+At the earlier observation the owner conditionally authorized **one** ordinary
+update to revision `00759b8ebf86414b349aa390097e63f8fd6a0293`, image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`;
+it was not attempted. At that time the deploy workflow used unverified `ssh-keyscan`,
+which was prohibited. PR [#549](https://github.com/koteev-m/clubs_bot/pull/549)
+subsequently merged the reviewed pinned SSH implementation. Do not replace the
+protected contract with ad-hoc Docker commands, a local runner or a fabricated run identity.
+
+Current published main is `d10c0fb53829192d2cc38cb93dfbbc754a4ab123` with image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:6ca42beb556e72317e949bd043ae7884db440536ad0e6bb454944e564fcd8c93`.
+All 15 post-merge workflows succeeded; [Docker Publish 40386747163](https://github.com/koteev-m/clubs_bot/actions/runs/40386747163)
+verified signature and OCI/SLSA provenance. The new image is not reported deployed
+on stage; publication does not prove stage acceptance. The earlier authorization
+for `00759b8...`/`fd39b782...` does not transfer to this new revision/image.
+After any later merge of PR #548, re-confirm the resulting main SHA and its matching
+signed image: `EXPECTED_REVISION=github.sha` prevents assuming the `d10c0fb...` image
+matches the new workflow revision. This documentation reconciliation selects no target.
+
+After separately authorized pin provisioning/verification, fresh admission must
+establish the exact image/revision/platform/provenance, protected stage principal,
+Environment policy, persistent root/backing and current resource baseline; validate
+the shared flock including ownership/ACL/xattrs and exclude concurrent operators;
+check first-use/durable FSM state and live schema with **no pending migrations**.
+No changed migration files were found between the previously observed app revision
+and the current published main, but that is not a live schema validation. Stop on any failed/unverified gate or unexpected
+runtime; the historical Hookah backend ID was absent during this observation and
+its current identity must be reconciled before claiming neighbor continuity.
+The old Hookah DB and its HTTP health were observed healthy; no neighbor mutation occurred.
+
+Use the existing shared-host-lock/FSM order and all migration/security/health gates;
+no retry or rollback after UNKNOWN. Keep PostgreSQL, Hookah, Caddy, DNS and prod
+outside the mutation scope. Confirm exact new app revision/digest, restart/health,
+unchanged DB/resources, HTTPS health/ready and packaged Mini App before success.
+A real Telegram smoke then requires the owner to open the same bot's HTTPS
+`/app?mode=platform-owner`, use fresh header-only initData and confirm allowed access;
+another identity must remain denied. Presence of a positive configured owner ID or
+an HTML 200 alone proves neither the bot/owner pairing nor authorization. Never
+print initData, bot tokens, private IDs or other credentials. Owner/device interaction
+is a separate manual smoke step; it was not performed here.
+
 ## Current shared-host staging coordination
 
 CLB-91 uses the [simple shared flock contract](CLB-91-shared-staging-flock.md):
@@ -19,6 +78,11 @@ are not authorized by this simpler staging model.
 
 ## Ordinary release SSH pin candidate and revision binding — 2026-10-26
 
+> Historical local-preparation snapshot, preserved after PR #549 merged. Its
+> local-only publication and hosted-CI future-tense statements describe that earlier
+> point; the current merged state and artifact are recorded above. Its trust,
+> provisioning, exact-revision and separate-authorization requirements remain in force.
+
 This local CLB-91 candidate replaces unverified key discovery only in
 `deploy-ssh.yml` and `db-migrate.yml` plus their shared ordinary runner. It retains
 protected Environment selection, confirmation, concurrency, permission/action pins,
@@ -30,8 +94,9 @@ strict anonymous read-only pin. Stage admits only the owner-accepted VNC fingerp
 Ed25519. Prod requires its separate Environment key/endpoint and rejects stage's.
 [Exact provisioning and no-overlap requirements](secrets-rotation.md#ordinary-release-ssh-pin--clb-91-local-preparation-2026-10-26)
 are a future separately authorized operation, not a claim about current secret values.
-The dated trust decision is in unmerged PR #548; its historical text is not silently
-rewritten by this implementation. Old diagnostic/incident channels are unchanged.
+At local-preparation time the dated trust decision was in then-unmerged PR #548;
+its historical text was not silently rewritten by the implementation. Old
+diagnostic/incident channels are unchanged.
 
 **`EXPECTED_REVISION = github.sha` remains unchanged.** The workflow does not gain
 an input that overrides revision, digest, provenance source or GitHub run identity.
@@ -41,12 +106,15 @@ match the workflow's exact source SHA. Run owner remains
 
 The previously published image
 `ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`
-belongs to `00759b8ebf86414b349aa390097e63f8fd6a0293`. Publishing/merging this fix
-will create a different main revision. That old image must fail the new workflow's
+belongs to `00759b8ebf86414b349aa390097e63f8fd6a0293`. Publication and merge of
+this fix created a different main revision. That old image must fail the new workflow's
 revision check; changing the input tag cannot make it admissible. Running the old
 workflow ref would retain the unsafe key-discovery code and is not a workaround.
 
-Minimal path within the existing contract, **recommended but not authorized here**:
+At the time of local preparation, the minimal path within the existing contract was
+**recommended but not authorized there**. The merged fix and published main image
+are now recorded above; the subsequent provisioning, target choice and release
+still require their applicable separate authorizations:
 
 1. Separately authorize publication/review/merge of this fix and reconcile PR #548.
 2. Let normal post-merge CI/Docker Publish produce the signed immutable image for

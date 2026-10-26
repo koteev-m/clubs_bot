@@ -6,6 +6,113 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-91 documentation reconciliation, 2026-10-26: **SSH_PIN_FIX_MERGED;
+  ENVIRONMENT_AND_STAGE_ADMISSION_UNVERIFIED**. PR [#549](https://github.com/koteev-m/clubs_bot/pull/549)
+  is merged at main `d10c0fb53829192d2cc38cb93dfbbc754a4ab123`; both privileged
+  release workflows use the reviewed pinned SSH trust instead of unverified key
+  discovery. All 15 post-merge workflows succeeded. [Docker Publish 40386747163](https://github.com/koteev-m/clubs_bot/actions/runs/40386747163)
+  published and verified signature/OCI/SLSA provenance for exact main image
+  `ghcr.io/koteev-m/clubs_bot/app-bot@sha256:6ca42beb556e72317e949bd043ae7884db440536ad0e6bb454944e564fcd8c93`.
+  Publication/CI are not runtime evidence. The new image is not reported deployed
+  to stage; no SSH or stage observation occurs in this documentation reconciliation.
+  If PR #548 is later merged, re-confirm the resulting main SHA and its matching
+  published image: `EXPECTED_REVISION=github.sha` does not permit assuming `d10c0fb...`
+  remains the deployable source revision. No new release target is selected here.
+- The owner and [Clubs project journal](https://docs.google.com/document/d/1I4m-kQvDjQ6xTNXh5t6pcdtrpNn9dGSVSgOGuWwwtQ4/edit)
+  report successful one-use bounded recovery and verification on 2026-10-23; later
+  HTTPS activation and a real Mini App opening were reported. At the last recorded
+  2026-10-26 observation the original DB was healthy, app revision was `77e0635a4e43df03eb1bbec7acf91bf832966aa3`,
+  and HTTPS health/ready returned 200. This timestamped observation does not prove
+  current stage health, identity or readiness. Do not repeat recovery or restore.
+- The accepted [DEC-038 replacement](../product/OPEN_DECISIONS.md#accepted-replacement--authenticated-aeza-vnc-2026-10-26)
+  binds the owner-confirmed VNC Ed25519 key to the exact stage endpoint. Existing
+  stage Environment `SSH_KNOWN_HOSTS` contents, protected policy/principal, live
+  schema, shared-flock admission and neighbor continuity remain **UNVERIFIED**.
+  Provisioning/verification, fresh runtime admission and stage deployment are
+  separate steps requiring their applicable authorization. Earlier authorization
+  naming a different revision/image does not transfer to `d10c0fb...`.
+
+### Historical CLB-91 stage observation and prior docs checkpoint (2026-10-26)
+
+The following records the earlier observation and decisions as they stood then;
+its old key-discovery blocker and next-step wording are not current authority.
+
+- CLB-91 stage continuation, 2026-10-26: **CURRENT_BACKEND_HEALTH_OBSERVED;
+  LATEST_MAIN_RELEASE_BLOCKED_BEFORE_RUNTIME_MUTATION**. This was the operational
+  checkpoint at the time of observation; subsequent publication is recorded above.
+  Owner-confirmed history, also recorded in the [Clubs project journal](https://docs.google.com/document/d/1I4m-kQvDjQ6xTNXh5t6pcdtrpNn9dGSVSgOGuWwwtQ4/edit):
+  one bounded `recover-application` PASS and first-install `verify` PASS on 2026-10-23;
+  original PostgreSQL/data resources retained. A later shared-host operation activated
+  system Caddy/HTTPS, and the owner opened the Mini App through `@NightConcierge_Bot`.
+  These are attributed historical reports, not commands repeated in this continuation.
+- The owner explicitly accepted the post-reinstall Ed25519 key
+  `SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk`, authenticated through AEZA VNC,
+  only for `koteev-m/clubs_bot` / `stage` / `178.20.209.5:22`.
+  [DEC-038 dated replacement](../product/OPEN_DECISIONS.md#accepted-replacement--authenticated-aeza-vnc-2026-10-26)
+  preserves the old retained-key decision as history. Local known_hosts matched;
+  two bounded SSH observations used strict Ed25519 checking, no keyscan, no trust
+  update, no proxy/fallback, and explicit local Docker socket. Root observation is
+  not proof of the protected workflow deployment principal or Environment policy.
+- Fresh read-only SSH observation at 2026-10-26 17:43:36 UTC: Engine `29.9.2`, ID
+  `e9f62784-ee1d-49b1-9bed-17a2b1bfb964`, Compose `2.40.3`; root `/opt/clubs-bot-stage`,
+  project `clubs-bot-stage`. App `f07e720e4c1ce594b56d78dd8c0215e4154cb01bffa39560256e0d0583e2e0df`
+  is running/healthy, restart count 0, started 2026-10-23; deployed revision
+  `77e0635a4e43df03eb1bbec7acf91bf832966aa3`, immutable image
+  `ghcr.io/koteev-m/clubs_bot/app-bot@sha256:1113570fc72001f761aa4f93444ad2e0b65779fe533da0d8a60ca06155230a1e`.
+  Original DB `c25a5b59d1995fca1ceb3b12add2e6dc558fb92fd975c3f27ad17689a35df7e7`
+  is running/healthy, restart count 0, PostgreSQL `16.15-1.pgdg13+2`; original
+  `clubs-bot-stage_pgdata` and both network IDs/config hashes match the journal.
+  Six first-install markers include the recovery attempt and observed baseline;
+  baseline app and database-ready DB IDs match the running resources. No recovery
+  or installer was executed. Shared flock is regular/root-owned/0660/single-link;
+  no held lock appeared in the instantaneous procfs observation. No lock was acquired;
+  ACL/xattr admission, exclusion of concurrent writers and full release admission remain unverified.
+  `.clubs-bot-release-state` is absent: this is not a completed ordinary release.
+- Loopback `/health` and `/ready` returned 200; Caddy is enabled/active/running.
+  Fresh certificate-verified HTTPS GETs to `stage.nightconcierge.help` returned 200
+  for `/health`, `/ready`, `/app`, `/app?mode=platform-owner`; both app responses
+  are HTML shells, not authorization evidence. `/api/platform/access` returned 404
+  on the old deployed revision. Required bot/owner/five-chat inputs are present;
+  owner configuration is positive; values were not printed and real identity was not exercised.
+  Neighbor Hookah loopback health returned 200; its historical DB ID remains healthy
+  with restart count 0. The historical backend ID was absent, so complete neighbor
+  container-identity continuity is not claimed. No Hookah/Caddy/DNS changes occurred.
+- Previous delivery target at the time of observation: merged PRs [#545](https://github.com/koteev-m/clubs_bot/pull/545),
+  [#546](https://github.com/koteev-m/clubs_bot/pull/546), [#547](https://github.com/koteev-m/clubs_bot/pull/547);
+  confirmed remote main `00759b8ebf86414b349aa390097e63f8fd6a0293`.
+  Reused same-revision evidence: 15/15 push workflows SUCCESS;
+  [Docker Publish 40349552528](https://github.com/koteev-m/clubs_bot/actions/runs/40349552528),
+  signed OCI index/SLSA verification and direct GHCR manifest/config digest checks for
+  amd64/arm64. Exact target is
+  `ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`;
+  it is not preloaded on stage. No migration files changed from the historical app
+  revision to the target; live pending-migration state was not queried or declared clean.
+- At that time the first delivery blocker was [deploy-ssh.yml](../../.github/workflows/deploy-ssh.yml)
+  appending `ssh-keyscan` output without validating the trusted pin. The owner
+  expressly forbade that workflow; PR #549 subsequently replaced this behavior. No dispatch, release helper execution,
+  image pull, recovery, deploy, migration or server configuration mutation occurred;
+  no alternative runner or fabricated GitHub release owner was introduced.
+  One conditional ordinary stage update was authorized only after all admission gates;
+  it was not attempted. The then-next step was separately authorizing the trusted-pin
+  workflow fix, now merged as PR #549; neighbor baseline and live schema gates must
+  still pass before any subsequent runtime change.
+- Documentation continuation: isolated `codex/clb91-stage-docs-20261026`, base
+  `00759b8ebf86414b349aa390097e63f8fd6a0293`, worktree
+  `/Users/maksimmartynov/.codex/worktrees/clb91-stage-docs-20261026/clubs_bot`.
+  `PROJECT_IDENTITY_OK`, exact-base PASS, active foreign instructions=0.
+  Primary checkout's existing AGENTS/status changes are preserved. Only this checkpoint,
+  the first-install/release runbooks and DEC-038 are changed for one docs commit/Draft PR;
+  runtime/workflow changes and merge are outside this publication scope.
+  Docs checks: diff/whitespace, added relative paths/anchors, four-file scope and
+  historical-text preservation PASS; no JVM/Gradle/runtime tests are required for
+  this documentation-only diff. No manual CI rerun or dispatch was performed.
+
+### Historical CLB-91 SSH pin local preparation checkpoint (2026-10-26)
+
+This retains the local-only review and test evidence before PR #549 was published;
+its prior publication/hosted-CI next steps describe that historical point only.
+The merged implementation and post-merge CI are recorded in the current status above.
+
 - CLB-91 ordinary-release SSH pin, LOCAL ONLY (2026-10-26):
   **CLB91_RELEASE_SSH_PIN_LOCAL_REVIEW_PASS**. Separate persistent worktree
   `/Users/maksimmartynov/.codex/worktrees/clb91-release-ssh-pin/clubs_bot`, detached
@@ -62,6 +169,8 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
   application/DB/migration/Caddy/Hookah/prod operation occurred in this task. Next:
   obtain separate authorization to publish this exact reviewed local candidate;
   no execution permission transfers from earlier target-specific requests.
+
+### Earlier repository checkpoints
 
 - CLB-198 CI fixture optimization, LOCAL ONLY (2026-10-26):
   **CLB198_LOCAL_VERIFIED_HOSTED_TIMING_PENDING**. New isolated worktree
