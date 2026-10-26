@@ -249,6 +249,7 @@ python3 -B "$ROOT_DIR/scripts/tests/test_amd64_dual_snapshot.py"
 
 echo "[selfcheck] canonical SSH action pin and offline post-cleanup regression"
 python3 -B "$ROOT_DIR/scripts/tests/test_ssh_agent_pin.py"
+python3 -B "$ROOT_DIR/scripts/tests/test_release_ssh_pin.py"
 
 fake_docker="$TMP_DIR/fake-docker"
 fake_docker_args="$TMP_DIR/fake-docker-args.txt"
@@ -7191,6 +7192,8 @@ RUBY
     cp "$ROOT_DIR/$native_source" "$fixture_root/$native_source"
   done <"$native_source_list"
   cp "$ROOT_DIR/scripts/deploy/quiesced-release.sh" "$fixture_root/scripts/deploy/"
+  cp "$ROOT_DIR/scripts/deploy/release_ssh_pin.py" "$fixture_root/scripts/deploy/"
+  cp "$ROOT_DIR/scripts/deploy/release_private_root.py" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/deploy/remote-compose-release.sh" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/deploy/shared_staging_flock.py" "$fixture_root/scripts/deploy/"
   cp "$ROOT_DIR/scripts/verify-oci-provenance.py" "$fixture_root/scripts/"
@@ -9721,6 +9724,8 @@ payment_hardening_files=(
   "scripts/deploy/quiesced-release.sh"
   "scripts/deploy/remote-compose-release.sh"
   "scripts/deploy/shared_staging_flock.py"
+  "scripts/deploy/release_ssh_pin.py"
+  "scripts/deploy/release_private_root.py"
 )
 for relative_path in "${payment_hardening_files[@]}"; do
   mkdir -p "$payment_hardening_fixture_base/$(dirname "$relative_path")"

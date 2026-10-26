@@ -1,6 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The external entrypoint is unchanged. Always validate before any transport, including
+# a direct invocation of the internal handoff. FD 18 is anonymous and read-only.
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ "$#" -eq 0 ]; then
+  exec python3 -I -S -B "$repository_root/scripts/deploy/release_ssh_pin.py" --bootstrap
+fi
+if [ "$#" -ne 1 ] || [ "$1" != "--pinned-ssh-v1" ]; then
+  echo "quiesced-release: invalid invocation" >&2
+  exit 2
+fi
+python3 -I -S -B "$repository_root/scripts/deploy/release_ssh_pin.py" --check-fd
+readonly pin_reference="/proc/$$/fd/18"
+unset SSH_KNOWN_HOSTS CLUBS_RELEASE_PIN_FD
+readonly -a ssh_options=(
+  -F /dev/null
+  -o "UserKnownHostsFile=$pin_reference" -o GlobalKnownHostsFile=/dev/null
+  -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519
+  -o KnownHostsCommand=none -o VerifyHostKeyDNS=no -o UpdateHostKeys=no
+  -o ProxyCommand=none -o ProxyJump=none -o PermitLocalCommand=no
+  -o ControlMaster=no -o ControlPath=none -o ControlPersist=no
+  -o CanonicalizeHostname=no -o BatchMode=yes -o ConnectionAttempts=1
+  -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+  -o PreferredAuthentications=publickey -o IdentityFile=none -o CertificateFile=none
+)
+
 required_variables=(
   APP_ENV
   IMAGE_REPOSITORY
@@ -94,7 +119,7 @@ remote_command() {
   printf -v quoted_command '%q ' "${command_parts[@]}"
   if [ "$remote_mode" = "status" ]; then
     # A fresh read-only connection is allowed after transport ambiguity.
-    ssh -p "$SSH_PORT" "$ssh_target" "$quoted_command"
+    ssh "${ssh_options[@]}" -p "$SSH_PORT" "$ssh_target" "$quoted_command"
   else
     python3 -I -S -B "$repository_root/scripts/deploy/shared_staging_flock.py" \
       request "$remote_mode" "$remote_owner" "$APP_ENV" "$@"
@@ -106,7 +131,7 @@ start_host_session() {
   session_command="$(python3 -I -S -B "$repository_root/scripts/deploy/shared_staging_flock.py" \
     command "$remote_script" "$remote_owner" "$APP_ENV")"
   # One server process owns one open file description across every request.
-  coproc HOST_SESSION { exec ssh -T -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+  coproc HOST_SESSION { exec ssh "${ssh_options[@]}" -T -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
     -p "$SSH_PORT" "$ssh_target" "$session_command" 2>/dev/null; }
   session_pid="$HOST_SESSION_PID"
   # Reopen only these owned pipes: Bash preserves CLOEXEC on coproc dup FDs.
@@ -346,7 +371,7 @@ upload_remote_helper() {
   scp_stderr="$(mktemp "${TMPDIR:-/tmp}/clubs-release-scp-error.XXXXXX")"
   chmod 600 "$scp_stdout" "$scp_stderr"
   set +e
-timeout --signal=KILL 20s scp -P "$SSH_PORT" \
+timeout --signal=KILL 20s scp "${ssh_options[@]}" -P "$SSH_PORT" \
     "$repository_root/scripts/deploy/remote-compose-release.sh" \
     "$ssh_target:$remote_script" >"$scp_stdout" 2>"$scp_stderr"
   scp_exit=$?

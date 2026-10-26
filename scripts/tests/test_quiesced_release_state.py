@@ -646,6 +646,16 @@ import sys
 config_path = Path(os.environ["FAKE_SSH_CONFIG"])
 log_path = Path(os.environ["FAKE_SSH_LOG"])
 config = json.loads(config_path.read_text(encoding="utf-8"))
+options = sys.argv[1:]
+assert options[:2] == ['-F', '/dev/null']
+for required in ['StrictHostKeyChecking=yes', 'GlobalKnownHostsFile=/dev/null',
+                 'HostKeyAlgorithms=ssh-ed25519', 'ControlPath=none', 'ProxyCommand=none',
+                 'ProxyJump=none', 'KnownHostsCommand=none', 'UpdateHostKeys=no',
+                 'VerifyHostKeyDNS=no', 'BatchMode=yes', 'ConnectionAttempts=1']:
+    assert required in options
+reference = next(v.split('=', 1)[1] for v in options if v.startswith('UserKnownHostsFile='))
+assert Path(reference).read_text().startswith('178.20.209.5 ssh-ed25519 ')
+assert 'SSH_KNOWN_HOSTS' not in os.environ
 command = sys.argv[-1]
 parts = shlex.split(command)
 sensitive = config.get("sensitive_stderr", "")
@@ -692,6 +702,11 @@ import json
 import os
 from pathlib import Path
 import sys
+assert sys.argv[1:3] == ['-F', '/dev/null']
+assert 'StrictHostKeyChecking=yes' in sys.argv and 'ControlPath=none' in sys.argv
+reference = next(v.split('=', 1)[1] for v in sys.argv if v.startswith('UserKnownHostsFile='))
+assert Path(reference).read_text().startswith('178.20.209.5 ssh-ed25519 ')
+assert 'SSH_KNOWN_HOSTS' not in os.environ
 
 
 entry = {
@@ -1440,6 +1455,7 @@ class RunnerHarness:
             prefix="clubs-release-runner-",
             dir="/tmp",
         )
+        self.pin_directory = tempfile.TemporaryDirectory(prefix=".release-pin-test-", dir=REPOSITORY_ROOT)
         self.root = Path(self.temporary_directory.name)
         self.fake_bin = self.root / "bin"
         self.tmp = self.root / "tmp"
@@ -1486,7 +1502,9 @@ class RunnerHarness:
                 "PATH": f"{self.fake_bin}{os.pathsep}{os.environ['PATH']}",
                 "REGISTRY_READ_TOKEN": SENSITIVE_VALUES[0],
                 "REGISTRY_USERNAME": "fixture-user",
-                "SSH_HOST": "stage-host.invalid",
+                "SSH_HOST": "178.20.209.5",
+                "SSH_KNOWN_HOSTS": "178.20.209.5 " + (REPOSITORY_ROOT / "scripts/tests/fixtures/clb91-stage-host.pub").read_text(),
+                "RUNNER_TEMP": self.pin_directory.name,
                 "SSH_PORT": "22",
                 "SSH_USER": "release-user",
                 "TMPDIR": str(self.tmp),
@@ -1497,6 +1515,7 @@ class RunnerHarness:
         return self
 
     def __exit__(self, *_: object) -> None:
+        self.pin_directory.cleanup()
         self.temporary_directory.cleanup()
 
     def run(self) -> subprocess.CompletedProcess[str]:

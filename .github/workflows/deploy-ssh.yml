@@ -54,22 +54,26 @@ jobs:
           test -n "$image_tag"
           echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
 
+      - name: Validate pinned SSH host
+        shell: bash
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: python3 -I -S -B scripts/deploy/release_ssh_pin.py --validate
+
       - name: Setup SSH agent
         uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Add host to known_hosts
-        shell: bash
-        run: |
-          set -euo pipefail
-          ssh-keyscan -p "${{ secrets.SSH_PORT || '22' }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts"
 
       - name: Quiesce, migrate and start verified image
         env:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
           COMPOSE_PATH: ${{ secrets.COMPOSE_PATH }}
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_READ_TOKEN: ${{ github.token }}

@@ -17,6 +17,55 @@ The existing durable FSM below remains authoritative for project outcomes.
 Historical HDC and incident-recovery evidence is unchanged; old recovery paths
 are not authorized by this simpler staging model.
 
+## Ordinary release SSH pin candidate and revision binding — 2026-10-26
+
+This local CLB-91 candidate replaces unverified key discovery only in
+`deploy-ssh.yml` and `db-migrate.yml` plus their shared ordinary runner. It retains
+protected Environment selection, confirmation, concurrency, permission/action pins,
+shared flock/FSM, stdin-only registry credentials and image signature/provenance
+verification. Both workflows validate the Environment's trusted `SSH_KNOWN_HOSTS`
+before SSH-agent access and again before transport; all SSH/SCP paths share a
+strict anonymous read-only pin. Stage admits only the owner-accepted VNC fingerprint
+`SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk` at `178.20.209.5:22` with
+Ed25519. Prod requires its separate Environment key/endpoint and rejects stage's.
+[Exact provisioning and no-overlap requirements](secrets-rotation.md#ordinary-release-ssh-pin--clb-91-local-preparation-2026-10-26)
+are a future separately authorized operation, not a claim about current secret values.
+The dated trust decision is in unmerged PR #548; its historical text is not silently
+rewritten by this implementation. Old diagnostic/incident channels are unchanged.
+
+**`EXPECTED_REVISION = github.sha` remains unchanged.** The workflow does not gain
+an input that overrides revision, digest, provenance source or GitHub run identity.
+The verified tag resolves to an immutable digest; image OCI revision/provenance must
+match the workflow's exact source SHA. Run owner remains
+`${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`. A caller cannot reuse an old run owner.
+
+The previously published image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`
+belongs to `00759b8ebf86414b349aa390097e63f8fd6a0293`. Publishing/merging this fix
+will create a different main revision. That old image must fail the new workflow's
+revision check; changing the input tag cannot make it admissible. Running the old
+workflow ref would retain the unsafe key-discovery code and is not a workaround.
+
+Minimal path within the existing contract, **recommended but not authorized here**:
+
+1. Separately authorize publication/review/merge of this fix and reconcile PR #548.
+2. Let normal post-merge CI/Docker Publish produce the signed immutable image for
+   the resulting exact main SHA; verify its actual digest, matching revision and
+   OCI/SLSA graph. Do not dispatch/rerun merely to reuse old successful evidence.
+3. The owner explicitly selects that new SHA/digest as the release target and gives
+   one-use stage authority. Earlier permission naming `00759b8...` does not transfer
+   to a new target. If the old image must remain the target, stop for a separate
+   external-release-contract decision; no override is implemented by this task.
+4. With separately provisioned/verified stage pin and protected policy/principal,
+   perform fresh runtime/resource/flock/FSM and no-pending-migrations admission,
+   reconcile the neighbor baseline, then dispatch exactly one supported stage
+   release from that exact main with its matching published tag. Preserve every
+   signature/provenance/migration/health gate and no-retry-after-UNKNOWN rule.
+
+No image is selected anew, no Environment/secret is changed, and no workflow,
+SSH/server operation or release is executed by this local preparation. Recovery,
+DB restore, Caddy/DNS, Hookah and prod remain outside its execution scope.
+
 ## Durable release state
 
 Каждый active release привязан к точным `owner`, full revision, immutable candidate digest и hash ожидаемой
