@@ -19,19 +19,24 @@ configuration presence is observed; real Telegram credentials/identity were not 
 The owner accepted the VNC-authenticated replacement key in
 [DEC-038](../product/OPEN_DECISIONS.md#accepted-replacement--authenticated-aeza-vnc-2026-10-26).
 
-PRs #545–547 are merged. Delivery target is main
-`00759b8ebf86414b349aa390097e63f8fd6a0293`, immutable image
-`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`.
-It is **not deployed**. The next delivery must use the ordinary protected quiesced
+PRs #545–547 and #549 are merged. Current published main is
+`d10c0fb53829192d2cc38cb93dfbbc754a4ab123`, immutable image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:6ca42beb556e72317e949bd043ae7884db440536ad0e6bb454944e564fcd8c93`
+([Docker Publish 40386747163](https://github.com/koteev-m/clubs_bot/actions/runs/40386747163),
+15/15 post-merge workflows SUCCESS). The owner reports that the new image is **not
+deployed**; this documentation reconciliation performs no stage observation. The
+previously proposed `00759b8...` / `fd39b782...` remains historical; its conditional
+authorization does not transfer to the current artifact. The next delivery must use the ordinary protected quiesced
 release/FSM, capture the recovered app as prior baseline and preserve project/root,
 DB, networks and volume. No historical incident recovery state is imported.
 
-**Current delivery blocker:** `.github/workflows/deploy-ssh.yml` uses unverified
-`ssh-keyscan` trust bootstrapping and is prohibited by the owner's current request.
-No release was dispatched or run. The target image is not preloaded; live schema,
-protected deployment-principal/Environment and complete release admission remain
-unchecked. Current HTTPS HTML for `mode=platform-owner` is not evidence that the
-new cabinet was deployed: the old backend returns 404 for `/api/platform/access`.
+**Current delivery boundary:** PR #549 replaced the earlier unverified
+`ssh-keyscan` trust bootstrapping with reviewed pinned SSH trust for both privileged
+workflows. Live Environment pin provisioning/verification, protected deployment
+principal/policy, schema and complete release admission remain unverified. No release
+was dispatched or run in this documentation reconciliation. The previous target was
+not preloaded at the last observation; preloading of the current image is unknown. At the last recorded observation, HTTPS HTML for `mode=platform-owner` did not
+prove the new cabinet was deployed: the old backend returned 404 for `/api/platform/access`.
 See [ordinary stage delivery gates](release-rollback.md#current-clb-91-stage-delivery-boundary--2026-10-26).
 
 ## Historical local preparation and recovery contract — 2026-10-22

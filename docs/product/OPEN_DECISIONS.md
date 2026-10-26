@@ -978,9 +978,10 @@
   No old incident authority or prod permission is transferred.
 - **Execution boundary:** the owner separately authorized one exact ordinary stage
   update only after all mandatory admission gates, plus four-file docs publication.
-  The current workflow's unverified keyscan prevents its use; no dispatch or runtime
-  mutation occurred. Documentation acceptance does not make that workflow trusted
-  or authorize a replacement implementation. Recovery/restore/Caddy/DNS/Hookah changes
+  At that time the workflow's unverified keyscan prevented its use; no dispatch or
+  runtime mutation occurred. PR #549 subsequently merged the reviewed pinned SSH
+  implementation. This decision does not itself verify Environment provisioning,
+  runtime admission or authorize deployment. Recovery/restore/Caddy/DNS/Hookah changes
   remain prohibited; future authorization cannot be inferred from this historical record.
 - **Status:** `ACCEPTED_DECISION` (dated replacement within DEC-038).
 

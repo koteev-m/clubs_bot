@@ -434,11 +434,15 @@ class ReleaseSessionTest(unittest.TestCase):
                 f'    allowed = allowed or target == Path({str(helper)!r})\n'
                 f'    allowed = allowed or (target.parent == Path("/tmp") and target.name.startswith(".clubs-bot-migration-log.{R.OWNER}.") and len(target.name.rsplit(".", 1)[-1]) == 6)\n'
                 '    allowed = allowed or bool('))
-            env = dict(h.env, TMPDIR=str(h.volatile_root), APP_ENV='stage', COMPOSE_PATH=str(h.compose_path),
+            pin_temp = tempfile.TemporaryDirectory(prefix='.release-pin-test-', dir=ROOT)
+            self.addCleanup(pin_temp.cleanup)
+            env = dict(h.env, RUNNER_TEMP=pin_temp.name,
+                       SSH_KNOWN_HOSTS='178.20.209.5 ' + (ROOT / 'scripts/tests/fixtures/clb91-stage-host.pub').read_text(),
+                       TMPDIR=str(h.volatile_root), APP_ENV='stage', COMPOSE_PATH=str(h.compose_path),
                        EXPECTED_REVISION=R.REVISION, IMAGE_REPOSITORY=R.IMAGE_REPOSITORY,
                        IMAGE_TAG='candidate', REGISTRY_USERNAME='fixture-bot',
                        REGISTRY_READ_TOKEN='synthetic-token', GITHUB_RUN_ID='12345',
-                       GITHUB_RUN_ATTEMPT='1', SSH_USER='fixture', SSH_HOST='fixture.invalid', SSH_PORT='22')
+                       GITHUB_RUN_ATTEMPT='1', SSH_USER='fixture', SSH_HOST='178.20.209.5', SSH_PORT='22')
             try:
                 with M.HostLock(h.host_lock):
                     result = subprocess.run(['bash', str(R.RUNNER)], env=env, capture_output=True,

@@ -828,6 +828,16 @@ done
 [ "$(grep -c '^    def test_' "$state_test")" = "73" ] ||
   fail "release-state executable regression count must be exactly 73"
 bash -n "$runner_script" || fail "release runner is not valid Bash"
+[ -f "$repository_root/scripts/deploy/release_ssh_pin.py" ] || fail "release SSH pin helper missing"
+for workflow in "$deploy_workflow" "$migrate_workflow"; do
+  if grep -Fq 'ssh-keyscan' "$workflow"; then
+    fail "live SSH key discovery is forbidden"
+  fi
+  grep -Fqx '        run: python3 -I -S -B scripts/deploy/release_ssh_pin.py --validate' "$workflow" ||
+    fail "workflow lacks pre-agent SSH pin validation"
+  [ "$(grep -Fc 'SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}' "$workflow")" = "2" ] ||
+    fail "workflow must pass Environment SSH_KNOWN_HOSTS to validation and runner"
+done
 bash -n "$remote_script" || fail "remote helper is not valid Bash"
 
 expected_group='  group: payments-schema-${{ github.event_name == '\''push'\'' && '\''prod'\'' || inputs.environment }}'
@@ -945,7 +955,7 @@ expected_release_body="$(printf '%s\n' \
   fail "runner release order or single-invocation contract changed"
 [ "$(grep -Fc 'remote_command "$requested_operation" "$@"' "$runner_script")" = "1" ] ||
   fail "mutating SSH operation is not single-shot"
-[ "$(grep -Fc 'scp -P "$SSH_PORT"' "$runner_script")" = "1" ] ||
+[ "$(grep -Fc 'scp "${ssh_options[@]}" -P "$SSH_PORT"' "$runner_script")" = "1" ] ||
   fail "remote helper upload is not single-shot"
 if grep -Eq 'remote_command[[:space:]]+(abort|resume)' "$runner_script"; then
   fail "runner automatically invokes abort or resume"

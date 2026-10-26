@@ -10,8 +10,9 @@
 ## Current CLB-91 stage delivery boundary — 2026-10-26
 
 The owner/journal report the 2026-10-23 bounded recovery and subsequent HTTPS
-activation as completed; [fresh observations and source attribution](PROJECT_STATUS.md#current-operational-state)
-confirm the recovered backend is currently healthy. The next operation is an
+activation as completed; [the last recorded observation and source attribution](PROJECT_STATUS.md#current-operational-state)
+reported a healthy recovered backend at that time. This documentation reconciliation
+makes no new stage observation. The next operation is an
 ordinary stage update, never another recovery/restore/initial-install or Caddy setup.
 Old incident executor identities and historical local-only readiness entries below
 are not the current stage baseline or reusable execution permissions.
@@ -25,26 +26,31 @@ and strict host checking; no keyscan, accept-new, automatic replacement or fallb
 Root observer access does not establish the protected deployment principal or live
 Environment gates. No protected secret or known_hosts was changed in this continuation.
 
-The owner conditionally authorized **one** ordinary update to exact revision
-`00759b8ebf86414b349aa390097e63f8fd6a0293`, image
-`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`.
-PRs #545–547 are merged; all 15 target push workflows succeeded. Docker Publish
-[40349552528](https://github.com/koteev-m/clubs_bot/actions/runs/40349552528)
-verified its signature/OCI/SLSA graph. Publication does not prove stage acceptance.
+At the earlier observation the owner conditionally authorized **one** ordinary
+update to revision `00759b8ebf86414b349aa390097e63f8fd6a0293`, image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`;
+it was not attempted. At that time the deploy workflow used unverified `ssh-keyscan`,
+which was prohibited. PR [#549](https://github.com/koteev-m/clubs_bot/pull/549)
+subsequently merged the reviewed pinned SSH implementation. Do not replace the
+protected contract with ad-hoc Docker commands, a local runner or a fabricated run identity.
 
-**First blocker — no runtime operation attempted:** the current
-[deploy workflow](../../.github/workflows/deploy-ssh.yml) appends `ssh-keyscan`
-output without validating the accepted pin. Do not dispatch it. Changing workflow
-code requires a separate scope; do not replace the protected contract with ad-hoc
-Docker commands, a local runner or a fabricated GitHub run identity.
+Current published main is `d10c0fb53829192d2cc38cb93dfbbc754a4ab123` with image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:6ca42beb556e72317e949bd043ae7884db440536ad0e6bb454944e564fcd8c93`.
+All 15 post-merge workflows succeeded; [Docker Publish 40386747163](https://github.com/koteev-m/clubs_bot/actions/runs/40386747163)
+verified signature and OCI/SLSA provenance. The new image is not reported deployed
+on stage; publication does not prove stage acceptance. The earlier authorization
+for `00759b8...`/`fd39b782...` does not transfer to this new revision/image.
+After any later merge of PR #548, re-confirm the resulting main SHA and its matching
+signed image: `EXPECTED_REVISION=github.sha` prevents assuming the `d10c0fb...` image
+matches the new workflow revision. This documentation reconciliation selects no target.
 
-After a separately reviewed trusted-pin delivery path exists, fresh admission must
+After separately authorized pin provisioning/verification, fresh admission must
 establish the exact image/revision/platform/provenance, protected stage principal,
 Environment policy, persistent root/backing and current resource baseline; validate
 the shared flock including ownership/ACL/xattrs and exclude concurrent operators;
 check first-use/durable FSM state and live schema with **no pending migrations**.
-No changed migration files were found between the old revision and target, but
-that is not a live schema validation. Stop on any failed/unverified gate or unexpected
+No changed migration files were found between the previously observed app revision
+and the current published main, but that is not a live schema validation. Stop on any failed/unverified gate or unexpected
 runtime; the historical Hookah backend ID was absent during this observation and
 its current identity must be reconciled before claiming neighbor continuity.
 The old Hookah DB and its HTTP health were observed healthy; no neighbor mutation occurred.
@@ -69,6 +75,64 @@ locks. BUSY refuses before effects; SSH ambiguity requires read-only reconciliat
 The existing durable FSM below remains authoritative for project outcomes.
 Historical HDC and incident-recovery evidence is unchanged; old recovery paths
 are not authorized by this simpler staging model.
+
+## Ordinary release SSH pin candidate and revision binding — 2026-10-26
+
+> Historical local-preparation snapshot, preserved after PR #549 merged. Its
+> local-only publication and hosted-CI future-tense statements describe that earlier
+> point; the current merged state and artifact are recorded above. Its trust,
+> provisioning, exact-revision and separate-authorization requirements remain in force.
+
+This local CLB-91 candidate replaces unverified key discovery only in
+`deploy-ssh.yml` and `db-migrate.yml` plus their shared ordinary runner. It retains
+protected Environment selection, confirmation, concurrency, permission/action pins,
+shared flock/FSM, stdin-only registry credentials and image signature/provenance
+verification. Both workflows validate the Environment's trusted `SSH_KNOWN_HOSTS`
+before SSH-agent access and again before transport; all SSH/SCP paths share a
+strict anonymous read-only pin. Stage admits only the owner-accepted VNC fingerprint
+`SHA256:zpgtCw+yuSj+kjxAzuBb6TYMuEarfKtsLTg0g6htgTk` at `178.20.209.5:22` with
+Ed25519. Prod requires its separate Environment key/endpoint and rejects stage's.
+[Exact provisioning and no-overlap requirements](secrets-rotation.md#ordinary-release-ssh-pin--clb-91-local-preparation-2026-10-26)
+are a future separately authorized operation, not a claim about current secret values.
+At local-preparation time the dated trust decision was in then-unmerged PR #548;
+its historical text was not silently rewritten by the implementation. Old
+diagnostic/incident channels are unchanged.
+
+**`EXPECTED_REVISION = github.sha` remains unchanged.** The workflow does not gain
+an input that overrides revision, digest, provenance source or GitHub run identity.
+The verified tag resolves to an immutable digest; image OCI revision/provenance must
+match the workflow's exact source SHA. Run owner remains
+`${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`. A caller cannot reuse an old run owner.
+
+The previously published image
+`ghcr.io/koteev-m/clubs_bot/app-bot@sha256:fd39b7829fff0a329ba2fff9edadd6c32e24de46f4a079d987049405e60ad6bc`
+belongs to `00759b8ebf86414b349aa390097e63f8fd6a0293`. Publication and merge of
+this fix created a different main revision. That old image must fail the new workflow's
+revision check; changing the input tag cannot make it admissible. Running the old
+workflow ref would retain the unsafe key-discovery code and is not a workaround.
+
+At the time of local preparation, the minimal path within the existing contract was
+**recommended but not authorized there**. The merged fix and published main image
+are now recorded above; the subsequent provisioning, target choice and release
+still require their applicable separate authorizations:
+
+1. Separately authorize publication/review/merge of this fix and reconcile PR #548.
+2. Let normal post-merge CI/Docker Publish produce the signed immutable image for
+   the resulting exact main SHA; verify its actual digest, matching revision and
+   OCI/SLSA graph. Do not dispatch/rerun merely to reuse old successful evidence.
+3. The owner explicitly selects that new SHA/digest as the release target and gives
+   one-use stage authority. Earlier permission naming `00759b8...` does not transfer
+   to a new target. If the old image must remain the target, stop for a separate
+   external-release-contract decision; no override is implemented by this task.
+4. With separately provisioned/verified stage pin and protected policy/principal,
+   perform fresh runtime/resource/flock/FSM and no-pending-migrations admission,
+   reconcile the neighbor baseline, then dispatch exactly one supported stage
+   release from that exact main with its matching published tag. Preserve every
+   signature/provenance/migration/health gate and no-retry-after-UNKNOWN rule.
+
+No image is selected anew, no Environment/secret is changed, and no workflow,
+SSH/server operation or release is executed by this local preparation. Recovery,
+DB restore, Caddy/DNS, Hookah and prod remain outside its execution scope.
 
 ## Durable release state
 
