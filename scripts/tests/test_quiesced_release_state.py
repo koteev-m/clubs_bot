@@ -464,6 +464,29 @@ os.execv(os.environ["FAKE_REAL_STAT"], [os.environ["FAKE_REAL_STAT"], *arguments
 '''
 
 
+# GNU stat already implements these exact single-field requests. Avoid a fresh
+# Python interpreter for every permission/owner/link check in the disposable
+# helper fixtures, including the atomic identity triplet. Follow symlinks like
+# the original os.stat; all other formats (including timestamps) retain Python.
+# This never changes production executors, polling, locks, fsync or FSM logic.
+FAST_LINUX_STAT = r'''#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" = 3 ] && { [ "$1" = -c ] || [ "$1" = -f ]; }; then
+  case "$2" in
+    %a|%Lp) format=%a ;;
+    %u) format=%u ;;
+    %h|%l) format=%h ;;
+    %a:%u:%h|%Lp:%u:%l) format=%a:%u:%h ;;
+    *) format= ;;
+  esac
+  if [ -n "$format" ]; then
+    exec "$FAKE_REAL_STAT" -L -c "$format" -- "$3"
+  fi
+fi
+exec "${BASH_SOURCE[0]%/*}/stat-python-fallback" "$@"
+'''
+
+
 FAKE_FINDMNT = r'''#!/usr/bin/env python3
 import json
 import os
@@ -688,6 +711,14 @@ def write_executable(path: Path, content: str) -> None:
     path.chmod(0o700)
 
 
+def install_stat_fixture(directory: Path) -> None:
+    if sys.platform == "linux":
+        write_executable(directory / "stat-python-fallback", FAKE_STAT)
+        write_executable(directory / "stat", FAST_LINUX_STAT)
+    else:
+        write_executable(directory / "stat", FAKE_STAT)
+
+
 def canonical_override(digest: str, revision: str) -> bytes:
     return (
         "# clubs-bot-managed-quiesced-release\n"
@@ -870,7 +901,7 @@ class RemoteHarness:
         write_executable(self.fake_bin / "rm", FAKE_RM)
         write_executable(self.fake_bin / "flock", FAKE_FLOCK)
         write_executable(self.fake_bin / "findmnt", FAKE_FINDMNT)
-        write_executable(self.fake_bin / "stat", FAKE_STAT)
+        install_stat_fixture(self.fake_bin)
         write_executable(self.fake_bin / "sync", FAKE_SYNC)
         self.env = os.environ.copy()
         self.env.update(

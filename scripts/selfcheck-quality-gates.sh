@@ -11811,6 +11811,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stage_runtime_fe
 python3 -B "$ROOT_DIR/scripts/tests/linux-semantic/b-launch/test-workflow.py"
 python3 -I -S -B "$ROOT_DIR/scripts/tests/test_clb91_b_postwait_canary.py"
 PYTHONDONTWRITEBYTECODE=1 python3 -I -S -B "$ROOT_DIR/scripts/tests/test_stage_principal_uid.py"
+PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_stat_fixture.py"
 PYTHONDONTWRITEBYTECODE=1 python3 "$ROOT_DIR/scripts/tests/test_lint_sharding.py"
 python3 -B "$ROOT_DIR/scripts/run-corrected-stage-shard.py" --check
 if [ "$CORRECTED_STAGE_SELFCHECK_MODE" = "full" ]; then
