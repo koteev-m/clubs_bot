@@ -13,7 +13,7 @@ data class BotConfig(
     val username: String?,
     val ownerId: Long,
 ) {
-    fun safe(): String = "BotConfig(token=${maskSecret(token)}, username=$username, ownerId=$ownerId)"
+    fun safe(): String = "BotConfig(token=${maskSecret(token)}, username=$username, ownerConfigured=${ownerId > 0})"
 }
 
 data class WebhookConfig(

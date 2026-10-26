@@ -45,7 +45,7 @@ fun Application.webAppRoutes() {
 private suspend fun ApplicationCall.respondMiniAppIndex(classLoader: ClassLoader) {
     val isReactMode =
         when (request.queryParameters["mode"]) {
-            "support", "guest-support" -> true
+            "support", "guest-support", "platform-owner" -> true
             else -> false
         }
     val resourcePath = if (isReactMode) "webapp/app/react/index.html" else "webapp/app/index.html"

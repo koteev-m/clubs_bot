@@ -6,6 +6,98 @@ Repository: `koteev-m/clubs_bot` (`/Users/maksimmartynov/IdeaProjects/clubs_bot`
 
 ## Current operational state
 
+- CLB-197 PR #546 Trivy dependency fix, LOCAL ONLY (2026-10-26):
+  **CLB197_TRIVY_FIX_LOCAL_READY**. Existing worktree
+  `/Users/maksimmartynov/.codex/worktrees/clb196-platform-owner-ui/clubs_bot`, branch
+  `codex/clb196-clb197-platform-owner`, unchanged HEAD
+  `e314560d23e4182875d2da0d2afead4831bdb9b3`; published [Draft PR #546](https://github.com/koteev-m/clubs_bot/pull/546)
+  contains CLB-196/197. `PROJECT_IDENTITY_OK`; active clubs-owned instructions,
+  active foreign=0. User-confirmed Security Scan evidence: run `40315994545`,
+  attempt 1, job `121548609203`, failed Trivy filesystem step; one HIGH
+  `CVE-2023-54404` for npm `zod@3.25.76` in `miniapp/pnpm-lock.yaml`.
+  Scoped source/test/tooling search found no zod imports or API usage; `pnpm why zod`
+  confirmed only the direct miniapp dependency, already present in the base commit.
+  pnpm 11.25.0 removed that dependency and its importer/package/snapshot entries.
+  Exact diff checks confirm no other manifest or lockfile drift; no ignore, severity,
+  workflow or security-gate changes. Frozen install and supply-chain policy PASS
+  (488 entries); offline validation initially lacked cached metadata, then the normal
+  network-backed policy check passed with install scripts disabled and no version changes.
+  Fresh local verification: Vitest **158/158** (24 files), TypeScript, strict ESLint,
+  production build and `git diff --check` PASS. Installed lockfile matches the repository
+  lockfile; all six rebuilt dist files are byte-identical to HEAD. Backend and runtime
+  source are unchanged, so existing JVM 1,189 PASS, Playwright 9 PASS and focused
+  `CLB197_SECURITY_REVIEW_PASS` evidence remain applicable to the unchanged functionality;
+  JVM/browser suites were not repeated. Local edits are package.json, pnpm-lock.yaml and
+  this checkpoint only. No commit, push, PR update, CI rerun or runtime/config change.
+  Trivy on the updated lockfile remains unverified in GitHub until publication.
+  Next: obtain separate authorization for commit/push to PR #546 and fresh automatic CI;
+  physical Telegram/HTTPS/staging smoke and deployment remain outside this task.
+
+- CLB-197 Platform Owner Telegram Identity, LOCAL ONLY (2026-10-26):
+  **PLATFORM_OWNER_AUTH_LOCAL_READY**. Same CLB-196 worktree, detached unchanged
+  HEAD/base `af6c74888fa026b1f95833d12b0070d3f5ed6df7`; CLB-196 UI/tests preserved.
+  CLB-197 absent from checked local history/main docs/refs and bounded remote branch lookup.
+  `PROJECT_IDENTITY_OK`; active clubs-owned instructions attested, active foreign=0.
+  [DEC-039](../product/OPEN_DECISIONS.md#dec-039--telegram-identity-владельца-платформы)
+  records the user's explicit platform identity and future club-owner isolation decision.
+  `GET /api/platform/access` reuses validated header initData and exact positive protected
+  `AppConfig.bot.ownerId`, returns only a no-store access boolean, rejects query/body
+  credentials, and makes no DB/role writes. Existing legacy OWNER/GLOBAL authority is
+  unchanged and insufficient for this cabinet. Safe config logs now expose presence only.
+  Bounded `/app?mode=platform-owner` mounts the shared CLB-196 screens only after the
+  server check; credentials/page restoration/errors/refusal clear UI access. Original
+  loopback dev preview, guest catalogue and guest/staff support remain available.
+  Compiled tracked dist refreshed and asset validator PASS; no server ingress changed.
+  [Usage and checks](../../miniapp/README.md#platform-owner-telegram-identity-clb-197).
+  Final `./gradlew test detekt ktlintCheck --continue --no-configuration-cache` PASS:
+  1,189 tests passed, 0 failures/errors, 1 pre-existing disabled `GuestFlowStartTest`.
+  Ktor platform auth 6/6, AppConfig 24/24 and packaged-entry tests 4/4 are included.
+  Frontend full Vitest 158/158, typecheck, strict ESLint and build PASS; mobile Chrome
+  auth 4/4 plus preserved preview/guest/guest-support 5/5 PASS. Production browser smoke
+  verifies lazy assets, allowed navigation, 401/403/malformed-response refusal and both
+  dev-path refusals, using mock API outcomes only. Cryptographic identity checks use
+  signed synthetic initData in Ktor, not the browser mocks. No real identity/token read.
+  Corrected own verification fixtures (405 expectation, SDK launch fragment, repeated
+  same-document smoke navigation), scoped formatter setup, and one safe-log ktlint wrap;
+  affected final checks passed without disabling gates. JVM log:
+  `/private/tmp/clb197-jvm-final.log`; browser config/script:
+  `/private/tmp/clb197-browser.config.mjs`, `/private/tmp/clb197-production-smoke.mjs`.
+  PostgreSQL IT not required for this DB-free endpoint; no schema/transaction code changed.
+  Physical Telegram/iPhone, actual configured bot/owner pairing and HTTPS launch remain
+  unverified; no SSH, publication, deploy, protected config or real backend startup used.
+  Next: separately authorize runtime delivery and Telegram smoke of this read-only entry;
+  future club-owner role/scope/permissions and invitation lifecycle still need their own
+  implementation. Legacy GLOBAL OWNER must not be issued as a club-owner shortcut.
+
+- CLB-196 platform-owner two-screen UI, LOCAL ONLY (2026-10-26):
+  **LOCAL_TWO_SCREENS_READY**. Isolated worktree
+  `/Users/maksimmartynov/.codex/worktrees/clb196-platform-owner-ui/clubs_bot`, detached
+  HEAD/base `af6c74888fa026b1f95833d12b0070d3f5ed6df7`, matching fetched `origin/main`.
+  No prior CLB-196 found in local history/refs/main docs or the bounded remote branch check.
+  `PROJECT_IDENTITY_OK`; active clubs-owned instructions attested, active foreign=0.
+  [Local preview and validation](../../miniapp/README.md#local-platform-owner-preview-clb-196):
+  dev+loopback-only overview and invite routes, real Back/Forward/direct-entry/reload
+  history, Telegram BackButton, safe-area CSS, honest unavailable data and disabled
+  unfinished navigation. No backend requests, invitation issuance or role assignment.
+  Production excludes preview module/CSS and refuses owner/query/preview URL entry.
+  Final full Vitest **145/145**, TypeScript, strict ESLint, build, mobile Chrome platform
+  smoke **4/4**, guest-support continuation smoke **1/1**, diff/changed-links checks PASS.
+  Production bundle inspection plus **4/4** URL/role refusal probes PASS. Its initial
+  asset-404/timeouts were local preview configuration errors: `--base /app/react/`
+  matches the existing build base; no ingress/config contract changed. Initial own
+  afterEach type error and overbroad test URL interception were corrected and rechecked.
+  Independent read-only source/test review: no actionable P0/P1/P2. Screenshots retained
+  in this chat's `clb196-browser` local artifact directory. Installed lockfile dependencies
+  passed supply-chain policy; pnpm reported ignored esbuild install scripts, so checks
+  ran the installed Node CLIs directly without granting build-script permission.
+  Generated tracked dist files restored after validation; no dependency/config changes.
+  Existing primary-checkout AGENTS/status edits preserved. Guest/support/canonical `/app`,
+  RBAC, DB, API and server ingress unchanged. Physical iPhone/Telegram acceptance and
+  real backend integration are unverified. No publication/deploy/runtime authority used.
+  First blocker/next step: agree a server-derived capability contract distinguishing
+  platform-owner authority from an invited independent club owner before public integration;
+  DEC-005 OWNER/GLOBAL naming alone is insufficient. DEC-003/007 remain unchanged.
+
 - CLB-91 independent P1 verification recorded and main integration assessed, LOCAL ONLY (2026-10-22):
   **CLB91_NETWORK_P1_INDEPENDENT_VERIFIED**.
   **CLB91_P1_RECORDED_MAIN_INTEGRATION_ASSESSED** records this checkpoint-only follow-up;

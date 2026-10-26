@@ -35,6 +35,26 @@ class AppConfigFromEnvTest :
             error.message shouldBe "ENV TELEGRAM_BOT_TOKEN is required"
         }
 
+        "owner config output exposes presence only" {
+            val syntheticOwner = 941_001L
+            val safe = BotConfig("test-token", "test_bot", syntheticOwner).safe()
+            safe shouldContain "ownerConfigured=true"
+            safe shouldNotContain syntheticOwner.toString()
+            BotConfig("test-token", null, 0L).safe() shouldContain "ownerConfigured=false"
+        }
+
+        "missing malformed and overflow owner ids fail startup without echoing values" {
+            listOf(null, "", "not-an-id", "999999999999999999999999999").forEach { value ->
+                val error =
+                    shouldThrow<IllegalStateException> {
+                        withEnv(baseEnv + mapOf("TELEGRAM_BOT_TOKEN" to "test-token", "OWNER_TELEGRAM_ID" to value)) {
+                            AppConfig.fromEnv()
+                        }
+                    }
+                error.message shouldBe "ENV OWNER_TELEGRAM_ID is required (long)"
+            }
+        }
+
         "loads bot token from TELEGRAM_BOT_TOKEN" {
             val token = "123456:ABC"
             val config =

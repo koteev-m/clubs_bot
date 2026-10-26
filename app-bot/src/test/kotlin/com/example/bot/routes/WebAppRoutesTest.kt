@@ -94,7 +94,12 @@ class WebAppRoutesTest {
                 requireNotNull(WebAppRoutesTest::class.java.classLoader.getResource("webapp/app/react/index.html"))
                     .readText()
 
-            listOf("/app?mode=support", "/app/?mode=support").forEach { path ->
+            listOf(
+                "/app?mode=support",
+                "/app/?mode=support",
+                "/app?mode=platform-owner",
+                "/app/?mode=platform-owner",
+            ).forEach { path ->
                 val response = client.get(path)
                 val html = response.bodyAsText()
 
