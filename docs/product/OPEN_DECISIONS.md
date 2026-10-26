@@ -951,3 +951,20 @@
   - `SSH_KNOWN_HOSTS` provisioning until the separately required live policy and secret-scope gates are satisfied and a distinct provisioning authority exists;
   - Release Status dispatch, deployment, resume, rollback and recovery until all ordered gates and their separate authorities are satisfied.
 - **Status:** `ACCEPTED_DECISION`.
+
+## DEC-039 — Telegram identity владельца платформы
+
+- **Context:** пользователь явно принял это продуктовое решение в задаче CLB-197 (2026-10-26). CLB-196 реализовал два локальных экрана, но не подтверждение личности владельца платформы.
+- **Accepted by:** user.
+- **Accepted at:** 2026-10-26.
+- **Accepted contract:**
+  - Системный владелец платформы определяется основным Telegram user ID из защищённой серверной настройки `OWNER_TELEGRAM_ID`, уже читаемой `AppConfig`.
+  - Доступ к его кабинету требует валидированной Telegram initData, положительного configured ID и точного совпадения подписанного `user.id`; URL, query, client state и прежняя роль `OWNER` у другого пользователя этого доступа не дают.
+  - Только системный владелец платформы сможет назначать владельцев клубов. Будущий владелец клуба сможет назначать сотрудников только своего клуба и не становится глобальным владельцем платформы.
+  - Отсутствующая/некорректная настройка и недостоверная identity не предоставляют доступ. Реальный ID не попадает в Git, тесты, ответы API или логи.
+  - Минимальная текущая реализация — read-only проверка доступа и подключение двух экранов; приглашения, назначения, DB migrations, выдача ролей и runtime rollout в неё не входят.
+- **Relation to DEC-005:** legacy `Role.OWNER` сохраняет прежний GLOBAL scope и существующие проверки endpoints. Этот record не переосмысляет прежние назначения, не создаёт второй role catalogue и не разрешает автоматическую запись `OWNER` в БД. Проверка кабинета — узкое подтверждение platform identity, не способ получить полномочия других legacy endpoints.
+- **Remaining boundary:** отдельного `CLUB_OWNER` пока нет. Представление/permissions/invitation lifecycle будущего club owner требуют отдельной реализации в рамках принятой изоляции; текущая проверка сама по себе не разрешает выдавать назначения.
+- **Navigation:** bounded `mode=platform-owner` выбирает проверяемую presentation, но не authority; canonical guest `/app`, support flows, DEC-003 pilot scope и DEC-007/017 cutover gates сохраняются.
+- **Depends on:** `DEC-005`, `DEC-007`, `DEC-017`.
+- **Status:** `ACCEPTED_DECISION`.

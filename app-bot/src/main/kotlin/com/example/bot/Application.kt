@@ -110,6 +110,7 @@ import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.musicLikesRoutes
 import com.example.bot.routes.musicBattleRoutes
 import com.example.bot.routes.ownerHealthRoutes
+import com.example.bot.routes.platformOwnerRoutes
 import com.example.bot.routes.supportRoutes
 import com.example.bot.routes.pingRoute
 import com.example.bot.routes.promoterInvitesRoutes
@@ -345,6 +346,10 @@ fun Application.module() {
 
     // 8) Роуты (все роуты сами внутри вешают withMiniAppAuth на нужные ветки)
     errorCodesRoutes()
+    platformOwnerRoutes(
+        configuredOwnerId = config.bot.ownerId,
+        botTokenProvider = { config.bot.token },
+    )
     pingRoute()
     guestListRoutes(
         repository = guestListRepository,

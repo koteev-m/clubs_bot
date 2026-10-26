@@ -4,6 +4,35 @@
 
 ## 1) RBAC
 
+### Platform cabinet identity (DEC-039, CLB-197 local implementation)
+
+`GET /api/platform/access` is a read-only capability check for the two platform-owner
+screens. It requires the existing validated Telegram initData header contract and an
+exact match of signed `user.id` to positive `AppConfig.bot.ownerId` (protected
+`OWNER_TELEGRAM_ID`). It returns only `{ "platformOwner": true }` on success, with
+`Cache-Control: no-store` and the existing Mini App Vary header. Invalid/missing/stale
+initData is 401; another identity or nonpositive/unavailable configured ID is 403.
+Missing/malformed raw owner configuration retains the existing safe startup failure.
+The existing validator age/future-skew rules are reused; no new token/session is issued.
+
+This endpoint rejects initData in query strings in every profile, even when a valid
+header is also present, and does not read credentials from a body. URL userId/role/scope,
+unverified Telegram headers, browser storage and legacy `Role.OWNER` cannot authorize it.
+Errors use the existing auth/API error contract without identity values. Startup safe
+config output reports only `ownerConfigured`, not the configured ID.
+
+This is not a new global role system: it creates no DB identity/assignment and changes
+no existing OWNER/GLOBAL or support permissions. Future invitation/assignment/data APIs
+must independently enforce platform identity on the server; a previous successful check
+or visible frontend controls provide no mutation authority. Club-owner representation,
+club-only staff assignment and invitation lifecycle remain separate implementation work.
+
+`/app?mode=platform-owner` selects the guarded React presentation only; ordinary `/app`
+still serves the guest catalogue and the support entries are preserved. The explicit
+development preview remains loopback-only and cannot issue access or invitations.
+
+### Existing admin/promoter RBAC
+
 - Все `/api/admin/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.
 - Все `/api/promoter/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.
 - Доступные роли: `OWNER`, `GLOBAL_ADMIN`, `CLUB_ADMIN`.
