@@ -158,7 +158,7 @@ private fun TelegramUser.toMiniUser(): TelegramMiniUser = TelegramMiniUser(id = 
 
 // -------- helpers --------
 
-private fun ApplicationCall.matchesPathPrefix(prefixSegments: List<String>): Boolean {
+internal fun ApplicationCall.matchesPathPrefix(prefixSegments: List<String>): Boolean {
     val segments =
         request
             .path()
@@ -176,7 +176,7 @@ private fun ApplicationCall.matchesPathPrefix(prefixSegments: List<String>): Boo
     }
 }
 
-private fun ApplicationCall.hasForbiddenInitDataQuery(): Boolean =
+internal fun ApplicationCall.hasForbiddenInitDataQuery(): Boolean =
     request.queryString().splitToSequence('&').any { parameter ->
         // Inspect every key without decoding credential values or applying a parameter-count limit.
         try {
