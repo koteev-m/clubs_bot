@@ -39,7 +39,7 @@ internal object WebAppInitDataTestHelper {
             )
         val dataCheckString =
             rawParams
-                .filterKeys { it != "hash" && it != "signature" }
+                .filterKeys { it != "hash" }
                 .toSortedMap()
                 .entries
                 .joinToString("\n") { (key, value) -> "$key=$value" }

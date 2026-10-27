@@ -46,6 +46,18 @@ import kotlin.test.assertFalse
 
 class PlatformOwnerRoutesTest {
     @Test
+    fun `owner payload with signature included in HMAC succeeds through both headers`() =
+        withApp {
+            val signed = signedAt(Instant.now().epochSecond)
+            listOf("X-Telegram-Init-Data", "X-Telegram-InitData").forEach { name ->
+                val response = client.get(PATH) { header(name, signed) }
+                assertEquals(HttpStatusCode.OK, response.status)
+                response.assertPrivate()
+                assertEquals("""{"platformOwner":true}""", response.bodyAsText())
+            }
+        }
+
+    @Test
     fun `signed configured owner succeeds without a database role and exposes no identity`() =
         withApp {
             listOf("X-Telegram-Init-Data", "X-Telegram-InitData").forEach { name ->
@@ -61,7 +73,7 @@ class PlatformOwnerRoutesTest {
         withApp {
             val response =
                 client.get("$PATH?mode=platform-owner&role=OWNER&scope=GLOBAL&userId=$OWNER") {
-                    header("X-Telegram-Init-Data", createInitData(userId = OTHER))
+                    header("X-Telegram-Init-Data", signedAt(Instant.now().epochSecond, userId = OTHER))
                     header("X-Telegram-Id", OWNER.toString())
                 }
             assertEquals(HttpStatusCode.Forbidden, response.status)
@@ -87,25 +99,30 @@ class PlatformOwnerRoutesTest {
     @Test
     fun `missing forged expired and future init data are rejected`() =
         withApp {
-            val good = createInitData(userId = OWNER)
+            val good = signedAt(Instant.now().epochSecond)
             val expired = signedAt(Instant.now().minusSeconds(90_000).epochSecond)
             val future = signedAt(Instant.now().plusSeconds(3_600).epochSecond)
-            listOf(null, "", "$good-invalid", expired, future).forEach { raw ->
-                val response =
-                    client.get(PATH) {
-                        if (raw != null) header("X-Telegram-Init-Data", raw)
-                        header("X-Telegram-Id", OWNER.toString())
-                    }
-                assertEquals(HttpStatusCode.Unauthorized, response.status)
-                response.assertCode("unauthorized")
-                response.assertPrivate()
-            }
+            val wrongToken = signedAt(Instant.now().epochSecond, botToken = "$TEST_BOT_TOKEN-wrong")
+            val tamperedSignature = good.replace(SYNTHETIC_SIGNATURE, "tampered_signature")
+            val missingHash = good.substringBefore("&hash=")
+            val forgedHash = "$missingHash&hash=${"00".repeat(32)}"
+            listOf(null, "", "$good-invalid", expired, future, wrongToken, tamperedSignature, missingHash, forgedHash)
+                .forEach { raw ->
+                    val response =
+                        client.get(PATH) {
+                            if (raw != null) header("X-Telegram-Init-Data", raw)
+                            header("X-Telegram-Id", OWNER.toString())
+                        }
+                    assertEquals(HttpStatusCode.Unauthorized, response.status)
+                    response.assertCode("unauthorized")
+                    response.assertPrivate()
+                }
         }
 
     @Test
     fun `query credential transport is denied even with a valid header and body is not accepted`() =
         withApp {
-            val signed = createInitData(userId = OWNER)
+            val signed = signedAt(Instant.now().epochSecond)
             listOf("initData=${signed.encodeURLParameter()}", "initData=", "%69nitData=bad").forEach { query ->
                 val response = client.get("$PATH?$query") { header("X-Telegram-Init-Data", signed) }
                 assertEquals(HttpStatusCode.Unauthorized, response.status)
@@ -118,6 +135,12 @@ class PlatformOwnerRoutesTest {
                     setBody("""{"initData":"$signed","userId":$OWNER,"role":"OWNER"}""")
                 }
             assertEquals(HttpStatusCode.Unauthorized, response.status)
+            val formResponse =
+                client.get(PATH) {
+                    contentType(ContentType.Application.FormUrlEncoded)
+                    setBody("initData=${signed.encodeURLParameter()}")
+                }
+            assertEquals(HttpStatusCode.Unauthorized, formResponse.status)
             assertEquals(HttpStatusCode.MethodNotAllowed, client.post(PATH).status)
         }
 
@@ -181,15 +204,24 @@ class PlatformOwnerRoutesTest {
         assertEquals("X-Telegram-Init-Data", headers["Vary"])
     }
 
-    private fun signedAt(authDate: Long): String =
+    private fun signedAt(
+        authDate: Long,
+        userId: Long = OWNER,
+        botToken: String = TEST_BOT_TOKEN,
+    ): String =
         WebAppInitDataTestHelper.createInitData(
-            TEST_BOT_TOKEN,
-            mapOf("user" to WebAppInitDataTestHelper.encodeUser(OWNER), "auth_date" to authDate.toString()),
+            botToken,
+            mapOf(
+                "user" to WebAppInitDataTestHelper.encodeUser(userId),
+                "auth_date" to authDate.toString(),
+                "signature" to SYNTHETIC_SIGNATURE,
+            ),
         )
 
     private companion object {
         const val PATH = "/api/platform/access"
         const val OWNER = 42L
         const val OTHER = 43L
+        const val SYNTHETIC_SIGNATURE = "synthetic_signature-CLB91"
     }
 }

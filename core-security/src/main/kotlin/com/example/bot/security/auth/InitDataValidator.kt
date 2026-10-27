@@ -19,7 +19,7 @@ object InitDataValidator {
     private val webAppKey = "WebAppData".toByteArray(StandardCharsets.UTF_8)
     private val defaultMaxAge: Duration = Duration.ofHours(24)
     private val defaultMaxFutureSkew: Duration = Duration.ofMinutes(2)
-    private val EXCLUDED_KEYS = setOf("hash", "signature")
+    private val EXCLUDED_KEYS = setOf("hash")
 
     /**
      * Parses and validates raw init data. Returns user information if valid, or null otherwise.
@@ -71,7 +71,7 @@ object InitDataValidator {
                 return null
             }
         }
-
+        // Bot-token HMAC covers signature too; excluding it belongs to third-party Ed25519 validation.
         val dataCheckString =
             params
                 .asSequence()

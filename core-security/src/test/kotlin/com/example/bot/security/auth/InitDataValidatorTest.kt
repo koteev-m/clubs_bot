@@ -26,7 +26,7 @@ class InitDataValidatorTest {
     private data class TelegramUserPayload(val id: Long, val username: String? = null)
 
     @Test
-    fun `accepts payload signed via WebApp spec and ignores signature field`() {
+    fun `accepts payload signed via WebApp spec including signature field`() {
         val params = linkedMapOf(
             "user" to json.encodeToString(TelegramUserPayload(id = 42, username = "miniapp")),
             "auth_date" to Instant.now(clock).epochSecond.toString(),
@@ -261,7 +261,7 @@ class InitDataValidatorTest {
     private fun createInitData(botToken: String, raw: Map<String, String>): String {
         val secret = hmacSha256("WebAppData".toByteArray(StandardCharsets.UTF_8), botToken.toByteArray(StandardCharsets.UTF_8))
         val dataCheckString = raw
-            .filterKeys { it != "hash" && it != "signature" }
+            .filterKeys { it != "hash" }
             .toSortedMap()
             .entries
             .joinToString("\n") { (key, value) -> "$key=$value" }
@@ -301,7 +301,7 @@ class InitDataValidatorTest {
     private fun createInitDataWithShaDigest(botToken: String, raw: Map<String, String>): String {
         val secret = java.security.MessageDigest.getInstance("SHA-256").digest(botToken.toByteArray(StandardCharsets.UTF_8))
         val dataCheckString = raw
-            .filterKeys { it != "hash" && it != "signature" }
+            .filterKeys { it != "hash" }
             .toSortedMap()
             .entries
             .joinToString("\n") { (key, value) -> "$key=$value" }
