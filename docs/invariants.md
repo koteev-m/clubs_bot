@@ -108,6 +108,30 @@
 
 ## Audit log: контракт и ограничения
 
+### Client onboarding A: отдельная transaction boundary
+
+Принятый [контракт А/Б §29](product/PRODUCT_SPEC.md#client-onboarding-ab-technical-contract)
+добавляет invitation/application/access события в существующий `audit_log`.
+В локальном source path `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/OnboardingSql.kt::audit`
+вставка выполняется через соединение текущей onboarding transaction; отдельный
+`AuditLogRepositoryImpl.append()` не вызывается как независимый commit этого пути.
+Business change, minimal identity provisioning при claim, command result и audit
+должны commit/rollback вместе. Итоговая проверка rollback/concurrency/idempotency
+привязана к [checkpoint](ops/PROJECT_STATUS.md), а не к одному наличию helper.
+
+Метаданные содержат только внутренние client/resource/actor IDs, action/transition,
+version и безопасную correlation. Invitation secret, initData, raw
+`Idempotency-Key`, verification code и полная commercial/internal note туда не
+копируются. Повтор одной committed команды не создаёт второе бизнес-событие и
+перепроверяет текущий доступ перед возвратом ресурса; сама запись команды не grant.
+
+Scoped revoke деактивирует membership/actions/club grants, сохраняя client,
+applications и clubs. Explicit restore не расширяет набор прежних scopes.
+Submitted snapshot не меняется; approval не истекает автоматически, но платформа
+может отменить его до consumption. В А consumption/club creation отсутствуют.
+Новые V062 FK/RESTRICT защищают историю созданных onboarding записей от физического
+удаления; старое описание V061 delete compatibility относится к одному read-scope.
+
 ### Что пишем в `audit_log`
 
 Audit log содержит унифицированные записи событий с полями:

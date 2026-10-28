@@ -15,6 +15,7 @@ import {
 import { useTelegram } from '../../app/providers/TelegramProvider';
 import { PLATFORM_INVITE_PATH, PLATFORM_PREVIEW_PATH } from './previewAccess';
 import './platform-owner.css';
+import PlatformOnboarding from '../client/PlatformOnboarding';
 
 const navigation = [
   { label: 'Обзор', icon: LayoutGrid, available: true },
@@ -26,9 +27,19 @@ const navigation = [
 /** Shared presentation; live entry is mounted only after the server access check. */
 export default function PlatformOwnerScreens({
   preview = false,
+  credential = '',
 }: {
   preview?: boolean;
+  credential?: string;
 }) {
+  return preview ? (
+    <PreviewScreens preview />
+  ) : (
+    <PlatformOnboarding credential={credential} />
+  );
+}
+
+function PreviewScreens({ preview = false }: { preview?: boolean }) {
   const webApp = useTelegram();
   const isInvitation = useCallback(
     () =>

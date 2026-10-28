@@ -1,14 +1,32 @@
 {
   email {$ACME_EMAIL}
+  # Reverse-proxy error logs also carry request metadata, even without access logging.
+  # Telegram launch queries and initData headers must never enter that metadata.
+  log default {
+    format filter {
+      wrap json
+      fields {
+        request>uri delete
+        request>headers delete
+      }
+    }
+  }
 }
 
 nightconcierge.help {
   encode zstd gzip
 
   @deny_methods {
-    method DELETE PATCH PUT TRACE TRACK
+    method DELETE PUT TRACE TRACK
   }
   respond @deny_methods 405
+
+  # Only the authenticated Stage A draft endpoint accepts PATCH.
+  @deny_patch {
+    method PATCH
+    not path_regexp clientDraft ^/api/client/applications/[1-9][0-9]*$
+  }
+  respond @deny_patch 405
 
   @hsts expression {env.ENABLE_HSTS} == "true"
   header @hsts Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -18,9 +36,18 @@ nightconcierge.help {
 
   # Short-cache for root and all .html pages
   @html_root path / /index.html
-  @html_files path_regexp htmlFiles ^/(?!index\.html$).+\.html$
+  @html_files {
+    path_regexp htmlFiles \.html$
+    not path /index.html /app/index.html
+  }
   header @html_root Cache-Control "max-age=60, must-revalidate"
   header @html_files Cache-Control "max-age=60, must-revalidate"
+
+  @miniapp_documents path /app /app/ /app/index.html
+  header @miniapp_documents {
+    Cache-Control "no-store"
+    Referrer-Policy "no-referrer"
+  }
 
   reverse_proxy app:8080
 

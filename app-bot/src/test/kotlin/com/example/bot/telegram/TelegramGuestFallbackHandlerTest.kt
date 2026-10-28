@@ -26,7 +26,6 @@ import com.pengrad.telegrambot.model.CallbackQuery
 import com.pengrad.telegrambot.model.Chat
 import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
-import com.pengrad.telegrambot.model.User as TelegramUser
 import com.pengrad.telegrambot.model.request.ForceReply
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.request.AnswerCallbackQuery
@@ -35,12 +34,6 @@ import com.pengrad.telegrambot.request.SendMessage
 import com.pengrad.telegrambot.response.BaseResponse
 import io.mockk.every
 import io.mockk.mockk
-import java.sql.SQLException
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
-import java.util.UUID
-import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
@@ -53,8 +46,62 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.sql.SQLException
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
+import com.pengrad.telegrambot.model.User as TelegramUser
 
 class TelegramGuestFallbackHandlerTest {
+    @Test
+    fun `client reopens through an extra button using sender membership and keeps guest entry`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            var checkedUser: Long? = null
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    hasClientMembership = {
+                        checkedUser = it
+                        true
+                    },
+                )
+            handler.handle(messageUpdate(text = "/start", telegramUserId = 101L, chatId = 909L))
+            val request = sender.requests.single() as SendMessage
+            val markup = request.parameters["reply_markup"] as InlineKeyboardMarkup
+            val buttons = markup.inlineKeyboard().flatMap { it.asList() }
+            assertEquals(101L, checkedUser)
+            assertEquals(listOf("Открыть Night Concierge", "Мои клубы"), buttons.map { it.text })
+            assertEquals(TEST_MINI_APP_URL, buttons.first().webApp?.url())
+            assertEquals(
+                "client",
+                io.ktor.http
+                    .Url(buttons.last().webApp!!.url())
+                    .parameters["mode"],
+            )
+        }
+
+    @Test
+    fun `membership lookup failure preserves welcome without granting client navigation`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    hasClientMembership = { error("synthetic database unavailable") },
+                )
+            handler.handle(messageUpdate(text = "/start"))
+            val request = sender.requests.single() as SendMessage
+            val markup = request.parameters["reply_markup"] as InlineKeyboardMarkup
+            assertEquals(1, markup.inlineKeyboard().flatMap { it.asList() }.size)
+        }
+
     @Test
     fun `bare start provisions first identity and welcomes user with exact mini app url`() =
         runBlocking {
@@ -724,6 +771,7 @@ private fun handler(
     currentBotUserIdProvider: suspend () -> Long = { TEST_BOT_USER_ID },
     botUsername: String? = "clubbot",
     miniAppUrl: String? = TEST_MINI_APP_URL,
+    hasClientMembership: suspend (Long) -> Boolean = { false },
 ): TelegramGuestFallbackHandler {
     val bookingState = mockk<BookingState>()
     every { bookingState.now() } returns now
@@ -739,6 +787,7 @@ private fun handler(
         botUsername = botUsername,
         miniAppUrl = miniAppUrl,
         qrSecretProvider = { qrSecret },
+        hasClientMembership = hasClientMembership,
     )
 }
 

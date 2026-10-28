@@ -9,6 +9,10 @@ const supportAuthState = vi.hoisted(() => ({
   guestRenderedBeforeAuth: false,
 }));
 
+vi.mock('./providers/TelegramProvider', () => ({
+  useTelegram: () => ({ initDataUnsafe: {} }),
+}));
+
 vi.mock('../modules/auth/hooks/useInitData', () => ({
   useInitData: () => ({
     initData: 'signed-init-data',

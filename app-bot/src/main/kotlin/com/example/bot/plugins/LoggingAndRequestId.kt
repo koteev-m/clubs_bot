@@ -5,9 +5,11 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.callid.CallId
 import io.ktor.server.plugins.callid.callId
 import io.ktor.server.plugins.calllogging.CallLogging
-import java.util.UUID
-import org.slf4j.event.Level
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
 import org.slf4j.LoggerFactory
+import org.slf4j.event.Level
+import java.util.UUID
 
 private const val REQUEST_ID_HEADER = "X-Request-Id"
 private const val LEGACY_REQUEST_ID_HEADER = "X-Request-ID"
@@ -29,6 +31,8 @@ fun Application.configureLoggingAndRequestId() {
 
     install(CallLogging) {
         level = Level.INFO
+        // Launch URLs can contain invitation secrets. Never log query, headers or bodies.
+        format { call -> "${call.response.status()?.value} ${call.request.httpMethod.value} ${call.request.path()}" }
         mdc("requestId") { call -> call.callId }
     }
 }

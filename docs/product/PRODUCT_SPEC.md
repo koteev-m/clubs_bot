@@ -425,7 +425,7 @@ iBota не является способом обойти этот порядо�
 <a id="client-onboarding-contract"></a>
 ### Клиенты, заявки и брендированные боты — принято 2026-10-27
 
-Authority: `DEC-040`–`DEC-042`. Все новые требования ниже — **`ACCEPTED_NOT_IMPLEMENTED`**; рабочий platform identity является только переиспользуемой основой. Это отдельный accepted overlay, не дополнительные immutable-source rows.
+Authority: `DEC-040`–`DEC-042`. На дату принятия 2026-10-27 все новые требования ниже — **`ACCEPTED_NOT_IMPLEMENTED`**; рабочий platform identity является только переиспользуемой основой. Это отдельный accepted overlay, не дополнительные immutable-source rows. Принятые позже технические детали А/Б — [§29](#client-onboarding-ab-technical-contract), bounded local results — [AS_BUILT](AS_BUILT.md#client-onboarding-a-local); полный onboarding/multi-bot outcome не объявляется выполненным.
 
 | ID | Принятое требование | Authority |
 |---|---|---|
@@ -646,3 +646,145 @@ Nullable поля могут опускаться действующим seriali
 **Exclusions:** реальные memberships/grants/mapping и credentials; любые mutation/admin APIs, UI, invitation/application/approval/club creation/publish, draft state machine, SDK upgrade, webhook/outbound multi-bot refactor, полный legacy isolation audit/cutover, commit/publication/deploy/runtime. Законченный локальный outcome не называется клиентским onboarding или готовностью запуска клиента. После его отдельной реализации и проверки — один handoff; дальнейшие права не возникают автоматически.
 
 **Существенные альтернативы:** запись grants в существующий `user_roles` отвергнута принятым контрактом из-за расширения legacy authority; отдельные capability grants сохраняют старый role catalogue. Nullable `clubs.client_id` с глобальным NOT NULL/backfill не рекомендуется: side mapping оставляет legacy unmapped и не меняет старые queries. Унификация всех auth errors/удаление legacy X-Telegram-Id fallback не включены: новый namespace имеет строгий стандартный envelope, изменение старого внешнего контракта требует отдельного scope. За этими границами дополнительных вариантов для принятия этой первой задачи не требуется.
+
+<a id="client-onboarding-ab-technical-contract"></a>
+## 29. Принятый технический контракт А/Б: приглашение, заявка и отдельное создание клуба
+
+**ACCEPTED, 2026-10-28.** Владелец прямо принял техническое предложение, подготовленное от `main 90b772ef117baa07b203ec6bad056873f51f8979`, с семью уточнениями текущей задачи. Это уточнение `DEC-039`–`DEC-042` и `CLNT-001`–`CLNT-010`, без нового DEC/CLB ID. §28 сохраняет контракт и исторические границы предыдущей read-задачи; его исключения mutations/UI не запрещают отдельно разрешённый этап А. Принятие target не доказывает implementation или runtime: локальная дельта — [AS_BUILT](AS_BUILT.md#client-onboarding-a-local), фактический verdict и проверки — [checkpoint](../ops/PROJECT_STATUS.md).
+
+| Результат | Проверяемый конец | Текущая граница |
+|---|---|---|
+| **А** | Platform owner приглашает клиента; получатель явно подтверждает Telegram-аккаунт; платформа сверяет кандидата и выдаёт доступ; «Мои клубы» сохраняет заявку до решения платформы и восстанавливает её после входа | Разрешена локальная реализация production wiring, additive migrations, tests, UI/dist и связанные документы; без публикации/runtime |
+| **Б** | Собственная approved-заявка используется ровно один раз для атомарного создания непубличного клуба, точных grants и минимального профиля; повтор ведёт к тому же клубу | Принят target-контракт, **реализация не входит в А** и требует отдельного разрешения |
+
+Managed Bots, guest publication, перенос существующих реальных клубов, управление сотрудниками, полный мастер зала/календаря, автоматический billing и перенос владения на другой Telegram-аккаунт не входят в А. Б также не принимает автоматически многоботовый credential lifecycle или guest cutover.
+
+### 29.1. Authority и клиентские границы
+
+Существующие `users`, V061 `clients/client_memberships/client_clubs/client_club_grants`, оба client GET, `ApiError`, no-store и один production adapter платформенного бота переиспользуются. Новые назначения не записываются в `user_roles`; legacy `OWNER/GLOBAL` не открывает новые onboarding API.
+
+| Субъект | Разрешение |
+|---|---|
+| Exact platform owner | Свежая проверенная Telegram identity, совпадающая с положительным серверным `OWNER_TELEGRAM_ID`: выдача/отзыв/явное восстановление доступа, направленные заявки, решения |
+| Активный участник клиента | Собственное пространство; membership сама не предоставляет клубы или заявки |
+| Участник с точным `client.application.manage` | Собственные черновики; чтение направленных заявок того же клиента; только автор изменяет/отправляет/отменяет свою заявку |
+| Пользователь с точным `client.club.read` | Только соответствующий mapped-клуб при активных client/membership/grant; это не право настройки или создания |
+
+Каждый новый запрос заново проверяет подпись, freshness и серверное подключение. Client mutation проверяет активность клиента, membership, точный action, объект и авторство. Platform mutation заново проверяет exact owner; прежний ответ `/api/platform/access` и отображённая кнопка не являются authority. Query, username, clientId, `X-Telegram-Id`, выбранный в браузере аккаунт и владение ссылкой не подтверждают полномочия. Браузер не выбирает bot token; второго production resolver или перебора токенов нет.
+
+### 29.2. Приглашение и подтверждение человека
+
+1. Platform owner вводит название клиентского пространства и подпись предполагаемого получателя. Одна транзакция создаёт неактивное пространство и invitation.
+2. Invitation действует **семь суток**. Secret — криптографически случайный, минимум 256 бит; persistence хранит только hash. Ссылка использует отдельный `startapp=ci_<secret>`, не смешивается с guest invitations.
+3. Preview/GET не создаёт `users`, membership или grants. Явный claim из прямого Mini App launch идемпотентно provisions минимального пользователя по проверенной Telegram identity в той же транзакции и фиксирует одного кандидата. Аккаунт не обязан предварительно отправлять `/start`.
+4. Кандидат получает короткий одноразовый код и сообщает его отправителю **в исходном личном чате**. Платформа показывает тот же код у зафиксированного кандидата. Код служит человеку для сверки, не является credential и не принимается вместо platform-owner authority.
+5. Только отдельное авторизованное действие platform owner до expiry активирует client, membership и ровно `client.application.manage`, переводит invitation в accepted и пишет audit. Клуб и клубные grants на этом шаге не создаются.
+
+| Invitation state | Значение и допустимое продолжение |
+|---|---|
+| `issued` | Ожидает явного claim |
+| `claimed` | Кандидат зафиксирован, код доступен для сверки; доступа ещё нет |
+| `accepted` | Платформа завершила выдачу доступа; прежняя ссылка проверяет текущую membership и ничего не восстанавливает |
+| `revoked` | Ссылка отозвана; secret и код больше не действуют |
+| Effective `expired` | У issued/claimed истекло время; GET вычисляет состояние без записи, confirm запрещён |
+
+Чужой аккаунт не заменяет зафиксированного кандидата и не получает его/клиентские private-данные. Для ошибочного получателя нужны revoke и reissue. Claim/confirm/revoke сериализуются; повтор не создаёт вторую identity/membership/grant или второе бизнес-событие. Effective expiry проверяется и на mutation, а не только при отрисовке.
+
+Raw secret возвращается только в первоначальном успешном ответе issue/reissue. Идемпотентный повтор возвращает ту же invitation без восстановления secret; при потерянном ответе нужен явный reissue. Reissue отзывает прежнюю запись и создаёт новую для того же клиента с `replaces_invitation_id`; прежняя ссылка больше не действует. Accepted invitation не перевыпускается для восстановления доступа.
+
+Сервер не отправляет приглашение автоматически: platform owner копирует ссылку и передаёт её сам. Raw secret, initData и raw idempotency key не сохраняются в наших логах, telemetry, audit metadata или необязательных клиентских хранилищах. `startapp` может попасть в URL и подписанную initData; приложение очищает адрес/необязательный SDK cache, но **не обещает отсутствие этого значения внутри инфраструктуры Telegram**.
+
+### 29.3. Отзыв и восстановление доступа
+
+До accepted отзывается invitation. После accepted отдельная platform операция деактивирует membership, `client.application.manage` и club grants этого пользователя **только в данном клиенте**. Пространство, заявки и клубы сохраняются; другие участники/пространства не меняются. Отказ в новой заявке не отзывает прежние клубные grants.
+
+Restore — отдельная platform mutation с актуальной версией и **явным списком возвращаемых прежних scopes**: membership permission и пары club/action. Нельзя включить все клубы клиента по membership, восстановить чужие/не существовавшие grants или перенести членство на другой Telegram-аккаунт. Пустой явный список может восстановить только membership; новые права из него не следуют. Повтор и гонка restore/revoke подчинены общей transactional/version/idempotency границе.
+
+### 29.4. Заявка: одно заведение, один автор
+
+Новый draft сервер связывает с выбранным активным клиентом и текущим автором; автор/клиент далее неизменяемы. Для submit обязательны `venueName` 1–255, `countryCode` из двух букв, `city` 1–128, `address` 1–512 и валидная IANA `timezone` до 64 символов; `unit` до 128 и `comment` до 2000 необязательны. Контакт — подтверждённый Telegram-аккаунт автора; обязательных телефонных/платёжных реквизитов нет.
+
+| Переход | Authority и условия |
+|---|---|
+| Создать/изменить `draft` | Автор, active client/membership и exact manage |
+| `draft → submitted` | Автор; полная валидная форма и явное подтверждение отправки |
+| `submitted → reviewing` | Только platform owner; актуальная version |
+| `reviewing → approved` | Только platform owner; manual commercial record и явное подтверждение платформы |
+| `reviewing → rejected` | Только platform owner; обязательная причина для клиента |
+| `draft/submitted/reviewing → cancelled` | Автор с актуальным доступом, явная отмена |
+| `submitted/reviewing → cancelled` | Platform owner, обязательная причина |
+| `approved → cancelled` | Только platform owner, обязательная причина, до использования одобрения в Б |
+
+После submit поля заведения неизменяемы; сохраняются snapshot, его hash и версия. Исправление требует отмены и нового draft с `previous_application_id`. Rejected/cancelled — конечные состояния; «Подать заново» создаёт другую запись, история прежней остаётся. Approval автоматически не истекает. Второе несовместимое решение или гонка submit/cancel, approve/reject возвращает конфликт версии/перехода, а не частичный результат.
+
+Черновик читает только автор с manage; другие managers этого клиента читают направленные заявки без права действовать от имени автора. Platform owner видит направленные заявки и дальнейшую историю, не чужие несданные drafts. Обычная membership не открывает заявки. Отзыв автора не передаёт его approval другому manager; для другого будущего владельца нужна новая связанная заявка.
+
+Нормализованный fingerprint названия и адреса уникален внутри клиента среди submitted/reviewing/approved. Одобрение, использованное в Б, продолжает резервировать fingerprint. Разные написания одного реального заведения требуют человеческой проверки и не считаются решённой физической дедупликацией.
+
+### 29.5. Ручное коммерческое согласование
+
+Approve требует `commercialReference`, `commercialAgreedAt` (дата), `platformConfirmed=true`, актуальную version и привязку к immutable submitted snapshot/hash/version. Сохраняются внутренний decision actor и серверное время. Один reference может покрывать несколько отдельно одобренных заявок. Синтетические references используются только в локальных тестах; payment API, счета, проверка оплаты и автоматическое списание не реализуются.
+
+Клиентский текст решения и внутренняя platform note разделены. Клиентский API не возвращает internal note или чужие коммерческие данные. Ошибка новой заявки не меняет существующие клубы и их доступы. В А approved-карточка показывает ровно: **«Подключение одобрено. Создание клуба будет доступно после следующего этапа настройки платформы»**. Рабочей кнопки создания клуба в А нет.
+
+### 29.6. Additive schema, API и транзакции
+
+Все новые resource IDs — positive BIGINT и десятичные строки в JSON; изменяемые ресурсы имеют positive BIGINT version. Времена — UTC. Парные migrations PostgreSQL/H2 идут после V061; старые migration bytes не меняются.
+
+| Объект А | Контракт |
+|---|---|
+| `client_memberships.version` | Версия выдачи/отзыва/восстановления доступа |
+| `client_membership_grants` | Точный composite FK к membership, PK client/user/action; только `client.application.manage`, default inactive, version/timestamps |
+| `client_invitations` | Unique token hash, state/expiry/claimant, verification code только на период сверки, version, замена invitation, CHECK согласованности lifecycle; не более одного открытого invitation клиента |
+| `client_club_applications` | Client/author composite FK, шесть состояний, draft-поля, submitted snapshot/hash/version, fingerprint, previous application, решение/согласование/история, запрет активного точного дубля |
+| `client_commands` | Unique actor/connection/key-hash, digest операции/resource/нормализованного payload/version, ссылки на результат; без raw secrets/keys/credentials |
+| `audit_log` | Transaction-local insert через то же соединение; безопасные внутренние actor/resource/client IDs, action/transition, version и correlation, без полной заметки или secret |
+
+`C=/api/client`, `P=/api/platform/onboarding`. Действующие `GET C/context` и `GET C/clubs/{clubId}` сохраняют read-контракт.
+
+| API А | Назначение |
+|---|---|
+| `POST P/invitations`; `GET P/invitations/{id}` | Issue и состояние/кандидат |
+| `POST P/invitations/{id}/{confirm,revoke,reissue}` | Отдельные platform lifecycle actions |
+| `POST P/clients/search`; `GET P/clients/{id}` | Ограниченные списки/карточки клиентов и доступов |
+| `POST P/clients/{c}/members/{u}/{revoke,restore}` | Отдельный отзыв/явное восстановление scopes |
+| `POST C/invitations/resolve`; `POST C/invitations/{id}/claim`; `GET C/invitations/{id}` | Read-only preview secret из body, явный claim, статус своего кандидата |
+| `GET C/clients/{c}/onboarding` | Доступные actions и разрешённые клубы |
+| `POST C/clients/{c}/applications`; `POST C/clients/{c}/applications/search` | Создание draft и авторизованный список |
+| `GET/PATCH C/applications/{id}`; `POST C/applications/{id}/{submit,cancel}` | Своя карточка/draft/переход |
+| `POST P/applications/search`; `GET P/applications/{id}` | Очередь и карточка направленной заявки |
+| `POST P/applications/{id}/{review,approve,reject,cancel}` | Platform decision |
+
+Read-only search POST не требует idempotency key; cursor находится в body, default limit 50/max 100. Query-параметров нового API нет. Mutations требуют `Idempotency-Key`, изменения существующего ресурса также `expectedVersion`. Responses возвращают состояние, version и доступные действия; эти actions — подсказка UI, не authority.
+
+Каждая mutation записывает бизнес-данные, identity provisioning при необходимости, command result и обязательный audit в **одной** transaction/connection. Ошибка audit откатывает все записи; нет последовательных независимых writer-транзакций. Порядок locks согласован между claim/confirm/revoke/access/application действиями; concurrency проверяется на отдельных PostgreSQL соединениях. Bounded retry повторяет всю transaction; `CancellationException` пробрасывается. Повтор уже committed команды повторно проверяет текущий доступ и возвращает тот же ресурс без второго бизнес-события. Тот же key с другим payload даёт `409 idempotency_conflict`; потерянный ответ не запускает компенсационное удаление.
+
+Сохраняется плоский `ApiError` и no-store/Vary. Неверная/устаревшая identity — 401; не-platform owner — 403; чужой/отсутствующий/недоступный объект неразличимы (404); ввод — 400; `version_conflict/invalid_transition/idempotency_conflict/duplicate_application` — 409 после authority check; persistence failure — безопасный 500 без SQL/credentials. Значение GET не обещает отменить уже начавшийся ответ после момента его снимка.
+
+### 29.7. Экраны, повторный вход и account switch
+
+Переиспользуются тёмная основа platform-owner, существующие карточки, safe areas, Back/history и фокус на заголовке. Platform screens связаны с приглашениями/кандидатом, выдачей и отзывом доступа, clients и очередью/карточкой решения. Client screens: текущий аккаунт и claim, ожидание с кодом, «Мои клубы», выбор собственного пространства, сохранение draft/submit, статус/история/допустимая отмена.
+
+Кабинет читает свежий серверный context; global guest ClubPicker для него не используется. Нет активных пространств — честное empty state; нет clubs — разрешённая manage-кнопка «Подключить заведение». Club picker содержит только exact grants пользователя. Несохранённый ввод не объявляется сохранённым; уход с ним требует предупреждения.
+
+При запуске, foreground/pageshow и смене аккаунта прежние private-данные скрываются, SDK credential перечитывается, запросы отменяются, старые формы/results очищаются; запоздалые ответы прежнего аккаунта отвергаются. Сохранённые IDs — только навигационное предпочтение. Если доступ отозван или identity устарела, UI показывает access lost/повторное открытие, не старые данные.
+
+Предусмотрены loading, empty, error/retry, saving, success, validation, access lost, version conflict и **«Результат операции пока неизвестен»**. После неизвестного исхода допускается повтор той же команды с тем же key/payload либо авторизованное перечитывание; после 409 загружается актуальный ресурс. Секрет invitation не сохраняется в localStorage/sessionStorage/другом необязательном cache.
+
+Прямой `startapp` использует canonical React client entry; `mode=client` выбирает presentation, а не права. Private `/start` сохраняет guest кнопку и добавляет «Мои клубы» по active membership **message.from.id**. Platform-owner menu сохраняется. Backend не рассылает реальные приглашения автоматически.
+
+### 29.8. Контракт Б остаётся отдельной реализацией
+
+`POST C/applications/{id}/club` в Б принимает expectedVersion, idempotency key и проверяет автора, active client/membership/manage и approved snapshot. Одна transaction создаёт ровно один `clubs` с `is_active=false`, `client_clubs`, `client_club_onboarding`, exact `client.club.read` и `client.club.profile.write`, consumption и audit. Unique application consumption и composite FK фиксируют client/owner/approved status; used approval нельзя отменить или освободить удалением mapping. Потерянный ответ/параллельный повтор возвращает тот же клуб при текущем доступе; любая ошибка до commit полностью откатывает результат.
+
+Минимальный профиль Б: display name, описание до 2000 и валидная timezone; страна/город/адрес одобренного заведения без редактирования. `GET/PATCH C/clubs/{id}/profile` требует exact read/write grants, version/idempotency для записи. Статусы «Непубличный», «Бот не подключён», дата сохранения профиля независимы от approval. Publication API отсутствует.
+
+Одного `is_active=false` недостаточно: до готовности Б обязательны targeted guards guest list/detail/events, support/ask, layout/files/ETag/304, booking/HOLD и legacy admin mutations для новых mapped private clubs, включая кэши и side effects; unmapped legacy flow сохраняется. Это будущий containment target, **не выполненный этапом А**. Перенос владения, staff management, Managed Bots и реальная активация клиентов требуют отдельного scope.
+
+### 29.9. Verification и delivery boundary
+
+Локальная приёмка А: meaningful Kotlin/H2 unit/migration tests; Ktor transport/identity/authority/negative isolation; PostgreSQL на CI-major для transactions/rollback/claim-confirm-revoke и submit-cancel/approve-reject concurrency; idempotency/lost response; Vitest/TypeScript/lint, Playwright переходов и отказов; build/dist/реальное packaging; affected detekt/ktlint/logs-security и полный JVM gate межмодульного изменения. Все аккаунты/данные/references синтетические.
+
+Один независимый focused review проверяет final auth/RBAC, client boundaries, lifecycle, locks, audit, secrets и guest regression; findings исправляются, affected checks повторяются. Review evidence привязывается к **финальным bytes после форматирования и последней static правки**, не только к base SHA.
+
+Real Telegram/device, stage/prod, deployed revision и runtime migrations проверяются только после отдельного разрешения rollout. Текущая задача запрещает commit/push/PR/merge, workflow dispatch/rerun, deploy/recovery, SSH/AEZA/Docker lifecycle, Secrets/Environment и live mutations. Следующий publication step — отдельное разрешение подготовки Draft PR; автоматического перехода к Б нет.

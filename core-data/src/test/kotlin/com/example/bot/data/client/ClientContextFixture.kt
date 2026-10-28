@@ -58,7 +58,8 @@ internal class ClientContextFixture(
             .configure()
             .dataSource(dataSource)
             .locations("classpath:db/migration/common", "classpath:db/migration/$vendor")
-            .apply { target?.let { target(it) } }
+            // This contract intentionally verifies the V061 boundary independently of later migrations.
+            .target(target ?: "61")
             .load()
 
     fun execute(vararg sql: String) {

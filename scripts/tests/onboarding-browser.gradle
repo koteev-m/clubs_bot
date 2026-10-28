@@ -1,0 +1,12 @@
+// Disposable local browser fixture; test classes, H2 memory database, loopback only.
+// Usage: ./gradlew -I scripts/tests/onboarding-browser.gradle :app-bot:runOnboardingBrowserFixture --no-configuration-cache
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app-bot')
+    if (app == null) return
+    app.tasks.register('runOnboardingBrowserFixture', JavaExec) {
+        dependsOn app.tasks.named('testClasses')
+        classpath = app.sourceSets.test.runtimeClasspath
+        mainClass = 'com.example.bot.routes.ClientOnboardingBrowserFixture'
+        environment 'CLB_ONBOARDING_BROWSER_FIXTURE', 'synthetic'
+    }
+}

@@ -5,9 +5,16 @@ import { join } from 'node:path';
 
 export default defineConfig({
   testDir: './tests',
-  outputDir: join(tmpdir(), `clubs-bot-playwright-${process.pid}-${randomUUID()}`),
+  testIgnore: [
+    'onboarding-integrated.spec.ts',
+    'onboarding-production.spec.ts',
+  ],
+  outputDir: join(
+    tmpdir(),
+    `clubs-bot-playwright-${process.pid}-${randomUUID()}`,
+  ),
   webServer: {
-    command: 'pnpm dev',
+    command: 'node node_modules/vite/bin/vite.js',
     port: 5173,
     reuseExistingServer: true,
   },

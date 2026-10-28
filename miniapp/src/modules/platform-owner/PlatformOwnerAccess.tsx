@@ -9,25 +9,31 @@ type AccessStatus = 'loading' | 'allowed' | 'denied' | 'unauthorized' | 'error';
 
 /** Client state controls presentation only. Server operations need their own authorization. */
 export default function PlatformOwnerAccess() {
-  const { initData } = useInitData();
+  const { initData, refreshEpoch = 0 } = useInitData();
   const [attempt, setAttempt] = useState(0);
   const [access, setAccess] = useState<{
     credential: string;
+    refreshEpoch: number;
     status: AccessStatus;
-  }>({ credential: '', status: 'loading' });
+  }>({ credential: '', refreshEpoch: -1, status: 'loading' });
 
   useEffect(() => {
     const controller = new AbortController();
     setInitData(initData);
     setAccess({
       credential: initData,
+      refreshEpoch,
       status: initData ? 'loading' : 'unauthorized',
     });
     if (initData) {
       checkPlatformOwnerAccess(controller.signal)
         .then(() => {
           if (!controller.signal.aborted)
-            setAccess({ credential: initData, status: 'allowed' });
+            setAccess({
+              credential: initData,
+              refreshEpoch,
+              status: 'allowed',
+            });
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
@@ -36,6 +42,7 @@ export default function PlatformOwnerAccess() {
             : undefined;
           setAccess({
             credential: initData,
+            refreshEpoch,
             status:
               status === 403
                 ? 'denied'
@@ -46,15 +53,16 @@ export default function PlatformOwnerAccess() {
         });
     }
     return () => controller.abort();
-  }, [initData, attempt]);
+  }, [initData, attempt, refreshEpoch]);
 
   useEffect(() => {
     const recheck = () => {
-      setAccess({ credential: '', status: 'loading' });
+      setAccess({ credential: '', refreshEpoch: -1, status: 'loading' });
       setAttempt((value) => value + 1);
     };
     const onVisibility = () => {
-      if (document.hidden) setAccess({ credential: '', status: 'loading' });
+      if (document.hidden)
+        setAccess({ credential: '', refreshEpoch: -1, status: 'loading' });
       else recheck();
     };
     window.addEventListener('pageshow', recheck);
@@ -65,7 +73,10 @@ export default function PlatformOwnerAccess() {
     };
   }, []);
 
-  const status = access.credential === initData ? access.status : 'loading';
+  const status =
+    access.credential === initData && access.refreshEpoch === refreshEpoch
+      ? access.status
+      : 'loading';
   const loading = (
     <main
       aria-busy="true"
@@ -79,7 +90,7 @@ export default function PlatformOwnerAccess() {
   if (status === 'allowed')
     return (
       <Suspense fallback={loading}>
-        <Screens />
+        <Screens key={refreshEpoch + ':' + initData} credential={initData} />
       </Suspense>
     );
   return (

@@ -54,6 +54,8 @@ Decision log содержит 42 records: 22 `ACCEPTED_DECISION` и 20 `DECISION
 
 ## Правила доказательности
 
+**Датированное уточнение, 2026-10-28:** владелец принял [технический контракт А/Б, §29](PRODUCT_SPEC.md#client-onboarding-ab-technical-contract), уточняющий `DEC-039`–`DEC-042` без новых decision/card IDs. В пределах А отдельно разрешены local implementation/tests/docs; club creation/minimal profile относятся к Б, Managed Bots и tenant isolation всех legacy surfaces остаются отдельными outcomes. Прежние формулировки read-only scope §28 и решения от 2026-10-27 сохраняют историю, а не отменяют новое разрешение. [Bounded local delta](AS_BUILT.md#client-onboarding-a-local) не является runtime evidence; фактические проверки/final review/final-byte hashes находятся в [checkpoint](../ops/PROJECT_STATUS.md).
+
 - `SOURCE` не означает `AS_BUILT`, а наличие класса, route, repository или asset само по себе не означает production availability.
 - Для `AS_BUILT`, `PARTIAL` и `PRESENT_UNWIRED` указывается относительный path, ограниченный диапазон строк, symbol/route/test и объяснение фактического runtime значения.
 - Для ключевого flow проверяется цепочка `entrypoint → route/router → handler/service → repository → persistence → response/UI`.

@@ -10,6 +10,9 @@ import SupportShell from '../modules/support/pages/SupportShell';
 import GuestSupportShell from '../modules/guest/pages/GuestSupportShell';
 import { resolvePlatformOwnerEntry } from '../modules/platform-owner/previewAccess';
 import PlatformOwnerAccess from '../modules/platform-owner/PlatformOwnerAccess';
+import ClientAccess from '../modules/client/ClientAccess';
+import { readClientEntry } from '../modules/client/clientEntry';
+import { useTelegram } from './providers/TelegramProvider';
 
 // Vite removes the unguarded preview entry from production builds.
 const PlatformOwnerPreview = import.meta.env.DEV
@@ -17,6 +20,14 @@ const PlatformOwnerPreview = import.meta.env.DEV
   : null;
 
 export default function App() {
+  const webApp = useTelegram();
+  const [clientEntry, setClientEntry] = useState(() =>
+    readClientEntry(
+      window.location.search,
+      window.location.hash,
+      webApp.initDataUnsafe?.start_param,
+    ),
+  );
   const entry = resolvePlatformOwnerEntry({
     development: import.meta.env.DEV,
     hostname: window.location.hostname,
@@ -50,6 +61,13 @@ export default function App() {
     );
   }
   if (entry === 'protected') return <PlatformOwnerAccess />;
+  if (clientEntry.client)
+    return (
+      <ClientAccess
+        initialToken={clientEntry.token}
+        onTokenConsumed={() => setClientEntry({ client: true, token: null })}
+      />
+    );
   return <ExistingApp />;
 }
 

@@ -7,6 +7,13 @@ test.use({
   isMobile: true,
 });
 
+test.beforeEach(async ({ page }) => {
+  await page.route(
+    'http://localhost:5173/api/platform/onboarding/**',
+    (route) => route.fulfill({ json: { items: [], nextCursor: null } }),
+  );
+});
+
 const telegramStub = `window.Telegram={WebApp:{initData:'synthetic-init-data',platform:'ios',version:'7.0',ready:()=>{},expand:()=>{},colorScheme:'light',onEvent:()=>{},offEvent:()=>{},MainButton:{setText:()=>{},show:()=>{},hide:()=>{},onClick:()=>{},offClick:()=>{}}}}`;
 
 test('server-confirmed owner can navigate both real screens without invitation effects', async ({
@@ -21,8 +28,12 @@ test('server-confirmed owner can navigate both real screens without invitation e
       'synthetic-init-data',
     );
     expect(new URL(request.url()).search).toBe('');
-    expect(request.postData()).toBeNull();
-    await route.fulfill({ json: { platformOwner: true } });
+    const access = new URL(request.url()).pathname === '/api/platform/access';
+    if (access) expect(request.postData()).toBeNull();
+    else expect(request.postDataJSON()).toEqual({ limit: 50 });
+    await route.fulfill({
+      json: access ? { platformOwner: true } : { items: [], nextCursor: null },
+    });
   });
   await page.goto(
     '/app?mode=platform-owner#tgWebAppData=synthetic-init-data&tgWebAppVersion=7.0&tgWebAppPlatform=ios',
@@ -34,31 +45,39 @@ test('server-confirmed owner can navigate both real screens without invitation e
     page.getByText('Владелец платформы', { exact: true }),
   ).toBeVisible();
   await expect(page.getByText('Локальный просмотр')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Пригласить владельца' }).click();
+  await page.getByRole('button', { name: 'Пригласить клиента' }).click();
   await expect(page).toHaveURL(/screen=invite/);
   await expect(
-    page.getByRole('heading', { name: 'Пригласить владельца' }),
+    page.getByRole('heading', { name: 'Пригласить клиента' }),
   ).toBeVisible();
-  await expect(page.getByRole('status')).toContainText(
-    'Создание приглашений ещё не подключено',
-  );
-  await page.getByRole('button', { name: 'Назад к обзору' }).click();
+  await expect(
+    page.getByLabel('Название клиентского пространства'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Создать ссылку' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Назад' }).click();
   await expect(
     page.getByRole('heading', { name: 'Управление платформой' }),
   ).toBeVisible();
   await page.goForward();
   await expect(
-    page.getByRole('heading', { name: 'Пригласить владельца' }),
+    page.getByRole('heading', { name: 'Пригласить клиента' }),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'Назад к обзору' }).click();
+  await page.getByRole('button', { name: 'Назад' }).click();
   await expect(
     page.getByRole('heading', { name: 'Управление платформой' }),
   ).toBeVisible();
   expect(requests.length).toBeGreaterThan(0);
-  expect(requests.every((value) => value === 'GET /api/platform/access')).toBe(
-    true,
-  );
+  expect(
+    requests.every((value) =>
+      [
+        'GET /api/platform/access',
+        'POST /api/platform/onboarding/applications/search',
+      ].includes(value),
+    ),
+  ).toBe(true);
 });
 
 test('direct invitation entry rechecks access and returns to overview', async ({
@@ -72,9 +91,9 @@ test('direct invitation entry rechecks access and returns to overview', async ({
     '/app?mode=platform-owner&screen=invite#tgWebAppData=synthetic-init-data&tgWebAppVersion=7.0&tgWebAppPlatform=ios',
   );
   await expect(
-    page.getByRole('heading', { name: 'Пригласить владельца' }),
+    page.getByRole('heading', { name: 'Пригласить клиента' }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Назад к обзору' }).click();
+  await page.getByRole('button', { name: 'Назад' }).click();
   await expect(
     page.getByRole('heading', { name: 'Управление платформой' }),
   ).toBeVisible();
@@ -96,10 +115,10 @@ test('server refusal cannot be bypassed by query or persisted frontend state', a
     page.getByRole('heading', { name: 'Нет доступа к управлению платформой' }),
   ).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Пригласить владельца' }),
+    page.getByRole('heading', { name: 'Пригласить клиента' }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole('button', { name: 'Пригласить владельца' }),
+    page.getByRole('button', { name: 'Пригласить клиента' }),
   ).toHaveCount(0);
   await page.reload();
   await expect(
@@ -127,7 +146,7 @@ test('network failure stays closed and a retry uses a new server response', asyn
     page.getByRole('heading', { name: 'Не удалось проверить доступ' }),
   ).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Пригласить владельца' }),
+    page.getByRole('button', { name: 'Пригласить клиента' }),
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Повторить проверку' }).click();
   await expect(
