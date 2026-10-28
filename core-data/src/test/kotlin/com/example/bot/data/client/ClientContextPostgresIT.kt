@@ -231,7 +231,7 @@ internal class ClientContextPostgresIT : ClientContextContract() {
                     .configure()
                     .dataSource(source)
                     .locations("classpath:db/migration/common", "classpath:db/migration/postgresql")
-                    .apply { target?.let { target(it) } }
+                    .target(target ?: "61")
                     .load()
             configured("60").migrate()
             source.connection.use { connection ->

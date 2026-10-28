@@ -8,7 +8,9 @@ Roadmap задаёт последовательность проверяемых
 <a id="client-delivery-sequence"></a>
 ## Текущий связанный outcome: клиентское подключение (2026-10-27)
 
-Authority `DEC-040`–`DEC-042`; target `ACCEPTED_NOT_IMPLEMENTED`. Это ближайшая последовательность по прямому решению владельца, а не ожидание завершения всех прежних phases 1–6. Она не объявляет Private Support Loop завершённым и не расширяет его acceptance. Полный no-code master из Phase 7 остаётся последующим outcome.
+Authority `DEC-040`–`DEC-042`; полный onboarding/multi-bot target остаётся `ACCEPTED_NOT_IMPLEMENTED`. Это ближайшая последовательность по прямому решению владельца, а не ожидание завершения всех прежних phases 1–6. Она не объявляет Private Support Loop завершённым и не расширяет его acceptance. Полный no-code master из Phase 7 остаётся последующим outcome.
+
+**Обновление 2026-10-28:** read-основа включена в предоставленный main `90b772ef117baa07b203ec6bad056873f51f8979` после PR #551. Владелец принял [технический контракт А/Б](PRODUCT_SPEC.md#client-onboarding-ab-technical-contract) и разрешил только локальную реализацию результата **А** (строка 2): приглашение → подтверждённый кабинет → заявка → решение платформы. [Локальная дельта](AS_BUILT.md#client-onboarding-a-local) и [checkpoint](../ops/PROJECT_STATUS.md) отделяют source wiring/проверки от stage/prod; main этой revision по предоставленному контексту ещё не развёрнут на staging. **Б** (строка 3) принят как target, но не разрешён к реализации этой задачей.
 
 | Порядок | Проверяемый результат | Зависимость / граница готовности |
 |---|---|---|
@@ -39,10 +41,12 @@ Authority `DEC-040`–`DEC-042`; target `ACCEPTED_NOT_IMPLEMENTED`. Это бл�
 <a id="client-open-design"></a>
 ### Оставшиеся существенные технические решения
 
-Продукт `DEC-040`–`DEC-042` принят; ниже один список ещё не утверждённых деталей, блокирующих только зависимую реализацию:
+**Граница после принятия 2026-10-28:** invitation protocol, семь суток, сверка кандидата кодом, exact grants/revoke/restore, application transitions/immutability, manual commercial record и atomic single-club/profile контракт А/Б теперь приняты в [§29](PRODUCT_SPEC.md#client-onboarding-ab-technical-contract). Их нельзя снова представлять как общие pending choices. Следующий список сохраняет исходные направления проектирования; открытыми остаются только не охваченные А/Б детали Managed Bots/credential lifecycle, guest publication/cutover и live migration. Локальная готовность А не разрешает автоматически ни публикацию, ни Б.
+
+Продукт `DEC-040`–`DEC-042` принят; ниже disposition технических деталей. Только явно оставшиеся pending items блокируют зависимую реализацию:
 
 1. **Принято 2026-10-27:** [schema/API/access contract первой read-задачи](PRODUCT_SPEC.md#client-context-technical-contract). Повторное принятие не требуется; независимая локальная проверка и отдельное решение о публикации/rollout сохраняются.
-2. Приглашение (binding к человеку, повтор/expiry/revocation), разрешённые точки отмены/пересмотра заявки, минимальный профиль и guest publication policy; одна атомарная граница consumption одобрения + club + assignment + permission + audit и поведение при сбое. Предпочтение одной DB transaction — техническое предложение, не уже принятое решение.
+2. **Принято 2026-10-28:** invitation binding/expiry/revocation, transitions, минимальный профиль Б, атомарная граница consumption + club + grants + audit и rollback из [§29](PRODUCT_SPEC.md#client-onboarding-ab-technical-contract). А реализуется локально; Б остаётся отдельным разрешаемым этапом. Guest publication policy за границей private profile остаётся pending.
 3. SDK upgrade либо ограниченный адаптер Managed Bots, доверенная привязка Telegram creator/bot к клиенту и разрешённым клубам; хранение, получение, ротация/отзыв credentials, прекращение управления и in-flight delivery. Подключение старых ботов и transfer ownership отдельно не спроектированы.
 4. Явный mapping существующих клубов и план перехода текущего guest entry/публичности с проверками совместимости. Live bot setup, миграция данных, публикация и rollout требуют отдельного scope/разрешения.
 

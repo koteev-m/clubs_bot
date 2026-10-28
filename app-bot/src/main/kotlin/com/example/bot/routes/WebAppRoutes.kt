@@ -26,7 +26,7 @@ fun Application.webAppRoutes() {
         }
 
         get("/app/index.html") {
-            call.respondMiniAppResource(classLoader, "webapp/app/index.html", ContentType.Text.Html)
+            call.respondMiniAppIndex(classLoader)
         }
 
         get("/app/layout.html") {
@@ -45,12 +45,22 @@ fun Application.webAppRoutes() {
 private suspend fun ApplicationCall.respondMiniAppIndex(classLoader: ClassLoader) {
     val isReactMode =
         when (request.queryParameters["mode"]) {
-            "support", "guest-support", "platform-owner" -> true
-            else -> false
+            "support", "guest-support", "platform-owner", "client" -> true
+            else ->
+                listOf("tgWebAppStartParam", "startapp").any { key ->
+                    request.queryParameters
+                        .getAll(key)
+                        ?.singleOrNull()
+                        ?.let(CLIENT_LAUNCH::matches) == true
+                }
         }
     val resourcePath = if (isReactMode) "webapp/app/react/index.html" else "webapp/app/index.html"
+    response.headers.append("Cache-Control", "no-store")
+    response.headers.append("Referrer-Policy", "no-referrer")
     respondMiniAppResource(classLoader, resourcePath, ContentType.Text.Html)
 }
+
+private val CLIENT_LAUNCH = Regex("ci_[A-Za-z0-9_-]{43}|client")
 
 private suspend fun ApplicationCall.respondMiniAppResource(
     classLoader: ClassLoader,

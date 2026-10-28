@@ -1,150 +1,154 @@
 package com.example.bot
 
-import com.example.bot.booking.BookingService
-import com.example.bot.checkin.CheckinService
-import com.example.bot.club.GuestListService
-import com.example.bot.club.InvitationService
-import com.example.bot.club.GuestListRepository
-import com.example.bot.club.WaitlistRepository
 import com.example.bot.admin.AdminClubsRepository
 import com.example.bot.admin.AdminHallsRepository
+import com.example.bot.analytics.AdminAnalyticsRefreshWorker
+import com.example.bot.analytics.AdminAnalyticsSnapshotService
 import com.example.bot.audit.AuditLogger
+import com.example.bot.booking.BookingService
+import com.example.bot.booking.a3.Booking
+import com.example.bot.checkin.CheckinService
+import com.example.bot.club.GuestListRepository
+import com.example.bot.club.GuestListService
+import com.example.bot.club.InvitationService
+import com.example.bot.club.WaitlistRepository
+import com.example.bot.clubs.ClubsRepository
+import com.example.bot.clubs.EventsRepository
+import com.example.bot.coredata.CoreDataSeed
+import com.example.bot.data.booking.TableDepositRepository
+import com.example.bot.data.booking.TableSessionRepository
+import com.example.bot.data.client.ClientAudience
+import com.example.bot.data.client.JdbcClientContextRepository
+import com.example.bot.data.client.onboarding.JdbcClientOnboardingRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
+import com.example.bot.data.gamification.GamificationSettingsRepository
+import com.example.bot.data.privacy.PrivacyConfig
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
 import com.example.bot.data.security.UserRolePermissionRepository
 import com.example.bot.data.security.webhook.SuspiciousIpRepository
-import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.data.security.webhook.TelegramWebhookIngressRepository
-import com.example.bot.data.booking.TableDepositRepository
-import com.example.bot.data.booking.TableSessionRepository
-import com.example.bot.data.gamification.GamificationSettingsRepository
-import com.example.bot.data.visits.NightOverrideRepository
-import com.example.bot.data.visits.VisitRepository
+import com.example.bot.data.security.webhook.WebhookUpdateDedupRepository
 import com.example.bot.data.stories.GuestSegmentsRepository
 import com.example.bot.data.stories.PostEventStoryRepository
-import com.example.bot.analytics.AdminAnalyticsRefreshWorker
-import com.example.bot.analytics.AdminAnalyticsSnapshotService
-import com.example.bot.opschat.ClubOpsChatConfigRepository
-import com.example.bot.clubs.ClubsRepository
-import com.example.bot.clubs.EventsRepository
-import com.example.bot.coredata.CoreDataSeed
-import com.example.bot.metrics.UiCheckinMetrics
-import com.example.bot.metrics.UiWaitlistMetrics
-import com.example.bot.music.MusicLikesRepository
-import com.example.bot.music.MusicPlaylistRepository
-import com.example.bot.music.MusicService
-import com.example.bot.music.MixtapeService
-import com.example.bot.music.MusicAssetRepository
-import com.example.bot.music.MusicItemRepository
-import com.example.bot.music.TrackOfNightRepository
+import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.VisitRepository
+import com.example.bot.deprecated.legacy.web.LegacyBookingConfig
+import com.example.bot.deprecated.legacy.web.installLegacyBookingWebApp
+import com.example.bot.di.appModules
+import com.example.bot.host.BookingProvider
+import com.example.bot.host.HostEntranceService
+import com.example.bot.host.HostSearchService
+import com.example.bot.host.ShiftChecklistService
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.HallPlansRepository
 import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
+import com.example.bot.metrics.UiCheckinMetrics
+import com.example.bot.metrics.UiWaitlistMetrics
+import com.example.bot.music.MixtapeService
+import com.example.bot.music.MusicAssetRepository
+import com.example.bot.music.MusicItemRepository
+import com.example.bot.music.MusicLikesRepository
+import com.example.bot.music.MusicPlaylistRepository
+import com.example.bot.music.MusicService
+import com.example.bot.music.TrackOfNightRepository
+import com.example.bot.notifications.LoggingNotificationService
+import com.example.bot.notifications.NotificationService
+import com.example.bot.notifications.TelegramOperationalNotificationService
+import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.plugins.ActorMdcPlugin
+import com.example.bot.plugins.DataSourceHolder
+import com.example.bot.plugins.appConfig
 import com.example.bot.plugins.configureLoggingAndRequestId
 import com.example.bot.plugins.configureSecurity
 import com.example.bot.plugins.enforceRbacStartupGuard
 import com.example.bot.plugins.installAppConfig
 import com.example.bot.plugins.installCorsFromEnv
 import com.example.bot.plugins.installDiagTime
-import com.example.bot.plugins.installHttpSecurityFromEnv
 import com.example.bot.plugins.installHotPathLimiterDefaults
-import com.example.bot.plugins.installRateLimitPluginDefaults
-import com.example.bot.plugins.resolveFlag
+import com.example.bot.plugins.installHttpSecurityFromEnv
 import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
+import com.example.bot.plugins.installRateLimitPluginDefaults
 import com.example.bot.plugins.installRequestGuardsFromEnv
 import com.example.bot.plugins.installWebAppCspFromEnv
 import com.example.bot.plugins.installWebAppEtagForFingerprints
 import com.example.bot.plugins.installWebAppImmutableCacheFromEnv
 import com.example.bot.plugins.installWebUi
-import com.example.bot.plugins.appConfig
-import com.example.bot.routes.checkinRoutes
-import com.example.bot.routes.clubsRoutes
-import com.example.bot.booking.a3.Booking
-import com.example.bot.host.BookingProvider
-import com.example.bot.host.HostEntranceService
-import com.example.bot.host.HostSearchService
-import com.example.bot.notifications.LoggingNotificationService
-import com.example.bot.notifications.NotificationService
-import com.example.bot.notifications.TelegramOperationalNotificationService
+import com.example.bot.plugins.resolveFlag
 import com.example.bot.promoter.admin.PromoterAdminService
 import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import com.example.bot.promoter.rating.PromoterRatingService
-import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
-import com.example.bot.support.SupportService
-import com.example.bot.support.StaffSupportReadService
-import com.example.bot.support.SupportReplyDeliveryService
-import com.example.bot.routes.bookingA3Routes
-import com.example.bot.routes.errorCodesRoutes
-import com.example.bot.routes.guestListInviteRoutes
-import com.example.bot.routes.guestListRoutes
-import com.example.bot.routes.adminPrivacyRoutes
-import com.example.bot.routes.hostEntranceRoutes
-import com.example.bot.routes.hostChecklistRoutes
-import com.example.bot.routes.hostCheckinRoutes
-import com.example.bot.routes.hostWaitlistRoutes
-import com.example.bot.routes.adminClubsRoutes
 import com.example.bot.routes.adminAnalyticsRoutes
+import com.example.bot.routes.adminClubsRoutes
 import com.example.bot.routes.adminFinanceShiftRoutes
 import com.example.bot.routes.adminFinanceTemplateRoutes
 import com.example.bot.routes.adminGamificationRoutes
-import com.example.bot.routes.adminHallsRoutes
 import com.example.bot.routes.adminHallPlanRoutes
+import com.example.bot.routes.adminHallsRoutes
+import com.example.bot.routes.adminMusicRoutes
 import com.example.bot.routes.adminOpsChatsRoutes
+import com.example.bot.routes.adminPrivacyRoutes
 import com.example.bot.routes.adminTableOpsRoutes
 import com.example.bot.routes.adminTablesRoutes
+import com.example.bot.routes.bookingA3Routes
+import com.example.bot.routes.checkinRoutes
+import com.example.bot.routes.clientOnboardingRoutes
+import com.example.bot.routes.clubsRoutes
+import com.example.bot.routes.errorCodesRoutes
 import com.example.bot.routes.guestGamificationRoutes
+import com.example.bot.routes.guestListInviteRoutes
+import com.example.bot.routes.guestListRoutes
 import com.example.bot.routes.hallPlanRoutes
+import com.example.bot.routes.healthRoute
+import com.example.bot.routes.hostCheckinRoutes
+import com.example.bot.routes.hostChecklistRoutes
+import com.example.bot.routes.hostEntranceRoutes
+import com.example.bot.routes.hostWaitlistRoutes
+import com.example.bot.routes.invitationRoutes
 import com.example.bot.routes.layoutRoutes
 import com.example.bot.routes.meBookingsRoutes
-import com.example.bot.routes.adminMusicRoutes
-import com.example.bot.routes.musicRoutes
-import com.example.bot.routes.musicLikesRoutes
 import com.example.bot.routes.musicBattleRoutes
+import com.example.bot.routes.musicLikesRoutes
+import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.ownerHealthRoutes
-import com.example.bot.routes.clientContextRoutes
-import com.example.bot.data.client.JdbcClientContextRepository
-import com.example.bot.plugins.DataSourceHolder
-import com.example.bot.routes.platformOwnerRoutes
-import com.example.bot.routes.supportRoutes
 import com.example.bot.routes.pingRoute
-import com.example.bot.routes.promoterInvitesRoutes
-import com.example.bot.routes.promoterGuestListRoutes
-import com.example.bot.routes.promoterQuotasAdminRoutes
+import com.example.bot.routes.platformOwnerRoutes
 import com.example.bot.routes.promoterAdminRoutes
+import com.example.bot.routes.promoterGuestListRoutes
+import com.example.bot.routes.promoterInvitesRoutes
+import com.example.bot.routes.promoterQuotasAdminRoutes
 import com.example.bot.routes.promoterRatingRoutes
+import com.example.bot.routes.readinessRoute
 import com.example.bot.routes.securedBookingRoutes
+import com.example.bot.routes.supportRoutes
+import com.example.bot.routes.telegramWebhookRoutes
 import com.example.bot.routes.trackOfNightRoutes
 import com.example.bot.routes.waitlistRoutes
 import com.example.bot.routes.webAppRoutes
-import com.example.bot.routes.invitationRoutes
-import com.example.bot.routes.telegramWebhookRoutes
-import com.example.bot.routes.healthRoute
-import com.example.bot.routes.readinessRoute
+import com.example.bot.support.StaffSupportReadService
+import com.example.bot.support.SupportReplyDeliveryService
+import com.example.bot.support.SupportService
 import com.example.bot.tables.GuestQrResolver
 import com.example.bot.telegram.InvitationTelegramHandler
 import com.example.bot.telegram.SupportTelegramHandler
-import com.example.bot.telegram.TelegramClient
 import com.example.bot.telegram.TelegramCallbackRouter
+import com.example.bot.telegram.TelegramClient
 import com.example.bot.telegram.TelegramGuestFallbackHandler
 import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
 import com.example.bot.telegram.webhook.TelegramWebhookIngressWorker
-import com.example.bot.deprecated.legacy.web.LegacyBookingConfig
-import com.example.bot.deprecated.legacy.web.installLegacyBookingWebApp
-import com.example.bot.di.appModules
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStarted
-import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.ApplicationStopped
+import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.install
 import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.compression.Compression
@@ -158,11 +162,9 @@ import org.koin.core.logger.Level
 import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
+import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.ZoneId
-import com.example.bot.host.ShiftChecklistService
-import com.example.bot.data.privacy.PrivacyConfig
-import org.slf4j.LoggerFactory
 
 @Suppress("unused")
 fun Application.module() {
@@ -300,6 +302,7 @@ fun Application.module() {
             supportService = supportService,
             userRepository = userRepository,
         )
+    val clientContextRepository = JdbcClientContextRepository(checkNotNull(DataSourceHolder.dataSource))
     val telegramGuestFallbackHandler =
         TelegramGuestFallbackHandler(
             send = telegramClient::send,
@@ -312,6 +315,9 @@ fun Application.module() {
             botUsername = config.bot.username,
             miniAppUrl = config.miniAppUrl,
             qrSecretProvider = { System.getenv("QR_SECRET") ?: "" },
+            hasClientMembership = { telegramId ->
+                clientContextRepository.context(telegramId, ClientAudience.Platform).isNotEmpty()
+            },
         )
     val telegramCallbackRouter =
         TelegramCallbackRouter(
@@ -353,8 +359,15 @@ fun Application.module() {
         configuredOwnerId = config.bot.ownerId,
         botTokenProvider = { config.bot.token },
     )
-    clientContextRoutes(
-        repository = JdbcClientContextRepository(checkNotNull(DataSourceHolder.dataSource)),
+    clientOnboardingRoutes(
+        contextRepository = clientContextRepository,
+        onboardingRepository =
+            JdbcClientOnboardingRepository(
+                checkNotNull(DataSourceHolder.dataSource),
+                config.bot.ownerId,
+            ),
+        configuredOwnerId = config.bot.ownerId,
+        botUsername = config.bot.username,
         botTokenProvider = { config.bot.token },
     )
     pingRoute()

@@ -3,6 +3,7 @@ package com.example.bot.routes
 import com.example.bot.data.client.ClientAudience
 import com.example.bot.data.client.ClientClub
 import com.example.bot.data.client.ClientContextRepository
+import com.example.bot.data.client.onboarding.ClientOnboardingRepository
 import com.example.bot.data.security.PermissionCodes
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
@@ -29,12 +30,28 @@ fun Application.clientContextRoutes(
     clientContextRoutes(repository, TrustedBotConnection("platform", ClientAudience.Platform, botTokenProvider))
 }
 
+/** One trusted platform connection protects both client reads and onboarding mutations. */
+fun Application.clientOnboardingRoutes(
+    contextRepository: ClientContextRepository,
+    onboardingRepository: ClientOnboardingRepository,
+    botUsername: String?,
+    configuredOwnerId: Long?,
+    botTokenProvider: () -> String,
+) {
+    val connection = TrustedBotConnection("platform", ClientAudience.Platform, botTokenProvider)
+    clientContextRoutes(contextRepository, connection, onboardingRepository, botUsername, configuredOwnerId)
+}
+
 /** A restricted audience can be injected by synthetic tests; no production connection resolver exists. */
 internal fun Application.clientContextRoutes(
     repository: ClientContextRepository,
     connection: TrustedBotConnection,
+    onboardingRepository: ClientOnboardingRepository? = null,
+    botUsername: String? = null,
+    configuredOwnerId: Long? = null,
 ) {
-    installClientContextAuth(connection)
+    installClientContextAuth(connection, includePlatformOnboarding = onboardingRepository != null)
+    onboardingRepository?.let { registerClientOnboardingRoutes(it, connection, botUsername, configuredOwnerId) }
     routing {
         route("/api/client") {
             withClientContextAuth(connection)

@@ -5,6 +5,7 @@ import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
 import com.example.bot.security.auth.InitDataValidator
+import com.example.bot.security.auth.TelegramUser
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -33,7 +34,8 @@ internal class TrustedBotConnection(
         }
     }
 
-    fun verify(initData: String): Long? = InitDataValidator.validate(initData, checkedToken())?.id?.takeIf { it > 0 }
+    fun verify(initData: String): TelegramUser? =
+        InitDataValidator.validate(initData, checkedToken())?.takeIf { it.id > 0 }
 
     private fun checkedToken(): String =
         tokenProvider().also {
@@ -49,6 +51,7 @@ internal class VerifiedClientIdentity private constructor(
     val telegramUserId: Long,
     val connectionKey: String,
     val audience: ClientAudience,
+    val username: String?,
     private val connection: TrustedBotConnection,
 ) {
     fun belongsTo(expected: TrustedBotConnection): Boolean = connection === expected
@@ -59,7 +62,7 @@ internal class VerifiedClientIdentity private constructor(
             initData: String,
         ): VerifiedClientIdentity? =
             connection.verify(initData)?.let {
-                VerifiedClientIdentity(it, connection.connectionKey, connection.audience, connection)
+                VerifiedClientIdentity(it.id, connection.connectionKey, connection.audience, it.username, connection)
             }
     }
 }
@@ -69,13 +72,20 @@ private val identityKey = AttributeKey<VerifiedClientIdentity>("client.verified.
 private const val INIT_DATA_HEADER = "X-Telegram-Init-Data"
 private const val INIT_DATA_ALIAS = "X-Telegram-InitData"
 private val clientPathSegments = listOf("api", "client")
+private val platformOnboardingPathSegments = listOf("api", "platform", "onboarding")
 
 /** Runs before routing parses query values and before any handler can use legacy identity attributes. */
-internal fun Application.installClientContextAuth(connection: TrustedBotConnection) {
+internal fun Application.installClientContextAuth(
+    connection: TrustedBotConnection,
+    includePlatformOnboarding: Boolean = false,
+) {
     check(!attributes.contains(authInstalledKey)) { "Client context auth already registered" }
     attributes.put(authInstalledKey, true)
     intercept(ApplicationCallPipeline.Monitoring) {
-        if (!call.matchesPathPrefix(clientPathSegments)) return@intercept
+        val protectedPath =
+            call.matchesPathPrefix(clientPathSegments) ||
+                (includePlatformOnboarding && call.matchesPathPrefix(platformOnboardingPathSegments))
+        if (!protectedPath) return@intercept
         call.ensureMiniAppNoStoreHeaders()
         val headers = call.request.headers
         val initData =
@@ -113,15 +123,23 @@ internal fun Application.installClientContextAuth(connection: TrustedBotConnecti
 
 private class ClientContextGuardConfig {
     lateinit var connection: TrustedBotConnection
+    var platformOnboarding: Boolean = false
+    var ownerId: Long? = null
 }
 
 private val ClientContextGuard =
     createRouteScopedPlugin("ClientContextGuard", ::ClientContextGuardConfig) {
         val connection = pluginConfig.connection
+        val platformOnboarding = pluginConfig.platformOnboarding
+        val ownerId = pluginConfig.ownerId?.takeIf { it > 0 }
         onCall { call ->
             if (call.attributes.getOrNull(identityKey)?.belongsTo(connection) != true) {
                 call.ensureMiniAppNoStoreHeaders()
                 call.respondError(HttpStatusCode.Unauthorized, ErrorCodes.unauthorized)
+                throw MiniAppAuthAbort()
+            }
+            if (platformOnboarding && (ownerId == null || call.verifiedClientIdentity().telegramUserId != ownerId)) {
+                call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                 throw MiniAppAuthAbort()
             }
         }
@@ -130,6 +148,17 @@ private val ClientContextGuard =
 /** No legacy principal fallback and no second signature validation. */
 internal fun Route.withClientContextAuth(connection: TrustedBotConnection) {
     install(ClientContextGuard) { this.connection = connection }
+}
+
+internal fun Route.withPlatformOnboardingAuth(
+    connection: TrustedBotConnection,
+    ownerId: Long?,
+) {
+    install(ClientContextGuard) {
+        this.connection = connection
+        this.ownerId = ownerId
+        platformOnboarding = true
+    }
 }
 
 internal fun ApplicationCall.verifiedClientIdentity(): VerifiedClientIdentity = attributes[identityKey]

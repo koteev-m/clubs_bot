@@ -41,6 +41,7 @@ class TelegramGuestFallbackHandler(
     private val miniAppUrl: String?,
     private val qrSecretProvider: () -> String,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
+    private val hasClientMembership: suspend (Long) -> Boolean = { false },
 ) {
     private val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(zoneId)
     private val logger = LoggerFactory.getLogger("TelegramGuestFallbackHandler")
@@ -123,10 +124,31 @@ class TelegramGuestFallbackHandler(
                             .webApp(WebAppInfo(configuredMiniAppUrl)),
                     ),
                 )
+            clientCabinetUrl(telegramUserId, configuredMiniAppUrl)?.let { url ->
+                keyboard.addRow(InlineKeyboardButton("Мои клубы").webApp(WebAppInfo(url)))
+            }
             request.replyMarkup(keyboard)
         }
         applyThread(request, message.threadIdOrNull())
         send(request)
+    }
+
+    private suspend fun clientCabinetUrl(
+        telegramUserId: Long,
+        configuredMiniAppUrl: String,
+    ): String? {
+        val hasMembership =
+            try {
+                hasClientMembership(telegramUserId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+        if (!hasMembership) return null
+        return parseGuestSupportUriOrNull(configuredMiniAppUrl)
+            ?.takeIf { it.isSafeGuestSupportBase() }
+            ?.let { buildGuestSupportUrlOrNull(configuredMiniAppUrl, "client") }
     }
 
     private suspend fun handleQr(message: Message) {
@@ -418,7 +440,10 @@ class TelegramGuestFallbackHandler(
     private fun java.net.URI.hasHttpScheme(): Boolean =
         scheme.equals("http", ignoreCase = true) || scheme.equals("https", ignoreCase = true)
 
-    private fun buildGuestSupportUrlOrNull(configuredMiniAppUrl: String): String? =
+    private fun buildGuestSupportUrlOrNull(
+        configuredMiniAppUrl: String,
+        mode: String = GUEST_SUPPORT_MODE,
+    ): String? =
         try {
             val urlBuilder = io.ktor.http.URLBuilder(configuredMiniAppUrl)
             val encodedParameterNames = urlBuilder.encodedParameters.names()
@@ -434,7 +459,7 @@ class TelegramGuestFallbackHandler(
                         decodeGuestSupportQueryParameterName(encodedName)
                             .equals(GUEST_SUPPORT_MODE_PARAMETER, ignoreCase = true)
                     }.forEach(urlBuilder.encodedParameters::remove)
-                urlBuilder.parameters[GUEST_SUPPORT_MODE_PARAMETER] = GUEST_SUPPORT_MODE
+                urlBuilder.parameters[GUEST_SUPPORT_MODE_PARAMETER] = mode
                 urlBuilder.buildString()
             }
         } catch (_: io.ktor.http.URLParserException) {
@@ -676,6 +701,8 @@ private val guestSupportSensitiveQueryMarkers =
         "initdata",
         "token",
         "secret",
+        "startapp",
+        "tgwebapp",
     )
 
 @Suppress("DEPRECATION")

@@ -24,12 +24,63 @@ config output reports only `ownerConfigured`, not the configured ID.
 This is not a new global role system: it creates no DB identity/assignment and changes
 no existing OWNER/GLOBAL or support permissions. Future invitation/assignment/data APIs
 must independently enforce platform identity on the server; a previous successful check
-or visible frontend controls provide no mutation authority. Club-owner representation,
-club-only staff assignment and invitation lifecycle remain separate implementation work.
+or visible frontend controls provide no mutation authority. The separately accepted
+onboarding A contract and local source delta are described below; club creation/profile
+and club-only staff assignment remain outside this stage.
 
 `/app?mode=platform-owner` selects the guarded React presentation only; ordinary `/app`
 still serves the guest catalogue and the support entries are preserved. The explicit
 development preview remains loopback-only and cannot issue access or invitations.
+
+### Client onboarding A (accepted 2026-10-28; local candidate)
+
+Authority is [PRODUCT_SPEC §29](product/PRODUCT_SPEC.md#client-onboarding-ab-technical-contract),
+refining DEC-039–042. Implementation evidence is bounded to
+[AS_BUILT §4.16](product/AS_BUILT.md#client-onboarding-a-local); final checks/review and
+unverified runtime are recorded in [PROJECT_STATUS](ops/PROJECT_STATUS.md).
+
+- `/api/client/*` and `/api/platform/onboarding/*` use the fixed server platform
+  connection, fresh verified Telegram identity and one canonical
+  `X-Telegram-Init-Data` header. Duplicate/coalesced headers, the alias, body-only
+  credentials and credential query are rejected; other new API query parameters are
+  rejected after authentication. Legacy request identity/RBAC does not authorize
+  these endpoints. Every platform action requires the exact positive configured owner.
+- Invitation secret has at least 256 cryptographically random bits, is stored only
+  as a hash, and is returned only on initial issue/reissue. Seven-day expiry is checked
+  on claim/confirmation. Preview and GET never provision a user or grant authority.
+  Explicit claim provisions only minimal identity in its transaction; membership and
+  exact `client.application.manage` require a later owner confirmation.
+- The candidate's short one-time verification code is a **human comparison aid**:
+  the recipient reports it in the original private chat. It cannot authorize access,
+  replace the configured owner, switch the candidate or grant club access.
+- Every client mutation/replay rechecks client, active membership, exact action and
+  object/author. Membership alone does not authorize all clubs. Revoke closes only
+  that user's client scopes and preserves data; restore lists prior scopes explicitly.
+  Submitted fields are immutable, rejected/cancelled terminal, and approval does not
+  create a club in A. Internal platform notes are excluded from client responses.
+- Business changes, command record and audit insert use one transaction. Audit
+  failure rolls everything back. Raw invitation secrets, initData and raw idempotency
+  keys are forbidden in persistence metadata, logs, telemetry and optional browser
+  storage. HTTP logs use method/path/status without query, headers or request bodies.
+- `startapp` can appear in launch URL and in Telegram initData. The client scrubs
+  invitation-bearing address state and prevents optional SDK sessionStorage caching
+  of launch credentials; signed initData remains available in memory for auth.
+  This application guarantee does **not** assert that Telegram infrastructure cannot
+  store or process the parameter. An integration/deployment must also avoid raw
+  launch query logging at its own ingress. The repository Caddy configuration also
+  removes request URI and headers from reverse-proxy error metadata; the local
+  ingress check exercises an actual upstream failure with synthetic canaries.
+- Caddy permits PATCH only for the exact positive-ID client application route.
+  Authentication, author scope and draft/version checks remain server-side; the
+  proxy matcher grants no authority. Mini App documents use no-store/no-referrer.
+- New API successes/errors keep `ApiError`, no-store and the Mini App Vary header.
+  Account switch/foreground invalidates private UI state and rejects late responses;
+  an old response or selected client ID never restores a lost grant.
+
+No Managed Bots, multiple production credentials, staff management, payment
+verification, private-club creation/profile or complete legacy tenant containment is
+claimed here. Real invitations, Telegram setup, live DB changes and rollout remain
+separately authorized actions.
 
 ### Existing admin/promoter RBAC
 

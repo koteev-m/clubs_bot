@@ -99,6 +99,11 @@ class WebAppRoutesTest {
                 "/app/?mode=support",
                 "/app?mode=platform-owner",
                 "/app/?mode=platform-owner",
+                "/app?mode=client",
+                "/app/?mode=client",
+                "/app?tgWebAppStartParam=ci_" + "a".repeat(43),
+                "/app?startapp=ci_" + "b".repeat(43),
+                "/app/index.html?mode=client",
             ).forEach { path ->
                 val response = client.get(path)
                 val html = response.bodyAsText()
@@ -107,6 +112,8 @@ class WebAppRoutesTest {
                 assertTrue(response.contentType()?.match(ContentType.Text.Html) == true)
                 assertEquals(packagedSupportIndex, html)
                 assertContains(html, "<div id=\"root\"></div>")
+                assertEquals("no-store", response.headers["Cache-Control"])
+                assertEquals("no-referrer", response.headers["Referrer-Policy"])
 
                 val assetReferences = assetReferencePattern.findAll(html).map { it.groupValues[1] }.toList()
                 assertTrue(assetReferences.any { it.endsWith(".css") })
