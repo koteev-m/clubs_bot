@@ -5,7 +5,10 @@ import com.example.bot.booking.BookingService
 import com.example.bot.booking.BookingStatusUpdateResult
 import com.example.bot.booking.dto.ConfirmRequest
 import com.example.bot.booking.dto.HoldRequest
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
@@ -51,6 +54,12 @@ fun Route.securedBookingRoutes(bookingService: BookingService) {
                             }
                     if (payload.clubId != null && payload.clubId != clubIdPath) {
                         return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "club_mismatch"))
+                    }
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.TABLE, payload.tableId),
+                        )
+                    ) {
+                        return@post
                     }
                     val command =
                         runCatching { payload.toCommand(clubIdPath) }
@@ -106,6 +115,12 @@ fun Route.securedBookingRoutes(bookingService: BookingService) {
                                     mapOf("error" to "invalid_payload"),
                                 )
                             }
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.HOLD, holdId.toString()),
+                        )
+                    ) {
+                        return@post
+                    }
                     val context = call.rbacContext()
                     val guestUserId = if (Role.GUEST in context.roles) context.user.id else null
                     val promoterUserId = if (Role.PROMOTER in context.roles) context.user.id else null

@@ -64,6 +64,14 @@ def main():
                         time.sleep(0.05)
                 cases = [
                     ("PATCH", "/api/client/applications/1", 502),
+                    ("PATCH", "/api/client/clubs/1/profile", 502),
+                    ("PATCH", "/api/client/clubs/01/profile", 405),
+                    ("PATCH", "/api/client/clubs/1", 405),
+                    ("PATCH", "/api/client/clubs/1/profile/extra", 405),
+                    ("PATCH", "/api/client/clubs/1/profile/", 405),
+                    ("PATCH", "/api/platform/onboarding/clubs/1/profile", 405),
+                    ("PUT", "/api/client/clubs/1/profile", 405),
+                    ("DELETE", "/api/client/clubs/1/profile", 405),
                     ("PATCH", "/api/client/applications/01", 405),
                     ("PATCH", "/api/platform/onboarding/applications/1", 405),
                     ("PUT", "/api/client/applications/1", 405),

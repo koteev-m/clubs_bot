@@ -1,10 +1,13 @@
 package com.example.bot.routes
 
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.logging.errorSqlSafe
 import com.example.bot.logging.warnSqlSafe
 import com.example.bot.observability.MetricsProvider
 import com.example.bot.payments.finalize.PaymentsFinalizeService
 import com.example.bot.plugins.MiniAppUserKey
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promo.PromoAttributionService
 import com.example.bot.telemetry.PaymentsMetrics
@@ -159,6 +162,12 @@ fun Application.paymentsFinalizeRoutes(miniAppBotTokenProvider: () -> String) {
                         return@post
                     }
 
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.BOOKING, bookingId.toString()),
+                        )
+                    ) {
+                        return@post
+                    }
                     val bookingLabel = maskBookingId(bookingId)
                     val timer = PaymentsMetrics.timer(metricsProvider, Path.Finalize, Source.MiniApp)
                     val metadata =

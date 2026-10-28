@@ -600,7 +600,10 @@ function MemberAccess({
             .filter((grant) => grant.active)
             .map((grant) => (
               <p key={grant.clubId + grant.permission}>
-                {grant.clubName}: чтение клуба
+                {grant.clubName}:{' '}
+                {grant.permission === 'client.club.profile.write'
+                  ? 'редактирование профиля'
+                  : 'чтение клуба'}
               </p>
             ))}
           <button
@@ -660,7 +663,12 @@ function MemberAccess({
                   )
                 }
               />
-              <span>{grant.clubName}: чтение клуба</span>
+              <span>
+                {grant.clubName}:{' '}
+                {grant.permission === 'client.club.profile.write'
+                  ? 'редактирование профиля'
+                  : 'чтение клуба'}
+              </span>
             </label>
           ))}
           <label className="ob-check">

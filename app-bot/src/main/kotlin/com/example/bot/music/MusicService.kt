@@ -4,7 +4,6 @@ import com.example.bot.routes.dto.MusicItemDto
 import com.example.bot.routes.dto.MusicPlaylistDetailsDto
 import com.example.bot.routes.dto.MusicPlaylistDto
 import com.example.bot.routes.dto.MusicSetDto
-import com.example.bot.music.TrackOfNightRepository
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -32,9 +31,13 @@ class MusicService(
 
         val etag =
             etagFor(
-                updatedAt = listOfNotNull(itemsRepo.lastUpdatedAt(), trackOfNightRepository.lastUpdatedAt()).maxOrNull(),
+                updatedAt =
+                    listOfNotNull(
+                        itemsRepo.lastUpdatedAt(),
+                        trackOfNightRepository.lastUpdatedAt(),
+                    ).maxOrNull(),
                 count = items.size,
-                seed = "items",
+                seed = "items|ids=" + items.joinToString(",") { it.id.toString() },
             )
 
         val payload =
@@ -104,7 +107,7 @@ class MusicService(
             etagFor(
                 updatedAt = playlistsRepo.lastUpdatedAt(),
                 count = playlists.size,
-                seed = "playlists",
+                seed = "playlists|ids=" + playlists.joinToString(",") { it.id.toString() },
             )
 
         val payload =
@@ -128,9 +131,13 @@ class MusicService(
 
         val etag =
             etagFor(
-                updatedAt = listOfNotNull(playlistsRepo.lastUpdatedAt(), trackOfNightRepository.lastUpdatedAt()).maxOrNull(),
+                updatedAt =
+                    listOfNotNull(
+                        playlistsRepo.lastUpdatedAt(),
+                        trackOfNightRepository.lastUpdatedAt(),
+                    ).maxOrNull(),
                 count = playlist.items.size,
-                seed = "playlist:$id",
+                seed = "playlist:$id|ids=" + playlist.items.joinToString(",") { it.id.toString() },
             )
 
         val payload =
@@ -191,21 +198,19 @@ class MusicService(
         val likedFingerprint = likedByUser.sorted().joinToString(",")
         val seed =
             "sets|limit=$limit|offset=$offset|tag=${tag.orEmpty()}|q=${q.orEmpty()}|" +
-                "likes=$countsFingerprint|liked=$likedFingerprint|user=${userId ?: 0}"
+                "likes=$countsFingerprint|liked=$likedFingerprint|user=${userId ?: 0}|ids=" +
+                items.joinToString(",") { it.id.toString() }
         return etagFor(updatedAt, items.size, seed)
     }
 
-    private fun MusicItemView.coverUrlFor(): String? {
-        return coverAssetId?.let { "/api/music/items/$id/cover" } ?: coverUrl
-    }
+    private fun MusicItemView.coverUrlFor(): String? = coverAssetId?.let { "/api/music/items/$id/cover" } ?: coverUrl
 
-    private fun MusicItemView.audioUrlFor(): String? {
-        return when {
+    private fun MusicItemView.audioUrlFor(): String? =
+        when {
             audioAssetId != null -> "/api/music/items/$id/audio"
             sourceUrl != null -> sourceUrl
             else -> null
         }
-    }
 }
 
 private const val MILLIS_IN_SECOND = 1_000L

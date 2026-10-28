@@ -15,8 +15,10 @@ import com.example.bot.webapp.WebAppInitDataTestHelper
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
@@ -37,9 +39,36 @@ import kotlin.test.assertTrue
 
 class ClientOnboardingAuthTest {
     @Test
+    fun `profile read and update authenticate canonical fresh identity before repository access`() =
+        withApp { repository ->
+            for (method in listOf(HttpMethod.Get, HttpMethod.Patch)) {
+                for (credential in listOf(null, "forged", signed(date = Instant.now().epochSecond - 90_000))) {
+                    val response =
+                        client.request("$C/clubs/1/profile") {
+                            this.method = method
+                            if (credential != null) header(HEADER, credential)
+                            header("X-Telegram-Id", OWNER.toString())
+                            header("X-Debug-Roles", "OWNER,GLOBAL_ADMIN")
+                            header(KEY, "synthetic-profile-key")
+                            if (method == HttpMethod.Patch) setBody("""{"expectedVersion":"1","name":"Forged"}""")
+                        }
+                    response.assertClientError(HttpStatusCode.Unauthorized, "unauthorized")
+                    assertEquals("no-store", response.headers["Cache-Control"])
+                }
+            }
+            coVerify(exactly = 0) { repository.read(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { repository.mutate(any(), any(), any(), any(), any()) }
+        }
+
+    @Test
     fun `all onboarding namespaces require fresh canonical signed transport`() =
         withApp { repository ->
-            for (path in listOf("$P/invitations", "$C/invitations/resolve", "$P/applications/search")) {
+            for (path in listOf(
+                "$P/invitations",
+                "$C/invitations/resolve",
+                "$P/applications/search",
+                "$C/applications/1/club",
+            )) {
                 for (credential in listOf(null, "forged", signed(date = Instant.now().epochSecond - 90_000))) {
                     client
                         .post(path) {

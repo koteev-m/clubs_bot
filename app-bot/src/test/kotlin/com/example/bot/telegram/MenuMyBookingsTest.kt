@@ -11,6 +11,7 @@ import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.booking.core.BookingOutboxTable
 import com.example.bot.data.booking.core.OutboxRepository
+import com.example.bot.data.privacy.ClientClubMappings
 import com.example.bot.data.security.ExposedUserRepository
 import com.example.bot.telegram.bookings.MyBookingsMetrics
 import com.example.bot.telegram.bookings.MyBookingsService
@@ -76,6 +77,7 @@ class MenuMyBookingsTest :
                 TablesTable,
                 BookingsTable,
                 BookingOutboxTable,
+                ClientClubMappings,
             )
         }
 

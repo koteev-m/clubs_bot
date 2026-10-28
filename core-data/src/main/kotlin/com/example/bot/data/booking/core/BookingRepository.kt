@@ -8,6 +8,7 @@ import com.example.bot.data.booking.TablesTable
 import com.example.bot.data.db.isRetryLimitExceeded
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.withTxRetry
+import com.example.bot.data.privacy.unmappedClub
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -15,23 +16,23 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.JoinType
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
-import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
+import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.selectAll
-import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
-import org.jetbrains.exposed.sql.transactions.TransactionManager
-import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.lowerCase
 import org.jetbrains.exposed.sql.or
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.TransactionManager
+import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.sql.update
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -76,7 +77,7 @@ class BookingRepository(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 BookingsTable
                     .selectAll()
-                    .where { BookingsTable.id eq id }
+                    .where { (BookingsTable.id eq id) and unmappedClub(BookingsTable.clubId) }
                     .limit(1)
                     .firstOrNull()
                     ?.toBookingRecord()
@@ -88,7 +89,7 @@ class BookingRepository(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 BookingsTable
                     .selectAll()
-                    .where { BookingsTable.idempotencyKey eq key }
+                    .where { (BookingsTable.idempotencyKey eq key) and unmappedClub(BookingsTable.clubId) }
                     .limit(1)
                     .firstOrNull()
                     ?.toBookingRecord()
@@ -244,7 +245,9 @@ class BookingRepository(
                             }.empty()
                             .not()
                     if (hasActiveBooking) {
-                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
+                        return@newSuspendedTransaction BookingCoreResult.Failure(
+                            BookingCoreError.DuplicateActiveBooking,
+                        )
                     }
 
                     val hasActiveHold =
@@ -533,8 +536,7 @@ class BookingRepository(
                             (BookingsTable.eventId eq eventId) and
                             (BookingsTable.guestName.isNotNull()) and
                             (BookingsTable.guestName.lowerCase() like likePattern)
-                    }
-                    .orderBy(BookingsTable.createdAt to SortOrder.DESC)
+                    }.orderBy(BookingsTable.createdAt to SortOrder.DESC)
                     .limit(safeLimit)
                     .map { row ->
                         BookingSearchRecord(
@@ -553,7 +555,8 @@ class BookingRepository(
     }
 
     private fun escapeLike(value: String): String =
-        value.replace("\\", "\\\\")
+        value
+            .replace("\\", "\\\\")
             .replace("%", "\\%")
             .replace("_", "\\_")
 }
@@ -867,9 +870,8 @@ class OutboxRepository(
         }
     }
 
-    suspend fun pickBatchForSend(limit: Int): List<OutboxMessage> {
-        return claimBatchWithLease(limit = limit, leaseOwner = "worker", leaseTtl = defaultLeaseTtl)
-    }
+    suspend fun pickBatchForSend(limit: Int): List<OutboxMessage> =
+        claimBatchWithLease(limit = limit, leaseOwner = "worker", leaseTtl = defaultLeaseTtl)
 
     suspend fun claimBatchWithLease(
         limit: Int,
@@ -880,7 +882,10 @@ class OutboxRepository(
         val leaseUntil = Instant.now(clock).plusMillis(leaseTtl.inWholeMilliseconds).toOffsetDateTime()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                if (this.db.dialect.name.lowercase().contains("postgres")) {
+                if (this.db.dialect.name
+                        .lowercase()
+                        .contains("postgres")
+                ) {
                     claimPostgresBatch(limit = limit, now = now, leaseUntil = leaseUntil, leaseOwner = leaseOwner)
                 } else {
                     claimFallbackBatch(limit = limit, now = now, leaseUntil = leaseUntil, leaseOwner = leaseOwner)
@@ -901,7 +906,10 @@ class OutboxRepository(
         val topicList = topics.toList()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                if (this.db.dialect.name.lowercase().contains("postgres")) {
+                if (this.db.dialect.name
+                        .lowercase()
+                        .contains("postgres")
+                ) {
                     claimPostgresTopicBatch(
                         limit = limit,
                         now = now,
@@ -995,9 +1003,8 @@ class OutboxRepository(
         }
     }
 
-
-    suspend fun queueStats(): OutboxQueueStats {
-        return withTxRetry {
+    suspend fun queueStats(): OutboxQueueStats =
+        withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 val depth =
                     BookingOutboxTable
@@ -1016,7 +1023,6 @@ class OutboxRepository(
                 OutboxQueueStats(depth = depth, oldestCreatedAt = oldest)
             }
         }
-    }
 
     suspend fun markFailedWithRetry(
         id: Long,
@@ -1102,7 +1108,6 @@ class OutboxRepository(
             lastError = reason,
         )
 }
-
 
 private fun Transaction.claimPostgresTopicBatch(
     limit: Int,
@@ -1204,6 +1209,7 @@ private fun Transaction.claimFallbackTopicBatch(
         )
     }
 }
+
 private fun Transaction.claimPostgresBatch(
     limit: Int,
     now: OffsetDateTime,

@@ -65,6 +65,34 @@ class SupportGuestTicketCreationRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
+    fun `mapped private club cannot create a support ticket or queue notifications`() =
+        withSupportApp { context ->
+            val telegramId = 880063501L
+            insertUser(context.database, telegramId, "synthetic_private_guest")
+            val clubId = insertClub(context.database, "Synthetic private club")
+            val legacyId = insertClub(context.database, "Synthetic legacy club")
+            transaction(context.database) {
+                exec("INSERT INTO clients(id,display_name) VALUES (880063501,'Synthetic private client')")
+                exec("UPDATE clubs SET is_active=false WHERE id=$clubId")
+                exec("INSERT INTO client_clubs(client_id,club_id) VALUES (880063501,$clubId)")
+            }
+
+            val privateResponse = createTicketRequest(telegramId, clubId)
+            assertEquals(HttpStatusCode.NotFound, privateResponse.status)
+            privateResponse.assertNoStoreHeaders()
+            assertFalse(privateResponse.bodyAsText().contains("Synthetic private"))
+            assertTrue(context.opsPublisher.notifications.isEmpty())
+            transaction(context.database) {
+                exec("SELECT COUNT(*) FROM tickets") { rows ->
+                    rows.next()
+                    assertEquals(0, rows.getInt(1))
+                }
+            }
+            assertEquals(HttpStatusCode.Created, createTicketRequest(telegramId, legacyId).status)
+            assertEquals(1, context.opsPublisher.notifications.size)
+        }
+
+    @Test
     fun `create ticket persistence failure returns generic 500 without details or notification`() {
         val rawDetail = "SENTINEL tickets_status_check INSERT INTO tickets"
         val failingSupportService = mockk<SupportService>()

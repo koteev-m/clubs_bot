@@ -10,16 +10,20 @@ import com.example.bot.club.InvitationChannel
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.db.withTxRetry
+import com.example.bot.data.privacy.LegacyResource
+import com.example.bot.data.privacy.isMappedClub
+import com.example.bot.data.privacy.unmappedClub
+import com.example.bot.data.privacy.unmappedResource
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
-import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
@@ -135,6 +139,7 @@ class GuestListDbRepository(
         val now = now()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                check(!isMappedClub(list.clubId)) { "Club unavailable" }
                 val id =
                     GuestListsTable.insert {
                         it[clubId] = list.clubId
@@ -175,7 +180,7 @@ class GuestListDbRepository(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 GuestListsTable
                     .selectAll()
-                    .where { GuestListsTable.id eq id }
+                    .where { (GuestListsTable.id eq id) and unmappedClub(GuestListsTable.clubId) }
                     .limit(1)
                     .firstOrNull()
                     ?.toGuestListRecord()
@@ -193,7 +198,7 @@ class GuestListDbRepository(
                 val query =
                     GuestListsTable
                         .selectAll()
-                        .where { GuestListsTable.promoterId eq promoterId }
+                        .where { (GuestListsTable.promoterId eq promoterId) and unmappedClub(GuestListsTable.clubId) }
 
                 if (clubId != null) {
                     query.andWhere { GuestListsTable.clubId eq clubId }
@@ -221,7 +226,7 @@ class GuestListDbRepository(
                 val query =
                     GuestListsTable
                         .selectAll()
-                        .where { GuestListsTable.clubId eq clubId }
+                        .where { (GuestListsTable.clubId eq clubId) and unmappedClub(GuestListsTable.clubId) }
 
                 if (eventId != null) {
                     query.andWhere { GuestListsTable.eventId eq eventId }
@@ -337,7 +342,7 @@ class GuestListEntryDbRepository(
 
                 if (rows.size != entries.size) {
                     throw IllegalStateException(
-                        "$INSERT_MANY_LOG_PREFIX rowCountMismatch guestListId=$listId expectedRows=${entries.size} actualRows=${rows.size} shouldReturnGeneratedValues=true"
+                        "$INSERT_MANY_LOG_PREFIX rowCountMismatch guestListId=$listId expectedRows=${entries.size} actualRows=${rows.size} shouldReturnGeneratedValues=true",
                     )
                 }
 
@@ -349,7 +354,7 @@ class GuestListEntryDbRepository(
                         val status = entry.status.name
                         throw IllegalStateException(
                             "$INSERT_MANY_LOG_PREFIX invalidGeneratedId " +
-                                "guestListId=$listId entryIndex=$index id=$id displayName=\"$escapedDisplayName\" telegramUserId=$telegramUserId status=$status"
+                                "guestListId=$listId entryIndex=$index id=$id displayName=\"$escapedDisplayName\" telegramUserId=$telegramUserId status=$status",
                         )
                     }
                     GuestListEntryRecord(
@@ -372,8 +377,10 @@ class GuestListEntryDbRepository(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 GuestListEntriesTable
                     .selectAll()
-                    .where { GuestListEntriesTable.id eq entryId }
-                    .limit(1)
+                    .where {
+                        (GuestListEntriesTable.id eq entryId) and
+                            unmappedResource(LegacyResource.GUEST_LIST, GuestListEntriesTable.guestListId)
+                    }.limit(1)
                     .firstOrNull()
                     ?.toGuestListEntryRecord()
             }
@@ -384,8 +391,10 @@ class GuestListEntryDbRepository(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 GuestListEntriesTable
                     .selectAll()
-                    .where { GuestListEntriesTable.guestListId eq listId }
-                    .orderBy(GuestListEntriesTable.createdAt to SortOrder.ASC)
+                    .where {
+                        (GuestListEntriesTable.guestListId eq listId) and
+                            unmappedResource(LegacyResource.GUEST_LIST, GuestListEntriesTable.guestListId)
+                    }.orderBy(GuestListEntriesTable.createdAt to SortOrder.ASC)
                     .map { it.toGuestListEntryRecord() }
             }
         }
@@ -549,8 +558,10 @@ class InvitationDbRepository(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 InvitationsTable
                     .selectAll()
-                    .where { InvitationsTable.tokenHash eq tokenHash }
-                    .limit(1)
+                    .where {
+                        (InvitationsTable.tokenHash eq tokenHash) and
+                            unmappedResource(LegacyResource.GUEST_ENTRY, InvitationsTable.guestListEntryId)
+                    }.limit(1)
                     .firstOrNull()
                     ?.toInvitationRecord()
             }
@@ -570,8 +581,7 @@ class InvitationDbRepository(
                             InvitationsTable.revokedAt.isNull() and
                             InvitationsTable.usedAt.isNull() and
                             (InvitationsTable.expiresAt greater nowOffset)
-                    }
-                    .orderBy(InvitationsTable.createdAt to SortOrder.DESC)
+                    }.orderBy(InvitationsTable.createdAt to SortOrder.DESC)
                     .limit(1)
                     .firstOrNull()
                     ?.toInvitationRecord()
@@ -632,7 +642,10 @@ class CheckinDbRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    data class InvitationUse(val invitationId: Long, val usedAt: Instant)
+    data class InvitationUse(
+        val invitationId: Long,
+        val usedAt: Instant,
+    )
 
     suspend fun insert(checkin: NewCheckin): CheckinRecord {
         val createdAt = now()
@@ -681,9 +694,9 @@ class CheckinDbRepository(
                 if (invitationUse != null) {
                     val updated =
                         InvitationsTable.update({
-                        (InvitationsTable.id eq invitationUse.invitationId) and
-                            InvitationsTable.usedAt.isNull() and
-                            InvitationsTable.revokedAt.isNull()
+                            (InvitationsTable.id eq invitationUse.invitationId) and
+                                InvitationsTable.usedAt.isNull() and
+                                InvitationsTable.revokedAt.isNull()
                         }) {
                             it[InvitationsTable.usedAt] = invitationUse.usedAt.toOffsetDateTime()
                             it[InvitationsTable.token] = null
@@ -739,17 +752,17 @@ class CheckinDbRepository(
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 val updated =
-                if (allowedFromStatuses.isNotEmpty()) {
-                    val allowedNames = allowedFromStatuses.map { it.name }
-                    BookingsTable.update({
-                        (BookingsTable.id eq bookingId) and (BookingsTable.status inList allowedNames)
-                    }) { statement ->
-                        statement[status] = bookingStatus.name
-                        statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
+                    if (allowedFromStatuses.isNotEmpty()) {
+                        val allowedNames = allowedFromStatuses.map { it.name }
+                        BookingsTable.update({
+                            (BookingsTable.id eq bookingId) and (BookingsTable.status inList allowedNames)
+                        }) { statement ->
+                            statement[status] = bookingStatus.name
+                            statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
+                        }
+                    } else {
+                        1
                     }
-                } else {
-                    1
-                }
 
                 if (updated == 0) {
                     return@newSuspendedTransaction null
@@ -797,8 +810,7 @@ class CheckinDbRepository(
                     .where {
                         (CheckinsTable.subjectType eq subjectType.name) and
                             (CheckinsTable.subjectId eq subjectId)
-                    }
-                    .limit(1)
+                    }.limit(1)
                     .firstOrNull()
                     ?.toCheckinRecord()
             }

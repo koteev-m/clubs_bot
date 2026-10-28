@@ -1,10 +1,13 @@
 package com.example.bot.routes
 
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promoter.admin.PromoterAccessUpdateResult
 import com.example.bot.promoter.admin.PromoterAdminEntry
@@ -91,8 +94,10 @@ fun Application.promoterAdminRoutes(
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
 
-                    val payload = runCatching { call.receive<PromoterAccessUpdateRequest>() }.getOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    val payload =
+                        runCatching { call.receive<PromoterAccessUpdateRequest>() }.getOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    if (!call.requireLegacyResources(LegacyReference(LegacyResource.CLUB, payload.clubId))) return@post
                     if (payload.clubId <= 0) {
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
@@ -126,12 +131,13 @@ private fun PromoterAdminEntry.toView(): PromoterAdminView =
         username = profile.username,
         displayName = profile.displayName,
         accessEnabled = profile.accessEnabled,
-        quotas = quotas.map { quota ->
-            PromoterAdminQuotaView(
-                tableId = quota.tableId,
-                quota = quota.quota,
-                held = quota.held,
-                expiresAt = quota.expiresAt.toString(),
-            )
-        },
+        quotas =
+            quotas.map { quota ->
+                PromoterAdminQuotaView(
+                    tableId = quota.tableId,
+                    quota = quota.quota,
+                    held = quota.held,
+                    expiresAt = quota.expiresAt.toString(),
+                )
+            },
     )

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useInitData } from '../auth/hooks/useInitData';
 import { useTelegram } from '../../app/providers/TelegramProvider';
-import { authorityLost, onboardingRequest } from './onboarding.api';
+import { authorityLost, OnboardingError } from './onboarding.api';
+import ClubProfile from './ClubProfile';
 import { scrubClientLaunchUrl } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -18,6 +19,7 @@ import {
   applicationLabels,
   ClientSummary,
   ClubApplication,
+  ClubProfile as Profile,
   Invitation,
   invitationLabels,
   OnboardingContext,
@@ -29,6 +31,7 @@ type Screen =
   | { type: 'home' }
   | { type: 'space'; id: string }
   | { type: 'application'; id: string }
+  | { type: 'club'; id: string }
   | { type: 'new'; id: string; previous?: ClubApplication }
   | { type: 'invitation'; id?: string };
 function savedScreen(): Screen {
@@ -39,6 +42,7 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'application')
     return { type: 'application', id };
   if (params.get('screen') === 'invitation') return { type: 'invitation', id };
+  if (params.get('screen') === 'club') return { type: 'club', id };
   return { type: 'home' };
 }
 
@@ -183,6 +187,16 @@ function ClientWorkspace({
         id={screen.id}
         back={home}
         navigate={navigate}
+        reportDirty={reportDirty}
+      />
+    );
+  if (screen.type === 'club')
+    return (
+      <ClubProfile
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        home={home}
         reportDirty={reportDirty}
       />
     );
@@ -391,12 +405,14 @@ function ClientSpace({
               <p className="po-card ob-card">Клубов пока нет</p>
             )}
             {remote.data.clubs.map((club) => (
-              <AuthorizedClub
+              <button
                 key={club.id}
-                credential={credential}
-                id={club.id}
-                name={club.name}
-              />
+                className="po-card ob-card ob-row"
+                onClick={() => navigate({ type: 'club', id: club.id })}
+              >
+                <strong>{club.name}</strong>
+                <small>Открыть клуб</small>
+              </button>
             ))}
           </section>
           {remote.data.permissions.includes('client.application.manage') && (
@@ -417,63 +433,6 @@ function ClientSpace({
         </>
       )}
     </Shell>
-  );
-}
-
-function AuthorizedClub({
-  credential,
-  id,
-  name,
-}: {
-  credential: string;
-  id: string;
-  name: string;
-}) {
-  const [opened, setOpened] = useState(false);
-  const [detail, setDetail] = useState<{ name: string }>();
-  const [error, setError] = useState<unknown>();
-  useEffect(() => {
-    if (!opened) return;
-    const controller = new AbortController();
-    onboardingRequest<{ name: string }>(credential, '/api/client/clubs/' + id, {
-      signal: controller.signal,
-    })
-      .then((result) => {
-        if (!controller.signal.aborted) setDetail(result);
-      })
-      .catch((problem) => {
-        if (!controller.signal.aborted) setError(problem);
-      });
-    return () => controller.abort();
-  }, [credential, id, opened]);
-  return (
-    <section className="po-card ob-card">
-      <button
-        className="ob-button"
-        onClick={() => {
-          setDetail(undefined);
-          setError(undefined);
-          setOpened((value) => !value);
-        }}
-      >
-        {name}
-      </button>
-      {opened && (
-        <>
-          <RemoteState
-            loading={!detail && !error}
-            error={error}
-            refresh={() => setOpened(false)}
-          />
-          {detail && (
-            <p>
-              {detail.name}. Доступ подтверждён. Настройка клуба относится к
-              следующему этапу.
-            </p>
-          )}
-        </>
-      )}
-    </section>
   );
 }
 
@@ -617,22 +576,34 @@ function ClientApplication({
   const [application, setApplication] = useState<ClubApplication>();
   const [fields, setFields] = useState<VenueFields>();
   const command = useCommand<ClubApplication>(credential);
+  const createClub = useCommand<Profile>(credential);
+  const createConflict =
+    createClub.error instanceof OnboardingError &&
+    createClub.error.status === 409;
+  const reload = remote.refresh;
   const [submitConfirmed, setSubmitConfirmed] = useState(false);
   useEffect(() => {
-    if (authorityLost(command.error) || remote.error) {
+    if (
+      authorityLost(command.error) ||
+      authorityLost(createClub.error) ||
+      remote.error
+    ) {
       setApplication(undefined);
       setFields(undefined);
     } else if (remote.data) {
       setApplication(remote.data);
       setFields((value) => value ?? venueFields(remote.data!));
     }
-  }, [remote.data, remote.error, command.error]);
+  }, [remote.data, remote.error, command.error, createClub.error]);
+  useEffect(() => {
+    if (createConflict) reload();
+  }, [createConflict, reload]);
   const dirty = Boolean(
     application &&
       fields &&
       JSON.stringify(venueFields(application)) !== JSON.stringify(fields),
   );
-  const leave = useUnsavedChanges(dirty, reportDirty);
+  const leave = useUnsavedChanges(dirty || createClub.unknown, reportDirty);
   const accept = (result: ClubApplication) => {
     setApplication(result);
     setFields(venueFields(result));
@@ -681,6 +652,34 @@ function ClientApplication({
           ) : (
             <ApplicationSummary application={application} />
           )}
+          {application.status === 'approved' &&
+            application.availableActions.includes('createClub') &&
+            !application.createdClubId && (
+              <button
+                className="po-primary"
+                disabled={createClub.blocked || command.blocked}
+                onClick={() =>
+                  createClub.run(
+                    '/api/client/applications/' + id + '/club',
+                    { expectedVersion: application.version },
+                    (club) => navigate({ type: 'club', id: club.id }),
+                  )
+                }
+              >
+                Создать клуб
+              </button>
+            )}
+          {application.createdClubId &&
+            application.availableActions.includes('openClub') && (
+              <button
+                className="po-primary"
+                onClick={() =>
+                  navigate({ type: 'club', id: application.createdClubId! })
+                }
+              >
+                Открыть клуб
+              </button>
+            )}
           {application.availableActions.includes('submit') && (
             <>
               <label className="ob-check">
@@ -755,6 +754,7 @@ function ClientApplication({
         </>
       )}
       <CommandState command={command} refresh={remote.refresh} />
+      <CommandState command={createClub} refresh={remote.refresh} />
     </Shell>
   );
 }

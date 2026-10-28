@@ -2,6 +2,8 @@ package com.example.bot.data.club
 
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.withTxRetry
+import com.example.bot.data.privacy.isMappedClub
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.opschat.ClubOpsChatConfig
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.opschat.ClubOpsChatConfigUpsert
@@ -9,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -28,7 +31,7 @@ class ClubOpsChatConfigRepositoryImpl(
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
                 ClubOpsChatConfigTable
                     .selectAll()
-                    .where { ClubOpsChatConfigTable.clubId eq clubId }
+                    .where { (ClubOpsChatConfigTable.clubId eq clubId) and unmappedClub(ClubOpsChatConfigTable.clubId) }
                     .limit(1)
                     .firstOrNull()
                     ?.toClubOpsChatConfig()
@@ -40,6 +43,7 @@ class ClubOpsChatConfigRepositoryImpl(
         val now = Instant.now(clock).toOffsetDateTime()
         return withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+                check(!isMappedClub(config.clubId)) { "Club notification configuration unavailable" }
                 val updated = updateConfig(config, now)
                 if (updated == 0) {
                     insertConfig(config, now)
@@ -55,7 +59,10 @@ class ClubOpsChatConfigRepositoryImpl(
         }
     }
 
-    private fun updateConfig(config: ClubOpsChatConfigUpsert, now: OffsetDateTime): Int =
+    private fun updateConfig(
+        config: ClubOpsChatConfigUpsert,
+        now: OffsetDateTime,
+    ): Int =
         ClubOpsChatConfigTable.update({ ClubOpsChatConfigTable.clubId eq config.clubId }) {
             it[chatId] = config.chatId
             it[bookingsThreadId] = config.bookingsThreadId
@@ -66,7 +73,10 @@ class ClubOpsChatConfigRepositoryImpl(
             it[updatedAt] = now
         }
 
-    private fun insertConfig(config: ClubOpsChatConfigUpsert, now: OffsetDateTime) {
+    private fun insertConfig(
+        config: ClubOpsChatConfigUpsert,
+        now: OffsetDateTime,
+    ) {
         try {
             ClubOpsChatConfigTable.insert {
                 it[clubId] = config.clubId

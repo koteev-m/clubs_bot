@@ -9,9 +9,8 @@ import com.example.bot.data.db.withRetriedTx
 import com.example.bot.data.layout.HallZonesTable
 import com.example.bot.data.layout.HallsTable
 import com.example.bot.data.layout.LayoutDbRepository
-import java.time.Clock
-import java.time.OffsetDateTime
-import java.time.ZoneOffset
+import com.example.bot.data.privacy.isMappedClub
+import com.example.bot.data.privacy.unmappedClub
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -23,11 +22,14 @@ import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.lowerCase
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
-import org.jetbrains.exposed.sql.insertAndGetId
-import org.jetbrains.exposed.sql.insert
+import java.time.Clock
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class AdminHallsDbRepository(
     private val database: Database,
@@ -39,7 +41,7 @@ class AdminHallsDbRepository(
         withRetriedTx(name = "admin.halls.list", readOnly = true, database = database) {
             HallsTable
                 .selectAll()
-                .where { HallsTable.clubId eq clubId }
+                .where { (HallsTable.clubId eq clubId) and unmappedClub(HallsTable.clubId) }
                 .orderBy(HallsTable.id, SortOrder.ASC)
                 .map { it.toAdminHall() }
         }
@@ -48,7 +50,7 @@ class AdminHallsDbRepository(
         withRetriedTx(name = "admin.halls.get", readOnly = true, database = database) {
             HallsTable
                 .selectAll()
-                .where { HallsTable.id eq id }
+                .where { (HallsTable.id eq id) and unmappedClub(HallsTable.clubId) }
                 .firstOrNull()
                 ?.toAdminHall()
         }
@@ -57,14 +59,20 @@ class AdminHallsDbRepository(
         withRetriedTx(name = "admin.halls.active", readOnly = true, database = database) {
             HallsTable
                 .selectAll()
-                .where { (HallsTable.clubId eq clubId) and (HallsTable.isActive eq true) }
-                .orderBy(HallsTable.id, SortOrder.ASC)
+                .where {
+                    (HallsTable.clubId eq clubId) and (HallsTable.isActive eq true) and
+                        unmappedClub(HallsTable.clubId)
+                }.orderBy(HallsTable.id, SortOrder.ASC)
                 .firstOrNull()
                 ?.toAdminHall()
         }
 
-    override suspend fun create(clubId: Long, request: AdminHallCreate): AdminHall =
+    override suspend fun create(
+        clubId: Long,
+        request: AdminHallCreate,
+    ): AdminHall =
         withRetriedTx(name = "admin.halls.create", database = database) {
+            check(!isMappedClub(clubId)) { "Club unavailable" }
             val now = clock.instant().toOffsetDateTime()
             val zones = parseZones(request.geometryJson)
             if (request.isActive) {
@@ -103,12 +111,15 @@ class AdminHallsDbRepository(
                 .toAdminHall()
         }
 
-    override suspend fun update(id: Long, request: AdminHallUpdate): AdminHall? =
+    override suspend fun update(
+        id: Long,
+        request: AdminHallUpdate,
+    ): AdminHall? =
         withRetriedTx(name = "admin.halls.update", database = database) {
             val existing =
                 HallsTable
                     .selectAll()
-                    .where { HallsTable.id eq id }
+                    .where { (HallsTable.id eq id) and unmappedClub(HallsTable.clubId) }
                     .firstOrNull()
                     ?: return@withRetriedTx null
             val now = clock.instant().toOffsetDateTime()
@@ -139,7 +150,7 @@ class AdminHallsDbRepository(
             val hall =
                 HallsTable
                     .selectAll()
-                    .where { HallsTable.id eq id }
+                    .where { (HallsTable.id eq id) and unmappedClub(HallsTable.clubId) }
                     .firstOrNull()
                     ?: return@withRetriedTx false
             val clubId = hall[HallsTable.clubId]
@@ -173,7 +184,7 @@ class AdminHallsDbRepository(
             val hall =
                 HallsTable
                     .selectAll()
-                    .where { HallsTable.id eq id }
+                    .where { (HallsTable.id eq id) and unmappedClub(HallsTable.clubId) }
                     .firstOrNull()
                     ?: return@withRetriedTx null
             val now = clock.instant().toOffsetDateTime()
@@ -191,16 +202,19 @@ class AdminHallsDbRepository(
             hall.toAdminHall().copy(isActive = true, layoutRevision = nextRevision, updatedAt = now.toInstant())
         }
 
-    override suspend fun isHallNameTaken(clubId: Long, name: String, excludeHallId: Long?): Boolean =
+    override suspend fun isHallNameTaken(
+        clubId: Long,
+        name: String,
+        excludeHallId: Long?,
+    ): Boolean =
         withRetriedTx(name = "admin.halls.nameTaken", readOnly = true, database = database) {
             HallsTable
                 .selectAll()
                 .where {
-                        (HallsTable.clubId eq clubId) and
+                    (HallsTable.clubId eq clubId) and
                         (HallsTable.name.lowerCase() eq name.lowercase()) and
                         (excludeHallId?.let { HallsTable.id neq it } ?: Op.TRUE)
-                }
-                .limit(1)
+                }.limit(1)
                 .any()
         }
 
@@ -242,7 +256,11 @@ class AdminHallsDbRepository(
         return raw
     }
 
-    private fun upsertZones(hallId: Long, zones: List<HallZoneSpec>, now: OffsetDateTime) {
+    private fun upsertZones(
+        hallId: Long,
+        zones: List<HallZoneSpec>,
+        now: OffsetDateTime,
+    ) {
         zones.forEachIndexed { index, zone ->
             val updated =
                 HallZonesTable.update({ (HallZonesTable.hallId eq hallId) and (HallZonesTable.zoneId eq zone.id) }) {

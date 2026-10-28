@@ -8,6 +8,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -16,9 +18,12 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import java.net.URI
+import java.net.URLClassLoader
+import java.nio.file.Path
 import java.sql.DriverManager
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /** Explicit disposable native PostgreSQL only; no Docker or application database discovery. */
 @Tag("it")
@@ -91,6 +96,98 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
         runBlocking<Unit> {
             assertExpiryAfterLock(OnboardingMutation.INVITATION_CONFIRM, "invalid_transition")
         }
+
+    @Test
+    fun `create waiting for client lock rechecks committed revocation before any persistence`() =
+        runBlocking<Unit> {
+            val approved = fixture.approved(fixture.accept().id("clientId"))
+            fixture.source.connection.use { blocker ->
+                blocker.autoCommit = false
+                val sql = OnboardingSql(blocker)
+                val blockerId = checkNotNull(sql.row("SELECT pg_backend_pid() AS pid")).long("pid").toInt()
+                sql.row("SELECT id FROM clients WHERE id=? FOR UPDATE", approved.id("clientId"))
+                coroutineScope {
+                    val outcome =
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            try {
+                                fixture.mutate(fixture.alice, OnboardingMutation.APPLICATION_CREATE_CLUB, approved)
+                                "unexpected_success"
+                            } catch (failure: OnboardingFailure) {
+                                failure.code
+                            }
+                        }
+                    try {
+                        awaitBlockedMutation(blockerId)
+                        sql.update(
+                            "UPDATE client_memberships SET is_active=FALSE WHERE client_id=?",
+                            approved.id("clientId"),
+                        )
+                        sql.update(
+                            "UPDATE client_membership_grants SET is_active=FALSE WHERE client_id=?",
+                            approved.id("clientId"),
+                        )
+                        blocker.commit()
+                    } finally {
+                        blocker.rollback()
+                    }
+                    assertEquals("not_found", outcome.await())
+                }
+            }
+            assertEquals(0, fixture.count("client_club_onboarding"))
+            assertEquals(0, fixture.count("client_clubs"))
+            assertEquals(0, fixture.count("client_club_grants"))
+        }
+
+    @Test
+    fun `club profile and exact ownership survive independent JVM restarts`() =
+        runBlocking<Unit> {
+            val approved = fixture.approved(fixture.accept().id("clientId"))
+            val club = fixture.mutate(fixture.alice, OnboardingMutation.APPLICATION_CREATE_CLUB, approved)
+            val saved =
+                fixture.mutate(
+                    fixture.alice,
+                    OnboardingMutation.CLUB_PROFILE_UPDATE,
+                    club,
+                    buildJsonObject {
+                        put("name", "Persisted synthetic club")
+                        put("description", "Persisted synthetic profile")
+                        put("timezone", "Europe/Paris")
+                    },
+                )
+            repeat(2) {
+                assertEquals("CLUB_PROFILE=$saved", runProfileProcess(club.id("id")))
+            }
+        }
+
+    private fun runProfileProcess(clubId: Long): String {
+        val paths = linkedSetOf<String>()
+        paths += System.getProperty("java.class.path").split(java.io.File.pathSeparator)
+        generateSequence(javaClass.classLoader) { it.parent }.filterIsInstance<URLClassLoader>().forEach { loader ->
+            paths += loader.urLs.map { Path.of(it.toURI()).toString() }
+        }
+        val process =
+            ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp",
+                paths.joinToString(java.io.File.pathSeparator),
+                ClubProfileProcessProbe::class.java.name,
+                url,
+                user,
+                fixture.rows("SELECT current_schema() AS name").single().getValue("name"),
+                extensions,
+                fixture.owner.telegramUserId.toString(),
+                fixture.alice.telegramUserId.toString(),
+                clubId.toString(),
+            ).redirectErrorStream(true).apply { environment()["CLB_SYNTHETIC_PG_PASSWORD"] = password }.start()
+        try {
+            assertTrue(process.waitFor(30, TimeUnit.SECONDS), "Fresh profile JVM did not finish")
+            val output = process.inputStream.bufferedReader().readText()
+            assertEquals(0, process.exitValue(), output)
+            return output.lineSequence().single { it.startsWith("CLUB_PROFILE=") }
+        } finally {
+            if (process.isAlive) process.destroyForcibly()
+        }
+    }
 
     private suspend fun assertExpiryAfterLock(
         operation: OnboardingMutation,
@@ -174,7 +271,8 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
                     "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint " +
                         "WHERE contype='f' AND connamespace=current_schema()::regnamespace " +
                         "AND conrelid::regclass::text IN ('client_invitations'," +
-                        "'client_club_applications','client_membership_grants','client_commands')",
+                        "'client_club_applications','client_membership_grants'," +
+                        "'client_commands','client_club_onboarding')",
                 ).map { it.getValue("definition") }
         assertTrue(
             keys.any {
@@ -189,6 +287,16 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
             },
         )
         assertTrue(keys.all { it?.contains("ON UPDATE RESTRICT ON DELETE RESTRICT") == true })
+        assertTrue(keys.any { it?.contains("FOREIGN KEY (client_id, club_id) REFERENCES client_clubs") == true })
+        assertTrue(
+            keys.any {
+                it?.contains(
+                    "FOREIGN KEY (application_id, client_id, owner_user_id, application_status, " +
+                        "approved_snapshot_hash, approved_snapshot_version)",
+                ) ==
+                    true
+            },
+        )
     }
 
     @AfterAll
@@ -200,4 +308,29 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
             }
         }
     }
+}
+
+internal object ClubProfileProcessProbe {
+    @JvmStatic
+    fun main(args: Array<String>) =
+        runBlocking<Unit> {
+            HikariDataSource(
+                HikariConfig().apply {
+                    jdbcUrl = args[0]
+                    username = args[1]
+                    password = System.getenv("CLB_SYNTHETIC_PG_PASSWORD").orEmpty()
+                    connectionInitSql = "SET search_path TO ${args[2]}, ${args[3]}, public"
+                    maximumPoolSize = 1
+                },
+            ).use { source ->
+                val repository = JdbcClientOnboardingRepository(source, args[4].toLong())
+                val profile =
+                    repository.read(
+                        OnboardingActor(args[5].toLong(), "platform"),
+                        OnboardingRead.CLUB_PROFILE_GET,
+                        args[6].toLong(),
+                    )
+                println("CLUB_PROFILE=$profile")
+            }
+        }
 }

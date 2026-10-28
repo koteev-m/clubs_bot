@@ -2,29 +2,32 @@ package com.example.bot.routes
 
 import com.example.bot.club.GuestListEntryStatus
 import com.example.bot.club.GuestListRepository
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
-import com.example.bot.http.ErrorCodes
 import com.example.bot.guestlists.QrGuestListCodec
 import com.example.bot.guestlists.QrVerificationResult
+import com.example.bot.http.ErrorCodes
+import com.example.bot.http.respondError
 import com.example.bot.logging.MdcContext
 import com.example.bot.logging.maskQrToken
 import com.example.bot.logging.spanSuspended
+import com.example.bot.metrics.QrRotationConfig
 import com.example.bot.metrics.UiCheckinMetrics
-import com.example.bot.promoter.invites.PromoterInviteQrCodec
-import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.miniAppBotTokenRequired
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
-import com.example.bot.http.respondError
-import com.example.bot.metrics.QrRotationConfig
+import com.example.bot.promoter.invites.PromoterInviteQrCodec
+import com.example.bot.promoter.invites.PromoterInviteService
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.clubScoped
 import com.example.bot.security.rbac.rbacContext
-import com.example.bot.telemetry.Tracing
 import com.example.bot.telemetry.CheckinScanResult
+import com.example.bot.telemetry.Tracing
 import com.example.bot.telemetry.setCheckinResult
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -53,7 +56,9 @@ private const val SCAN_TYPE_PROMOTER_INVITE = "promoter_invite"
 private const val SCAN_STATUS_ARRIVED = "ARRIVED"
 
 @Serializable
-private data class ScanPayload(val qr: String)
+private data class ScanPayload(
+    val qr: String,
+)
 
 @Serializable
 private data class PromoterInviteScanResponse(
@@ -79,11 +84,16 @@ fun Application.checkinRoutes(
             // ЕДИНЫЙ механизм WebApp-авторизации
             withMiniAppAuth { botTokenProvider() }
 
-                authorize(Role.CLUB_ADMIN, Role.MANAGER, Role.ENTRY_MANAGER) {
-                    clubScoped(ClubScope.Own) {
-                        val maxBytes: Long = (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
-                            ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
-                        install(RequestSizeLimit) {
+            authorize(Role.CLUB_ADMIN, Role.MANAGER, Role.ENTRY_MANAGER) {
+                clubScoped(ClubScope.Own) {
+                    val maxBytes: Long =
+                        (
+                            System
+                                .getenv("CHECKIN_MAX_BODY_BYTES")
+                                ?.toLongOrNull()
+                                ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)
+                        ) ?: DEFAULT_CHECKIN_MAX_BYTES
+                    install(RequestSizeLimit) {
                         maxRequestSize = maxBytes
                     }
 
@@ -117,6 +127,7 @@ fun Application.checkinRoutes(
                                 tracer.spanSuspended("checkin.scan") { span ->
                                     span.setAttribute("club.id", clubId.toLong())
                                     var scanResult = CheckinScanResult.INVALID
+
                                     fun setResult(result: CheckinScanResult) {
                                         scanResult = result
                                         span.setCheckinResult(result)
@@ -165,11 +176,22 @@ fun Application.checkinRoutes(
                                                 clubId,
                                                 maskQrToken(qr),
                                             )
-                                            call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_or_expired_qr)
+                                            call.respondError(
+                                                HttpStatusCode.BadRequest,
+                                                ErrorCodes.invalid_or_expired_qr,
+                                            )
                                             return@spanSuspended
                                         }
 
-                                        val marked = promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false
+                                        if (!call.requireLegacyResources(
+                                                LegacyReference(LegacyResource.EVENT, decodedInvite.eventId),
+                                            )
+                                        ) {
+                                            return@spanSuspended
+                                        }
+
+                                        val marked =
+                                            promoterInviteService?.markArrivedById(decodedInvite.inviteId, now) ?: false
                                         if (!marked) {
                                             UiCheckinMetrics.incError()
                                             setResult(CheckinScanResult.INVALID_STATE)
@@ -185,7 +207,8 @@ fun Application.checkinRoutes(
 
                                         setResult(CheckinScanResult.SUCCESS)
                                         logger.info(
-                                            "checkin.scan promoter_invite status=arrived clubId={} inviteId={} eventId={}",
+                                            "checkin.scan promoter_invite status=arrived clubId={} " +
+                                                "inviteId={} eventId={}",
                                             clubId,
                                             decodedInvite.inviteId,
                                             decodedInvite.eventId,
@@ -201,7 +224,9 @@ fun Application.checkinRoutes(
                                         return@spanSuspended
                                     }
 
-                                    val qrValidation = com.example.bot.guestlists.quickValidateQr(qr)
+                                    val qrValidation =
+                                        com.example.bot.guestlists
+                                            .quickValidateQr(qr)
                                     if (qrValidation != null) {
                                         UiCheckinMetrics.incQrInvalid()
                                         UiCheckinMetrics.incError()
@@ -232,7 +257,8 @@ fun Application.checkinRoutes(
                                         }
                                     val decoded =
                                         when {
-                                            primaryVerification is QrVerificationResult.Valid -> primaryVerification.decoded
+                                            primaryVerification is QrVerificationResult.Valid ->
+                                                primaryVerification.decoded
                                             oldSecretVerification is QrVerificationResult.Valid -> {
                                                 UiCheckinMetrics.incOldSecretFallback()
                                                 oldSecretVerification.decoded
@@ -279,7 +305,10 @@ fun Application.checkinRoutes(
                                                         clubId,
                                                         decoded.listId,
                                                     )
-                                                    call.respondError(HttpStatusCode.NotFound, ErrorCodes.list_not_found)
+                                                    call.respondError(
+                                                        HttpStatusCode.NotFound,
+                                                        ErrorCodes.list_not_found,
+                                                    )
                                                     return@withIds
                                                 }
 
@@ -312,7 +341,10 @@ fun Application.checkinRoutes(
                                                         decoded.listId,
                                                         decoded.entryId,
                                                     )
-                                                    call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
+                                                    call.respondError(
+                                                        HttpStatusCode.NotFound,
+                                                        ErrorCodes.entry_not_found,
+                                                    )
                                                     return@withIds
                                                 }
 
@@ -344,7 +376,8 @@ fun Application.checkinRoutes(
                                             return@withIds
                                         }
 
-                                        val withinWindow = isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
+                                        val withinWindow =
+                                            isWithinWindow(now, list.arrivalWindowStart, list.arrivalWindowEnd)
                                         if (!withinWindow && entry.status != GuestListEntryStatus.CALLED) {
                                             UiCheckinMetrics.incError()
                                             currentResult = CheckinScanResult.OUTSIDE_ARRIVAL_WINDOW
@@ -434,11 +467,12 @@ private fun isWithinWindow(
     return afterStart && beforeEnd
 }
 
-private val alreadyCheckedInStatuses = setOf(
-    GuestListEntryStatus.CHECKED_IN,
-    GuestListEntryStatus.ARRIVED,
-    GuestListEntryStatus.LATE,
-)
+private val alreadyCheckedInStatuses =
+    setOf(
+        GuestListEntryStatus.CHECKED_IN,
+        GuestListEntryStatus.ARRIVED,
+        GuestListEntryStatus.LATE,
+    )
 
 private fun alreadyCheckedInDetails(entry: com.example.bot.club.GuestListEntry): Map<String, String> {
     val details = mutableMapOf<String, String>()

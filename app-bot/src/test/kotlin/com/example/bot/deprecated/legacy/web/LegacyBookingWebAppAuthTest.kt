@@ -1,10 +1,12 @@
 package com.example.bot.deprecated.legacy.web
 
 import com.example.bot.bootstrapLegacyBookingWebApp
+import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import com.example.bot.data.privacy.PrivacyConfig
 import com.example.bot.isLegacyBookingEnabled
 import com.example.bot.plugins.TelegramMiniUser
 import com.example.bot.plugins.installJsonErrorPages
+import com.example.bot.plugins.installPrivateClubContainment
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
 import com.example.bot.webapp.WebAppInitDataTestHelper
@@ -83,6 +85,52 @@ class LegacyBookingWebAppAuthTest {
             TransactionManager.closeAndUnregister(fixture.database)
         }
     }
+
+    @Test
+    fun `enabled legacy module hides private descendants and rejects mixed body IDs without notification`() =
+        legacyTestApplication {
+            val notifier = RecordingLegacyHqNotifier()
+            installLegacyAppWithDatabase(authenticatedUserId = AUTH_USER_ID, legacyHqNotifier = notifier)
+            transaction(fixture.database) {
+                exec("INSERT INTO client_clubs(club_id) VALUES (1001)")
+            }
+            val clubs = client.get("/api/clubs") { validInitData() }
+            assertEquals(HttpStatusCode.OK, clubs.status)
+            assertFalse(clubs.bodyAsText().contains("Runtime Club"))
+            assertTrue(clubs.bodyAsText().contains("Other Club"))
+            val bookings = client.get("/api/bookings/my") { validInitData() }
+            assertEquals(HttpStatusCode.OK, bookings.status)
+            assertEquals("[]", bookings.bodyAsText())
+            for (path in listOf("/api/events?clubId=1001", "/api/tables/free?clubId=1002&eventId=1001")) {
+                assertEquals(HttpStatusCode.NotFound, client.get(path) { validInitData() }.status)
+            }
+            for ((club, event, table) in listOf(
+                Triple(1001, 1001, 1008),
+                Triple(1002, 1001, 1011),
+                Triple(1002, 1002, 1008),
+            )) {
+                val response =
+                    client.post("/api/bookings") {
+                        validInitData()
+                        contentType(ContentType.Application.Json)
+                        setBody("""{"clubId":$club,"eventId":$event,"tableId":$table,"guestsCount":2}""")
+                    }
+                assertEquals(HttpStatusCode.NotFound, response.status)
+                assertTrue(response.headers["Cache-Control"].orEmpty().contains("no-store"))
+            }
+            assertEquals(0, countBookingsForTable(fixture.database, tableId = 1008))
+            assertTrue(notifier.messages.isEmpty())
+            val legacy =
+                client.post("/api/bookings") {
+                    validInitData()
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"clubId":1002,"eventId":1002,"tableId":1011,"guestsCount":2}""")
+                }
+            assertEquals(HttpStatusCode.OK, legacy.status, legacy.bodyAsText())
+            withTimeout(1_000) { notifier.nextMessage.await() }
+            assertEquals(1, notifier.messages.size)
+            assertEquals(1, countBookingsForTable(fixture.database, tableId = 1011))
+        }
 
     @Test
     fun `valid mini app auth allows legacy api access`() =
@@ -592,6 +640,7 @@ class LegacyBookingWebAppAuthTest {
         application {
             install(ContentNegotiation) { json() }
             installJsonErrorPages()
+            installPrivateClubContainment(JdbcLegacyClubAccess(fixture.dataSource)) { null }
             installLegacyBookingWebApp(
                 privacyConfig = privacyConfig(),
                 legacyHqNotifier = legacyHqNotifier,
@@ -630,6 +679,9 @@ class LegacyBookingWebAppAuthTest {
                         timezone TEXT NOT NULL
                     )
                     """.trimIndent(),
+                )
+                statement.execute(
+                    "CREATE TABLE client_clubs (club_id BIGINT PRIMARY KEY REFERENCES clubs(id))",
                 )
                 statement.execute(
                     """

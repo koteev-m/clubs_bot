@@ -445,3 +445,20 @@ Authority: `DEC-040`–`DEC-042`, requirements `CLNT-001`–`CLNT-010`; target �
 | `CLNT-007/008/009/010` | Один production platform adapter; новые client APIs не наследуют legacy GLOBAL, guest entry сохранён | Managed Bots, branded ingress/outbound, очереди/кэши/файлы полного tenant outcome и cutover остаются отдельной реализацией |
 
 Точные symbols source chain и границы — [AS_BUILT §4.16](AS_BUILT.md#client-onboarding-a-local); commands/results, final-byte independent review и unverified — [checkpoint](../ops/PROJECT_STATUS.md). Read foundation, локальный source candidate, fresh main и deployed revision различаются. Наличие V062/React screens не даёт права объявить Б, полный onboarding или многоботовую isolation готовыми.
+
+<a id="client-onboarding-b-delta"></a>
+### Продолжение Б — локальная дельта 2026-10-28
+
+Отдельное разрешение владельца исполняет §29.8 после PR #552 на
+`600f9b34d65abc07dfc38e86fb4c724469268827`; target decisions не меняются.
+
+| Requirement | Local source delta | Remaining boundary |
+|---|---|---|
+| `CLNT-005`, `CLNT-AC-03/04/05` | V063 + `ClubOnboardingOperations`: unique durable consumption, approved client/author/snapshot FK, private club and exact grants in one command/audit transaction; repeat refers to the same club | No publication, live mapping or real migration; next venue requires another approval |
+| `CLNT-006`, `CLNT-AC-06/11` | Profile GET/PATCH, immutable agreed location, name/description/IANA timezone, savedAt/version; My clubs explicit selection, retry/reopen and account invalidation | Full club master and bot connection are absent |
+| `CLNT-007/009` | Targeted legacy/guest containment for mapped ownership, descendants, files/caches, support and mutations; synthetic child-resource negatives | This is the private-club Б boundary, not complete multi-bot isolation or guest cutover |
+| `CLNT-010` | Local A regression plus Б checks/review tracked in checkpoint | Real Telegram, runtime rollout, branded connections and full A×2/B outcome remain unverified |
+
+[AS_BUILT §4.17](AS_BUILT.md#client-onboarding-b-local) identifies the source chain.
+Final verdict is conditional on completed checks and independent review in the
+[checkpoint](../ops/PROJECT_STATUS.md), not on this delta table alone.

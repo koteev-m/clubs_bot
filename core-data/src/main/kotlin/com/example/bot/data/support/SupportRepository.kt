@@ -1,5 +1,7 @@
 package com.example.bot.data.support
 
+import com.example.bot.data.privacy.isMappedClub
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.support.GuestTicketDetails
 import com.example.bot.support.GuestTicketMessage
 import com.example.bot.support.GuestTicketThread
@@ -64,6 +66,7 @@ class SupportRepository(
         attachments: String?,
     ): TicketWithMessage =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            if (isMappedClub(clubId)) throw PrivateSupportClubException()
             val now = clock.instant().atOffset(ZoneOffset.UTC)
             val ticketId =
                 TicketsTable.insert {
@@ -116,7 +119,7 @@ class SupportRepository(
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
             TicketsTable
                 .selectAll()
-                .where { TicketsTable.id eq id }
+                .where { (TicketsTable.id eq id) and unmappedClub(TicketsTable.clubId) }
                 .map { toTicket(it) }
                 .singleOrNull()
         }
@@ -126,7 +129,7 @@ class SupportRepository(
             val ticketRows =
                 TicketsTable
                     .selectAll()
-                    .where { TicketsTable.userId eq userId }
+                    .where { (TicketsTable.userId eq userId) and unmappedClub(TicketsTable.clubId) }
                     .orderBy(TicketsTable.updatedAt to SortOrder.DESC, TicketsTable.id to SortOrder.DESC)
                     .toList()
             buildSummaries(ticketRows)
@@ -142,7 +145,7 @@ class SupportRepository(
                     .selectAll()
                     .where {
                         (TicketsTable.id eq ticketId) and
-                            (TicketsTable.userId eq userId)
+                            (TicketsTable.userId eq userId) and unmappedClub(TicketsTable.clubId)
                     }.singleOrNull()
                     ?: return@newSuspendedTransaction null
             val messages =
@@ -175,7 +178,10 @@ class SupportRepository(
         status: TicketStatus?,
     ): List<TicketSummary> =
         newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-            val baseQuery = TicketsTable.selectAll().where { TicketsTable.clubId eq clubId }
+            val baseQuery =
+                TicketsTable.selectAll().where {
+                    (TicketsTable.clubId eq clubId) and unmappedClub(TicketsTable.clubId)
+                }
             val filtered =
                 if (status == null) {
                     baseQuery
@@ -202,7 +208,7 @@ class SupportRepository(
                     .selectAll()
                     .where {
                         (TicketsTable.id eq ticketId) and
-                            (TicketsTable.clubId inList permittedClubIds)
+                            (TicketsTable.clubId inList permittedClubIds) and unmappedClub(TicketsTable.clubId)
                     }.singleOrNull()
                     ?: return@newSuspendedTransaction null
             val messageRows =
@@ -250,7 +256,7 @@ class SupportRepository(
                 .select(TicketsTable.clubId)
                 .where {
                     (TicketsTable.id eq ticketId) and
-                        (TicketsTable.clubId inList permittedClubIds)
+                        (TicketsTable.clubId inList permittedClubIds) and unmappedClub(TicketsTable.clubId)
                 }.singleOrNull()
                 ?.get(TicketsTable.clubId)
         }
@@ -300,7 +306,7 @@ class SupportRepository(
             val updated =
                 TicketsTable.update({
                     (TicketsTable.id eq ticketId) and
-                        (TicketsTable.userId eq userId) and
+                        (TicketsTable.userId eq userId) and unmappedClub(TicketsTable.clubId) and
                         TicketsTable.resolutionRating.isNull() and
                         (
                             TicketsTable.status inList
@@ -314,7 +320,7 @@ class SupportRepository(
                 val ticket =
                     TicketsTable
                         .selectAll()
-                        .where { TicketsTable.id eq ticketId }
+                        .where { (TicketsTable.id eq ticketId) and unmappedClub(TicketsTable.clubId) }
                         .map { toTicket(it) }
                         .singleOrNull()
                         ?: return@newSuspendedTransaction SetResolutionRatingResult.Failure(
@@ -325,7 +331,7 @@ class SupportRepository(
             val ticketRow =
                 TicketsTable
                     .selectAll()
-                    .where { TicketsTable.id eq ticketId }
+                    .where { (TicketsTable.id eq ticketId) and unmappedClub(TicketsTable.clubId) }
                     .singleOrNull()
                     ?: return@newSuspendedTransaction SetResolutionRatingResult.Failure(
                         SetResolutionRatingFailure.NotFound,
@@ -545,3 +551,5 @@ enum class SetResolutionRatingFailure {
     NotAllowed,
     AlreadySet,
 }
+
+internal class PrivateSupportClubException : RuntimeException("Support club unavailable")

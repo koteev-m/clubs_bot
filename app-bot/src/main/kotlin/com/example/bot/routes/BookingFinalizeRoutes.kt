@@ -2,8 +2,11 @@ package com.example.bot.routes
 
 import com.example.bot.booking.BookingCmdResult
 import com.example.bot.booking.BookingService
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.miniAppBotTokenRequired
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -45,6 +48,12 @@ fun Application.bookingFinalizeRoutes(
                         .getOrNull()
                         ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid bookingId")
 
+                if (!call.requireLegacyResources(
+                        LegacyReference(LegacyResource.BOOKING, bookingId.toString()),
+                    )
+                ) {
+                    return@post
+                }
                 when (val result = bookingService.finalize(bookingId, telegramUserId)) {
                     is BookingCmdResult.Booked ->
                         call.respond(

@@ -7,6 +7,8 @@ import com.example.bot.booking.a3.HoldResult
 import com.example.bot.booking.a3.PlusOneCanonicalPayload
 import com.example.bot.booking.a3.PlusOneResult
 import com.example.bot.booking.a3.hashRequestCanonical
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.logging.MdcContext
@@ -17,13 +19,14 @@ import com.example.bot.opschat.OpsNotificationEvent
 import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.ratelimit.RateLimitSnapshot
 import com.example.bot.ratelimit.TokenBucket
 import com.example.bot.security.rbac.rbacContext
-import com.example.bot.telemetry.Tracing
 import com.example.bot.telemetry.BookingConfirmResult
 import com.example.bot.telemetry.BookingHoldResult
+import com.example.bot.telemetry.Tracing
 import com.example.bot.telemetry.setBookingConfirmResult
 import com.example.bot.telemetry.setBookingHoldResult
 import io.ktor.http.ContentType
@@ -42,8 +45,8 @@ import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.text.Charsets
 import kotlin.math.ceil
+import kotlin.text.Charsets
 
 private val JSON = ContentType.Application.Json.withCharset(Charsets.UTF_8)
 private const val VARY_HEADER = "X-Telegram-Init-Data"
@@ -51,7 +54,8 @@ private const val NO_CACHE = "no-store"
 private val IDEM_KEY = Regex("^[A-Za-z0-9._~:-]{1,128}$")
 private val PROMOTER_ROLES =
     setOf(Role.PROMOTER, Role.CLUB_ADMIN, Role.HEAD_MANAGER, Role.OWNER, Role.GLOBAL_ADMIN)
-private val holdRateLimit = rateLimitConfig("BOOKING_RATE_LIMIT_HOLD_CAPACITY", "BOOKING_RATE_LIMIT_HOLD_REFILL", 5.0, 0.5)
+private val holdRateLimit =
+    rateLimitConfig("BOOKING_RATE_LIMIT_HOLD_CAPACITY", "BOOKING_RATE_LIMIT_HOLD_REFILL", 5.0, 0.5)
 private val confirmRateLimit =
     rateLimitConfig("BOOKING_RATE_LIMIT_CONFIRM_CAPACITY", "BOOKING_RATE_LIMIT_CONFIRM_REFILL", 5.0, 0.5)
 private val plusOneRateLimit =
@@ -65,7 +69,9 @@ private data class HoldPayload(
 )
 
 @Serializable
-private data class ConfirmPayload(val bookingId: Long)
+private data class ConfirmPayload(
+    val bookingId: Long,
+)
 
 fun Application.bookingA3Routes(
     bookingState: BookingState,
@@ -90,35 +96,49 @@ fun Application.bookingA3Routes(
                             refillPerSec = holdRateLimit.refillPerSec,
                         )
                     val promoterId = call.promoterIdOrNull()
-                    val clubId = call.parameters["clubId"]?.toLongOrNull()
-                        ?: run {
-                            call.applyRateLimitHeaders(ratePeek)
-                            return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                        }
-                    val idem = call.request.headers["Idempotency-Key"]?.trim()
-                        ?: run {
-                            call.applyRateLimitHeaders(ratePeek)
-                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.missing_idempotency_key)
-                        }
+                    val clubId =
+                        call.parameters["clubId"]?.toLongOrNull()
+                            ?: run {
+                                call.applyRateLimitHeaders(ratePeek)
+                                return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                            }
+                    val idem =
+                        call.request.headers["Idempotency-Key"]?.trim()
+                            ?: run {
+                                call.applyRateLimitHeaders(ratePeek)
+                                return@post call.respondError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.missing_idempotency_key,
+                                )
+                            }
                     if (!idem.isValidIdemKey()) {
                         call.applyRateLimitHeaders(ratePeek)
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
-                    val payload = runCatching { call.receive<HoldPayload>() }.getOrNull()
-                        ?: run {
-                            call.applyRateLimitHeaders(ratePeek)
-                            return@post call.respondError(
-                                HttpStatusCode.BadRequest,
-                                ErrorCodes.validation_error,
-                                idem,
-                            )
-                        }
+                    val payload =
+                        runCatching { call.receive<HoldPayload>() }.getOrNull()
+                            ?: run {
+                                call.applyRateLimitHeaders(ratePeek)
+                                return@post call.respondError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.validation_error,
+                                    idem,
+                                )
+                            }
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.EVENT, payload.eventId),
+                            LegacyReference(LegacyResource.HALL_TABLE, payload.tableId),
+                        )
+                    ) {
+                        return@post
+                    }
                     MdcContext.withIds(clubId = clubId) {
                         val tracer = Tracing.tracer
                         tracer.spanSuspended("booking.hold") { span ->
                             span.setAttribute("club.id", clubId)
                             span.setAttribute("booking.requested_guests", payload.guestCount.toLong())
                             var spanResult = BookingHoldResult.REJECTED
+
                             fun setResult(result: BookingHoldResult) {
                                 spanResult = result
                                 span.setBookingHoldResult(result)
@@ -173,8 +193,7 @@ fun Application.bookingA3Routes(
                                             clubId.toString(),
                                             "replay",
                                             replayTag,
-                                        )
-                                        ?.increment()
+                                        )?.increment()
                                     call.applyIdempotencyHeaders(idem, result.cached)
                                     setResult(BookingHoldResult.SUCCESS)
                                     span.setAttribute("booking.id", result.booking.id)
@@ -204,8 +223,7 @@ fun Application.bookingA3Routes(
                                             clubId.toString(),
                                             "replay",
                                             "false",
-                                        )
-                                        ?.increment()
+                                        )?.increment()
                                     setResult(
                                         when (result.code) {
                                             BookingError.TABLE_NOT_AVAILABLE -> BookingHoldResult.OVERBOOKED
@@ -239,29 +257,41 @@ fun Application.bookingA3Routes(
                             capacity = confirmRateLimit.capacity,
                             refillPerSec = confirmRateLimit.refillPerSec,
                         )
-                    val clubId = call.parameters["clubId"]?.toLongOrNull()
-                        ?: run {
-                            call.applyRateLimitHeaders(ratePeek)
-                            return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
-                        }
-                    val idem = call.request.headers["Idempotency-Key"]?.trim()
-                        ?: run {
-                            call.applyRateLimitHeaders(ratePeek)
-                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.missing_idempotency_key)
-                        }
+                    val clubId =
+                        call.parameters["clubId"]?.toLongOrNull()
+                            ?: run {
+                                call.applyRateLimitHeaders(ratePeek)
+                                return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                            }
+                    val idem =
+                        call.request.headers["Idempotency-Key"]?.trim()
+                            ?: run {
+                                call.applyRateLimitHeaders(ratePeek)
+                                return@post call.respondError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.missing_idempotency_key,
+                                )
+                            }
                     if (!idem.isValidIdemKey()) {
                         call.applyRateLimitHeaders(ratePeek)
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
-                    val payload = runCatching { call.receive<ConfirmPayload>() }.getOrNull()
-                        ?: run {
-                            call.applyRateLimitHeaders(ratePeek)
-                            return@post call.respondError(
-                                HttpStatusCode.BadRequest,
-                                ErrorCodes.validation_error,
-                                idem,
-                            )
-                        }
+                    val payload =
+                        runCatching { call.receive<ConfirmPayload>() }.getOrNull()
+                            ?: run {
+                                call.applyRateLimitHeaders(ratePeek)
+                                return@post call.respondError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.validation_error,
+                                    idem,
+                                )
+                            }
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.BOOKING, payload.bookingId),
+                        )
+                    ) {
+                        return@post
+                    }
                     val rate =
                         rateLimiter.acquire(
                             "confirm:${user.id}",
@@ -294,6 +324,7 @@ fun Application.bookingA3Routes(
                             span.setAttribute("club.id", clubId)
                             span.setAttribute("booking.id", payload.bookingId)
                             var spanResult = BookingConfirmResult.REJECTED
+
                             fun setResult(result: BookingConfirmResult) {
                                 spanResult = result
                                 span.setBookingConfirmResult(result)
@@ -309,8 +340,7 @@ fun Application.bookingA3Routes(
                                             clubId.toString(),
                                             "replay",
                                             replayTag,
-                                        )
-                                        ?.increment()
+                                        )?.increment()
                                     call.applyIdempotencyHeaders(idem, result.cached)
                                     setResult(BookingConfirmResult.SUCCESS)
                                     span.setAttribute("booking.status.before", "HOLD")
@@ -353,14 +383,14 @@ fun Application.bookingA3Routes(
                                             clubId.toString(),
                                             "replay",
                                             "false",
-                                        )
-                                        ?.increment()
+                                        )?.increment()
                                     setResult(
                                         when (result.code) {
                                             BookingError.INVALID_STATE -> BookingConfirmResult.INVALID_STATE
                                             BookingError.HOLD_EXPIRED -> BookingConfirmResult.EXPIRED
                                             BookingError.FORBIDDEN,
-                                            BookingError.CLUB_SCOPE_MISMATCH -> BookingConfirmResult.SCOPE_MISMATCH
+                                            BookingError.CLUB_SCOPE_MISMATCH,
+                                            -> BookingConfirmResult.SCOPE_MISMATCH
                                             BookingError.NOT_FOUND -> BookingConfirmResult.NOT_FOUND
                                             else -> BookingConfirmResult.REJECTED
                                         },
@@ -393,20 +423,22 @@ fun Application.bookingA3Routes(
                         capacity = plusOneRateLimit.capacity,
                         refillPerSec = plusOneRateLimit.refillPerSec,
                     )
-                val idem = call.request.headers["Idempotency-Key"]?.trim()
-                    ?: run {
-                        call.applyRateLimitHeaders(ratePeek)
-                        return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.missing_idempotency_key)
-                    }
+                val idem =
+                    call.request.headers["Idempotency-Key"]?.trim()
+                        ?: run {
+                            call.applyRateLimitHeaders(ratePeek)
+                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.missing_idempotency_key)
+                        }
                 if (!idem.isValidIdemKey()) {
                     call.applyRateLimitHeaders(ratePeek)
                     return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                 }
-                val bookingId = call.parameters["id"]?.toLongOrNull()
-                    ?: run {
-                        call.applyRateLimitHeaders(ratePeek)
-                        return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found, idem)
-                    }
+                val bookingId =
+                    call.parameters["id"]?.toLongOrNull()
+                        ?: run {
+                            call.applyRateLimitHeaders(ratePeek)
+                            return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found, idem)
+                        }
                 val rate =
                     rateLimiter.acquire(
                         "plus-one:${user.id}",
@@ -444,8 +476,7 @@ fun Application.bookingA3Routes(
                                 result.booking.clubId.toString(),
                                 "replay",
                                 replayTag,
-                            )
-                            ?.increment()
+                            )?.increment()
                         call.applyIdempotencyHeaders(idem, result.cached)
                         logger.info(
                             "booking.audit source=miniapp user_id={} club_id={} booking_id={} table_id={} event_id={} status={} guests={}",
@@ -484,8 +515,7 @@ fun Application.bookingA3Routes(
                                 clubIdTag,
                                 "replay",
                                 "false",
-                            )
-                            ?.increment()
+                            )?.increment()
                         logger.warn(
                             "booking.plus_one failed status={} error_code={} bookingId={} user={}",
                             status,
@@ -507,7 +537,11 @@ private suspend fun ApplicationCall.respondBooking(bodyJson: String) {
     respondText(status = HttpStatusCode.OK, contentType = JSON, text = bodyJson)
 }
 
-private suspend fun ApplicationCall.respondError(status: HttpStatusCode, code: String, idemKey: String? = null) {
+private suspend fun ApplicationCall.respondError(
+    status: HttpStatusCode,
+    code: String,
+    idemKey: String? = null,
+) {
     response.headers.append(HttpHeaders.CacheControl, NO_CACHE)
     response.headers.append(HttpHeaders.Vary, VARY_HEADER)
     idemKey?.takeIf { it.isValidIdemKey() }?.let { response.headers.append("Idempotency-Key", it) }
@@ -518,16 +552,28 @@ private suspend fun ApplicationCall.respondError(status: HttpStatusCode, code: S
     )
 }
 
-private fun ApplicationCall.applyRateLimitHeaders(snapshot: RateLimitSnapshot, includeRetryAfter: Boolean = false) {
+private fun ApplicationCall.applyRateLimitHeaders(
+    snapshot: RateLimitSnapshot,
+    includeRetryAfter: Boolean = false,
+) {
     response.headers.append("X-RateLimit-Limit", snapshot.limit.toInt().toString())
-    response.headers.append("X-RateLimit-Remaining", snapshot.remaining.coerceAtLeast(0.0).toInt().toString())
+    response.headers.append(
+        "X-RateLimit-Remaining",
+        snapshot.remaining
+            .coerceAtLeast(0.0)
+            .toInt()
+            .toString(),
+    )
     if (includeRetryAfter) {
         val retry = ceil(snapshot.retryAfterSeconds).toLong()
         response.headers.append(HttpHeaders.RetryAfter, retry.toString())
     }
 }
 
-private fun ApplicationCall.applyIdempotencyHeaders(idem: String, replay: Boolean) {
+private fun ApplicationCall.applyIdempotencyHeaders(
+    idem: String,
+    replay: Boolean,
+) {
     response.headers.append("Idempotency-Key", idem)
     if (replay) {
         response.headers.append("Idempotency-Replay", "true")
@@ -560,9 +606,17 @@ private fun ApplicationCall.promoterIdOrNull(): Long? =
             }
         }
 
-private data class RateLimitConfig(val capacity: Double, val refillPerSec: Double)
+private data class RateLimitConfig(
+    val capacity: Double,
+    val refillPerSec: Double,
+)
 
-private fun rateLimitConfig(capacityEnv: String, refillEnv: String, defaultCap: Double, defaultRefill: Double): RateLimitConfig {
+private fun rateLimitConfig(
+    capacityEnv: String,
+    refillEnv: String,
+    defaultCap: Double,
+    defaultRefill: Double,
+): RateLimitConfig {
     val cap = System.getenv(capacityEnv)?.toDoubleOrNull() ?: defaultCap
     val refill = System.getenv(refillEnv)?.toDoubleOrNull() ?: defaultRefill
     return RateLimitConfig(capacity = cap, refillPerSec = refill)
@@ -585,36 +639,54 @@ private fun BookingError.toHttp(): Pair<HttpStatusCode, String> =
     }
 
 private class RouteRateLimiter {
-    private data class Bucket(val bucket: TokenBucket, val capacity: Double, val refillPerSec: Double) {
+    private data class Bucket(
+        val bucket: TokenBucket,
+        val capacity: Double,
+        val refillPerSec: Double,
+    ) {
         @Volatile var lastSeenNanos: Long = System.nanoTime()
     }
 
     private val buckets = ConcurrentHashMap<String, Bucket>()
-    private val ttlNanos = java.util.concurrent.TimeUnit.MINUTES.toNanos(30)
+    private val ttlNanos =
+        java.util.concurrent.TimeUnit.MINUTES
+            .toNanos(30)
     private val maxEntries = 5_000
-    private val cleanupIntervalNanos = java.util.concurrent.TimeUnit.SECONDS.toNanos(15)
+    private val cleanupIntervalNanos =
+        java.util.concurrent.TimeUnit.SECONDS
+            .toNanos(15)
     private var lastCleanupNanos: Long = System.nanoTime()
 
-    fun acquire(key: String, capacity: Double, refillPerSec: Double): RateLimitDecision {
+    fun acquire(
+        key: String,
+        capacity: Double,
+        refillPerSec: Double,
+    ): RateLimitDecision {
         val now = System.nanoTime()
-        val bucket = buckets.compute(key) { _, existing ->
-            val bucket = existing ?: Bucket(TokenBucket(capacity, refillPerSec, now), capacity, refillPerSec)
-            bucket.lastSeenNanos = now
-            bucket
-        }!!
+        val bucket =
+            buckets.compute(key) { _, existing ->
+                val bucket = existing ?: Bucket(TokenBucket(capacity, refillPerSec, now), capacity, refillPerSec)
+                bucket.lastSeenNanos = now
+                bucket
+            }!!
         val allowed = bucket.bucket.tryAcquire(now)
         val snapshot = bucket.bucket.snapshot(now)
         cleanup(now)
         return RateLimitDecision(allowed, snapshot)
     }
 
-    fun peek(key: String, capacity: Double, refillPerSec: Double): RateLimitSnapshot {
+    fun peek(
+        key: String,
+        capacity: Double,
+        refillPerSec: Double,
+    ): RateLimitSnapshot {
         val now = System.nanoTime()
-        val bucket = buckets.compute(key) { _, existing ->
-            val bucket = existing ?: Bucket(TokenBucket(capacity, refillPerSec, now), capacity, refillPerSec)
-            bucket.lastSeenNanos = now
-            bucket
-        }!!
+        val bucket =
+            buckets.compute(key) { _, existing ->
+                val bucket = existing ?: Bucket(TokenBucket(capacity, refillPerSec, now), capacity, refillPerSec)
+                bucket.lastSeenNanos = now
+                bucket
+            }!!
         val snapshot = bucket.bucket.snapshot(now)
         cleanup(now)
         return snapshot

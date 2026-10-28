@@ -47,17 +47,20 @@ export function useCommand<T>(credential: string) {
     success: false,
   });
   const pending = useRef<PendingCommand<T> | null>(null);
+  const executing = useRef(false);
   const lifetime = useRef(new AbortController());
   useEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
+    executing.current = false;
     return () => {
       controller.abort();
       pending.current = null;
     };
   }, [credential]);
   const execute = async (command: PendingCommand<T>) => {
-    if (state.saving) return;
+    if (executing.current) return;
+    executing.current = true;
     const controller = lifetime.current;
     setState({ saving: true, unknown: false, success: false });
     try {
@@ -78,6 +81,8 @@ export function useCommand<T>(credential: string) {
         (error.status === 0 || error.status >= 500);
       if (!unknown) pending.current = null;
       setState({ saving: false, unknown, success: false, error });
+    } finally {
+      if (!controller.signal.aborted) executing.current = false;
     }
   };
   return {
@@ -102,6 +107,11 @@ export function useCommand<T>(credential: string) {
     },
     retry() {
       if (pending.current) void execute(pending.current);
+    },
+    reset() {
+      // A pending unknown command must be retried with its original intent.
+      if (pending.current || executing.current) return;
+      setState({ saving: false, unknown: false, success: false });
     },
   };
 }

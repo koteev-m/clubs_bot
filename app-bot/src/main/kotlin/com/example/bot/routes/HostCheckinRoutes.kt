@@ -7,6 +7,8 @@ import com.example.bot.checkin.HostCheckinAction
 import com.example.bot.checkin.HostCheckinOutcome
 import com.example.bot.checkin.HostCheckinRequest
 import com.example.bot.checkin.HostCheckinSubject
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.AuthContext
 import com.example.bot.data.security.Role
 import com.example.bot.host.HostSearchItem
@@ -18,11 +20,12 @@ import com.example.bot.plugins.DEFAULT_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MAX_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.MIN_CHECKIN_MAX_BYTES
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
-import com.example.bot.security.rbac.clubScoped
 import com.example.bot.security.rbac.canAccessClub
+import com.example.bot.security.rbac.clubScoped
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -39,9 +42,9 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import java.util.Locale
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
+import java.util.Locale
 
 private val logger = LoggerFactory.getLogger("HostCheckinRoutes")
 
@@ -126,13 +129,29 @@ fun Application.hostCheckinRoutes(
                             )
                         }
 
-                        val body = call.receiveOrNull<HostCheckinRequestPayload>()
-                            ?: return@post call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-                        val action = parseAction(body.action)
-                            ?: return@post call.respondCheckinError(
-                                HttpStatusCode.BadRequest,
-                                ErrorCodes.checkin_invalid_payload,
+                        val body =
+                            call.receiveOrNull<HostCheckinRequestPayload>()
+                                ?: return@post call.respondCheckinError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.invalid_json,
+                                )
+                        if (!call.requireLegacyResources(
+                                listOfNotNull(
+                                    LegacyReference(LegacyResource.CLUB, body.clubId),
+                                    LegacyReference(LegacyResource.EVENT, body.eventId),
+                                    body.bookingId?.let { LegacyReference(LegacyResource.BOOKING, it) },
+                                    body.guestListEntryId?.let { LegacyReference(LegacyResource.GUEST_ENTRY, it) },
+                                ),
                             )
+                        ) {
+                            return@post
+                        }
+                        val action =
+                            parseAction(body.action)
+                                ?: return@post call.respondCheckinError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.checkin_invalid_payload,
+                                )
                         val payload =
                             HostCheckinRequest(
                                 clubId = body.clubId,
@@ -160,8 +179,19 @@ fun Application.hostCheckinRoutes(
                             )
                         }
 
-                        val body = call.receiveOrNull<HostScanRequest>()
-                            ?: return@post call.respondCheckinError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val body =
+                            call.receiveOrNull<HostScanRequest>()
+                                ?: return@post call.respondCheckinError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.invalid_json,
+                                )
+                        if (!call.requireLegacyResources(
+                                LegacyReference(LegacyResource.CLUB, body.clubId),
+                                LegacyReference(LegacyResource.EVENT, body.eventId),
+                            )
+                        ) {
+                            return@post
+                        }
                         val payload = body.qrPayload.trim()
                         if (payload.isBlank()) {
                             logger.warn("host.checkin.scan invalid_payload length=0")
@@ -182,7 +212,10 @@ fun Application.hostCheckinRoutes(
                     get("/search") {
                         val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
                         val eventId = call.request.queryParameters["eventId"]?.toLongOrNull()
-                        val query = call.request.queryParameters["query"]?.trim().orEmpty()
+                        val query =
+                            call.request.queryParameters["query"]
+                                ?.trim()
+                                .orEmpty()
                         val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 20
                         if (clubId == null || clubId <= 0 || eventId == null || eventId <= 0) {
                             logger.warn("host.checkin.search validation_error club_id={} event_id={}", clubId, eventId)
@@ -269,7 +302,10 @@ private fun parseAction(value: String?): HostCheckinAction? {
 private suspend inline fun <reified T : Any> ApplicationCall.receiveOrNull(): T? =
     runCatching { receive<T>() }.getOrNull()
 
-private suspend fun ApplicationCall.respondCheckinError(status: HttpStatusCode, code: String) {
+private suspend fun ApplicationCall.respondCheckinError(
+    status: HttpStatusCode,
+    code: String,
+) {
     respondError(status, code)
 }
 
@@ -283,5 +319,9 @@ private fun ApplicationCall.toAuthContext(): AuthContext {
 }
 
 private fun readCheckinMaxBodyBytesFromEnvOrDefault(): Long =
-    (System.getenv("CHECKIN_MAX_BODY_BYTES")?.toLongOrNull()
-        ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)) ?: DEFAULT_CHECKIN_MAX_BYTES
+    (
+        System
+            .getenv("CHECKIN_MAX_BODY_BYTES")
+            ?.toLongOrNull()
+            ?.coerceIn(MIN_CHECKIN_MAX_BYTES, MAX_CHECKIN_MAX_BYTES)
+    ) ?: DEFAULT_CHECKIN_MAX_BYTES

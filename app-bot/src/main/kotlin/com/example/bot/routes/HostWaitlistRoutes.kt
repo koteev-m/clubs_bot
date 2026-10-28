@@ -1,16 +1,19 @@
 package com.example.bot.routes
 
 import com.example.bot.club.WaitlistRepository
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
-import com.example.bot.security.rbac.clubScoped
 import com.example.bot.security.rbac.canAccessClub
+import com.example.bot.security.rbac.clubScoped
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -92,14 +95,35 @@ fun Application.hostWaitlistRoutes(
                         val id = call.parameters["id"]?.toLongOrNull()
                         if (id == null || id <= 0) {
                             logger.warn("host.waitlist invite invalid_id={}", id)
-                            return@post call.respondWaitlistError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                            return@post call.respondWaitlistError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.validation_error,
+                            )
                         }
 
-                        val body = runCatching { call.receive<HostWaitlistInviteRequest>() }.getOrNull()
-                            ?: return@post call.respondWaitlistError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val body =
+                            runCatching { call.receive<HostWaitlistInviteRequest>() }.getOrNull()
+                                ?: return@post call.respondWaitlistError(
+                                    HttpStatusCode.BadRequest,
+                                    ErrorCodes.invalid_json,
+                                )
+                        if (!call.requireLegacyResources(
+                                LegacyReference(LegacyResource.CLUB, body.clubId),
+                                LegacyReference(LegacyResource.EVENT, body.eventId),
+                            )
+                        ) {
+                            return@post
+                        }
                         if (body.clubId <= 0 || body.eventId <= 0) {
-                            logger.warn("host.waitlist invite validation_error club_id={} event_id={}", body.clubId, body.eventId)
-                            return@post call.respondWaitlistError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                            logger.warn(
+                                "host.waitlist invite validation_error club_id={} event_id={}",
+                                body.clubId,
+                                body.eventId,
+                            )
+                            return@post call.respondWaitlistError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.validation_error,
+                            )
                         }
                         if (!call.rbacContext().canAccessClub(body.clubId)) {
                             return@post call.respondWaitlistError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
@@ -107,11 +131,21 @@ fun Application.hostWaitlistRoutes(
 
                         val entry = repository.get(id)
                         if (entry == null || entry.clubId != body.clubId || entry.eventId != body.eventId) {
-                            logger.warn("host.waitlist invite not_found id={} club_id={} event_id={}", id, body.clubId, body.eventId)
+                            logger.warn(
+                                "host.waitlist invite not_found id={} club_id={} event_id={}",
+                                id,
+                                body.clubId,
+                                body.eventId,
+                            )
                             return@post call.respondWaitlistError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         }
 
-                        logger.info("host.waitlist invite disabled id={} club_id={} event_id={}", id, body.clubId, body.eventId)
+                        logger.info(
+                            "host.waitlist invite disabled id={} club_id={} event_id={}",
+                            id,
+                            body.clubId,
+                            body.eventId,
+                        )
                         call.respond(
                             HostWaitlistInviteResponse(
                                 enabled = false,

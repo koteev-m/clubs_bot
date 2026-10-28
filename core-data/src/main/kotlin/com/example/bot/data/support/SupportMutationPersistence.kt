@@ -3,6 +3,7 @@ package com.example.bot.data.support
 import com.example.bot.audit.StandardAuditAction
 import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.audit.AuditLogTable
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.data.security.PermissionCode
 import com.example.bot.data.security.PermissionCodes
 import com.example.bot.data.security.Role
@@ -129,7 +130,7 @@ internal class SupportMutationPersistence(
             val ticketRow =
                 TicketsTable
                     .selectAll()
-                    .where { TicketsTable.id eq ticketId }
+                    .where { (TicketsTable.id eq ticketId) and unmappedClub(TicketsTable.clubId) }
                     .forUpdate()
                     .singleOrNull()
                     ?: return@newSuspendedTransaction AddGuestMessageResult.Failure(
@@ -491,7 +492,7 @@ internal class SupportMutationPersistence(
             .selectAll()
             .where {
                 (TicketsTable.id eq ticketId) and
-                    (TicketsTable.clubId inList permittedClubIds)
+                    (TicketsTable.clubId inList permittedClubIds) and unmappedClub(TicketsTable.clubId)
             }.forUpdate()
             .singleOrNull()
             ?.let { ticketRow -> authorizedTicket(ticketId, ticketRow, assignments) }
@@ -559,7 +560,7 @@ internal class SupportMutationPersistence(
     private fun loadTicket(ticketId: Long): Ticket =
         TicketsTable
             .selectAll()
-            .where { TicketsTable.id eq ticketId }
+            .where { (TicketsTable.id eq ticketId) and unmappedClub(TicketsTable.clubId) }
             .map(::toTicket)
             .single()
 

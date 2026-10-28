@@ -2,6 +2,8 @@
 
 package com.example.bot.data.music
 
+import com.example.bot.data.privacy.isMappedClub
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.music.MusicItemCreate
 import com.example.bot.music.MusicItemRepository
 import com.example.bot.music.MusicItemType
@@ -33,6 +35,7 @@ class MusicItemRepositoryImpl(
         actor: UserId,
     ): MusicItemView =
         newSuspendedTransaction(Dispatchers.IO, db) {
+            check(req.clubId?.let(::isMappedClub) != true) { "Club unavailable" }
             val row =
                 MusicItemsTable
                     .insert {
@@ -59,8 +62,9 @@ class MusicItemRepositoryImpl(
         actor: UserId,
     ): MusicItemView? =
         newSuspendedTransaction(Dispatchers.IO, db) {
+            if (req.clubId?.let(::isMappedClub) == true) return@newSuspendedTransaction null
             val updated =
-                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                MusicItemsTable.update({ (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }) {
                     req.clubId?.let { value -> it[clubId] = value }
                     req.title?.let { value -> it[title] = value }
                     req.dj?.let { value -> it[dj] = value }
@@ -78,7 +82,7 @@ class MusicItemRepositoryImpl(
             }
             MusicItemsTable
                 .selectAll()
-                .where { MusicItemsTable.id eq id }
+                .where { (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }
                 .firstOrNull()
                 ?.toView()
         }
@@ -90,12 +94,16 @@ class MusicItemRepositoryImpl(
     ): MusicItemView? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val updated =
-                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                MusicItemsTable.update({ (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }) {
                     it[this.publishedAt] = publishedAt?.atOffset(ZoneOffset.UTC)
                     it[updatedAt] = Instant.now().atOffset(ZoneOffset.UTC)
                 }
             if (updated == 0) return@newSuspendedTransaction null
-            MusicItemsTable.selectAll().where { MusicItemsTable.id eq id }.firstOrNull()?.toView()
+            MusicItemsTable
+                .selectAll()
+                .where { (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }
+                .firstOrNull()
+                ?.toView()
         }
 
     override suspend fun attachAudioAsset(
@@ -105,12 +113,16 @@ class MusicItemRepositoryImpl(
     ): MusicItemView? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val updated =
-                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                MusicItemsTable.update({ (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }) {
                     it[audioAssetId] = assetId
                     it[updatedAt] = Instant.now().atOffset(ZoneOffset.UTC)
                 }
             if (updated == 0) return@newSuspendedTransaction null
-            MusicItemsTable.selectAll().where { MusicItemsTable.id eq id }.firstOrNull()?.toView()
+            MusicItemsTable
+                .selectAll()
+                .where { (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }
+                .firstOrNull()
+                ?.toView()
         }
 
     override suspend fun attachCoverAsset(
@@ -120,19 +132,23 @@ class MusicItemRepositoryImpl(
     ): MusicItemView? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val updated =
-                MusicItemsTable.update({ MusicItemsTable.id eq id }) {
+                MusicItemsTable.update({ (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }) {
                     it[coverAssetId] = assetId
                     it[updatedAt] = Instant.now().atOffset(ZoneOffset.UTC)
                 }
             if (updated == 0) return@newSuspendedTransaction null
-            MusicItemsTable.selectAll().where { MusicItemsTable.id eq id }.firstOrNull()?.toView()
+            MusicItemsTable
+                .selectAll()
+                .where { (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }
+                .firstOrNull()
+                ?.toView()
         }
 
     override suspend fun getById(id: Long): MusicItemView? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicItemsTable
                 .selectAll()
-                .where { MusicItemsTable.id eq id }
+                .where { (MusicItemsTable.id eq id) and unmappedClub(MusicItemsTable.clubId) }
                 .firstOrNull()
                 ?.toView()
         }
@@ -142,7 +158,7 @@ class MusicItemRepositoryImpl(
         return newSuspendedTransaction(Dispatchers.IO, db) {
             MusicItemsTable
                 .selectAll()
-                .where { MusicItemsTable.id inList ids }
+                .where { (MusicItemsTable.id inList ids) and unmappedClub(MusicItemsTable.clubId) }
                 .map { it.toView() }
         }
     }
@@ -168,7 +184,7 @@ class MusicItemRepositoryImpl(
             }
             MusicItemsTable
                 .selectAll()
-                .where { cond }
+                .where { cond and unmappedClub(MusicItemsTable.clubId) }
                 .orderBy(MusicItemsTable.publishedAt, SortOrder.DESC)
                 .limit(limit, offset.toLong())
                 .map { it.toView() }
@@ -186,7 +202,7 @@ class MusicItemRepositoryImpl(
             if (type != null) cond = cond and (MusicItemsTable.itemType eq type.name)
             MusicItemsTable
                 .selectAll()
-                .where { cond }
+                .where { cond and unmappedClub(MusicItemsTable.clubId) }
                 .orderBy(MusicItemsTable.updatedAt, SortOrder.DESC)
                 .limit(limit, offset.toLong())
                 .map { it.toView() }
@@ -196,6 +212,7 @@ class MusicItemRepositoryImpl(
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicItemsTable
                 .selectAll()
+                .where { unmappedClub(MusicItemsTable.clubId) }
                 .orderBy(MusicItemsTable.updatedAt, SortOrder.DESC)
                 .limit(1)
                 .firstOrNull()
@@ -233,6 +250,7 @@ class MusicPlaylistRepositoryImpl(
         actor: UserId,
     ): PlaylistView =
         newSuspendedTransaction(Dispatchers.IO, db) {
+            check(req.clubId?.let(::isMappedClub) != true) { "Club unavailable" }
             val row =
                 MusicPlaylistsTable
                     .insert {
@@ -267,7 +285,7 @@ class MusicPlaylistRepositoryImpl(
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicPlaylistsTable
                 .selectAll()
-                .where { MusicPlaylistsTable.isActive eq true }
+                .where { (MusicPlaylistsTable.isActive eq true) and unmappedClub(MusicPlaylistsTable.clubId) }
                 .orderBy(MusicPlaylistsTable.updatedAt, SortOrder.DESC)
                 .limit(limit, offset.toLong())
                 .map { it.toView() }
@@ -303,14 +321,14 @@ class MusicPlaylistRepositoryImpl(
             val p =
                 MusicPlaylistsTable
                     .selectAll()
-                    .where { MusicPlaylistsTable.id eq id }
+                    .where { (MusicPlaylistsTable.id eq id) and unmappedClub(MusicPlaylistsTable.clubId) }
                     .firstOrNull()
                     ?.toView() ?: return@newSuspendedTransaction null
             val items =
                 MusicItemsTable
                     .innerJoin(MusicPlaylistItemsTable)
                     .selectAll()
-                    .where { MusicPlaylistItemsTable.playlistId eq id }
+                    .where { (MusicPlaylistItemsTable.playlistId eq id) and unmappedClub(MusicItemsTable.clubId) }
                     .orderBy(MusicPlaylistItemsTable.position)
                     .map { it.toItemView() }
             PlaylistFullView(p.id, p.clubId, p.title, p.description, p.coverUrl, items)
@@ -321,6 +339,7 @@ class MusicPlaylistRepositoryImpl(
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicPlaylistsTable
                 .selectAll()
+                .where { unmappedClub(MusicPlaylistsTable.clubId) }
                 .orderBy(MusicPlaylistsTable.updatedAt, SortOrder.DESC)
                 .limit(1)
                 .firstOrNull()

@@ -52,6 +52,7 @@ class JdbcClientOnboardingRepository(
                             body,
                         )
                     OnboardingRead.CLIENT_APPLICATION_GET -> applications.get(required(resourceId), platform = false)
+                    OnboardingRead.CLUB_PROFILE_GET -> ClubOnboardingOperations(session).get(required(resourceId))
                     OnboardingRead.PLATFORM_INVITATION_GET -> invitations.get(required(resourceId), platform = true)
                     OnboardingRead.PLATFORM_CLIENT_SEARCH -> clients.search(body)
                     OnboardingRead.PLATFORM_CLIENT_GET -> clients.get(required(resourceId))
@@ -99,8 +100,9 @@ class JdbcClientOnboardingRepository(
                                 keyHash,
                             )
                         if (existing != null) {
+                            val current = replay(session, existing, ownerOperation)
                             if (existing["request_hash"] != requestHash) fail("idempotency_conflict")
-                            replay(session, existing, ownerOperation)
+                            current
                         } else {
                             val result = execute(session, operation, resourceId, body)
                             sql.update(
@@ -147,6 +149,14 @@ class JdbcClientOnboardingRepository(
                 ClientAccessOperations(session).change(required(resourceId), operation, body)
             OnboardingMutation.APPLICATION_CREATE -> applications.create(required(resourceId), body)
             OnboardingMutation.APPLICATION_UPDATE -> applications.update(required(resourceId), body)
+            OnboardingMutation.APPLICATION_CREATE_CLUB ->
+                ClubOnboardingOperations(
+                    session,
+                ).create(required(resourceId), body)
+            OnboardingMutation.CLUB_PROFILE_UPDATE ->
+                ClubOnboardingOperations(
+                    session,
+                ).update(required(resourceId), body)
             else -> applications.transition(required(resourceId), operation, body)
         }
     }
@@ -162,6 +172,8 @@ class JdbcClientOnboardingRepository(
             "invitation" -> InvitationOperations(session).get(command.long("result_id"), platform)
             "application" -> ApplicationOperations(session).get(command.long("result_id"), platform)
             "member" -> ClientAccessOperations(session).memberView(command.long("client_id"), command.long("result_id"))
+            "club_create" -> ClubOnboardingOperations(session).replayCreate(command.long("result_id"))
+            "club_profile" -> ClubOnboardingOperations(session).get(command.long("result_id"), write = true)
             else -> error("Invalid stored command result")
         }
     }

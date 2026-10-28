@@ -70,6 +70,9 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     patch("/applications/{id}") { api.mutate(call, OnboardingMutation.APPLICATION_UPDATE, "id") }
     post("/applications/{id}/submit") { api.mutate(call, OnboardingMutation.APPLICATION_SUBMIT, "id") }
     post("/applications/{id}/cancel") { api.mutate(call, OnboardingMutation.APPLICATION_CANCEL, "id") }
+    post("/applications/{id}/club") { api.mutate(call, OnboardingMutation.APPLICATION_CREATE_CLUB, "id") }
+    get("/clubs/{id}/profile") { api.read(call, OnboardingRead.CLUB_PROFILE_GET, "id") }
+    patch("/clubs/{id}/profile") { api.mutate(call, OnboardingMutation.CLUB_PROFILE_UPDATE, "id") }
 }
 
 private fun Route.platformInvitationEndpoints(api: OnboardingHttp) {

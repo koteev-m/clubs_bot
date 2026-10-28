@@ -1,8 +1,11 @@
 package com.example.bot.routes
 
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.http.ErrorCodes
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promoter.invites.PromoterInviteQrCodec
 import com.example.bot.promoter.invites.PromoterInviteService
@@ -22,11 +25,11 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.MeterRegistry
+import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Instant
 import kotlin.text.Charsets
-import kotlinx.serialization.Serializable
-import org.slf4j.LoggerFactory
 
 private val JSON = ContentType.Application.Json.withCharset(Charsets.UTF_8)
 private val CSV = ContentType.parse("text/csv; charset=utf-8")
@@ -54,7 +57,9 @@ private data class InviteQrPayload(
 )
 
 @Serializable
-private data class InvitesResponse(val invites: List<PromoterInviteView>)
+private data class InvitesResponse(
+    val invites: List<PromoterInviteView>,
+)
 
 fun Application.promoterInvitesRoutes(
     promoterInviteService: PromoterInviteService,
@@ -71,8 +76,9 @@ fun Application.promoterInvitesRoutes(
 
             post("/invites") {
                 val user = call.attributes[MiniAppUserKey]
-                val request = runCatching { call.receive<IssueInviteRequest>() }.getOrNull()
-                    ?: return@post call.respondPromoterError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                val request =
+                    runCatching { call.receive<IssueInviteRequest>() }.getOrNull()
+                        ?: return@post call.respondPromoterError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                 val validationError =
                     when {
@@ -87,31 +93,60 @@ fun Application.promoterInvitesRoutes(
                             "promoter.invite.issue.failed",
                             "error_code",
                             validationError,
-                        )
-                        ?.increment()
-                    logger.warn("promoter.invite.issue error={} promoter_id={} event={} club={}", validationError, user.id, request.eventId, request.clubId)
+                        )?.increment()
+                    logger.warn(
+                        "promoter.invite.issue error={} promoter_id={} event={} club={}",
+                        validationError,
+                        user.id,
+                        request.eventId,
+                        request.clubId,
+                    )
                     return@post call.respondPromoterError(HttpStatusCode.BadRequest, validationError)
                 }
 
+                if (!call.requireLegacyResources(
+                        LegacyReference(LegacyResource.CLUB, request.clubId),
+                        LegacyReference(LegacyResource.EVENT, request.eventId),
+                    )
+                ) {
+                    return@post
+                }
                 val secret = qrSecretProvider()
                 if (secret.isBlank()) {
-                    meterRegistry?.counter("promoter.invite.issue.failed", "error_code", ErrorCodes.internal_error)?.increment()
+                    meterRegistry
+                        ?.counter(
+                            "promoter.invite.issue.failed",
+                            "error_code",
+                            ErrorCodes.internal_error,
+                        )?.increment()
                     logger.warn("promoter.invite.issue error={} promoter_id={}", ErrorCodes.internal_error, user.id)
                     return@post call.respondPromoterError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
                 }
 
                 val now = Instant.now(clock)
-                val invite = promoterInviteService.issueInvite(
-                    promoterId = user.id,
-                    clubId = request.clubId,
-                    eventId = request.eventId,
-                    guestName = request.guestName.trim(),
-                    guestCount = request.guestCount,
-                    now = now,
-                )
+                val invite =
+                    promoterInviteService.issueInvite(
+                        promoterId = user.id,
+                        clubId = request.clubId,
+                        eventId = request.eventId,
+                        guestName = request.guestName.trim(),
+                        guestCount = request.guestCount,
+                        now = now,
+                    )
                 val qrPayload = PromoterInviteQrCodec.encode(invite.id, invite.eventId, now, secret)
-                meterRegistry?.counter("promoter.invite.issue.success", "event_id", request.eventId.toString())?.increment()
-                logger.info("promoter.invite.issue ok promoter_id={} invite_id={} event_id={} club_id={}", user.id, invite.id, invite.eventId, invite.clubId)
+                meterRegistry
+                    ?.counter(
+                        "promoter.invite.issue.success",
+                        "event_id",
+                        request.eventId.toString(),
+                    )?.increment()
+                logger.info(
+                    "promoter.invite.issue ok promoter_id={} invite_id={} event_id={} club_id={}",
+                    user.id,
+                    invite.id,
+                    invite.eventId,
+                    invite.clubId,
+                )
                 call.applyPromoterHeaders(NO_STORE)
                 call.respond(
                     status = HttpStatusCode.Created,
@@ -121,19 +156,26 @@ fun Application.promoterInvitesRoutes(
 
             get("/invites") {
                 val user = call.attributes[MiniAppUserKey]
-                val eventId = call.requireEventIdOrValidationError()
-                    ?: return@get call.respondPromoterError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                val eventId =
+                    call.requireEventIdOrValidationError()
+                        ?: return@get call.respondPromoterError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
                 val invites = promoterInviteService.listInvites(user.id, eventId)
-                logger.info("promoter.invite.list ok promoter_id={} event_id={} count={}", user.id, eventId, invites.size)
+                logger.info(
+                    "promoter.invite.list ok promoter_id={} event_id={} count={}",
+                    user.id,
+                    eventId,
+                    invites.size,
+                )
                 call.applyPromoterHeaders(NO_STORE)
                 call.respond(InvitesResponse(invites))
             }
 
             post("/invites/{id}/revoke") {
                 val user = call.attributes[MiniAppUserKey]
-                val id = call.parameters["id"]?.toLongOrNull()
-                    ?: return@post call.respondPromoterError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                val id =
+                    call.parameters["id"]?.toLongOrNull()
+                        ?: return@post call.respondPromoterError(HttpStatusCode.NotFound, ErrorCodes.not_found)
 
                 when (val result = promoterInviteService.revokeInvite(user.id, id)) {
                     is PromoterInviteService.RevokeResult.Success -> {
@@ -143,17 +185,32 @@ fun Application.promoterInvitesRoutes(
                     }
 
                     PromoterInviteService.RevokeResult.NotFound -> {
-                        logger.warn("promoter.invite.revoke error={} invite_id={} promoter_id={}", ErrorCodes.not_found, id, user.id)
+                        logger.warn(
+                            "promoter.invite.revoke error={} invite_id={} promoter_id={}",
+                            ErrorCodes.not_found,
+                            id,
+                            user.id,
+                        )
                         call.respondPromoterError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                     }
 
                     PromoterInviteService.RevokeResult.Forbidden -> {
-                        logger.warn("promoter.invite.revoke error={} invite_id={} promoter_id={}", ErrorCodes.forbidden, id, user.id)
+                        logger.warn(
+                            "promoter.invite.revoke error={} invite_id={} promoter_id={}",
+                            ErrorCodes.forbidden,
+                            id,
+                            user.id,
+                        )
                         call.respondPromoterError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
 
                     PromoterInviteService.RevokeResult.InvalidState -> {
-                        logger.warn("promoter.invite.revoke error={} invite_id={} promoter_id={}", ErrorCodes.invalid_state, id, user.id)
+                        logger.warn(
+                            "promoter.invite.revoke error={} invite_id={} promoter_id={}",
+                            ErrorCodes.invalid_state,
+                            id,
+                            user.id,
+                        )
                         call.respondPromoterError(HttpStatusCode.Conflict, ErrorCodes.invalid_state)
                     }
                 }
@@ -161,11 +218,17 @@ fun Application.promoterInvitesRoutes(
 
             get("/invites/export.csv") {
                 val user = call.attributes[MiniAppUserKey]
-                val eventId = call.requireEventIdOrValidationError()
-                    ?: return@get call.respondPromoterError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                val eventId =
+                    call.requireEventIdOrValidationError()
+                        ?: return@get call.respondPromoterError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
                 val csv = promoterInviteService.exportCsv(user.id, eventId)
-                logger.info("promoter.invite.export ok promoter_id={} event_id={} rows={}", user.id, eventId, csv.lineSequence().count() - 1)
+                logger.info(
+                    "promoter.invite.export ok promoter_id={} event_id={} rows={}",
+                    user.id,
+                    eventId,
+                    csv.lineSequence().count() - 1,
+                )
                 call.applyPromoterHeaders(NO_STORE)
                 call.respondText(csv, contentType = CSV)
             }

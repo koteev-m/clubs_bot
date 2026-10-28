@@ -15,6 +15,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
@@ -22,7 +23,6 @@ import java.time.Instant
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import org.slf4j.LoggerFactory
 
 class BookingState(
     private val layoutRepository: LayoutRepository,
@@ -38,6 +38,7 @@ class BookingState(
     private val watermarkRetention: Duration = Duration.ofDays(7),
     private val maxIdempotencyEntries: Int = 10_000,
     meterRegistry: MeterRegistry? = null,
+    private val isLegacyClub: (Long) -> Boolean = { true },
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(BookingState::class.java)
     private val sequence = AtomicLong(1)
@@ -75,6 +76,7 @@ class BookingState(
         requestHash: String,
         promoterId: Long? = null,
     ): HoldResult {
+        if (!isLegacyClub(clubId)) return HoldResult.Error(BookingError.NOT_FOUND)
         val layout = layoutRepository.getLayout(clubId, eventId) ?: return HoldResult.Error(BookingError.NOT_FOUND)
         val table = layout.tables.find { it.id == tableId } ?: return HoldResult.Error(BookingError.NOT_FOUND)
         if (guestCount < 1) return HoldResult.Error(BookingError.VALIDATION_ERROR)
@@ -117,13 +119,14 @@ class BookingState(
             HoldQuotaResult.NoQuotaConfigured, null -> Unit
         }
         val tookHold: Boolean =
-            tableLocks.compute(key) { _, prev ->
-                val cur = prev?.evictIfExpired(now) ?: TableState.free()
-                when (cur.status) {
-                    TableOccupancy.FREE -> TableState(TableOccupancy.HOLD, bookingId, expiresAt)
-                    else -> cur
-                }
-            }?.bookingId == bookingId
+            tableLocks
+                .compute(key) { _, prev ->
+                    val cur = prev?.evictIfExpired(now) ?: TableState.free()
+                    when (cur.status) {
+                        TableOccupancy.FREE -> TableState(TableOccupancy.HOLD, bookingId, expiresAt)
+                        else -> cur
+                    }
+                }?.bookingId == bookingId
 
         if (!tookHold) {
             if (quotaReserved && promoterId != null) {
@@ -132,23 +135,24 @@ class BookingState(
             return HoldResult.Error(BookingError.TABLE_NOT_AVAILABLE)
         }
 
-        val booking = Booking(
-            id = bookingId,
-            userId = userId,
-            promoterId = promoterId,
-            clubId = clubId,
-            tableId = tableId,
-            eventId = eventId,
-            status = BookingStatus.HOLD,
-            guestCount = guestCount,
-            arrivalWindow = arrivalStart to arrivalEnd,
-            latePlusOneAllowedUntil = latePlusOneUntil,
-            plusOneUsed = false,
-            capacityAtHold = table.capacity,
-            createdAt = now,
-            updatedAt = now,
-            holdExpiresAt = expiresAt,
-        )
+        val booking =
+            Booking(
+                id = bookingId,
+                userId = userId,
+                promoterId = promoterId,
+                clubId = clubId,
+                tableId = tableId,
+                eventId = eventId,
+                status = BookingStatus.HOLD,
+                guestCount = guestCount,
+                arrivalWindow = arrivalStart to arrivalEnd,
+                latePlusOneAllowedUntil = latePlusOneUntil,
+                plusOneUsed = false,
+                capacityAtHold = table.capacity,
+                createdAt = now,
+                updatedAt = now,
+                holdExpiresAt = expiresAt,
+            )
 
         bookings[bookingId] = booking
         lastUpdated[key] = now
@@ -167,6 +171,7 @@ class BookingState(
         idempotencyKey: String,
         requestHash: String,
     ): ConfirmResult {
+        if (!isLegacyClub(clubId)) return ConfirmResult.Error(BookingError.NOT_FOUND)
         val now = Instant.now(clock)
         cleanupExpired(now)
 
@@ -176,7 +181,12 @@ class BookingState(
             if (stored.isExpired(now, idempotencyTtl)) {
                 idempotency.remove(idemKey)
             } else if (stored.requestHash == requestHash) {
-                return ConfirmResult.Success(stored.snapshot.toBooking(), stored.snapshot, stored.bodyJson, cached = true)
+                return ConfirmResult.Success(
+                    stored.snapshot.toBooking(),
+                    stored.snapshot,
+                    stored.bodyJson,
+                    cached = true,
+                )
             } else {
                 return ConfirmResult.Error(BookingError.IDEMPOTENCY_CONFLICT)
             }
@@ -219,6 +229,8 @@ class BookingState(
         idempotencyKey: String,
         requestHash: String,
     ): PlusOneResult {
+        val clubId = bookings[bookingId]?.clubId ?: return PlusOneResult.Error(BookingError.NOT_FOUND)
+        if (!isLegacyClub(clubId)) return PlusOneResult.Error(BookingError.NOT_FOUND)
         val now = Instant.now(clock)
         cleanupExpired(now)
 
@@ -228,7 +240,12 @@ class BookingState(
             if (stored.isExpired(now, idempotencyTtl)) {
                 idempotency.remove(idemKey)
             } else if (stored.requestHash == requestHash) {
-                return PlusOneResult.Success(stored.snapshot.toBooking(), stored.snapshot, stored.bodyJson, cached = true)
+                return PlusOneResult.Success(
+                    stored.snapshot.toBooking(),
+                    stored.snapshot,
+                    stored.bodyJson,
+                    cached = true,
+                )
             } else {
                 return PlusOneResult.Error(BookingError.IDEMPOTENCY_CONFLICT)
             }
@@ -245,28 +262,34 @@ class BookingState(
         if (capacity == null) return PlusOneResult.Error(BookingError.NOT_FOUND)
 
         var applied = false
-        val booking = bookings.compute(bookingId) { _, current ->
-            val cur = current ?: return@compute null
-            if (cur.userId != userId) return@compute cur
-            val deadline = cur.latePlusOneAllowedUntil
-            if (cur.status != BookingStatus.BOOKED || cur.plusOneUsed || (deadline != null && now.isAfter(deadline))) {
-                return@compute cur
-            }
-            if (cur.guestCount + 1 > capacity) return@compute cur
+        val booking =
+            bookings.compute(bookingId) { _, current ->
+                val cur = current ?: return@compute null
+                if (cur.userId != userId) return@compute cur
+                val deadline = cur.latePlusOneAllowedUntil
+                if (cur.status != BookingStatus.BOOKED ||
+                    cur.plusOneUsed ||
+                    (deadline != null && now.isAfter(deadline))
+                ) {
+                    return@compute cur
+                }
+                if (cur.guestCount + 1 > capacity) return@compute cur
 
-            cur.plusOneUsed = true
-            cur.guestCount += 1
-            cur.updatedAt = now
-            applied = true
-            cur
-        } ?: return PlusOneResult.Error(BookingError.NOT_FOUND)
+                cur.plusOneUsed = true
+                cur.guestCount += 1
+                cur.updatedAt = now
+                applied = true
+                cur
+            } ?: return PlusOneResult.Error(BookingError.NOT_FOUND)
 
         if (booking.userId != userId) return PlusOneResult.Error(BookingError.FORBIDDEN)
         if (!applied) {
             return when {
                 booking.status != BookingStatus.BOOKED -> PlusOneResult.Error(BookingError.INVALID_STATE)
                 booking.plusOneUsed -> PlusOneResult.Error(BookingError.PLUS_ONE_ALREADY_USED)
-                booking.latePlusOneAllowedUntil?.let(now::isAfter) == true -> PlusOneResult.Error(BookingError.LATE_PLUS_ONE_EXPIRED)
+                booking.latePlusOneAllowedUntil?.let(
+                    now::isAfter,
+                ) == true -> PlusOneResult.Error(BookingError.LATE_PLUS_ONE_EXPIRED)
                 booking.guestCount + 1 > capacity -> PlusOneResult.Error(BookingError.CAPACITY_EXCEEDED)
                 else -> PlusOneResult.Error(BookingError.INVALID_STATE)
             }
@@ -281,13 +304,13 @@ class BookingState(
     fun findBookingById(bookingId: Long): Booking? {
         val now = Instant.now(clock)
         cleanupExpired(now)
-        return bookings[bookingId]?.copy()
+        return bookings[bookingId]?.takeIf { isLegacyClub(it.clubId) }?.copy()
     }
 
     fun findUserBookings(userId: Long): List<Booking> {
         val now = Instant.now(clock)
         cleanupExpired(now)
-        return bookings.values.filter { it.userId == userId }.map { it.copy() }
+        return bookings.values.filter { it.userId == userId && isLegacyClub(it.clubId) }.map { it.copy() }
     }
 
     /**
@@ -297,7 +320,11 @@ class BookingState(
      * and the returned list contains defensive copies, so callers can safely aggregate
      * and expose them without risking mutations of the internal state.
      */
-    fun findBookingsForEvent(clubId: Long, eventId: Long): List<Booking> {
+    fun findBookingsForEvent(
+        clubId: Long,
+        eventId: Long,
+    ): List<Booking> {
+        if (!isLegacyClub(clubId)) return emptyList()
         val now = Instant.now(clock)
         cleanupExpired(now)
         return bookings.values
@@ -309,7 +336,10 @@ class BookingState(
 
     fun snapshotOf(booking: Booking): BookingResponseSnapshot = booking.toSnapshot()
 
-    fun tableStatus(eventId: Long, tableId: Long): TableStatus {
+    fun tableStatus(
+        eventId: Long,
+        tableId: Long,
+    ): TableStatus {
         val now = Instant.now(clock)
         val key = eventId to tableId
         var expired = false
@@ -336,11 +366,12 @@ class BookingState(
         }
     }
 
-    fun lastUpdatedAt(eventId: Long, tableId: Long): Instant? =
-        lastUpdated[eventId to tableId]
+    fun lastUpdatedAt(
+        eventId: Long,
+        tableId: Long,
+    ): Instant? = lastUpdated[eventId to tableId]
 
-    fun lastUpdatedAt(eventId: Long): Instant? =
-        eventWatermark[eventId]?.get()
+    fun lastUpdatedAt(eventId: Long): Instant? = eventWatermark[eventId]?.get()
 
     fun bookingClubId(bookingId: Long): Long? = bookings[bookingId]?.clubId
 
@@ -431,19 +462,27 @@ class BookingState(
         now: Instant,
     ) {
         val promoterId = booking.promoterId ?: return
+        if (!isLegacyClub(booking.clubId)) return
         // Releases the reserved quota slot for promoter HOLDs. Safe to call
         // multiple times across confirm/cleanup flows because the quota service
         // is idempotent for expired/missing quotas.
         promoterQuotaService?.releaseHoldIfTracked(booking.clubId, promoterId, booking.tableId, now)
     }
 
-    private fun bumpWatermark(eventId: Long, now: Instant) {
+    private fun bumpWatermark(
+        eventId: Long,
+        now: Instant,
+    ) {
         eventWatermark
-            .computeIfAbsent(eventId) { java.util.concurrent.atomic.AtomicReference(Instant.EPOCH) }
-            .updateAndGet { prev -> if (now.isAfter(prev)) now else prev }
+            .computeIfAbsent(eventId) {
+                java.util.concurrent.atomic
+                    .AtomicReference(Instant.EPOCH)
+            }.updateAndGet { prev -> if (now.isAfter(prev)) now else prev }
     }
 
-    private fun pruneIdempotency(@Suppress("UNUSED_PARAMETER") now: Instant) {
+    private fun pruneIdempotency(
+        @Suppress("UNUSED_PARAMETER") now: Instant,
+    ) {
         if (idempotency.size <= maxIdempotencyEntries) return
         val overflow = idempotency.size - maxIdempotencyEntries
         idempotency.entries
@@ -458,13 +497,12 @@ private data class TableState(
     val bookingId: Long?,
     val expiresAt: Instant?,
 ) {
-    fun evictIfExpired(now: Instant): TableState? {
-        return if (expiresAt != null && expiresAt.isBefore(now)) {
+    fun evictIfExpired(now: Instant): TableState? =
+        if (expiresAt != null && expiresAt.isBefore(now)) {
             null
         } else {
             this
         }
-    }
 
     companion object {
         fun free(): TableState = TableState(TableOccupancy.FREE, null, null)
@@ -485,7 +523,11 @@ inline fun <reified T> hashRequestCanonical(payload: T): String {
 }
 
 @PublishedApi
-internal val CanonJson = Json { encodeDefaults = true; explicitNulls = false }
+internal val CanonJson =
+    Json {
+        encodeDefaults = true
+        explicitNulls = false
+    }
 
 private fun Booking.toSnapshot(): BookingResponseSnapshot {
     val arrival = listOf(arrivalWindow.first.toString(), arrivalWindow.second.toString())

@@ -1,5 +1,7 @@
 package com.example.bot.routes
 
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
@@ -12,6 +14,7 @@ import com.example.bot.music.MusicItemType
 import com.example.bot.music.MusicItemUpdate
 import com.example.bot.music.MusicSource
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -162,8 +165,9 @@ fun Application.adminMusicRoutes(
                     }
 
                     post {
-                        val payload = runCatching { call.receive<AdminMusicItemCreateRequest>() }.getOrNull()
-                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val payload =
+                            runCatching { call.receive<AdminMusicItemCreateRequest>() }.getOrNull()
+                                ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                         if (payload.title.isBlank()) {
                             return@post call.respondError(
@@ -187,6 +191,11 @@ fun Application.adminMusicRoutes(
                             )
                         }
 
+                        if (payload.clubId != null &&
+                            !call.requireLegacyResources(LegacyReference(LegacyResource.CLUB, payload.clubId))
+                        ) {
+                            return@post
+                        }
                         if (!call.isAllowedForClub(payload.clubId)) {
                             return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
@@ -223,8 +232,9 @@ fun Application.adminMusicRoutes(
                                 details = mapOf("id" to "must_be_positive"),
                             )
                         }
-                        val item = itemsRepository.getById(id)
-                            ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                        val item =
+                            itemsRepository.getById(id)
+                                ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         if (!call.isAllowedForClub(item.clubId)) {
                             return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
@@ -240,13 +250,15 @@ fun Application.adminMusicRoutes(
                                 details = mapOf("id" to "must_be_positive"),
                             )
                         }
-                        val existing = itemsRepository.getById(id)
-                            ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                        val existing =
+                            itemsRepository.getById(id)
+                                ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         if (!call.isAllowedForClub(existing.clubId)) {
                             return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
-                        val payload = runCatching { call.receive<AdminMusicItemUpdateRequest>() }.getOrNull()
-                            ?: return@put call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val payload =
+                            runCatching { call.receive<AdminMusicItemUpdateRequest>() }.getOrNull()
+                                ?: return@put call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                         if (payload.title.isBlank()) {
                             return@put call.respondError(
@@ -268,6 +280,11 @@ fun Application.adminMusicRoutes(
                                 ErrorCodes.validation_error,
                                 details = mapOf("clubId" to "must_be_positive"),
                             )
+                        }
+                        if (payload.clubId != null &&
+                            !call.requireLegacyResources(LegacyReference(LegacyResource.CLUB, payload.clubId))
+                        ) {
+                            return@put
                         }
                         if (!call.isAllowedForClub(payload.clubId)) {
                             return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
@@ -306,8 +323,9 @@ fun Application.adminMusicRoutes(
                             details = mapOf("id" to "must_be_positive"),
                         )
                     }
-                    val existing = itemsRepository.getById(id)
-                        ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                    val existing =
+                        itemsRepository.getById(id)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                     if (!call.isAllowedForClub(existing.clubId)) {
                         return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
@@ -331,8 +349,9 @@ fun Application.adminMusicRoutes(
                             details = mapOf("id" to "must_be_positive"),
                         )
                     }
-                    val existing = itemsRepository.getById(id)
-                        ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                    val existing =
+                        itemsRepository.getById(id)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                     if (!call.isAllowedForClub(existing.clubId)) {
                         return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
@@ -361,8 +380,9 @@ fun Application.adminMusicRoutes(
                                 details = mapOf("id" to "must_be_positive"),
                             )
                         }
-                        val item = itemsRepository.getById(id)
-                            ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                        val item =
+                            itemsRepository.getById(id)
+                                ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         if (!call.isAllowedForClub(item.clubId)) {
                             return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
@@ -428,8 +448,9 @@ fun Application.adminMusicRoutes(
                                 details = mapOf("id" to "must_be_positive"),
                             )
                         }
-                        val item = itemsRepository.getById(id)
-                            ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                        val item =
+                            itemsRepository.getById(id)
+                                ?: return@put call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
                         if (!call.isAllowedForClub(item.clubId)) {
                             return@put call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
@@ -531,9 +552,15 @@ private suspend fun ApplicationCall.receiveUpload(
                                 error =
                                     when (throwable) {
                                         is MusicPayloadTooLargeException ->
-                                            MusicUploadResult.Error(HttpStatusCode.PayloadTooLarge, ErrorCodes.payload_too_large)
+                                            MusicUploadResult.Error(
+                                                HttpStatusCode.PayloadTooLarge,
+                                                ErrorCodes.payload_too_large,
+                                            )
                                         else ->
-                                            MusicUploadResult.Error(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
+                                            MusicUploadResult.Error(
+                                                HttpStatusCode.InternalServerError,
+                                                ErrorCodes.internal_error,
+                                            )
                                     }
                                 part.dispose()
                                 return@forEachPart
@@ -610,14 +637,13 @@ internal suspend fun readLimitedWithShaToTempFile(
 
 private class MusicPayloadTooLargeException : IOException()
 
-private suspend fun ApplicationCall.isAllowedForClub(clubId: Long?): Boolean {
-    return if (clubId == null) {
+private suspend fun ApplicationCall.isAllowedForClub(clubId: Long?): Boolean =
+    if (clubId == null) {
         val roles = rbacContext().roles
         roles.any { it == Role.OWNER || it == Role.GLOBAL_ADMIN }
     } else {
         isAdminClubAllowed(clubId)
     }
-}
 
 private fun com.example.bot.music.MusicItemView.toAdminResponse(): AdminMusicItemResponse =
     AdminMusicItemResponse(

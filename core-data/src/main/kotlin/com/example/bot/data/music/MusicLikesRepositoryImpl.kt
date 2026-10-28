@@ -1,5 +1,7 @@
 package com.example.bot.data.music
 
+import com.example.bot.data.privacy.LegacyResource
+import com.example.bot.data.privacy.unmappedResource
 import com.example.bot.music.Like
 import com.example.bot.music.MusicLikesRepository
 import kotlinx.coroutines.Dispatchers
@@ -8,12 +10,12 @@ import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.count
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insertIgnore
-import org.jetbrains.exposed.sql.count
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.slice
-import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.time.Instant
 import java.time.ZoneOffset
@@ -22,7 +24,11 @@ import java.time.ZoneOffset
 class MusicLikesRepositoryImpl(
     private val db: Database,
 ) : MusicLikesRepository {
-    override suspend fun like(userId: Long, itemId: Long, now: Instant): Boolean =
+    override suspend fun like(
+        userId: Long,
+        itemId: Long,
+        now: Instant,
+    ): Boolean =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val inserted =
                 MusicLikesTable.insertIgnore {
@@ -33,33 +39,44 @@ class MusicLikesRepositoryImpl(
             (inserted.insertedCount > 0)
         }
 
-    override suspend fun unlike(userId: Long, itemId: Long): Boolean =
+    override suspend fun unlike(
+        userId: Long,
+        itemId: Long,
+    ): Boolean =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicLikesTable.deleteWhere {
                 (MusicLikesTable.userId eq userId) and (MusicLikesTable.itemId eq itemId)
             } > 0
         }
 
-    override suspend fun findUserLikesSince(userId: Long, since: Instant): List<Like> =
+    override suspend fun findUserLikesSince(
+        userId: Long,
+        since: Instant,
+    ): List<Like> =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicLikesTable
                 .select {
                     (MusicLikesTable.userId eq userId) and
-                        (MusicLikesTable.likedAt greaterEq since.atOffset(ZoneOffset.UTC))
-                }
-                .orderBy(MusicLikesTable.likedAt, SortOrder.DESC)
+                        (MusicLikesTable.likedAt greaterEq since.atOffset(ZoneOffset.UTC)) and
+                        unmappedResource(LegacyResource.MUSIC_ITEM, MusicLikesTable.itemId)
+                }.orderBy(MusicLikesTable.likedAt, SortOrder.DESC)
                 .map { it.toLike() }
         }
 
     override suspend fun findAllLikesSince(since: Instant): List<Like> =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicLikesTable
-                .select { MusicLikesTable.likedAt greaterEq since.atOffset(ZoneOffset.UTC) }
-                .orderBy(MusicLikesTable.likedAt, SortOrder.DESC)
+                .select {
+                    (MusicLikesTable.likedAt greaterEq since.atOffset(ZoneOffset.UTC)) and
+                        unmappedResource(LegacyResource.MUSIC_ITEM, MusicLikesTable.itemId)
+                }.orderBy(MusicLikesTable.likedAt, SortOrder.DESC)
                 .map { it.toLike() }
         }
 
-    override suspend fun aggregateUserLikesSince(clubId: Long, since: Instant): Map<Long, Int> =
+    override suspend fun aggregateUserLikesSince(
+        clubId: Long,
+        since: Instant,
+    ): Map<Long, Int> =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val countExpr = MusicLikesTable.userId.count()
             MusicLikesTable
@@ -67,16 +84,19 @@ class MusicLikesRepositoryImpl(
                 .slice(MusicLikesTable.userId, countExpr)
                 .select {
                     (MusicItemsTable.clubId eq clubId) and
-                        (MusicLikesTable.likedAt greaterEq since.atOffset(ZoneOffset.UTC))
-                }
-                .groupBy(MusicLikesTable.userId)
+                        (MusicLikesTable.likedAt greaterEq since.atOffset(ZoneOffset.UTC)) and
+                        unmappedResource(LegacyResource.MUSIC_ITEM, MusicLikesTable.itemId)
+                }.groupBy(MusicLikesTable.userId)
                 .associate { row ->
                     val count = row[countExpr].coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                     row[MusicLikesTable.userId] to count
                 }
         }
 
-    override suspend fun find(userId: Long, itemId: Long): Like? =
+    override suspend fun find(
+        userId: Long,
+        itemId: Long,
+    ): Like? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicLikesTable
                 .select { (MusicLikesTable.userId eq userId) and (MusicLikesTable.itemId eq itemId) }
@@ -103,7 +123,10 @@ class MusicLikesRepositoryImpl(
         }
     }
 
-    override suspend fun likedItemsForUser(userId: Long, itemIds: Collection<Long>): Set<Long> {
+    override suspend fun likedItemsForUser(
+        userId: Long,
+        itemIds: Collection<Long>,
+    ): Set<Long> {
         if (itemIds.isEmpty()) return emptySet()
         return newSuspendedTransaction(Dispatchers.IO, db) {
             MusicLikesTable
