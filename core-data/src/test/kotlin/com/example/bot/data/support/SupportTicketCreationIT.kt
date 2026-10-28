@@ -13,6 +13,7 @@ import org.flywaydb.core.api.FlywayException
 import org.jetbrains.exposed.sql.Database
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -39,11 +40,19 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
-@RequiresDocker
 @Tag("it")
-@Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class SupportTicketCreationIT {
+internal abstract class SupportTicketCreationContract {
+    protected abstract val jdbcUrl: String
+    protected abstract val username: String
+    protected abstract val password: String
+
+    protected open fun startPostgres() = Unit
+
+    protected open fun stopPostgres() = Unit
+
+    private lateinit var legacyDataSource: HikariDataSource
+    private lateinit var currentFixture: LegacyFixture
     private lateinit var dataSource: HikariDataSource
     private lateinit var database: Database
     private lateinit var legacyFixture: LegacyFixture
@@ -56,12 +65,12 @@ class SupportTicketCreationIT {
 
     @BeforeAll
     fun migrateFromLegacySchema() {
-        postgres.start()
+        startPostgres()
         val locations = arrayOf("classpath:db/migration/common", "classpath:db/migration/postgresql")
         val legacyFlyway =
             Flyway
                 .configure()
-                .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
+                .dataSource(jdbcUrl, username, password)
                 .locations(*locations)
                 .target(LEGACY_VERSION)
                 .cleanDisabled(false)
@@ -69,7 +78,7 @@ class SupportTicketCreationIT {
         legacyFlyway.clean()
         legacyFlyway.migrate()
 
-        postgres.createConnection("").use { connection ->
+        java.sql.DriverManager.getConnection(jdbcUrl, username, password).use { connection ->
             legacyFixture = insertLegacyFixture(connection)
             legacyRowsBeforeMigration = readLegacyRows(connection, legacyFixture)
         }
@@ -77,7 +86,7 @@ class SupportTicketCreationIT {
         val latestFlyway =
             Flyway
                 .configure()
-                .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
+                .dataSource(jdbcUrl, username, password)
                 .locations(*locations)
                 .target(EXPECTED_VERSION)
                 .load()
@@ -90,16 +99,16 @@ class SupportTicketCreationIT {
                 ?.toString()
                 .orEmpty()
 
-        dataSource =
-            HikariDataSource(
-                HikariConfig().apply {
-                    jdbcUrl = postgres.jdbcUrl
-                    driverClassName = postgres.driverClassName
-                    username = postgres.username
-                    password = postgres.password
-                    maximumPoolSize = 3
-                },
-            )
+        legacyDataSource = connectionPool(jdbcUrl)
+        val currentJdbcUrl = createDatabase("support_current")
+        Flyway
+            .configure()
+            .dataSource(currentJdbcUrl, username, password)
+            .locations(*locations)
+            .load()
+            .migrate()
+        dataSource = connectionPool(currentJdbcUrl)
+        dataSource.connection.use { currentFixture = insertLegacyFixture(it) }
         database = Database.connect(dataSource)
     }
 
@@ -113,8 +122,8 @@ class SupportTicketCreationIT {
             connection
                 .prepareStatement("DELETE FROM tickets WHERE id <> ? AND id <> ?")
                 .use { statement ->
-                    statement.setLong(1, legacyFixture.openedTicketId)
-                    statement.setLong(2, legacyFixture.answeredTicketId)
+                    statement.setLong(1, currentFixture.openedTicketId)
+                    statement.setLong(2, currentFixture.answeredTicketId)
                     statement.executeUpdate()
                 }
         }
@@ -127,10 +136,13 @@ class SupportTicketCreationIT {
 
     @AfterAll
     fun closeDatabase() {
-        if (::dataSource.isInitialized) {
-            dataSource.close()
-        }
-        postgres.stop()
+        // JUnit also invokes AfterAll after a failed BeforeAll and retains the original failure.
+        // Attempt every cleanup even when one pool or database cannot be closed.
+        assertAll(
+            { if (::dataSource.isInitialized) dataSource.close() },
+            { if (::legacyDataSource.isInitialized) legacyDataSource.close() },
+            { stopPostgres() },
+        )
     }
 
     @Test
@@ -138,7 +150,8 @@ class SupportTicketCreationIT {
         assertEquals(1, migrationsExecuted)
         assertEquals(EXPECTED_VERSION, currentMigrationVersion)
 
-        dataSource.connection.use { connection ->
+        legacyDataSource.connection.use { connection ->
+            connection.metaData.getTables(null, "public", "client_clubs", null).use { assertFalse(it.next()) }
             assertEquals(legacyRowsBeforeMigration, readLegacyRows(connection, legacyFixture))
 
             connection
@@ -206,19 +219,12 @@ class SupportTicketCreationIT {
 
     @Test
     fun `V057 fails closed when the expected legacy status constraint was renamed`() {
-        val driftDatabaseName = "support_v057_drift_${UUID.randomUUID().toString().replace("-", "")}"
-        postgres.createConnection("").use { connection ->
-            connection.createStatement().use { statement ->
-                statement.execute("CREATE DATABASE $driftDatabaseName")
-            }
-        }
-        val driftJdbcUrl =
-            "jdbc:postgresql://${postgres.host}:${postgres.firstMappedPort}/$driftDatabaseName"
+        val driftJdbcUrl = createDatabase("support_v057_drift")
         val locations = arrayOf("classpath:db/migration/common", "classpath:db/migration/postgresql")
         val legacyFlyway =
             Flyway
                 .configure()
-                .dataSource(driftJdbcUrl, postgres.username, postgres.password)
+                .dataSource(driftJdbcUrl, username, password)
                 .locations(*locations)
                 .target(LEGACY_VERSION)
                 .load()
@@ -262,7 +268,7 @@ class SupportTicketCreationIT {
         val latestFlyway =
             Flyway
                 .configure()
-                .dataSource(driftJdbcUrl, postgres.username, postgres.password)
+                .dataSource(driftJdbcUrl, username, password)
                 .locations(*locations)
                 .target(EXPECTED_VERSION)
                 .load()
@@ -343,12 +349,14 @@ class SupportTicketCreationIT {
     @Test
     fun `service persists one NEW ticket and its exact initial GUEST message`() =
         runBlocking {
+            assertCurrentSchema()
+            val ticketsBefore = dataSource.connection.use(::ticketCount)
             val service = SupportServiceImpl(SupportRepository(database, fixedClock))
 
             val result =
                 service.createTicket(
-                    clubId = legacyFixture.clubId,
-                    userId = legacyFixture.userId,
+                    clubId = currentFixture.clubId,
+                    userId = currentFixture.userId,
                     bookingId = null,
                     listEntryId = null,
                     topic = TicketTopic.LOST_FOUND,
@@ -358,8 +366,8 @@ class SupportTicketCreationIT {
 
             assertTrue(result is SupportServiceResult.Success)
             val created = (result as SupportServiceResult.Success).value
-            assertEquals(legacyFixture.clubId, created.ticket.clubId)
-            assertEquals(legacyFixture.userId, created.ticket.userId)
+            assertEquals(currentFixture.clubId, created.ticket.clubId)
+            assertEquals(currentFixture.userId, created.ticket.userId)
             assertEquals(TicketTopic.LOST_FOUND, created.ticket.topic)
             assertEquals(TicketStatus.NEW, created.ticket.status)
             assertNull(created.ticket.bookingId)
@@ -375,12 +383,12 @@ class SupportTicketCreationIT {
             assertEquals(fixedInstant, created.initialMessage.createdAt)
 
             dataSource.connection.use { connection ->
-                assertEquals(legacyRowsBeforeMigration.size + 1L, ticketCount(connection))
+                assertEquals(ticketsBefore + 1L, ticketCount(connection))
                 assertEquals(1L, messageCount(connection))
 
                 val storedTicket = readTicket(connection, created.ticket.id)
-                assertEquals(legacyFixture.clubId, storedTicket.clubId)
-                assertEquals(legacyFixture.userId, storedTicket.userId)
+                assertEquals(currentFixture.clubId, storedTicket.clubId)
+                assertEquals(currentFixture.userId, storedTicket.userId)
                 assertNull(storedTicket.bookingId)
                 assertNull(storedTicket.listEntryId)
                 assertEquals(TicketTopic.LOST_FOUND.wire, storedTicket.topic)
@@ -407,7 +415,9 @@ class SupportTicketCreationIT {
 
     @Test
     fun `initial message failure returns typed error and rolls back the complete transaction`() {
+        assertCurrentSchema()
         installFailureTrigger()
+        assertFalse(failureTriggerReached())
         val ticketsBefore = dataSource.connection.use(::ticketCount)
         val messagesBefore = dataSource.connection.use(::messageCount)
         val service = SupportServiceImpl(SupportRepository(database, fixedClock))
@@ -416,14 +426,16 @@ class SupportTicketCreationIT {
             try {
                 runBlocking {
                     service.createTicket(
-                        clubId = legacyFixture.clubId,
-                        userId = legacyFixture.userId,
+                        clubId = currentFixture.clubId,
+                        userId = currentFixture.userId,
                         bookingId = null,
                         listEntryId = null,
                         topic = TicketTopic.OTHER,
                         text = FAILURE_SENTINEL,
                         attachments = null,
                     )
+                }.also {
+                    assertTrue(failureTriggerReached(), "Initial message INSERT must reach the failure trigger")
                 }
             } finally {
                 dropFailureTrigger()
@@ -446,166 +458,93 @@ class SupportTicketCreationIT {
         }
     }
 
-    private fun insertLegacyFixture(connection: Connection): LegacyFixture {
-        val clubId =
-            connection
-                .prepareStatement(
-                    """
-                    INSERT INTO clubs (name, description, timezone, admin_channel_id)
-                    VALUES ('Support migration club', NULL, 'Europe/Moscow', NULL)
-                    RETURNING id
-                    """.trimIndent(),
-                ).use { statement ->
-                    statement.executeQuery().use { resultSet ->
-                        assertTrue(resultSet.next())
-                        resultSet.getLong(1)
+    @Test
+    fun `mapped private club denies creation and reads while leaving stored rows unchanged`() =
+        runBlocking {
+            assertCurrentSchema()
+            dataSource.connection.use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        "INSERT INTO clients(id,display_name) VALUES (880057002,'Synthetic private client')",
+                    )
+                    statement.execute(
+                        "INSERT INTO client_clubs(client_id,club_id) VALUES (880057002,${currentFixture.clubId})",
+                    )
+                }
+            }
+            try {
+                val service = SupportServiceImpl(SupportRepository(database, fixedClock))
+                val result =
+                    service.createTicket(
+                        currentFixture.clubId,
+                        currentFixture.userId,
+                        null,
+                        null,
+                        TicketTopic.OTHER,
+                        NORMALIZED_QUESTION,
+                        null,
+                    )
+                assertEquals(SupportServiceResult.Failure(SupportServiceError.TicketNotFound), result)
+                assertNull(service.getTicket(currentFixture.openedTicketId))
+                assertTrue(service.listMyTickets(currentFixture.userId).isEmpty())
+                dataSource.connection.use { connection ->
+                    assertEquals(2L, ticketCount(connection))
+                    assertEquals(0L, messageCount(connection))
+                }
+            } finally {
+                dataSource.connection.use { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.execute("DELETE FROM client_clubs WHERE client_id=880057002")
+                        statement.execute("DELETE FROM clients WHERE id=880057002")
                     }
                 }
-        val userId =
-            connection
-                .prepareStatement(
-                    """
-                    INSERT INTO users (telegram_user_id, username, display_name, phone_e164)
-                    VALUES (880057001, 'support_migration_guest', 'Support Migration Guest', NULL)
-                    RETURNING id
-                    """.trimIndent(),
-                ).use { statement ->
-                    statement.executeQuery().use { resultSet ->
-                        assertTrue(resultSet.next())
-                        resultSet.getLong(1)
-                    }
+            }
+        }
+
+    private fun assertCurrentSchema() {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT to_regclass('client_clubs') IS NOT NULL").use { statement ->
+                statement.executeQuery().use { rows ->
+                    assertTrue(rows.next())
+                    assertTrue(rows.getBoolean(1), "Service tests require the current ownership schema")
                 }
-        val openedTicketId =
-            insertLegacyTicket(
-                connection = connection,
-                clubId = clubId,
-                userId = userId,
-                topic = TicketTopic.ADDRESS.wire,
-                status = TicketStatus.OPENED.wire,
-                createdAt = LEGACY_CREATED_AT,
-                updatedAt = LEGACY_CREATED_AT.plusSeconds(30),
-            )
-        val answeredTicketId =
-            insertLegacyTicket(
-                connection = connection,
-                clubId = clubId,
-                userId = userId,
-                topic = TicketTopic.COMPLAINT.wire,
-                status = TicketStatus.ANSWERED.wire,
-                createdAt = LEGACY_CREATED_AT.plusSeconds(60),
-                updatedAt = LEGACY_CREATED_AT.plusSeconds(90),
-            )
-        return LegacyFixture(
-            clubId = clubId,
-            userId = userId,
-            openedTicketId = openedTicketId,
-            answeredTicketId = answeredTicketId,
-        )
+            }
+        }
     }
 
-    private fun insertLegacyTicket(
-        connection: Connection,
-        clubId: Long,
-        userId: Long,
-        topic: String,
-        status: String,
-        createdAt: Instant,
-        updatedAt: Instant,
-    ): Long =
-        connection
-            .prepareStatement(
-                """
-                INSERT INTO tickets (
-                    club_id, user_id, booking_id, list_entry_id, topic, status,
-                    created_at, updated_at, last_agent_id, resolution_rating
-                ) VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL)
-                RETURNING id
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setLong(1, clubId)
-                statement.setLong(2, userId)
-                statement.setString(3, topic)
-                statement.setString(4, status)
-                statement.setObject(5, createdAt.atOffset(ZoneOffset.UTC))
-                statement.setObject(6, updatedAt.atOffset(ZoneOffset.UTC))
-                statement.executeQuery().use { resultSet ->
-                    assertTrue(resultSet.next())
-                    resultSet.getLong(1)
-                }
-            }
+    private fun connectionPool(url: String): HikariDataSource =
+        HikariDataSource(
+            HikariConfig().apply {
+                jdbcUrl = url
+                driverClassName = "org.postgresql.Driver"
+                username = this@SupportTicketCreationContract.username
+                password = this@SupportTicketCreationContract.password
+                maximumPoolSize = 3
+            },
+        )
+
+    protected open fun createDatabase(prefix: String): String {
+        val name = prefix + "_" + UUID.randomUUID().toString().replace("-", "")
+        java.sql.DriverManager.getConnection(jdbcUrl, username, password).use { connection ->
+            connection.createStatement().use { it.execute("CREATE DATABASE $name") }
+        }
+        return jdbcUrl.substringBeforeLast('/') + "/$name"
+    }
 
     private fun driftConnection(jdbcUrl: String): Connection =
-        java.sql.DriverManager.getConnection(jdbcUrl, postgres.username, postgres.password)
-
-    private fun readLegacyRows(
-        connection: Connection,
-        fixture: LegacyFixture,
-    ): List<PersistedTicketRow> =
-        connection
-            .prepareStatement(
-                """
-                SELECT id, club_id, user_id, booking_id, list_entry_id, topic, status,
-                       created_at, updated_at, last_agent_id, resolution_rating
-                FROM tickets
-                WHERE id IN (?, ?)
-                ORDER BY id
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setLong(1, fixture.openedTicketId)
-                statement.setLong(2, fixture.answeredTicketId)
-                statement.executeQuery().use { resultSet ->
-                    buildList {
-                        while (resultSet.next()) {
-                            add(resultSet.toTicketRow())
-                        }
-                    }
-                }
-            }
-
-    private fun readTicket(
-        connection: Connection,
-        ticketId: Long,
-    ): PersistedTicketRow =
-        connection
-            .prepareStatement(
-                """
-                SELECT id, club_id, user_id, booking_id, list_entry_id, topic, status,
-                       created_at, updated_at, last_agent_id, resolution_rating
-                FROM tickets
-                WHERE id = ?
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setLong(1, ticketId)
-                statement.executeQuery().use { resultSet ->
-                    assertTrue(resultSet.next())
-                    resultSet.toTicketRow().also { assertFalse(resultSet.next()) }
-                }
-            }
-
-    private fun ResultSet.toTicketRow(): PersistedTicketRow =
-        PersistedTicketRow(
-            id = getLong("id"),
-            clubId = getLong("club_id"),
-            userId = getLong("user_id"),
-            bookingId = getObject("booking_id", UUID::class.java),
-            listEntryId = getObject("list_entry_id")?.let { (it as Number).toLong() },
-            topic = getString("topic"),
-            status = getString("status"),
-            createdAt = getObject("created_at", OffsetDateTime::class.java).toInstant(),
-            updatedAt = getObject("updated_at", OffsetDateTime::class.java).toInstant(),
-            lastAgentId = getObject("last_agent_id")?.let { (it as Number).toLong() },
-            resolutionRating = getObject("resolution_rating")?.let { (it as Number).toInt() },
-        )
+        java.sql.DriverManager.getConnection(jdbcUrl, username, password)
 
     private fun installFailureTrigger() {
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
+                statement.execute("CREATE SEQUENCE $FAILURE_PROBE_SEQUENCE")
                 statement.execute(
                     """
                     CREATE OR REPLACE FUNCTION $FAILURE_FUNCTION_NAME()
                     RETURNS trigger AS ${'$'}${'$'}
                     BEGIN
                         IF NEW.text = '$FAILURE_SENTINEL' THEN
+                            PERFORM nextval('$FAILURE_PROBE_SEQUENCE');
                             RAISE EXCEPTION '$FAILURE_SENTINEL';
                         END IF;
                         RETURN NEW;
@@ -624,12 +563,24 @@ class SupportTicketCreationIT {
         }
     }
 
+    // PostgreSQL sequences are not transactional: the marker survives the forced rollback.
+    private fun failureTriggerReached(): Boolean =
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT is_called FROM $FAILURE_PROBE_SEQUENCE").use { statement ->
+                statement.executeQuery().use { rows ->
+                    assertTrue(rows.next())
+                    rows.getBoolean(1)
+                }
+            }
+        }
+
     private fun dropFailureTrigger() {
         if (!::dataSource.isInitialized) return
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute("DROP TRIGGER IF EXISTS $FAILURE_TRIGGER_NAME ON ticket_messages")
                 statement.execute("DROP FUNCTION IF EXISTS $FAILURE_FUNCTION_NAME()")
+                statement.execute("DROP SEQUENCE IF EXISTS $FAILURE_PROBE_SEQUENCE")
             }
         }
     }
@@ -681,27 +632,10 @@ class SupportTicketCreationIT {
         private const val NORMALIZED_QUESTION = "Где найти гардероб?"
         private const val FAILURE_SENTINEL = "forced-support-message-v057-sentinel"
         private const val FAILURE_FUNCTION_NAME = "reject_support_message_v057"
+        private const val FAILURE_PROBE_SEQUENCE = "support_initial_message_failure_probe"
         private const val FAILURE_TRIGGER_NAME = "reject_support_message_v057_trigger"
         private const val DRIFTED_STATUS_CONSTRAINT = "tickets_status_legacy_drift_check"
         private const val DRIFT_MESSAGE_TEXT = "Legacy message survives failed V057"
-        private val LEGACY_CREATED_AT = Instant.parse("2024-05-01T10:00:00Z")
-
-        @JvmStatic
-        @BeforeAll
-        fun assumeDocker() {
-            val dockerAvailable =
-                try {
-                    DockerClientFactory.instance().client()
-                    true
-                } catch (_: Throwable) {
-                    false
-                }
-            assumeTrue(dockerAvailable, "Docker is not available on this host; skipping IT.")
-        }
-
-        @Container
-        @JvmStatic
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
     }
 }
 
@@ -785,3 +719,188 @@ private data class PersistedMessageRow(
     val attachments: String?,
     val createdAt: Instant,
 )
+
+@RequiresDocker
+@Testcontainers
+internal class SupportTicketCreationIT : SupportTicketCreationContract() {
+    override val jdbcUrl: String get() = postgres.jdbcUrl
+    override val username: String get() = postgres.username
+    override val password: String get() = postgres.password
+
+    override fun startPostgres() {
+        postgres.start()
+    }
+
+    override fun stopPostgres() {
+        postgres.stop()
+    }
+
+    companion object {
+        @JvmStatic
+        @BeforeAll
+        fun assumeDocker() {
+            val dockerAvailable =
+                try {
+                    DockerClientFactory.instance().client()
+                    true
+                } catch (_: Throwable) {
+                    false
+                }
+            assumeTrue(dockerAvailable, "Docker is not available on this host; skipping IT.")
+        }
+
+        @Container
+        @JvmStatic
+        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+    }
+}
+
+private fun insertLegacyFixture(connection: Connection): LegacyFixture {
+    val clubId =
+        connection
+            .prepareStatement(
+                """
+                INSERT INTO clubs (name, description, timezone, admin_channel_id)
+                VALUES ('Support migration club', NULL, 'Europe/Moscow', NULL)
+                RETURNING id
+                """.trimIndent(),
+            ).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    assertTrue(resultSet.next())
+                    resultSet.getLong(1)
+                }
+            }
+    val userId =
+        connection
+            .prepareStatement(
+                """
+                INSERT INTO users (telegram_user_id, username, display_name, phone_e164)
+                VALUES (880057001, 'support_migration_guest', 'Support Migration Guest', NULL)
+                RETURNING id
+                """.trimIndent(),
+            ).use { statement ->
+                statement.executeQuery().use { resultSet ->
+                    assertTrue(resultSet.next())
+                    resultSet.getLong(1)
+                }
+            }
+    val openedTicketId =
+        insertLegacyTicket(
+            connection = connection,
+            clubId = clubId,
+            userId = userId,
+            topic = TicketTopic.ADDRESS.wire,
+            status = TicketStatus.OPENED.wire,
+            createdAt = LEGACY_CREATED_AT,
+            updatedAt = LEGACY_CREATED_AT.plusSeconds(30),
+        )
+    val answeredTicketId =
+        insertLegacyTicket(
+            connection = connection,
+            clubId = clubId,
+            userId = userId,
+            topic = TicketTopic.COMPLAINT.wire,
+            status = TicketStatus.ANSWERED.wire,
+            createdAt = LEGACY_CREATED_AT.plusSeconds(60),
+            updatedAt = LEGACY_CREATED_AT.plusSeconds(90),
+        )
+    return LegacyFixture(
+        clubId = clubId,
+        userId = userId,
+        openedTicketId = openedTicketId,
+        answeredTicketId = answeredTicketId,
+    )
+}
+
+private fun insertLegacyTicket(
+    connection: Connection,
+    clubId: Long,
+    userId: Long,
+    topic: String,
+    status: String,
+    createdAt: Instant,
+    updatedAt: Instant,
+): Long =
+    connection
+        .prepareStatement(
+            """
+            INSERT INTO tickets (
+                club_id, user_id, booking_id, list_entry_id, topic, status,
+                created_at, updated_at, last_agent_id, resolution_rating
+            ) VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL)
+            RETURNING id
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setLong(1, clubId)
+            statement.setLong(2, userId)
+            statement.setString(3, topic)
+            statement.setString(4, status)
+            statement.setObject(5, createdAt.atOffset(ZoneOffset.UTC))
+            statement.setObject(6, updatedAt.atOffset(ZoneOffset.UTC))
+            statement.executeQuery().use { resultSet ->
+                assertTrue(resultSet.next())
+                resultSet.getLong(1)
+            }
+        }
+
+private fun readLegacyRows(
+    connection: Connection,
+    fixture: LegacyFixture,
+): List<PersistedTicketRow> =
+    connection
+        .prepareStatement(
+            """
+            SELECT id, club_id, user_id, booking_id, list_entry_id, topic, status,
+                   created_at, updated_at, last_agent_id, resolution_rating
+            FROM tickets
+            WHERE id IN (?, ?)
+            ORDER BY id
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setLong(1, fixture.openedTicketId)
+            statement.setLong(2, fixture.answeredTicketId)
+            statement.executeQuery().use { resultSet ->
+                buildList {
+                    while (resultSet.next()) {
+                        add(resultSet.toTicketRow())
+                    }
+                }
+            }
+        }
+
+private fun readTicket(
+    connection: Connection,
+    ticketId: Long,
+): PersistedTicketRow =
+    connection
+        .prepareStatement(
+            """
+            SELECT id, club_id, user_id, booking_id, list_entry_id, topic, status,
+                   created_at, updated_at, last_agent_id, resolution_rating
+            FROM tickets
+            WHERE id = ?
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setLong(1, ticketId)
+            statement.executeQuery().use { resultSet ->
+                assertTrue(resultSet.next())
+                resultSet.toTicketRow().also { assertFalse(resultSet.next()) }
+            }
+        }
+
+private fun ResultSet.toTicketRow(): PersistedTicketRow =
+    PersistedTicketRow(
+        id = getLong("id"),
+        clubId = getLong("club_id"),
+        userId = getLong("user_id"),
+        bookingId = getObject("booking_id", UUID::class.java),
+        listEntryId = getObject("list_entry_id")?.let { (it as Number).toLong() },
+        topic = getString("topic"),
+        status = getString("status"),
+        createdAt = getObject("created_at", OffsetDateTime::class.java).toInstant(),
+        updatedAt = getObject("updated_at", OffsetDateTime::class.java).toInstant(),
+        lastAgentId = getObject("last_agent_id")?.let { (it as Number).toLong() },
+        resolutionRating = getObject("resolution_rating")?.let { (it as Number).toInt() },
+    )
+
+private val LEGACY_CREATED_AT = Instant.parse("2024-05-01T10:00:00Z")
