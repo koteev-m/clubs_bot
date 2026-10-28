@@ -43,6 +43,7 @@ services:
       # --- telegram / security ---
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       BOT_TOKEN: ${BOT_TOKEN}                # ДОЛЖЕН совпадать с TELEGRAM_BOT_TOKEN
+      BOT_USERNAME: ${BOT_USERNAME:-}        # Публичный username этого же бота; нужен для client invitations
       TELEGRAM_USE_POLLING: "false"
 
       # единый ключ для вебхука; поддерживаем оба имени на всякий случай

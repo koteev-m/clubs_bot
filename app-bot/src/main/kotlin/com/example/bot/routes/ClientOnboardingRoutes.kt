@@ -127,7 +127,8 @@ private class OnboardingHttp(
                 ?.singleOrNull()
         if (key == null || !COMMAND_KEY.matches(key)) throw OnboardingFailure("validation_error")
         val issuesLink = operation in invitationIssuers
-        if (issuesLink && username == null) error("Onboarding launch configuration unavailable")
+        // This refusal happens before persistence, so callers can distinguish it from a lost response.
+        if (issuesLink && username == null) throw OnboardingFailure(ErrorCodes.INVITATION_LINK_UNAVAILABLE)
         var body = call.onboardingBody()
         if (operation in memberMutations) {
             val userId = call.positiveId("userId").toString()
@@ -188,6 +189,7 @@ private suspend fun ApplicationCall.safeOnboarding(block: suspend () -> JsonObje
                 "not_found" -> HttpStatusCode.NotFound
                 "forbidden" -> HttpStatusCode.Forbidden
                 "validation_error" -> HttpStatusCode.BadRequest
+                ErrorCodes.INVITATION_LINK_UNAVAILABLE -> HttpStatusCode.ServiceUnavailable
                 in conflictCodes -> HttpStatusCode.Conflict
                 else -> HttpStatusCode.InternalServerError
             }

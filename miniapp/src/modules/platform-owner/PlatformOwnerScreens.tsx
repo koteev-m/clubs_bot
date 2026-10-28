@@ -16,6 +16,7 @@ import { useTelegram } from '../../app/providers/TelegramProvider';
 import { PLATFORM_INVITE_PATH, PLATFORM_PREVIEW_PATH } from './previewAccess';
 import './platform-owner.css';
 import PlatformOnboarding from '../client/PlatformOnboarding';
+import { InvitationDraft } from '../client/useInvitationDraft';
 
 const navigation = [
   { label: 'Обзор', icon: LayoutGrid, available: true },
@@ -28,14 +29,16 @@ const navigation = [
 export default function PlatformOwnerScreens({
   preview = false,
   credential = '',
+  invite,
 }: {
   preview?: boolean;
   credential?: string;
+  invite?: InvitationDraft;
 }) {
   return preview ? (
     <PreviewScreens preview />
   ) : (
-    <PlatformOnboarding credential={credential} />
+    <PlatformOnboarding credential={credential} invite={invite} />
   );
 }
 

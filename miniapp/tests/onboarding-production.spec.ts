@@ -382,3 +382,135 @@ test('browser Back asks before discarding an unsaved application and cancel keep
   ).toBeVisible();
   await expect(page.getByLabel('Название заведения')).toHaveCount(0);
 });
+
+test('owner invitation draft and pending intent survive Back Forward without retry scrolling to the top', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 520 });
+  const commands: { key: string; body: string | null }[] = [];
+  let releaseReplay!: () => void;
+  const replayGate = new Promise<void>((resolve) => {
+    releaseReplay = resolve;
+  });
+  let rechecking = false;
+  let releaseAccess!: () => void;
+  const accessGate = new Promise<void>((resolve) => {
+    releaseAccess = resolve;
+  });
+  await page.route('**/api/**', async (route) => {
+    if (route.request().url().endsWith('/api/platform/access')) {
+      if (rechecking) await accessGate;
+      return route.fulfill({ json: { platformOwner: true } });
+    }
+    if (
+      route.request().url().endsWith('/api/platform/onboarding/invitations')
+    ) {
+      commands.push({
+        key: route.request().headers()['idempotency-key'],
+        body: route.request().postData(),
+      });
+      if (commands.length === 1) return route.abort();
+      await replayGate;
+      return route.fulfill({
+        json: { ...invitation, availableActions: ['reissue', 'revoke'] },
+      });
+    }
+    return route.fulfill({ json: { items: [], nextCursor: null } });
+  });
+  await page.goto('/app?mode=platform-owner' + ordinaryHash);
+  await page.getByRole('button', { name: 'Пригласить клиента' }).click();
+  await page.getByLabel('Название клиента или компании').fill('MIX Group');
+  await page.getByLabel('Имя получателя').fill('Иван Петров');
+  await expect(
+    page.getByText(
+      'Так клиент будет называться в вашей платформе. Это не название конкретного клуба',
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      'Имя для вашего удобства. Telegram ID или ссылка на профиль не нужны',
+    ),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Назад', exact: true }).click();
+  await expect(
+    page.getByRole('heading', {
+      name: 'Управление платформой',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.goForward();
+  await expect(
+    page.getByLabel('Название клиента или компании'),
+  ).toHaveValue('MIX Group');
+  await expect(page.getByLabel('Имя получателя')).toHaveValue(
+    'Иван Петров',
+  );
+  await page.getByRole('button', { name: 'Создать ссылку' }).click();
+  await expect(
+    page.getByText('Ответ сервера не получен, результат нужно проверить.'),
+  ).toBeVisible();
+  // Foreground rechecks authority before showing private UI, while retaining the
+  // original uncertain command for the same signed Telegram session.
+  rechecking = true;
+  const recheckRequest = page.waitForRequest((request) =>
+    request.url().endsWith('/api/platform/access'),
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
+  await recheckRequest;
+  await expect(page.getByText('Проверяем доступ…')).toBeVisible();
+  await expect(page.getByLabel('Название клиента или компании')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Проверить результат' })).toHaveCount(0);
+  releaseAccess();
+  await expect(page.getByLabel('Название клиента или компании')).toHaveValue('MIX Group');
+  await expect(page.getByLabel('Имя получателя')).toHaveValue('Иван Петров');
+  await expect(page.getByText('Ответ сервера не получен, результат нужно проверить.')).toBeVisible();
+  expect(commands).toHaveLength(1);
+  await page.goBack();
+  await expect(
+    page.getByRole('heading', {
+      name: 'Управление платформой',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.goForward();
+  await expect(
+    page.getByLabel('Название клиента или компании'),
+  ).toHaveValue('MIX Group');
+  await expect(
+    page.getByRole('button', { name: 'Создать ссылку' }),
+  ).toBeDisabled();
+  const retry = page.getByRole('button', { name: 'Проверить результат' });
+  await retry.scrollIntoViewIfNeeded();
+  const beforeRetry = await page.evaluate(() => window.scrollY);
+  expect(beforeRetry).toBeGreaterThan(0);
+  await retry.click();
+  await expect(page.getByText('Создаём приглашение…')).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  releaseReplay();
+  await expect(
+    page.getByRole('heading', { name: 'Ссылка не получена' }),
+  ).toBeVisible();
+  expect(commands).toHaveLength(2);
+  expect(commands[0]).toEqual(commands[1]);
+  await expect(
+    page.getByRole('heading', { name: 'Приглашение создано' }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Открыть приглашение' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const storage = await page.evaluate(() =>
+    JSON.stringify({ ...sessionStorage, ...localStorage }),
+  );
+  expect(storage).not.toContain('MIX Group');
+  expect(storage).not.toContain('Иван Петров');
+  expect(storage).not.toContain(commands[0].key);
+  await page.screenshot({
+    path: test.info().outputPath('invitation-safe-recovery-mobile.png'),
+    fullPage: true,
+  });
+});

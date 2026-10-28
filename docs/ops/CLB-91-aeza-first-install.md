@@ -82,6 +82,16 @@ Bot API, tracing and legacy booking features do not require activation credentia
 No additional missing mandatory input was found in these startup guards. This is not
 proof of a full healthy application or of credential validity/external integrations.
 
+Client onboarding adds a separate functional requirement: `BOT_USERNAME` must reach
+the app container and identify the platform bot authenticated by its existing token.
+An empty/invalid value can pass these startup guards but cannot issue a usable client
+invitation. The repository Compose now maps this value; the independently provisioned
+Stage Compose/environment must be checked separately by an authorized operator.
+The bot must have its Main Mini App configured to the canonical Mini App URL for
+`https://t.me/<bot_username>?startapp=ci_<secret>` launches. Opening the existing menu
+button alone does not verify the Main Mini App configuration. See the
+[invitation diagnostic boundary](client-invitation-fix.md).
+
 Logging: the FILE appender is instantiated even when its event filter denies stage
 events. It attempts to open relative `logs/app.log` on the read-only container root;
 failure leaves that appender unstarted. In the isolated JVM probe the exact

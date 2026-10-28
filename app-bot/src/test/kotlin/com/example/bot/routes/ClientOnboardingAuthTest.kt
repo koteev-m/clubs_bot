@@ -161,6 +161,56 @@ class ClientOnboardingAuthTest {
         }
 
     @Test
+    fun `reported stage username produces the exact main mini app link without contacting Telegram`() {
+        for (username in listOf("NightConcierge_Bot", "@NightConcierge_Bot")) {
+            withApp(botUsername = username) { repository ->
+                coEvery { repository.mutate(any(), OnboardingMutation.INVITATION_ISSUE, null, any(), any()) } returns
+                    JsonObject(mapOf("id" to JsonPrimitive("1"), "token" to JsonPrimitive(TOKEN)))
+                val response =
+                    client.post("$P/invitations") {
+                        header(HEADER, signed())
+                        header(KEY, "synthetic-stage-name-key")
+                        setBody("""{"clientName":"Synthetic client","recipientLabel":"Recipient"}""")
+                    }
+                assertEquals(HttpStatusCode.OK, response.status)
+                assertTrue(response.bodyAsText().contains("https://t.me/NightConcierge_Bot?startapp=ci_$TOKEN"))
+                assertFalse(response.bodyAsText().contains("https://t.me/@"))
+            }
+        }
+    }
+
+    @Test
+    fun `missing or malformed bot username is a known nonmutating failure for issue and reissue`() {
+        for (username in listOf(null, "", "bad", "bot name", "https://t.me/synthetic_bot", "bot?startapp=evil")) {
+            withApp(botUsername = username) { repository ->
+                for (path in listOf("$P/invitations", "$P/invitations/1/reissue")) {
+                    val response =
+                        client.post(path) {
+                            header(HEADER, signed())
+                            header(KEY, "synthetic-config-key")
+                            setBody("{}")
+                        }
+                    response.assertClientError(HttpStatusCode.ServiceUnavailable, "invitation_link_unavailable")
+                    assertEquals("no-store", response.headers["Cache-Control"])
+                }
+                coVerify(exactly = 0) { repository.mutate(any(), any(), any(), any(), any()) }
+            }
+        }
+    }
+
+    @Test
+    fun `configuration failure never reveals itself before owner authorization`() =
+        withApp(botUsername = null) { repository ->
+            client
+                .post("$P/invitations") {
+                    header(HEADER, signed(user = CLIENT))
+                    header(KEY, "synthetic-config-key")
+                    setBody("{}")
+                }.assertClientError(HttpStatusCode.Forbidden, "forbidden")
+            coVerify(exactly = 0) { repository.mutate(any(), any(), any(), any(), any()) }
+        }
+
+    @Test
     fun `body id key and size validation happens after authority and before mutation`() =
         withApp { repository ->
             for (body in listOf("", "[]", "{", """{"padding":"${"x".repeat(17_000)}"}""")) {
@@ -243,6 +293,7 @@ class ClientOnboardingAuthTest {
 
     private fun withApp(
         ownerId: Long? = OWNER,
+        botUsername: String? = "synthetic_bot",
         block: suspend ApplicationTestBuilder.(ClientOnboardingRepository) -> Unit,
     ) = testApplication {
         val context = mockk<ClientContextRepository>()
@@ -254,7 +305,7 @@ class ClientOnboardingAuthTest {
             configureLoggingAndRequestId()
             install(ContentNegotiation) { json() }
             installJsonErrorPages()
-            clientOnboardingRoutes(context, repository, "synthetic_bot", ownerId) { TEST_BOT_TOKEN }
+            clientOnboardingRoutes(context, repository, botUsername, ownerId) { TEST_BOT_TOKEN }
             webAppRoutes()
         }
         block(repository)

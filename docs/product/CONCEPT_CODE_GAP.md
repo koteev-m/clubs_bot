@@ -412,6 +412,27 @@ Authority: `DEC-040`–`DEC-042`, requirements `CLNT-001`–`CLNT-010`; target �
 
 Официальные [Managed Bots](https://core.telegram.org/bots/features#managed-bots), [ManagedBotUpdated](https://core.telegram.org/bots/api#managedbotupdated), [getManagedBotToken](https://core.telegram.org/bots/api#getmanagedbottoken) проверены 2026-10-27: management mode включается через BotFather, пользователь подтверждает создание, manager получает `managed_bot` и может получить token. Update также относится к изменениям token/owner; это не означает, что transfer ownership flow принят продуктом. В repository нет готового binding этих событий к клиентской заявке/правам, выбора credentials, multi-bot webhook, rotation/revocation или корректной branded delivery. Ни manager mode, ни доступность метода на реальном боте не проверялись.
 
+<a id="managed-bots-direction-gap"></a>
+### Специализированные подключения — направление и gaps, 2026-10-28
+
+Владелец расширил направление на ботов для задач клуба/сотрудников. Единый
+[каталог](MANAGED_BOTS_DIRECTION.md) содержит восемь `PROPOSED` специализаций,
+data/access dependencies и evidence E1–E8. Это не новые accepted requirements,
+не автоматическая реализация спорных legacy функций и не отдельная спецификация DEC-042.
+Первичные Telegram страницы повторно проверены 2026-10-28; точные ссылки и различие
+Bot API/MTProto приведены в каталоге. Технологическая доступность не закрывает
+вопросы поддержки SDK, привязки бота к пользователю, клиенту и клубу,
+управления токенами, обработки и дедупликации входящих событий,
+исходящих сообщений и изоляции персональных данных.
+
+[Адресная source проверка](AS_BUILT.md#managed-bots-direction-evidence) на
+`71d0beda…` сохраняет единственный platform adapter и global update_id. Готовые
+доменные primitives не доказывают готовность специализированного бота;
+инциденты/опросы/consent/network aggregation нельзя объявлять существующими
+источниками по одному названию категории. Предложенный порядок связан с
+[roadmap](PRODUCT_ROADMAP.md#managed-bots-proposed-sequence), без автоматического
+принятия или расширения invitation fix.
+
 ### Минимальный технический путь — предложение
 
 Развивать существующий Ktor backend и persistence: минимальный client/membership + club ownership, application с одним разрешением на конкретный клуб и connection registry с явно разрешёнными клубами одного клиента. Предлагаемые логические сущности не утверждают имена таблиц/API/миграций. Существующие пользователи и exact-assignment permission pattern переиспользуются; новый client path не полагается на legacy global role checks. Trusted bot context проходит ingress → auth/handler → persisted intent → outbound; customer scope проверяется в reads/mutations, а не только UI. Схема не требует копии проекта или отдельной БД на клиента.

@@ -234,6 +234,39 @@ internal abstract class OnboardingFoundationContract {
         }
 
     @Test
+    fun `concurrent lost issue and reissue retries persist one client and expose each secret once`() =
+        runBlocking<Unit> {
+            val issued =
+                coroutineScope {
+                    List(2) { async { fixture.issue("concurrent-lost-issue") } }.map { it.await() }
+                }
+            assertEquals(1, issued.map { it.id("id") }.toSet().size)
+            assertEquals(1, issued.count { it["token"] != null })
+            assertEquals(1, fixture.count("clients"))
+            assertEquals(1, fixture.count("client_invitations"))
+            val replacements =
+                coroutineScope {
+                    List(2) {
+                        async {
+                            fixture.mutate(
+                                fixture.owner,
+                                OnboardingMutation.INVITATION_REISSUE,
+                                issued.first(),
+                                key = "concurrent-lost-reissue",
+                            )
+                        }
+                    }.map { it.await() }
+                }
+            assertEquals(1, replacements.map { it.id("id") }.toSet().size)
+            assertEquals(1, replacements.count { it["token"] != null })
+            assertEquals(issued.first()["clientId"], replacements.first()["clientId"])
+            assertEquals(1, fixture.count("clients"))
+            assertEquals(2, fixture.count("client_invitations"))
+            assertEquals(2, fixture.count("client_commands"))
+            assertEquals(3, fixture.count("audit_log"))
+        }
+
+    @Test
     fun `same claim and confirmation retry generate one authority and audit event`() =
         runBlocking<Unit> {
             val issued = fixture.issue()
