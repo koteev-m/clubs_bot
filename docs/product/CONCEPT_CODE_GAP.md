@@ -421,7 +421,9 @@ data/access dependencies и evidence E1–E8. Это не новые accepted re
 не автоматическая реализация спорных legacy функций и не отдельная спецификация DEC-042.
 Первичные Telegram страницы повторно проверены 2026-10-28; точные ссылки и различие
 Bot API/MTProto приведены в каталоге. Технологическая доступность не закрывает
-SDK, user/client/club/bot binding, token lifecycle, ingress/dedup/outbound/PII isolation.
+вопросы поддержки SDK, привязки бота к пользователю, клиенту и клубу,
+управления токенами, обработки и дедупликации входящих событий,
+исходящих сообщений и изоляции персональных данных.
 
 [Адресная source проверка](AS_BUILT.md#managed-bots-direction-evidence) на
 `71d0beda…` сохраняет единственный platform adapter и global update_id. Готовые
