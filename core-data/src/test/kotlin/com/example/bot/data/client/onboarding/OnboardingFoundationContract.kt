@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.sql.SQLException
 import java.time.Duration
+import java.util.UUID
 
 internal abstract class OnboardingFoundationContract {
     protected lateinit var fixture: OnboardingFixture
@@ -60,7 +61,7 @@ internal abstract class OnboardingFoundationContract {
     @Test
     fun `audit and persisted commands contain hashes and correlation without raw secrets`() =
         runBlocking<Unit> {
-            val key = "synthetic-sensitive-key-062"
+            val key = UUID.randomUUID().toString()
             val issued = fixture.issue(key)
             val secret = checkNotNull(issued.string("token"))
             fixture.claim(issued)
