@@ -110,6 +110,9 @@ import com.example.bot.routes.musicRoutes
 import com.example.bot.routes.musicLikesRoutes
 import com.example.bot.routes.musicBattleRoutes
 import com.example.bot.routes.ownerHealthRoutes
+import com.example.bot.routes.clientContextRoutes
+import com.example.bot.data.client.JdbcClientContextRepository
+import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.routes.platformOwnerRoutes
 import com.example.bot.routes.supportRoutes
 import com.example.bot.routes.pingRoute
@@ -348,6 +351,10 @@ fun Application.module() {
     errorCodesRoutes()
     platformOwnerRoutes(
         configuredOwnerId = config.bot.ownerId,
+        botTokenProvider = { config.bot.token },
+    )
+    clientContextRoutes(
+        repository = JdbcClientContextRepository(checkNotNull(DataSourceHolder.dataSource)),
         botTokenProvider = { config.bot.token },
     )
     pingRoute()

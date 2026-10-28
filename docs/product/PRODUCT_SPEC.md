@@ -416,7 +416,70 @@ iBota не является способом обойти этот порядо�
 | DEC-034 | `AMEND` — active accepted extension | Authorized on-demand exports derive from canonical reports with fixed filters/period/scope/timezone and metadata, frozen financial or explicit non-final semantics, PII minimization/permission and sensitive access audit; formats remain an implementation-slice choice. Scheduled reports follow canonical metrics and accepted delivery with allowlists, test/enablement/log/bounded retry/dedup; AI narrative cannot replace numbers and remains blocked by accepted AI-grounding contract; not first slice/navigation | Analytics/communications phase | [DEC-034](OPEN_DECISIONS.md#dec-034--exportsauto-reports) |
 | DEC-035 | `AMEND` — active accepted extension | Versioned allowlisted configuration templates are created and published only by Owner or an authorized GLOBAL role; templates and explicit-category create-from-existing snapshots produce validated, previewed, confirmed, audited drafts with new independent IDs and no live link; secrets, credentials/keys, staff/roles, guests/PII, booking/entrance/session/financial/audit/idempotency/incident/delivery runtime state never copy; content/media is explicit and rights-checked; no first slice or guest navigation | Onboarding/network-scaling phase | [DEC-035](OPEN_DECISIONS.md#dec-035--cloningtemplates) |
 | DEC-036 | `ACCEPTED PRODUCT SLICE` | Target status: `ACCEPTED_NOT_IMPLEMENTED`. Private Support Loop for one data/config-selected pilot club: minimal idempotent fresh-user identity, private `/ask`, production club and guest-selected category, durable ticket/thread, explicitly permissioned club-scoped staff inbox/detail/reply/status, truthful Telegram delivery, exact `DEC-025` lifecycle/audit and bounded exclusions. Canonical acceptance and implementation contract is in the slice specification | First product slice | [DEC-036](OPEN_DECISIONS.md#dec-036--first-product-slice-private-support-loop) · [Private Support Loop](slices/PRIVATE_SUPPORT_LOOP.md) |
-| DEC-039 | `ACCEPTED_DECISION` — platform identity | Кабинет системного владельца требует подписанной Telegram identity и точного совпадения с положительным protected configured owner ID; прежний OWNER/GLOBAL другого пользователя не предоставляет доступ к этому кабинету и сохраняет прежние legacy semantics. Только владелец платформы сможет назначать владельцев клубов; будущий club owner ограничен собственным клубом и не становится GLOBAL owner. Сейчас разрешены только read-only identity check и два экрана, без назначения ролей/приглашений/DB migrations | Platform cabinet identity; club-owner assignment remains future implementation | [DEC-039](OPEN_DECISIONS.md#dec-039--telegram-identity-владельца-платформы) |
+| DEC-039 | `ACCEPTED_DECISION` — platform identity | Кабинет системного владельца требует подписанной Telegram identity и точного совпадения с положительным protected configured owner ID; прежний OWNER/GLOBAL другого пользователя не предоставляет доступ к этому кабинету и сохраняет прежние legacy semantics. Только владелец платформы сможет назначать владельцев клубов; будущий владелец клиента ограничен разрешёнными клубами по DEC-040/041 и не становится GLOBAL owner. Scope реализации DEC-039 — read-only identity check и два экрана; новые приглашения/заявки приняты отдельно и ещё не реализованы | Platform cabinet identity; club-owner assignment remains future implementation | [DEC-039](OPEN_DECISIONS.md#dec-039--telegram-identity-владельца-платформы) |
+
+### Уточнение прежних overlays от 2026-10-27
+
+`DEC-040/041/042` уточняют строки `DEC-003/005/007/017/039` выше: один operational pilot не ограничивает аккаунт одним клубом; GLOBAL относится к сохранённым legacy назначениям, не к новому клиенту; «Клубы» в целевом guest entry ограничены одним клиентом; полный UI redesign не prerequisite кабинета. Рабочий platform-owner identity check и explicit guest cutover сохраняются. Исходные 170 source rows не меняются; при расхождении применяются эти явно принятые дополнения. Остальные решения и границы Private Support Loop не расширяются.
+
+<a id="client-onboarding-contract"></a>
+### Клиенты, заявки и брендированные боты — принято 2026-10-27
+
+Authority: `DEC-040`–`DEC-042`. Все новые требования ниже — **`ACCEPTED_NOT_IMPLEMENTED`**; рабочий platform identity является только переиспользуемой основой. Это отдельный accepted overlay, не дополнительные immutable-source rows.
+
+| ID | Принятое требование | Authority |
+|---|---|---|
+| `CLNT-001` | Пользователь, клиент, клуб и подключение бота различны. Каждый клуб принадлежит одному клиенту; у клиента один клуб или сеть. Нет лимита «аккаунт = один клуб». | DEC-040 |
+| `CLNT-002` | Клиентское членство не даёт сотруднику все клубы. Доступ определяется человеком, клиентом, разрешённым клубом и действием; platform owner отдельно. Legacy GLOBAL назначения не переосмысливаются и не выдаются новому клиенту. | DEC-040; DEC-005/039 |
+| `CLNT-003` | Подтверждённое приглашение открывает кабинет клиента, но не club-creation grant. Отзыв приглашения, доступа и удаление данных — разные действия. | DEC-041 |
+| `CLNT-004` | Каждый клуб требует своей заявки и одобрения только platform owner после коммерческого согласования. Черновик → отправлена → согласование → одобрена / отклонена / отменена; один счёт может покрыть несколько отдельных разрешений, без автоматического биллинга. | DEC-041 |
+| `CLNT-005` | Одобрение разрешает ровно один конкретный клуб. Повторы/конкуренция не создают дубль. Создание даёт непубличный черновик; профиль и подключение бота не означают публикацию. Отказ новой заявки не отключает существующие клубы; отзыв доступа не удаляет данные автоматически. | DEC-041 |
+| `CLNT-006` | «Мои клубы»: свои разрешённые клубы, прогресс настройки, заявки, «Подключить заведение» и явный рабочий контекст. Повторный вход восстанавливает сохранённую настройку; следующий клуб требует новой заявки, а не приглашения. Платформа видит клиентов, заявки/решения и связанные клубы. | DEC-041 |
+| `CLNT-007` | Guest entry открывает клуб или разрешённую витрину одной сети/клиента. Публичность разных клубов не раскрывает клиентам чужую историю гостей, обращения, брони и финансы. Общий каталог независимых клиентов не стандартный вход. | DEC-040/042 |
+| `CLNT-008` | Общая серверная часть/обновления обслуживают брендированные боты: один клуб либо явно заданные клубы одного клиента на бот; несколько брендов могут иметь разные боты. NightConcierge остаётся платформенным входом, старые guest flows сохраняются до проверенного перехода. Managed Bots — предпочтительный механизм с подтверждением и владением пользователя, без гарантии username. | DEC-042 |
+| `CLNT-009` | Доверенный bot context определяет initData validation и outbound connection. Сервер проверяет бот → клиент → клуб → действие; URL/username/подставленный ID не authority. Изоляция охватывает API, файлы, уведомления, очереди и кэши; токены/чувствительные данные не раскрываются. | DEC-040/042 |
+| `CLNT-010` | Приёмка: A подключает два клуба по двум одобрениям, B изолирован, повторы безопасны; брендированные входы/доставка не смешиваются. Дополнительные данные синтетические, operational pilot может быть одним реальным клубом. Полный мастер, аналитика сети и автоматические платежи не обязательны для ближайшего outcome. | DEC-040/041/042 |
+
+#### Матрица полномочий нового пути
+
+| Субъект | Разрешено в принятой границе | Не следует из этой authority |
+|---|---|---|
+| Системный владелец платформы | После exact DEC-039 identity: управление доступом клиентов, просмотр заявок/связанных клубов, решение по каждому подключению | Вход от имени клиента; автоматическое право всех операционных действий клуба |
+| Подтверждённый владелец клиента | «Мои клубы», заявки своего клиента; создание конкретного клуба только по своему отдельному одобрению; настройка разрешённых клубов и назначение сотрудников в их пределах | Самоодобрение; неограниченное создание; чужие клиенты; legacy GLOBAL OWNER |
+| Сотрудник | Только разрешённые клубы и конкретные explicit permissions | Все клубы клиента; коммерческое одобрение; platform cabinet |
+| Гость | Публичный клуб/разрешённая витрина сети и собственные операции в этом контексте | Черновик, чужие private records или перенос закрытой истории между клиентами |
+| Legacy OWNER/GLOBAL | Существующая semantics сохраняется в legacy endpoints | Platform identity; новый клиентский доступ или одобрение заявки по одному названию роли |
+
+#### UX без полного перепроектирования
+
+1. Platform owner приглашает человека в клиентский кабинет. Текст прежнего draft «доступ для создания собственного клуба» заменяется смыслом «доступ к кабинету и подаче заявок»; приглашение само не создаёт клуб и не выдаёт разрешение на него.
+2. Подтверждённый пользователь открывает **«Мои клубы»**, даже если клубов пока нет. Пустое состояние ведёт в **«Подключить заведение»** — форму заявки, не форму создания клуба.
+3. Заявка сохраняется черновиком, отправляется и отображает согласование/решение. До одобрения рабочее создание клуба отсутствует и отклоняется сервером. Отказ/отмена показываются в заявке; действующие клубы доступны по прежним разрешениям.
+4. В **«Управлении платформой»** нужны списки клиентов/заявок и карточка решения: конкретный клиент и заведение, состояние, коммерческий контекст без автоматического биллинга, решение и связь с созданным клубом. Карточка не подменяет оперативный кабинет клиента.
+5. По одобренной заявке появляется действие создания **одного непубличного клуба**. После успеха повтор ведёт к этому же клубу. Карточка предлагает продолжить профиль/настройку; название, готовый профиль и одобрение не делают клуб доступным гостям.
+6. Повторный вход возвращает сохранённые клубы, заявки и прогресс. При нескольких клубах явно показывается выбранный рабочий контекст. Через полгода «Подключить заведение» начинает новую заявку без повторного приглашения.
+7. Карточка клуба показывает состояние брендированного подключения отдельно от настройки и публичности. Предлагаемые UI labels: «Не подключён», «Ожидает подтверждения в Telegram», «Подключён», «Требует внимания»; это presentation proposal, не утверждённая token state machine. До готового wiring не показывать подключение как работающее.
+
+Существующие layout, typography, карточки, Back/navigation и platform auth переиспользуются после проверки API/permissions; существующий preview не доказывает backend. Guest cutover и publication остаются отдельной реализацией с проверками.
+
+#### Критерии приёмки целевой модели
+
+| ID | Проверка | Ожидаемый результат |
+|---|---|---|
+| `CLNT-AC-01` | Приглашение подтверждено; заявки ещё нет | Кабинет доступен, создание запрещено; GLOBAL роль не появилась |
+| `CLNT-AC-02` | Все состояния заявки; попытка самоодобрения/чужого решения | Принятый путь виден; решение только exact platform owner; подробные cancellation/reconsideration rules утверждены до реализации |
+| `CLNT-AC-03` | Одобренная заявка, повтор/конкурентное создание и сбой сохранения | Ровно один связанный клуб; нет частично выданных прав/потраченного разрешения без согласованного результата; recovery/atomicity contract проверен |
+| `CLNT-AC-04` | Создан черновик, заполнен профиль; прямые guest URLs/API/files | Клуб и связанные данные непубличны до отдельной публикации, не только скрыты в списке |
+| `CLNT-AC-05` | A получает два клуба по двум одобрениям; повторный вход и новая заявка | Один кабинет, сохранённый профиль/настройка, явный выбор клуба; повторная регистрация не нужна |
+| `CLNT-AC-06` | B подставляет client/club/record IDs A; сотрудник A1 пробует A2 | Нет чтения/изменения private данных без соответствующего назначения, даже внутри одного клиента |
+| `CLNT-AC-07` | Отказ/отмена новой заявки; отзыв конкретного доступа | Работающие клубы не отключаются из-за отказа; отозванный доступ не действует, данные не удаляются автоматически |
+| `CLNT-AC-08` | Guest посещает публичные A/B, затем их владельцы читают историю | Видна только разрешённая история своего клиентского/клубного контекста |
+| `CLNT-AC-09` | Подмена bot context, initData другого бота, callback/deep link чужого клуба | Fail-closed, без перебора токенов; platform-owner identity не ослаблена |
+| `CLNT-AC-10` | Одинаковый update_id/chatId у двух ботов, retries и сохранённая delivery | Дедупликация и доставка различают подключения; ответ/уведомление идёт правильным ботом |
+| `CLNT-AC-11` | Повторные reads через API/files/cache/queues и revoked access | Изоляция проверяется вне UI, устаревший контекст не выдаёт права, sensitive data не раскрываются |
+| `CLNT-AC-12` | Один бот для сети A; отдельные боты брендов A и B; старый NightConcierge flow | Сеть ограничена A; независимые клиенты не объединяются; старый вход работает до отдельного cutover |
+
+Дополнительные клиенты/клубы/пользователи в этих проверках синтетические. Ни один критерий пока не объявлен PASS. Этапы и одна первая задача — в [roadmap](PRODUCT_ROADMAP.md#client-delivery-sequence); существенные технические выборы собраны [одним блоком](PRODUCT_ROADMAP.md#client-open-design).
 
 ## 27. Что спецификация сознательно не обещает
 
@@ -424,3 +487,162 @@ iBota не является способом обойти этот порядо�
 - Public product/assistant names остаются pending до явного решения пользователя; first-release role set и pilot launch policy определены только accepted overlays `DEC-003`–`DEC-005` и не меняют immutable source rows.
 - Repository-only additions не становятся target promises автоматически по `DEC-026/D`. Initial eight conflicts имеют только boundaries из accepted overlays выше; все остальные disputed additions требуют собственной item-level classification.
 - Availability любого Telegram capability без повторной официальной проверки непосредственно перед реализацией/release.
+
+<a id="client-context-technical-contract"></a>
+## 28. Принятый технический контракт: клиентский контекст и чтение клубов
+
+**Статус: ACCEPTED — прямое решение владельца, 2026-10-27.** Владелец утвердил узкий контракт четырёх таблиц, `client.club.read`, двух GET endpoints, одного production adapter платформенного бота и отсутствия автоматического mapping/GLOBAL grants; разрешил локальную реализацию, тесты и связанные документы. Это техническое уточнение `DEC-039`–`DEC-042`, без нового DEC/CLB. Приглашения, заявки, UI, Managed Bots и активация клиентов не входят в разрешение. Публикация и runtime-действия не разрешены. Локальное implementation evidence и ограничения фиксируются отдельно в [AS_BUILT](AS_BUILT.md#client-read-local) и [checkpoint](../ops/PROJECT_STATUS.md), а не следуют из статуса принятия.
+
+**Пользовательский результат:** подписанный Telegram-пользователь может прочитать собственные клиентские пространства и только явно разрешённые клубы. Будущие «Мои клубы» получают имена и доступный контекст; список не даёт прав на настройку, создание или операционные данные. Владелец с grants на A1/A2 видит оба, сотрудник с grant на A1 — только A1. Все реальные записи остаются прежними: первая реализация создаёт новую схему пустой и проверяет её только синтетическими fixtures.
+
+#### 1. Данные: четыре additive-таблицы и одно действие
+
+Переиспользуются `users` (одна application identity по подписанному Telegram ID), `clubs` (существующие операционные клубы), каталог `permissions(code)` и тип `PermissionCode`. **Новые grants не записываются в `user_roles` или `user_role_permissions`.** Не создаются второй каталог ролей, `CLIENT_OWNER` role enum, наследование прав сети или универсальная CRM. «Владелец» и «сотрудник» в примерах — продуктовые персоны; для этого read slice их различает только набор явных grants.
+
+Все ID ниже — положительные `BIGINT` / Kotlin `Long`, `CHECK (> 0)` на новых ID/FK-полях, без `toInt()`. SQL `clubs.id` уже BIGINT (PostgreSQL/H2 V1), хотя `data/db/Tables.kt` использует `IntIdTable`: новый repository читает `clubs.id` через Long-проекцию/типизированный SQL, не меняя существующую ORM-модель или тип существующего API. Во внешнем **новом** API ID — десятичные строки, чтобы не терять точность в JavaScript.
+
+| Таблица | Поля и обязательные ограничения | Зачем / reuse |
+|---|---|---|
+| `clients` | `id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY`; `display_name VARCHAR(255) NOT NULL`, `CHECK (char_length(trim(display_name)) BETWEEN 1 AND 255)`; `is_active BOOLEAN NOT NULL DEFAULT FALSE`; `created_at`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP` | Отдельное пространство бизнеса; ни user, ни club его не заменяют. Название не уникально и не идентификатор доверия. |
+| `client_memberships` | `client_id BIGINT NOT NULL`, `user_id BIGINT NOT NULL`, `is_active BOOLEAN NOT NULL DEFAULT FALSE`, timestamps как выше; PK `(client_id,user_id)`; FK `client_id → clients(id)` ON DELETE RESTRICT; FK `user_id → users(id)` ON DELETE CASCADE; индекс `(user_id,client_id)` | Членство открывает только собственный кабинет/имя клиента. Пользователь может состоять в нескольких клиентах, у каждого клиента много пользователей. Не означает доступ ко всем клубам. |
+| `client_clubs` | `club_id BIGINT PRIMARY KEY`, `client_id BIGINT NOT NULL`, `created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`; FK `club_id → clubs(id)` ON DELETE CASCADE; FK `client_id → clients(id)` ON DELETE RESTRICT; UNIQUE `(client_id,club_id)` | PK гарантирует не более одного клиента для клуба. Отдельный mapping позволяет оставить существующие клубы unmapped без nullable/backfill-изменений старой таблицы. UNIQUE нужен для composite FK grants. |
+| `client_club_grants` | `client_id`, `user_id`, `club_id BIGINT NOT NULL`; `permission_code TEXT NOT NULL`; `is_active BOOLEAN NOT NULL DEFAULT FALSE`; timestamps как у membership; PK `(client_id,user_id,club_id,permission_code)`; FK `(client_id,user_id) → client_memberships(client_id,user_id)` ON DELETE CASCADE; FK `(client_id,club_id) → client_clubs(client_id,club_id)` ON DELETE CASCADE; FK `permission_code → permissions(code)` ON DELETE RESTRICT; CHECK `permission_code = 'client.club.read'`; индекс `(user_id,client_id,club_id)` | **Одна строка — точное клубное назначение на одно действие.** Composite FKs не позволяют соединить membership A и club mapping B. Отдельная assignment-таблица без роли/других атрибутов сейчас не нужна. |
+
+У всех FK — ON UPDATE RESTRICT; нет deferrable constraints, partial unique или cross-table CHECK. NOT NULL обязателен для всех компонентов ключей. Добавляется ровно одна запись в существующий каталог permissions: `client.club.read` — чтение минимального club context только через новые endpoints. Это не grant и не `support.view`; наличие кода в каталоге никого не авторизует. Существующий набор permissions/roles сохраняется. Добавление иных действий в новый grant store потребует отдельного расширения DB allowlist и predicate, а не wildcard или role inheritance.
+
+`is_active=false` клиента скрывает его и все его клубы в новых reads; неактивная membership скрывает этот клиент только для данного пользователя; неактивный grant скрывает только соответствующий клуб/действие. **Отзыв для read slice = деактивация**, а не удаление membership/клуба/данных. GET не меняет timestamps и не активирует записи. Интерфейса/endpoint выдачи, отзыва или повторной активации нет; будущая административная операция потребует собственного контракта и audit. FK CASCADE касается только удаления производных memberships/mappings/grants, если соответствующий user/club уже удаляется отдельно разрешённой legacy операцией; это сохраняет возможность прежнего delete и не делает revoke удалением. Удаление самого клиента с зависимостями запрещено FK; нового delete API нет.
+
+Принятый target требует владельца-клиента для каждого нового клуба, но на переходной схеме **существующий unmapped club разрешён как legacy запись и отсутствует в новом контексте**. Будущая одобренная операция создания обязана записывать mapping атомарно; она не входит в этот slice. `clubs.is_active` не используется как permission или новая публикационная state machine: явно разрешённая минимальная карточка mapped клуба доступна в кабинете независимо от этого legacy flag, без доступа к guest/private endpoints и без утверждения «это опубликованный клуб/черновик».
+
+#### 2. Доверенное подключение и свежая identity
+
+Внутренние типы (не wire API): `TrustedBotConnection(connectionKey, audience, tokenProvider)` и `VerifiedClientIdentity(telegramUserId, connectionKey, audience)`. `audience` — закрытый вариант `Platform` либо `Client(clientId, allowedClubIds)`. Конфигурация создаётся серверным wiring; положительные IDs проверяются, пустой allowlist у Client не разрешает ни одного клуба. `tokenProvider` — непрозрачная ссылка на credential provider, не поле сериализуемого principal; секреты не попадают в `toString`, ошибки, API и logs. Тип verified identity создаётся только после validation в текущем запросе.
+
+В первой реализации `Application` передаёт **один фиксированный platform connection** в регистрацию `/api/client`: `connectionKey = "platform"`, audience `Platform`, token provider из существующего `AppConfig.bot.token`. Не используется fallback выбора через `BOT_TOKEN`/query/header, нет registry API и вызова Telegram/getMe. Platform connection не привязано к одному клиенту: допустимые клиенты определяются membership пользователя; сам platform entry не даёт GLOBAL authority. `Client` audience реализуется только как тестируемая restriction policy и синтетическая DI fixture, не как второй production endpoint/бот.
+
+Тонкий namespace adapter `withClientContextAuth(connection)` состоит из раннего application hook для `/api/client` и route guard, требующего созданную этим hook identity. Он переиспользует **тот же `InitDataValidator.validate`**, включая HMAC fix #550, существующие freshness/skew defaults и constant-time comparison. Это адаптация контекста/HTTP envelope, не второй HMAC алгоритм. Hook выполняется в `ApplicationCallPipeline.Monitoring` до routing/query decoding; namespace определяется серверной регистрацией и сегментами path, не request IDs. Он охватывает весь `/api/client` namespace; остальные маршруты не меняются. Route guard не валидирует подпись повторно и не восстанавливает identity из legacy attributes. На новых endpoints:
+
+1. С начала запроса выставляются no-store headers. До routing/query decoding используется существующий принцип `rejectMiniAppInitDataQuery`: просмотр raw query keys, включая encoded/malformed keys, с отказом `401 unauthorized` при forbidden transport или malformed query key. Значения raw query не декодируются. Для нового namespace отказ идёт через `respondError`; можно выделить общий predicate/helper, но прежние callers/ответы остаются без изменений.
+2. Connection берётся только из серверного route wiring. При отсутствующем/некорректном token configuration — fail-closed startup; unexpected provider failure в запросе — `500 internal_error`, без fallback на другой token. Request `botId`, username, `clientId`, `clubId`, Host и forwarded headers не выбирают connection.
+3. Принимается ровно один непустой канонический header `X-Telegram-Init-Data`. Повторные значения или присутствие альтернативного `X-Telegram-InitData` дают `401 unauthorized`; body/query transport не применяется. Это явный контракт **новых** endpoints; aliases/body compatibility других маршрутов не меняются.
+4. Подпись проверяется один раз токеном фиксированного connection; подписанный `user.id` должен быть положительным. Неверная/просроченная подпись, другой synthetic bot token, неподписанный header/body дают `401`. Ни token trial loop, ни доверия уже существующему `MiniAppUserKey` нет.
+5. После успеха validation, **ещё до routing decoding**, любой оставшийся непустой raw query отклоняется как `400 validation_error` без декодирования key/value. Поэтому `?x=%GG` без/с неверной подписью даёт 401, с валидной подписью — 400; ни routing parser, ни DB не вызываются. Одиночный завершающий `?` без query bytes эквивалентен отсутствию query. Ранний отказ завершает pipeline.
+6. Только для прошедшего все шаги запроса создаётся новый request-local `VerifiedClientIdentity`. Новый handler читает только его и передаёт в новый read repository; не использует `rbacContext`, `TelegramPrincipal` из legacy fallback, `roles`, `clubIds`, `ClubScopeResolver` или клиентский «selected context» как authority.
+
+`configureSecurity()` сейчас допускает `X-Telegram-Id` fallback, а `RbacPlugin` может сохранить успешную resolution до route auth. Эта legacy semantics **не исправляется глобально** данной задачей. Новая route group не вложена в `authorize/clubScoped` и не потребляет сохранённую resolution. Даже при заранее заполненном legacy контексте B и валидной подписи A результат обязан соответствовать A; без подписи результат 401. `X-Telegram-Id`/`X-Telegram-Username`/`X-Club-Id` игнорируются новыми handlers. Ошибка/отсутствие legacy resolution не заменяет проверку и не предоставляет доступ.
+
+`/api/platform/access`, `OWNER_TELEGRAM_ID`, существующие Mini App response defaults и HMAC алгоритм остаются без изменения semantics. System owner и legacy OWNER не получают клиентские записи без membership/grant; platform cabinet сохраняет свой отдельный endpoint/identity gate.
+
+#### 3. Точный предикат и актуальность
+
+Для подписанного principal `p`, клиента `c`, клуба `k` и действия `a` доступ разрешён **только одновременно** при:
+
+```text
+p получен fresh validation выбранного сервером connection
+u.telegram_user_id = p.telegramUserId, u существует
+c.id = m.client_id = mapping.client_id = g.client_id
+u.id = m.user_id = g.user_id
+k.id = mapping.club_id = g.club_id
+c.is_active AND m.is_active AND g.is_active
+g.permission_code = a = 'client.club.read'
+audience = Platform
+  OR (audience = Client(c.id, allowedClubIds) AND k.id IN allowedClubIds)
+```
+
+Роль из `user_roles`, роль платформы и grant другого действия не являются альтернативными ветками. Membership lookup для показа собственного клиентского имени использует только fresh identity, существующего user, активные client/membership и restriction по audience.clientId; клубы добавляются исключительно по полному predicate. Поэтому активное членство без grants возвращает клиента с `clubs: []`, без чужих названий/счётчиков. У Client audience все отображаемые клубы дополнительно проходят allowlist.
+
+Для ответа каждого endpoint новый client repository выполняет **один параметризованный SELECT**, который в одной read-only `READ COMMITTED` transaction связывает `users`, memberships, clients, mapping, grants и club projection. В list используется authorized-club subquery/LEFT JOIN после фильтрации membership; detail фильтруется полным predicate сразу, без предварительного existence lookup. Не допускается сначала выбрать клуб, затем разрешить его по отдельному cached/role check; не допускаются N+1 lookup/автопровижининг пользователя. SQL/policy получает действие как server constant, не из request. Пользователь без application row также получает пустой список.
+
+Результат соответствует committed snapshot **начала SELECT**. Отзыв, committed до следующего SELECT, обязательно действует в следующем ответе; отзыв, committed после начала уже выполняющегося SELECT, не гарантирует изъятия этого in-flight ответа. Это принятая граница snapshot, без обещания линейной актуальности до последнего сетевого байта. При отказе/timeout БД — 500 без выдачи старого результата; cancellation пробрасывается. Никакого cross-request auth/data cache, TTL grants или сохранения authority в browser/localStorage. Общие flags `RBAC_ENABLED` не отключают этот predicate. Семантика одного SELECT проверена по [PostgreSQL 16: Read Committed](https://www.postgresql.org/docs/16/transaction-iso.html#XACT-READ-COMMITTED); cross-table связи задаются [FK/UNIQUE](https://www.postgresql.org/docs/16/ddl-constraints.html#DDL-CONSTRAINTS-FK), а не CHECK с внешним lookup.
+
+#### 4. Новый read API
+
+| Endpoint | Успех / граница |
+|---|---|
+| `GET /api/client/context` | 200: `clients` — все активные memberships подписанного пользователя в допустимой audience, каждый с массивом только разрешённых clubs. Без pagination/тихого truncation на этом этапе; порядок client.id, затем club.id по числовому значению. |
+| `GET /api/client/clubs/{clubId}` | 200: одна минимальная разрешённая club card; путь содержит только club ID, client определяется из mapping. Валидный, но чужой/unmapped/revoked/missing club — одинаковый 404 `not_found`. |
+
+Query-параметры не предусмотрены: после auth ранний namespace hook отвергает любые непустые raw query bytes, кроме уже отвергнутого credential transport/malformed key, с `400 validation_error` без echo ключей/значений. Body не читается и не используется. `clubId` должен быть канонической десятичной строкой `[1-9][0-9]*` в диапазоне positive signed Long; malformed/overflow ID после auth даёт `400 validation_error`, не lookup. Ни path ID, ни возвращаемые IDs не являются токенами доступа.
+
+Обязательные success поля: client `{id, name, clubs}`; club `{id, name, permissions}`. Detail добавляет `clientId`. `permissions` в этой версии ровно `["client.club.read"]` для каждой показанной карточки; это не права старых APIs. Не выдаются Telegram/user IDs, membership/grant IDs, роли, бот/credentials, чужие counts, guest history, files, progress/publication/bot status (их надёжной модели ещё нет). Отсутствующие capabilities не имитируются `ready=true`, `canCreate=true` или неработающими actions.
+
+Примеры синтетических ответов:
+
+```json
+{"clients":[]}
+```
+
+200 одинаков для никогда не зарегистрированного подписанного Telegram user, существующего user без memberships и user с единственной отозванной membership. Не раскрывается, какой из этих случаев произошёл.
+
+```json
+{"clients":[{"id":"101","name":"Клиент A","clubs":[{"id":"1001","name":"A1","permissions":["client.club.read"]},{"id":"1002","name":"A2","permissions":["client.club.read"]}]}]}
+```
+
+Это владелец с двумя **явными** grants, а не наследование по названию роли. Сотрудник с grant только A1:
+
+```json
+{"clients":[{"id":"101","name":"Клиент A","clubs":[{"id":"1001","name":"A1","permissions":["client.club.read"]}]}]}
+```
+
+Активная membership без клубных grants:
+
+```json
+{"clients":[{"id":"101","name":"Клиент A","clubs":[]}]}
+```
+
+Разрешённый `GET /api/client/clubs/1001`:
+
+```json
+{"clientId":"101","id":"1001","name":"A1","permissions":["client.club.read"]}
+```
+
+Попытка сотрудника A1 прочитать A2, пользователя B прочитать A1, запрос unmapped/несуществующего клуба или detail после отзыва membership — один 404 через проектный `ApiError`/`respondError`:
+
+```json
+{"code":"not_found","message":null,"requestId":"req-synthetic","status":404,"details":null}
+```
+
+Nullable поля могут опускаться действующим serializer; `requestId` — текущий call ID или null, не идентификатор чужого объекта. По тому же envelope: 401 `unauthorized` для auth/transport, 400 `validation_error` для формата/query после auth, 500 `internal_error` для provider/DB failure. Причина отсутствия доступа/SQL/credential не выдаётся; нет отдельного 403, позволяющего различить существующий чужой объект. Это контракт нового namespace, не глобальная унификация старых 401 (`InitDataAuth` исторически имеет другой shape).
+
+На всех success/error ответах: `Cache-Control: no-store`, `Vary: X-Telegram-Init-Data` через `ensureMiniAppNoStoreHeaders`; отсутствие ETag/Last-Modified/304, даже при условных request headers. Existing generic rate/body limits и безопасный error envelope сохраняются. GET не создаёт/не обновляет users, clients, mappings, memberships, grants, заявки или клубы; не вызывает `ensureMinimalIdentity` и не пишет domain audit. Существующая инфраструктурная telemetry допустима без credentials/PII.
+
+Будущий экран «Мои клубы» загружает context заново при входе/возврате, явно выбирает одну из полученных карточек и перед открытием перечитывает detail. На 401 очищает локальный контекст; на 404 очищает выбор и перечитывает список. Пустой список показывает нейтральное отсутствие доступных пространств; пустые clubs — отсутствие разрешённых клубов. **Кнопки приглашения, заявки, создания, настройки и подключения бота этим API не включаются.** Клиентское сохранение выбранного ID — только удобство навигации, не permission. UI в первой задаче не реализуется.
+
+#### 5. Additive migration и граница legacy
+
+Порядок paired PostgreSQL/H2 Flyway migration `V061__client_context.sql`: clients → memberships → client_clubs → добавить `client.club.read` в permissions → client_club_grants/индексы. Применить NOT NULL/PK/UNIQUE/FKs/CHECK к пустым новым таблицам; проверить metadata и отказ на schema drift, без ослабляющего `IF NOT EXISTS`. Вставка каталожного кода не выдаёт grant. Номер 061 выбран после inventory до V060; существующие миграции/checksums не редактируются. H2 повторяет доступные structural constraints; production-инварианты и concurrency доказываются на Postgres по [migration parity policy](../runtime-db-resiliency.md#flyway-migration-parity-policy-postgres-vs-h2).
+
+Нет backfill по OWNER, username, `OWNER_TELEGRAM_ID`, `adminChatId` или «первому клубу». Existing users/clubs/roles/permissions/grants сохраняются; FK на новые таблицы не добавляются в старые таблицы. Empty/unmapped state легален: старые endpoints работают по прежнему контракту, новые не возвращают unmapped clubs. CASCADE на legacy user/club FK удаляет только новые зависимые access rows при отдельно выполненном parent delete; иначе новый FK RESTRICT неожиданно изменил бы старый delete API. Old-code compatibility проверяется на расширенной схеме, но она не разрешает runtime rollback вопреки действующим release/migration guards.
+
+Новые записи не расширяют legacy доступ: `ExposedUserRoleRepository` и support permission repository читают только старые `user_roles`/`user_role_permissions`; их query/wiring/cache не получают client grants и не вызываются как authority нового namespace. Пользователь без прежних staff ролей после выдачи synthetic client grant не получает `/api/admin/clubs`, support staff mutations, OWNER/GLOBAL или `/api/platform/access`. У пользователя с прежними legacy правами они сохраняются, включая прежние широкие grants; новая membership не «исправляет» и не отзывает их. Поэтому этот результат **не доказывает изоляцию всего приложения для включения клиентов**.
+
+До активации полного клиентского сценария обязательны отдельные проверки/containment старых API, fallback/header identity, файлов, private guest history, уведомлений, очередей/кэшей, callback/deep links, draft visibility и branded ingress/outbound. Нельзя обойти их тем, что новый список отфильтрован. Client activation не выполняется в данной задаче.
+
+Будущий mapping — отдельно разрешённая процедура: идентифицировать конкретный бизнес/клубы и Telegram-пользователей, согласовать независимое client space и явные grants, проверить legacy права и полную boundary, затем в одной аудируемой transaction создать клиента/memberships/mappings/grants с явным подтверждением. Только уникальный mapping, без reparent существующего club или автоматического повышения роли. Повторная выдача/реактивация, перенос клуба между клиентами и live backfill не входят в первую задачу. Это описание следующей authority boundary, не готовая команда для базы.
+
+#### 6. Матрица проверок и законченный outcome
+
+Таблица задаёт обязательный verification contract. Фактические команды, результаты и ограничения локальной проверки находятся в [checkpoint](../ops/PROJECT_STATUS.md); эта таблица сама по себе не является свидетельством выполнения. Fixtures: A=`101`, B=`102`; A1=`1001`, A2=`1002`, B1=`2001`; ownerA имеет active membership A и два read grants, staffA1 — membership A и один, ownerB — membership B и один. Два synthetic bot tokens известны только fixture; production token не читается. Дополнительные synthetic user/client/club IDs проверяют multiple memberships и BIGINT выше `Int.MAX_VALUE`/JS safe integer.
+
+| Проверка | Unit / policy | Ktor с реальным auth/wiring | PostgreSQL IT / persistence |
+|---|---|---|---|
+| A1/A2/B1 и staff A1 | Predicate: точный user/client/club/action; Platform не bypass | context/detail ровно ожидаемые JSON, foreign detail 404 | Real joins с разными users/clients; order и уникальность результатов |
+| Membership без grants, unknown user, revoked membership | Membership не даёт клубы | 200 empty/no clubs согласно примерам; GET не provisions | До/после GET rows и sequences не меняются; false membership исключает все её grants |
+| Mixed assignments | A1 permission + иной club/user/client/действие не складываются | Legacy cached roles/clubIds B не меняют ответ signed A | Composite FK отвергает membership A + mapping B; active grant A1 и inactive A2 не дают A2; другой action запрещён CHECK |
+| Отзыв grant/client и другие memberships | false на каждом уровне deny; отзыв A не выключает membership B | Следующий запрос после commit уже не видит отозванное | Синхронизированные два соединения: commit до SELECT и после snapshot; rollback не отзывает; без sleeps как доказательства |
+| Spoof headers и IDs | Request values не вызывают resolver/token lookup | X-Telegram-Id без initData →401; signed A + spoof B → только A; X-Club-Id игнорируется; query bot/client/club →400 после auth | SQL binds из fresh signed ID и path; no existence lookup leakage |
+| Другой бот / audience | Synthetic Platform и Client(A,{A1}); для Client A2/B1 denied даже при grants | Production path проверяет только platform token; signature другого bot →401, lookup/send counters подтверждают отсутствие token trial/Telegram вызова | Membership/grant остаются обязательными даже при trusted audience |
+| Transport / freshness / HMAC #550 | Empty/negative user, expiry/future skew, signature field включена в HMAC | Canonical single header; duplicate/alias/body-only/credential query/malformed key →401; `?x=%GG` без/с неверной подписью →401, с валидной →400 до routing/DB; valid header; fresh attr нельзя заменить старым MiniAppUserKey | Невалидный auth не вызывает новый client repository |
+| Data constraints | Long/string codec, positive IDs | malformed/overflow path →400; missing/foreign одинаковы 404 | Duplicate PK/club mapping, orphan FK, NULL, bad permission/blank client name отвергаются; одна identity во многих клубах/клиентах разрешена; Long без narrowing |
+| Совместимость DELETE | Cascade не означает revoke/delete клуба | Новые read grants не блокируют старую разрешённую delete операцию | Parent delete в disposable fixture удаляет только новый access tail; деактивация ничего не удаляет; client с зависимостями RESTRICT |
+| Сохранность legacy authority | Ни одного моста к Role.OWNER/GLOBAL/старым permissions | Full application fixture: новые grants не открывают admin/support/platform; прежние разрешения/отказы и старые auth response shapes неизменны | Existing users/clubs/user_roles/user_role_permissions byte/value equivalent после additive migration; нет backfill/grants |
+| Platform owner auth | Точное signed user.id и positive configured owner ID | Existing platform-owner tests: missing/invalid config denied; signed owner allowed; legacy OWNER другого user denied; HMAC #550 regression сохраняется | Read-only access не создаёт memberships/grants |
+| Restart / failures / caching | Нет singleton cache authority; CancellationException rethrow | Второй application instance с тем же DB даёт тот же context; изменения после restart видны; 500 без старого payload; no-store/Vary во всех ответах, no 304 | Два независимых процесса с одной synthetic DB сохраняют grants/context; DB failure не возвращает cached данные; GET не изменяет записи |
+| Миграция | Paired schema definitions согласованы | Startup нового приложения на extended schema; без external calls | Fresh DB и upgrade populated fixture; все constraints + повторный Flyway validate; invalid drift fail; прежние reads/mutations на extended schema |
+| No secret leakage | Principal/connection representations без token | Capture responses/logs/errors с synthetic canaries; нет initData/token/Idempotency-Key/чужих названий | Ошибки constraints/SQL наружу не попадают |
+
+**Один законченный implementation outcome:** четыре additive-таблицы, один permission code без grants, два read endpoints и namespace-local trusted identity + exact access query, с единственным platform adapter и синтетическим proof A1/A2/B1. Новые grants не влияют на legacy RBAC; текущий owner entry работает без изменения контракта. Все строки матрицы имеют PASS либо устраняемый в scope failure до handoff. Targeted module tests, Ktor test host, Postgres IT и H2 migration parity, affected detekt/ktlint обязательны; межмодульный auth/data/API change требует полного JVM test gate по repository DoD. Документы получают bounded implementation evidence, независимое focused review и исправления findings.
+
+**Exclusions:** реальные memberships/grants/mapping и credentials; любые mutation/admin APIs, UI, invitation/application/approval/club creation/publish, draft state machine, SDK upgrade, webhook/outbound multi-bot refactor, полный legacy isolation audit/cutover, commit/publication/deploy/runtime. Законченный локальный outcome не называется клиентским onboarding или готовностью запуска клиента. После его отдельной реализации и проверки — один handoff; дальнейшие права не возникают автоматически.
+
+**Существенные альтернативы:** запись grants в существующий `user_roles` отвергнута принятым контрактом из-за расширения legacy authority; отдельные capability grants сохраняют старый role catalogue. Nullable `clubs.client_id` с глобальным NOT NULL/backfill не рекомендуется: side mapping оставляет legacy unmapped и не меняет старые queries. Унификация всех auth errors/удаление legacy X-Telegram-Id fallback не включены: новый namespace имеет строгий стандартный envelope, изменение старого внешнего контракта требует отдельного scope. За этими границами дополнительных вариантов для принятия этой первой задачи не требуется.
