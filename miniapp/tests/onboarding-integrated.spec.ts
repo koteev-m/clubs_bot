@@ -24,16 +24,17 @@ async function open(page: Page, path: string, initData: string) {
   if (sameDocument) await page.reload();
 }
 
-test('packaged application completes invitation, confirmed access, approval and rejection against JDBC', async ({
+test('packaged application completes invitation, approval, one private club, saved profile and rejection against JDBC', async ({
   browser,
   request,
   baseURL,
 }) => {
+  test.setTimeout(90000);
   const owner = await browser.newPage({
     baseURL,
     viewport: { width: 390, height: 844 },
   });
-  const recipient = await browser.newPage({
+  let recipient = await browser.newPage({
     baseURL,
     viewport: { width: 390, height: 844 },
   });
@@ -52,7 +53,7 @@ test('packaged application completes invitation, confirmed access, approval and 
     owner.getByRole('heading', { name: 'Управление платформой', exact: true }),
   ).toBeVisible();
   await owner.getByRole('button', { name: 'Пригласить клиента' }).click();
-  const clientName = 'Synthetic Stage A ' + Date.now();
+  const clientName = 'Synthetic Onboarding AB ' + Date.now();
   await owner.getByLabel('Название клиентского пространства').fill(clientName);
   await owner
     .getByLabel('Кому отправляете приглашение')
@@ -159,17 +160,13 @@ test('packaged application completes invitation, confirmed access, approval and 
   await open(recipient, '/app?mode=client', recipientCredential);
   await recipient.getByRole('button', { name: new RegExp(clientName) }).click();
   await recipient.getByRole('button', { name: /Synthetic Venue/ }).click();
-  await expect(
-    recipient.getByText(
-      'Подключение одобрено. Создание клуба будет доступно после следующего этапа настройки платформы',
-    ),
-  ).toBeVisible();
+  await expect(recipient.getByText('Подключение одобрено.')).toBeVisible();
   await expect(
     recipient.getByText('Synthetic private platform note'),
   ).toHaveCount(0);
   await expect(
-    recipient.getByRole('button', { name: /Создать.*клуб/i }),
-  ).toHaveCount(0);
+    recipient.getByRole('button', { name: 'Создать клуб' }),
+  ).toBeVisible();
   await recipient.screenshot({
     path: test.info().outputPath('approved-client.png'),
     fullPage: true,
@@ -180,6 +177,93 @@ test('packaged application completes invitation, confirmed access, approval and 
     ),
   ).toBe(true);
 
+  // Execute the real transaction, then lose its HTTP response. The UI must retry
+  // the original command without creating a second club or a new intent.
+  const creates: { key: string; body: string | null }[] = [];
+  await recipient.route(
+    '**/api/client/applications/' + draft.id + '/club',
+    async (route) => {
+      creates.push({
+        key: route.request().headers()['idempotency-key'],
+        body: route.request().postData(),
+      });
+      if (creates.length === 1) {
+        const committed = await route.fetch();
+        expect(committed.ok()).toBe(true);
+        return route.abort();
+      }
+      return route.continue();
+    },
+  );
+  await recipient.getByRole('button', { name: 'Создать клуб' }).click();
+  await expect(
+    recipient.getByText('Результат операции пока неизвестен'),
+  ).toBeVisible();
+  await expect(
+    recipient.getByRole('button', { name: 'Создать клуб' }),
+  ).toBeDisabled();
+  const createResponse = recipient.waitForResponse(
+    (result) =>
+      result.url().endsWith('/applications/' + draft.id + '/club') &&
+      result.ok(),
+  );
+  await recipient
+    .getByRole('button', { name: 'Повторить ту же операцию' })
+    .click();
+  const created = await (await createResponse).json();
+  expect(creates).toHaveLength(2);
+  expect(creates[0]).toEqual(creates[1]);
+  await expect(
+    recipient.getByText('Непубличный', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    recipient.getByText('Бот не подключён', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    recipient.getByText('Synthetic Street 1', { exact: true }),
+  ).toBeVisible();
+  await expect(recipient.getByLabel('Адрес', { exact: true })).toHaveCount(0);
+  await recipient
+    .getByLabel('Отображаемое название')
+    .fill('Synthetic Saved Club');
+  await recipient
+    .getByLabel('Описание клуба')
+    .fill('Synthetic saved description');
+  await recipient.getByLabel('Часовой пояс').fill('Europe/Paris');
+  await recipient.getByRole('button', { name: 'Сохранить профиль' }).click();
+  await expect(recipient.getByText('Сохранено', { exact: true })).toBeVisible();
+  await recipient.screenshot({
+    path: test.info().outputPath('saved-private-club.png'),
+    fullPage: true,
+  });
+  await recipient.close();
+  recipient = await browser.newPage({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+  });
+  await open(recipient, '/app?mode=client', recipientCredential);
+  await recipient.getByRole('button', { name: new RegExp(clientName) }).click();
+  await recipient.getByRole('button', { name: /Synthetic Saved Club/ }).click();
+  await expect(recipient).toHaveURL(
+    new RegExp('screen=club&resource=' + created.id),
+  );
+  await expect(recipient.getByLabel('Описание клуба')).toHaveValue(
+    'Synthetic saved description',
+  );
+  await expect(recipient.getByLabel('Часовой пояс')).toHaveValue(
+    'Europe/Paris',
+  );
+  const approvedSnapshot = await request.get(
+    '/api/client/applications/' + draft.id,
+    { headers: { 'X-Telegram-Init-Data': recipientCredential } },
+  );
+  const consumed = await approvedSnapshot.json();
+  expect(consumed.venueName).toBe('Synthetic Venue');
+  expect(consumed.timezone).toBe('Europe/Moscow');
+  expect(consumed.createdClubId).toBe(created.id);
+  expect(consumed.availableActions).toContain('openClub');
+  expect(consumed.availableActions).not.toContain('createClub');
+
   await open(
     foreign,
     '/app?mode=client&screen=application&resource=' + draft.id,
@@ -187,6 +271,13 @@ test('packaged application completes invitation, confirmed access, approval and 
   );
   await expect(foreign.getByText(/Доступ утрачен/)).toBeVisible();
   await expect(foreign.getByText('Synthetic Venue')).toHaveCount(0);
+  await open(
+    foreign,
+    '/app?mode=client&screen=club&resource=' + created.id,
+    foreignCredential,
+  );
+  await expect(foreign.getByText(/Доступ утрачен/)).toBeVisible();
+  await expect(foreign.getByText('Synthetic Street 1')).toHaveCount(0);
   const context = await request.get('/api/client/context', {
     headers: { 'X-Telegram-Init-Data': recipientCredential },
   });
@@ -194,7 +285,13 @@ test('packaged application completes invitation, confirmed access, approval and 
   expect(
     clients.find((client: { id: string }) => client.id === issued.clientId)
       .clubs,
-  ).toEqual([]);
+  ).toEqual([
+    {
+      id: created.id,
+      name: 'Synthetic Saved Club',
+      permissions: ['client.club.read'],
+    },
+  ]);
   await open(
     owner,
     '/app?mode=platform-owner&screen=client&resource=' + issued.clientId,
@@ -211,7 +308,7 @@ test('packaged application completes invitation, confirmed access, approval and 
   await recipient.evaluate(() => window.dispatchEvent(new Event('pageshow')));
   await expect(recipient.getByText(/Доступ утрачен/)).toBeVisible();
   await expect(
-    recipient.getByRole('heading', { name: 'Synthetic Venue' }),
+    recipient.getByRole('heading', { name: 'Synthetic Saved Club' }),
   ).toHaveCount(0);
   await owner
     .getByRole('checkbox', { name: 'Управление заявками', exact: true })
@@ -228,11 +325,20 @@ test('packaged application completes invitation, confirmed access, approval and 
     owner.getByText('Доступ активен', { exact: true }),
   ).toBeVisible();
   await recipient.evaluate(() => window.dispatchEvent(new Event('pageshow')));
+  // Restoring manage alone must not restore either club grant.
+  await expect(recipient.getByText(/Доступ утрачен/)).toBeVisible();
+  await open(
+    recipient,
+    '/app?mode=client&screen=application&resource=' + draft.id,
+    recipientCredential,
+  );
+  await expect(recipient.getByText('Подключение одобрено.')).toBeVisible();
   await expect(
-    recipient.getByText(
-      'Подключение одобрено. Создание клуба будет доступно после следующего этапа настройки платформы',
-    ),
-  ).toBeVisible();
+    recipient.getByRole('button', { name: 'Открыть клуб' }),
+  ).toHaveCount(0);
+  await expect(
+    recipient.getByRole('button', { name: 'Создать клуб' }),
+  ).toHaveCount(0);
 
   await open(recipient, '/app?mode=client', recipientCredential);
   await recipient.getByRole('button', { name: new RegExp(clientName) }).click();
@@ -341,11 +447,7 @@ test('packaged application completes invitation, confirmed access, approval and 
       level: 1,
     }),
   ).toBeVisible();
-  await expect(
-    recipient.getByText(
-      'Подключение одобрено. Создание клуба будет доступно после следующего этапа настройки платформы',
-    ),
-  ).toBeVisible();
+  await expect(recipient.getByText('Подключение одобрено.')).toBeVisible();
   await owner.close();
   await recipient.close();
   await foreign.close();

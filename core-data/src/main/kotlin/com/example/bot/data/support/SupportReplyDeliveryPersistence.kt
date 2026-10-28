@@ -3,15 +3,18 @@ package com.example.bot.data.support
 import com.example.bot.audit.StandardAuditAction
 import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.audit.AuditLogTable
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.support.SupportReplyDeliveryFailureCode
 import com.example.bot.support.SupportReplyDeliveryStatus
 import com.example.bot.support.TicketSenderType
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.Op
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.exists
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -78,7 +81,8 @@ internal class SupportReplyDeliveryPersistence(
             val updated =
                 SupportReplyDeliveriesTable.update({
                     (SupportReplyDeliveriesTable.id eq deliveryId) and
-                        (SupportReplyDeliveriesTable.status eq SupportReplyDeliveryStatus.PENDING.wire)
+                        (SupportReplyDeliveriesTable.status eq SupportReplyDeliveryStatus.PENDING.wire) and
+                        visibleDelivery()
                 }) {
                     it[status] = SupportReplyDeliveryStatus.SENDING.wire
                     it[failureCode] = null
@@ -91,7 +95,7 @@ internal class SupportReplyDeliveryPersistence(
             val deliveryRow =
                 SupportReplyDeliveriesTable
                     .selectAll()
-                    .where { SupportReplyDeliveriesTable.id eq deliveryId }
+                    .where { (SupportReplyDeliveriesTable.id eq deliveryId) and visibleDelivery() }
                     .single()
             val ticketId = deliveryRow[SupportReplyDeliveriesTable.ticketId]
             val replyMessageId = deliveryRow[SupportReplyDeliveriesTable.replyMessageId]
@@ -150,7 +154,7 @@ internal class SupportReplyDeliveryPersistence(
             val deliveryRow =
                 SupportReplyDeliveriesTable
                     .selectAll()
-                    .where { SupportReplyDeliveriesTable.id eq deliveryId }
+                    .where { (SupportReplyDeliveriesTable.id eq deliveryId) and visibleDelivery() }
                     .forUpdate()
                     .singleOrNull()
                     ?: return@newSuspendedTransaction SupportReplyDeliveryFinalizationResult.NotFinalized
@@ -183,7 +187,7 @@ internal class SupportReplyDeliveryPersistence(
         newSuspendedTransaction(context = transactionContext, db = db) {
             SupportReplyDeliveriesTable
                 .selectAll()
-                .where { SupportReplyDeliveriesTable.id eq deliveryId }
+                .where { (SupportReplyDeliveriesTable.id eq deliveryId) and visibleDelivery() }
                 .singleOrNull()
                 ?.let(::toRecord)
         }
@@ -273,3 +277,10 @@ private object SupportDeliveryUsersTable : Table("users") {
 
     override val primaryKey = PrimaryKey(id)
 }
+
+private fun visibleDelivery(): Op<Boolean> =
+    exists(
+        TicketsTable.select(TicketsTable.id).where {
+            (TicketsTable.id eq SupportReplyDeliveriesTable.ticketId) and unmappedClub(TicketsTable.clubId)
+        },
+    )

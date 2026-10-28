@@ -5,6 +5,7 @@ import com.example.bot.booking.a3.BookingState
 import com.example.bot.booking.a3.BookingStatus
 import com.example.bot.clubs.Club
 import com.example.bot.clubs.ClubsRepository
+import com.example.bot.data.clubs.ClubsDbRepository
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserIdentityProvisioner
 import com.example.bot.data.security.UserRepository
@@ -40,6 +41,7 @@ import org.h2.jdbcx.JdbcDataSource
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
@@ -53,6 +55,99 @@ import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 import com.pengrad.telegrambot.model.User as TelegramUser
+
+class TelegramPrivateContainmentTest {
+    private var privateDatabase: Database? = null
+
+    private fun database(): Database = prepareRealSupportDatabase().also { privateDatabase = it }
+
+    @AfterEach
+    fun closeDatabase() {
+        privateDatabase?.let { database -> transaction(database) { exec("SET DB_CLOSE_DELAY 0") } }
+    }
+
+    @Test
+    fun `support rating callback cannot mutate a private descendant ticket`() =
+        runBlocking {
+            val database = database()
+            transaction(database) {
+                exec("INSERT INTO users(id,telegram_user_id) VALUES (55,101)")
+                exec(
+                    "INSERT INTO clubs(id,name,timezone,is_active) VALUES " +
+                        "(880063512,'PRIVATE-RATING-CONTENT','UTC',false)",
+                )
+                exec("INSERT INTO clients(id,display_name) VALUES (880063512,'Synthetic private client')")
+                exec("INSERT INTO client_clubs(client_id,club_id) VALUES (880063512,880063512)")
+                exec(
+                    "INSERT INTO tickets(id,club_id,user_id,topic,status) VALUES " +
+                        "(880063512,880063512,55,'booking','answered')",
+                )
+                exec(
+                    "INSERT INTO ticket_messages(ticket_id,sender_type,text) VALUES " +
+                        "(880063512,'agent','PRIVATE-RATING-CONTENT')",
+                )
+            }
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                SupportTelegramHandler(
+                    sender::send,
+                    SupportServiceImpl(SupportRepository(database)),
+                    RegisteredFallbackUserRepository,
+                )
+            val update = mockk<Update>()
+            val callback = mockk<CallbackQuery>()
+            val from = mockk<TelegramUser>()
+            every { update.callbackQuery() } returns callback
+            every { callback.data() } returns "support_rate:880063512:up"
+            every { callback.id() } returns "synthetic-private-rating"
+            every { callback.message() } returns null
+            every { callback.from() } returns from
+            every { from.id() } returns 101L
+            handler.handle(update)
+            val answer = sender.requests.single() as AnswerCallbackQuery
+            assertEquals("Не удалось сохранить оценку.", answer.parameters["text"])
+            transaction(database) {
+                exec("SELECT resolution_rating FROM tickets WHERE id=880063512") { rows ->
+                    rows.next()
+                    assertEquals(null, rows.getObject(1))
+                }
+                assertEquals(1L, TicketMessagesTable.selectAll().count())
+            }
+        }
+
+    @Test
+    fun `ask direct callbacks never reveal a mapped club even with active synthetic record`() =
+        runBlocking {
+            val database = database()
+            transaction(database) {
+                exec(
+                    "INSERT INTO clubs(id,name,timezone,is_active) VALUES (880063511,'PRIVATE-ASK-CONTENT','UTC',true)",
+                )
+                exec("INSERT INTO clients(id,display_name) VALUES (880063511,'Synthetic private client')")
+                exec("INSERT INTO client_clubs(client_id,club_id) VALUES (880063511,880063511)")
+            }
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender = sender,
+                    now = TEST_NOW,
+                    bookings = emptyList(),
+                    clubsRepository = ClubsDbRepository(database),
+                    supportService = SupportServiceImpl(SupportRepository(database)),
+                )
+            for (callback in listOf("ask:club:880063511", "ask:club:880063511:topic:booking")) {
+                assertTrue(handler.handle(askCallbackUpdate(callback)))
+            }
+            val answers = sender.requests.filterIsInstance<AnswerCallbackQuery>()
+            assertEquals(2, answers.size)
+            assertTrue(answers.all { it.parameters["text"] == "Клуб не найден." })
+            assertTrue(sender.requests.none { it is SendMessage })
+            transaction(database) {
+                assertEquals(0L, TicketsTable.selectAll().count())
+                assertEquals(0L, TicketMessagesTable.selectAll().count())
+            }
+        }
+}
 
 class TelegramGuestFallbackHandlerTest {
     @Test

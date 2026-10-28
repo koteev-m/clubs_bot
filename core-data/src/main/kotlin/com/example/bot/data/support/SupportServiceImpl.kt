@@ -44,6 +44,8 @@ class SupportServiceImpl(
             )
         } catch (error: CancellationException) {
             throw error
+        } catch (_: PrivateSupportClubException) {
+            SupportServiceResult.Failure(SupportServiceError.TicketNotFound)
         } catch (_: Exception) {
             SupportServiceResult.Failure(SupportServiceError.PersistenceFailure)
         }

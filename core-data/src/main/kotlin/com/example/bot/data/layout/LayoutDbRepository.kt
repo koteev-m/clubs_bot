@@ -1,29 +1,24 @@
 package com.example.bot.data.layout
 
-import com.example.bot.data.db.withRetriedTx
 import com.example.bot.data.db.isUniqueViolation
+import com.example.bot.data.db.withRetriedTx
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.layout.AdminTableCreate
 import com.example.bot.layout.AdminTableUpdate
 import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.ClubLayout
-import com.example.bot.layout.LayoutAssets
-import com.example.bot.layout.LayoutAssetsRepository
-import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.HallPlan
 import com.example.bot.layout.HallPlanMeta
 import com.example.bot.layout.HallPlansRepository
+import com.example.bot.layout.LayoutAssets
+import com.example.bot.layout.LayoutAssetsRepository
+import com.example.bot.layout.LayoutRepository
 import com.example.bot.layout.Table
-import com.example.bot.layout.TableStatus
 import com.example.bot.layout.TableNumberConflictException
+import com.example.bot.layout.TableStatus
 import com.example.bot.layout.Zone
 import com.example.bot.layout.parseArrivalWindowOrNull
 import com.example.bot.layout.toRangeString
-import java.security.MessageDigest
-import java.time.Clock
-import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.ZoneOffset
-import java.util.Base64
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -37,19 +32,31 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertAndGetId
-import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
+import java.security.MessageDigest
+import java.time.Clock
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.util.Base64
 
 class LayoutDbRepository(
     private val database: Database,
     private val clock: Clock = Clock.systemUTC(),
-) : LayoutRepository, AdminTablesRepository, LayoutAssetsRepository, HallPlansRepository {
+) : LayoutRepository,
+    AdminTablesRepository,
+    LayoutAssetsRepository,
+    HallPlansRepository {
     private val logger = LoggerFactory.getLogger(LayoutDbRepository::class.java)
     private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun getLayout(clubId: Long, eventId: Long?): ClubLayout? =
+    override suspend fun getLayout(
+        clubId: Long,
+        eventId: Long?,
+    ): ClubLayout? =
         withRetriedTx(name = "layout.get", readOnly = true, database = database) {
             val hall = loadActiveHall(clubId) ?: return@withRetriedTx null
             val hallId = hall.id
@@ -79,7 +86,10 @@ class LayoutDbRepository(
             )
         }
 
-    override suspend fun lastUpdatedAt(clubId: Long, eventId: Long?): Instant? =
+    override suspend fun lastUpdatedAt(
+        clubId: Long,
+        eventId: Long?,
+    ): Instant? =
         withRetriedTx(name = "layout.lastUpdatedAt", readOnly = true, database = database) {
             val hall = loadActiveHall(clubId) ?: return@withRetriedTx null
             bumpInstantWithRevision(hall.updatedAt, hall.layoutRevision)
@@ -97,7 +107,10 @@ class LayoutDbRepository(
             listZonesForHall(hall.id)
         }
 
-    override suspend fun findById(clubId: Long, id: Long): Table? =
+    override suspend fun findById(
+        clubId: Long,
+        id: Long,
+    ): Table? =
         withRetriedTx(name = "layout.findById", readOnly = true, database = database) {
             val hall = loadActiveHall(clubId) ?: return@withRetriedTx null
             loadTableById(hall.id, id)
@@ -115,7 +128,10 @@ class LayoutDbRepository(
             updateTableForHall(hall.id, request)
         }
 
-    override suspend fun delete(clubId: Long, id: Long): Boolean =
+    override suspend fun delete(
+        clubId: Long,
+        id: Long,
+    ): Boolean =
         withRetriedTx(name = "layout.delete", database = database) {
             val hall = requireActiveHall(clubId)
             deleteTableForHall(hall.id, id)
@@ -129,11 +145,13 @@ class LayoutDbRepository(
 
     override suspend fun listForHall(hallId: Long): List<Table> =
         withRetriedTx(name = "layout.listForHall", readOnly = true, database = database) {
+            if (!legacyHall(hallId)) return@withRetriedTx emptyList()
             listTablesForHall(hallId)
         }
 
     override suspend fun listZonesForHall(hallId: Long): List<Zone> =
         withRetriedTx(name = "layout.listZonesForHall", readOnly = true, database = database) {
+            if (!legacyHall(hallId)) return@withRetriedTx emptyList()
             HallZonesTable
                 .selectAll()
                 .where { HallZonesTable.hallId eq hallId }
@@ -141,25 +159,35 @@ class LayoutDbRepository(
                 .map { it.toZone() }
         }
 
-    override suspend fun findByIdForHall(hallId: Long, id: Long): Table? =
+    override suspend fun findByIdForHall(
+        hallId: Long,
+        id: Long,
+    ): Table? =
         withRetriedTx(name = "layout.findByIdForHall", readOnly = true, database = database) {
+            if (!legacyHall(hallId)) return@withRetriedTx null
             loadTableById(hallId, id)
         }
 
     override suspend fun createForHall(request: AdminTableCreate): Table =
         withRetriedTx(name = "layout.createForHall", database = database) {
             val hallId = request.hallId ?: error("Hall id is required for createForHall")
+            check(legacyHall(hallId)) { "Hall unavailable" }
             createTableForHall(hallId, request)
         }
 
     override suspend fun updateForHall(request: AdminTableUpdate): Table? =
         withRetriedTx(name = "layout.updateForHall", database = database) {
             val hallId = request.hallId ?: error("Hall id is required for updateForHall")
+            if (!legacyHall(hallId)) return@withRetriedTx null
             updateTableForHall(hallId, request)
         }
 
-    override suspend fun deleteForHall(hallId: Long, id: Long): Boolean =
+    override suspend fun deleteForHall(
+        hallId: Long,
+        id: Long,
+    ): Boolean =
         withRetriedTx(name = "layout.deleteForHall", database = database) {
+            if (!legacyHall(hallId)) return@withRetriedTx false
             deleteTableForHall(hallId, id)
         }
 
@@ -167,15 +195,20 @@ class LayoutDbRepository(
         withRetriedTx(name = "layout.adminLastUpdatedForHall", readOnly = true, database = database) {
             HallsTable
                 .selectAll()
-                .where { HallsTable.id eq hallId }
+                .where { (HallsTable.id eq hallId) and unmappedClub(HallsTable.clubId) }
                 .firstOrNull()
                 ?.let { row ->
                     bumpInstantWithRevision(row[HallsTable.updatedAt].toInstant(), row[HallsTable.layoutRevision])
                 }
         }
 
-    override suspend fun isTableNumberTaken(hallId: Long, tableNumber: Int, excludeTableId: Long?): Boolean =
+    override suspend fun isTableNumberTaken(
+        hallId: Long,
+        tableNumber: Int,
+        excludeTableId: Long?,
+    ): Boolean =
         withRetriedTx(name = "layout.tableNumberTaken", readOnly = true, database = database) {
+            if (!legacyHall(hallId)) return@withRetriedTx false
             HallTablesTable
                 .selectAll()
                 .where {
@@ -183,17 +216,21 @@ class LayoutDbRepository(
                         (HallTablesTable.tableNumber eq tableNumber) and
                         (HallTablesTable.isActive eq true) and
                         (excludeTableId?.let { HallTablesTable.id neq it } ?: Op.TRUE)
-                }
-                .limit(1)
+                }.limit(1)
                 .any()
         }
 
-    override suspend fun loadGeometry(clubId: Long, fingerprint: String): String? =
+    override suspend fun loadGeometry(
+        clubId: Long,
+        fingerprint: String,
+    ): String? =
         withRetriedTx(name = "layout.geometry", readOnly = true, database = database) {
             HallsTable
                 .selectAll()
-                .where { (HallsTable.clubId eq clubId) and (HallsTable.geometryFingerprint eq fingerprint) }
-                .firstOrNull()
+                .where {
+                    (HallsTable.clubId eq clubId) and (HallsTable.geometryFingerprint eq fingerprint) and
+                        unmappedClub(HallsTable.clubId)
+                }.firstOrNull()
                 ?.get(HallsTable.geometryJson)
         }
 
@@ -205,6 +242,7 @@ class LayoutDbRepository(
         sizeBytes: Long,
     ): HallPlan =
         withRetriedTx(name = "layout.plan.upsert", database = database) {
+            check(legacyHall(hallId)) { "Hall unavailable" }
             val now = clock.instant()
             val nowOffset = now.toOffsetDateTime()
             val updated =
@@ -251,7 +289,10 @@ class LayoutDbRepository(
                 .toHallPlan()
         }
 
-    override suspend fun getPlanForClub(clubId: Long, hallId: Long): HallPlan? =
+    override suspend fun getPlanForClub(
+        clubId: Long,
+        hallId: Long,
+    ): HallPlan? =
         withRetriedTx(name = "layout.plan.get", readOnly = true, database = database) {
             if (!hallBelongsToClub(hallId, clubId)) {
                 return@withRetriedTx null
@@ -263,7 +304,10 @@ class LayoutDbRepository(
                 ?.toHallPlan()
         }
 
-    override suspend fun getPlanMetaForClub(clubId: Long, hallId: Long): HallPlanMeta? =
+    override suspend fun getPlanMetaForClub(
+        clubId: Long,
+        hallId: Long,
+    ): HallPlanMeta? =
         withRetriedTx(name = "layout.plan.meta.get", readOnly = true, database = database) {
             if (!hallBelongsToClub(hallId, clubId)) {
                 return@withRetriedTx null
@@ -275,35 +319,46 @@ class LayoutDbRepository(
                     HallPlansTable.sha256,
                     HallPlansTable.sizeBytes,
                     HallPlansTable.updatedAt,
-                )
-                .select { HallPlansTable.hallId eq hallId }
+                ).select { HallPlansTable.hallId eq hallId }
                 .firstOrNull()
                 ?.toHallPlanMeta()
         }
 
-    private fun hallBelongsToClub(hallId: Long, clubId: Long): Boolean {
-        return HallsTable
-            .slice(HallsTable.id)
-            .select { (HallsTable.id eq hallId) and (HallsTable.clubId eq clubId) }
+    private fun legacyHall(hallId: Long): Boolean =
+        HallsTable
+            .select(HallsTable.id)
+            .where { (HallsTable.id eq hallId) and unmappedClub(HallsTable.clubId) }
             .limit(1)
             .any()
-    }
 
-    private fun loadActiveHall(clubId: Long): HallRow? {
-        return HallsTable
+    private fun hallBelongsToClub(
+        hallId: Long,
+        clubId: Long,
+    ): Boolean =
+        HallsTable
+            .slice(HallsTable.id)
+            .select { (HallsTable.id eq hallId) and (HallsTable.clubId eq clubId) and unmappedClub(HallsTable.clubId) }
+            .limit(1)
+            .any()
+
+    private fun loadActiveHall(clubId: Long): HallRow? =
+        HallsTable
             .selectAll()
-            .where { (HallsTable.clubId eq clubId) and (HallsTable.isActive eq true) }
-            .orderBy(HallsTable.id, SortOrder.ASC)
+            .where {
+                (HallsTable.clubId eq clubId) and (HallsTable.isActive eq true) and
+                    unmappedClub(
+                        HallsTable.clubId,
+                    )
+            }.orderBy(HallsTable.id, SortOrder.ASC)
             .firstOrNull()
             ?.let { row ->
-            HallRow(
-                id = row[HallsTable.id].value,
-                geometryFingerprint = row[HallsTable.geometryFingerprint],
-                updatedAt = row[HallsTable.updatedAt].toInstant(),
-                layoutRevision = row[HallsTable.layoutRevision],
-            )
-        }
-    }
+                HallRow(
+                    id = row[HallsTable.id].value,
+                    geometryFingerprint = row[HallsTable.geometryFingerprint],
+                    updatedAt = row[HallsTable.updatedAt].toInstant(),
+                    layoutRevision = row[HallsTable.layoutRevision],
+                )
+            }
 
     private fun ResultRow.toHallPlan(): HallPlan =
         HallPlan(
@@ -325,31 +380,33 @@ class LayoutDbRepository(
             updatedAt = this[HallPlansTable.updatedAt].toInstant(),
         )
 
-    private fun requireActiveHall(clubId: Long): HallRow {
-        return loadActiveHall(clubId) ?: error("No active hall for club $clubId")
-    }
+    private fun requireActiveHall(clubId: Long): HallRow =
+        loadActiveHall(clubId) ?: error("No active hall for club $clubId")
 
-    private fun loadTableById(hallId: Long, id: Long): Table? {
-        return HallTablesTable
+    private fun loadTableById(
+        hallId: Long,
+        id: Long,
+    ): Table? =
+        HallTablesTable
             .selectAll()
             .where {
                 (HallTablesTable.hallId eq hallId) and
                     (HallTablesTable.id eq id) and
                     (HallTablesTable.isActive eq true)
-            }
-            .firstOrNull()
+            }.firstOrNull()
             ?.toTable()
-    }
 
-    private fun listTablesForHall(hallId: Long): List<Table> {
-        return HallTablesTable
+    private fun listTablesForHall(hallId: Long): List<Table> =
+        HallTablesTable
             .selectAll()
             .where { (HallTablesTable.hallId eq hallId) and (HallTablesTable.isActive eq true) }
             .orderBy(HallTablesTable.id, SortOrder.ASC)
             .map { it.toTable() }
-    }
 
-    private fun createTableForHall(hallId: Long, request: AdminTableCreate): Table {
+    private fun createTableForHall(
+        hallId: Long,
+        request: AdminTableCreate,
+    ): Table {
         val now = clock.instant()
         val nowOffset = now.toOffsetDateTime()
         val nextNumber =
@@ -388,7 +445,10 @@ class LayoutDbRepository(
         return loadTableById(hallId, newId.value) ?: error("Failed to create table")
     }
 
-    private fun updateTableForHall(hallId: Long, request: AdminTableUpdate): Table? {
+    private fun updateTableForHall(
+        hallId: Long,
+        request: AdminTableUpdate,
+    ): Table? {
         val existing = loadTableById(hallId, request.id) ?: return null
         val now = clock.instant()
         val nowOffset = now.toOffsetDateTime()
@@ -420,14 +480,18 @@ class LayoutDbRepository(
                 }
                 throw error
             }
-        if (updated == 0) {
-            return null
+        return if (updated == 0) {
+            null
+        } else {
+            bumpHallRevision(hallId, nowOffset)
+            loadTableById(hallId, request.id)
         }
-        bumpHallRevision(hallId, nowOffset)
-        return loadTableById(hallId, request.id)
     }
 
-    private fun deleteTableForHall(hallId: Long, id: Long): Boolean {
+    private fun deleteTableForHall(
+        hallId: Long,
+        id: Long,
+    ): Boolean {
         val nowOffset = clock.instant().toOffsetDateTime()
         val updated =
             HallTablesTable.update({
@@ -446,17 +510,19 @@ class LayoutDbRepository(
         }
     }
 
-    private fun defaultZoneId(hallId: Long): String {
-        return HallZonesTable
+    private fun defaultZoneId(hallId: Long): String =
+        HallZonesTable
             .selectAll()
             .where { HallZonesTable.hallId eq hallId }
             .orderBy(HallZonesTable.sortOrder, SortOrder.ASC)
             .firstOrNull()
             ?.get(HallZonesTable.zoneId)
             ?: "main"
-    }
 
-    private fun bumpHallRevision(hallId: Long, now: OffsetDateTime) {
+    private fun bumpHallRevision(
+        hallId: Long,
+        now: OffsetDateTime,
+    ) {
         val updated =
             HallsTable.update({ HallsTable.id eq hallId }) {
                 it[layoutRevision] = HallsTable.layoutRevision + 1
@@ -506,7 +572,10 @@ class LayoutDbRepository(
             .split(',')
             .mapNotNull { it.trim().trim('"').takeIf { value -> value.isNotBlank() } }
 
-    private fun bumpInstantWithRevision(base: Instant, revision: Long): Instant {
+    private fun bumpInstantWithRevision(
+        base: Instant,
+        revision: Long,
+    ): Instant {
         val nanoBump = (revision % 1_000_000_000L).toInt()
         return base.plusNanos(nanoBump.toLong())
     }

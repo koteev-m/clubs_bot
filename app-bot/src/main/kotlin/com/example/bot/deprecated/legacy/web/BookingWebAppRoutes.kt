@@ -27,6 +27,9 @@ import com.example.bot.data.booking.BookingStatusNames
 import com.example.bot.data.db.DbErrorClassifier
 import com.example.bot.data.db.DbErrorReason
 import com.example.bot.data.privacy.PrivacyConfig
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
 import io.ktor.http.ContentType
@@ -41,6 +44,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.routing.route
 import com.example.bot.plugins.withMiniAppAuth
+import com.example.bot.plugins.requireLegacyResources
 import io.ktor.server.application.call
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
@@ -432,6 +436,7 @@ fun Application.installLegacyBookingWebApp(
             val clubs: List<ClubDto> = transaction {
                 Clubs
                     .selectAll()
+                    .where { unmappedClub(Clubs.id) }
                     .orderBy(Clubs.id, SortOrder.ASC)
                     .map { ClubDto(it[Clubs.id], it[Clubs.name], it[Clubs.description]) }
             }
@@ -446,8 +451,9 @@ fun Application.installLegacyBookingWebApp(
             val events: List<EventDto> = transaction {
                 Events
                     .selectAll()
-                    .where { (Events.clubId eq clubId) and (Events.endAt greaterEq now) }
-                    .orderBy(Events.startAt, SortOrder.ASC)
+                    .where {
+                        (Events.clubId eq clubId) and (Events.endAt greaterEq now) and unmappedClub(Events.clubId)
+                    }.orderBy(Events.startAt, SortOrder.ASC)
                       .limit(EVENTS_LIMIT)
                     .map {
                         EventDto(
@@ -473,18 +479,20 @@ fun Application.installLegacyBookingWebApp(
             val free: List<TableDto> = transaction {
                 val busyTableIds: Set<Long> = Bookings
                     .selectAll()
-                    .where { (Bookings.eventId eq eventId) and (Bookings.status inList activeBookingStatuses) }
-                    .map { it[Bookings.tableId] }
+                    .where {
+                        (Bookings.eventId eq eventId) and (Bookings.status inList activeBookingStatuses) and
+                        unmappedClub(Bookings.clubId)
+                    }.map { it[Bookings.tableId] }
                     .toSet()
 
                 Tables
                     .selectAll()
                     .where {
                         (Tables.clubId eq clubId) and
+                            unmappedClub(Tables.clubId) and
                             (Tables.active eq true) and
                             (Tables.capacity greaterEq guests)
-                    }
-                    .orderBy(Tables.tableNumber, SortOrder.ASC)
+                    }.orderBy(Tables.tableNumber, SortOrder.ASC)
                     .mapNotNull {
                         val id = it[Tables.id]
                         if (id in busyTableIds) null
@@ -519,6 +527,11 @@ fun Application.installLegacyBookingWebApp(
                     message = "Request body must be valid JSON",
                 )
             }
+            if (!call.requireLegacyResources(
+                    LegacyReference(LegacyResource.CLUB, req.clubId),
+                    LegacyReference(LegacyResource.EVENT, req.eventId),
+                    LegacyReference(LegacyResource.TABLE, req.tableId),
+                )) return@post
             val parsedArrivalBy: Instant? = try {
                 req.arrivalBy?.let(Instant::parse)
             } catch (_: DateTimeParseException) {
@@ -537,7 +550,7 @@ fun Application.installLegacyBookingWebApp(
             val result: BookingResult = transaction {
                 val event = Events
                     .selectAll()
-                    .where { Events.id eq req.eventId }
+                    .where { (Events.id eq req.eventId) and unmappedClub(Events.clubId) }
                     .limit(1)
                     .firstOrNull() ?: return@transaction BookingError("EVENT_NOT_FOUND")
 
@@ -547,7 +560,7 @@ fun Application.installLegacyBookingWebApp(
 
                 val table = Tables
                     .selectAll()
-                    .where { Tables.id eq req.tableId }
+                    .where { (Tables.id eq req.tableId) and unmappedClub(Tables.clubId) }
                     .limit(1)
                     .firstOrNull() ?: return@transaction BookingError("TABLE_NOT_FOUND")
 
@@ -563,8 +576,7 @@ fun Application.installLegacyBookingWebApp(
                         (Bookings.eventId eq req.eventId) and
                             (Bookings.tableId eq req.tableId) and
                             (Bookings.status inList activeBookingStatuses)
-                    }
-                    .any()
+                    }.any()
                 if (existsActive) return@transaction BookingError("ALREADY_BOOKED")
 
                 val userId: Long = ensureUser(privacyConfig, tgUserId, tgUsername, tgDisplay, req.phoneE164)
@@ -654,7 +666,7 @@ fun Application.installLegacyBookingWebApp(
                     .join(Events, INNER, additionalConstraint = { Bookings.eventId eq Events.id })
                     .join(Clubs,  INNER, additionalConstraint = { Bookings.clubId eq Clubs.id })
                     .selectAll()
-                    .where { Bookings.guestUserId eq user[Users.id] }
+                    .where { (Bookings.guestUserId eq user[Users.id]) and unmappedClub(Bookings.clubId) }
                     .orderBy(Bookings.createdAt, SortOrder.DESC)
                       .limit(BOOKINGS_LIMIT)
                     .map {
@@ -746,29 +758,65 @@ private object Bookings : Table("bookings") {
 
 /* ==========================  DTO ========================== */
 
-@Serializable private data class ClubDto(val id: Long, val name: String, val description: String?)
+@Serializable private data class ClubDto(
+    val id: Long,
+    val name: String,
+    val description: String?
+)
 @Serializable private data class EventDto(
-    val id: Long, val clubId: Long, val title: String?, val startAt: String, val endAt: String, val isSpecial: Boolean
+    val id: Long,
+    val clubId: Long,
+    val title: String?,
+    val startAt: String,
+    val endAt: String,
+    val isSpecial: Boolean
 )
 @Serializable private data class TableDto(
-    val id: Long, val clubId: Long, val zoneId: Long?, val tableNumber: Int, val capacity: Int, val minDeposit: String
+    val id: Long,
+    val clubId: Long,
+    val zoneId: Long?,
+    val tableNumber: Int,
+    val capacity: Int,
+    val minDeposit: String
 )
 @Serializable private data class BookingRequest(
-    val clubId: Long, val eventId: Long, val tableId: Long, val guestsCount: Int,
-    val guestName: String? = null, val phoneE164: String? = null, val arrivalBy: String? = null
+    val clubId: Long,
+    val eventId: Long,
+    val tableId: Long,
+    val guestsCount: Int,
+    val guestName: String? = null,
+    val phoneE164: String? = null,
+    val arrivalBy: String? = null
 )
 @Serializable internal data class BookingCreated(
-    val clubId: Long, val eventId: Long, val tableId: Long, val tableNumber: Int,
-    val guestsCount: Int, val minDeposit: String, val totalDeposit: String, val qrSecret: String, val bookingRef: String
+    val clubId: Long,
+    val eventId: Long,
+    val tableId: Long,
+    val tableNumber: Int,
+    val guestsCount: Int,
+    val minDeposit: String,
+    val totalDeposit: String,
+    val qrSecret: String,
+    val bookingRef: String
 )
 @Serializable private data class MyBookingDto(
-    val id: String, val clubName: String, val eventTitle: String?, val eventStartAt: String,
-    val tableNumber: Int, val guestsCount: Int, val totalDeposit: String, val status: String
+    val id: String,
+    val clubName: String,
+    val eventTitle: String?,
+    val eventStartAt: String,
+    val tableNumber: Int,
+    val guestsCount: Int,
+    val totalDeposit: String,
+    val status: String
 )
 
 private sealed interface BookingResult
-private data class BookingOk(val data: BookingCreated) : BookingResult
-private data class BookingError(val code: String) : BookingResult
+private data class BookingOk(
+    val data: BookingCreated
+) : BookingResult
+private data class BookingError(
+    val code: String
+) : BookingResult
 
 private suspend fun io.ktor.server.application.ApplicationCall.respondLegacyBookingError(error: BookingError) {
     val status = legacyBookingErrorStatus(error.code)

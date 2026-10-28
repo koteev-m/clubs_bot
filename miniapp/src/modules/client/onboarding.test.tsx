@@ -130,7 +130,7 @@ describe('connected onboarding screens', () => {
     expect(window.location.href).not.toContain(token);
   });
 
-  it('shows only authorized client and clubs, and preserves honest approved boundary', async () => {
+  it('shows only authorized client and clubs, and requires server create authority', async () => {
     const approved: ClubApplication = {
       ...draft,
       status: 'approved',
@@ -164,14 +164,12 @@ describe('connected onboarding screens', () => {
     });
     render(<ClientAccess initialToken={null} />);
     fireEvent.click(await screen.findByRole('button', { name: /Client A/ }));
-    await screen.findByRole('button', { name: 'Club A1' });
+    await screen.findByRole('button', { name: /Club A1/ });
     expect(screen.queryByText('Club A2')).toBeNull();
     fireEvent.click(
       await screen.findByRole('button', { name: /Synthetic Venue/ }),
     );
-    await screen.findByText(
-      'Подключение одобрено. Создание клуба будет доступно после следующего этапа настройки платформы',
-    );
+    await screen.findByText('Подключение одобрено.');
     expect(screen.queryByRole('button', { name: /Создать.*клуб/i })).toBeNull();
     expect(
       fetch.mock.calls.some((call) =>

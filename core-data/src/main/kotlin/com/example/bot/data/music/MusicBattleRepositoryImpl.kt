@@ -1,5 +1,6 @@
 package com.example.bot.data.music
 
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.music.MusicBattle
 import com.example.bot.music.MusicBattleRepository
 import com.example.bot.music.MusicBattleStatus
@@ -8,10 +9,10 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
@@ -41,8 +42,7 @@ class MusicBattleRepositoryImpl(
                     it[this.endsAt] = endsAt.atOffset(ZoneOffset.UTC)
                     it[createdAt] = now
                     it[updatedAt] = now
-                }
-                .resultedValues
+                }.resultedValues
                 .orEmpty()
                 .first()
                 .toMusicBattle()
@@ -51,23 +51,25 @@ class MusicBattleRepositoryImpl(
     override suspend fun getById(id: Long): MusicBattle? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicBattlesTable
-                .select { MusicBattlesTable.id eq id }
+                .select { (MusicBattlesTable.id eq id) and unmappedClub(MusicBattlesTable.clubId) }
                 .limit(1)
                 .firstOrNull()
                 ?.toMusicBattle()
         }
 
-    override suspend fun findCurrentActive(clubId: Long?, now: Instant): MusicBattle? =
+    override suspend fun findCurrentActive(
+        clubId: Long?,
+        now: Instant,
+    ): MusicBattle? =
         newSuspendedTransaction(Dispatchers.IO, db) {
             val nowOffset = now.atOffset(ZoneOffset.UTC)
             MusicBattlesTable
                 .select {
-                    (MusicBattlesTable.clubId eq clubId) and
+                    ((MusicBattlesTable.clubId eq clubId) and unmappedClub(MusicBattlesTable.clubId)) and
                         (MusicBattlesTable.status eq MusicBattleStatus.ACTIVE.name) and
                         (MusicBattlesTable.startsAt lessEq nowOffset) and
                         (MusicBattlesTable.endsAt greater nowOffset)
-                }
-                .orderBy(MusicBattlesTable.startsAt to SortOrder.DESC, MusicBattlesTable.id to SortOrder.DESC)
+                }.orderBy(MusicBattlesTable.startsAt to SortOrder.DESC, MusicBattlesTable.id to SortOrder.DESC)
                 .limit(1)
                 .firstOrNull()
                 ?.toMusicBattle()
@@ -80,15 +82,19 @@ class MusicBattleRepositoryImpl(
     ): List<MusicBattle> =
         newSuspendedTransaction(Dispatchers.IO, db) {
             MusicBattlesTable
-                .select { MusicBattlesTable.clubId eq clubId }
+                .select { (MusicBattlesTable.clubId eq clubId) and unmappedClub(MusicBattlesTable.clubId) }
                 .orderBy(MusicBattlesTable.startsAt to SortOrder.DESC, MusicBattlesTable.id to SortOrder.DESC)
                 .limit(limit, offset.toLong())
                 .map { it.toMusicBattle() }
         }
 
-    override suspend fun setStatus(id: Long, status: MusicBattleStatus, updatedAt: Instant): Boolean =
+    override suspend fun setStatus(
+        id: Long,
+        status: MusicBattleStatus,
+        updatedAt: Instant,
+    ): Boolean =
         newSuspendedTransaction(Dispatchers.IO, db) {
-            MusicBattlesTable.update({ MusicBattlesTable.id eq id }) {
+            MusicBattlesTable.update({ (MusicBattlesTable.id eq id) and unmappedClub(MusicBattlesTable.clubId) }) {
                 it[MusicBattlesTable.status] = status.name
                 it[MusicBattlesTable.updatedAt] = updatedAt.atOffset(ZoneOffset.UTC)
             } > 0

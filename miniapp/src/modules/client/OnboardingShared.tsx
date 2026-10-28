@@ -306,8 +306,9 @@ export function ApplicationSummary({
       )}
       {application.status === 'approved' && (
         <p className="po-notice">
-          Подключение одобрено. Создание клуба будет доступно после следующего
-          этапа настройки платформы
+          {application.createdClubId
+            ? 'Подключение одобрено. Клуб создан по этой заявке.'
+            : 'Подключение одобрено.'}
         </p>
       )}
       <section className="ob-section">

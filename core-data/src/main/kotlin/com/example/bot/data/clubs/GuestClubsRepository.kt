@@ -7,7 +7,7 @@ import com.example.bot.clubs.EventsRepository
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.db.Clubs
 import com.example.bot.data.db.withRetriedTx
-import java.time.Instant
+import com.example.bot.data.privacy.unmappedClub
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -15,8 +15,10 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.time.Instant
 
 class ClubsDbRepository(
     private val database: Database,
@@ -27,7 +29,7 @@ class ClubsDbRepository(
         withRetriedTx(name = "clubs.get", readOnly = true, database = database) {
             Clubs
                 .selectAll()
-                .where { (Clubs.id eq id.toInt()) and (Clubs.isActive eq true) }
+                .where { (Clubs.id eq id.toInt()) and (Clubs.isActive eq true) and unmappedClub(Clubs.id) }
                 .firstOrNull()
                 ?.toClub()
         }
@@ -44,7 +46,7 @@ class ClubsDbRepository(
             val rows =
                 Clubs
                     .selectAll()
-                    .where { Clubs.isActive eq true }
+                    .where { (Clubs.isActive eq true) and unmappedClub(Clubs.id) }
                     .map { it.toClub() }
             rows
                 .asSequence()
@@ -55,8 +57,7 @@ class ClubsDbRepository(
                     query == null ||
                         it.name.contains(query, ignoreCase = true) ||
                         it.genres.any { g -> g.contains(query, ignoreCase = true) }
-                }
-                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, Club::name).thenBy(Club::id))
+                }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, Club::name).thenBy(Club::id))
                 .drop(offset)
                 .take(limit)
                 .toList()
@@ -66,7 +67,7 @@ class ClubsDbRepository(
         withRetriedTx(name = "clubs.lastUpdatedAt", readOnly = true, database = database) {
             Clubs
                 .selectAll()
-                .where { Clubs.isActive eq true }
+                .where { (Clubs.isActive eq true) and unmappedClub(Clubs.id) }
                 .maxOfOrNull { it[Clubs.updatedAt].toInstant() }
         }
 
@@ -104,7 +105,7 @@ class EventsDbRepository(
                 city?.let { cityFilter ->
                     Clubs
                         .selectAll()
-                        .where { Clubs.isActive eq true }
+                        .where { (Clubs.isActive eq true) and unmappedClub(Clubs.id) }
                         .map { row -> row[Clubs.id].value.toLong() to row[Clubs.city] }
                         .filter { (_, clubCity) -> clubCity.equals(cityFilter, ignoreCase = true) }
                         .map { it.first }
@@ -114,16 +115,16 @@ class EventsDbRepository(
 
             EventsTable
                 .selectAll()
+                .where { unmappedClub(EventsTable.clubId) }
                 .let { query ->
                     if (clubId != null) {
-                        query.where { EventsTable.clubId eq clubId }
+                        query.andWhere { EventsTable.clubId eq clubId }
                     } else if (clubIds != null) {
-                        query.where { EventsTable.clubId inList clubIds }
+                        query.andWhere { EventsTable.clubId inList clubIds }
                     } else {
                         query
                     }
-                }
-                .filter { row -> from == null || !row[EventsTable.startAt].toInstant().isBefore(from) }
+                }.filter { row -> from == null || !row[EventsTable.startAt].toInstant().isBefore(from) }
                 .filter { row -> to == null || !row[EventsTable.startAt].toInstant().isAfter(to) }
                 .sortedWith(compareBy<ResultRow> { it[EventsTable.startAt] }.thenBy { it[EventsTable.id] })
                 .drop(offset)
@@ -144,15 +145,21 @@ class EventsDbRepository(
         withRetriedTx(name = "events.lastUpdatedAt", readOnly = true, database = database) {
             EventsTable
                 .selectAll()
+                .where { unmappedClub(EventsTable.clubId) }
                 .maxOfOrNull { it[EventsTable.startAt].toInstant() }
         }
 
-    override fun findById(clubId: Long, eventId: Long): Event? =
+    override fun findById(
+        clubId: Long,
+        eventId: Long,
+    ): Event? =
         transaction(database) {
             EventsTable
                 .selectAll()
-                .where { (EventsTable.clubId eq clubId) and (EventsTable.id eq eventId) }
-                .firstOrNull()
+                .where {
+                    (EventsTable.clubId eq clubId) and (EventsTable.id eq eventId) and
+                        unmappedClub(EventsTable.clubId)
+                }.firstOrNull()
                 ?.let { row ->
                     Event(
                         id = row[EventsTable.id],

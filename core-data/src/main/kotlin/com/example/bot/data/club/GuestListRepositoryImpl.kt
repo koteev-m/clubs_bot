@@ -11,7 +11,11 @@ import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListStatus
 import com.example.bot.club.ParsedGuest
 import com.example.bot.data.db.withTxRetry
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.privacy.PhoneCipher
+import com.example.bot.data.privacy.isMappedClub
+import com.example.bot.data.privacy.unmappedClub
+import com.example.bot.data.privacy.unmappedResource
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Expression
 import org.jetbrains.exposed.sql.Function
@@ -19,12 +23,12 @@ import org.jetbrains.exposed.sql.Op
 import org.jetbrains.exposed.sql.QueryBuilder
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
-import org.jetbrains.exposed.sql.TextColumnType
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
+import org.jetbrains.exposed.sql.TextColumnType
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.batchInsert
@@ -58,6 +62,7 @@ class GuestListRepositoryImpl(
     ): GuestList =
         withTxRetry {
             transaction(database) {
+                check(!isMappedClub(clubId)) { "Club unavailable" }
                 val createdAt = clock.instant().atOffset(ZoneOffset.UTC)
                 GuestListsTable
                     .insert {
@@ -71,7 +76,8 @@ class GuestListRepositoryImpl(
                         it[GuestListsTable.arrivalWindowEnd] = arrivalWindowEnd?.atOffset(ZoneOffset.UTC)
                         it[GuestListsTable.status] = status.name
                         it[GuestListsTable.createdAt] = createdAt
-                    }.resultedValues!!
+                    }.resultedValues
+                    .orEmpty()
                     .single()
                     .toGuestList()
             }
@@ -82,7 +88,7 @@ class GuestListRepositoryImpl(
             transaction(database) {
                 GuestListsTable
                     .selectAll()
-                    .where { GuestListsTable.id eq id }
+                    .where { (GuestListsTable.id eq id) and unmappedClub(GuestListsTable.clubId) }
                     .firstOrNull()
                     ?.toGuestList()
             }
@@ -93,8 +99,10 @@ class GuestListRepositoryImpl(
             transaction(database) {
                 GuestListEntriesTable
                     .selectAll()
-                    .where { GuestListEntriesTable.id eq id }
-                    .firstOrNull()
+                    .where {
+                        (GuestListEntriesTable.id eq id) and
+                            unmappedResource(LegacyResource.GUEST_LIST, GuestListEntriesTable.guestListId)
+                    }.firstOrNull()
                     ?.toGuestListEntry()
             }
         }
@@ -112,7 +120,7 @@ class GuestListRepositoryImpl(
             transaction(database) {
                 GuestListsTable
                     .selectAll()
-                    .where { GuestListsTable.clubId eq clubId }
+                    .where { (GuestListsTable.clubId eq clubId) and unmappedClub(GuestListsTable.clubId) }
                     .orderBy(GuestListsTable.createdAt, SortOrder.DESC)
                     .limit(size, offset)
                     .map { it.toGuestList() }
@@ -145,7 +153,9 @@ class GuestListRepositoryImpl(
                             it[GuestListEntriesTable.fullName] = valid.name
                             val protectedPhone =
                                 valid.phone?.let { phone ->
-                                    requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone)
+                                    requireNotNull(
+                                        phoneCipher,
+                                    ) { "PhoneCipher is required for phone persistence" }.protect(phone)
                                 }
                             it[GuestListEntriesTable.phone] = null
                             it[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
@@ -165,7 +175,8 @@ class GuestListRepositoryImpl(
                                 it[GuestListEntriesTable.checkedInAt] = null
                                 it[GuestListEntriesTable.checkedInBy] = null
                             }
-                        }.resultedValues!!
+                        }.resultedValues
+                        .orEmpty()
                         .single()
                 inserted.toGuestListEntry()
             }
@@ -305,7 +316,9 @@ class GuestListRepositoryImpl(
                         this[GuestListEntriesTable.fullName] = valid.name
                         val protectedPhone =
                             valid.phone?.let { phone ->
-                                requireNotNull(phoneCipher) { "PhoneCipher is required for phone persistence" }.protect(phone)
+                                requireNotNull(
+                                    phoneCipher,
+                                ) { "PhoneCipher is required for phone persistence" }.protect(phone)
                             }
                         this[GuestListEntriesTable.phone] = null
                         this[GuestListEntriesTable.encryptedPhone] = protectedPhone?.encrypted
@@ -339,7 +352,7 @@ class GuestListRepositoryImpl(
         require(offset <= Int.MAX_VALUE) { "page too large" }
         return withTxRetry {
             transaction(database) {
-                var condition: Op<Boolean> = Op.TRUE
+                var condition: Op<Boolean> = unmappedClub(GuestListsTable.clubId)
                 filter.clubIds?.takeIf { it.isNotEmpty() }?.let { clubs ->
                     condition = condition and (GuestListsTable.clubId inList clubs)
                 }

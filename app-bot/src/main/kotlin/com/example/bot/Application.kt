@@ -63,6 +63,8 @@ import com.example.bot.notifications.TelegramOperationalNotificationService
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.DataSourceHolder
+import com.example.bot.plugins.installPrivateClubContainment
+import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import com.example.bot.plugins.appConfig
 import com.example.bot.plugins.configureLoggingAndRequestId
 import com.example.bot.plugins.configureSecurity
@@ -202,6 +204,10 @@ fun Application.module() {
     val bookingService by inject<BookingService>()
     val bookingRepository by inject<com.example.bot.data.booking.core.BookingRepository>()
     val bookingState by inject<com.example.bot.booking.a3.BookingState>()
+    installPrivateClubContainment(
+        JdbcLegacyClubAccess(checkNotNull(DataSourceHolder.dataSource)),
+        bookingState::bookingClubId,
+    )
     val clubsRepository by inject<ClubsRepository>()
     val eventsRepository by inject<EventsRepository>()
     val layoutRepository by inject<LayoutRepository>()

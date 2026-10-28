@@ -1,5 +1,11 @@
 package com.example.bot.routes
 
+import com.example.bot.admin.AdminHallsRepository
+import com.example.bot.booking.a3.BookingError
+import com.example.bot.booking.a3.BookingState
+import com.example.bot.booking.a3.ConfirmResult
+import com.example.bot.booking.a3.HoldResult
+import com.example.bot.booking.a3.hashRequestCanonical
 import com.example.bot.club.GuestList
 import com.example.bot.club.GuestListEntryInfo
 import com.example.bot.club.GuestListInfo
@@ -13,34 +19,31 @@ import com.example.bot.club.InvitationChannel
 import com.example.bot.club.InvitationCreateResult
 import com.example.bot.club.InvitationService
 import com.example.bot.club.InvitationServiceResult
-import com.example.bot.admin.AdminHallsRepository
-import com.example.bot.booking.a3.BookingError
-import com.example.bot.booking.a3.BookingState
-import com.example.bot.booking.a3.ConfirmResult
-import com.example.bot.booking.a3.HoldResult
 import com.example.bot.clubs.Club
 import com.example.bot.clubs.ClubsRepository
 import com.example.bot.clubs.Event
 import com.example.bot.clubs.EventsRepository
-import com.example.bot.booking.a3.hashRequestCanonical
 import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.club.GuestListEntryRecord
 import com.example.bot.data.club.GuestListRecord
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
+import com.example.bot.data.promoter.AcquireLockResult
+import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
 import com.example.bot.http.respondError
+import com.example.bot.layout.AdminTablesRepository
+import com.example.bot.layout.toRangeString
 import com.example.bot.opschat.NoopOpsNotificationPublisher
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationEvent
 import com.example.bot.opschat.OpsNotificationPublisher
-import com.example.bot.layout.AdminTablesRepository
-import com.example.bot.layout.toRangeString
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
-import com.example.bot.data.promoter.AcquireLockResult
-import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.security.rbac.RbacContext
 import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
@@ -55,14 +58,14 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import java.time.Clock
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneOffset
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
+import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 private val logger = LoggerFactory.getLogger("PromoterGuestListRoutes")
 
@@ -310,7 +313,14 @@ fun Application.promoterGuestListRoutes(
                     val context = call.rbacContext()
                     val clubs =
                         if (context.roles.any { it in GLOBAL_ROLES }) {
-                            clubsRepository.list(city = null, query = null, tag = null, genre = null, offset = 0, limit = 200)
+                            clubsRepository.list(
+                                city = null,
+                                query = null,
+                                tag = null,
+                                genre = null,
+                                offset = 0,
+                                limit = 200,
+                            )
                         } else {
                             context.clubIds.mapNotNull { clubsRepository.getById(it) }
                         }
@@ -318,23 +328,34 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 get("/club-events") {
-                    val clubId = call.request.queryParameters["clubId"]?.toLongOrNull()
-                        ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
-                    val date = call.request.queryParameters["date"]?.let { parseDate(it) }
-                        ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val clubId =
+                        call.request.queryParameters["clubId"]?.toLongOrNull()
+                            ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val date =
+                        call.request.queryParameters["date"]?.let { parseDate(it) }
+                            ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     val context = call.rbacContext()
                     if (!context.canAccessClub(clubId)) {
                         return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
                     val from = date.atStartOfDay().toInstant(ZoneOffset.UTC)
                     val to = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC)
-                    val events = eventsRepository.list(clubId = clubId, city = null, from = from, to = to, offset = 0, limit = 200)
+                    val events =
+                        eventsRepository.list(
+                            clubId = clubId,
+                            city = null,
+                            from = from,
+                            to = to,
+                            offset = 0,
+                            limit = 200,
+                        )
                     call.respond(events.map { it.toDto() })
                 }
 
                 get("/clubs/{clubId}/halls") {
-                    val clubId = call.parameters["clubId"]?.toLongOrNull()
-                        ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val clubId =
+                        call.parameters["clubId"]?.toLongOrNull()
+                            ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     val context = call.rbacContext()
                     if (!context.canAccessClub(clubId)) {
                         return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
@@ -344,17 +365,22 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 get("/halls/{hallId}/tables") {
-                    val hallId = call.parameters["hallId"]?.toLongOrNull()
-                        ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
-                    val hall = adminHallsRepository.getById(hallId)
-                        ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.hall_not_found)
+                    val hallId =
+                        call.parameters["hallId"]?.toLongOrNull()
+                            ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val hall =
+                        adminHallsRepository.getById(hallId)
+                            ?: return@get call.respondError(HttpStatusCode.NotFound, ErrorCodes.hall_not_found)
                     val context = call.rbacContext()
                     if (!context.canAccessClub(hall.clubId)) {
                         return@get call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
                     val zones = adminTablesRepository.listZonesForHall(hallId)
                     val tables = adminTablesRepository.listForHall(hallId)
-                    val sorted = tables.sortedWith(compareBy<com.example.bot.layout.Table> { it.zoneId }.thenBy { it.id })
+                    val sorted =
+                        tables.sortedWith(
+                            compareBy<com.example.bot.layout.Table> { it.zoneId }.thenBy { it.id },
+                        )
                     call.respond(sorted.map { it.toPromoterResponse(hall.clubId, hallId, zones) })
                 }
 
@@ -388,8 +414,9 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 get("/guest-lists/{id}") {
-                    val listId = call.parameters["id"]?.toLongOrNull()
-                        ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val listId =
+                        call.parameters["id"]?.toLongOrNull()
+                            ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     val list = call.requireAccessibleGuestList(guestListRepository, listId) ?: return@get
                     val entries = guestListEntryRepository.listByGuestList(listId)
                     val stats = guestListService.getStats(listId, clock.instant())
@@ -411,8 +438,9 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 get("/guest-lists/{id}/invitations") {
-                    val listId = call.parameters["id"]?.toLongOrNull()
-                        ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val listId =
+                        call.parameters["id"]?.toLongOrNull()
+                            ?: return@get call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     call.requireAccessibleGuestList(guestListRepository, listId) ?: return@get
                     val entries = guestListEntryRepository.listByGuestList(listId)
                     val context = call.rbacContext()
@@ -439,15 +467,22 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 post("/bookings/assign") {
-                    val payload = runCatching { call.receive<PromoterBookingAssignRequest>() }.getOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
-                    if (payload.guestListEntryId <= 0 || payload.tableId <= 0 || payload.eventId <= 0 || payload.hallId <= 0) {
+                    val payload =
+                        runCatching { call.receive<PromoterBookingAssignRequest>() }.getOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    if (payload.guestListEntryId <= 0 ||
+                        payload.tableId <= 0 ||
+                        payload.eventId <= 0 ||
+                        payload.hallId <= 0
+                    ) {
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
-                    val entry = guestListEntryRepository.findById(payload.guestListEntryId)
-                        ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
-                    val list = guestListRepository.getList(entry.guestListId)
-                        ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
+                    val entry =
+                        guestListEntryRepository.findById(payload.guestListEntryId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.entry_not_found)
+                    val list =
+                        guestListRepository.getList(entry.guestListId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.guest_list_not_found)
                     val context = call.rbacContext()
                     if (!canAccessList(context, list)) {
                         return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
@@ -455,16 +490,18 @@ fun Application.promoterGuestListRoutes(
                     if (list.eventId != payload.eventId) {
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
-                    val hall = adminHallsRepository.getById(payload.hallId)
-                        ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.hall_not_found)
+                    val hall =
+                        adminHallsRepository.getById(payload.hallId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.hall_not_found)
                     if (hall.clubId != list.clubId) {
                         return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.club_scope_mismatch)
                     }
                     if (!context.canAccessClub(hall.clubId)) {
                         return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
-                    val table = adminTablesRepository.findByIdForHall(payload.hallId, payload.tableId)
-                        ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
+                    val table =
+                        adminTablesRepository.findByIdForHall(payload.hallId, payload.tableId)
+                            ?: return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.table_not_found)
                     when (val lockResult = promoterAssignments.acquireLock(entry.id)) {
                         is AcquireLockResult.AlreadyAssigned -> {
                             return@post call.respondError(
@@ -483,7 +520,14 @@ fun Application.promoterGuestListRoutes(
                         AcquireLockResult.Acquired -> Unit
                     }
                     val idem = "promoter-assign:${entry.id}"
-                    val holdHash = hashRequestCanonical(mapOf("tableId" to payload.tableId, "eventId" to payload.eventId, "guests" to 1))
+                    val holdHash =
+                        hashRequestCanonical(
+                            mapOf(
+                                "tableId" to payload.tableId,
+                                "eventId" to payload.eventId,
+                                "guests" to 1,
+                            ),
+                        )
                     var confirmSucceeded = false
                     try {
                         when (
@@ -522,17 +566,25 @@ fun Application.promoterGuestListRoutes(
                                     is ConfirmResult.Success -> {
                                         confirmSucceeded = true
                                         val assignmentBookingId =
-                                            PromoterBookingAssignmentsRepository.toAssignmentBookingId(confirm.booking.id)
+                                            PromoterBookingAssignmentsRepository.toAssignmentBookingId(
+                                                confirm.booking.id,
+                                            )
                                                 ?: return@post call.respondError(
                                                     HttpStatusCode.InternalServerError,
                                                     ErrorCodes.internal_error,
                                                     message = "Некорректный booking id для назначения",
                                                 )
-                                        val finalized = promoterAssignments.finalizeAssignment(entry.id, assignmentBookingId)
+                                        val finalized =
+                                            promoterAssignments.finalizeAssignment(
+                                                entry.id,
+                                                assignmentBookingId,
+                                            )
                                         if (!finalized) {
                                             val currentBookingId = promoterAssignments.findBookingIdForEntry(entry.id)
                                             if (currentBookingId != null &&
-                                                PromoterBookingAssignmentsRepository.isFinalizedBookingId(currentBookingId)
+                                                PromoterBookingAssignmentsRepository.isFinalizedBookingId(
+                                                    currentBookingId,
+                                                )
                                             ) {
                                                 return@post call.respondError(
                                                     HttpStatusCode.Conflict,
@@ -586,8 +638,15 @@ fun Application.promoterGuestListRoutes(
                                 if (context.clubIds.isNotEmpty()) {
                                     context.clubIds
                                 } else {
-                                    clubsRepository.list(city = null, query = null, tag = null, genre = null, offset = 0, limit = 200)
-                                        .map { it.id }
+                                    clubsRepository
+                                        .list(
+                                            city = null,
+                                            query = null,
+                                            tag = null,
+                                            genre = null,
+                                            offset = 0,
+                                            limit = 200,
+                                        ).map { it.id }
                                         .toSet()
                                 }
                             guestListDbRepository.listByClubs(clubIds)
@@ -626,18 +685,28 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 post("/guest-lists") {
-                    val payload = runCatching { call.receive<CreateGuestListRequest>() }.getOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    val payload =
+                        runCatching { call.receive<CreateGuestListRequest>() }.getOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                     if (payload.clubId <= 0 || payload.eventId <= 0) {
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
 
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.CLUB, payload.clubId),
+                            LegacyReference(LegacyResource.EVENT, payload.eventId),
+                        )
+                    ) {
+                        return@post
+                    }
                     val arrivalWindowStart = parseInstant(payload.arrivalWindowStart)
                     val arrivalWindowEnd = parseInstant(payload.arrivalWindowEnd)
                     if (
-                        payload.arrivalWindowStart != null && arrivalWindowStart == null ||
-                        payload.arrivalWindowEnd != null && arrivalWindowEnd == null
+                        payload.arrivalWindowStart != null &&
+                        arrivalWindowStart == null ||
+                        payload.arrivalWindowEnd != null &&
+                        arrivalWindowEnd == null
                     ) {
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     }
@@ -696,13 +765,15 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 post("/guest-lists/{id}/entries/bulk") {
-                    val listId = call.parameters["id"]?.toLongOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val listId =
+                        call.parameters["id"]?.toLongOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
                     call.requireAccessibleGuestList(guestListRepository, listId) ?: return@post
 
-                    val payload = runCatching { call.receive<BulkEntriesRequest>() }.getOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    val payload =
+                        runCatching { call.receive<BulkEntriesRequest>() }.getOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                     when (val result = guestListService.addEntriesBulk(listId, payload.rawText)) {
                         is GuestListServiceResult.Failure -> {
@@ -724,13 +795,15 @@ fun Application.promoterGuestListRoutes(
                 }
 
                 post("/guest-lists/{id}/entries") {
-                    val listId = call.parameters["id"]?.toLongOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val listId =
+                        call.parameters["id"]?.toLongOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
                     call.requireAccessibleGuestList(guestListRepository, listId) ?: return@post
 
-                    val payload = runCatching { call.receive<AddEntryRequest>() }.getOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    val payload =
+                        runCatching { call.receive<AddEntryRequest>() }.getOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                     val added = guestListService.addEntrySingle(listId, payload.displayName)
                     when (added) {
@@ -762,8 +835,9 @@ fun Application.promoterGuestListRoutes(
                     val listId =
                         call.parameters["id"]?.toLongOrNull()
                             ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
-                    val entryId = call.parameters["entryId"]?.toLongOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val entryId =
+                        call.parameters["entryId"]?.toLongOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
 
                     call.requireAccessibleGuestList(guestListRepository, listId) ?: return@post
                     val context = call.rbacContext()
@@ -775,16 +849,18 @@ fun Application.promoterGuestListRoutes(
                         return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.entry_list_mismatch)
                     }
 
-                    val payload = runCatching { call.receive<CreateInvitationRequest>() }.getOrNull()
-                        ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    val payload =
+                        runCatching { call.receive<CreateInvitationRequest>() }.getOrNull()
+                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                     val channel = payload.channel.toDomain()
                     when (
-                        val result = invitationService.createInvitation(
-                            entryId = entryId,
-                            channel = channel,
-                            createdBy = context.user.id,
-                        )
+                        val result =
+                            invitationService.createInvitation(
+                                entryId = entryId,
+                                channel = channel,
+                                createdBy = context.user.id,
+                            )
                     ) {
                         is InvitationServiceResult.Failure -> {
                             val (status, code) = result.error.toHttpError()
@@ -849,7 +925,8 @@ private fun GuestListServiceError.toHttpError(): Pair<HttpStatusCode, String> =
         GuestListServiceError.BulkParseTooLarge -> HttpStatusCode.PayloadTooLarge to ErrorCodes.bulk_parse_too_large
         GuestListServiceError.InvalidArrivalWindow,
         GuestListServiceError.InvalidLimit,
-        GuestListServiceError.InvalidDisplayName -> HttpStatusCode.BadRequest to ErrorCodes.validation_error
+        GuestListServiceError.InvalidDisplayName,
+        -> HttpStatusCode.BadRequest to ErrorCodes.validation_error
     }
 
 private fun InvitationChannelDto.toDomain(): InvitationChannel =
@@ -1005,14 +1082,17 @@ private fun com.example.bot.layout.Table.toPromoterResponse(
     )
 }
 
-private fun parseDate(value: String): LocalDate? =
-    runCatching { LocalDate.parse(value) }.getOrNull()
+private fun parseDate(value: String): LocalDate? = runCatching { LocalDate.parse(value) }.getOrNull()
 
-private fun ApplicationCall.hasInvalidDateRange(from: LocalDate?, to: LocalDate?): Boolean {
-    if (from == null && to == null) return false
-    if (from == null || to == null) return true
-    return to.isBefore(from)
-}
+private fun ApplicationCall.hasInvalidDateRange(
+    from: LocalDate?,
+    to: LocalDate?,
+): Boolean =
+    when {
+        from == null && to == null -> false
+        from == null || to == null -> true
+        else -> to.isBefore(from)
+    }
 
 private fun List<GuestListRecord>.filterByDateRange(
     from: LocalDate?,
@@ -1020,8 +1100,9 @@ private fun List<GuestListRecord>.filterByDateRange(
 ): List<GuestListRecord> {
     if (from == null && to == null) return this
     return filter { list ->
-        val date = list.arrivalWindowStart?.atZone(ZoneOffset.UTC)?.toLocalDate()
-            ?: list.createdAt.atZone(ZoneOffset.UTC).toLocalDate()
+        val date =
+            list.arrivalWindowStart?.atZone(ZoneOffset.UTC)?.toLocalDate()
+                ?: list.createdAt.atZone(ZoneOffset.UTC).toLocalDate()
         val afterFrom = from == null || !date.isBefore(from)
         val beforeTo = to == null || !date.isAfter(to)
         afterFrom && beforeTo

@@ -3,12 +3,14 @@ package com.example.bot.di
 import com.example.bot.admin.AdminHallsRepository
 import com.example.bot.booking.a3.BookingState
 import com.example.bot.data.admin.AdminHallsDbRepository
-import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.data.layout.LayoutDbRepository
+import com.example.bot.data.privacy.JdbcLegacyClubAccess
+import com.example.bot.layout.AdminTablesRepository
 import com.example.bot.layout.BookingAwareLayoutRepository
 import com.example.bot.layout.HallPlansRepository
 import com.example.bot.layout.LayoutAssetsRepository
 import com.example.bot.layout.LayoutRepository
+import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.promoter.quotas.PromoterQuotaService
 import io.micrometer.core.instrument.Metrics
 import org.koin.core.qualifier.named
@@ -49,6 +51,7 @@ val layoutModule =
                 bookingRetention = bookingRetention,
                 watermarkRetention = watermarkRetention,
                 meterRegistry = Metrics.globalRegistry,
+                isLegacyClub = JdbcLegacyClubAccess(checkNotNull(DataSourceHolder.dataSource))::isLegacyClub,
             )
         }
 
@@ -57,5 +60,7 @@ val layoutModule =
         }
     }
 
-private fun envDuration(name: String, default: Duration): Duration =
-    System.getenv(name)?.let { runCatching { Duration.parse(it) }.getOrNull() } ?: default
+private fun envDuration(
+    name: String,
+    default: Duration,
+): Duration = System.getenv(name)?.let { runCatching { Duration.parse(it) }.getOrNull() } ?: default

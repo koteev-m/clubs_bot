@@ -6,16 +6,18 @@ import com.example.bot.admin.AdminClubUpdate
 import com.example.bot.admin.AdminClubsRepository
 import com.example.bot.data.db.Clubs
 import com.example.bot.data.db.withRetriedTx
-import java.time.Clock
-import java.time.OffsetDateTime
-import java.time.ZoneOffset
+import com.example.bot.data.privacy.unmappedClub
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
-import org.jetbrains.exposed.sql.insertAndGetId
+import java.time.Clock
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class AdminClubsDbRepository(
     private val database: Database,
@@ -25,6 +27,7 @@ class AdminClubsDbRepository(
         withRetriedTx(name = "admin.clubs.list", readOnly = true, database = database) {
             Clubs
                 .selectAll()
+                .where { unmappedClub(Clubs.id) }
                 .orderBy(Clubs.id, SortOrder.ASC)
                 .map { it.toAdminClub() }
         }
@@ -33,7 +36,7 @@ class AdminClubsDbRepository(
         withRetriedTx(name = "admin.clubs.get", readOnly = true, database = database) {
             Clubs
                 .selectAll()
-                .where { Clubs.id eq id.toInt() }
+                .where { (Clubs.id eq id.toInt()) and unmappedClub(Clubs.id) }
                 .firstOrNull()
                 ?.toAdminClub()
         }
@@ -68,16 +71,19 @@ class AdminClubsDbRepository(
                 .toAdminClub()
         }
 
-    override suspend fun update(id: Long, request: AdminClubUpdate): AdminClub? =
+    override suspend fun update(
+        id: Long,
+        request: AdminClubUpdate,
+    ): AdminClub? =
         withRetriedTx(name = "admin.clubs.update", database = database) {
             val existing =
                 Clubs
                     .selectAll()
-                    .where { Clubs.id eq id.toInt() }
+                    .where { (Clubs.id eq id.toInt()) and unmappedClub(Clubs.id) }
                     .firstOrNull()
                     ?: return@withRetriedTx null
             val now = clock.instant().toOffsetDateTime()
-            Clubs.update({ Clubs.id eq id.toInt() }) {
+            Clubs.update({ (Clubs.id eq id.toInt()) and unmappedClub(Clubs.id) }) {
                 request.name?.let { value -> it[name] = value }
                 request.city?.let { value -> it[city] = value }
                 request.isActive?.let { value -> it[isActive] = value }
@@ -94,7 +100,7 @@ class AdminClubsDbRepository(
     override suspend fun delete(id: Long): Boolean =
         withRetriedTx(name = "admin.clubs.delete", database = database) {
             val now = clock.instant().toOffsetDateTime()
-            Clubs.update({ Clubs.id eq id.toInt() }) {
+            Clubs.update({ (Clubs.id eq id.toInt()) and unmappedClub(Clubs.id) }) {
                 it[isActive] = false
                 it[updatedAt] = now
             } > 0

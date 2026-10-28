@@ -171,6 +171,7 @@ internal class ApplicationOperations(
                         setOf("draft", "submitted", "reviewing")
                     }
                 if (state !in allowed) fail("invalid_transition")
+                if (consumption(application) != null) fail("invalid_transition")
                 change(
                     application,
                     "cancelled",
@@ -395,6 +396,15 @@ internal class ApplicationOperations(
             put("authorUserId", application.getValue("author_user_id"))
             put("status", application.getValue("status"))
             put("version", application.getValue("version"))
+            val clubId =
+                if (platform) {
+                    consumption(application)?.get("club_id")
+                } else {
+                    ClubOnboardingOperations(session)
+                        .accessibleClub(application.long("id"))
+                        ?.toString()
+                }
+            put("createdClubId", jsonNullable(clubId))
             FIELDS.forEach { put(it, application.getValue(column(it))) }
             put("previousApplicationId", jsonNullable(application["previous_application_id"]))
             put(
@@ -440,7 +450,7 @@ internal class ApplicationOperations(
             when (application["status"]) {
                 "submitted" -> listOf("review", "cancel")
                 "reviewing" -> listOf("approve", "reject", "cancel")
-                "approved" -> listOf("cancel")
+                "approved" -> if (consumption(application) == null) listOf("cancel") else emptyList()
                 else -> emptyList()
             }
         } else if (application.long("author_user_id") != session.userId) {
@@ -449,9 +459,20 @@ internal class ApplicationOperations(
             when (application["status"]) {
                 "draft" -> listOf("update", "submit", "cancel")
                 "submitted", "reviewing" -> listOf("cancel")
+                "approved" ->
+                    if (consumption(application) == null) {
+                        listOf("createClub")
+                    } else if (ClubOnboardingOperations(session).accessibleClub(application.long("id")) != null) {
+                        listOf("openClub")
+                    } else {
+                        emptyList()
+                    }
                 else -> emptyList()
             }
         }
+
+    private fun consumption(application: DbRow): DbRow? =
+        sql.row("SELECT club_id FROM client_club_onboarding WHERE application_id=?", application.long("id"))
 
     private companion object {
         const val COMMENT_LIMIT = 2000

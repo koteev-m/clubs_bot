@@ -2,10 +2,13 @@ package com.example.bot.routes
 
 import com.example.bot.club.WaitlistEntry
 import com.example.bot.club.WaitlistRepository
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
 import com.example.bot.metrics.UiWaitlistMetrics
 import com.example.bot.notifications.NotificationService
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.security.rbac.ClubScope
 import com.example.bot.security.rbac.authorize
@@ -23,12 +26,12 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.serialization.Serializable
+import org.slf4j.LoggerFactory
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
-import kotlinx.serialization.Serializable
-import org.slf4j.LoggerFactory
 
 private const val VARY_HEADER = "X-Telegram-Init-Data"
 private const val NO_STORE = "no-store"
@@ -218,6 +221,12 @@ fun Application.waitlistRoutes(
                                 ),
                             )
 
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.EVENT, payload.eventId),
+                        )
+                    ) {
+                        return@post
+                    }
                     if (payload.partySize <= 0) {
                         return@post call.respond(
                             HttpStatusCode.BadRequest,

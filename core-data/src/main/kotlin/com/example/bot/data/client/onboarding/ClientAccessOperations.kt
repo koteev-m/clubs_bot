@@ -202,11 +202,12 @@ internal class ClientAccessOperations(
                 val grant = it as? JsonObject ?: fail("validation_error")
                 grant.only(listOf("clubId", "permission"))
                 val clubId = grant.id("clubId")
-                if (grant.string("permission") != READ_CLUB) fail("validation_error")
-                clubId
+                val permission = grant.string("permission")
+                if (permission !in setOf(READ_CLUB, WRITE_PROFILE)) fail("validation_error")
+                clubId to permission
             }
         if (requestedGrants.distinct().size != requestedGrants.size) fail("validation_error")
-        requestedGrants.forEach { clubId ->
+        requestedGrants.forEach { (clubId, permission) ->
             if (sql.update(
                     "UPDATE client_club_grants SET is_active=TRUE,updated_at=? " +
                         "WHERE client_id=? AND user_id=? AND club_id=? AND permission_code=?",
@@ -214,7 +215,7 @@ internal class ClientAccessOperations(
                     clientId,
                     userId,
                     clubId,
-                    READ_CLUB,
+                    permission,
                 ) != 1
             ) {
                 fail("validation_error")

@@ -773,13 +773,20 @@ Read-only search POST не требует idempotency key; cursor находит
 
 Прямой `startapp` использует canonical React client entry; `mode=client` выбирает presentation, а не права. Private `/start` сохраняет guest кнопку и добавляет «Мои клубы» по active membership **message.from.id**. Platform-owner menu сохраняется. Backend не рассылает реальные приглашения автоматически.
 
-### 29.8. Контракт Б остаётся отдельной реализацией
+### 29.8. Контракт Б: отдельное создание непубличного клуба
+
+**Локальная реализация отдельно разрешена 2026-10-28** от проверенного main
+`600f9b34d65abc07dfc38e86fb4c724469268827` после PR #552. Это исполнение уже принятого
+контракта, без нового DEC/CLB и без изменения границ А. Source delta описана в
+[AS_BUILT §4.17](AS_BUILT.md#client-onboarding-b-local), фактическая проверка и
+непроверенные элементы — в [checkpoint](../ops/PROJECT_STATUS.md). Публикация и
+runtime не разрешены. Указанные выше ограничения «только А» относятся к прежней задаче.
 
 `POST C/applications/{id}/club` в Б принимает expectedVersion, idempotency key и проверяет автора, active client/membership/manage и approved snapshot. Одна transaction создаёт ровно один `clubs` с `is_active=false`, `client_clubs`, `client_club_onboarding`, exact `client.club.read` и `client.club.profile.write`, consumption и audit. Unique application consumption и composite FK фиксируют client/owner/approved status; used approval нельзя отменить или освободить удалением mapping. Потерянный ответ/параллельный повтор возвращает тот же клуб при текущем доступе; любая ошибка до commit полностью откатывает результат.
 
 Минимальный профиль Б: display name, описание до 2000 и валидная timezone; страна/город/адрес одобренного заведения без редактирования. `GET/PATCH C/clubs/{id}/profile` требует exact read/write grants, version/idempotency для записи. Статусы «Непубличный», «Бот не подключён», дата сохранения профиля независимы от approval. Publication API отсутствует.
 
-Одного `is_active=false` недостаточно: до готовности Б обязательны targeted guards guest list/detail/events, support/ask, layout/files/ETag/304, booking/HOLD и legacy admin mutations для новых mapped private clubs, включая кэши и side effects; unmapped legacy flow сохраняется. Это будущий containment target, **не выполненный этапом А**. Перенос владения, staff management, Managed Bots и реальная активация клиентов требуют отдельного scope.
+Одного `is_active=false` недостаточно: до готовности Б обязательны targeted guards guest list/detail/events, support/ask, layout/files/ETag/304, booking/HOLD и legacy admin mutations для новых mapped private clubs, включая кэши и side effects; unmapped legacy flow сохраняется. Этап А эту границу не реализовал; локальное evidence Б фиксируется отдельно в checkpoint. Перенос владения, staff management, Managed Bots и реальная активация клиентов требуют отдельного scope.
 
 ### 29.9. Verification и delivery boundary
 

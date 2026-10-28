@@ -20,6 +20,17 @@ Authority `DEC-040`–`DEC-042`; полный onboarding/multi-bot target ост
 | 4 | Брендированное Managed Bots подключение использует тот же клиентский контекст, ingress/auth/outbound | Результаты 1–3; SDK adapter/upgrade и credential lifecycle согласованы; `CLNT-AC-09/10`, два синтетических подключения без реальных credentials |
 | 5 | Полная синтетическая приёмка A×2/B и отдельно разрешённый operational pilot/cutover | Все `CLNT-AC-01`–`CLNT-AC-12`; guest/publication и реальные Telegram/runtime действия требуют отдельной задачи/разрешения |
 
+**Продолжение Б, 2026-10-28:** после предоставленного merge PR #552 и main
+`600f9b34d65abc07dfc38e86fb4c724469268827` владелец отдельно разрешил локально выполнить
+строку 3: approved → один private club → сохранённый профиль → повторный вход.
+Additive V063, exact grants, durable consumption и targeted legacy containment
+рассматриваются вместе; отсутствие дочерних данных не считается доказательством
+изоляции. [Source delta](AS_BUILT.md#client-onboarding-b-local) и
+[checkpoint](../ops/PROJECT_STATUS.md) фиксируют проверенный объём. Managed Bots,
+guest publication, полный мастер, multi-bot isolation и runtime rollout остаются
+следующими отдельно разрешаемыми outcomes. Следующий delivery шаг после локальной
+готовности — отдельная публикация через Draft PR.
+
 <a id="client-first-implementation"></a>
 ### Одна первая реализационная задача: клиентский контекст и граница доступа
 

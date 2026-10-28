@@ -1,13 +1,14 @@
 package com.example.bot.telegram.bookings
 
+import com.example.bot.audit.AuditLogger
 import com.example.bot.availability.AvailabilityCacheInvalidator
 import com.example.bot.data.booking.BookingStatus
 import com.example.bot.data.booking.BookingsTable
 import com.example.bot.data.booking.EventsTable
 import com.example.bot.data.booking.core.OutboxRepository
+import com.example.bot.data.privacy.unmappedClub
 import com.example.bot.data.security.User
 import com.example.bot.data.security.UserRepository
-import com.example.bot.audit.AuditLogger
 import com.example.bot.opschat.NoopOpsNotificationPublisher
 import com.example.bot.opschat.OpsDomainNotification
 import com.example.bot.opschat.OpsNotificationEvent
@@ -119,7 +120,9 @@ class MyBookingsService(
         val updated =
             newSuspendedTransaction(context = Dispatchers.IO, db = database) {
                 val affected =
-                    BookingsTable.update({ BookingsTable.id eq info.id }) { row ->
+                    BookingsTable.update(
+                        { (BookingsTable.id eq info.id) and unmappedClub(BookingsTable.clubId) },
+                    ) { row ->
                         row[status] = BookingStatus.CANCELLED.name
                         row[updatedAt] = Instant.now(clock).atOffset(ZoneOffset.UTC)
                     }
@@ -164,7 +167,8 @@ class MyBookingsService(
                 BookingsTable
                     .selectAll()
                     .where {
-                        (BookingsTable.guestUserId eq userId) and (BookingsTable.status inList ACTIVE_STATUSES)
+                        (BookingsTable.guestUserId eq userId) and (BookingsTable.status inList ACTIVE_STATUSES) and
+                            unmappedClub(BookingsTable.clubId)
                     }.orderBy(BookingsTable.slotStart to SortOrder.ASC)
                     .limit(limit, offset)
                     .toList()
@@ -180,7 +184,8 @@ class MyBookingsService(
                 BookingsTable
                     .selectAll()
                     .where {
-                        (BookingsTable.id eq bookingId) and (BookingsTable.guestUserId eq userId)
+                        (BookingsTable.id eq bookingId) and (BookingsTable.guestUserId eq userId) and
+                            unmappedClub(BookingsTable.clubId)
                     }.limit(1)
                     .firstOrNull()
             if (row == null) {

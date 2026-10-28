@@ -1,9 +1,12 @@
 package com.example.bot.routes
 
+import com.example.bot.data.privacy.LegacyReference
+import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.respondError
 import com.example.bot.plugins.miniAppBotTokenProvider
+import com.example.bot.plugins.requireLegacyResources
 import com.example.bot.plugins.withMiniAppAuth
 import com.example.bot.promoter.quotas.PromoterQuota
 import com.example.bot.promoter.quotas.PromoterQuotaService
@@ -22,10 +25,10 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import java.time.Clock
-import java.time.Instant
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
+import java.time.Clock
+import java.time.Instant
 
 private const val VARY_HEADER = "X-Telegram-Init-Data"
 private const val NO_STORE = "no-store"
@@ -51,10 +54,14 @@ private data class PromoterQuotaView(
 )
 
 @Serializable
-private data class PromoterQuotasResponse(val quotas: List<PromoterQuotaView>)
+private data class PromoterQuotasResponse(
+    val quotas: List<PromoterQuotaView>,
+)
 
 @Serializable
-private data class PromoterQuotaResponse(val quota: PromoterQuotaView)
+private data class PromoterQuotaResponse(
+    val quota: PromoterQuotaView,
+)
 
 fun Application.promoterQuotasAdminRoutes(
     promoterQuotaService: PromoterQuotaService,
@@ -83,11 +90,23 @@ fun Application.promoterQuotasAdminRoutes(
                 }
 
                 post {
-                    val payload = runCatching { call.receive<PromoterQuotaPayload>() }.getOrNull()
-                        ?: return@post call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    val payload =
+                        runCatching { call.receive<PromoterQuotaPayload>() }.getOrNull()
+                            ?: return@post call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.CLUB, payload.clubId),
+                            LegacyReference(LegacyResource.HALL_TABLE, payload.tableId),
+                        )
+                    ) {
+                        return@post
+                    }
 
-                    val quota = payload.toQuotaOrNull()
-                        ?: return@post call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val quota =
+                        payload.toQuotaOrNull()
+                            ?: return@post call.respondAdminError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.validation_error,
+                            )
                     if (!call.rbacContext().canAccessClub(quota.clubId)) {
                         return@post call.respondAdminError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
@@ -103,17 +122,27 @@ fun Application.promoterQuotasAdminRoutes(
                 }
 
                 put {
-                    val payload = runCatching { call.receive<PromoterQuotaPayload>() }.getOrNull()
-                        ?: return@put call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    val payload =
+                        runCatching { call.receive<PromoterQuotaPayload>() }.getOrNull()
+                            ?: return@put call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                    if (!call.requireLegacyResources(
+                            LegacyReference(LegacyResource.CLUB, payload.clubId),
+                            LegacyReference(LegacyResource.HALL_TABLE, payload.tableId),
+                        )
+                    ) {
+                        return@put
+                    }
 
-                    val quota = payload.toQuotaOrNull()
-                        ?: return@put call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
+                    val quota =
+                        payload.toQuotaOrNull()
+                            ?: return@put call.respondAdminError(HttpStatusCode.BadRequest, ErrorCodes.validation_error)
                     if (!call.rbacContext().canAccessClub(quota.clubId)) {
                         return@put call.respondAdminError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                     }
 
-                    val updated = promoterQuotaService.updateExisting(quota)
-                        ?: return@put call.respondAdminError(HttpStatusCode.NotFound, ErrorCodes.not_found)
+                    val updated =
+                        promoterQuotaService.updateExisting(quota)
+                            ?: return@put call.respondAdminError(HttpStatusCode.NotFound, ErrorCodes.not_found)
 
                     logger.info(
                         "promoter.quotas.upsert club_id={} promoter_id={} table_id={} action=updated",
@@ -147,7 +176,10 @@ private suspend fun ApplicationCall.respondWithQuotas(body: Any) {
     respond(HttpStatusCode.OK, body)
 }
 
-private suspend fun ApplicationCall.respondAdminError(status: HttpStatusCode, code: String) {
+private suspend fun ApplicationCall.respondAdminError(
+    status: HttpStatusCode,
+    code: String,
+) {
     applyAdminCacheHeaders()
     respondError(status, code)
 }

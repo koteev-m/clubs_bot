@@ -9,6 +9,7 @@ import org.flywaydb.core.Flyway
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
 import java.sql.Connection
+import java.sql.PreparedStatement
 import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
@@ -152,7 +153,76 @@ internal class OnboardingFixture(
             clock,
         )
 
-    override fun close() = source.close()
+    /** Throws after the chosen statement actually changed this connection, proving transaction rollback. */
+    fun failingAfterRepository(
+        sqlPrefix: String,
+        occurrence: Int = 1,
+    ): JdbcClientOnboardingRepository {
+        var remaining = occurrence
+        val failingSource =
+            object : DataSource by source {
+                override fun getConnection(): Connection {
+                    val delegate = source.connection
+                    return Proxy.newProxyInstance(
+                        Connection::class.java.classLoader,
+                        arrayOf(Connection::class.java),
+                    ) { _, method, arguments ->
+                        try {
+                            val result = method.invoke(delegate, *arguments.orEmpty())
+                            if (method.name == "prepareStatement" &&
+                                arguments?.firstOrNull()?.toString()?.startsWith(sqlPrefix) == true
+                            ) {
+                                Proxy.newProxyInstance(
+                                    PreparedStatement::class.java.classLoader,
+                                    arrayOf(PreparedStatement::class.java),
+                                ) { _, statementMethod, statementArguments ->
+                                    try {
+                                        val value = statementMethod.invoke(result, *statementArguments.orEmpty())
+                                        if (statementMethod.name == "executeUpdate" && --remaining == 0) {
+                                            throw SQLException("Synthetic post-step failure", "XX000")
+                                        }
+                                        value
+                                    } catch (failure: InvocationTargetException) {
+                                        throw failure.targetException
+                                    }
+                                }
+                            } else {
+                                result
+                            }
+                        } catch (failure: InvocationTargetException) {
+                            throw failure.targetException
+                        }
+                    } as Connection
+                }
+            }
+        return JdbcClientOnboardingRepository(failingSource, owner.telegramUserId, clock)
+    }
+
+    suspend fun approved(
+        clientId: Long,
+        actor: OnboardingActor = alice,
+        venue: String = "Synthetic venue",
+    ): JsonObject {
+        val draft = draft(clientId, actor, venue)
+        val submitted = mutate(actor, OnboardingMutation.APPLICATION_SUBMIT, draft)
+        val reviewed = mutate(owner, OnboardingMutation.APPLICATION_REVIEW, submitted)
+        return mutate(owner, OnboardingMutation.APPLICATION_APPROVE, reviewed, approval())
+    }
+
+    override fun close() {
+        try {
+            if (vendor == "h2") releaseH2OnLastConnection()
+        } finally {
+            source.close()
+        }
+    }
+
+    private fun releaseH2OnLastConnection() =
+        source.connection.use { connection ->
+            // Keep Hikari's logical connection alive until it has reset/returned it.
+            // Closing the pool then closes the final physical connection and the test database.
+            connection.createStatement().use { it.execute("SET DB_CLOSE_DELAY 0") }
+        }
 
     companion object {
         fun fields(venue: String = "Synthetic venue") =

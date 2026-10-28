@@ -16,7 +16,6 @@ import io.ktor.http.withCharset
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
-import io.ktor.server.application.log
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
@@ -36,7 +35,10 @@ private const val DEFAULT_PAGE_SIZE = 20
 private const val MAX_PAGE_SIZE = 100
 private const val CACHE_CONTROL = "max-age=60, must-revalidate"
 private const val VARY_HEADER = "X-Telegram-Init-Data"
-private val JSON_CONTENT_TYPE = ContentType.Application.Json.withCharset(Charsets.UTF_8).toString()
+private val JSON_CONTENT_TYPE =
+    ContentType.Application.Json
+        .withCharset(Charsets.UTF_8)
+        .toString()
 
 @Serializable
 data class ClubDto(
@@ -100,7 +102,12 @@ fun Application.clubsRoutes(
                 val offset = page * size
 
                 val dateRange = parseDateRange(date)
-                val dateSeed = dateRange?.first?.atOffset(ZoneOffset.UTC)?.toLocalDate()?.toString()
+                val dateSeed =
+                    dateRange
+                        ?.first
+                        ?.atOffset(ZoneOffset.UTC)
+                        ?.toLocalDate()
+                        ?.toString()
 
                 val hasFilters = city != null || query != null || tag != null || genre != null || dateRange != null
                 val clubs =
@@ -178,7 +185,8 @@ fun Application.clubsRoutes(
                     etagFor(
                         effectiveUpdatedAt,
                         clubs.size,
-                        "clubs|$city|$tag|$genre|$query|$dateSeed|$page|$size",
+                        "clubs|$city|$tag|$genre|$query|$dateSeed|$page|$size|ids=" +
+                            clubs.joinToString(",") { it.id.toString() },
                     )
 
                 call.respondWithCache(
@@ -234,7 +242,13 @@ fun Application.clubsRoutes(
                     events.size,
                 )
 
-                val etag = etagFor(eventsRepository.lastUpdatedAt(), events.size, "events|$clubId|$city|$from|$to|$page|$size")
+                val etag =
+                    etagFor(
+                        eventsRepository.lastUpdatedAt(),
+                        events.size,
+                        "events|$clubId|$city|$from|$to|$page|$size|ids=" +
+                            events.joinToString(",") { it.id.toString() },
+                    )
 
                 call.respondWithCache(
                     etag = etag,
@@ -263,19 +277,30 @@ private fun parseDateRange(value: String?): Pair<Instant, Instant>? {
     return runCatching {
         val localDate = LocalDate.parse(value)
         val from = localDate.atStartOfDay().toInstant(ZoneOffset.UTC)
-        val to = localDate.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC).minusNanos(1)
+        val to =
+            localDate
+                .plusDays(1)
+                .atStartOfDay()
+                .toInstant(ZoneOffset.UTC)
+                .minusNanos(1)
         from to to
     }.getOrNull()
 }
 
-private fun maxInstant(a: Instant?, b: Instant?): Instant? =
+private fun maxInstant(
+    a: Instant?,
+    b: Instant?,
+): Instant? =
     when {
         a == null -> b
         b == null -> a
         else -> if (a.isAfter(b)) a else b
     }
 
-private suspend fun ApplicationCall.callRespond(etag: String, payload: Any) {
+private suspend fun ApplicationCall.callRespond(
+    etag: String,
+    payload: Any,
+) {
     response.header(HttpHeaders.ETag, etag)
     response.header(HttpHeaders.CacheControl, CACHE_CONTROL)
     response.header(HttpHeaders.Vary, VARY_HEADER)

@@ -277,6 +277,32 @@ Bounded local candidate от `main 90b772ef117baa07b203ec6bad056873f51f8979`, wo
 
 `CLNT-001/002/003/004/006/009` получают bounded локальную реализацию А; `CLNT-005` покрыт только запретом creation до отдельного этапа и независимостью refusal/access от существующих клубов. Полный `CLNT-010` A×2/B/Managed Bots outcome, создание private club, профиль, publication и multi-bot ingress/outbound **не реализованы А**. Нет stage/prod migration, live client/club mapping, real invitation или переноса владельца. Accepted decision — отдельное от source wiring, completed checks и deployed state измерение.
 
+<a id="client-onboarding-b-local"></a>
+### 4.17. Local onboarding Б source delta (2026-10-28)
+
+Continuation on exact main `600f9b34d65abc07dfc38e86fb4c724469268827`, isolated
+`client-onboarding-b/clubs_bot`, branch `codex/client-onboarding-b`. The earlier A
+section is its historical scope, not the current publication state. User reports
+PR #552 merged and 15 post-merge workflows successful; this task does not rerun or
+independently reassert CI/runtime acceptance. The following describes local source;
+test results, review and final file hashes are in [PROJECT_STATUS](../ops/PROJECT_STATUS.md).
+
+| Surface | Bounded source evidence | Effect and limit |
+|---|---|---|
+| Durable ownership | `core-data/src/main/resources/db/migration/{postgresql,h2}/V063__client_onboarding_b.sql` | One association per approval and per club, composite FK to client/author/approved snapshot and mapping, immutable association/delete guard; profile version/save time mutable. No backfill or publication. |
+| Create/profile API | `app-bot/src/main/kotlin/com/example/bot/routes/ClientOnboardingRoutes.kt::clientApplicationEndpoints`; `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubOnboardingOperations.kt::create/get/update` | POST application club, GET/PATCH profile share fresh signed identity; exact manage/author for create, exact read plus write for PATCH. Payload cannot assign owner/client/publication. |
+| Transaction and replay | `JdbcClientOnboardingRepository.kt::mutate/replay/transaction`, `ClubOnboardingOperations.kt::lockedApplication/replayCreate`, `ApplicationOperations.kt::transition`, `ClientAccessOperations.kt::change` in the same data/onboarding package | Actor → client → resource locks, existing client serialization with revoke/cancel; one connection for club, ownership, grants, consumption, audit and command result. Repeat rechecks authority and returns same club. |
+| Private boundary | `app-bot/src/main/kotlin/com/example/bot/Application.kt::module` → `plugins/PrivateClubContainment.kt::installPrivateClubContainment`; `core-data/src/main/kotlin/com/example/bot/data/privacy/{LegacyClubAccess,ClientClubContainment}.kt` | Ownership-only checks before legacy handlers/cached responses; query predicates remove mapped clubs/descendants from lists. Client APIs are separately authorized; legacy GLOBAL does not open onboarding ownership. |
+| Legacy switch and collection caches | `deprecated/legacy/web/BookingWebAppRoutes.kt::installLegacyBookingWebApp`; `routes/ClubsRoutes.kt`; `music/MusicService.kt`, all under `app-bot/src/main/kotlin/com/example/bot` | The supported legacy booking feature flag also filters private lists/own bookings and rejects private body IDs before persistence/notification. Collection validators include the current allowed membership, so a changed result cannot reuse an earlier private response through 304. |
+| Support and outbound | `core-data/src/main/kotlin/com/example/bot/data/support/{SupportRepository,SupportMutationPersistence,SupportReplyDeliveryPersistence}.kt`; `data/club/ClubOpsChatConfigRepositoryImpl.kt::getByClubId/upsert` | Private tickets/messages excluded before content reads and mutations; pending replies cannot be claimed; operations queue cannot resolve private destination. `/ask` uses the contained club repository; rating callback uses contained persistence. |
+| UI and packaging | `miniapp/src/modules/client/{ClientAccess,ClubProfile}.tsx`, `onboarding.hooks.ts`; existing `routes/WebAppRoutes.kt`, `app-bot/build.gradle.kts::copyMiniAppDist/processResources/installDist`, `Dockerfile` | My clubs → create/open → private profile; approved address immutable, save status/version and explicit club selection. Production React dist is copied into the served JAR path. Actual byte verification is separate evidence. |
+| Ingress | `Caddyfile`, `scripts/tests/check_client_onboarding_ingress.py` | Local exact PATCH allowlist includes positive-ID profile and draft routes; all other method restrictions remain. No server Caddy change. |
+
+Creation does not connect a bot or enable guest bookings. Profile edits do not change
+the approved submitted snapshot. Full master, staff management, publication,
+Managed Bots and universal multi-bot isolation remain outside Б. No deployed
+revision, live schema, real Telegram interaction or customer migration is asserted.
+
 ## 5. Domain-by-domain state
 
 | # | Domain | Status | Evidence | Wired/persistence/UI/missing summary |

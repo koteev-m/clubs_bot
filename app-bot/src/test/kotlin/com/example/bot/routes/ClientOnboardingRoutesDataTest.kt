@@ -35,11 +35,12 @@ import kotlin.test.assertTrue
 
 class ClientOnboardingRoutesDataTest {
     @Test
-    fun `direct Mini App recipient is provisioned only by claim and owner decides without creating a club`() =
+    fun `direct Mini App recipient proceeds from approved application to one persisted private club profile`() =
         database { source ->
             val initialRoles = source.scalar("SELECT COUNT(*) FROM user_roles")
             val initialClubs = source.scalar("SELECT COUNT(*) FROM clubs")
             lateinit var applicationId: String
+            lateinit var clubId: String
             withApp(source) {
                 val invitation =
                     ok(
@@ -92,6 +93,8 @@ class ClientOnboardingRoutesDataTest {
                 assertEquals(initialRoles, source.scalar("SELECT COUNT(*) FROM user_roles"))
                 var draft = ok(C + "/clients/$clientId/applications", RECIPIENT, venue())
                 applicationId = draft.string("id")
+                requestAs(C + "/applications/$applicationId/club", RECIPIENT, version(draft))
+                    .assertClientError(HttpStatusCode.Conflict, "invalid_transition")
                 requestAs(
                     P + "/applications/$applicationId",
                     OWNER,
@@ -144,20 +147,84 @@ class ClientOnboardingRoutesDataTest {
                     C + "/applications/$applicationId",
                     FOREIGN,
                 ).assertClientError(HttpStatusCode.NotFound, "not_found")
+                assertEquals(initialClubs, source.scalar("SELECT COUNT(*) FROM clubs"))
+                requestAs(C + "/applications/$applicationId/club", FOREIGN, version(approved))
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
                 requestAs(
                     C + "/applications/$applicationId/club",
                     RECIPIENT,
-                    obj(
-                        "expectedVersion" to approved.string("version"),
-                    ),
+                    JsonObject(version(approved) + obj("clientId" to "1", "ownerId" to "1")),
+                ).assertClientError(HttpStatusCode.BadRequest, "validation_error")
+                val profile =
+                    ok(
+                        C + "/applications/$applicationId/club",
+                        RECIPIENT,
+                        version(approved),
+                        key = "create-club-lost-response",
+                    )
+                clubId = profile.string("id")
+                val repeat =
+                    ok(
+                        C + "/applications/$applicationId/club",
+                        RECIPIENT,
+                        version(approved),
+                        key = "create-club-lost-response",
+                    )
+                assertEquals(profile, repeat)
+                assertEquals(profile, ok(C + "/applications/$applicationId/club", RECIPIENT, version(approved)))
+                assertEquals("FALSE", source.scalar("SELECT is_active FROM clubs WHERE id=$clubId"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_club_onboarding"))
+                assertEquals("Synthetic Street 1", profile.string("address"))
+                requestAs(C + "/clubs/$clubId/profile", FOREIGN).assertClientError(HttpStatusCode.NotFound, "not_found")
+                requestAs(
+                    C + "/clubs/9223372036854775807/profile",
+                    FOREIGN,
                 ).assertClientError(HttpStatusCode.NotFound, "not_found")
-                assertEquals(initialClubs, source.scalar("SELECT COUNT(*) FROM clubs"))
+                requestAs(
+                    C + "/clubs/$clubId/profile",
+                    RECIPIENT,
+                    JsonObject(version(profile) + obj("address" to "Forged address")),
+                    HttpMethod.Patch,
+                ).assertClientError(HttpStatusCode.BadRequest, "validation_error")
+                val update =
+                    JsonObject(
+                        version(profile) +
+                            obj(
+                                "name" to "Saved club",
+                                "description" to "Saved description",
+                                "timezone" to "Europe/Paris",
+                            ),
+                    )
+                val saved =
+                    ok(C + "/clubs/$clubId/profile", RECIPIENT, update, HttpMethod.Patch, "save-club-lost-response")
+                assertEquals("2", saved.string("version"))
+                assertEquals(
+                    saved,
+                    ok(C + "/clubs/$clubId/profile", RECIPIENT, update, HttpMethod.Patch, "save-club-lost-response"),
+                )
+                requestAs(C + "/clubs/$clubId/profile", RECIPIENT, update, HttpMethod.Patch)
+                    .assertClientError(HttpStatusCode.Conflict, "version_conflict")
+                val consumed = ok(C + "/applications/$applicationId", RECIPIENT)
+                assertEquals(profile["id"], consumed["createdClubId"])
+                assertEquals("Synthetic Venue", consumed.string("venueName"))
+                requestAs(
+                    P + "/applications/$applicationId/cancel",
+                    OWNER,
+                    JsonObject(version(consumed) + obj("reason" to "Cannot cancel consumed approval")),
+                ).assertClientError(HttpStatusCode.Conflict, "invalid_transition")
             }
             // A new Ktor application/repository instance uses the same persisted result.
             withApp(source) {
                 val restored = ok(C + "/applications/$applicationId", RECIPIENT)
                 assertEquals("approved", restored.string("status"))
                 assertEquals("Saved synthetic draft", restored.string("comment"))
+                val profile = ok(C + "/clubs/$clubId/profile", RECIPIENT)
+                assertEquals("Saved club", profile.string("name"))
+                assertEquals("Saved description", profile.string("description"))
+                assertEquals("Europe/Paris", profile.string("timezone"))
+                assertEquals("Synthetic Street 1", profile.string("address"))
+                val clubs = ok(C + "/clients/${restored.string("clientId")}/onboarding", RECIPIENT)["clubs"]!!.jsonArray
+                assertEquals(listOf(clubId), clubs.map { it.jsonObject.string("id") })
             }
         }
 

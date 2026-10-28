@@ -115,6 +115,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.micrometer.core)
 
+    // H2's parity trigger is compiled once; PostgreSQL runtime does not load this optional adapter.
+    compileOnly(libs.h2)
+
     // Тесты
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotest.runner)

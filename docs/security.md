@@ -82,6 +82,32 @@ verification, private-club creation/profile or complete legacy tenant containmen
 claimed here. Real invitations, Telegram setup, live DB changes and rollout remain
 separately authorized actions.
 
+### Client onboarding Б (local continuation, 2026-10-28)
+
+The separately authorized [§29.8 contract](product/PRODUCT_SPEC.md#client-onboarding-ab-technical-contract)
+uses the same identity, command and transaction boundary. V063 binds consumed
+approval permanently to its client, author, approved snapshot and club through
+composite foreign keys and an immutable association guard. Deleting the mapping
+cannot free approval. Club creation sets `is_active=false`, grants exact
+`client.club.read` and `client.club.profile.write`, and never writes legacy roles.
+Profile PATCH checks both permissions, active client/membership, version and
+idempotency; agreed location and submitted snapshot remain immutable.
+
+Private containment is based on durable mapping, not only `is_active`: production
+installs `PrivateClubContainment` before legacy handlers and cached/conditional
+responses, with ownership-only lookup and explicit body-resource checks. List
+queries exclude mapped descendants; booking state rechecks ownership before its
+idempotency cache. Support persistence filters tickets before content reads or
+mutations, reply-delivery claiming cannot load private content, and operational
+notifications cannot resolve private destinations. Legacy GLOBAL roles remain
+unchanged for unmapped clubs and do not bypass this boundary. Synthetic descendants
+and warm cache tests are required evidence; general multi-bot isolation is not implied.
+
+The local Caddy allowlist also permits exactly `PATCH /api/client/clubs/{positiveId}/profile`.
+Server auth/grants remain authoritative. No server Caddy configuration was changed.
+Exact test/review coverage and residual gaps are recorded in
+[PROJECT_STATUS](ops/PROJECT_STATUS.md); no live migration or Telegram action is asserted.
+
 ### Existing admin/promoter RBAC
 
 - Все `/api/admin/*` требуют miniapp авторизации (initData) и выставляют `Cache-Control: no-store`.

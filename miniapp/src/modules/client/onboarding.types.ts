@@ -22,6 +22,22 @@ export interface Club {
   name: string;
   permissions?: string[];
 }
+export interface ClubProfile {
+  id: string;
+  clientId: string;
+  clientName: string;
+  name: string;
+  description: string;
+  timezone: string;
+  countryCode: string;
+  city: string;
+  address: string;
+  unit: string;
+  version: string;
+  savedAt: string;
+  permissions: string[];
+  availableActions: string[];
+}
 export interface ClientSummary {
   id: string;
   name: string;
@@ -77,6 +93,7 @@ export interface ClubApplication extends VenueFields {
   status: ApplicationStatus;
   version: string;
   previousApplicationId: string | null;
+  createdClubId?: string | null;
   submittedAt: string | null;
   decisionReason: string | null;
   history: { status: ApplicationStatus; at: string; reason: string | null }[];

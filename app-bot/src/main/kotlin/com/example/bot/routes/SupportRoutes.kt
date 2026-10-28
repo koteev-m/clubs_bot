@@ -251,6 +251,9 @@ fun Application.supportRoutes(
                     }
 
                     is SupportServiceResult.Failure -> {
+                        if (result.error == SupportServiceError.TicketNotFound) {
+                            return@post call.respondError(HttpStatusCode.NotFound, ErrorCodes.support_ticket_not_found)
+                        }
                         logger.warn("support.ticket.create internal_error club_id={}", clubId)
                         call.respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
                     }

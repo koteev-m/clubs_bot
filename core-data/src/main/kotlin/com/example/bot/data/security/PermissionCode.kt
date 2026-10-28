@@ -18,6 +18,7 @@ value class PermissionCode(
 object PermissionCodes {
     val CLIENT_APPLICATION_MANAGE = PermissionCode("client.application.manage")
     val CLIENT_CLUB_READ = PermissionCode("client.club.read")
+    val CLIENT_CLUB_PROFILE_WRITE = PermissionCode("client.club.profile.write")
     val SUPPORT_VIEW = PermissionCode("support.view")
     val SUPPORT_REPLY = PermissionCode("support.reply")
     val SUPPORT_STATUS_MANAGE = PermissionCode("support.status.manage")
