@@ -70,4 +70,5 @@ object ErrorCodes {
     const val VERSION_CONFLICT: String = "version_conflict"
     const val INVALID_TRANSITION: String = "invalid_transition"
     const val DUPLICATE_APPLICATION: String = "duplicate_application"
+    const val INVITATION_LINK_UNAVAILABLE: String = "invitation_link_unavailable"
 }

@@ -54,10 +54,14 @@ test('packaged application completes invitation, approval, one private club, sav
   ).toBeVisible();
   await owner.getByRole('button', { name: 'Пригласить клиента' }).click();
   const clientName = 'Synthetic Onboarding AB ' + Date.now();
-  await owner.getByLabel('Название клиентского пространства').fill(clientName);
+  await owner.getByLabel('Название клиента или компании').fill(clientName);
   await owner
-    .getByLabel('Кому отправляете приглашение')
+    .getByLabel('Имя получателя')
     .fill('Synthetic recipient');
+  await owner.screenshot({
+    path: test.info().outputPath('invitation-filled-mobile.png'),
+    fullPage: true,
+  });
   const issuedResponse = owner.waitForResponse(
     (response) =>
       response.url().endsWith('/api/platform/onboarding/invitations') &&
@@ -68,10 +72,33 @@ test('packaged application completes invitation, approval, one private club, sav
   await expect(
     owner.getByRole('heading', { name: 'Приглашение создано' }),
   ).toBeVisible();
-  const launch = new URL(
-    await owner.locator('.ob-link').innerText(),
-  ).searchParams.get('startapp')!;
+  const link = new URL(await owner.locator('.ob-link').innerText());
+  expect(link.origin).toBe('https://t.me');
+  expect(link.pathname).toBe('/synthetic_bot');
+  const launch = link.searchParams.get('startapp')!;
+  expect(new Date(issued.expiresAt).getTime() - Date.now()).toBeGreaterThan(
+    7 * 24 * 60 * 60 * 1000 - 60000,
+  );
+  expect(
+    new Date(issued.expiresAt).getTime() - Date.now(),
+  ).toBeLessThanOrEqual(7 * 24 * 60 * 60 * 1000);
+  await expect(owner.getByText(/семь суток/)).toBeVisible();
+  await expect(
+    owner.getByText('Отправьте эту ссылку человеку в Telegram'),
+  ).toBeVisible();
+  await owner
+    .context()
+    .grantPermissions(['clipboard-read', 'clipboard-write']);
+  await owner.getByRole('button', { name: 'Копировать ссылку' }).click();
+  await expect(owner.getByText('Ссылка скопирована')).toBeVisible();
+  expect(await owner.evaluate(() => navigator.clipboard.readText())).toBe(
+    link.toString(),
+  );
   expect(launch).toMatch(/^ci_[A-Za-z0-9_-]{43}$/);
+  await owner.screenshot({
+    path: test.info().outputPath('invitation-created-copied-mobile.png'),
+    fullPage: true,
+  });
   await owner.getByRole('button', { name: 'Открыть приглашение' }).click();
 
   await open(recipient, '/app', await identity(request, 'recipient', launch));
@@ -451,4 +478,164 @@ test('packaged application completes invitation, approval, one private club, sav
   await owner.close();
   await recipient.close();
   await foreign.close();
+});
+
+test('lost committed invitation response replays one client and requires explicit safe reissue before recipient claim', async ({
+  browser,
+  request,
+  baseURL,
+}) => {
+  const owner = await browser.newPage({ baseURL });
+  const recipient = await browser.newPage({ baseURL });
+  const ownerCredential = await identity(request, 'owner');
+  const recipientCredential = await identity(request, 'recipient');
+  const clientName = 'Synthetic Lost Invitation ' + Date.now();
+  const commands: { key: string; body: string | null }[] = [];
+  let committed:
+    | { id: string; clientId: string; invitationLink: string }
+    | undefined;
+  await owner.route(
+    '**/api/platform/onboarding/invitations',
+    async (route) => {
+      commands.push({
+        key: route.request().headers()['idempotency-key'],
+        body: route.request().postData(),
+      });
+      if (commands.length === 1) {
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        committed = await response.json();
+        return route.abort();
+      }
+      return route.continue();
+    },
+  );
+  await open(owner, '/app?mode=platform-owner', ownerCredential);
+  await owner.getByRole('button', { name: 'Пригласить клиента' }).click();
+  await owner.getByLabel('Название клиента или компании').fill(clientName);
+  await owner.getByLabel('Имя получателя').fill('Synthetic lost recipient');
+  await owner.getByRole('button', { name: 'Создать ссылку' }).click();
+  await expect(
+    owner.getByText('Ответ сервера не получен, результат нужно проверить.'),
+  ).toBeVisible();
+  await owner.goBack();
+  await expect(
+    owner.getByRole('heading', {
+      name: 'Управление платформой',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await owner.goForward();
+  await expect(
+    owner.getByLabel('Название клиента или компании'),
+  ).toHaveValue(clientName);
+  await expect(
+    owner.getByRole('button', { name: 'Создать ссылку' }),
+  ).toBeDisabled();
+  const replayResponse = owner.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/platform/onboarding/invitations') &&
+      response.ok(),
+  );
+  await owner.getByRole('button', { name: 'Проверить результат' }).click();
+  const replay = await (await replayResponse).json();
+  expect(commands).toHaveLength(2);
+  expect(commands[0]).toEqual(commands[1]);
+  expect(replay.id).toBe(committed!.id);
+  expect(replay.clientId).toBe(committed!.clientId);
+  expect(replay.invitationLink).toBeUndefined();
+  expect(replay.token).toBeUndefined();
+  await expect(
+    owner.getByRole('heading', { name: 'Ссылка не получена' }),
+  ).toBeVisible();
+  await expect(
+    owner.getByRole('heading', { name: 'Приглашение создано' }),
+  ).toHaveCount(0);
+  await expect(
+    owner.getByRole('button', { name: 'Копировать ссылку' }),
+  ).toHaveCount(0);
+  await owner.getByRole('button', { name: 'Открыть приглашение' }).click();
+  const oldLaunch = new URL(committed!.invitationLink).searchParams.get(
+    'startapp',
+  )!;
+  owner.once('dialog', (dialog) => dialog.accept());
+  const reissueResponse = owner.waitForResponse(
+    (response) => response.url().endsWith('/reissue') && response.ok(),
+  );
+  await owner
+    .getByRole('button', { name: 'Выпустить новую ссылку' })
+    .click();
+  const reissued = await (await reissueResponse).json();
+  expect(reissued.id).not.toBe(committed!.id);
+  expect(reissued.clientId).toBe(committed!.clientId);
+  await expect(
+    owner.getByRole('heading', { name: 'Приглашение создано' }),
+  ).toBeVisible();
+  const newLink = new URL(await owner.locator('.ob-link').innerText());
+  expect(newLink.origin).toBe('https://t.me');
+  expect(newLink.pathname).toBe('/synthetic_bot');
+  const newLaunch = newLink.searchParams.get('startapp')!;
+  expect(newLaunch).toMatch(/^ci_[A-Za-z0-9_-]{43}$/);
+  expect(newLaunch).not.toBe(oldLaunch);
+  const stale = await request.post(
+    '/api/client/invitations/' + committed!.id + '/claim',
+    {
+      headers: {
+        'X-Telegram-Init-Data': recipientCredential,
+        'Idempotency-Key': 'synthetic-old-claim-' + committed!.id,
+      },
+      data: { token: oldLaunch.slice(3), expectedVersion: '1' },
+    },
+  );
+  expect(stale.status()).toBe(404);
+  const oldStatus = await request.get(
+    '/api/platform/onboarding/invitations/' + committed!.id,
+    {
+      headers: { 'X-Telegram-Init-Data': ownerCredential },
+    },
+  );
+  expect((await oldStatus.json()).status).toBe('revoked');
+  const client = await request.get(
+    '/api/platform/onboarding/clients/' + committed!.clientId,
+    {
+      headers: { 'X-Telegram-Init-Data': ownerCredential },
+    },
+  );
+  expect(
+    (await client.json()).invitations
+      .map((item: { id: string }) => item.id)
+      .sort(),
+  ).toEqual([committed!.id, reissued.id].sort());
+  await open(
+    recipient,
+    '/app',
+    await identity(request, 'recipient', newLaunch),
+  );
+  await expect(
+    recipient.getByRole('heading', { name: 'Приглашение клиента' }),
+  ).toBeVisible();
+  await recipient.getByRole('checkbox').check();
+  await recipient
+    .getByRole('button', { name: 'Подтвердить аккаунт' })
+    .click();
+  await expect(
+    recipient.getByRole('heading', {
+      name: 'Ожидаем подтверждение платформы',
+    }),
+  ).toBeVisible();
+  for (const page of [owner, recipient]) {
+    const storage = await page.evaluate(() =>
+      JSON.stringify({
+        local: { ...localStorage },
+        session: { ...sessionStorage },
+      }),
+    );
+    expect(storage).not.toContain(oldLaunch);
+    expect(storage).not.toContain(newLaunch);
+    expect(storage).not.toContain(ownerCredential);
+    expect(storage).not.toContain(recipientCredential);
+    expect(page.url()).not.toContain(newLaunch);
+  }
+  await owner.close();
+  await recipient.close();
 });

@@ -251,17 +251,18 @@ describe('connected onboarding screens', () => {
         : response({ ...invitation, availableActions: ['revoke', 'reissue'] });
     });
     render(<PlatformOnboarding credential="synthetic-owner" />);
-    fireEvent.change(
-      screen.getByLabelText('Название клиентского пространства'),
-      { target: { value: 'Synthetic Client' } },
-    );
-    fireEvent.change(screen.getByLabelText('Кому отправляете приглашение'), {
+    fireEvent.change(screen.getByLabelText('Название клиента или компании'), {
+      target: { value: 'Synthetic Client' },
+    });
+    fireEvent.change(screen.getByLabelText('Имя получателя'), {
       target: { value: 'Candidate' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Создать ссылку' }));
-    await screen.findByText('Результат операции пока неизвестен');
+    await screen.findByText(
+      'Ответ сервера не получен, результат нужно проверить.',
+    );
     fireEvent.click(
-      screen.getByRole('button', { name: 'Повторить ту же операцию' }),
+      screen.getByRole('button', { name: 'Проверить результат' }),
     );
     await screen.findByText(/Первоначальный ответ со ссылкой не получен/);
     expect(fetch.mock.calls).toHaveLength(2);

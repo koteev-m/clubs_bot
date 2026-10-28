@@ -78,6 +78,8 @@ export function errorMessage(error: unknown): string {
     return 'Действие больше недоступно в текущем состоянии. Обновите данные.';
   if (error.code === 'idempotency_conflict')
     return 'Команда уже использована с другими данными. Обновите состояние.';
+  if (error.code === 'invitation_link_unavailable')
+    return 'Telegram-ссылка недоступна: требуется настройка платформенного бота. Приглашение не создано. Сообщите администратору платформы.';
   if (error.status === 400)
     return 'Проверьте заполненные поля и повторите действие.';
   return 'Не удалось загрузить данные. Повторите попытку.';

@@ -7,7 +7,7 @@ Error Registry предоставляет машиночитаемый спис�
 ## Эндпоинт /api/.well-known/errors
 
 - Методы: `GET`, `HEAD`.
-- Заголовки ответа: `Content-Type: application/json; charset=utf-8`, `Cache-Control: public, max-age=300, stale-while-revalidate=30, stale-if-error=86400`, `ETag: "error-codes-v<version>"` (текущая версия — 8). Это версия реестра (ErrorRegistry.version) для кеширования и контроля изменений набора кодов.
+- Заголовки ответа: `Content-Type: application/json; charset=utf-8`, `Cache-Control: public, max-age=300, stale-while-revalidate=30, stale-if-error=86400`, `ETag: "error-codes-v<version>"` (текущая версия — 12). Это версия реестра (ErrorRegistry.version) для кеширования и контроля изменений набора кодов.
 - Кэширование: поддерживаются слабые/джокерные `If-None-Match`; при совпадении ETag — `304 Not Modified` с теми же заголовками. `HEAD` возвращает только заголовки/статус.
 - Контракт реализован в `ErrorRegistry` + `errorCodesRoutes()`; фактический маршрут — `/api/.well-known/errors`.
 - Общая политика HTTP-заголовков и кэширования описана в `docs/headers-and-cache.md`.
@@ -30,7 +30,7 @@ Error Registry предоставляет машиночитаемый спис�
 }
 ```
 
-- `version` в JSON — версия схемы payload (ErrorCodesPayload.version), она может быть меньше/больше версии реестра и меняется только при изменении формата JSON (поэтому при ETag `v8` в примерах допустимо видеть `version: 2`).
+- `version` в JSON — версия схемы payload (ErrorCodesPayload.version), она может быть меньше/больше версии реестра и меняется только при изменении формата JSON (поэтому при ETag `v12` в примерах допустимо видеть `version: 2`).
 - Поле `code` — строковый идентификатор (например, `invalid_or_expired_qr`, `idempotency_conflict`).
 - `http` — числовой HTTP статус, с которым код обычно возвращается.
 - `stable` — флаг стабильности контракта (по умолчанию `true`).
@@ -39,7 +39,7 @@ Error Registry предоставляет машиночитаемый спис�
 
 ## Кэширование и версионирование Error Registry
 
-- ETag обновляется вместе с версией реестра (`"error-codes-v8"` на текущий момент). Клиенты могут кэшировать ответ до смены ETag или до истечения `max-age`/`stale-*` директив.
+- ETag обновляется вместе с версией реестра (`"error-codes-v12"` на текущий момент). Клиенты могут кэшировать ответ до смены ETag или до истечения `max-age`/`stale-*` директив.
 - При получении `304 Not Modified` клиент может продолжать использовать кэшированное тело; `RouteCacheMetrics` фиксирует hit/miss для анализа.
 - При смене версии/наборов кодов ETag изменится автоматически, клиенты получат новое тело.
 
@@ -53,6 +53,14 @@ curl -i https://service.example.com/api/.well-known/errors
 curl -I https://service.example.com/api/.well-known/errors
 
 # Кэширование с If-None-Match
-curl -i -H 'If-None-Match: "error-codes-v8"' https://service.example.com/api/.well-known/errors
+curl -i -H 'If-None-Match: "error-codes-v12"' https://service.example.com/api/.well-known/errors
 # -> 304 Not Modified при актуальном ETag
 ```
+
+## Client invitation configuration
+
+`invitation_link_unavailable` (HTTP 503) uses the common `ApiError` envelope.
+It means issue/reissue was refused before mutation because the platform bot username
+is unavailable or invalid. It never indicates a committed invitation. A prior lost
+response remains unknown and must still be checked with the original command key.
+No bot credentials or invitation secrets are included in this error.

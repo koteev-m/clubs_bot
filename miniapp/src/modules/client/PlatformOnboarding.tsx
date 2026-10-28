@@ -18,7 +18,8 @@ import {
   Membership,
   Page,
 } from './onboarding.types';
-import { authorityLost } from './onboarding.api';
+import { authorityLost, errorMessage } from './onboarding.api';
+import { InvitationDraft, useInvitationDraft } from './useInvitationDraft';
 
 type OwnerScreen =
   | { type: 'overview' | 'invite' | 'clients' | 'applications' }
@@ -40,8 +41,29 @@ function currentScreen(): OwnerScreen {
 
 export default function PlatformOnboarding({
   credential,
+  invite,
 }: {
   credential: string;
+  invite?: InvitationDraft;
+}) {
+  if (invite)
+    return <PlatformNavigation credential={credential} invite={invite} />;
+  return <PlatformSession key={credential} credential={credential} />;
+}
+
+function PlatformSession({ credential }: { credential: string }) {
+  // The draft and original command survive route changes only in this authorized
+  // component's memory. Changing credentials destroys the entire session.
+  const invite = useInvitationDraft(credential);
+  return <PlatformNavigation credential={credential} invite={invite} />;
+}
+
+function PlatformNavigation({
+  credential,
+  invite,
+}: {
+  credential: string;
+  invite: ReturnType<typeof useInvitationDraft>;
 }) {
   const [screen, setScreen] = useState<OwnerScreen>(currentScreen);
   const navigate = useCallback((next: OwnerScreen, replace = false) => {
@@ -72,14 +94,14 @@ export default function PlatformOnboarding({
   const overview = screen.type === 'overview';
   const back = useCallback(() => window.history.back(), []);
   const home = () => navigate({ type: 'overview' });
-  const openInvitation = (invitation: Invitation) =>
+  const openInvitation = (invitation: Invitation) => {
+    invite.forgetLink();
     navigate({ type: 'invitation', id: invitation.id });
+  };
   const openApplication = (application: ClubApplication) =>
     navigate({ type: 'application', id: application.id });
   if (screen.type === 'invite')
-    return (
-      <OwnerInvite credential={credential} back={back} open={openInvitation} />
-    );
+    return <OwnerInvite draft={invite} back={back} open={openInvitation} />;
   if (screen.type === 'invitation')
     return (
       <OwnerInvitation
@@ -192,18 +214,23 @@ export default function PlatformOnboarding({
 }
 
 function OwnerInvite({
-  credential,
+  draft,
   back,
   open,
 }: {
-  credential: string;
+  draft: ReturnType<typeof useInvitationDraft>;
   back: () => void;
   open: (invitation: Invitation) => void;
 }) {
-  const [clientName, setClientName] = useState('');
-  const [recipientLabel, setRecipientLabel] = useState('');
-  const [invitation, setInvitation] = useState<Invitation>();
-  const command = useCommand<Invitation>(credential);
+  const {
+    clientName,
+    setClientName,
+    recipientLabel,
+    setRecipientLabel,
+    invitation,
+    setInvitation,
+    command,
+  } = draft;
   return (
     <Shell
       title="Пригласить клиента"
@@ -222,31 +249,52 @@ function OwnerInvite({
             );
           }}
         >
-          <Field label="Название клиентского пространства">
+          <p>
+            Создайте ссылку, затем самостоятельно отправьте её получателю в
+            Telegram.
+          </p>
+          <Field label="Название клиента или компании">
             <input
               required
               maxLength={255}
+              placeholder="MIX Group"
+              aria-describedby="invite-client-help"
               value={clientName}
               disabled={command.blocked}
               onChange={(event) => setClientName(event.target.value)}
             />
           </Field>
-          <Field label="Кому отправляете приглашение">
+          <p id="invite-client-help" className="po-muted">
+            Так клиент будет называться в вашей платформе. Это не название
+            конкретного клуба.
+          </p>
+          <Field label="Имя получателя">
             <input
               required
               maxLength={255}
+              placeholder="Иван Петров"
+              aria-describedby="invite-recipient-help"
               value={recipientLabel}
               disabled={command.blocked}
               onChange={(event) => setRecipientLabel(event.target.value)}
             />
           </Field>
+          <p id="invite-recipient-help" className="po-muted">
+            Имя для вашего удобства. Telegram ID или ссылка на профиль не нужны.
+          </p>
           <p className="po-notice">
             Ссылка действует семь суток. Получатель подтвердит аккаунт и сообщит
             код в вашем исходном личном чате. После сверки вы отдельно
             предоставите доступ.
           </p>
-          <button className="po-primary" disabled={command.blocked}>
-            Создать ссылку
+          <button
+            type="submit"
+            className="po-primary"
+            disabled={
+              command.blocked || !clientName.trim() || !recipientLabel.trim()
+            }
+          >
+            {command.saving ? 'Создаём приглашение…' : 'Создать ссылку'}
           </button>
         </form>
       ) : (
@@ -255,28 +303,98 @@ function OwnerInvite({
           <button className="po-primary" onClick={() => open(invitation)}>
             Открыть приглашение
           </button>
+          <button
+            type="button"
+            className="ob-button"
+            disabled={command.blocked}
+            onClick={draft.reset}
+          >
+            Пригласить другого клиента
+          </button>
         </>
       )}
-      <CommandState command={command} />
+      <InvitationCommandState command={command} />
     </Shell>
+  );
+}
+
+function InvitationCommandState({
+  command,
+}: {
+  command: ReturnType<typeof useCommand<Invitation>>;
+}) {
+  // Keep the retry control in place during the request: removing this tall
+  // notice clamps mobile scroll position before the response arrives.
+  return (
+    <div className="ob-invitation-command" aria-live="polite">
+      {(command.saving || command.unknown) && (
+        <div className="po-notice">
+          <div>
+            <h2>
+              {command.saving
+                ? 'Ожидаем ответ сервера…'
+                : 'Ответ сервера не получен, результат нужно проверить.'}
+            </h2>
+            <p>
+              Проверка повторит ту же команду и не создаст второго клиента. Если
+              запись сохранена, а ссылка потеряна, откройте приглашение и явно
+              выпустите новую ссылку.
+            </p>
+            <button
+              type="button"
+              className="ob-button"
+              disabled={command.saving}
+              onClick={command.retry}
+            >
+              Проверить результат
+            </button>
+          </div>
+        </div>
+      )}
+      {!command.unknown && Boolean(command.error) && (
+        <div className="po-notice" role="alert">
+          <div>
+            <h2>Не удалось создать приглашение.</h2>
+            <p>{errorMessage(command.error)}</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
 function InvitationLink({ invitation }: { invitation: Invitation }) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
+  const link = invitation.invitationLink;
+  const usable = Boolean(
+    link &&
+      /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{4,31}\?startapp=ci_[A-Za-z0-9_-]{43}$/.test(
+        link,
+      ),
+  );
+  useEffect(() => {
+    setCopied(false);
+    setCopyError(false);
+  }, [link]);
   return (
     <section className="po-card ob-card">
-      <h2>Приглашение создано</h2>
-      {invitation.invitationLink ? (
+      <h2>{usable ? 'Приглашение создано' : 'Ссылка не получена'}</h2>
+      {usable ? (
         <>
-          <p>Передайте ссылку получателю в личном чате.</p>
-          <p className="ob-link">{invitation.invitationLink}</p>
+          <p>Отправьте эту ссылку человеку в Telegram.</p>
+          <p className="ob-link">{link}</p>
+          <p>
+            Ссылка действует семь суток — до{' '}
+            {new Date(invitation.expiresAt).toLocaleString('ru-RU')}.
+          </p>
           <button
+            type="button"
             className="ob-button"
             onClick={() => {
-              void navigator.clipboard
-                .writeText(invitation.invitationLink!)
+              setCopied(false);
+              void Promise.resolve()
+                .then(() => navigator.clipboard.writeText(link!))
                 .then(() => {
                   setCopied(true);
                   setCopyError(false);

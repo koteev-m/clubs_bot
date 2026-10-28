@@ -18,7 +18,7 @@ data class ErrorCodesPayload(
 )
 
 object ErrorRegistry {
-    const val version: Int = 11
+    const val version: Int = 12
     val etag: String = "\"error-codes-v$version\""
     const val cacheControl: String = "public, max-age=300, stale-while-revalidate=30, stale-if-error=86400"
 
@@ -112,6 +112,7 @@ object ErrorRegistry {
             ErrorCodeInfo(ErrorCodes.VERSION_CONFLICT, HttpStatusCode.Conflict.value),
             ErrorCodeInfo(ErrorCodes.INVALID_TRANSITION, HttpStatusCode.Conflict.value),
             ErrorCodeInfo(ErrorCodes.DUPLICATE_APPLICATION, HttpStatusCode.Conflict.value),
+            ErrorCodeInfo(ErrorCodes.INVITATION_LINK_UNAVAILABLE, HttpStatusCode.ServiceUnavailable.value),
         ).sortedBy { it.code }
 
     val codes: List<ErrorCodeInfo> =

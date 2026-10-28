@@ -27,6 +27,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
 import org.junit.jupiter.api.Test
+import java.net.URI
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.assertEquals
@@ -277,6 +279,65 @@ class ClientOnboardingRoutesDataTest {
                     RECIPIENT,
                 ).assertClientError(HttpStatusCode.NotFound, "not_found")
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_club_applications"))
+            }
+        }
+
+    @Test
+    fun `issued link opens recipient confirmation and lost response replay safely reissues for the same client`() =
+        database { source ->
+            withApp(source) {
+                val body = obj("clientName" to "MIX Group", "recipientLabel" to "Иван Петров")
+                val before = Instant.now()
+                val issued = ok(P + "/invitations", OWNER, body, key = "lost-link-response")
+                val link = URI(issued.string("invitationLink"))
+                assertEquals("https", link.scheme)
+                assertEquals("t.me", link.host)
+                assertEquals("/synthetic_bot", link.path)
+                assertTrue(link.rawQuery.matches(Regex("startapp=ci_[A-Za-z0-9_-]{43}")))
+                val token = link.rawQuery.removePrefix("startapp=ci_")
+                assertEquals(issued.string("token"), token)
+                val expiresAt = Instant.parse(issued.string("expiresAt"))
+                assertTrue(!expiresAt.isBefore(before.plus(Duration.ofDays(7))))
+                assertTrue(!expiresAt.isAfter(Instant.now().plus(Duration.ofDays(7))))
+                val replay = ok(P + "/invitations", OWNER, body, key = "lost-link-response")
+                assertEquals(issued["id"], replay["id"])
+                assertFalse(replay.containsKey("token"))
+                assertFalse(replay.containsKey("invitationLink"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM clients"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_invitations"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_commands"))
+                val id = issued.string("id")
+                val existing = ok(P + "/invitations/$id", OWNER)
+                assertFalse(existing.containsKey("token"))
+                val replacement =
+                    ok(P + "/invitations/$id/reissue", OWNER, version(existing), key = "lost-reissue-response")
+                val reissueReplay =
+                    ok(P + "/invitations/$id/reissue", OWNER, version(existing), key = "lost-reissue-response")
+                assertEquals(replacement["id"], reissueReplay["id"])
+                assertEquals(issued["clientId"], replacement["clientId"])
+                assertFalse(reissueReplay.containsKey("token"))
+                assertFalse(reissueReplay.containsKey("invitationLink"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM clients"))
+                assertEquals("2", source.scalar("SELECT COUNT(*) FROM client_invitations"))
+                requestAs(
+                    C + "/invitations/$id/claim",
+                    RECIPIENT,
+                    obj("token" to token, "expectedVersion" to issued.string("version")),
+                ).assertClientError(HttpStatusCode.NotFound, "not_found")
+                val newToken = URI(replacement.string("invitationLink")).rawQuery.removePrefix("startapp=ci_")
+                val preview = ok(C + "/invitations/resolve", RECIPIENT, obj("token" to newToken))
+                assertEquals(replacement["id"], preview["id"])
+                val claim =
+                    ok(
+                        C + "/invitations/${preview.string("id")}/claim",
+                        RECIPIENT,
+                        obj("token" to newToken, "expectedVersion" to preview.string("version")),
+                    )
+                assertEquals("claimed", claim.string("status"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_memberships"))
+                val accepted = ok(P + "/invitations/${claim.string("id")}/confirm", OWNER, version(claim))
+                assertEquals("accepted", accepted.string("status"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_memberships"))
             }
         }
 

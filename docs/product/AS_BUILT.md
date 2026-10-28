@@ -236,6 +236,25 @@ Base: verified remote main `376969bbda6307b16caa464195996efa0dea4b4c`; branch `c
 - Ktor evidence: `app-bot/src/test/kotlin/com/example/bot/routes/SupportAuthTransportRoutesTest.kt` exercises actual support wiring with signed credentials, guest-owned tickets and explicitly permitted staff; it checks all four prod-like profiles via both environment keys, non-prod compatibility, query/response sentinels, validator non-invocation and captured application logs with production request logging. Raw malformed value/key and late-key cases are injected at test-host ingress because HttpClient validates/normalizes URI input; a raw malformed-value negative control exposed Ktor’s eager parameter decoding before route-scoped auth; the pre-routing guard requires bounded 401 and a neighboring `/api/support-other` control retains query authentication. This is a support-specific transport gate, not a second authentication implementation. `plugins/ProfileDetectionTest.kt` retains profile precedence/normalization; `plugins/MiniAppAuthTest.kt` preserves unrelated default query/body behavior. Existing guest ownership, staff exact-permission/scope/non-enumeration, lifecycle and delivery suites remain regression evidence.
 - `PSL-AC-34` remains its separate privacy criterion: the new query-transport tests do not retroactively change the scope of earlier privacy evidence. No persistence, audit schema, permission, lifecycle, delivery, UI, Telegram entrypoint or Phase-2 capability changes. Accepted staging smoke is still `NOT_RUN`; historical stage observations above are not fresh runtime verification. Publication, operational release prerequisites and smoke authorization remain separate.
 
+<a id="managed-bots-direction-evidence"></a>
+### Managed Bots direction: адресное source уточнение, 2026-10-28
+
+В worktree `client-invitation-fix/clubs_bot`, HEAD/base `71d0beda4ab2897f668f63f9a67b552d4214d863`,
+проверены relevant Telegram connection paths. `di/OpsNotificationsModule.kt:13–26`
+содержит один TelegramBot/TelegramClient; `Application.kt:368–379` передаёт platform
+token в client onboarding; `routes/TelegramWebhookRoutes.kt:39–79` принимает один
+webhook secret и enqueue без bot context;
+`core-data/src/main/kotlin/com/example/bot/data/security/webhook/WebhookSecurityTables.kt:23–53`
+имеет глобальный update_id. Пути кроме core-data относятся к
+`app-bot/src/main/kotlin/com/example/bot/`. Managed lifecycle, purpose registry и
+несколько входящих/исходящих connections остаются `GAP`.
+
+[Каталог специализаций](MANAGED_BOTS_DIRECTION.md#bounded-evidence-существующих-основ)
+различает доменные foundations и `PROPOSED` bot products; ни один дополнительный
+специализированный бот не получает `AS_BUILT`. Старые срезы ниже сохраняют свои даты;
+А/Б дельты описаны отдельно. Эта docs-only задача не меняет и не перепроверяет
+Stage/runtime, SDK или прежние successful tests.
+
 ### 4.14. Bounded platform identity / client-and-bot delta (2026-10-27)
 
 Исследованы bytes existing worktree `clb91-initdata-hmac/clubs_bot`, branch `codex/clb91-initdata-hmac-fix`, HEAD `7b9a5d565e48f36a42c26e015aa54845ddbc6b4c`; bounded GitHub compare с user-confirmed main `4c34696e3b526893c7753cbababe7f8c5a5dd2a9` показывает один merge commit без файловой дельты. Это не обновление всего baseline.

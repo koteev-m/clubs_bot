@@ -12,6 +12,13 @@
 6. [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) — dependency-aware последовательность, а не календарный план.
 7. [CONCEPT_SOURCE.md](CONCEPT_SOURCE.md) — неизменяемый первичный источник намерения.
 
+Для будущих Telegram-подключений после target/decisions читать
+[MANAGED_BOTS_DIRECTION.md](MANAGED_BOTS_DIRECTION.md): направление владельца,
+каталог восьми специализаций, официальные возможности Telegram, source evidence
+и открытые вопросы. Каталог не дублирует DEC-042, не добавляет decision record
+и не делает предложенные продукты/архитектуру принятыми. `PROPOSED` внутри него —
+метка предложения, а не новый статус requirement rows.
+
 ## Управление документами
 
 `DEC-026`, option D, принят пользователем 2026-08-17. Принята ровно следующая governance policy:

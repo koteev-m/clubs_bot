@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useInitData } from '../auth/hooks/useInitData';
 import { setInitData } from '../../shared/api/http';
 import { checkPlatformOwnerAccess } from './platformOwner.api';
+import { useInvitationDraft } from '../client/useInvitationDraft';
 
 const Screens = lazy(() => import('./PlatformOwnerScreens'));
 type AccessStatus = 'loading' | 'allowed' | 'denied' | 'unauthorized' | 'error';
@@ -77,6 +78,18 @@ export default function PlatformOwnerAccess() {
     access.credential === initData && access.refreshEpoch === refreshEpoch
       ? access.status
       : 'loading';
+  // Revalidation hides/unmounts private screens, but must not lose an uncertain
+  // command. Temporary hidden-page credential suppression is not account change.
+  const lastCredential = useRef('');
+  if (initData || !document.hidden) lastCredential.current = initData;
+  const denied =
+    Boolean(initData) &&
+    access.credential === initData &&
+    (access.status === 'denied' || access.status === 'unauthorized');
+  const invite = useInvitationDraft(
+    denied ? '' : lastCredential.current,
+    status !== 'allowed',
+  );
   const loading = (
     <main
       aria-busy="true"
@@ -90,7 +103,11 @@ export default function PlatformOwnerAccess() {
   if (status === 'allowed')
     return (
       <Suspense fallback={loading}>
-        <Screens key={refreshEpoch + ':' + initData} credential={initData} />
+        <Screens
+          key={refreshEpoch + ':' + initData}
+          credential={initData}
+          invite={invite}
+        />
       </Suspense>
     );
   return (

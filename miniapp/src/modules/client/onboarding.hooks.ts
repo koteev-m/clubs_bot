@@ -33,6 +33,7 @@ interface PendingCommand<T> {
   body: object;
   method: string;
   key: string;
+  unknown?: boolean;
   onSuccess: (data: T) => void;
 }
 export function useCommand<T>(credential: string) {
@@ -53,6 +54,7 @@ export function useCommand<T>(credential: string) {
     const controller = new AbortController();
     lifetime.current = controller;
     executing.current = false;
+    setState({ saving: false, unknown: false, success: false });
     return () => {
       controller.abort();
       pending.current = null;
@@ -78,7 +80,9 @@ export function useCommand<T>(credential: string) {
       if (controller.signal.aborted) return;
       const unknown =
         error instanceof OnboardingError &&
+        (command.unknown || error.code !== 'invitation_link_unavailable') &&
         (error.status === 0 || error.status >= 500);
+      command.unknown = unknown;
       if (!unknown) pending.current = null;
       setState({ saving: false, unknown, success: false, error });
     } finally {
