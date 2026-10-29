@@ -58,7 +58,14 @@ internal class OnboardingFixture(
                 it.validate()
             }
 
-    suspend fun issue(key: String = UUID.randomUUID().toString()): JsonObject =
+    /** Historical lifecycle contract fixtures intentionally retain the pre-V064 acceptance policy. */
+    suspend fun issue(key: String = UUID.randomUUID().toString()): JsonObject {
+        val invitation = issueDirect(key)
+        execute("UPDATE client_invitations SET acceptance_policy='owner_confirmation' WHERE id=${invitation.id("id")}")
+        return JsonObject(invitation + ("acceptanceMode" to kotlinx.serialization.json.JsonPrimitive("legacy")))
+    }
+
+    suspend fun issueDirect(key: String = UUID.randomUUID().toString()): JsonObject =
         repository.mutate(
             owner,
             OnboardingMutation.INVITATION_ISSUE,

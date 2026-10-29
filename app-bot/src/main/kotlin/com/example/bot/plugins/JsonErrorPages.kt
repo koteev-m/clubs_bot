@@ -99,7 +99,7 @@ fun Application.installJsonErrorPages() {
             call.respondError(HttpStatusCode.NotFound, ErrorCodes.not_found)
         }
 
-        exception<Throwable> { call, cause ->
+        exception<Exception> { call, cause ->
             if (cause is CancellationException) throw cause
             if (!call.request.path().startsWith("/api/")) throw cause
             logger.errorSqlSafe("unhandled exception for API path {}", call.request.path(), cause)

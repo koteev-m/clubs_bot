@@ -25,13 +25,16 @@ import com.example.bot.support.TicketTopic
 import com.example.bot.support.TicketWithMessage
 import com.pengrad.telegrambot.model.CallbackQuery
 import com.pengrad.telegrambot.model.Chat
+import com.pengrad.telegrambot.model.MenuButtonWebApp
 import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
+import com.pengrad.telegrambot.model.WebAppInfo
 import com.pengrad.telegrambot.model.request.ForceReply
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.SendMessage
+import com.pengrad.telegrambot.request.SetChatMenuButton
 import com.pengrad.telegrambot.response.BaseResponse
 import io.mockk.every
 import io.mockk.mockk
@@ -149,9 +152,9 @@ class TelegramPrivateContainmentTest {
         }
 }
 
-class TelegramGuestFallbackHandlerTest {
+class TelegramCabinetEntryTest {
     @Test
-    fun `client reopens through an extra button using sender membership and keeps guest entry`() =
+    fun `client receives one cabinet launch and a persistent private menu using sender membership`() =
         runBlocking {
             val sender = FallbackRecordingTelegramSender()
             var checkedUser: Long? = null
@@ -166,20 +169,58 @@ class TelegramGuestFallbackHandlerTest {
                     },
                 )
             handler.handle(messageUpdate(text = "/start", telegramUserId = 101L, chatId = 909L))
-            val request = sender.requests.single() as SendMessage
+            val request = sender.requests.filterIsInstance<SendMessage>().single()
             val markup = request.parameters["reply_markup"] as InlineKeyboardMarkup
             val buttons = markup.inlineKeyboard().flatMap { it.asList() }
             assertEquals(101L, checkedUser)
-            assertEquals(listOf("Открыть Night Concierge", "Мои клубы"), buttons.map { it.text })
-            assertEquals(TEST_MINI_APP_URL, buttons.first().webApp?.url())
+            assertEquals(listOf("Открыть кабинет"), buttons.map { it.text })
+            val url = buttons.single().webApp!!.url()
             assertEquals(
-                "client",
+                "cabinet",
                 io.ktor.http
-                    .Url(buttons.last().webApp!!.url())
+                    .Url(url)
                     .parameters["mode"],
             )
+            val menu = sender.requests.filterIsInstance<SetChatMenuButton>().single()
+            assertEquals(909L, menu.parameters["chat_id"])
+            assertEquals(MenuButtonWebApp("Открыть кабинет", WebAppInfo(url)), menu.parameters["menu_button"])
         }
 
+    @Test
+    fun `exact platform owner receives cabinet entry without requiring client membership`() =
+        runBlocking {
+            val sender = FallbackRecordingTelegramSender()
+            val handler =
+                handler(
+                    sender,
+                    TEST_NOW,
+                    emptyList(),
+                    configuredOwnerId = 101L,
+                    hasClientMembership = { error("owner must not need client membership") },
+                )
+            handler.handle(messageUpdate(text = "/start", telegramUserId = 101L))
+            assertEquals(listOf("Открыть кабинет"), sender.lastInlineButtons().map { it.text })
+            assertEquals(1, sender.requests.filterIsInstance<SetChatMenuButton>().size)
+        }
+
+    @Test
+    fun `menu transport failure keeps the sent cabinet launch and cancellation propagates`() =
+        runBlocking<Unit> {
+            val sender = FallbackRecordingTelegramSender(IllegalStateException("synthetic"))
+            handler(sender, TEST_NOW, emptyList(), configuredOwnerId = 101L)
+                .handle(messageUpdate(text = "/start"))
+            assertEquals(listOf("Открыть кабинет"), sender.lastInlineButtons().map { it.text })
+            val cancelled = FallbackRecordingTelegramSender(kotlin.coroutines.cancellation.CancellationException())
+            assertThrows(kotlin.coroutines.cancellation.CancellationException::class.java) {
+                runBlocking {
+                    handler(cancelled, TEST_NOW, emptyList(), configuredOwnerId = 101L)
+                        .handle(messageUpdate(text = "/start"))
+                }
+            }
+        }
+}
+
+class TelegramGuestFallbackHandlerTest {
     @Test
     fun `membership lookup failure preserves welcome without granting client navigation`() =
         runBlocking {
@@ -867,6 +908,7 @@ private fun handler(
     botUsername: String? = "clubbot",
     miniAppUrl: String? = TEST_MINI_APP_URL,
     hasClientMembership: suspend (Long) -> Boolean = { false },
+    configuredOwnerId: Long? = null,
 ): TelegramGuestFallbackHandler {
     val bookingState = mockk<BookingState>()
     every { bookingState.now() } returns now
@@ -883,6 +925,7 @@ private fun handler(
         miniAppUrl = miniAppUrl,
         qrSecretProvider = { qrSecret },
         hasClientMembership = hasClientMembership,
+        configuredOwnerId = configuredOwnerId,
     )
 }
 
@@ -1037,12 +1080,15 @@ private class StaticClubsRepository(
     override suspend fun lastUpdatedAt(): Instant? = null
 }
 
-private class FallbackRecordingTelegramSender {
+private class FallbackRecordingTelegramSender(
+    private val menuFailure: Exception? = null,
+) {
     val requests = mutableListOf<BaseRequest<*, *>>()
 
     suspend fun send(request: BaseRequest<*, *>): BaseResponse {
         requests += request
-        return mockk<BaseResponse>()
+        if (request is SetChatMenuButton && menuFailure != null) throw menuFailure
+        return mockk<BaseResponse>().also { every { it.isOk } returns true }
     }
 
     fun texts(): List<String> = requests.filterIsInstance<SendMessage>().map { it.parameters["text"].toString() }

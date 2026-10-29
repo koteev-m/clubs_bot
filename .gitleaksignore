@@ -1,0 +1,12 @@
+# Exact historical occurrences only; no file/rule/global fingerprints.
+# Reasons and provenance: docs/ops/simplified-client-onboarding.md
+# FALSE_POSITIVE: architecture prose, subsequently corrected.
+6ec7be88e320990506553c8a5660b5668d41e35b:docs/product/CONCEPT_CODE_GAP.md:generic-api-key:424
+# SYNTHETIC_TEST_VALUE: onboarding audit fixture.
+119181e921c19f177dad97120a42c3bc3af66d35:core-data/src/test/kotlin/com/example/bot/data/client/onboarding/OnboardingFoundationContract.kt:generic-api-key:63
+# SYNTHETIC_TEST_VALUE: H2 payment idempotency fixture.
+f06af8dfcbb301d0cb037a9960347ef3e5430435:core-data/src/test/kotlin/com/example/bot/data/repo/PaymentsRepositoryH2Test.kt:generic-api-key:80
+# EXPOSED_CREDENTIAL / OWNER_ATTESTED_REVOKED, 2026-10-29.
+# Bot ID 8295829972 matched privately; owner reports BotFather Revoke for this bot.
+# No independent Telegram API verification. Future occurrences remain detectable.
+f88a089df8b0b78874bc069592a40d472cfe4108:scripts/dev-env.sh:telegram-bot-api-token:5

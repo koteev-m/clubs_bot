@@ -198,7 +198,10 @@ private fun installDoubleReceiveIfNeeded(application: Application) {
     if (application.pluginOrNull(DoubleReceive) != null) return
     synchronized(doubleReceiveLock) {
         if (application.pluginOrNull(DoubleReceive) == null) {
-            application.install(DoubleReceive)
+            application.install(DoubleReceive) {
+                // Uploads are single-pass; buffering them defeats route streaming limits/cancellation.
+                excludeFromCache { call, _ -> call.request.contentType().match(ContentType.MultiPart.FormData) }
+            }
         }
     }
 }

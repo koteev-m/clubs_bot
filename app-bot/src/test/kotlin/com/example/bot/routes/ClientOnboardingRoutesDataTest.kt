@@ -37,7 +37,148 @@ import kotlin.test.assertTrue
 
 class ClientOnboardingRoutesDataTest {
     @Test
-    fun `direct Mini App recipient proceeds from approved application to one persisted private club profile`() =
+    fun `one action accepts invitation and direct creation enforces owner managed client limit`() =
+        database { source ->
+            lateinit var clientId: String
+            lateinit var clubId: String
+            withApp(source) {
+                val invitation =
+                    ok(
+                        P + "/invitations",
+                        OWNER,
+                        obj(
+                            "clientName" to "Direct",
+                            "recipientLabel" to "Recipient",
+                        ),
+                    )
+                clientId = invitation.string("clientId")
+                val id = invitation.string("id")
+                assertEquals("direct", invitation.string("acceptanceMode"))
+                val acceptBody =
+                    obj(
+                        "token" to invitation.string("token"),
+                        "expectedVersion" to invitation.string("version"),
+                    )
+                val accepted =
+                    ok(C + "/invitations/$id/claim", RECIPIENT, acceptBody, key = "direct-accept-lost-response")
+                assertEquals("accepted", accepted.string("status"))
+                assertEquals(
+                    accepted,
+                    ok(C + "/invitations/$id/claim", RECIPIENT, acceptBody, key = "direct-accept-lost-response"),
+                )
+                requestAs(C + "/invitations/$id/claim", FOREIGN, acceptBody)
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                val before = ok(C + "/clients/$clientId/onboarding", RECIPIENT)
+                assertEquals("1", before.string("allowedClubs"))
+                assertEquals("0", before.string("createdClubs"))
+                val body =
+                    obj(
+                        "venueName" to "Первое",
+                        "countryCode" to "RU",
+                        "cityId" to "524901",
+                        "address" to "Полный адрес, дом 1",
+                    )
+                val club = ok(C + "/clients/$clientId/clubs", RECIPIENT, body, key = "direct-create-lost-response")
+                clubId = club.string("id")
+                assertEquals("Europe/Moscow", club.string("timezone"))
+                assertEquals("Полный адрес, дом 1", club.string("address"))
+                assertEquals(
+                    club,
+                    ok(C + "/clients/$clientId/clubs", RECIPIENT, body, key = "direct-create-lost-response"),
+                )
+                val second = JsonObject(body + obj("venueName" to "Второе", "address" to "Второй адрес"))
+                requestAs(C + "/clients/$clientId/clubs", RECIPIENT, second)
+                    .assertClientError(HttpStatusCode.Conflict, "club_limit_reached")
+                requestAs(C + "/clients/$clientId/clubs", FOREIGN, second)
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                requestAs(C + "/clubs/$clubId/profile", FOREIGN)
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                val detail = ok(P + "/clients/$clientId", OWNER)
+                val raise =
+                    JsonObject(
+                        obj("expectedVersion" to detail.string("limitVersion")) + ("allowedClubs" to JsonPrimitive(2)),
+                    )
+                requestAs(P + "/clients/$clientId/limit", RECIPIENT, raise)
+                    .assertClientError(HttpStatusCode.Forbidden, "forbidden")
+                ok(P + "/clients/$clientId/limit", OWNER, raise)
+                val secondClub = ok(C + "/clients/$clientId/clubs", RECIPIENT, second)
+                assertFalse(secondClub["id"] == club["id"])
+                val current = ok(P + "/clients/$clientId", OWNER)
+                assertEquals("2", current.string("createdClubs"))
+                assertEquals("0", current.string("availableClubs"))
+                requestAs(
+                    P + "/clients/$clientId/limit",
+                    OWNER,
+                    JsonObject(
+                        obj("expectedVersion" to current.string("limitVersion")) + ("allowedClubs" to JsonPrimitive(1)),
+                    ),
+                ).assertClientError(HttpStatusCode.Conflict, "club_limit_below_usage")
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_club_applications"))
+                assertEquals(
+                    "0",
+                    source.scalar(
+                        "SELECT COUNT(*) FROM clubs c JOIN client_clubs m ON m.club_id=c.id WHERE m.client_id=$clientId AND c.is_active=TRUE",
+                    ),
+                )
+            }
+            withApp(source) {
+                assertEquals("Первое", ok(C + "/clubs/$clubId/profile", RECIPIENT).string("name"))
+                assertEquals(2, ok(C + "/clients/$clientId/onboarding", RECIPIENT)["clubs"]!!.jsonArray.size)
+            }
+        }
+
+    @Test
+    fun `location selection resolves timezone and refuses injected or mismatched locations`() =
+        database { source ->
+            withApp(source) {
+                val countries = ok(C + "/locations", RECIPIENT)["countries"]!!.jsonArray
+                assertTrue(countries.any { it.jsonObject["name"] == JsonPrimitive("Россия") })
+                val matches =
+                    ok(
+                        C + "/locations/search",
+                        RECIPIENT,
+                        obj("countryCode" to "RU", "query" to "Москва"),
+                    )["cities"]!!.jsonArray
+                assertTrue(matches.any { it.jsonObject["id"] == JsonPrimitive("524901") })
+                val ambiguous =
+                    ok(
+                        C + "/locations/search",
+                        RECIPIENT,
+                        obj(
+                            "countryCode" to "US",
+                            "query" to "Springfield",
+                        ),
+                    )["cities"]!!.jsonArray
+                assertTrue(ambiguous.size > 1)
+                assertTrue(ambiguous.map { it.jsonObject["region"] }.distinct().size > 1)
+                val absent =
+                    ok(
+                        C + "/locations/search",
+                        RECIPIENT,
+                        obj(
+                            "countryCode" to "RU",
+                            "query" to "DefinitelyMissingCity",
+                        ),
+                    )
+                assertEquals(JsonArray(emptyList()), absent["cities"])
+                val base =
+                    obj(
+                        "venueName" to "No guess",
+                        "countryCode" to "RU",
+                        "cityId" to "524901",
+                        "address" to "Address",
+                    )
+                requestAs(C + "/clients/1/clubs", RECIPIENT, JsonObject(base + obj("timezone" to "UTC")))
+                    .assertClientError(HttpStatusCode.BadRequest, "validation_error")
+                requestAs(C + "/clients/1/clubs", RECIPIENT, JsonObject(base + obj("countryCode" to "US")))
+                    .assertClientError(HttpStatusCode.BadRequest, "location_required")
+                requestAs(C + "/clients/1/clubs", RECIPIENT, JsonObject(base + obj("cityId" to "missing")))
+                    .assertClientError(HttpStatusCode.BadRequest, "location_required")
+            }
+        }
+
+    @Test
+    fun `historical confirmation and approved application remain readable and consume the configured limit`() =
         database { source ->
             val initialRoles = source.scalar("SELECT COUNT(*) FROM user_roles")
             val initialClubs = source.scalar("SELECT COUNT(*) FROM clubs")
@@ -56,6 +197,14 @@ class ClientOnboardingRoutesDataTest {
                 val invitationId = invitation.string("id")
                 val token = invitation.string("token")
                 val clientId = invitation.string("clientId")
+                // Explicit historical fixture: new invitations no longer use owner confirmation.
+                source.connection.use { connection ->
+                    connection.createStatement().use {
+                        it.executeUpdate(
+                            "UPDATE client_invitations SET acceptance_policy='owner_confirmation' WHERE id=$invitationId",
+                        )
+                    }
+                }
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM users WHERE telegram_user_id=$RECIPIENT"))
                 assertEquals(JsonArray(emptyList()), ok(C + "/context", RECIPIENT)["clients"])
                 ok(C + "/invitations/resolve", RECIPIENT, obj("token" to token))
@@ -254,7 +403,7 @@ class ClientOnboardingRoutesDataTest {
                             "expectedVersion" to invitation.string("version"),
                         ),
                     )
-                ok(P + "/invitations/$id/confirm", OWNER, version(claim))
+                assertEquals("accepted", claim.string("status"))
                 val member = ok(P + "/clients/$clientId", OWNER)["members"]!!.jsonArray.single().jsonObject
                 val memberId = member.string("userId")
                 val draft = ok(C + "/clients/$clientId/applications", RECIPIENT, venue(), key = "create-before-revoke")
@@ -333,10 +482,7 @@ class ClientOnboardingRoutesDataTest {
                         RECIPIENT,
                         obj("token" to newToken, "expectedVersion" to preview.string("version")),
                     )
-                assertEquals("claimed", claim.string("status"))
-                assertEquals("0", source.scalar("SELECT COUNT(*) FROM client_memberships"))
-                val accepted = ok(P + "/invitations/${claim.string("id")}/confirm", OWNER, version(claim))
-                assertEquals("accepted", accepted.string("status"))
+                assertEquals("accepted", claim.string("status"))
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_memberships"))
             }
         }

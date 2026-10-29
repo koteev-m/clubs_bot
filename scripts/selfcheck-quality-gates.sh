@@ -231,7 +231,7 @@ while IFS= read -r relative_path; do
   fi
 done < "$secret_contract_files"
 
-for allowlist_path in .gitleaksignore gitleaks.toml; do
+for allowlist_path in gitleaks.toml; do
   if [ -e "$ROOT_DIR/$allowlist_path" ]; then
     fail "unexpected gitleaks ignore/allowlist file: $allowlist_path"
   fi
@@ -239,6 +239,9 @@ done
 if [ ! -f "$ROOT_DIR/.gitleaks.toml" ]; then
   fail "expected the exact CLB-91 gitleaks checksum exception config"
 fi
+
+echo "[selfcheck] exact historical fingerprints and fail-closed scanner wrapper"
+CLB_SECRET_SCAN_DOCKER_TESTS=1 python3 -B "$ROOT_DIR/scripts/tests/test_secret_scan.py"
 
 echo "[selfcheck] pinned gitleaks runtime checksum exceptions"
 python3 -B "$ROOT_DIR/scripts/tests/test_gitleaks_runtime_allowlist.py"
@@ -257,17 +260,23 @@ fake_docker_log="$TMP_DIR/fake-docker.log"
 cat > "$fake_docker" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$FAKE_DOCKER_ARGS_FILE"
-exit 23
+for argument in "$@"; do
+  if [ "$argument" = "detect" ]; then
+    exit 23
+  fi
+done
+printf 'SCANNER_PREFLIGHT_OK\n'
 SH
 chmod +x "$fake_docker"
 
 if FAKE_DOCKER_ARGS_FILE="$fake_docker_args" DOCKER_BIN="$fake_docker" \
   "$ROOT_DIR/scripts/verify.sh" secret-scan >"$fake_docker_log" 2>&1; then
-  fail "expected secret-scan to propagate a started scanner failure"
+  fail "expected secret-scan to block a started scanner failure"
 else
   status=$?
-  assert_eq "$status" "23"
+  assert_eq "$status" "2"
 fi
+assert_contains "$(cat "$fake_docker_log")" "Secret scan BLOCKED: Scanner execution failed"
 
 gitleaks_image="$(sed -n 's/^GITLEAKS_IMAGE=//p' "$ROOT_DIR/scripts/quality-gates.env")"
 assert_contains "$gitleaks_image" "@sha256:"
@@ -275,8 +284,16 @@ fake_docker_arg_list="$(cat "$fake_docker_args")"
 assert_contains "$fake_docker_arg_list" "$gitleaks_image"
 assert_contains "$fake_docker_arg_list" "detect"
 assert_contains "$fake_docker_arg_list" "--source"
-assert_contains "$fake_docker_arg_list" "--redact"
-assert_not_contains "$fake_docker_arg_list" "--exit-code 0"
+assert_contains "$fake_docker_arg_list" "--redact=100"
+assert_contains "$fake_docker_arg_list" "--no-color"
+assert_contains "$fake_docker_arg_list" "--no-git"
+assert_contains "$fake_docker_arg_list" "--config"
+assert_contains "$fake_docker_arg_list" ".gitleaks.toml"
+assert_contains "$fake_docker_arg_list" "--gitleaks-ignore-path"
+assert_contains "$fake_docker_arg_list" ".gitleaksignore"
+assert_contains "$fake_docker_arg_list" "--read-only"
+assert_contains "$fake_docker_arg_list" "--network=none"
+assert_not_contains "$fake_docker_arg_list" "--exit-code"
 
 usage_out="$("$ROOT_DIR/scripts/refresh-verification-metadata.sh" unknown 2>&1 || true)"
 assert_contains "$usage_out" "Usage: scripts/refresh-verification-metadata.sh [default]"

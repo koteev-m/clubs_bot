@@ -42,6 +42,8 @@ enum class OnboardingMutation {
     PLATFORM_APPLICATION_CANCEL,
     APPLICATION_CREATE_CLUB,
     CLUB_PROFILE_UPDATE,
+    CLIENT_LIMIT_UPDATE,
+    CLUB_CREATE,
 }
 
 class OnboardingFailure(

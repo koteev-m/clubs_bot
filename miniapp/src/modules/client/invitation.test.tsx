@@ -91,6 +91,7 @@ describe('owner invitation recovery', () => {
     expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({
       clientName: 'MIX Group',
       recipientLabel: 'Иван Петров',
+      allowedClubs: 1,
     });
     expect(Object.keys(localStorage)).toHaveLength(0);
     expect(Object.keys(sessionStorage)).toHaveLength(0);

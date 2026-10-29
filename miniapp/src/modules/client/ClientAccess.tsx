@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useInitData } from '../auth/hooks/useInitData';
-import { useTelegram } from '../../app/providers/TelegramProvider';
-import { authorityLost, OnboardingError } from './onboarding.api';
+import NewClub, { blankNewVenue } from './NewClub';
+import { authorityLost } from './onboarding.api';
 import ClubProfile from './ClubProfile';
 import { scrubClientLaunchUrl } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
   ApplicationSummary,
-  blankVenue,
   CommandState,
   RemoteState,
   Shell,
-  useUnsavedChanges,
-  VenueForm,
-  venueFields,
 } from './OnboardingShared';
 import {
   applicationLabels,
@@ -24,7 +20,7 @@ import {
   invitationLabels,
   OnboardingContext,
   Page,
-  VenueFields,
+  NewVenueFields,
 } from './onboarding.types';
 
 type Screen =
@@ -42,6 +38,7 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'application')
     return { type: 'application', id };
   if (params.get('screen') === 'invitation') return { type: 'invitation', id };
+  if (params.get('screen') === 'new-club') return { type: 'new', id };
   if (params.get('screen') === 'club') return { type: 'club', id };
   return { type: 'home' };
 }
@@ -53,21 +50,35 @@ export default function ClientAccess({
   initialToken: string | null;
   onTokenConsumed?: () => void;
 }) {
-  const { initData, refreshEpoch = 0 } = useInitData();
+  const { initData } = useInitData();
+  const lastCredential = useRef(initData);
+  if (initData || !document.hidden) lastCredential.current = initData;
+  const [revoked, setRevoked] = useState<string | null>(null);
+  useEffect(() => {
+    const lost = (event: Event) => {
+      const credential = (event as CustomEvent<string>).detail;
+      if (credential === lastCredential.current) setRevoked(credential);
+    };
+    window.addEventListener('client-authority-lost', lost);
+    return () => window.removeEventListener('client-authority-lost', lost);
+  }, []);
+  const credential = initData || lastCredential.current;
   useEffect(() => scrubClientLaunchUrl(), []);
-  if (!initData)
+  if (!credential || revoked === credential)
     return (
       <Shell title="Нужна авторизация в Telegram">
         <p>Откройте мини-приложение заново из Telegram.</p>
       </Shell>
     );
   return (
-    <ClientWorkspace
-      key={refreshEpoch + ':' + initData}
-      credential={initData}
-      initialToken={initialToken}
-      onTokenConsumed={onTokenConsumed}
-    />
+    <div hidden={!initData}>
+      <ClientWorkspace
+        key={credential}
+        credential={credential}
+        initialToken={initialToken}
+        onTokenConsumed={onTokenConsumed}
+      />
+    </div>
   );
 }
 
@@ -84,6 +95,19 @@ function ClientWorkspace({
   const [screen, setScreen] = useState<Screen>(() =>
     token ? { type: 'invitation' } : savedScreen(),
   );
+  const [draftClient, setDraftClient] = useState(
+    screen.type === 'new' ? screen.id : '',
+  );
+  const [draft, setDraft] = useState<NewVenueFields>(blankNewVenue);
+  const [previous, setPrevious] = useState<ClubApplication>();
+  const createClub = useCommand<Profile>(credential);
+  const invitationCommand = useCommand<Invitation>(credential);
+  const drafts = useRef(
+    new Map<string, { fields: NewVenueFields; previous?: ClubApplication }>(),
+  );
+  if (draftClient) drafts.current.set(draftClient, { fields: draft, previous });
+  const pendingClient = useRef('');
+  pendingClient.current = createClub.blocked ? draftClient : '';
   const dirty = useRef(false);
   const position = useRef(
     Number.isSafeInteger(window.history.state?.clientPosition)
@@ -93,24 +117,59 @@ function ClientWorkspace({
   const reportDirty = useCallback((value: boolean) => {
     dirty.current = value;
   }, []);
-  const navigate = useCallback((next: Screen, replace = false) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('mode', 'client');
-    url.searchParams.delete('screen');
-    url.searchParams.delete('resource');
-    if (next.type !== 'home' && next.type !== 'new') {
-      url.searchParams.set(
-        'screen',
-        next.type === 'space' ? 'client-space' : next.type,
-      );
-      if (next.id) url.searchParams.set('resource', next.id);
-    }
-    if (!replace) position.current += 1;
-    const state = { onboarding: true, clientPosition: position.current };
-    if (replace) window.history.replaceState(state, '', url);
-    else window.history.pushState(state, '', url);
-    setScreen(next);
-  }, []);
+  const navigate = useCallback(
+    (next: Screen, replace = false) => {
+      if (
+        next.type === 'new' &&
+        createClub.blocked &&
+        draftClient &&
+        next.id !== draftClient
+      )
+        next = { type: 'new', id: draftClient };
+      const url = new URL(window.location.href);
+      url.searchParams.set('mode', 'client');
+      url.searchParams.delete('screen');
+      url.searchParams.delete('resource');
+      if (next.type !== 'home') {
+        url.searchParams.set(
+          'screen',
+          next.type === 'space'
+            ? 'client-space'
+            : next.type === 'new'
+              ? 'new-club'
+              : next.type,
+        );
+        if (next.id) url.searchParams.set('resource', next.id);
+      }
+      if (!replace) position.current += 1;
+      const state = { onboarding: true, clientPosition: position.current };
+      if (replace) window.history.replaceState(state, '', url);
+      else window.history.pushState(state, '', url);
+      if (
+        next.type === 'new' &&
+        (next.id !== draftClient ||
+          (next.previous && next.previous.id !== previous?.id)) &&
+        !createClub.blocked
+      ) {
+        setDraftClient(next.id);
+        setDraft(
+          next.previous
+            ? {
+                venueName: next.previous.venueName,
+                countryCode: next.previous.countryCode,
+                cityId: '',
+                address: [next.previous.address, next.previous.unit]
+                  .filter(Boolean)
+                  .join(', '),
+              }
+            : (drafts.current.get(next.id)?.fields ?? blankNewVenue),
+        );
+        setPrevious(next.previous ?? drafts.current.get(next.id)?.previous);
+      }
+      setScreen(next);
+    },
+    [draftClient, createClub.blocked, previous?.id],
+  );
   useEffect(() => {
     window.history.replaceState(
       { onboarding: true, clientPosition: position.current },
@@ -131,7 +190,20 @@ function ClientWorkspace({
       }
       position.current = nextPosition;
       dirty.current = false;
-      setScreen(savedScreen());
+      let next = savedScreen();
+      if (next.type === 'new') {
+        if (pendingClient.current && next.id !== pendingClient.current) {
+          next = { type: 'new', id: pendingClient.current };
+          const url = new URL(window.location.href);
+          url.searchParams.set('resource', next.id);
+          window.history.replaceState(event.state, '', url);
+        }
+        const retained = drafts.current.get(next.id);
+        setDraftClient(next.id);
+        setDraft(retained?.fields ?? blankNewVenue);
+        setPrevious(retained?.previous);
+      }
+      setScreen(next);
     };
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
@@ -144,6 +216,7 @@ function ClientWorkspace({
   if (screen.type === 'invitation')
     return (
       <InvitationScreen
+        command={invitationCommand}
         credential={credential}
         token={token}
         id={screen.id}
@@ -167,16 +240,21 @@ function ClientWorkspace({
     );
   if (screen.type === 'new')
     return (
-      <NewApplication
-        key={screen.id + ':' + (screen.previous?.id ?? '')}
+      <NewClub
         credential={credential}
         clientId={screen.id}
-        previous={screen.previous}
-        reportDirty={reportDirty}
+        value={draft}
+        onChange={setDraft}
+        previous={previous}
+        command={createClub}
         back={() => navigate({ type: 'space', id: screen.id })}
-        saved={(application) =>
-          navigate({ type: 'application', id: application.id })
-        }
+        saved={(club) => {
+          drafts.current.delete(screen.id);
+          setDraft(blankNewVenue);
+          setDraftClient('');
+          setPrevious(undefined);
+          navigate({ type: 'club', id: club.id });
+        }}
       />
     );
   if (screen.type === 'application')
@@ -208,15 +286,19 @@ function ClientHome({
   navigate,
 }: {
   credential: string;
-  navigate: (screen: Screen) => void;
+  navigate: (screen: Screen, replace?: boolean) => void;
 }) {
   const remote = useRemote<{ clients: ClientSummary[] }>(
     credential,
     '/api/client/context',
   );
+  useEffect(() => {
+    if (remote.data?.clients.length === 1)
+      navigate({ type: 'space', id: remote.data.clients[0].id }, true);
+  }, [remote.data, navigate]);
   return (
     <Shell
-      title="Мои клубы"
+      title="Мои заведения"
       subtitle="Ваши клиентские пространства и разрешённые заведения."
     >
       <RemoteState {...remote} />
@@ -237,9 +319,7 @@ function ClientHome({
         >
           <strong>{client.name}</strong>
           <small>
-            {client.clubs?.length
-              ? 'Открыть клубы и заявки'
-              : 'Клубов пока нет'}
+            {client.clubs?.length ? 'Открыть заведения' : 'Клубов пока нет'}
           </small>
         </button>
       ))}
@@ -247,8 +327,8 @@ function ClientHome({
         Обновить кабинет
       </button>
       <p className="po-muted">
-        Для повторного входа откройте «Мои клубы» в личном чате платформенного
-        бота.
+        Для повторного входа используйте Mini App или кнопку «Открыть кабинет» в
+        меню бота.
       </p>
     </Shell>
   );
@@ -261,6 +341,7 @@ function InvitationScreen({
   home,
   resolved,
   claimed,
+  command,
 }: {
   credential: string;
   token: string | null;
@@ -268,17 +349,15 @@ function InvitationScreen({
   home: () => void;
   resolved: (id: string) => void;
   claimed: () => void;
+  command: ReturnType<typeof useCommand<Invitation>>;
 }) {
-  const webApp = useTelegram();
   const remote = useRemote<Invitation>(
     credential,
     token ? '/api/client/invitations/resolve' : '/api/client/invitations/' + id,
     token ? { token } : undefined,
   );
-  const command = useCommand<Invitation>(credential);
   const [current, setCurrent] = useState<Invitation>();
   const invitation = current;
-  const [confirmed, setConfirmed] = useState(false);
   useEffect(() => {
     if (authorityLost(command.error) || remote.error) setCurrent(undefined);
     else if (remote.data) setCurrent(remote.data);
@@ -286,6 +365,13 @@ function InvitationScreen({
   useEffect(() => {
     if (remote.data && id !== remote.data.id) resolved(remote.data.id);
   }, [id, remote.data, resolved]);
+  useEffect(() => {
+    if (
+      remote.data?.status === 'accepted' &&
+      remote.data.acceptanceMode === 'direct'
+    )
+      home();
+  }, [remote.data, home]);
   const refresh = () => {
     setCurrent(undefined);
     remote.refresh();
@@ -306,25 +392,13 @@ function InvitationScreen({
           {invitation.status === 'issued' && token && (
             <>
               <p>
-                Подтвердите текущий Telegram-аккаунт. Доступ к кабинету выдаст
-                владелец платформы после сверки.
+                {invitation.acceptanceMode === 'direct'
+                  ? 'Примите приглашение, чтобы открыть свой кабинет.'
+                  : 'Это прежнее приглашение: после принятия потребуется подтверждение владельца платформы.'}
               </p>
-              <label className="ob-check">
-                <input
-                  type="checkbox"
-                  checked={confirmed}
-                  onChange={(event) => setConfirmed(event.target.checked)}
-                />
-                <span>
-                  Подтверждаю свой аккаунт
-                  {webApp.initDataUnsafe?.user?.first_name
-                    ? ': ' + webApp.initDataUnsafe.user.first_name
-                    : ''}
-                </span>
-              </label>
               <button
                 className="po-primary"
-                disabled={!confirmed || command.blocked}
+                disabled={command.blocked}
                 onClick={() =>
                   command.run(
                     '/api/client/invitations/' + invitation.id + '/claim',
@@ -332,11 +406,16 @@ function InvitationScreen({
                     (result) => {
                       setCurrent(result);
                       claimed();
+                      if (
+                        result.status === 'accepted' &&
+                        result.acceptanceMode === 'direct'
+                      )
+                        home();
                     },
                   )
                 }
               >
-                Подтвердить аккаунт
+                {command.saving ? 'Принимаем…' : 'Принять приглашение'}
               </button>
             </>
           )}
@@ -356,7 +435,7 @@ function InvitationScreen({
           )}
           {invitation.status === 'accepted' && (
             <button className="po-primary" onClick={home}>
-              Открыть «Мои клубы»
+              Открыть кабинет
             </button>
           )}
           {(invitation.status === 'revoked' ||
@@ -399,8 +478,28 @@ function ClientSpace({
       <RemoteState {...remote} />
       {remote.data && (
         <>
+          <section className="po-card ob-card">
+            <p>Разрешено всего: {remote.data.allowedClubs ?? 'не настроено'}</p>
+            <p>
+              Создано: {remote.data.createdClubs ?? remote.data.clubs.length}
+            </p>
+            <p>Можно добавить: {remote.data.availableClubs ?? 0}</p>
+            {remote.data.allowedClubs == null && (
+              <p>
+                Для нового заведения владелец платформы должен установить лимит.
+                Существующие заведения доступны.
+              </p>
+            )}
+            {remote.data.allowedClubs != null &&
+              remote.data.availableClubs === 0 && (
+                <p>
+                  Для дополнительного заведения согласуйте увеличение лимита с
+                  владельцем платформы.
+                </p>
+              )}
+          </section>
           <section className="ob-section">
-            <h2>Мои клубы</h2>
+            <h2>Мои заведения</h2>
             {remote.data.clubs.length === 0 && (
               <p className="po-card ob-card">Клубов пока нет</p>
             )}
@@ -419,9 +518,10 @@ function ClientSpace({
             <>
               <button
                 className="po-primary"
+                disabled={!remote.data.availableClubs}
                 onClick={() => navigate({ type: 'new', id })}
               >
-                Подключить заведение
+                Создать заведение
               </button>
               <ApplicationList
                 credential={credential}
@@ -454,7 +554,7 @@ export function ApplicationList({
   });
   return (
     <section className="ob-section">
-      <h2>{owner ? 'Очередь заявок' : 'Заявки на подключение'}</h2>
+      <h2>{owner ? 'История заявок' : 'Сохранённые заявки'}</h2>
       <RemoteState {...remote} />
       {remote.data?.items.length === 0 && (
         <p className="po-card ob-card">Заявок пока нет</p>
@@ -488,80 +588,11 @@ export function ApplicationList({
   );
 }
 
-function NewApplication({
-  credential,
-  clientId,
-  previous,
-  back,
-  saved,
-  reportDirty,
-}: {
-  credential: string;
-  clientId: string;
-  previous?: ClubApplication;
-  back: () => void;
-  saved: (application: ClubApplication) => void;
-  reportDirty: (dirty: boolean) => void;
-}) {
-  const initial = previous ? venueFields(previous) : blankVenue;
-  const [fields, setFields] = useState<VenueFields>(initial);
-  const command = useCommand<ClubApplication>(credential);
-  const leave = useUnsavedChanges(
-    JSON.stringify(fields) !== JSON.stringify(initial),
-    reportDirty,
-  );
-  return (
-    <Shell
-      title="Подключить заведение"
-      subtitle="Сохраните черновик, проверьте данные и отправьте заявку. Отправленные сведения нельзя изменить."
-      back={() => {
-        if (leave()) back();
-      }}
-    >
-      {previous && (
-        <p className="po-notice">
-          Новая заявка связана с предыдущей №{previous.id}.
-        </p>
-      )}
-      <form
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault();
-          command.run(
-            '/api/client/clients/' + clientId + '/applications',
-            {
-              ...fields,
-              ...(previous ? { previousApplicationId: previous.id } : {}),
-            },
-            saved,
-          );
-        }}
-      >
-        <VenueForm
-          value={fields}
-          onChange={setFields}
-          disabled={command.blocked}
-        />
-        <button
-          className="po-primary"
-          type="submit"
-          formNoValidate
-          disabled={command.blocked}
-        >
-          Сохранить черновик
-        </button>
-      </form>
-      <CommandState command={command} />
-    </Shell>
-  );
-}
-
 function ClientApplication({
   credential,
   id,
   back,
   navigate,
-  reportDirty,
 }: {
   credential: string;
   id: string;
@@ -573,188 +604,42 @@ function ClientApplication({
     credential,
     '/api/client/applications/' + id,
   );
-  const [application, setApplication] = useState<ClubApplication>();
-  const [fields, setFields] = useState<VenueFields>();
-  const command = useCommand<ClubApplication>(credential);
-  const createClub = useCommand<Profile>(credential);
-  const createConflict =
-    createClub.error instanceof OnboardingError &&
-    createClub.error.status === 409;
-  const reload = remote.refresh;
-  const [submitConfirmed, setSubmitConfirmed] = useState(false);
-  useEffect(() => {
-    if (
-      authorityLost(command.error) ||
-      authorityLost(createClub.error) ||
-      remote.error
-    ) {
-      setApplication(undefined);
-      setFields(undefined);
-    } else if (remote.data) {
-      setApplication(remote.data);
-      setFields((value) => value ?? venueFields(remote.data!));
-    }
-  }, [remote.data, remote.error, command.error, createClub.error]);
-  useEffect(() => {
-    if (createConflict) reload();
-  }, [createConflict, reload]);
-  const dirty = Boolean(
-    application &&
-      fields &&
-      JSON.stringify(venueFields(application)) !== JSON.stringify(fields),
-  );
-  const leave = useUnsavedChanges(dirty || createClub.unknown, reportDirty);
-  const accept = (result: ClubApplication) => {
-    setApplication(result);
-    setFields(venueFields(result));
-    setSubmitConfirmed(false);
-  };
   return (
-    <Shell
-      title={application?.venueName || 'Заявка на подключение'}
-      back={() => {
-        if (leave()) back();
-      }}
-    >
+    <Shell title="Сохранённая заявка" back={back}>
       <RemoteState {...remote} />
-      {application && (
+      {remote.data && (
         <>
-          {application.status === 'draft' &&
-          fields &&
-          application.availableActions.includes('update') ? (
-            <form
-              noValidate
-              onSubmit={(event) => {
-                event.preventDefault();
-                command.run(
-                  '/api/client/applications/' + id,
-                  { ...fields, expectedVersion: application.version },
-                  accept,
-                  'PATCH',
-                );
-              }}
-            >
-              <p className="po-context">Черновик · {application.clientName}</p>
-              <VenueForm
-                value={fields}
-                onChange={setFields}
-                disabled={command.blocked}
-              />
-              <button
-                className="po-primary"
-                type="submit"
-                formNoValidate
-                disabled={command.blocked || !dirty}
-              >
-                Сохранить черновик
-              </button>
-            </form>
-          ) : (
-            <ApplicationSummary application={application} />
-          )}
-          {application.status === 'approved' &&
-            application.availableActions.includes('createClub') &&
-            !application.createdClubId && (
-              <button
-                className="po-primary"
-                disabled={createClub.blocked || command.blocked}
-                onClick={() =>
-                  createClub.run(
-                    '/api/client/applications/' + id + '/club',
-                    { expectedVersion: application.version },
-                    (club) => navigate({ type: 'club', id: club.id }),
-                  )
-                }
-              >
-                Создать клуб
-              </button>
-            )}
-          {application.createdClubId &&
-            application.availableActions.includes('openClub') && (
-              <button
-                className="po-primary"
-                onClick={() =>
-                  navigate({ type: 'club', id: application.createdClubId! })
-                }
-              >
-                Открыть клуб
-              </button>
-            )}
-          {application.availableActions.includes('submit') && (
-            <>
-              <label className="ob-check">
-                <input
-                  type="checkbox"
-                  checked={submitConfirmed}
-                  onChange={(event) => setSubmitConfirmed(event.target.checked)}
-                />
-                <span>
-                  Данные верны. После отправки изменить заявку нельзя.
-                </span>
-              </label>
-              {dirty && (
-                <p className="po-muted">Сначала сохраните изменения.</p>
-              )}
-              <button
-                className="po-primary"
-                disabled={command.blocked || dirty || !submitConfirmed}
-                onClick={() =>
-                  command.run(
-                    '/api/client/applications/' + id + '/submit',
-                    { expectedVersion: application.version },
-                    accept,
-                  )
-                }
-              >
-                Отправить заявку
-              </button>
-            </>
-          )}
-          {application.availableActions.includes('cancel') && (
-            <button
-              className="ob-button ob-danger"
-              disabled={command.blocked}
-              onClick={() => {
-                if (
-                  window.confirm('Отменить заявку? Это действие завершит её.')
-                )
-                  command.run(
-                    '/api/client/applications/' + id + '/cancel',
-                    { expectedVersion: application.version },
-                    accept,
-                  );
-              }}
-            >
-              Отменить заявку
-            </button>
-          )}
-          {(application.status === 'rejected' ||
-            application.status === 'cancelled') && (
+          <ApplicationSummary application={remote.data} />
+          <p className="po-notice">
+            Заявка сохранена как история. Новые заведения создаются в пределах
+            лимита клиента.
+          </p>
+          {remote.data.createdClubId &&
+          remote.data.availableActions.includes('openClub') ? (
             <button
               className="po-primary"
-              disabled={command.blocked}
+              onClick={() =>
+                navigate({ type: 'club', id: remote.data!.createdClubId! })
+              }
+            >
+              Открыть клуб
+            </button>
+          ) : (
+            <button
+              className="po-primary"
               onClick={() =>
                 navigate({
                   type: 'new',
-                  id: application.clientId,
-                  previous: application,
+                  id: remote.data!.clientId,
+                  previous: remote.data!,
                 })
               }
             >
-              Подать заново
+              Использовать данные для создания
             </button>
           )}
-          <button
-            className="ob-button"
-            disabled={command.saving}
-            onClick={remote.refresh}
-          >
-            Обновить заявку
-          </button>
         </>
       )}
-      <CommandState command={command} refresh={remote.refresh} />
-      <CommandState command={createClub} refresh={remote.refresh} />
     </Shell>
   );
 }

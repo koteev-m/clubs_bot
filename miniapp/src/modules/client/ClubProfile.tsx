@@ -17,6 +17,14 @@ const fieldsOf = (profile: Profile): Fields => ({
   timezone: profile.timezone,
 });
 
+function countryName(code: string): string {
+  try {
+    return new Intl.DisplayNames(['ru'], { type: 'region' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
 function validation(fields: Fields): string | null {
   if (!fields.name.trim() || fields.name.trim().length > 255)
     return 'Укажите название клуба от 1 до 255 символов.';
@@ -109,11 +117,12 @@ export default function ClubProfile({
           </div>
           <p className="po-notice">Бот не подключён</p>
           <section className="po-card ob-card">
-            <h2>Согласованное заведение</h2>
+            <h2>Сохранённое заведение</h2>
             <dl className="po-details">
               {[
-                ['Страна', profile.countryCode],
+                ['Страна', countryName(profile.countryCode)],
                 ['Город', profile.city],
+                ...(profile.region ? [['Регион', profile.region]] : []),
                 ['Адрес', profile.address],
                 ['Помещение', profile.unit],
               ].map(([label, value]) => (
@@ -124,7 +133,7 @@ export default function ClubProfile({
               ))}
             </dl>
             <p className="po-muted">
-              Эти сведения сохранены из одобренной заявки.
+              Эти сведения сохранены в профиле заведения.
             </p>
           </section>
           <form

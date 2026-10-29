@@ -44,14 +44,11 @@ run_lint() {
 
 run_secret_scan() {
   local gitleaks_image="${GITLEAKS_IMAGE:-ghcr.io/gitleaks/gitleaks@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854}"
-  local docker_bin="${DOCKER_BIN:-docker}"
-  if ! command -v "$docker_bin" >/dev/null 2>&1; then
-    echo "Secret scan requires Docker. Install Docker or run this gate in GitHub Actions."
-    return 2
+  local args=(--image "$gitleaks_image")
+  if [ -n "${SECRET_SCAN_OUTPUT_DIR:-}" ]; then
+    args+=(--output "$SECRET_SCAN_OUTPUT_DIR")
   fi
-
-  run_cmd "$docker_bin" run --rm -v "$PWD:/repo" -w /repo "$gitleaks_image" \
-    detect --source . --report-format sarif --report-path gitleaks.sarif --redact --verbose
+  run_cmd python3 -I -S -B scripts/secret-scan.py "${args[@]}"
 }
 
 case "$mode" in

@@ -54,6 +54,7 @@ internal class ClientAccessOperations(
             put("name", session.client(clientId).getValue("display_name"))
             put("permissions", JsonArray(if (permission == null) emptyList() else listOf(JsonPrimitive(MANAGE))))
             put("clubs", JsonArray(clubs(clientId, session.userId)))
+            ClientLimitOperations(session).view(clientId).forEach { (key, value) -> put(key, value) }
         }
     }
 
@@ -259,5 +260,6 @@ internal class ClientAccessOperations(
             put("id", client.getValue("id"))
             put("name", client.getValue("display_name"))
             put("active", client.active())
+            ClientLimitOperations(session).view(client.long("id")).forEach { (key, value) -> put(key, value) }
         }
 }

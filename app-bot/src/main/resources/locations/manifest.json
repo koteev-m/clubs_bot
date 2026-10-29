@@ -1,0 +1,10 @@
+{
+  "source": "https://download.geonames.org/export/dump/",
+  "license": "CC BY 4.0",
+  "rows": 34193,
+  "files": {
+    "cities15000.zip": "c89ba6601c29c98a717ef8ad021cdebe47f0de3f1c2ebe0a66f5fe7d60cdc352",
+    "admin1CodesASCII.txt": "2e4867f5397acb056ea26377601b57af37cb4c81399770225018e9e439e91ad3"
+  },
+  "outputSha256": "6480a3d41237a47fcf50223088516ab2dd1691e93cc94f11574d2d23efa50d90"
+}

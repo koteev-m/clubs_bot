@@ -14,6 +14,7 @@ import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.TicketTopic
 import com.pengrad.telegrambot.model.CallbackQuery
 import com.pengrad.telegrambot.model.Chat
+import com.pengrad.telegrambot.model.MenuButtonWebApp
 import com.pengrad.telegrambot.model.Message
 import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.model.WebAppInfo
@@ -23,6 +24,7 @@ import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import com.pengrad.telegrambot.request.BaseRequest
 import com.pengrad.telegrambot.request.SendMessage
+import com.pengrad.telegrambot.request.SetChatMenuButton
 import com.pengrad.telegrambot.response.BaseResponse
 import org.slf4j.LoggerFactory
 import java.time.ZoneId
@@ -42,6 +44,7 @@ class TelegramGuestFallbackHandler(
     private val qrSecretProvider: () -> String,
     private val zoneId: ZoneId = ZoneId.systemDefault(),
     private val hasClientMembership: suspend (Long) -> Boolean = { false },
+    private val configuredOwnerId: Long? = null,
 ) {
     private val dateFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(zoneId)
     private val logger = LoggerFactory.getLogger("TelegramGuestFallbackHandler")
@@ -115,40 +118,66 @@ class TelegramGuestFallbackHandler(
             return
         }
 
-        val request = SendMessage(message.chat().id(), WELCOME_TEXT)
-        miniAppUrl?.let { configuredMiniAppUrl ->
-            val keyboard =
+        val cabinetUrl = miniAppUrl?.let { clientCabinetUrl(telegramUserId, it) }
+        val request = SendMessage(message.chat().id(), if (cabinetUrl != null) CABINET_WELCOME_TEXT else WELCOME_TEXT)
+        val launchUrl = cabinetUrl ?: miniAppUrl
+        launchUrl?.let { url ->
+            request.replyMarkup(
                 InlineKeyboardMarkup(
-                    arrayOf(
-                        InlineKeyboardButton(OPEN_MINI_APP_BUTTON_TEXT)
-                            .webApp(WebAppInfo(configuredMiniAppUrl)),
-                    ),
-                )
-            clientCabinetUrl(telegramUserId, configuredMiniAppUrl)?.let { url ->
-                keyboard.addRow(InlineKeyboardButton("Мои клубы").webApp(WebAppInfo(url)))
-            }
-            request.replyMarkup(keyboard)
+                    InlineKeyboardButton(
+                        if (cabinetUrl !=
+                            null
+                        ) {
+                            OPEN_CABINET_BUTTON_TEXT
+                        } else {
+                            OPEN_MINI_APP_BUTTON_TEXT
+                        },
+                    ).webApp(WebAppInfo(url)),
+                ),
+            )
         }
         applyThread(request, message.threadIdOrNull())
         send(request)
+        if (cabinetUrl != null) installCabinetMenu(message.chat().id(), cabinetUrl)
+    }
+
+    private suspend fun installCabinetMenu(
+        chatId: Long,
+        url: String,
+    ) {
+        try {
+            val response =
+                send(
+                    SetChatMenuButton()
+                        .chatId(chatId)
+                        .menuButton(MenuButtonWebApp(OPEN_CABINET_BUTTON_TEXT, WebAppInfo(url))),
+                )
+            if (!response.isOk) logger.warn("telegram cabinet menu unavailable")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The already sent direct launch stays usable; never log Telegram payloads.
+            logger.warn("telegram cabinet menu unavailable")
+        }
     }
 
     private suspend fun clientCabinetUrl(
         telegramUserId: Long,
         configuredMiniAppUrl: String,
     ): String? {
-        val hasMembership =
-            try {
-                hasClientMembership(telegramUserId)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                false
-            }
-        if (!hasMembership) return null
+        val hasCabinet =
+            configuredOwnerId?.takeIf { it > 0 } == telegramUserId ||
+                try {
+                    hasClientMembership(telegramUserId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    false
+                }
+        if (!hasCabinet) return null
         return parseGuestSupportUriOrNull(configuredMiniAppUrl)
             ?.takeIf { it.isSafeGuestSupportBase() }
-            ?.let { buildGuestSupportUrlOrNull(configuredMiniAppUrl, "client") }
+            ?.let { buildGuestSupportUrlOrNull(configuredMiniAppUrl, "cabinet") }
     }
 
     private suspend fun handleQr(message: Message) {
@@ -707,3 +736,7 @@ private val guestSupportSensitiveQueryMarkers =
 
 @Suppress("DEPRECATION")
 private fun Message.threadIdOrNull(): Int? = runCatching { messageThreadId() }.getOrNull()
+
+private const val OPEN_CABINET_BUTTON_TEXT = "Открыть кабинет"
+private const val CABINET_WELCOME_TEXT =
+    "Ваш кабинет: заведения и сохранённые настройки. Откройте его кнопкой ниже или через постоянное меню."

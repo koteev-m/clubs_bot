@@ -137,6 +137,16 @@ internal abstract class ClubProfileContract : ClubOnboardingContract() {
             assertEquals(listOf(first["id"]), context.getValue("clubs").jsonArray.map { it.jsonObject["id"] })
             assertEquals(first["id"], create(approved)["id"])
             val secondApproval = fixture.approved(first.id("clientId"), venue = "Second approved venue")
+            fixture.repository.mutate(
+                fixture.owner,
+                OnboardingMutation.CLIENT_LIMIT_UPDATE,
+                first.id("clientId"),
+                buildJsonObject {
+                    put("allowedClubs", 2)
+                    put("expectedVersion", "1")
+                },
+                "explicit-second-club-limit",
+            )
             val second = create(secondApproval)
             assertTrue(second["id"] != first["id"])
             assertEquals(2, fixture.count("client_club_onboarding"))

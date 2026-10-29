@@ -7,6 +7,7 @@ import { Invitation } from './onboarding.types';
 export function useInvitationDraft(credential: string, hideLink = false) {
   const [clientName, setClientName] = useState('');
   const [recipientLabel, setRecipientLabel] = useState('');
+  const [allowedClubs, setAllowedClubs] = useState('1');
   const [invitation, storeInvitation] = useState<Invitation>();
   const command = useCommand<Invitation>(credential);
   const setInvitation = useCallback((value: Invitation) => {
@@ -23,12 +24,14 @@ export function useInvitationDraft(credential: string, hideLink = false) {
   useEffect(() => {
     setClientName('');
     setRecipientLabel('');
+    setAllowedClubs('1');
     storeInvitation(undefined);
   }, [credential]);
   useEffect(() => {
     if (authorityLost(command.error)) {
       setClientName('');
       setRecipientLabel('');
+      setAllowedClubs('1');
       storeInvitation(undefined);
     }
   }, [command.error]);
@@ -39,12 +42,15 @@ export function useInvitationDraft(credential: string, hideLink = false) {
     if (command.blocked) return;
     setClientName('');
     setRecipientLabel('');
+    setAllowedClubs('1');
     storeInvitation(undefined);
     command.reset();
   };
   return {
     clientName,
     setClientName,
+    allowedClubs,
+    setAllowedClubs,
     recipientLabel,
     setRecipientLabel,
     invitation,

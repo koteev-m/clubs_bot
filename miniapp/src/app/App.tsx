@@ -13,6 +13,7 @@ import PlatformOwnerAccess from '../modules/platform-owner/PlatformOwnerAccess';
 import ClientAccess from '../modules/client/ClientAccess';
 import { readClientEntry } from '../modules/client/clientEntry';
 import { useTelegram } from './providers/TelegramProvider';
+import CabinetEntry from './CabinetEntry';
 
 // Vite removes the unguarded preview entry from production builds.
 const PlatformOwnerPreview = import.meta.env.DEV
@@ -68,6 +69,8 @@ export default function App() {
         onTokenConsumed={() => setClientEntry({ client: true, token: null })}
       />
     );
+  if (new URLSearchParams(window.location.search).get('mode') === 'cabinet')
+    return <CabinetEntry />;
   return <ExistingApp />;
 }
 

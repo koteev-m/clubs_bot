@@ -20,7 +20,6 @@ import com.example.bot.security.rbac.authorize
 import com.example.bot.security.rbac.rbacContext
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
-import io.ktor.http.content.forEachPart
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
@@ -28,29 +27,21 @@ import io.ktor.server.application.call
 import io.ktor.server.plugins.requestsize.RequestSizeLimit
 import io.ktor.server.plugins.requestsize.maxRequestSize
 import io.ktor.server.request.receive
-import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
-import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.readAvailable
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
-import java.io.IOException
 import java.nio.file.Files
-import java.nio.file.Path
-import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 
 private const val MAX_AUDIO_SIZE_BYTES = 50L * 1024 * 1024
 private const val MAX_COVER_SIZE_BYTES = 5L * 1024 * 1024
 private const val MULTIPART_OVERHEAD_BYTES = 256L * 1024
-private const val FILE_FIELD = "file"
 private val AUDIO_CONTENT_TYPES =
     setOf(
         ContentType.Audio.MPEG,
@@ -393,6 +384,7 @@ fun Application.adminMusicRoutes(
                                     return@put call.respondError(result.status, result.code, details = result.details)
                                 }
                             }
+                        var assetFailure: Throwable? = null
                         val asset =
                             try {
                                 assetsRepository.createAssetStream(
@@ -402,8 +394,11 @@ fun Application.adminMusicRoutes(
                                     sizeBytes = upload.sizeBytes,
                                     openStream = { Files.newInputStream(upload.tempFile) },
                                 )
+                            } catch (cause: Throwable) {
+                                assetFailure = cause
+                                throw cause
                             } finally {
-                                Files.deleteIfExists(upload.tempFile)
+                                deleteMusicTempFile(upload.tempFile, assetFailure)
                             }
                         val updated =
                             itemsRepository.attachAudioAsset(
@@ -461,6 +456,7 @@ fun Application.adminMusicRoutes(
                                     return@put call.respondError(result.status, result.code, details = result.details)
                                 }
                             }
+                        var assetFailure: Throwable? = null
                         val asset =
                             try {
                                 assetsRepository.createAssetStream(
@@ -470,8 +466,11 @@ fun Application.adminMusicRoutes(
                                     sizeBytes = upload.sizeBytes,
                                     openStream = { Files.newInputStream(upload.tempFile) },
                                 )
+                            } catch (cause: Throwable) {
+                                assetFailure = cause
+                                throw cause
                             } finally {
-                                Files.deleteIfExists(upload.tempFile)
+                                deleteMusicTempFile(upload.tempFile, assetFailure)
                             }
                         val updated =
                             itemsRepository.attachCoverAsset(
@@ -505,137 +504,6 @@ fun Application.adminMusicRoutes(
         }
     }
 }
-
-private sealed class MusicUploadResult {
-    data class Ok(
-        val tempFile: Path,
-        val contentType: ContentType,
-        val sizeBytes: Long,
-        val sha256: String,
-    ) : MusicUploadResult()
-
-    data class Error(
-        val status: HttpStatusCode,
-        val code: String,
-        val details: Map<String, String>? = null,
-    ) : MusicUploadResult()
-}
-
-private suspend fun ApplicationCall.receiveUpload(
-    maxBytes: Long,
-    allowedContentTypes: Set<ContentType>,
-): MusicUploadResult {
-    val multipart = receiveMultipart()
-    var upload: MusicUploadResult.Ok? = null
-    var invalidContentType = false
-    var error: MusicUploadResult.Error? = null
-
-    multipart.forEachPart { part ->
-        if (error != null) {
-            part.dispose()
-            return@forEachPart
-        }
-        when (part) {
-            is io.ktor.http.content.PartData.FileItem -> {
-                if (part.name == FILE_FIELD && upload == null) {
-                    val contentType = part.contentType
-                    if (contentType == null || allowedContentTypes.none { contentType.match(it) }) {
-                        invalidContentType = true
-                    } else {
-                        val result =
-                            runCatching {
-                                readLimitedWithShaToTempFile(part.provider, maxBytes)
-                            }.getOrElse { throwable ->
-                                if (throwable is CancellationException) {
-                                    throw throwable
-                                }
-                                error =
-                                    when (throwable) {
-                                        is MusicPayloadTooLargeException ->
-                                            MusicUploadResult.Error(
-                                                HttpStatusCode.PayloadTooLarge,
-                                                ErrorCodes.payload_too_large,
-                                            )
-                                        else ->
-                                            MusicUploadResult.Error(
-                                                HttpStatusCode.InternalServerError,
-                                                ErrorCodes.internal_error,
-                                            )
-                                    }
-                                part.dispose()
-                                return@forEachPart
-                            }
-                        if (result.sizeBytes == 0L) {
-                            Files.deleteIfExists(result.tempFile)
-                            error =
-                                MusicUploadResult.Error(
-                                    HttpStatusCode.BadRequest,
-                                    ErrorCodes.validation_error,
-                                    details = mapOf(FILE_FIELD to "must_be_non_empty"),
-                                )
-                            part.dispose()
-                            return@forEachPart
-                        }
-                        upload = MusicUploadResult.Ok(result.tempFile, contentType, result.sizeBytes, result.sha256)
-                    }
-                }
-            }
-            else -> Unit
-        }
-        part.dispose()
-    }
-
-    error?.let { return it }
-    if (invalidContentType) {
-        return MusicUploadResult.Error(HttpStatusCode.UnsupportedMediaType, ErrorCodes.unsupported_media_type)
-    }
-    return upload ?: MusicUploadResult.Error(
-        HttpStatusCode.BadRequest,
-        ErrorCodes.validation_error,
-        details = mapOf(FILE_FIELD to "required"),
-    )
-}
-
-internal data class ReadWithShaResult(
-    val tempFile: Path,
-    val sizeBytes: Long,
-    val sha256: String,
-)
-
-internal suspend fun readLimitedWithShaToTempFile(
-    channelProvider: () -> ByteReadChannel,
-    maxBytes: Long,
-): ReadWithShaResult {
-    val tempFile = Files.createTempFile("music-upload-", ".bin")
-    return try {
-        val channel = channelProvider()
-        val digest = MessageDigest.getInstance("SHA-256")
-        val buffer = ByteArray(8_192)
-        var total = 0L
-        Files.newOutputStream(tempFile).use { output ->
-            while (true) {
-                val read = channel.readAvailable(buffer)
-                if (read <= 0) break
-                total += read
-                if (total > maxBytes) {
-                    throw MusicPayloadTooLargeException()
-                }
-                digest.update(buffer, 0, read)
-                output.write(buffer, 0, read)
-            }
-        }
-        val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
-        ReadWithShaResult(tempFile, total, sha256)
-    } catch (ex: CancellationException) {
-        Files.deleteIfExists(tempFile)
-        throw ex
-    } catch (ex: Throwable) {
-        Files.deleteIfExists(tempFile)
-        throw ex
-    }
-}
-
-private class MusicPayloadTooLargeException : IOException()
 
 private suspend fun ApplicationCall.isAllowedForClub(clubId: Long?): Boolean =
     if (clubId == null) {

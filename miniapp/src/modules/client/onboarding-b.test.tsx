@@ -90,122 +90,15 @@ describe('private club onboarding B', () => {
     vi.restoreAllMocks();
   });
 
-  it('creates only from a permitted approved application and opens the returned private profile', async () => {
-    const fetch = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation((path) =>
-        response(String(path).endsWith('/30') ? approved : profile),
-      );
+  it('keeps old approved data as history with explicit reuse and no approval consumption action', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => response(approved));
     render(<ClientAccess initialToken={null} />);
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Создать клуб' }),
-    );
-    await screen.findByLabelText('Отображаемое название');
-    expect(screen.getByText('Непубличный')).toBeTruthy();
-    expect(screen.getByText('Бот не подключён')).toBeTruthy();
-    expect(screen.getByText('Synthetic Street 1')).toBeTruthy();
-    expect(screen.queryByLabelText('Адрес')).toBeNull();
-    expect(screen.queryByText('Клуб опубликован')).toBeNull();
-    expect(screen.queryByText('Готов к бронированиям')).toBeNull();
-    const create = fetch.mock.calls.find(([path]) =>
-      String(path).endsWith('/club'),
-    )!;
-    expect(JSON.parse(String(create[1]?.body))).toEqual({
-      expectedVersion: '4',
-    });
+    await screen.findByText('Synthetic Street 1');
+    expect(screen.getByText('Test Unit')).toBeTruthy();
     expect(
-      (create[1]?.headers as Record<string, string>)['Idempotency-Key'],
+      screen.getByRole('button', { name: 'Использовать данные для создания' }),
     ).toBeTruthy();
-    expect(window.location.search).toContain('screen=club&resource=100');
-  });
-
-  it.each([
-    'draft',
-    'submitted',
-    'reviewing',
-    'rejected',
-    'cancelled',
-  ] as const)(
-    'does not create from %s even with a malformed action hint',
-    async (status) => {
-      vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
-        response({ ...approved, status }),
-      );
-      render(<ClientAccess initialToken={null} />);
-      await screen.findByRole('heading', { name: 'Synthetic Venue', level: 1 });
-      expect(screen.queryByRole('button', { name: 'Создать клуб' })).toBeNull();
-    },
-  );
-
-  it('lost create response blocks a new intent and retries the same key and payload', async () => {
-    let creates = 0;
-    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((path) => {
-      if (String(path).endsWith('/club'))
-        return ++creates === 1
-          ? Promise.reject(new Error('lost synthetic response'))
-          : response(profile);
-      return response(String(path).endsWith('/profile') ? profile : approved);
-    });
-    render(<ClientAccess initialToken={null} />);
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Создать клуб' }),
-    );
-    await screen.findByText('Результат операции пока неизвестен');
-    expect(
-      (
-        screen.getByRole('button', {
-          name: 'Создать клуб',
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
-    const retry = screen.getByRole('button', {
-      name: 'Повторить ту же операцию',
-    });
-    act(() => {
-      fireEvent.click(retry);
-      fireEvent.click(retry);
-    });
-    await screen.findByLabelText('Отображаемое название');
-    const attempts = fetch.mock.calls.filter(([path]) =>
-      String(path).endsWith('/club'),
-    );
-    expect(attempts).toHaveLength(2);
-    expect(attempts[0][1]?.headers).toEqual(attempts[1][1]?.headers);
-    expect(attempts[0][1]?.body).toEqual(attempts[1][1]?.body);
-  });
-
-  it('lost create response can be reconciled by reading the consumed application and opening the same club', async () => {
-    let created = false;
-    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((path) => {
-      if (String(path).endsWith('/club')) {
-        created = true;
-        return Promise.reject(new Error('lost synthetic response'));
-      }
-      if (String(path).endsWith('/profile')) return response(profile);
-      return response(
-        created
-          ? {
-              ...approved,
-              createdClubId: '100',
-              availableActions: ['openClub'],
-            }
-          : approved,
-      );
-    });
-    render(<ClientAccess initialToken={null} />);
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Создать клуб' }),
-    );
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Проверить состояние' }),
-    );
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Открыть клуб' }),
-    );
-    await screen.findByLabelText('Отображаемое название');
-    expect(
-      fetch.mock.calls.filter(([path]) => String(path).endsWith('/club')),
-    ).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Создать клуб' })).toBeNull();
   });
 
   it('saves only mutable profile fields and reopens the saved club through its own client', async () => {

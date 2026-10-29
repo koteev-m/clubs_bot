@@ -324,6 +324,50 @@ revision, live schema, real Telegram interaction or customer migration is assert
 
 ## 5. Domain-by-domain state
 
+### Local simplified onboarding delta — 2026-10-29
+
+Base: `c0df96b520e4e1f6bfe97a27ce7b17546d694505`. This is local source evidence,
+not a new deployed revision. The owner-supplied real Telegram check establishes
+that the previous claim/code/confirm path worked but was too complex; it supplies
+no HTTP status for the reported submit-button symptom.
+
+- `InvitationOperations` persists a policy on each invitation. New issue creates
+  a client with explicit allowance (default 1); explicit claim accepts only a new
+  empty cabinet. Old pending invitations retain owner confirmation. Signed identity,
+  client lock, expiry/revoke/reissue, hash-only token and current-authority replay remain.
+- New paired V064 leaves V001–V063 unchanged, adds nullable `clients.allowed_clubs`,
+  `limit_version`, invitation policy and `client_direct_club_profiles`. It does not
+  backfill existing client limits or rewrite applications/approvals/audit. Direct
+  creation does not fabricate an approved application.
+- `ClientLimitOperations`, `DirectClubOperations` and the old `ClubOnboardingOperations`
+  creation path share the client lock and count every `client_clubs` mapping. Limit
+  updates require exact owner/version and transactional audit. Stable city ID and
+  normalized venue/address fingerprint distinguish identically named cities and
+  prevent exact duplicate creation. Profile ownership/location are immutable; FK/trigger
+  protection prevents freeing capacity by deleting a direct mapping/profile.
+- `ClientOnboardingRoutes` adds direct create, owner limit and authenticated location
+  search. `OnboardingLocations` loads a pinned 34,193-row GeoNames cities15000 derivative,
+  with source hashes/license in `app-bot/src/main/resources/locations/`. Runtime
+  filters unsupported JVM zones/countries, requires explicit city/region selection,
+  and rejects client-supplied timezone/region. No existing city resolver was found;
+  prior source used manual IANA input and legacy Moscow defaults.
+- `CabinetEntry`, static `client-entry.js`, `ClientAccess`, `NewClub` and owner client
+  card implement the simplified route and visible states; Telegram handler prepares
+  default and per-chat `MenuButtonWebApp` using installed pengrad SDK 9.2.0, with fake
+  API tests. Default registration is best-effort on application startup; per-chat
+  registration accompanies `/start`. Both target the signed-authority cabinet entry.
+  No real Telegram API/BotFather call or menu change is evidence here. Guest entry
+  remains for users without management authority; `mode` is never authorization.
+- Old submit symptom has a local explanation candidate: command errors were after
+  the long form and workspace refresh remounted pending state. The new creation
+  intent belongs to the authenticated workspace and errors are beside the action.
+  This is not a claim about Stage's actual response.
+
+Final checks, review, remaining unverified behavior and exact local change boundary
+are recorded in [PROJECT_STATUS](../ops/PROJECT_STATUS.md). Historical A/B snapshots
+above remain valid for their revisions; current target is
+[§29.10](PRODUCT_SPEC.md#simplified-client-onboarding).
+
 | # | Domain | Status | Evidence | Wired/persistence/UI/missing summary |
 |---:|---|---|---|---|
 | 1 | Product identity and naming | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:345-346`; `miniapp/src/main/resources/miniapp/index.html:7-14`; `docker-compose.yml:20-28` | Runtime surfaces say Night Concierge and «Куда пойдём?», while source says Telegram Club OS/iBota. No single canonical identity. |

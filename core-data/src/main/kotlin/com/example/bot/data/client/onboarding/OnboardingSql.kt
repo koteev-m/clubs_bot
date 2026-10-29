@@ -111,12 +111,14 @@ internal class OnboardingSql(
         version: Long,
         now: Instant,
         correlation: String,
+        additionalMetadata: JsonObject = JsonObject(emptyMap()),
     ) {
         val metadata =
             buildJsonObject {
                 put("clientId", clientId.toString())
                 put("version", version.toString())
                 put("commandCorrelation", correlation)
+                additionalMetadata.forEach { (key, value) -> put(key, value) }
             }
         update(
             "INSERT INTO audit_log(created_at,actor_user_id,entity_type,entity_id,action,fingerprint,metadata_json) " +

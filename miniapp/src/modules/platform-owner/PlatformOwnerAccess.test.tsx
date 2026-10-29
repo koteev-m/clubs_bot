@@ -70,7 +70,9 @@ describe('platform owner server access gate', () => {
     );
     auth.refreshEpoch++;
     view.rerender(<PlatformOwnerAccess />);
-    expect(screen.queryByLabelText('Имя получателя')).toBeNull();
+    expect(
+      screen.getByLabelText('Имя получателя').closest('[hidden]'),
+    ).not.toBeNull();
     await act(async () => allow({ data: { platformOwner: true } }));
     expect(
       ((await screen.findByLabelText('Имя получателя')) as HTMLInputElement)
@@ -80,7 +82,9 @@ describe('platform owner server access gate', () => {
     auth.initData = '';
     auth.refreshEpoch++;
     view.rerender(<PlatformOwnerAccess />);
-    expect(screen.queryByLabelText('Имя получателя')).toBeNull();
+    expect(
+      screen.getByLabelText('Имя получателя').closest('[hidden]'),
+    ).not.toBeNull();
     hidden.mockReturnValue(false);
     auth.initData = 'synthetic-signed-init-data';
     auth.refreshEpoch++;

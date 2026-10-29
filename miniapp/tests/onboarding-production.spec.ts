@@ -1,8 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type {
-  ClubApplication,
-  ClubProfile,
-} from '../src/modules/client/onboarding.types';
+import type { ClubProfile } from '../src/modules/client/onboarding.types';
 
 const token = 'a'.repeat(43);
 const signed = new URLSearchParams({
@@ -26,6 +23,7 @@ const invitation = {
   candidate: null,
   verificationCode: null,
   availableActions: ['claim'],
+  acceptanceMode: 'direct',
 };
 const clubProfile: ClubProfile = {
   id: '100',
@@ -43,27 +41,6 @@ const clubProfile: ClubProfile = {
   permissions: ['client.club.read', 'client.club.profile.write'],
   availableActions: ['update'],
 };
-const approvedApplication: ClubApplication = {
-  id: '30',
-  clientId: '20',
-  clientName: 'Synthetic Client',
-  authorUserId: '90',
-  status: 'approved',
-  version: '4',
-  venueName: 'Synthetic Venue',
-  countryCode: 'RU',
-  city: 'Synthetic City',
-  address: 'Synthetic Street 1',
-  unit: 'Test Unit',
-  timezone: 'Europe/Moscow',
-  comment: '',
-  previousApplicationId: null,
-  createdClubId: null,
-  submittedAt: '2026-10-28T10:00:00Z',
-  decisionReason: null,
-  history: [],
-  availableActions: ['createClub'],
-};
 const ordinaryData = new URLSearchParams(signed);
 ordinaryData.delete('start_param');
 const ordinaryHash =
@@ -71,44 +48,24 @@ const ordinaryHash =
   encodeURIComponent(ordinaryData.toString()) +
   '&tgWebAppVersion=7.10&tgWebAppPlatform=ios';
 
-test('private club creation survives a lost response, saves a profile and reopens the same club from its client', async ({
+test('direct creation keeps its pending intent through Back Forward, opens saved private profile and respects capacity on reentry', async ({
   page,
 }) => {
-  let application = { ...approvedApplication };
-  let profile = { ...clubProfile };
+  let created = false;
   const creates: { key: string; body: string | null }[] = [];
-  const patches: object[] = [];
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    if (path.endsWith('/applications/30/club')) {
+    if (path.endsWith('/clients/20/clubs')) {
       creates.push({
         key: request.headers()['idempotency-key'],
         body: request.postData(),
       });
-      application = {
-        ...application,
-        createdClubId: profile.id,
-        availableActions: ['openClub'],
-      };
+      created = true;
       if (creates.length === 1) return route.abort();
-      return route.fulfill({ json: profile });
+      return route.fulfill({ json: clubProfile });
     }
-    if (path.endsWith('/profile')) {
-      if (request.method() === 'PATCH') {
-        const fields = request.postDataJSON();
-        patches.push(fields);
-        profile = {
-          ...profile,
-          name: fields.name,
-          description: fields.description,
-          timezone: fields.timezone,
-          version: '2',
-          savedAt: '2026-10-28T14:00:00Z',
-        };
-      }
-      return route.fulfill({ json: profile });
-    }
+    if (path.endsWith('/profile')) return route.fulfill({ json: clubProfile });
     if (path.endsWith('/context'))
       return route.fulfill({
         json: {
@@ -116,9 +73,8 @@ test('private club creation survives a lost response, saves a profile and reopen
             {
               id: '20',
               name: 'Synthetic Client',
-              clubs: application.createdClubId ? [profile] : [],
+              clubs: created ? [clubProfile] : [],
             },
-            { id: '21', name: 'Independent Client', clubs: [] },
           ],
         },
       });
@@ -128,25 +84,53 @@ test('private club creation survives a lost response, saves a profile and reopen
           id: '20',
           name: 'Synthetic Client',
           permissions: ['client.application.manage'],
-          clubs: application.createdClubId ? [profile] : [],
+          clubs: created ? [clubProfile] : [],
+          allowedClubs: 1,
+          createdClubs: created ? 1 : 0,
+          availableClubs: created ? 0 : 1,
         },
       });
-    if (path.endsWith('/search'))
+    if (path.endsWith('/locations'))
       return route.fulfill({
-        json: { items: [application], nextCursor: null },
+        json: { countries: [{ code: 'RU', name: 'Россия' }] },
       });
-    return route.fulfill({ json: application });
+    if (path.endsWith('/locations/search'))
+      return route.fulfill({
+        json: {
+          cities: [
+            {
+              id: '524901',
+              countryCode: 'RU',
+              name: 'Москва',
+              region: 'Москва',
+              timezone: 'Europe/Moscow',
+            },
+          ],
+          hasMore: false,
+        },
+      });
+    return route.fulfill({ json: { items: [], nextCursor: null } });
   });
   await page.goto('/app?mode=client' + ordinaryHash);
-  await page.getByRole('button', { name: /Synthetic Client/ }).click();
-  await page.getByRole('button', { name: /Synthetic Venue/ }).click();
-  await page.getByRole('button', { name: 'Создать клуб' }).click();
+  await page.getByRole('button', { name: 'Создать заведение' }).click();
+  await page.getByLabel('Название заведения').fill('Synthetic Venue');
+  await page.getByLabel('Страна', { exact: true }).selectOption('RU');
+  await page.getByLabel('Город', { exact: true }).fill('Москва');
+  await page.getByLabel('Город и регион').selectOption('524901');
+  await page.getByLabel('Полный адрес').fill('Synthetic Street 1');
+  await expect(page.getByLabel('Часовой пояс')).toHaveCount(0);
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Создать заведение' }).click();
   await expect(
     page.getByText('Результат операции пока неизвестен'),
   ).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Создать клуб' }),
-  ).toBeDisabled();
+  await page.goBack();
+  await expect(page.getByText('Можно добавить: 0')).toBeVisible();
+  await page.goForward();
+  await expect(page.getByLabel('Название заведения')).toHaveValue(
+    'Synthetic Venue',
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
   await page.getByRole('button', { name: 'Повторить ту же операцию' }).click();
   await expect(page.getByText('Непубличный', { exact: true })).toBeVisible();
   await expect(
@@ -154,25 +138,23 @@ test('private club creation survives a lost response, saves a profile and reopen
   ).toBeVisible();
   expect(creates).toHaveLength(2);
   expect(creates[0]).toEqual(creates[1]);
-  await page.getByLabel('Отображаемое название').fill('Saved Synthetic Club');
-  await page.getByLabel('Описание клуба').fill('Synthetic profile description');
-  await page.getByLabel('Часовой пояс').fill('Europe/Paris');
-  await page.getByRole('button', { name: 'Сохранить профиль' }).click();
-  await expect(page.getByText('Сохранено', { exact: true })).toBeVisible();
-  expect(patches).toEqual([
-    {
-      name: 'Saved Synthetic Club',
-      description: 'Synthetic profile description',
-      timezone: 'Europe/Paris',
-      expectedVersion: '1',
-    },
-  ]);
+  expect(JSON.parse(creates[0].body!)).toEqual({
+    venueName: 'Synthetic Venue',
+    countryCode: 'RU',
+    cityId: '524901',
+    address: 'Synthetic Street 1',
+  });
+  await page.goto('/app?mode=client' + ordinaryHash);
+  await expect(
+    page.getByRole('button', { name: 'Создать заведение' }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: /Synthetic Venue/ }).click();
+  await expect(page).toHaveURL(/screen=club&resource=100/);
   await expect(
     page.getByText('Synthetic Street 1', { exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel('Адрес', { exact: true })).toHaveCount(0);
   await page.screenshot({
-    path: test.info().outputPath('private-club-profile.png'),
+    path: test.info().outputPath('simplified-private-club.png'),
     fullPage: true,
   });
   expect(
@@ -180,24 +162,6 @@ test('private club creation survives a lost response, saves a profile and reopen
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.goto('/app?mode=client' + ordinaryHash);
-  await page.getByRole('button', { name: /Synthetic Client/ }).click();
-  await expect(page.getByText('Independent Client')).toHaveCount(0);
-  await page.getByRole('button', { name: /Saved Synthetic Club/ }).click();
-  await expect(page).toHaveURL(/screen=club&resource=100/);
-  await expect(page.getByLabel('Описание клуба')).toHaveValue(
-    'Synthetic profile description',
-  );
-  await page.goto(
-    '/app?mode=client&screen=application&resource=30' + ordinaryHash,
-  );
-  await expect(page.getByRole('button', { name: 'Создать клуб' })).toHaveCount(
-    0,
-  );
-  await page.getByRole('button', { name: 'Открыть клуб' }).click();
-  await expect(page.getByLabel('Отображаемое название')).toHaveValue(
-    'Saved Synthetic Club',
-  );
 });
 
 test('private profile validation, version conflict, access loss and foreground clearing are safe', async ({
@@ -261,8 +225,9 @@ test('production hash-only launch bridges before guest requests and omits launch
     page.getByRole('heading', { name: 'Приглашение клиента' }),
   ).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Подтвердить аккаунт' }),
-  ).toBeDisabled();
+    page.getByRole('button', { name: 'Принять приглашение' }),
+  ).toBeEnabled();
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
   expect(
     requests.every((path) => path === '/api/client/invitations/resolve'),
   ).toBe(true);
@@ -307,8 +272,7 @@ test('mutation lost response, safe retry, version conflict and access loss remai
     return route.fulfill({ json: current });
   });
   await page.goto('/app?mode=client' + hash);
-  await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'Подтвердить аккаунт' }).click();
+  await page.getByRole('button', { name: 'Принять приглашение' }).click();
   await expect(
     page.getByText('Результат операции пока неизвестен'),
   ).toBeVisible();
@@ -317,7 +281,7 @@ test('mutation lost response, safe retry, version conflict and access loss remai
   expect(mutations[0]).toEqual(mutations[1]);
   current = { ...current, version: '2' };
   await page.getByRole('button', { name: 'Обновить данные' }).click();
-  await page.getByRole('button', { name: 'Подтвердить аккаунт' }).click();
+  await page.getByRole('button', { name: 'Принять приглашение' }).click();
   await expect(page.getByText(/Доступ утрачен/)).toBeVisible();
 });
 
@@ -340,15 +304,9 @@ test('platform access refusal cannot be bypassed in production by OWNER query or
   expect(requests.every((path) => path === '/api/platform/access')).toBe(true);
 });
 
-test('browser Back asks before discarding an unsaved application and cancel keeps the input', async ({
+test('browser Back Forward retains creation fields without saving a draft', async ({
   page,
 }) => {
-  const data = new URLSearchParams(signed);
-  data.delete('start_param');
-  const ordinaryHash =
-    '#tgWebAppData=' +
-    encodeURIComponent(data.toString()) +
-    '&tgWebAppVersion=7.10&tgWebAppPlatform=ios';
   await page.route('**/api/**', (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/context'))
@@ -362,25 +320,28 @@ test('browser Back asks before discarding an unsaved application and cancel keep
           name: 'Synthetic Client',
           permissions: ['client.application.manage'],
           clubs: [],
+          allowedClubs: 1,
+          createdClubs: 0,
+          availableClubs: 1,
         },
+      });
+    if (path.endsWith('/locations'))
+      return route.fulfill({
+        json: { countries: [{ code: 'RU', name: 'Россия' }] },
       });
     return route.fulfill({ json: { items: [], nextCursor: null } });
   });
   await page.goto('/app?mode=client' + ordinaryHash);
-  await page.getByRole('button', { name: /Synthetic Client/ }).click();
-  await page.getByRole('button', { name: 'Подключить заведение' }).click();
+  await page.getByRole('button', { name: 'Создать заведение' }).click();
   await page.getByLabel('Название заведения').fill('Unsaved synthetic venue');
-  page.once('dialog', (dialog) => dialog.dismiss());
-  await page.goBack();
-  await expect(page.getByLabel('Название заведения')).toHaveValue(
-    'Unsaved synthetic venue',
-  );
-  page.once('dialog', (dialog) => dialog.accept());
   await page.goBack();
   await expect(
     page.getByRole('heading', { name: 'Synthetic Client' }),
   ).toBeVisible();
-  await expect(page.getByLabel('Название заведения')).toHaveCount(0);
+  await page.goForward();
+  await expect(page.getByLabel('Название заведения')).toHaveValue(
+    'Unsaved synthetic venue',
+  );
 });
 
 test('owner invitation draft and pending intent survive Back Forward without retry scrolling to the top', async ({
@@ -439,12 +400,10 @@ test('owner invitation draft and pending intent survive Back Forward without ret
     }),
   ).toBeVisible();
   await page.goForward();
-  await expect(
-    page.getByLabel('Название клиента или компании'),
-  ).toHaveValue('MIX Group');
-  await expect(page.getByLabel('Имя получателя')).toHaveValue(
-    'Иван Петров',
+  await expect(page.getByLabel('Название клиента или компании')).toHaveValue(
+    'MIX Group',
   );
+  await expect(page.getByLabel('Имя получателя')).toHaveValue('Иван Петров');
   await page.getByRole('button', { name: 'Создать ссылку' }).click();
   await expect(
     page.getByText('Ответ сервера не получен, результат нужно проверить.'),
@@ -458,12 +417,18 @@ test('owner invitation draft and pending intent survive Back Forward without ret
   await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
   await recheckRequest;
   await expect(page.getByText('Проверяем доступ…')).toBeVisible();
-  await expect(page.getByLabel('Название клиента или компании')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Проверить результат' })).toHaveCount(0);
+  await expect(page.getByLabel('Название клиента или компании')).toBeHidden();
+  await expect(
+    page.getByRole('button', { name: 'Проверить результат' }),
+  ).toBeHidden();
   releaseAccess();
-  await expect(page.getByLabel('Название клиента или компании')).toHaveValue('MIX Group');
+  await expect(page.getByLabel('Название клиента или компании')).toHaveValue(
+    'MIX Group',
+  );
   await expect(page.getByLabel('Имя получателя')).toHaveValue('Иван Петров');
-  await expect(page.getByText('Ответ сервера не получен, результат нужно проверить.')).toBeVisible();
+  await expect(
+    page.getByText('Ответ сервера не получен, результат нужно проверить.'),
+  ).toBeVisible();
   expect(commands).toHaveLength(1);
   await page.goBack();
   await expect(
@@ -473,9 +438,9 @@ test('owner invitation draft and pending intent survive Back Forward without ret
     }),
   ).toBeVisible();
   await page.goForward();
-  await expect(
-    page.getByLabel('Название клиента или компании'),
-  ).toHaveValue('MIX Group');
+  await expect(page.getByLabel('Название клиента или компании')).toHaveValue(
+    'MIX Group',
+  );
   await expect(
     page.getByRole('button', { name: 'Создать ссылку' }),
   ).toBeDisabled();
@@ -513,4 +478,69 @@ test('owner invitation draft and pending intent survive Back Forward without ret
     path: test.info().outputPath('invitation-safe-recovery-mobile.png'),
     fullPage: true,
   });
+});
+
+test('Main Mini App resolves owner and client cabinets using server authority without a guest request', async ({
+  page,
+}) => {
+  let owner = true;
+  const requested: string[] = [];
+  await page.route('**/api/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    requested.push(path);
+    if (path === '/api/platform/access')
+      return owner
+        ? route.fulfill({ json: { platformOwner: true } })
+        : route.fulfill({ status: 403, json: { code: 'forbidden' } });
+    if (path.endsWith('/context'))
+      return route.fulfill({
+        json: { clients: [{ id: '20', name: 'Synthetic Client', clubs: [] }] },
+      });
+    if (path.endsWith('/onboarding'))
+      return route.fulfill({
+        json: {
+          id: '20',
+          name: 'Synthetic Client',
+          clubs: [],
+          permissions: ['client.application.manage'],
+          allowedClubs: 1,
+          createdClubs: 0,
+          availableClubs: 1,
+        },
+      });
+    return route.fulfill({ json: { items: [], nextCursor: null } });
+  });
+  await page.goto('/app' + ordinaryHash);
+  await expect(
+    page.getByRole('heading', { name: 'Управление платформой', exact: true }),
+  ).toBeVisible();
+  owner = false;
+  await page.goto('/app' + ordinaryHash);
+  await expect(
+    page.getByRole('heading', { name: 'Synthetic Client', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Создать заведение' }),
+  ).toBeEnabled();
+  expect(
+    requested.every(
+      (path) =>
+        path.startsWith('/api/platform/') || path.startsWith('/api/client/'),
+    ),
+  ).toBe(true);
+});
+
+test('Main Mini App transport failure stays actionable without guest redirect', async ({
+  page,
+}) => {
+  const paths: string[] = [];
+  await page.route('**/api/**', (route) => {
+    paths.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ status: 503, json: { code: 'unavailable' } });
+  });
+  await page.goto('/app' + ordinaryHash);
+  await expect(
+    page.getByRole('button', { name: 'Повторить проверку' }),
+  ).toBeVisible();
+  expect(paths.every((path) => path === '/api/platform/access')).toBe(true);
 });

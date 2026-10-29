@@ -1,6 +1,5 @@
 package com.example.bot.routes
 
-import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.audit.AuditLogRepositoryImpl
 import com.example.bot.data.clubs.ClubsDbRepository
 import com.example.bot.data.security.ExposedUserRepository
@@ -10,6 +9,9 @@ import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.data.support.SupportRepository
 import com.example.bot.data.support.SupportServiceImpl
 import com.example.bot.data.support.TicketsTable
+import com.example.bot.opschat.OpsDomainNotification
+import com.example.bot.opschat.OpsNotificationEvent
+import com.example.bot.opschat.OpsNotificationPublisher
 import com.example.bot.plugins.MiniAppUserKey
 import com.example.bot.security.auth.TelegramPrincipal
 import com.example.bot.security.rbac.RbacPlugin
@@ -17,14 +19,14 @@ import com.example.bot.support.SupportReplyDeliveryOutcome
 import com.example.bot.support.SupportReplyDeliveryService
 import com.example.bot.support.SupportService
 import com.example.bot.support.TicketStatus
+import com.example.bot.testing.assertOwnedH2DatabaseClosed
 import com.example.bot.testing.createInitData
+import com.example.bot.testing.prepareOwnedH2Database
+import com.example.bot.testing.shutdownOwnedH2Database
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
-import com.example.bot.opschat.OpsDomainNotification
-import com.example.bot.opschat.OpsNotificationEvent
-import com.example.bot.opschat.OpsNotificationPublisher
-import io.ktor.client.request.post
 import io.ktor.client.request.get
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -37,7 +39,6 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
-import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -54,510 +55,288 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.junit.jupiter.api.Test
+import java.util.UUID
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class SupportGuestRoutesTest {
+class SupportGuestRoutesTest : SupportGuestRoutesFixture() {
+    @Test
+    fun `fixture releases its database when the application test fails`() {
+        var url = ""
+        val expected = IllegalStateException("synthetic support fixture failure")
+        val actual =
+            assertFailsWith<IllegalStateException> {
+                withSupportApp { context ->
+                    startApplication()
+                    url = context.database.url
+                    throw expected
+                }
+            }
+        assertEquals(expected.message, actual.message)
+        assertOwnedH2DatabaseClosed(url)
+    }
+
+    @Test
+    fun `fixture releases its database after application teardown`() {
+        var url = ""
+        withSupportApp { context ->
+            startApplication()
+            url = context.database.url
+            assertTrue(url.startsWith("jdbc:h2:mem:"))
+        }
+        assertOwnedH2DatabaseClosed(url)
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
-    fun `create ticket returns 201 and no-store headers`() = withSupportApp { context ->
-        val telegramId = 101L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
+    fun `create ticket returns 201 and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 101L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
 
-        val response =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
+            val response =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
                     "clubId":$clubId,
                     "topic":"booking",
                     "text":"Need help"
                 }""",
-                )
-            }
+                    )
+                }
 
-        assertEquals(HttpStatusCode.Created, response.status)
-        response.assertNoStoreHeaders()
-        val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertNotNull(payload["id"]?.jsonPrimitive?.long)
-        assertEquals(clubId, payload["clubId"]!!.jsonPrimitive.long)
-        assertEquals("booking", payload["topic"]!!.jsonPrimitive.content)
-        assertEquals("new", payload["status"]!!.jsonPrimitive.content)
-        assertTrue(payload["updatedAt"]!!.jsonPrimitive.content.isNotBlank())
-        assertEquals(1, context.opsPublisher.notifications.size)
-        val notification = context.opsPublisher.notifications.single()
-        assertEquals(clubId, notification.clubId)
-        assertEquals(OpsNotificationEvent.SUPPORT_QUESTION_CREATED, notification.event)
-    }
+            assertEquals(HttpStatusCode.Created, response.status)
+            response.assertNoStoreHeaders()
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertNotNull(payload["id"]?.jsonPrimitive?.long)
+            assertEquals(clubId, payload["clubId"]!!.jsonPrimitive.long)
+            assertEquals("booking", payload["topic"]!!.jsonPrimitive.content)
+            assertEquals("new", payload["status"]!!.jsonPrimitive.content)
+            assertTrue(payload["updatedAt"]!!.jsonPrimitive.content.isNotBlank())
+            assertEquals(1, context.opsPublisher.notifications.size)
+            val notification = context.opsPublisher.notifications.single()
+            assertEquals(clubId, notification.clubId)
+            assertEquals(OpsNotificationEvent.SUPPORT_QUESTION_CREATED, notification.event)
+        }
 
     @Test
-    fun `list my tickets returns ticket and no-store headers`() = withSupportApp { context ->
-        val telegramId = 202L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
+    fun `list my tickets returns ticket and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 202L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
 
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
+            val create =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
                     "clubId":$clubId,
                     "topic":"complaint",
                     "text":"Bad service"
                 }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
 
-        val response =
-            client.get("/api/support/tickets/my") {
-                withInitData(createInitData(userId = telegramId))
-            }
-
-        assertEquals(HttpStatusCode.OK, response.status)
-        response.assertNoStoreHeaders()
-        val items = json.parseToJsonElement(response.bodyAsText()).jsonArray
-        assertTrue(items.any { it.jsonObject["id"]!!.jsonPrimitive.long == ticketId })
-    }
-
-    @Test
-    fun `list my tickets without user returns 403 and no-store headers`() = withSupportApp {
-        val telegramId = 212L
-
-        val response =
-            client.get("/api/support/tickets/my") {
-                withInitData(createInitData(userId = telegramId))
-            }
-
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("forbidden", response.errorCode())
-    }
-
-    @Test
-    fun `add message returns 200 and no-store headers`() = withSupportApp { context ->
-        val telegramId = 303L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
-                    "clubId":$clubId,
-                    "topic":"other",
-                    "text":"Initial"
-                }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
-
-        val response =
-            client.post("/api/support/tickets/$ticketId/messages") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"More details","attachments":"[]"}""")
-            }
-
-        assertEquals(HttpStatusCode.OK, response.status)
-        response.assertNoStoreHeaders()
-        val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertEquals(ticketId, payload["ticketId"]!!.jsonPrimitive.long)
-        assertEquals("guest", payload["senderType"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `add message without user returns 403 and no-store headers`() = withSupportApp { context ->
-        val ownerTelegramId = 323L
-        val requesterTelegramId = 324L
-        insertUser(context.database, ownerTelegramId, "owner")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = ownerTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
-                    "clubId":$clubId,
-                    "topic":"other",
-                    "text":"Initial"
-                }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
-
-        val response =
-            client.post("/api/support/tickets/$ticketId/messages") {
-                withInitData(createInitData(userId = requesterTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Ping"}""")
-            }
-
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("forbidden", response.errorCode())
-    }
-
-    @Test
-    fun `add message to missing ticket returns 404 and no-store headers`() = withSupportApp { context ->
-        val telegramId = 313L
-        insertUser(context.database, telegramId, "guest")
-
-        val response =
-            client.post("/api/support/tickets/999999/messages") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Ping"}""")
-            }
-
-        assertEquals(HttpStatusCode.NotFound, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("support_ticket_not_found", response.errorCode())
-    }
-
-    @Test
-    fun `other user cannot add message`() = withSupportApp { context ->
-        val ownerTelegramId = 404L
-        val intruderTelegramId = 405L
-        insertUser(context.database, ownerTelegramId, "owner")
-        insertUser(context.database, intruderTelegramId, "intruder")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = ownerTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
-                    "clubId":$clubId,
-                    "topic":"invite",
-                    "text":"Issue"
-                }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
-
-        val response =
-            client.post("/api/support/tickets/$ticketId/messages") {
-                withInitData(createInitData(userId = intruderTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Hacked"}""")
-            }
-
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("support_ticket_forbidden", response.errorCode())
-    }
-
-    @Test
-    fun `closed ticket blocks guest message`() = withSupportApp { context ->
-        val telegramId = 505L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
-                    "clubId":$clubId,
-                    "topic":"dresscode",
-                    "text":"Question"
-                }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
-
-        seedTicketStatus(context.database, ticketId, TicketStatus.CLOSED)
-
-        val response =
-            client.post("/api/support/tickets/$ticketId/messages") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Ping"}""")
-            }
-
-        assertEquals(HttpStatusCode.Conflict, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("support_ticket_closed", response.errorCode())
-    }
-
-    @Test
-    fun `create ticket without user returns 403 and no-store headers`() = withSupportApp { context ->
-        val telegramId = 605L
-        val clubId = insertClub(context.database, "Test Club")
-
-        val response =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
-                    "clubId":$clubId,
-                    "topic":"booking",
-                    "text":"Need help"
-                }""",
-                )
-            }
-
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("forbidden", response.errorCode())
-    }
-
-    @Test
-    fun `create ticket rejects invalid json`() = withSupportApp { context ->
-        val telegramId = 606L
-        insertUser(context.database, telegramId, "guest")
-
-        val response =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody("{")
-            }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("invalid_json", response.errorCode())
-    }
-
-    @Test
-    fun `add message rejects invalid json`() = withSupportApp { context ->
-        val telegramId = 707L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
-                    "clubId":$clubId,
-                    "topic":"other",
-                    "text":"Initial"
-                }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
-
-        val response =
-            client.post("/api/support/tickets/$ticketId/messages") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody("{")
-            }
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("invalid_json", response.errorCode())
-    }
-
-    @Test
-    fun `create ticket validation errors return 400`() = withSupportApp { context ->
-        val telegramId = 808L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val requests =
-            listOf(
-                """{"clubId":$clubId,"topic":"booking","text":"   "}""",
-                """{"clubId":$clubId,"topic":"booking","text":"${"a".repeat(2001)}"}""",
-                """{"clubId":$clubId,"topic":"invalid","text":"Help"}""",
-            )
-
-        requests.forEach { body ->
             val response =
+                client.get("/api/support/tickets/my") {
+                    withInitData(createInitData(userId = telegramId))
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            response.assertNoStoreHeaders()
+            val items = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertTrue(items.any { it.jsonObject["id"]!!.jsonPrimitive.long == ticketId })
+        }
+
+    @Test
+    fun `list my tickets without user returns 403 and no-store headers`() =
+        withSupportApp {
+            val telegramId = 212L
+
+            val response =
+                client.get("/api/support/tickets/my") {
+                    withInitData(createInitData(userId = telegramId))
+                }
+
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("forbidden", response.errorCode())
+        }
+
+    @Test
+    fun `add message returns 200 and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 303L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val create =
                 client.post("/api/support/tickets") {
                     withInitData(createInitData(userId = telegramId))
                     contentType(ContentType.Application.Json)
-                    setBody(body)
-                }
-
-            assertEquals(HttpStatusCode.BadRequest, response.status)
-            response.assertNoStoreHeaders()
-            assertEquals("validation_error", response.errorCode())
-        }
-        assertTrue(context.opsPublisher.notifications.isEmpty())
-    }
-
-    @Test
-    fun `add message validation errors return 400`() = withSupportApp { context ->
-        val telegramId = 909L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
+                    setBody(
+                        """{
                     "clubId":$clubId,
                     "topic":"other",
                     "text":"Initial"
                 }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
 
-        val requests =
-            listOf(
-                """{"text":"   "}""",
-                """{"text":"${"a".repeat(2001)}"}""",
-            )
-
-        requests.forEach { body ->
             val response =
                 client.post("/api/support/tickets/$ticketId/messages") {
                     withInitData(createInitData(userId = telegramId))
                     contentType(ContentType.Application.Json)
-                    setBody(body)
+                    setBody("""{"text":"More details","attachments":"[]"}""")
                 }
 
-            assertEquals(HttpStatusCode.BadRequest, response.status)
+            assertEquals(HttpStatusCode.OK, response.status)
             response.assertNoStoreHeaders()
-            assertEquals("validation_error", response.errorCode())
+            val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals(ticketId, payload["ticketId"]!!.jsonPrimitive.long)
+            assertEquals("guest", payload["senderType"]!!.jsonPrimitive.content)
         }
-    }
 
     @Test
-    fun `create ticket missing fields return 400`() = withSupportApp { context ->
-        val telegramId = 910L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
+    fun `add message without user returns 403 and no-store headers`() =
+        withSupportApp { context ->
+            val ownerTelegramId = 323L
+            val requesterTelegramId = 324L
+            insertUser(context.database, ownerTelegramId, "owner")
+            val clubId = insertClub(context.database, "Test Club")
 
-        val requests =
-            listOf(
-                """{"topic":"booking","text":"Need help"}""",
-                """{"clubId":$clubId,"text":"Need help"}""",
-                """{"clubId":$clubId,"topic":"booking"}""",
-            )
-
-        requests.forEach { body ->
-            val response =
+            val create =
                 client.post("/api/support/tickets") {
-                    withInitData(createInitData(userId = telegramId))
+                    withInitData(createInitData(userId = ownerTelegramId))
                     contentType(ContentType.Application.Json)
-                    setBody(body)
-                }
-
-            assertEquals(HttpStatusCode.BadRequest, response.status)
-            response.assertNoStoreHeaders()
-            assertEquals("validation_error", response.errorCode())
-        }
-    }
-
-    @Test
-    fun `add message missing text returns 400`() = withSupportApp { context ->
-        val telegramId = 911L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
-
-        val create =
-            client.post("/api/support/tickets") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
+                    setBody(
+                        """{
                     "clubId":$clubId,
                     "topic":"other",
                     "text":"Initial"
                 }""",
-                )
-            }
-        val ticketId = json.parseToJsonElement(create.bodyAsText()).jsonObject["id"]!!.jsonPrimitive.long
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
 
-        val response =
-            client.post("/api/support/tickets/$ticketId/messages") {
-                withInitData(createInitData(userId = telegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"attachments":"[]"}""")
-            }
+            val response =
+                client.post("/api/support/tickets/$ticketId/messages") {
+                    withInitData(createInitData(userId = requesterTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Ping"}""")
+                }
 
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("validation_error", response.errorCode())
-    }
-
-    @Test
-    fun `list my tickets returns empty array for new user`() = withSupportApp { context ->
-        val telegramId = 912L
-        insertUser(context.database, telegramId, "guest")
-
-        val response =
-            client.get("/api/support/tickets/my") {
-                withInitData(createInitData(userId = telegramId))
-            }
-
-        assertEquals(HttpStatusCode.OK, response.status)
-        response.assertNoStoreHeaders()
-        val items = json.parseToJsonElement(response.bodyAsText()).jsonArray
-        assertEquals(0, items.size)
-    }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("forbidden", response.errorCode())
+        }
 
     @Test
-    fun `missing init data returns 401 and no-store headers`() = withSupportApp { context ->
-        val telegramId = 1001L
-        insertUser(context.database, telegramId, "guest")
-        val clubId = insertClub(context.database, "Test Club")
+    fun `add message to missing ticket returns 404 and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 313L
+            insertUser(context.database, telegramId, "guest")
 
-        val response =
-            client.post("/api/support/tickets") {
-                contentType(ContentType.Application.Json)
-                setBody(
-                    """{
+            val response =
+                client.post("/api/support/tickets/999999/messages") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Ping"}""")
+                }
+
+            assertEquals(HttpStatusCode.NotFound, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("support_ticket_not_found", response.errorCode())
+        }
+
+    @Test
+    fun `other user cannot add message`() =
+        withSupportApp { context ->
+            val ownerTelegramId = 404L
+            val intruderTelegramId = 405L
+            insertUser(context.database, ownerTelegramId, "owner")
+            insertUser(context.database, intruderTelegramId, "intruder")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val create =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = ownerTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
                     "clubId":$clubId,
-                    "topic":"booking",
-                    "text":"Need help"
+                    "topic":"invite",
+                    "text":"Issue"
                 }""",
-                )
-            }
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
 
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("unauthorized", response.errorCode())
-    }
+            val response =
+                client.post("/api/support/tickets/$ticketId/messages") {
+                    withInitData(createInitData(userId = intruderTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Hacked"}""")
+                }
 
-    @Test
-    fun `list my tickets without init data returns 401 and no-store headers`() = withSupportApp {
-        val response = client.get("/api/support/tickets/my")
-
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("unauthorized", response.errorCode())
-    }
-
-    @Test
-    fun `add message without init data returns 401 and no-store headers`() = withSupportApp {
-        val response =
-            client.post("/api/support/tickets/1/messages") {
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Ping"}""")
-            }
-
-        assertEquals(HttpStatusCode.Unauthorized, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("unauthorized", response.errorCode())
-    }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("support_ticket_forbidden", response.errorCode())
+        }
 
     @Test
-    fun `add message invalid ticket id returns 400 and no-store headers`() = withSupportApp { context ->
-        val telegramId = 1101L
-        insertUser(context.database, telegramId, "guest")
+    fun `closed ticket blocks guest message`() =
+        withSupportApp { context ->
+            val telegramId = 505L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
 
-        val invalidIds = listOf("abc", "0")
-        invalidIds.forEach { ticketId ->
+            val create =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
+                    "clubId":$clubId,
+                    "topic":"dresscode",
+                    "text":"Question"
+                }""",
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
+
+            seedTicketStatus(context.database, ticketId, TicketStatus.CLOSED)
+
             val response =
                 client.post("/api/support/tickets/$ticketId/messages") {
                     withInitData(createInitData(userId = telegramId))
@@ -565,88 +344,397 @@ class SupportGuestRoutesTest {
                     setBody("""{"text":"Ping"}""")
                 }
 
-            assertEquals(HttpStatusCode.BadRequest, response.status)
+            assertEquals(HttpStatusCode.Conflict, response.status)
             response.assertNoStoreHeaders()
-            assertEquals("validation_error", response.errorCode())
+            assertEquals("support_ticket_closed", response.errorCode())
         }
-    }
 
     @Test
-    fun `create ticket invalid club id returns 400 and no-store headers`() = withSupportApp { context ->
-        val telegramId = 1201L
-        insertUser(context.database, telegramId, "guest")
+    fun `create ticket without user returns 403 and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 605L
+            val clubId = insertClub(context.database, "Test Club")
 
-        val invalidClubIds = listOf(0, -1)
-        invalidClubIds.forEach { clubId ->
             val response =
                 client.post("/api/support/tickets") {
                     withInitData(createInitData(userId = telegramId))
                     contentType(ContentType.Application.Json)
                     setBody(
                         """{
-                        "clubId":$clubId,
-                        "topic":"booking",
-                        "text":"Need help"
-                    }""",
+                    "clubId":$clubId,
+                    "topic":"booking",
+                    "text":"Need help"
+                }""",
                     )
+                }
+
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("forbidden", response.errorCode())
+        }
+
+    @Test
+    fun `create ticket rejects invalid json`() =
+        withSupportApp { context ->
+            val telegramId = 606L
+            insertUser(context.database, telegramId, "guest")
+
+            val response =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("{")
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("invalid_json", response.errorCode())
+        }
+
+    @Test
+    fun `add message rejects invalid json`() =
+        withSupportApp { context ->
+            val telegramId = 707L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val create =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
+                    "clubId":$clubId,
+                    "topic":"other",
+                    "text":"Initial"
+                }""",
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
+
+            val response =
+                client.post("/api/support/tickets/$ticketId/messages") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("{")
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("invalid_json", response.errorCode())
+        }
+
+    @Test
+    fun `create ticket validation errors return 400`() =
+        withSupportApp { context ->
+            val telegramId = 808L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val requests =
+                listOf(
+                    """{"clubId":$clubId,"topic":"booking","text":"   "}""",
+                    """{"clubId":$clubId,"topic":"booking","text":"${"a".repeat(2001)}"}""",
+                    """{"clubId":$clubId,"topic":"invalid","text":"Help"}""",
+                )
+
+            requests.forEach { body ->
+                val response =
+                    client.post("/api/support/tickets") {
+                        withInitData(createInitData(userId = telegramId))
+                        contentType(ContentType.Application.Json)
+                        setBody(body)
+                    }
+
+                assertEquals(HttpStatusCode.BadRequest, response.status)
+                response.assertNoStoreHeaders()
+                assertEquals("validation_error", response.errorCode())
+            }
+            assertTrue(context.opsPublisher.notifications.isEmpty())
+        }
+
+    @Test
+    fun `add message validation errors return 400`() =
+        withSupportApp { context ->
+            val telegramId = 909L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val create =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
+                    "clubId":$clubId,
+                    "topic":"other",
+                    "text":"Initial"
+                }""",
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
+
+            val requests =
+                listOf(
+                    """{"text":"   "}""",
+                    """{"text":"${"a".repeat(2001)}"}""",
+                )
+
+            requests.forEach { body ->
+                val response =
+                    client.post("/api/support/tickets/$ticketId/messages") {
+                        withInitData(createInitData(userId = telegramId))
+                        contentType(ContentType.Application.Json)
+                        setBody(body)
+                    }
+
+                assertEquals(HttpStatusCode.BadRequest, response.status)
+                response.assertNoStoreHeaders()
+                assertEquals("validation_error", response.errorCode())
+            }
+        }
+
+    @Test
+    fun `create ticket missing fields return 400`() =
+        withSupportApp { context ->
+            val telegramId = 910L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val requests =
+                listOf(
+                    """{"topic":"booking","text":"Need help"}""",
+                    """{"clubId":$clubId,"text":"Need help"}""",
+                    """{"clubId":$clubId,"topic":"booking"}""",
+                )
+
+            requests.forEach { body ->
+                val response =
+                    client.post("/api/support/tickets") {
+                        withInitData(createInitData(userId = telegramId))
+                        contentType(ContentType.Application.Json)
+                        setBody(body)
+                    }
+
+                assertEquals(HttpStatusCode.BadRequest, response.status)
+                response.assertNoStoreHeaders()
+                assertEquals("validation_error", response.errorCode())
+            }
+        }
+
+    @Test
+    fun `add message missing text returns 400`() =
+        withSupportApp { context ->
+            val telegramId = 911L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val create =
+                client.post("/api/support/tickets") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
+                    "clubId":$clubId,
+                    "topic":"other",
+                    "text":"Initial"
+                }""",
+                    )
+                }
+            val ticketId =
+                json
+                    .parseToJsonElement(create.bodyAsText())
+                    .jsonObject["id"]!!
+                    .jsonPrimitive.long
+
+            val response =
+                client.post("/api/support/tickets/$ticketId/messages") {
+                    withInitData(createInitData(userId = telegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"attachments":"[]"}""")
                 }
 
             assertEquals(HttpStatusCode.BadRequest, response.status)
             response.assertNoStoreHeaders()
             assertEquals("validation_error", response.errorCode())
         }
-    }
 
-    private data class DbSetup(
+    @Test
+    fun `list my tickets returns empty array for new user`() =
+        withSupportApp { context ->
+            val telegramId = 912L
+            insertUser(context.database, telegramId, "guest")
+
+            val response =
+                client.get("/api/support/tickets/my") {
+                    withInitData(createInitData(userId = telegramId))
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            response.assertNoStoreHeaders()
+            val items = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertEquals(0, items.size)
+        }
+
+    @Test
+    fun `missing init data returns 401 and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 1001L
+            insertUser(context.database, telegramId, "guest")
+            val clubId = insertClub(context.database, "Test Club")
+
+            val response =
+                client.post("/api/support/tickets") {
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        """{
+                    "clubId":$clubId,
+                    "topic":"booking",
+                    "text":"Need help"
+                }""",
+                    )
+                }
+
+            assertEquals(HttpStatusCode.Unauthorized, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("unauthorized", response.errorCode())
+        }
+
+    @Test
+    fun `list my tickets without init data returns 401 and no-store headers`() =
+        withSupportApp {
+            val response = client.get("/api/support/tickets/my")
+
+            assertEquals(HttpStatusCode.Unauthorized, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("unauthorized", response.errorCode())
+        }
+
+    @Test
+    fun `add message without init data returns 401 and no-store headers`() =
+        withSupportApp {
+            val response =
+                client.post("/api/support/tickets/1/messages") {
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Ping"}""")
+                }
+
+            assertEquals(HttpStatusCode.Unauthorized, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("unauthorized", response.errorCode())
+        }
+
+    @Test
+    fun `add message invalid ticket id returns 400 and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 1101L
+            insertUser(context.database, telegramId, "guest")
+
+            val invalidIds = listOf("abc", "0")
+            invalidIds.forEach { ticketId ->
+                val response =
+                    client.post("/api/support/tickets/$ticketId/messages") {
+                        withInitData(createInitData(userId = telegramId))
+                        contentType(ContentType.Application.Json)
+                        setBody("""{"text":"Ping"}""")
+                    }
+
+                assertEquals(HttpStatusCode.BadRequest, response.status)
+                response.assertNoStoreHeaders()
+                assertEquals("validation_error", response.errorCode())
+            }
+        }
+
+    @Test
+    fun `create ticket invalid club id returns 400 and no-store headers`() =
+        withSupportApp { context ->
+            val telegramId = 1201L
+            insertUser(context.database, telegramId, "guest")
+
+            val invalidClubIds = listOf(0, -1)
+            invalidClubIds.forEach { clubId ->
+                val response =
+                    client.post("/api/support/tickets") {
+                        withInitData(createInitData(userId = telegramId))
+                        contentType(ContentType.Application.Json)
+                        setBody(
+                            """{
+                        "clubId":$clubId,
+                        "topic":"booking",
+                        "text":"Need help"
+                    }""",
+                        )
+                    }
+
+                assertEquals(HttpStatusCode.BadRequest, response.status)
+                response.assertNoStoreHeaders()
+                assertEquals("validation_error", response.errorCode())
+            }
+        }
+}
+
+open class SupportGuestRoutesFixture {
+    protected data class DbSetup(
         val dataSource: JdbcDataSource,
         val database: Database,
-    )
+    ) : AutoCloseable {
+        override fun close() = shutdownOwnedH2Database(dataSource, database)
+    }
 
-    private data class TestContext(
+    protected data class TestContext(
         val database: Database,
         val supportService: SupportService,
         val opsPublisher: RecordingOpsPublisher,
     )
 
-    private fun withSupportApp(block: suspend ApplicationTestBuilder.(TestContext) -> Unit) =
-        testApplication {
-            val setup = prepareDatabase()
-            val supportRepository = SupportRepository(setup.database)
-            val supportService = SupportServiceImpl(supportRepository)
-            val userRepository = ExposedUserRepository(setup.database)
-            val userRoleRepository = StubUserRoleRepository()
-            val opsPublisher = RecordingOpsPublisher()
-            application {
-                install(ContentNegotiation) { json() }
-                install(RbacPlugin) {
-                    this.userRepository = userRepository
-                    this.userRoleRepository = userRoleRepository
-                    this.auditLogRepository = AuditLogRepositoryImpl(setup.database)
-                    principalExtractor = { call ->
-                        if (call.attributes.contains(MiniAppUserKey)) {
-                            val principal = call.attributes[MiniAppUserKey]
-                            TelegramPrincipal(principal.id, principal.username)
-                        } else {
-                            null
+    protected fun withSupportApp(block: suspend ApplicationTestBuilder.(TestContext) -> Unit) =
+        prepareDatabase().use { setup ->
+            testApplication {
+                val supportRepository = SupportRepository(setup.database)
+                val supportService = SupportServiceImpl(supportRepository)
+                val userRepository = ExposedUserRepository(setup.database)
+                val userRoleRepository = StubUserRoleRepository()
+                val opsPublisher = RecordingOpsPublisher()
+                application {
+                    install(ContentNegotiation) { json() }
+                    install(RbacPlugin) {
+                        this.userRepository = userRepository
+                        this.userRoleRepository = userRoleRepository
+                        this.auditLogRepository = AuditLogRepositoryImpl(setup.database)
+                        principalExtractor = { call ->
+                            if (call.attributes.contains(MiniAppUserKey)) {
+                                val principal = call.attributes[MiniAppUserKey]
+                                TelegramPrincipal(principal.id, principal.username)
+                            } else {
+                                null
+                            }
                         }
                     }
+                    supportRoutes(
+                        supportService = supportService,
+                        staffSupportReadService = supportService,
+                        userRepository = userRepository,
+                        userRolePermissionRepository = ExposedUserRolePermissionRepository(setup.database),
+                        clubsRepository = ClubsDbRepository(setup.database),
+                        supportReplyDeliveryService =
+                            SupportReplyDeliveryService { SupportReplyDeliveryOutcome.PersistenceFailure },
+                        opsPublisher = opsPublisher,
+                        botTokenProvider = { TEST_BOT_TOKEN },
+                    )
                 }
-                supportRoutes(
-                    supportService = supportService,
-                    staffSupportReadService = supportService,
-                    userRepository = userRepository,
-                    userRolePermissionRepository = ExposedUserRolePermissionRepository(setup.database),
-                    clubsRepository = ClubsDbRepository(setup.database),
-                    supportReplyDeliveryService =
-                        SupportReplyDeliveryService { SupportReplyDeliveryOutcome.PersistenceFailure },
-                    opsPublisher = opsPublisher,
-                    botTokenProvider = { TEST_BOT_TOKEN },
-                )
+                block(TestContext(setup.database, supportService, opsPublisher))
             }
-            block(TestContext(setup.database, supportService, opsPublisher))
         }
 
-    private fun prepareDatabase(): DbSetup {
+    protected fun prepareDatabase(): DbSetup {
         val dbName = "support_routes_${UUID.randomUUID()}"
         val dataSource =
             JdbcDataSource().apply {
@@ -654,17 +742,19 @@ class SupportGuestRoutesTest {
                 user = "sa"
                 password = ""
             }
-        Flyway
-            .configure()
-            .dataSource(dataSource)
-            .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-            .load()
-            .migrate()
-        val database = Database.connect(dataSource)
-        return DbSetup(dataSource = dataSource, database = database)
+        return prepareOwnedH2Database(dataSource) { register ->
+            Flyway
+                .configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration/common", "classpath:db/migration/h2")
+                .load()
+                .migrate()
+            val database = Database.connect(dataSource).also(register)
+            DbSetup(dataSource = dataSource, database = database)
+        }
     }
 
-    private fun insertUser(
+    protected fun insertUser(
         database: Database,
         telegramUserId: Long,
         username: String,
@@ -680,7 +770,7 @@ class SupportGuestRoutesTest {
                 .single()[UsersTable.id]
         }
 
-    private fun insertClub(
+    protected fun insertClub(
         database: Database,
         name: String,
     ): Long =
@@ -698,7 +788,7 @@ class SupportGuestRoutesTest {
                 .single()[ClubsTable.id]
         }
 
-    private fun seedTicketStatus(
+    protected fun seedTicketStatus(
         database: Database,
         ticketId: Long,
         status: TicketStatus,
@@ -712,7 +802,7 @@ class SupportGuestRoutesTest {
         }
     }
 
-    private object UsersTable : Table("users") {
+    protected object UsersTable : Table("users") {
         val id = long("id").autoIncrement()
         val telegramUserId = long("telegram_user_id").nullable()
         val username = text("username").nullable()
@@ -721,7 +811,7 @@ class SupportGuestRoutesTest {
         override val primaryKey = PrimaryKey(id)
     }
 
-    private object ClubsTable : Table("clubs") {
+    protected object ClubsTable : Table("clubs") {
         val id = long("id").autoIncrement()
         val name = text("name")
         val description = text("description").nullable()
@@ -733,14 +823,14 @@ class SupportGuestRoutesTest {
         override val primaryKey = PrimaryKey(id)
     }
 
-    private suspend fun HttpResponse.errorCode(): String {
+    protected suspend fun HttpResponse.errorCode(): String {
         val raw = bodyAsText()
         val parsed = runCatching { Json.parseToJsonElement(raw).jsonObject.errorCodeOrNull() }.getOrNull()
         val extracted = Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(raw)?.groupValues?.getOrNull(1)
         return parsed ?: extracted ?: raw
     }
 
-    private fun JsonObject.errorCodeOrNull(): String? {
+    protected fun JsonObject.errorCodeOrNull(): String? {
         val code = this["code"] as? JsonPrimitive
         if (code != null) {
             return code.content
@@ -751,18 +841,18 @@ class SupportGuestRoutesTest {
         return nestedCode ?: legacyCode
     }
 
-    private fun HttpResponse.assertNoStoreHeaders() {
+    protected fun HttpResponse.assertNoStoreHeaders() {
         assertEquals("no-store", headers[HttpHeaders.CacheControl])
         assertEquals("X-Telegram-Init-Data", headers[HttpHeaders.Vary])
     }
 
-    private class StubUserRoleRepository : UserRoleRepository {
+    protected class StubUserRoleRepository : UserRoleRepository {
         override suspend fun listRoles(userId: Long): Set<Role> = emptySet()
 
         override suspend fun listClubIdsFor(userId: Long): Set<Long> = emptySet()
     }
 
-    private class RecordingOpsPublisher : OpsNotificationPublisher {
+    protected class RecordingOpsPublisher : OpsNotificationPublisher {
         val notifications = mutableListOf<OpsDomainNotification>()
 
         override fun enqueue(notification: OpsDomainNotification) {
