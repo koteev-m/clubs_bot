@@ -9,6 +9,8 @@ import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.installPrivateClubContainment
 import com.example.bot.plugins.overrideMiniAppValidatorForTesting
 import com.example.bot.plugins.resetMiniAppValidator
+import com.example.bot.testing.prepareOwnedH2Database
+import com.example.bot.testing.shutdownOwnedH2Database
 import com.example.bot.webapp.WebAppInitDataTestHelper
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
@@ -82,7 +84,7 @@ class LegacyBookingWebAppAuthTest {
         } finally {
             TransactionManager.defaultDatabase = previousDefaultDatabase
             TransactionManager.resetCurrent(previousManager)
-            TransactionManager.closeAndUnregister(fixture.database)
+            fixture.close()
         }
     }
 
@@ -612,7 +614,7 @@ class LegacyBookingWebAppAuthTest {
             } finally {
                 TransactionManager.defaultDatabase = fixture.database
                 TransactionManager.resetCurrent(fixtureManager)
-                TransactionManager.closeAndUnregister(secondFixture.database)
+                secondFixture.close()
             }
         }
 
@@ -651,15 +653,17 @@ class LegacyBookingWebAppAuthTest {
 
     private fun createLegacyDatabaseFixture(): LegacyDatabaseFixture {
         val dataSource = schemaDataSource()
-        val database = Database.connect(dataSource)
-        return LegacyDatabaseFixture(
-            dataSource = dataSource,
-            database = database,
-            identity = database.url,
-        )
+        return prepareOwnedH2Database(dataSource) { register ->
+            val database = Database.connect(dataSource).also(register)
+            LegacyDatabaseFixture(
+                dataSource = dataSource,
+                database = database,
+                identity = database.url,
+            )
+        }
     }
 
-    private fun schemaDataSource(): DataSource {
+    private fun schemaDataSource(): JdbcDataSource {
         val dataSource =
             JdbcDataSource().apply {
                 setURL(
@@ -668,92 +672,94 @@ class LegacyBookingWebAppAuthTest {
                 user = "sa"
                 password = ""
             }
-        dataSource.connection.use { connection ->
-            connection.createStatement().use { statement ->
-                statement.execute(
-                    """
-                    CREATE TABLE clubs (
-                        id BIGINT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        description TEXT NULL,
-                        timezone TEXT NOT NULL
+        return prepareOwnedH2Database(dataSource) { _ ->
+            dataSource.connection.use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        """
+                        CREATE TABLE clubs (
+                            id BIGINT PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            description TEXT NULL,
+                            timezone TEXT NOT NULL
+                        )
+                        """.trimIndent(),
                     )
-                    """.trimIndent(),
-                )
-                statement.execute(
-                    "CREATE TABLE client_clubs (club_id BIGINT PRIMARY KEY REFERENCES clubs(id))",
-                )
-                statement.execute(
-                    """
-                    CREATE TABLE events (
-                        id BIGINT PRIMARY KEY,
-                        club_id BIGINT NOT NULL REFERENCES clubs(id),
-                        title TEXT NULL,
-                        start_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        end_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        is_special BOOLEAN NOT NULL DEFAULT FALSE
+                    statement.execute(
+                        "CREATE TABLE client_clubs (club_id BIGINT PRIMARY KEY REFERENCES clubs(id))",
                     )
-                    """.trimIndent(),
-                )
-                statement.execute(
-                    """
-                    CREATE TABLE tables (
-                        id BIGINT PRIMARY KEY,
-                        club_id BIGINT NOT NULL REFERENCES clubs(id),
-                        zone_id BIGINT NULL,
-                        table_number INT NOT NULL,
-                        capacity INT NOT NULL,
-                        min_deposit NUMERIC(12,2) NOT NULL,
-                        active BOOLEAN NOT NULL DEFAULT TRUE
+                    statement.execute(
+                        """
+                        CREATE TABLE events (
+                            id BIGINT PRIMARY KEY,
+                            club_id BIGINT NOT NULL REFERENCES clubs(id),
+                            title TEXT NULL,
+                            start_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                            end_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                            is_special BOOLEAN NOT NULL DEFAULT FALSE
+                        )
+                        """.trimIndent(),
                     )
-                    """.trimIndent(),
-                )
-                statement.execute(
-                    """
-                    CREATE TABLE users (
-                        id BIGINT PRIMARY KEY,
-                        telegram_user_id BIGINT UNIQUE,
-                        username TEXT NULL,
-                        display_name TEXT NULL,
-                        phone_e164 TEXT NULL,
-                        encrypted_phone TEXT NULL,
-                        phone_hash VARCHAR(64) NULL,
-                        anonymized_at TIMESTAMP WITH TIME ZONE NULL
+                    statement.execute(
+                        """
+                        CREATE TABLE tables (
+                            id BIGINT PRIMARY KEY,
+                            club_id BIGINT NOT NULL REFERENCES clubs(id),
+                            zone_id BIGINT NULL,
+                            table_number INT NOT NULL,
+                            capacity INT NOT NULL,
+                            min_deposit NUMERIC(12,2) NOT NULL,
+                            active BOOLEAN NOT NULL DEFAULT TRUE
+                        )
+                        """.trimIndent(),
                     )
-                    """.trimIndent(),
-                )
-                statement.execute(
-                    """
-                    CREATE TABLE bookings (
-                        id UUID PRIMARY KEY,
-                        event_id BIGINT NOT NULL REFERENCES events(id),
-                        club_id BIGINT NOT NULL REFERENCES clubs(id),
-                        table_id BIGINT NOT NULL REFERENCES tables(id),
-                        table_number INT NOT NULL,
-                        guest_user_id BIGINT NULL REFERENCES users(id),
-                        guest_name TEXT NULL,
-                        phone_e164 TEXT NULL,
-                        encrypted_phone TEXT NULL,
-                        phone_hash VARCHAR(64) NULL,
-                        anonymized_at TIMESTAMP WITH TIME ZONE NULL,
-                        promoter_user_id BIGINT NULL REFERENCES users(id),
-                        guests_count INT NOT NULL,
-                        min_deposit NUMERIC(12,2) NOT NULL,
-                        total_deposit NUMERIC(12,2) NOT NULL,
-                        slot_start TIMESTAMP WITH TIME ZONE NOT NULL,
-                        slot_end TIMESTAMP WITH TIME ZONE NOT NULL,
-                        arrival_by TIMESTAMP WITH TIME ZONE NULL,
-                        status TEXT NOT NULL,
-                        qr_secret VARCHAR(64) NOT NULL UNIQUE,
-                        idempotency_key TEXT NOT NULL UNIQUE,
-                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+                    statement.execute(
+                        """
+                        CREATE TABLE users (
+                            id BIGINT PRIMARY KEY,
+                            telegram_user_id BIGINT UNIQUE,
+                            username TEXT NULL,
+                            display_name TEXT NULL,
+                            phone_e164 TEXT NULL,
+                            encrypted_phone TEXT NULL,
+                            phone_hash VARCHAR(64) NULL,
+                            anonymized_at TIMESTAMP WITH TIME ZONE NULL
+                        )
+                        """.trimIndent(),
                     )
-                    """.trimIndent(),
-                )
+                    statement.execute(
+                        """
+                        CREATE TABLE bookings (
+                            id UUID PRIMARY KEY,
+                            event_id BIGINT NOT NULL REFERENCES events(id),
+                            club_id BIGINT NOT NULL REFERENCES clubs(id),
+                            table_id BIGINT NOT NULL REFERENCES tables(id),
+                            table_number INT NOT NULL,
+                            guest_user_id BIGINT NULL REFERENCES users(id),
+                            guest_name TEXT NULL,
+                            phone_e164 TEXT NULL,
+                            encrypted_phone TEXT NULL,
+                            phone_hash VARCHAR(64) NULL,
+                            anonymized_at TIMESTAMP WITH TIME ZONE NULL,
+                            promoter_user_id BIGINT NULL REFERENCES users(id),
+                            guests_count INT NOT NULL,
+                            min_deposit NUMERIC(12,2) NOT NULL,
+                            total_deposit NUMERIC(12,2) NOT NULL,
+                            slot_start TIMESTAMP WITH TIME ZONE NOT NULL,
+                            slot_end TIMESTAMP WITH TIME ZONE NOT NULL,
+                            arrival_by TIMESTAMP WITH TIME ZONE NULL,
+                            status TEXT NOT NULL,
+                            qr_secret VARCHAR(64) NOT NULL UNIQUE,
+                            idempotency_key TEXT NOT NULL UNIQUE,
+                            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                            updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+                        )
+                        """.trimIndent(),
+                    )
+                }
             }
+            dataSource
         }
-        return dataSource
     }
 
     private fun seedLegacyBookingData(database: Database) {
@@ -1023,10 +1029,12 @@ class LegacyBookingWebAppAuthTest {
     }
 
     private data class LegacyDatabaseFixture(
-        val dataSource: DataSource,
+        val dataSource: JdbcDataSource,
         val database: Database,
         val identity: String,
-    )
+    ) : AutoCloseable {
+        override fun close() = shutdownOwnedH2Database(dataSource, database)
+    }
 
     private class FixtureDatabaseContext(
         private val fixtureManager: TransactionManager,

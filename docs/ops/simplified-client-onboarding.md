@@ -2,6 +2,41 @@
 
 ## Release-cycle preparation — 2026-10-29
 
+### Second PR CI correction — 2026-10-29
+
+At head `3a086b158f14faa75f816fbce0e5132048d7567b`, Lint `40909059412`
+(including required lint/release-state), Secret Scan `40909059206`, Security Scan
+`40909059324`, SCA `40909059297`, static-check and PR image build passed. Coverage
+`40909059334` and Build & Static `40909059197` still failed with heap exhaustion;
+Tests `40909059313` and build `40909059225` were CANCELLED, Smoke remained pending.
+Five bounded reads were used in that CI cycle; no aggregate PASS or merge is claimed.
+Latest observed main remains `c0df96b520e4e1f6bfe97a27ce7b17546d694505`.
+
+A single bounded 512 MiB app-bot diagnostic reproduced OOM; heap before cleanup was
+521,952/524,288 KiB. Its private dump identified 183 H2 Database instances, all
+closeDelay=-1, strongly owned by Engine.DATABASES. H2 classes/arrays contained
+243,419,335 serialized payload bytes, not a retained-size calculation. Public synthetic
+prefix attribution found four old fixture families responsible for 121 databases;
+the new onboarding/client fixtures were absent. Heap contents were not uploaded.
+The historical PID 84187 incident is not independently reconstructed by this new dump.
+
+Test-only correction closes exact owned H2/Exposed resources after testApplication,
+including setup failure, cancellation and a secondary legacy fixture. Existing SQL,
+request bodies and expected outcomes are preserved. Two real fixture lifecycle tests
+fail before/pass after; setup/cancellation tests preserve an independent control DB
+and manager. Independent review's setup-failure registration finding was fixed and
+re-reviewed; no open substantive findings. Six affected test files only; production,
+build configuration, V064 and deployment workflows unchanged in this correction.
+An unsuccessful forkEvery=20 experiment was removed and is not in the candidate.
+
+Final bounded app-bot check at unchanged 512 MiB: 965/965 tests, detektTest,
+ktlintCheck, jacocoTestReport and jacocoTestCoverageVerification PASS; controller exit0,
+123.079 seconds, owned cleanup verified. Earlier focused 148/148 passed. Formatting
+and fixture-class extraction satisfy the existing static gates without suppression.
+Evidence `/private/tmp/clb-release-evidence/h2-cleanup-final-checks.json` and
+`h2-full-app-after/`; broader Linux checks remain required on the next head SHA.
+No merge, normal Docker Publish, stage dispatch, secrets or server changes occurred.
+
 ### First PR CI correction — 2026-10-29
 
 PR [#555](https://github.com/koteev-m/clubs_bot/pull/555), initial ordinary push

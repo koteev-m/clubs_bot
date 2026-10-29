@@ -28,7 +28,10 @@ import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.TicketStatus
 import com.example.bot.support.TicketTopic
+import com.example.bot.testing.assertOwnedH2DatabaseClosed
 import com.example.bot.testing.createInitData
+import com.example.bot.testing.prepareOwnedH2Database
+import com.example.bot.testing.shutdownOwnedH2Database
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
 import com.pengrad.telegrambot.request.BaseRequest
@@ -53,7 +56,6 @@ import io.ktor.server.testing.testApplication
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -73,6 +75,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
+import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -83,26 +86,38 @@ private const val SUPPORT_STAFF_CANCELLATION_PROPAGATED_HEADER = "X-Support-Staf
 
 class SupportAdminRoutesTest : SupportAdminRoutesFixture() {
     @Test
-    fun `admin list tickets ok`() = withSupportAdminApp { context ->
-        val adminTelegramId = 201L
-        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
-        val clubId = insertClub(context.database, "Admin Club")
-        val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.CLUB_ADMIN, clubId)
-        grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_VIEW)
-
-        val ownerUserId = insertUser(context.database, context.userRepository, 202L, "guest")
-        val ticketId = createTicket(context, clubId, ownerUserId)
-
-        val response =
-            client.get("/api/support/tickets?clubId=$clubId") {
-                withInitData(createInitData(userId = adminTelegramId))
-            }
-
-        assertEquals(HttpStatusCode.OK, response.status)
-        response.assertNoStoreHeaders()
-        val items = json.parseToJsonElement(response.bodyAsText()).jsonArray
-        assertTrue(items.any { it.jsonObject["id"]!!.jsonPrimitive.long == ticketId })
+    fun `fixture releases its database after application teardown`() {
+        var url = ""
+        withSupportAdminApp { context ->
+            startApplication()
+            url = context.database.url
+            assertTrue(url.startsWith("jdbc:h2:mem:"))
+        }
+        assertOwnedH2DatabaseClosed(url)
     }
+
+    @Test
+    fun `admin list tickets ok`() =
+        withSupportAdminApp { context ->
+            val adminTelegramId = 201L
+            val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
+            val clubId = insertClub(context.database, "Admin Club")
+            val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.CLUB_ADMIN, clubId)
+            grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_VIEW)
+
+            val ownerUserId = insertUser(context.database, context.userRepository, 202L, "guest")
+            val ticketId = createTicket(context, clubId, ownerUserId)
+
+            val response =
+                client.get("/api/support/tickets?clubId=$clubId") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                }
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            response.assertNoStoreHeaders()
+            val items = json.parseToJsonElement(response.bodyAsText()).jsonArray
+            assertTrue(items.any { it.jsonObject["id"]!!.jsonPrimitive.long == ticketId })
+        }
 
     @Test
     fun `manager with matching view assignment lists permitted clubs tickets and complete detail`() =
@@ -279,72 +294,74 @@ class SupportAdminRoutesTest : SupportAdminRoutesFixture() {
         }
 
     @Test
-    fun `guest without role cannot list tickets`() = withSupportAdminApp { context ->
-        val telegramId = 301L
-        insertUser(context.database, context.userRepository, telegramId, "guest")
-        val clubId = insertClub(context.database, "Guest Club")
+    fun `guest without role cannot list tickets`() =
+        withSupportAdminApp { context ->
+            val telegramId = 301L
+            insertUser(context.database, context.userRepository, telegramId, "guest")
+            val clubId = insertClub(context.database, "Guest Club")
 
-        val response =
-            client.get("/api/support/tickets?clubId=$clubId") {
-                withInitData(createInitData(userId = telegramId))
-            }
+            val response =
+                client.get("/api/support/tickets?clubId=$clubId") {
+                    withInitData(createInitData(userId = telegramId))
+                }
 
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("support_ticket_forbidden", response.errorCode())
-    }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("support_ticket_forbidden", response.errorCode())
+        }
 
     @Test
-    fun `take reply and status remain bounded`() = withSupportAdminApp { context ->
-        val adminTelegramId = 401L
-        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
-        val clubId = insertClub(context.database, "Support Club")
-        val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.MANAGER, clubId)
-        grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_REPLY)
-        grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_STATUS_MANAGE)
+    fun `take reply and status remain bounded`() =
+        withSupportAdminApp { context ->
+            val adminTelegramId = 401L
+            val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
+            val clubId = insertClub(context.database, "Support Club")
+            val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.MANAGER, clubId)
+            grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_REPLY)
+            grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_STATUS_MANAGE)
 
-        val ownerUserId = insertUser(context.database, context.userRepository, 402L, "guest")
-        val ticketId = createTicket(context, clubId, ownerUserId)
+            val ownerUserId = insertUser(context.database, context.userRepository, 402L, "guest")
+            val ticketId = createTicket(context, clubId, ownerUserId)
 
-        val assignResponse =
-            client.post("/api/support/tickets/$ticketId/assign") {
-                withInitData(createInitData(userId = adminTelegramId))
-            }
+            val assignResponse =
+                client.post("/api/support/tickets/$ticketId/assign") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                }
 
-        assertEquals(HttpStatusCode.OK, assignResponse.status)
-        assignResponse.assertNoStoreHeaders()
-        val assignPayload = json.parseToJsonElement(assignResponse.bodyAsText()).jsonObject
-        assertEquals(ticketId, assignPayload["id"]!!.jsonPrimitive.long)
-        assertEquals(clubId, assignPayload["clubId"]!!.jsonPrimitive.long)
+            assertEquals(HttpStatusCode.OK, assignResponse.status)
+            assignResponse.assertNoStoreHeaders()
+            val assignPayload = json.parseToJsonElement(assignResponse.bodyAsText()).jsonObject
+            assertEquals(ticketId, assignPayload["id"]!!.jsonPrimitive.long)
+            assertEquals(clubId, assignPayload["clubId"]!!.jsonPrimitive.long)
 
-        val statusResponse =
-            client.post("/api/support/tickets/$ticketId/status") {
-                withInitData(createInitData(userId = adminTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"status":"answered"}""")
-            }
+            val statusResponse =
+                client.post("/api/support/tickets/$ticketId/status") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"status":"answered"}""")
+                }
 
-        assertEquals(HttpStatusCode.Conflict, statusResponse.status)
-        statusResponse.assertNoStoreHeaders()
-        assertEquals("invalid_state", statusResponse.errorCode())
+            assertEquals(HttpStatusCode.Conflict, statusResponse.status)
+            statusResponse.assertNoStoreHeaders()
+            assertEquals("invalid_state", statusResponse.errorCode())
 
-        val replyResponse =
-            client.post("/api/support/tickets/$ticketId/reply") {
-                withInitData(createInitData(userId = adminTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Reply","attachments":"[]"}""")
-            }
+            val replyResponse =
+                client.post("/api/support/tickets/$ticketId/reply") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Reply","attachments":"[]"}""")
+                }
 
-        assertEquals(HttpStatusCode.OK, replyResponse.status)
-        replyResponse.assertNoStoreHeaders()
-        val replyPayload = json.parseToJsonElement(replyResponse.bodyAsText()).jsonObject
-        assertEquals(ticketId, replyPayload["ticketId"]!!.jsonPrimitive.long)
-        assertEquals(clubId, replyPayload["clubId"]!!.jsonPrimitive.long)
-        assertFalse(replyPayload.containsKey("ownerUserId"))
-        assertEquals("in_progress", replyPayload["ticketStatus"]!!.jsonPrimitive.content)
-        assertNotNull(replyPayload["replyMessageId"]?.jsonPrimitive?.long)
-        assertTrue(replyPayload["replyCreatedAt"]!!.jsonPrimitive.content.isNotBlank())
-    }
+            assertEquals(HttpStatusCode.OK, replyResponse.status)
+            replyResponse.assertNoStoreHeaders()
+            val replyPayload = json.parseToJsonElement(replyResponse.bodyAsText()).jsonObject
+            assertEquals(ticketId, replyPayload["ticketId"]!!.jsonPrimitive.long)
+            assertEquals(clubId, replyPayload["clubId"]!!.jsonPrimitive.long)
+            assertFalse(replyPayload.containsKey("ownerUserId"))
+            assertEquals("in_progress", replyPayload["ticketStatus"]!!.jsonPrimitive.content)
+            assertNotNull(replyPayload["replyMessageId"]?.jsonPrimitive?.long)
+            assertTrue(replyPayload["replyCreatedAt"]!!.jsonPrimitive.content.isNotBlank())
+        }
 
     @Test
     fun `take and first reply accept NEW while generic status remains disabled`() {
@@ -407,130 +424,134 @@ class SupportAdminRoutesTest : SupportAdminRoutesFixture() {
     }
 
     @Test
-    fun `admin status invalid json returns 409 and no-store headers`() = withSupportAdminApp { context ->
-        val adminTelegramId = 451L
-        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
-        val clubId = insertClub(context.database, "Invalid Json Club")
-        val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.MANAGER, clubId)
-        grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_STATUS_MANAGE)
+    fun `admin status invalid json returns 409 and no-store headers`() =
+        withSupportAdminApp { context ->
+            val adminTelegramId = 451L
+            val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
+            val clubId = insertClub(context.database, "Invalid Json Club")
+            val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.MANAGER, clubId)
+            grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_STATUS_MANAGE)
 
-        val ownerUserId = insertUser(context.database, context.userRepository, 452L, "guest")
-        val ticketId = createTicket(context, clubId, ownerUserId)
-        val before = assertNotNull(context.supportService.getTicket(ticketId))
+            val ownerUserId = insertUser(context.database, context.userRepository, 452L, "guest")
+            val ticketId = createTicket(context, clubId, ownerUserId)
+            val before = assertNotNull(context.supportService.getTicket(ticketId))
 
-        val response =
-            client.post("/api/support/tickets/$ticketId/status") {
-                withInitData(createInitData(userId = adminTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody("{")
-            }
+            val response =
+                client.post("/api/support/tickets/$ticketId/status") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("{")
+                }
 
-        response.assertGenericInvalidState()
-        assertEquals(before, context.supportService.getTicket(ticketId))
-        assertEquals(1L, messageCount(context.database, ticketId))
-    }
-
-    @Test
-    fun `admin endpoints without init data return 401 and no-store headers`() = withSupportAdminApp {
-        val listResponse = client.get("/api/support/tickets?clubId=1")
-        assertEquals(HttpStatusCode.Unauthorized, listResponse.status)
-        listResponse.assertNoStoreHeaders()
-        assertEquals("unauthorized", listResponse.errorCode())
-
-        val assignResponse = client.post("/api/support/tickets/1/assign")
-        assertEquals(HttpStatusCode.Unauthorized, assignResponse.status)
-        assignResponse.assertNoStoreHeaders()
-        assertEquals("unauthorized", assignResponse.errorCode())
-
-        val statusResponse =
-            client.post("/api/support/tickets/1/status") {
-                contentType(ContentType.Application.Json)
-                setBody("""{"status":"answered"}""")
-            }
-        assertEquals(HttpStatusCode.Unauthorized, statusResponse.status)
-        statusResponse.assertNoStoreHeaders()
-        assertEquals("unauthorized", statusResponse.errorCode())
-
-        val replyResponse =
-            client.post("/api/support/tickets/1/reply") {
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Reply"}""")
-            }
-        assertEquals(HttpStatusCode.Unauthorized, replyResponse.status)
-        replyResponse.assertNoStoreHeaders()
-        assertEquals("unauthorized", replyResponse.errorCode())
-    }
+            response.assertGenericInvalidState()
+            assertEquals(before, context.supportService.getTicket(ticketId))
+            assertEquals(1L, messageCount(context.database, ticketId))
+        }
 
     @Test
-    fun `admin without club access cannot manage tickets`() = withSupportAdminApp { context ->
-        val adminTelegramId = 501L
-        val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
-        val clubId = insertClub(context.database, "Scoped Club")
-        val otherClubId = insertClub(context.database, "Other Scoped Club")
-        val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.CLUB_ADMIN, otherClubId)
-        grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_VIEW)
-        grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_REPLY)
-        grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_STATUS_MANAGE)
+    fun `admin endpoints without init data return 401 and no-store headers`() =
+        withSupportAdminApp {
+            val listResponse = client.get("/api/support/tickets?clubId=1")
+            assertEquals(HttpStatusCode.Unauthorized, listResponse.status)
+            listResponse.assertNoStoreHeaders()
+            assertEquals("unauthorized", listResponse.errorCode())
 
-        val ownerUserId = insertUser(context.database, context.userRepository, 502L, "guest")
-        val ticketId = createTicket(context, clubId, ownerUserId)
+            val assignResponse = client.post("/api/support/tickets/1/assign")
+            assertEquals(HttpStatusCode.Unauthorized, assignResponse.status)
+            assignResponse.assertNoStoreHeaders()
+            assertEquals("unauthorized", assignResponse.errorCode())
 
-        val listResponse =
-            client.get("/api/support/tickets?clubId=$clubId") {
-                withInitData(createInitData(userId = adminTelegramId))
-            }
+            val statusResponse =
+                client.post("/api/support/tickets/1/status") {
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"status":"answered"}""")
+                }
+            assertEquals(HttpStatusCode.Unauthorized, statusResponse.status)
+            statusResponse.assertNoStoreHeaders()
+            assertEquals("unauthorized", statusResponse.errorCode())
 
-        assertEquals(HttpStatusCode.Forbidden, listResponse.status)
-        listResponse.assertNoStoreHeaders()
-        assertEquals("support_ticket_forbidden", listResponse.errorCode())
-
-        val assignResponse =
-            client.post("/api/support/tickets/$ticketId/assign") {
-                withInitData(createInitData(userId = adminTelegramId))
-            }
-
-        assertEquals(HttpStatusCode.NotFound, assignResponse.status)
-        assignResponse.assertNoStoreHeaders()
-        assertEquals("support_ticket_not_found", assignResponse.errorCode())
-
-        val statusResponse =
-            client.post("/api/support/tickets/$ticketId/status") {
-                withInitData(createInitData(userId = adminTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"status":"closed"}""")
-            }
-
-        assertEquals(HttpStatusCode.NotFound, statusResponse.status)
-        statusResponse.assertNoStoreHeaders()
-        assertEquals("support_ticket_not_found", statusResponse.errorCode())
-
-        val replyResponse =
-            client.post("/api/support/tickets/$ticketId/reply") {
-                withInitData(createInitData(userId = adminTelegramId))
-                contentType(ContentType.Application.Json)
-                setBody("""{"text":"Reply"}""")
-            }
-
-        assertEquals(HttpStatusCode.NotFound, replyResponse.status)
-        replyResponse.assertNoStoreHeaders()
-        assertEquals("support_ticket_not_found", replyResponse.errorCode())
-    }
+            val replyResponse =
+                client.post("/api/support/tickets/1/reply") {
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Reply"}""")
+                }
+            assertEquals(HttpStatusCode.Unauthorized, replyResponse.status)
+            replyResponse.assertNoStoreHeaders()
+            assertEquals("unauthorized", replyResponse.errorCode())
+        }
 
     @Test
-    fun `invalid status filter returns 400`() = withSupportAdminApp { context ->
-        val adminTelegramId = 601L
-        insertUser(context.database, context.userRepository, adminTelegramId, "admin")
-        val clubId = insertClub(context.database, "Filter Club")
+    fun `admin without club access cannot manage tickets`() =
+        withSupportAdminApp { context ->
+            val adminTelegramId = 501L
+            val adminUserId = insertUser(context.database, context.userRepository, adminTelegramId, "admin")
+            val clubId = insertClub(context.database, "Scoped Club")
+            val otherClubId = insertClub(context.database, "Other Scoped Club")
+            val roleAssignmentId = insertRoleAssignment(context.database, adminUserId, Role.CLUB_ADMIN, otherClubId)
+            grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_VIEW)
+            grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_REPLY)
+            grantPermission(context.database, roleAssignmentId, PermissionCodes.SUPPORT_STATUS_MANAGE)
 
-        val response =
-            client.get("/api/support/tickets?clubId=$clubId&status=bad") {
-                withInitData(createInitData(userId = adminTelegramId))
-            }
+            val ownerUserId = insertUser(context.database, context.userRepository, 502L, "guest")
+            val ticketId = createTicket(context, clubId, ownerUserId)
 
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("validation_error", response.errorCode())
-    }
+            val listResponse =
+                client.get("/api/support/tickets?clubId=$clubId") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                }
+
+            assertEquals(HttpStatusCode.Forbidden, listResponse.status)
+            listResponse.assertNoStoreHeaders()
+            assertEquals("support_ticket_forbidden", listResponse.errorCode())
+
+            val assignResponse =
+                client.post("/api/support/tickets/$ticketId/assign") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                }
+
+            assertEquals(HttpStatusCode.NotFound, assignResponse.status)
+            assignResponse.assertNoStoreHeaders()
+            assertEquals("support_ticket_not_found", assignResponse.errorCode())
+
+            val statusResponse =
+                client.post("/api/support/tickets/$ticketId/status") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"status":"closed"}""")
+                }
+
+            assertEquals(HttpStatusCode.NotFound, statusResponse.status)
+            statusResponse.assertNoStoreHeaders()
+            assertEquals("support_ticket_not_found", statusResponse.errorCode())
+
+            val replyResponse =
+                client.post("/api/support/tickets/$ticketId/reply") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"text":"Reply"}""")
+                }
+
+            assertEquals(HttpStatusCode.NotFound, replyResponse.status)
+            replyResponse.assertNoStoreHeaders()
+            assertEquals("support_ticket_not_found", replyResponse.errorCode())
+        }
+
+    @Test
+    fun `invalid status filter returns 400`() =
+        withSupportAdminApp { context ->
+            val adminTelegramId = 601L
+            insertUser(context.database, context.userRepository, adminTelegramId, "admin")
+            val clubId = insertClub(context.database, "Filter Club")
+
+            val response =
+                client.get("/api/support/tickets?clubId=$clubId&status=bad") {
+                    withInitData(createInitData(userId = adminTelegramId))
+                }
+
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("validation_error", response.errorCode())
+        }
 
     @Test
     fun `staff reads reject non canonical positive decimal club and ticket ids`() =
@@ -626,18 +647,19 @@ class SupportAdminRoutesTest : SupportAdminRoutesFixture() {
     }
 
     @Test
-    fun `admin without internal user returns forbidden for support tickets`() = withSupportAdminApp { context ->
-        val clubId = insertClub(context.database, "Missing User Club")
+    fun `admin without internal user returns forbidden for support tickets`() =
+        withSupportAdminApp { context ->
+            val clubId = insertClub(context.database, "Missing User Club")
 
-        val response =
-            client.get("/api/support/tickets?clubId=$clubId") {
-                withInitData(createInitData(userId = 700L))
-            }
+            val response =
+                client.get("/api/support/tickets?clubId=$clubId") {
+                    withInitData(createInitData(userId = 700L))
+                }
 
-        assertEquals(HttpStatusCode.Forbidden, response.status)
-        response.assertNoStoreHeaders()
-        assertEquals("forbidden", response.errorCode())
-    }
+            assertEquals(HttpStatusCode.Forbidden, response.status)
+            response.assertNoStoreHeaders()
+            assertEquals("forbidden", response.errorCode())
+        }
 }
 
 open class SupportAdminRoutesFixture {
@@ -767,7 +789,9 @@ open class SupportAdminRoutesFixture {
     private data class DbSetup(
         val dataSource: JdbcDataSource,
         val database: Database,
-    )
+    ) : AutoCloseable {
+        override fun close() = shutdownOwnedH2Database(dataSource, database)
+    }
 
     protected data class TestContext(
         val database: Database,
@@ -781,66 +805,67 @@ open class SupportAdminRoutesFixture {
         supportServiceFactory: ((SupportService) -> SupportService)? = null,
         installCancellationMarker: Boolean = false,
         block: suspend ApplicationTestBuilder.(TestContext) -> Unit,
-    ) = testApplication {
-        val setup = prepareDatabase()
-        val supportRepository = SupportRepository(setup.database)
-        val realSupportService = SupportServiceImpl(supportRepository)
-        val routedStaffSupportReadService = staffSupportReadServiceFactory?.invoke() ?: realSupportService
-        val routedSupportService = supportServiceFactory?.invoke(realSupportService) ?: realSupportService
-        val userRepository = TestUserRepository()
-        val userRoleRepository = ExposedUserRoleRepository(setup.database)
-        val userRolePermissionRepository = ExposedUserRolePermissionRepository(setup.database)
-        val telegramSender = RecordingTelegramSender()
-        val clubsRepository = ClubsDbRepository(setup.database)
-        val supportReplyDeliveryService =
-            SupportReplyDeliveryServiceImpl(
-                repository = supportRepository,
-                clubsRepository = clubsRepository,
-                telegramGateway = telegramSender,
-            )
-        application {
-            install(ContentNegotiation) { json() }
-            if (installCancellationMarker) {
-                install(StatusPages) {
-                    exception<CancellationException> { call, _ ->
-                        call.response.headers.append(SUPPORT_STAFF_CANCELLATION_PROPAGATED_HEADER, "true")
-                        call.respondText("cancellation_propagated", status = HttpStatusCode.ServiceUnavailable)
+    ) = prepareDatabase().use { setup ->
+        testApplication {
+            val supportRepository = SupportRepository(setup.database)
+            val realSupportService = SupportServiceImpl(supportRepository)
+            val routedStaffSupportReadService = staffSupportReadServiceFactory?.invoke() ?: realSupportService
+            val routedSupportService = supportServiceFactory?.invoke(realSupportService) ?: realSupportService
+            val userRepository = TestUserRepository()
+            val userRoleRepository = ExposedUserRoleRepository(setup.database)
+            val userRolePermissionRepository = ExposedUserRolePermissionRepository(setup.database)
+            val telegramSender = RecordingTelegramSender()
+            val clubsRepository = ClubsDbRepository(setup.database)
+            val supportReplyDeliveryService =
+                SupportReplyDeliveryServiceImpl(
+                    repository = supportRepository,
+                    clubsRepository = clubsRepository,
+                    telegramGateway = telegramSender,
+                )
+            application {
+                install(ContentNegotiation) { json() }
+                if (installCancellationMarker) {
+                    install(StatusPages) {
+                        exception<CancellationException> { call, _ ->
+                            call.response.headers.append(SUPPORT_STAFF_CANCELLATION_PROPAGATED_HEADER, "true")
+                            call.respondText("cancellation_propagated", status = HttpStatusCode.ServiceUnavailable)
+                        }
+                    }
+                } else {
+                    installJsonErrorPages()
+                }
+                install(RbacPlugin) {
+                    this.userRepository = userRepository
+                    this.userRoleRepository = userRoleRepository
+                    this.auditLogRepository = AuditLogRepositoryImpl(setup.database)
+                    principalExtractor = { call ->
+                        if (call.attributes.contains(MiniAppUserKey)) {
+                            val principal = call.attributes[MiniAppUserKey]
+                            TelegramPrincipal(principal.id, principal.username)
+                        } else {
+                            null
+                        }
                     }
                 }
-            } else {
-                installJsonErrorPages()
+                supportRoutes(
+                    supportService = routedSupportService,
+                    staffSupportReadService = routedStaffSupportReadService,
+                    userRepository = userRepository,
+                    userRolePermissionRepository = userRolePermissionRepository,
+                    clubsRepository = clubsRepository,
+                    supportReplyDeliveryService = supportReplyDeliveryService,
+                    botTokenProvider = { TEST_BOT_TOKEN },
+                )
             }
-            install(RbacPlugin) {
-                this.userRepository = userRepository
-                this.userRoleRepository = userRoleRepository
-                this.auditLogRepository = AuditLogRepositoryImpl(setup.database)
-                principalExtractor = { call ->
-                    if (call.attributes.contains(MiniAppUserKey)) {
-                        val principal = call.attributes[MiniAppUserKey]
-                        TelegramPrincipal(principal.id, principal.username)
-                    } else {
-                        null
-                    }
-                }
-            }
-            supportRoutes(
-                supportService = routedSupportService,
-                staffSupportReadService = routedStaffSupportReadService,
-                userRepository = userRepository,
-                userRolePermissionRepository = userRolePermissionRepository,
-                clubsRepository = clubsRepository,
-                supportReplyDeliveryService = supportReplyDeliveryService,
-                botTokenProvider = { TEST_BOT_TOKEN },
+            block(
+                TestContext(
+                    database = setup.database,
+                    supportService = realSupportService,
+                    userRepository = userRepository,
+                    telegramSender = telegramSender,
+                ),
             )
         }
-        block(
-            TestContext(
-                database = setup.database,
-                supportService = realSupportService,
-                userRepository = userRepository,
-                telegramSender = telegramSender,
-            ),
-        )
     }
 
     private fun prepareDatabase(): DbSetup {
@@ -851,14 +876,16 @@ open class SupportAdminRoutesFixture {
                 user = "sa"
                 password = ""
             }
-        Flyway
-            .configure()
-            .dataSource(dataSource)
-            .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-            .load()
-            .migrate()
-        val database = Database.connect(dataSource)
-        return DbSetup(dataSource = dataSource, database = database)
+        return prepareOwnedH2Database(dataSource) { register ->
+            Flyway
+                .configure()
+                .dataSource(dataSource)
+                .locations("classpath:db/migration/common", "classpath:db/migration/h2")
+                .load()
+                .migrate()
+            val database = Database.connect(dataSource).also(register)
+            DbSetup(dataSource = dataSource, database = database)
+        }
     }
 
     protected suspend fun createTicket(
@@ -915,14 +942,14 @@ open class SupportAdminRoutesFixture {
     ): Long {
         val id =
             transaction(database) {
-            UsersTable
-                .insert {
-                    it[UsersTable.telegramUserId] = telegramUserId
-                    it[UsersTable.username] = username
-                    it[UsersTable.displayName] = username
-                    it[UsersTable.phoneE164] = null
-                }.resultedValues!!
-                .single()[UsersTable.id]
+                UsersTable
+                    .insert {
+                        it[UsersTable.telegramUserId] = telegramUserId
+                        it[UsersTable.username] = username
+                        it[UsersTable.displayName] = username
+                        it[UsersTable.phoneE164] = null
+                    }.resultedValues!!
+                    .single()[UsersTable.id]
             }
         userRepository.register(id, telegramUserId, username)
         return id

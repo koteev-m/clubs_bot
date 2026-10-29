@@ -1,10 +1,10 @@
 package com.example.bot.guestlist
 
+import com.example.bot.audit.AuditLogRepository
 import com.example.bot.club.GuestListOwnerType
 import com.example.bot.club.GuestListRepository
 import com.example.bot.club.GuestListStatus
 import com.example.bot.data.booking.EventsTable
-import com.example.bot.audit.AuditLogRepository
 import com.example.bot.data.club.GuestListCsvParser
 import com.example.bot.data.club.GuestListRepositoryImpl
 import com.example.bot.data.privacy.PhoneCipher
@@ -20,6 +20,8 @@ import com.example.bot.security.rbac.RbacPlugin
 import com.example.bot.testing.applicationDev
 import com.example.bot.testing.defaultRequest
 import com.example.bot.testing.header
+import com.example.bot.testing.prepareOwnedH2Database
+import com.example.bot.testing.shutdownOwnedH2Database
 import com.example.bot.testing.withInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
 import com.example.bot.webapp.WebAppInitDataTestHelper
@@ -27,10 +29,10 @@ import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.ktor.client.HttpClient
-import io.ktor.client.statement.bodyAsText
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -91,11 +93,13 @@ class GuestListRoutesTest :
                 val setup = prepareDatabase()
                 dataSource = setup.dataSource
                 database = setup.database
-                repository = GuestListRepositoryImpl(database, phoneCipher = PhoneCipher("12345678901234567890123456789012"))
+                repository =
+                    GuestListRepositoryImpl(database, phoneCipher = PhoneCipher("12345678901234567890123456789012"))
             }
 
             afterTest {
                 DataSourceHolder.dataSource = null
+                shutdownOwnedH2Database(dataSource, database)
             }
 
             fun Application.testModule(auditRepository: AuditLogRepository = relaxedAuditRepository()) {
@@ -539,7 +543,8 @@ class GuestListRoutesTest :
             }
 
             "format=csv overrides invalid Accept" {
-                val context = prepareActiveListWithManager("Lycaon", "InvalidHeader", "InvalidHeader", telegramId = 231L)
+                val context =
+                    prepareActiveListWithManager("Lycaon", "InvalidHeader", "InvalidHeader", telegramId = 231L)
 
                 testApplication {
                     applicationDev { testModule() }
@@ -774,7 +779,11 @@ class GuestListRoutesTest :
 
                 val events = mutableListOf<com.example.bot.audit.AuditLogEvent>()
                 coVerify(atLeast = 1) { auditRepository.append(capture(events)) }
-                events.any { it.action.value == "SENSITIVE_EXPORT_GRANTED" && it.metadata.toString().contains("incident") } shouldBe true
+                events.any {
+                    it.action.value == "SENSITIVE_EXPORT_GRANTED" &&
+                        it.metadata.toString().contains("incident")
+                } shouldBe
+                    true
             }
 
             "empty json includeSensitive without reason returns 400" {
@@ -973,7 +982,10 @@ class GuestListRoutesTest :
                 testApplication {
                     applicationDev { testModule() }
                     val authedClient = authenticatedClient(telegramId = 704L)
-                    val response = authedClient.get("/api/guest-lists/export?includeSensitive=true&reason=security_audit")
+                    val response =
+                        authedClient.get(
+                            "/api/guest-lists/export?includeSensitive=true&reason=security_audit",
+                        )
                     response.status shouldBe HttpStatusCode.OK
                     val body = response.bodyAsText()
                     body.contains("+79991112233") shouldBe true
@@ -1028,19 +1040,21 @@ private fun prepareDatabase(): GLDbSetup {
             user = "sa"
             password = ""
         }
-    Flyway
-        .configure()
-        .dataSource(dataSource)
-        .locations("classpath:db/migration/common", "classpath:db/migration/h2")
-        .load()
-        .migrate()
-    val database = Database.connect(dataSource)
-    transaction(database) {
-        listOf("action").forEach { column ->
-            exec("""ALTER TABLE audit_log ALTER COLUMN $column RENAME TO "$column"""")
+    return prepareOwnedH2Database(dataSource) { register ->
+        Flyway
+            .configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/migration/common", "classpath:db/migration/h2")
+            .load()
+            .migrate()
+        val database = Database.connect(dataSource).also(register)
+        transaction(database) {
+            listOf("action").forEach { column ->
+                exec("""ALTER TABLE audit_log ALTER COLUMN $column RENAME TO "$column"""")
+            }
         }
+        GLDbSetup(dataSource, database)
     }
-    return GLDbSetup(dataSource, database)
 }
 
 private object GLClubsTable : Table("clubs") {
