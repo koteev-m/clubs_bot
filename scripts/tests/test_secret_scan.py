@@ -109,6 +109,19 @@ class WrapperUnitTest(unittest.TestCase):
         entries = [s for s in (ROOT / '.gitleaksignore').read_text().splitlines() if s and not s.startswith('#')]
         self.assertEqual(len(entries), 4)
 
+    def test_repository_historical_fingerprints_are_exact(self):
+        SCAN.validate_ignore(ROOT / '.gitleaksignore')
+        entries = [line.strip() for line in (ROOT / '.gitleaksignore').read_text().splitlines()
+                   if line.strip() and not line.lstrip().startswith('#')]
+        expected = {
+            '6ec7be88e320990506553c8a5660b5668d41e35b:docs/product/CONCEPT_CODE_GAP.md:generic-api-key:424',
+            '119181e921c19f177dad97120a42c3bc3af66d35:core-data/src/test/kotlin/com/example/bot/data/client/onboarding/OnboardingFoundationContract.kt:generic-api-key:63',
+            'f06af8dfcbb301d0cb037a9960347ef3e5430435:core-data/src/test/kotlin/com/example/bot/data/repo/PaymentsRepositoryH2Test.kt:generic-api-key:80',
+            'f88a089df8b0b78874bc069592a40d472cfe4108:scripts/dev-env.sh:telegram-bot-api-token:5',
+        }
+        self.assertEqual(set(entries), expected)
+        self.assertEqual(len(entries), len(expected))
+
     def test_snapshot_includes_untracked_and_refuses_symlinks(self):
         repo = self.temp / 'repo'; repo.mkdir(); git(repo, 'init', '-q')
         (repo / 'untracked.txt').write_text('synthetic input')
@@ -139,6 +152,66 @@ class WrapperUnitTest(unittest.TestCase):
         self.assertIn('--network=none', command)
         with self.assertRaises(SCAN.ScanError):
             SCAN.docker_command(repo, {'common_dir': str(common)}, repo, repo, 'unpinned:latest')
+
+
+
+class SelfcheckIntegrationTest(unittest.TestCase):
+    """Exercise the real wrapper/verify boundary without starting Docker or Gradle."""
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix='clb-secret-cli-')
+        self.addCleanup(temp.cleanup)
+        self.temp = Path(temp.name).resolve()
+        self.repo = self.temp / 'repo'; self.repo.mkdir()
+        git(self.repo, 'init', '-q')
+        for relative in ('scripts/verify.sh', 'scripts/secret-scan.py',
+                         'scripts/quality-gates.env', '.gitleaks.toml', '.gitleaksignore'):
+            target = self.repo / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+        commit(self.repo)
+        self.calls = self.temp / 'calls.jsonl'
+        self.docker = self.temp / 'fake-docker'
+        self.docker.write_text(
+            '#!/usr/bin/env python3\n'
+            'import json,os,sys\n'
+            'with open(os.environ["FAKE_DOCKER_CALLS"], "a") as calls:\n'
+            '    calls.write(json.dumps(sys.argv[1:]) + "\\n")\n'
+            'if "detect" in sys.argv or os.environ.get("FAKE_FAIL_PREFLIGHT") == "1":\n'
+            '    raise SystemExit(23)\n'
+            'print("SCANNER_PREFLIGHT_OK")\n')
+        self.docker.chmod(0o755)
+
+    def invoke(self, fail_preflight=False):
+        environment = dict(os.environ, DOCKER_BIN=str(self.docker),
+                           FAKE_DOCKER_CALLS=str(self.calls),
+                           FAKE_FAIL_PREFLIGHT='1' if fail_preflight else '0',
+                           SECRET_SCAN_OUTPUT_DIR=str(self.temp / 'result'))
+        result = subprocess.run(['bash', str(self.repo / 'scripts/verify.sh'), 'secret-scan'],
+                                env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertNotIn('verify.sh completed', result.stdout)
+        self.assertNotIn('Secret scan PASS', result.stdout)
+        return result, [json.loads(line) for line in self.calls.read_text().splitlines()]
+
+    def test_preflight_failure_blocks_before_detect(self):
+        result, calls = self.invoke(fail_preflight=True)
+        self.assertIn('Container cannot verify read-only Git history', result.stdout)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn('detect', calls[0])
+
+    def test_started_scanner_failure_is_blocked_with_expected_arguments(self):
+        result, calls = self.invoke()
+        self.assertIn('Secret scan BLOCKED: Scanner execution failed', result.stdout)
+        self.assertEqual(len(calls), 2)
+        preflight, scan = calls
+        self.assertIn('--entrypoint', preflight)
+        self.assertIn(SCAN.IMAGE, scan)
+        for argument in ('detect', '--source', '--redact=100', '--no-color', '--no-git',
+                         '--config', '.gitleaks.toml', '--gitleaks-ignore-path',
+                         '.gitleaksignore', '--read-only', '--network=none'):
+            self.assertIn(argument, scan)
+        self.assertNotIn('--exit-code', scan)
+        self.assertNotIn('--no-verify', scan)
 
 
 @unittest.skipUnless(os.environ.get('CLB_SECRET_SCAN_DOCKER_TESTS') == '1', 'explicit pinned Docker regressions')

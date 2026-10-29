@@ -10,23 +10,37 @@ import com.example.bot.data.security.UserRoleRepository
 import com.example.bot.security.auth.TelegramPrincipal
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
+import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.header
+import io.ktor.server.request.receiveChannel
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
+import io.ktor.utils.io.ByteWriteChannel
+import io.ktor.utils.io.writeFully
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class RbacPluginTest {
     @Test
@@ -155,6 +169,86 @@ class RbacPluginTest {
                             it.action == StandardAuditAction.ACCESS_GRANTED
                     },
                 )
+            }
+        }
+
+    @Test
+    fun `multipart cancellation stops the original live request stream`() =
+        testApplication {
+            val releaseProducer = CompletableDeferred<Unit>()
+            val auditRepo = relaxedAuditRepo()
+            val userRepo = InMemoryUserRepository(mapOf(1L to User(id = 1L, telegramId = 1L, username = "one")))
+            val roleRepo = InMemoryUserRoleRepository(mapOf(1L to setOf(Role.MANAGER)), mapOf(1L to setOf(42L)))
+            application {
+                configureTestSecurity(auditRepo, userRepo, roleRepo)
+                routing {
+                    authorize(Role.MANAGER) {
+                        post("/upload") {
+                            try {
+                                val source = call.request.receiveChannel()
+                                val received = call.receiveChannel()
+                                assertFalse(source.isClosedForRead, "producer must still be live")
+                                received.cancel(CancellationException("synthetic upload rejection"))
+                                assertTrue(source.isClosedForRead, "rejecting the upload must cancel its live producer")
+                                call.respondText("rejected")
+                            } finally {
+                                releaseProducer.complete(Unit)
+                            }
+                        }
+                    }
+                }
+            }
+            val response =
+                client.post("/upload") {
+                    header("X-Telegram-Id", "1")
+                    setBody(
+                        object : OutgoingContent.WriteChannelContent() {
+                            override val contentType =
+                                ContentType.MultiPart.FormData.withParameter("boundary", "live-test")
+
+                            override suspend fun writeTo(channel: ByteWriteChannel) {
+                                channel.writeFully("--live-test\r\n".encodeToByteArray())
+                                channel.flush()
+                                releaseProducer.await()
+                            }
+                        },
+                    )
+                }
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals("rejected", response.bodyAsText())
+        }
+
+    @Test
+    fun `JSON and form club scopes retain replay for the endpoint`() =
+        testApplication {
+            val auditRepo = relaxedAuditRepo()
+            val userRepo = InMemoryUserRepository(mapOf(1L to User(id = 1L, telegramId = 1L, username = "one")))
+            val roleRepo = InMemoryUserRoleRepository(mapOf(1L to setOf(Role.MANAGER)), mapOf(1L to setOf(42L)))
+            application {
+                configureTestSecurity(auditRepo, userRepo, roleRepo)
+                routing {
+                    authorize(Role.MANAGER) {
+                        clubScoped(ClubScope.Own) {
+                            post("/body-scope") { call.respondText(call.receiveText()) }
+                        }
+                    }
+                }
+            }
+            for (
+            (type, body) in
+            listOf(
+                ContentType.Application.Json to "{\"clubId\":42,\"value\":\"retained\"}",
+                ContentType.Application.FormUrlEncoded to "clubId=42&value=retained",
+            )
+            ) {
+                val response =
+                    client.post("/body-scope") {
+                        header("X-Telegram-Id", "1")
+                        contentType(type)
+                        setBody(body)
+                    }
+                assertEquals(HttpStatusCode.OK, response.status)
+                assertEquals(body, response.bodyAsText())
             }
         }
 

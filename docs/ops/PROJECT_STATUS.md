@@ -2,6 +2,41 @@
 
 ## Release continuation — CLB-simplified-onboarding, 2026-10-29
 
+### First PR CI correction — 2026-10-29
+
+PR [#555](https://github.com/koteev-m/clubs_bot/pull/555), initial ordinary push
+`a37120632b11d07b21120cac17b36dc3838ce000`, tree
+`cc8447b983cd6887410fb2283e051da94f9cd1f2`. Committed source/history Gitleaks PASS:
+16,826,129 / 26,992,638 scanned bytes, 669 scanned commits, zero findings.
+PR scope equals local candidate. Latest observed main remains `c0df96b520e4e1f6bfe97a27ce7b17546d694505`.
+
+Initial CI identified two repairable problems: Lint `40905888042` selfcheck still
+forbade the newly accepted exact historical fingerprint file and expected the old
+scanner exit contract; Coverage `40905888221` and Build & Static `40905888038`
+failed application tests with OOM (Coverage: 961 tests, 3 failures). A retained stack
+allocates in Ktor DoubleReceive MemoryCache. RBAC needs replay only for JSON/form;
+multipart uploads are single-pass. The correction excludes multipart from that cache,
+preserves JSON/form replay, pins the four historical fingerprints in regressions and
+updates the selfcheck's fake scanner preflight/failure contract without allowing PASS.
+
+New Ktor live-stream cancellation regression fails before and passes after; six RBAC
+and 24 upload/lifecycle/error cases PASS at the unchanged 512 MiB test heap. Affected
+core-security detekt and final changed-file ktlint PASS; owned JVM cleanup verified.
+Formatting-only failures were fixed; two unrelated formatter changes were restored
+to exact HEAD bytes. Three new scanner integration/fingerprint cases and the actual
+selfcheck fake-scanner block PASS without launching Gradle. Independent corrective
+review reports no open substantive findings. The full cumulative heap-retention cause
+and full Linux acceptance remain unproven until the next CI cycle.
+
+At the fourth bounded status read of initial SHA, Secret Scan `40905887947`, Security
+Scan `40905887969`, SCA `40905887965`, static-check `40905887956`, Commitlint
+`40905887822`, CI Guard `40905887879`, Container Smoke `40905887810` and PR Docker
+build `40905887981` passed. Tests `40905887872`, build `40905887991`, Smoke
+`40905887880` and remaining Lint shards were still in progress; no aggregate success
+is claimed. The optional dispatch-only amd64 prototype was skipped as configured.
+Four of twelve allowed status reads were used for this initial cycle. No merge,
+Docker Publish, stage dispatch, server operation, token or protected config change.
+
 - Existing worktree, branch `codex/simplified-onboarding-release-20261029`, base/fetched
   main `c0df96b520e4e1f6bfe97a27ce7b17546d694505`. Identity preflight PASS; active
   clubs instructions, foreign=0. This bounded cycle explicitly authorizes ordinary
