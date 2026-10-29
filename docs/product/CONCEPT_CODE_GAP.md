@@ -468,6 +468,16 @@ Bot API/MTProto приведены в каталоге. Технологичес
 Точные symbols source chain и границы — [AS_BUILT §4.16](AS_BUILT.md#client-onboarding-a-local); commands/results, final-byte independent review и unverified — [checkpoint](../ops/PROJECT_STATUS.md). Read foundation, локальный source candidate, fresh main и deployed revision различаются. Наличие V062/React screens не даёт права объявить Б, полный onboarding или многоботовую isolation готовыми.
 
 <a id="client-onboarding-b-delta"></a>
+
+**AMEND 2026-10-29:** the following A/B gap records are historical. The owner replaced
+mandatory per-venue approval and comparison-code handoff with explicit client-wide
+capacity and one-action acceptance for new empty cabinets. `CLNT-003`–`006/010` and
+`CLNT-AC-01/02/03/05` now use [PRODUCT_SPEC §29.10](PRODUCT_SPEC.md#simplified-client-onboarding).
+The local implementation adds V064, direct creation/limit transactions, offline
+city resolution and authenticated cabinet entry; [AS_BUILT](AS_BUILT.md) and
+[checkpoint](../ops/PROJECT_STATUS.md) distinguish source/check evidence from runtime.
+Legacy records remain; unspecified limits block only new creation. Managed Bots,
+publication, live Telegram menu behavior and Stage rollout remain outside this task.
 ### Продолжение Б — локальная дельта 2026-10-28
 
 Отдельное разрешение владельца исполняет §29.8 после PR #552 на

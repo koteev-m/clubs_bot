@@ -45,7 +45,7 @@ fun Application.webAppRoutes() {
 private suspend fun ApplicationCall.respondMiniAppIndex(classLoader: ClassLoader) {
     val isReactMode =
         when (request.queryParameters["mode"]) {
-            "support", "guest-support", "platform-owner", "client" -> true
+            "support", "guest-support", "platform-owner", "client", "cabinet" -> true
             else ->
                 listOf("tgWebAppStartParam", "startapp").any { key ->
                     request.queryParameters

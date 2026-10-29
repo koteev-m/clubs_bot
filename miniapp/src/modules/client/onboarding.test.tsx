@@ -107,10 +107,10 @@ describe('connected onboarding screens', () => {
       ),
     ).toBe(true);
     const claim = screen.getByRole('button', {
-      name: 'Подтвердить аккаунт',
+      name: 'Принять приглашение',
     }) as HTMLButtonElement;
-    expect(claim.disabled).toBe(true);
-    fireEvent.click(screen.getByRole('checkbox'));
+    expect(claim.disabled).toBe(false);
+    expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.click(claim);
     await screen.findByText('ABC123');
     expect(screen.getByText('Ожидаем подтверждение платформы')).toBeTruthy();
@@ -163,7 +163,6 @@ describe('connected onboarding screens', () => {
       return response(approved);
     });
     render(<ClientAccess initialToken={null} />);
-    fireEvent.click(await screen.findByRole('button', { name: /Client A/ }));
     await screen.findByRole('button', { name: /Club A1/ });
     expect(screen.queryByText('Club A2')).toBeNull();
     fireEvent.click(
@@ -178,63 +177,22 @@ describe('connected onboarding screens', () => {
     ).toBe(false);
   });
 
-  it('saves a draft and submits its stored version only after explicit confirmation', async () => {
-    let stored = { ...draft };
-    const fetch = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation((path, options) => {
-        const url = String(path);
-        if (url.endsWith('/context'))
-          return response({
-            clients: [{ id: '20', name: 'Client A', clubs: [] }],
-          });
-        if (url.endsWith('/onboarding'))
-          return response({
-            id: '20',
-            name: 'Client A',
-            permissions: ['client.application.manage'],
-            clubs: [],
-          });
-        if (url.endsWith('/search'))
-          return response({ items: [], nextCursor: null });
-        if (url.endsWith('/submit')) {
-          stored = {
-            ...stored,
-            status: 'submitted',
-            version: '2',
-            availableActions: ['cancel'],
-          };
-          return response(stored);
-        }
-        if (url.endsWith('/applications') && options?.method === 'POST')
-          return response(stored);
-        return response(stored);
-      });
-    render(<ClientAccess initialToken={null} />);
-    fireEvent.click(await screen.findByRole('button', { name: /Client A/ }));
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Подключить заведение' }),
+  it('keeps an old draft readable and offers reuse without submit or checkbox', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/app?mode=client&screen=application&resource=30',
     );
-    fireEvent.change(screen.getByLabelText('Название заведения'), {
-      target: { value: 'Synthetic Venue' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить черновик' }));
-    await screen.findByRole('button', { name: 'Отправить заявку' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => response(draft));
+    render(<ClientAccess initialToken={null} />);
+    await screen.findByText('Test Street 1');
     expect(
-      (
-        screen.getByRole('button', {
-          name: 'Отправить заявку',
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: 'Отправить заявку' }));
-    await screen.findByText('Отправлена');
-    expect(screen.queryByLabelText('Название заведения')).toBeNull();
-    const sent = fetch.mock.calls.find((call) =>
-      requestPath(call[0]).endsWith('/submit'),
-    )!;
-    expect(JSON.parse(String(sent[1]?.body))).toEqual({ expectedVersion: '1' });
+      screen.getByRole('button', { name: 'Использовать данные для создания' }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Отправить заявку' }),
+    ).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
   it('unknown mutation outcome retries the identical key and payload after lost response', async () => {
@@ -285,7 +243,10 @@ describe('connected onboarding screens', () => {
             resolveOld = resolve;
           });
         return response({
-          clients: [{ id: '21', name: 'Client B', clubs: [] }],
+          clients: [
+            { id: '21', name: 'Client B', clubs: [] },
+            { id: '22', name: 'Client C', clubs: [] },
+          ],
         });
       });
     const view = render(<ClientAccess initialToken={null} />);
@@ -345,32 +306,21 @@ describe('connected onboarding screens', () => {
     });
   });
 
-  it('version conflict preserves draft input until refresh, and revoked access removes private data', async () => {
+  it('revoked history read removes previously visible application data', async () => {
     window.history.replaceState(
       {},
       '',
       '/app?mode=client&screen=application&resource=30',
     );
-    let reads = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation((_path, options) => {
-      if (options?.method === 'PATCH')
-        return response({ code: 'version_conflict' }, 409);
-      reads++;
-      return reads === 1
-        ? response(draft)
-        : response({ code: 'not_found' }, 404);
-    });
+    let revoked = false;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      revoked ? response({ code: 'not_found' }, 404) : response(draft),
+    );
     render(<ClientAccess initialToken={null} />);
-    const field = await screen.findByLabelText('Название заведения');
-    fireEvent.change(field, { target: { value: 'Unsaved replacement' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить черновик' }));
-    await screen.findByText(/Запись уже изменена/);
-    expect(
-      (screen.getByLabelText('Название заведения') as HTMLInputElement).value,
-    ).toBe('Unsaved replacement');
-    fireEvent.click(screen.getByRole('button', { name: 'Обновить данные' }));
+    await screen.findByText('Test Street 1');
+    revoked = true;
+    act(() => window.dispatchEvent(new Event('pageshow')));
     await screen.findByText(/Доступ утрачен/);
-    expect(screen.queryByLabelText('Название заведения')).toBeNull();
-    expect(screen.queryByText('Synthetic Venue')).toBeNull();
+    expect(screen.queryByText('Test Street 1')).toBeNull();
   });
 });

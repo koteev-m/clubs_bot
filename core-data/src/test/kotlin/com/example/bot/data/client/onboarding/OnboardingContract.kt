@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 import java.sql.SQLException
 import java.time.Duration
 
-internal abstract class OnboardingContract : ClubProfileContract() {
+internal abstract class OnboardingContract : SimplifiedOnboardingContract() {
     @Test
     fun `cross client isolation and membership alone never allow applications`() =
         runBlocking<Unit> {

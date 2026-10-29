@@ -1,4 +1,5 @@
 export interface Invitation {
+  acceptanceMode?: 'direct' | 'legacy';
   id: string;
   clientId: string;
   clientName: string;
@@ -23,6 +24,7 @@ export interface Club {
   permissions?: string[];
 }
 export interface ClubProfile {
+  region?: string;
   id: string;
   clientId: string;
   clientName: string;
@@ -39,6 +41,10 @@ export interface ClubProfile {
   availableActions: string[];
 }
 export interface ClientSummary {
+  limitVersion?: string;
+  allowedClubs?: number | null;
+  createdClubs?: number;
+  availableClubs?: number;
   id: string;
   name: string;
   active?: boolean;
@@ -127,3 +133,19 @@ export const invitationLabels: Record<Invitation['status'], string> = {
   revoked: 'Приглашение отозвано',
   expired: 'Срок приглашения истёк',
 };
+
+export interface LocationCity {
+  id: string;
+  countryCode: string;
+  name: string;
+  region: string;
+  timezone: string;
+}
+export interface NewVenueFields {
+  cityQuery?: string;
+  cityLabel?: string;
+  venueName: string;
+  countryCode: string;
+  cityId: string;
+  address: string;
+}

@@ -100,6 +100,7 @@ class WebAppRoutesTest {
                 "/app?mode=platform-owner",
                 "/app/?mode=platform-owner",
                 "/app?mode=client",
+                "/app?mode=cabinet",
                 "/app/?mode=client",
                 "/app?tgWebAppStartParam=ci_" + "a".repeat(43),
                 "/app?startapp=ci_" + "b".repeat(43),

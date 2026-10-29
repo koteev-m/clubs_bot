@@ -19,6 +19,20 @@ internal class ClubOnboardingOperations(
     ): MutationResult {
         body.only(listOf("expectedVersion"))
         val application = lockedApplication(applicationId)
+        val replay = existingCreation(application, body)
+        if (replay != null) return replay
+        session.version(application, body)
+        if (application["status"] != "approved") fail("invalid_transition")
+        val snapshot = approvedSnapshot(application)
+        val clientId = application.long("client_id")
+        return createApproved(application, snapshot, clientId)
+    }
+
+    private fun existingCreation(
+        application: DbRow,
+        body: JsonObject,
+    ): MutationResult? {
+        val applicationId = application.long("id")
         val existing = sql.row("SELECT * FROM client_club_onboarding WHERE application_id=?", applicationId)
         if (existing != null) {
             val expected = body.id("expectedVersion")
@@ -27,10 +41,33 @@ internal class ClubOnboardingOperations(
             }
             return result(existing.long("club_id"), "club_create", get(existing.long("club_id")))
         }
-        session.version(application, body)
-        if (application["status"] != "approved") fail("invalid_transition")
-        val snapshot = approvedSnapshot(application)
-        val clientId = application.long("client_id")
+        val direct = sql.row("SELECT club_id FROM client_direct_club_profiles WHERE application_id=?", applicationId)
+        return direct?.let { result(it.long("club_id"), "club_create", get(it.long("club_id"))) }
+    }
+
+    private fun createApproved(
+        application: DbRow,
+        snapshot: JsonObject,
+        clientId: Long,
+    ): MutationResult {
+        val applicationId = application.long("id")
+        val legacyFingerprint = application.getValue("venue_fingerprint")
+        val directProfiles =
+            sql.rows(
+                "SELECT venue_fingerprint,city_id FROM client_direct_club_profiles " +
+                    "WHERE client_id=? AND legacy_fingerprint=?",
+                clientId,
+                legacyFingerprint,
+            )
+        // Compare the immutable creation identity, independent of later profile edits.
+        if (directProfiles.any {
+                it.getValue("venue_fingerprint") ==
+                    digest(legacyFingerprint + ":" + it.getValue("city_id") + ":" + snapshot.string("timezone"))
+            }
+        ) {
+            fail("duplicate_application")
+        }
+        ClientLimitOperations(session).requireSpace(clientId)
         val clubId =
             sql.insert(
                 "INSERT INTO clubs(name,description,timezone,is_active) VALUES (?,?,?,FALSE)",
@@ -83,6 +120,8 @@ internal class ClubOnboardingOperations(
         clubId: Long,
         write: Boolean = false,
     ): JsonObject {
+        val direct = DirectClubOperations(session)
+        if (direct.exists(clubId)) return direct.get(clubId, write)
         val association = association(clubId)
         authorize(association, write)
         // No club or submitted profile data is loaded before current exact authority is checked.
@@ -116,6 +155,8 @@ internal class ClubOnboardingOperations(
         clubId: Long,
         body: JsonObject,
     ): MutationResult {
+        val direct = DirectClubOperations(session)
+        if (direct.exists(clubId)) return direct.update(clubId, body)
         body.only(listOf("expectedVersion", "name", "description", "timezone"))
         val before = association(clubId)
         session.client(before.long("client_id"), lock = true)
@@ -152,6 +193,12 @@ internal class ClubOnboardingOperations(
     }
 
     fun replayCreate(clubId: Long): JsonObject {
+        val direct = DirectClubOperations(session)
+        if (direct.exists(clubId)) {
+            val view = direct.get(clubId)
+            session.member(view.id("clientId"))
+            return view
+        }
         val association = association(clubId)
         lockedApplication(association.long("application_id"))
         return get(clubId)
@@ -159,7 +206,9 @@ internal class ClubOnboardingOperations(
 
     fun accessibleClub(applicationId: Long): Long? {
         val association =
-            sql.row("SELECT * FROM client_club_onboarding WHERE application_id=?", applicationId) ?: return null
+            sql.row("SELECT * FROM client_club_onboarding WHERE application_id=?", applicationId)
+                ?: sql.row("SELECT * FROM client_direct_club_profiles WHERE application_id=?", applicationId)
+                ?: return null
         return if (hasGrant(association, READ_CLUB)) association.long("club_id") else null
     }
 

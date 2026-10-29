@@ -1,5 +1,155 @@
 # Project status checkpoint
 
+## Release continuation — CLB-simplified-onboarding, 2026-10-29
+
+- Existing worktree, branch `codex/simplified-onboarding-release-20261029`, base/fetched
+  main `c0df96b520e4e1f6bfe97a27ce7b17546d694505`. Identity preflight PASS; active
+  clubs instructions, foreign=0. This bounded cycle explicitly authorizes ordinary
+  commits/pushes, one PR/merge, normal image publication and one stage-only deployment;
+  no production, credentials, direct server operations, force push or recovery.
+- Independent authority/migration, multipart/frontend and Gradle/security reviews
+  completed. One P2 fixed: legacy creation now compares immutable direct venue identity,
+  so editing the current club timezone cannot bypass duplicate detection. Shared H2/PG
+  regression fails before and passes after. No open substantive review findings; V064
+  remains additive, V001–V063 and CONCEPT_SOURCE unchanged.
+- New focused evidence `/private/tmp/clb-release-evidence/`: H2 onboarding 57/57 and
+  PostgreSQL 16 onboarding 62/62 PASS, affected core-data detektMain/detektTest/ktlint
+  PASS. Both successful Gradle invocations used the bounded supervisor and verified
+  owned-process cleanup. One initial test filter selected no tests, then was corrected;
+  an unsupported runIT CLI flag was rejected before JVM launch. No waived gates.
+- Hash-based reuse audit confirms all other final implementation bytes unchanged,
+  including V064/GeoNames/frontend/assets and Gradle/security remediation. Prior full
+  JVM/IT/coverage/build/browser results are retained, not rerun. Hosted Linux CI and
+  final committed-tree secret scan remain publication gates.
+- Owner directly confirmed on 2026-10-29: around 18:30 MSK, `/start` received a new
+  reply from @NightConcierge_Bot / 7696193761 and its Mini App opened after old-token
+  revocations. This satisfies the fresh bot prerequisite, not new onboarding acceptance.
+- Stage deployment improvements in the separate worktree are excluded. Protected
+  stage approval/timer and release/shared-resource guards remain mandatory. No stage
+  dispatch or runtime change has occurred in this continuation.
+- Next step: publish the verified committed candidate and require all current PR CI
+  results before merge; actual PR/main/image/deploy identities belong to later evidence.
+
+## Current local remediation — CLB-simplified-onboarding, 2026-10-29
+
+- **Onboarding: `ONBOARDING_PRESERVED`.** Original 68-path manifest: 66 implementation,
+  test, V064, GeoNames and packaged-assets paths unchanged; only these two ops documents
+  updated. Earlier functional acceptance remains recorded; no onboarding redesign or
+  repeat PostgreSQL/Playwright/full JVM suite. Separate Stage deployment work untouched.
+- **Gradle: `GRADLE_PROTECTION_VERIFIED_CAUSE_UNCONFIRMED`; cleanup
+  `OWNED_EXPERIMENTS_CLEAN`.** Multipart/temp ownership, cancellation/fatal-error handling,
+  streaming whole-request 413 and Vintage/test-application deadlines corrected. Small
+  foreground supervisor isolates its daemon registry, tracks precise birth identity and
+  live ancestry/group continuity, rejects uncertain ownership, limits time/logs/resources,
+  diagnoses then TERM/KILLs only verified own processes. No global daemon stop.
+- Controller **23/23 PASS**; real Ktor coverage **36 distinct cases PASS across focused
+  runs** (34 upload/lifecycle/error-format plus final 2 error-handler cases). No claim
+  that an earlier failed run passed: compilation/static and new-test expectation failures
+  were fixed and checked. Final error-handler run exit 0 / 81.184 s; affected
+  detektMain/detektTest/ktlint and compilation passed. Every protected invocation has
+  verified cleanup. Original idle daemon 83051 remains with unchanged birth identity.
+  Independent final supervisor/Kotlin review has no remaining blocking finding.
+- GC retaining cause remains unknown. macOS final recheck→signal race, dead controller
+  and never-observed detached/unmarked descendants remain explicit protection limits.
+  Linux path reviewed but process regressions executed on macOS. Broad required
+  test/IT/coverage/final packaging gates remain for controlled CI, not waived.
+- **Historical credentials/Gitleaks: `SECURITY_GATE_READY`.** Exactly four commit-scoped
+  fingerprints applied: one architectural false positive, two synthetic fixtures and
+  old bot **8295829972** credential, privately matched and **`OWNER_ATTESTED_REVOKED`**
+  by the owner's direct 2026-10-29 BotFather-Revoke report. No independent API verification.
+  Rules unchanged. Wrapper now checks current source and full available history with
+  verified RO Git common-dir access, positive coverage and fail-closed diagnostics.
+  Existing Secret Scan workflow uses the wrapper and full checkout; CI cost grows with
+  history instead of scanning one shallow merge commit.
+- Wrapper **14 focused cases verified** (10 unit rechecked after the final diagnostic
+  guard fix; four real Docker cases reused), pinned Gitleaks 8.28.0: candidate **1,526 files /
+  16,806,872 scanned bytes / 0 findings**; history **668 scanned commits /
+  26,024,672 bytes / 0 unaccounted findings** (1,216 reachable). Final documentation
+  receives a current-source recheck; history reuse requires identical graph/config/pins.
+- Additional owner-revoked display names: Night Concierge Test Bot, Dev Night Concierge
+  Bot, Night Concierge Bot. Their IDs/connections are unconfirmed and may include the
+  primary **@NightConcierge_Bot / 7696193761**. No successful post-revocation smoke is
+  available; if its previous token was revoked, recovery requires separate authorization.
+  No credential values were disclosed or changed; protected env, Telegram API and
+  BotFather were not accessed here.
+- Same detached HEAD `c0df96b520e4e1f6bfe97a27ce7b17546d694505` and existing worktree
+  `/Users/maksimmartynov/.codex/worktrees/simplified-onboarding/clubs_bot`; identity guard
+  PASS, active CLB instructions/foreign=0. Git history unchanged, no publication or
+  Stage/prod/SSH/other-project action. Details, exact commands and evidence links:
+  [simplified-client-onboarding.md](simplified-client-onboarding.md).
+- **One next step:** authorize a controlled CI run of the mandatory full
+  test/IT/coverage/build gates on the final candidate before publication.
+
+## Earlier diagnostic continuation — CLB-simplified-onboarding, 2026-10-29
+
+- **GRADLE: `CAUSE_NARROWED`. CREDENTIAL: `IDENTITY_UNCONFIRMED`, risk
+  `CREDENTIAL_REMEDIATION_REQUIRED`. PROCESS CLEANUP: `NOT_RUN`.** Independent results,
+  not one undifferentiated blocker. [Existing diagnostic](simplified-client-onboarding.md)
+  now records the incident, classified findings and minimal proposed implementation scopes.
+- Same worktree `/Users/maksimmartynov/.codex/worktrees/simplified-onboarding/clubs_bot`,
+  detached HEAD `c0df96b520e4e1f6bfe97a27ce7b17546d694505`; correct repository-only guard
+  PASS, CLB instructions/foreign=0. Previous external-data `--scope` error is acknowledged;
+  no guard/instruction override. Incoming 68-path candidate manifest matched. Only this
+  checkpoint and the existing diagnostic are edited; code/tests/V064/assets and separate
+  Stage deployment work remain unchanged. A base SHA is not a hash of earlier loaded bytes.
+- Owner dump SHA-256 matches `163b4476e089ad0ddaf19a1a07dafcac182a10ebc79335f0662dfa78c97bcfea`.
+  GC threads accumulated 27,118 CPU-seconds; test worker awaited the oversized music
+  upload's testApplication. Start-time/cwd/parent/daemon stream correlate it with the early
+  OOM run, canceled after client disconnection at 12:01:09; later checks ran while the
+  leftover worker lived. Exact worker argv/Xmx/Xms and retained allocation source are
+  unknown. Later successful test runs did **not** prove all workers were cleaned up.
+- Static review identified fatal Error→500 masking and incomplete multipart/temp/test
+  cleanup paths in unchanged base code, but did not establish them as the GC root cause.
+  Plan: narrow lifecycle/fatal-error fixes and regressions, Vintage-compatible deadline,
+  independent ownership-aware invocation watchdog/diagnostics/worker reconciliation.
+  No dependency upgrade or permanent heap increase is accepted as a proven fix.
+- Security classification is recorded: one architectural false positive, two synthetic
+  test values, one exposed Telegram credential with unverified identity/revocation.
+  No confirmed public bot ID/username; do not assume NightConcierge_Bot. Exact first-three
+  historical fingerprints and worktree/common-dir scanner fix are proposals only.
+  Current candidate/base/history/hosted scan evidence reused with distinct scopes.
+- No reproduction (0/2), Gradle/Java/Docker/browser tests, scanner rerun, process signal,
+  credential change or publication. Read-only process metadata does not authorize cleanup
+  of existing JVMs. Data-only evidence: `/private/tmp/clb-simplified-evidence/gradle-incident-evidence.json`.
+  Documentation/whitespace/link and preservation checks are the applicable final gates.
+- **One nearest owner action:** privately identify the historical credential's bot and
+  provide only its public identity plus exact-credential revocation evidence, or separately
+  authorize rotation after identification. No token should be sent in chat.
+
+## Earlier local simplified onboarding — 2026-10-29
+
+- **Verdict: `BLOCKED` — inherited repository history secret-scan findings.** Requested
+  simplified flow is implemented and passes functional local acceptance; the full-history
+  security gate is not waived. [Detailed handoff](simplified-client-onboarding.md) records
+  exact scope, commands, source/data changes and the four redacted historical findings.
+- New user-requested local task, no new CLB/DEC ID. Isolated managed worktree
+  `/Users/maksimmartynov/.codex/worktrees/simplified-onboarding/clubs_bot`, detached
+  HEAD/base/fresh origin/main `c0df96b520e4e1f6bfe97a27ce7b17546d694505`. Identity guard
+  PASS, active foreign instructions = 0. Primary checkout and existing dirty Stage
+  deployment work in `client-invitation-fix` remain separate and unedited.
+- Owner-authorized DEC-041 AMEND replaces mandatory code exchange/per-club approval:
+  invite with allowance 1 → one-action acceptance → direct private venue creation →
+  second rejected → exact owner raises allowance to 2 → second created. Nullable
+  existing-client limits, shared client lock, current-authority idempotency, legacy
+  creation guard, immutable mappings and audit preserve safety/history. New paired
+  V064 only; CONCEPT_SOURCE and prior migrations unchanged. Offline GeoNames selection
+  supplies timezone; Main Mini App/menu code resolves signed server authority.
+- Checks: full JVM 1,331 PASS + 1 existing disabled; full PostgreSQL/IT run 1,563 PASS
+  + 11 documented skips (10 optional native adapters, 1 existing disabled), including
+  onboarding H2 57/57 and PostgreSQL 62/62. detektGate, ktlintCheck, coverageGate,
+  dependency graph, logs policy and installDist PASS. Frontend full 222/222 plus final
+  affected CabinetEntry 10/10; TS/ESLint/build PASS. Final packaged browser 9/9 and real
+  local JDBC browser 2/2 PASS. Independent reviews closed their findings.
+- Secret scan: managed-worktree wrapper's zero-byte result rejected as verification
+  error. Correctly mounted pinned scanner found four inherited history findings in
+  668 commits; current complete source snapshot scan passes. No rule/allowlist/history
+  change. Evidence `/private/tmp/clb-simplified-evidence/`; local evidence is not runtime.
+- Unverified: actual Telegram menu/Main Mini App/device behavior, hosted CI, Stage
+  migrations/runtime and coverage for a real customer's settlement. No commit/push/PR,
+  merge, deploy, SSH, real Telegram/BotFather/Caddy or live data/config changes.
+- **One next step:** review and adjudicate the four inherited secret-scan findings
+  without publishing the local onboarding candidate.
+
 ## Current Managed Bots docs + invitation preparation — 2026-10-28
 
 - **Verdict: `DOCS_AND_INVITATION_CANDIDATE_READY`.** Continuation of `CLB-client-invitation-fix`, no new task/DEC ID. Existing worktree `/Users/maksimmartynov/.codex/worktrees/client-invitation-fix/clubs_bot`, detached HEAD/base `71d0beda4ab2897f668f63f9a67b552d4214d863`; identity guard PASS, active foreign instructions = 0. Read-only remote `main` lookup returned the same SHA; cached origin/main remains stale at `90b772ef…`, refs/index unchanged. No branch/worktree/project created.

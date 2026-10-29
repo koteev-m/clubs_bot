@@ -66,6 +66,7 @@ function PlatformNavigation({
   invite: ReturnType<typeof useInvitationDraft>;
 }) {
   const [screen, setScreen] = useState<OwnerScreen>(currentScreen);
+  const limitDraft = useClientLimitDraft(credential);
   const navigate = useCallback((next: OwnerScreen, replace = false) => {
     const url = new URL(window.location.href);
     url.searchParams.set('mode', 'platform-owner');
@@ -115,6 +116,7 @@ function PlatformNavigation({
   if (screen.type === 'client')
     return (
       <OwnerClient
+        limitDraft={limitDraft}
         key={screen.id}
         credential={credential}
         id={screen.id}
@@ -141,7 +143,7 @@ function PlatformNavigation({
             : 'Клиенты и доступы'
       }
       subtitle={
-        overview ? 'Клиенты, приглашения и решения по заявкам.' : undefined
+        overview ? 'Клиенты, приглашения и разрешённые заведения.' : undefined
       }
       owner
       back={overview ? undefined : back}
@@ -192,7 +194,7 @@ function PlatformNavigation({
             className="ob-button"
             onClick={() => navigate({ type: 'applications' })}
           >
-            Рассмотреть заявки
+            История заявок
           </button>
         </>
       )}
@@ -225,6 +227,8 @@ function OwnerInvite({
   const {
     clientName,
     setClientName,
+    allowedClubs,
+    setAllowedClubs,
     recipientLabel,
     setRecipientLabel,
     invitation,
@@ -234,7 +238,7 @@ function OwnerInvite({
   return (
     <Shell
       title="Пригласить клиента"
-      subtitle="Доступ к кабинету и подаче заявок. Каждый клуб требует отдельного одобрения."
+      subtitle="Доступ к кабинету с разрешённым количеством заведений."
       owner
       back={back}
     >
@@ -244,7 +248,11 @@ function OwnerInvite({
             event.preventDefault();
             command.run(
               '/api/platform/onboarding/invitations',
-              { clientName, recipientLabel },
+              {
+                clientName,
+                recipientLabel,
+                allowedClubs: Number(allowedClubs),
+              },
               setInvitation,
             );
           }}
@@ -282,16 +290,31 @@ function OwnerInvite({
           <p id="invite-recipient-help" className="po-muted">
             Имя для вашего удобства. Telegram ID или ссылка на профиль не нужны.
           </p>
+          <Field label="Разрешено заведений">
+            <input
+              type="number"
+              min="0"
+              step="1"
+              required
+              value={allowedClubs}
+              disabled={command.blocked}
+              onChange={(event) => setAllowedClubs(event.target.value)}
+            />
+          </Field>
           <p className="po-notice">
-            Ссылка действует семь суток. Получатель подтвердит аккаунт и сообщит
-            код в вашем исходном личном чате. После сверки вы отдельно
-            предоставите доступ.
+            Ссылка действует семь суток. Её фактический получатель сможет
+            принять приглашение и открыть кабинет. Передавайте ссылку только
+            нужному человеку. Отзыв доступа не отменяет прежние действия или
+            раскрытие данных.
           </p>
           <button
             type="submit"
             className="po-primary"
             disabled={
-              command.blocked || !clientName.trim() || !recipientLabel.trim()
+              command.blocked ||
+              !clientName.trim() ||
+              !recipientLabel.trim() ||
+              !/^(0|[1-9][0-9]*)$/.test(allowedClubs)
             }
           >
             {command.saving ? 'Создаём приглашение…' : 'Создать ссылку'}
@@ -622,7 +645,9 @@ function OwnerClient({
   id,
   back,
   open,
+  limitDraft,
 }: {
+  limitDraft: ReturnType<typeof useClientLimitDraft>;
   credential: string;
   id: string;
   back: () => void;
@@ -637,6 +662,11 @@ function OwnerClient({
       <RemoteState {...remote} />
       {remote.data && (
         <>
+          <ClientLimit
+            draft={limitDraft}
+            client={remote.data}
+            updated={remote.refresh}
+          />
           <section className="ob-section">
             <h2>Доступы</h2>
             {remote.data.members.length === 0 && <p>Доступы ещё не выданы</p>}
@@ -1048,5 +1078,86 @@ function OwnerApplication({
       )}
       <CommandState command={command} refresh={remote.refresh} />
     </Shell>
+  );
+}
+
+function useClientLimitDraft(credential: string) {
+  const [clientId, setClientId] = useState('');
+  const [value, setValue] = useState('');
+  const [result, setResult] = useState<ClientDetail>();
+  const command = useCommand<ClientDetail>(credential);
+  return { clientId, setClientId, value, setValue, result, setResult, command };
+}
+
+function ClientLimit({
+  draft,
+  client,
+  updated,
+}: {
+  draft: ReturnType<typeof useClientLimitDraft>;
+  client: ClientDetail;
+  updated: () => void;
+}) {
+  const { command, result } = draft;
+  useEffect(() => {
+    if (draft.clientId !== client.id && !command.blocked) {
+      draft.setClientId(client.id);
+      draft.setValue(client.allowedClubs?.toString() ?? '');
+      command.reset();
+    }
+  }, [client, draft, command]);
+  useEffect(() => {
+    if (result?.id === client.id) {
+      draft.setResult(undefined);
+      updated();
+    }
+  }, [result, client.id, updated, draft]);
+  if (command.blocked && draft.clientId !== client.id)
+    return (
+      <p className="po-notice">
+        Изменение лимита другого клиента ожидает результата. Вернитесь в его
+        карточку и проверьте результат.
+      </p>
+    );
+  return (
+    <section className="po-card ob-card">
+      <h2>Лимит заведений</h2>
+      <p>Разрешено всего: {client.allowedClubs ?? 'не настроено'}</p>
+      <p>Создано: {client.createdClubs ?? client.clubs.length}</p>
+      <p>Можно добавить: {client.availableClubs ?? 0}</p>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          command.run(
+            '/api/platform/onboarding/clients/' + client.id + '/limit',
+            {
+              allowedClubs: Number(draft.value),
+              expectedVersion: client.limitVersion,
+            },
+            draft.setResult,
+          );
+        }}
+      >
+        <Field label="Разрешено всего">
+          <input
+            type="number"
+            min={client.createdClubs ?? 0}
+            step="1"
+            required
+            value={draft.value}
+            disabled={command.blocked}
+            onChange={(event) => draft.setValue(event.target.value)}
+          />
+        </Field>
+        <button
+          type="submit"
+          className="po-primary"
+          disabled={command.blocked || !/^(0|[1-9][0-9]*)$/.test(draft.value)}
+        >
+          {command.saving ? 'Сохраняем…' : 'Сохранить лимит'}
+        </button>
+        <CommandState command={command} refresh={updated} />
+      </form>
+    </section>
   );
 }

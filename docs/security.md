@@ -34,6 +34,20 @@ development preview remains loopback-only and cannot issue access or invitations
 
 ### Client onboarding A (accepted 2026-10-28; local candidate)
 
+**AMEND 2026-10-29:** the historical A/B descriptions below retain provenance.
+For newly issued invitations, explicit recipient POST atomically activates only a
+new empty client cabinet, without comparison code/owner reconfirmation. Old pending
+invitations keep their original policy. A bearer link can be accepted by its actual
+recipient; revocation cannot undo previous actions or data disclosure. Existing
+signed identity, expiry, one-recipient binding, revoke/reissue, transaction/audit,
+current-authority replay and secret-handling invariants remain mandatory.
+The exact configured platform owner alone changes the client-wide venue limit;
+existing clients have no silently assigned capacity. All mapped venues count,
+including private ones. Direct and legacy approved creation share the client lock
+and limit check. The [current contract](product/PRODUCT_SPEC.md#simplified-client-onboarding)
+supersedes mandatory code/per-venue approval for the new path. Location selection is
+an offline packaged catalogue, with no address transfer to a new external processor.
+
 Authority is [PRODUCT_SPEC §29](product/PRODUCT_SPEC.md#client-onboarding-ab-technical-contract),
 refining DEC-039–042. Implementation evidence is bounded to
 [AS_BUILT §4.16](product/AS_BUILT.md#client-onboarding-a-local); final checks/review and

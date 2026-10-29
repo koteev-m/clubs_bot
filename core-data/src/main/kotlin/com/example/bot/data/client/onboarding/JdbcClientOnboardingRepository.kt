@@ -147,6 +147,8 @@ class JdbcClientOnboardingRepository(
             -> invitations.action(required(resourceId), operation, body)
             OnboardingMutation.MEMBER_REVOKE, OnboardingMutation.MEMBER_RESTORE ->
                 ClientAccessOperations(session).change(required(resourceId), operation, body)
+            OnboardingMutation.CLIENT_LIMIT_UPDATE -> ClientLimitOperations(session).update(required(resourceId), body)
+            OnboardingMutation.CLUB_CREATE -> DirectClubOperations(session).create(required(resourceId), body)
             OnboardingMutation.APPLICATION_CREATE -> applications.create(required(resourceId), body)
             OnboardingMutation.APPLICATION_UPDATE -> applications.update(required(resourceId), body)
             OnboardingMutation.APPLICATION_CREATE_CLUB ->
@@ -171,6 +173,7 @@ class JdbcClientOnboardingRepository(
         return when (command["result_type"]) {
             "invitation" -> InvitationOperations(session).get(command.long("result_id"), platform)
             "application" -> ApplicationOperations(session).get(command.long("result_id"), platform)
+            "client_limit" -> ClientAccessOperations(session).get(command.long("client_id"))
             "member" -> ClientAccessOperations(session).memberView(command.long("client_id"), command.long("result_id"))
             "club_create" -> ClubOnboardingOperations(session).replayCreate(command.long("result_id"))
             "club_profile" -> ClubOnboardingOperations(session).get(command.long("result_id"), write = true)
@@ -209,6 +212,7 @@ class JdbcClientOnboardingRepository(
     private companion object {
         val OWNER_OPERATIONS =
             setOf(
+                OnboardingMutation.CLIENT_LIMIT_UPDATE,
                 OnboardingMutation.INVITATION_ISSUE,
                 OnboardingMutation.INVITATION_CONFIRM,
                 OnboardingMutation.INVITATION_REVOKE,

@@ -78,7 +78,7 @@ export default function PlatformOwnerAccess() {
     access.credential === initData && access.refreshEpoch === refreshEpoch
       ? access.status
       : 'loading';
-  // Revalidation hides/unmounts private screens, but must not lose an uncertain
+  // Revalidation hides private screens, but must not lose an uncertain
   // command. Temporary hidden-page credential suppression is not account change.
   const lastCredential = useRef('');
   if (initData || !document.hidden) lastCredential.current = initData;
@@ -99,45 +99,61 @@ export default function PlatformOwnerAccess() {
       Проверяем доступ…
     </main>
   );
-  if (status === 'loading') return loading;
-  if (status === 'allowed')
-    return (
-      <Suspense fallback={loading}>
-        <Screens
-          key={refreshEpoch + ':' + initData}
-          credential={initData}
-          invite={invite}
-        />
-      </Suspense>
-    );
-  return (
-    <main
-      lang="ru"
-      className="min-h-screen bg-gray-50 p-6 flex items-center justify-center"
-    >
-      <div className="max-w-sm space-y-3">
-        <h1 className="text-xl font-semibold">
-          {status === 'denied'
-            ? 'Нет доступа к управлению платформой'
-            : status === 'unauthorized'
-              ? 'Нужна авторизация в Telegram'
-              : 'Не удалось проверить доступ'}
-        </h1>
-        <p>
-          {status === 'denied'
-            ? 'Кабинет доступен только владельцу платформы.'
-            : status === 'unauthorized'
-              ? 'Откройте мини-приложение заново из Telegram.'
-              : 'Повторите проверку, когда соединение восстановится.'}
-        </p>
-        <button
-          type="button"
-          className="min-h-11 text-blue-700"
-          onClick={() => setAttempt((value) => value + 1)}
-        >
-          Повторить проверку
-        </button>
+  const mountedCredential = useRef('');
+  if (status === 'allowed') mountedCredential.current = initData;
+  if (denied || (!initData && !document.hidden)) mountedCredential.current = '';
+  const screens =
+    mountedCredential.current &&
+    mountedCredential.current === lastCredential.current ? (
+      <div hidden={status !== 'allowed'}>
+        <Suspense fallback={loading}>
+          <Screens
+            key={mountedCredential.current}
+            credential={mountedCredential.current}
+            invite={invite}
+          />
+        </Suspense>
       </div>
-    </main>
+    ) : null;
+  if (status === 'loading')
+    return (
+      <>
+        {screens}
+        {loading}
+      </>
+    );
+  if (status === 'allowed') return screens;
+  return (
+    <>
+      {screens}
+      <main
+        lang="ru"
+        className="min-h-screen bg-gray-50 p-6 flex items-center justify-center"
+      >
+        <div className="max-w-sm space-y-3">
+          <h1 className="text-xl font-semibold">
+            {status === 'denied'
+              ? 'Нет доступа к управлению платформой'
+              : status === 'unauthorized'
+                ? 'Нужна авторизация в Telegram'
+                : 'Не удалось проверить доступ'}
+          </h1>
+          <p>
+            {status === 'denied'
+              ? 'Кабинет доступен только владельцу платформы.'
+              : status === 'unauthorized'
+                ? 'Откройте мини-приложение заново из Telegram.'
+                : 'Повторите проверку, когда соединение восстановится.'}
+          </p>
+          <button
+            type="button"
+            className="min-h-11 text-blue-700"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            Повторить проверку
+          </button>
+        </div>
+      </main>
+    </>
   );
 }

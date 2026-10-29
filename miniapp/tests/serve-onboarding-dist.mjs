@@ -12,7 +12,9 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/app' || url.pathname === '/app/') {
     const mode = url.searchParams.get('mode');
     file = resolve(
-      mode === 'client' || mode === 'platform-owner' ? dist : legacy,
+      mode === 'client' || mode === 'platform-owner' || mode === 'cabinet'
+        ? dist
+        : legacy,
       'index.html',
     );
   } else if (url.pathname.startsWith('/app/react/assets/')) {

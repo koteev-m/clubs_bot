@@ -4,6 +4,8 @@ import com.example.bot.admin.AdminClub
 import com.example.bot.admin.AdminClubCreate
 import com.example.bot.admin.AdminClubUpdate
 import com.example.bot.admin.AdminClubsRepository
+import com.example.bot.data.client.ClientAudience
+import com.example.bot.data.client.ClientContextRepository
 import com.example.bot.data.security.Role
 import com.example.bot.http.ErrorCodes
 import com.example.bot.http.ensureMiniAppNoStoreHeaders
@@ -56,6 +58,7 @@ private data class AdminClubResponse(
 
 fun Application.adminClubsRoutes(
     adminClubsRepository: AdminClubsRepository,
+    clientContexts: ClientContextRepository? = null,
     botTokenProvider: () -> String = miniAppBotTokenProvider(),
 ) {
     val logger = LoggerFactory.getLogger("AdminClubsRoutes")
@@ -82,13 +85,29 @@ fun Application.adminClubsRoutes(
                         if (!call.hasGlobalAdminAccess()) {
                             return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
+                        // A client must use its atomic, capacity-checked creation path,
+                        // even if this person also retains a legacy GLOBAL assignment.
+                        if (clientContexts
+                                ?.context(
+                                    call.rbacContext().user.telegramId,
+                                    ClientAudience.Platform,
+                                )?.isNotEmpty() ==
+                            true
+                        ) {
+                            return@post call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
+                        }
 
-                        val payload = runCatching { call.receive<AdminClubCreateRequest>() }.getOrNull()
-                            ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val payload =
+                            runCatching { call.receive<AdminClubCreateRequest>() }.getOrNull()
+                                ?: return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
 
                         val errors = payload.validateCreate()
                         if (errors.isNotEmpty()) {
-                            return@post call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error, details = errors)
+                            return@post call.respondError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.validation_error,
+                                details = errors,
+                            )
                         }
 
                         val created =
@@ -116,11 +135,16 @@ fun Application.adminClubsRoutes(
                             return@patch call.respondError(HttpStatusCode.Forbidden, ErrorCodes.forbidden)
                         }
 
-                        val payload = runCatching { call.receive<AdminClubUpdateRequest>() }.getOrNull()
-                            ?: return@patch call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
+                        val payload =
+                            runCatching { call.receive<AdminClubUpdateRequest>() }.getOrNull()
+                                ?: return@patch call.respondError(HttpStatusCode.BadRequest, ErrorCodes.invalid_json)
                         val errors = payload.validateUpdate()
                         if (errors.isNotEmpty()) {
-                            return@patch call.respondError(HttpStatusCode.BadRequest, ErrorCodes.validation_error, details = errors)
+                            return@patch call.respondError(
+                                HttpStatusCode.BadRequest,
+                                ErrorCodes.validation_error,
+                                details = errors,
+                            )
                         }
 
                         val updated =
@@ -178,8 +202,20 @@ private fun AdminClubUpdateRequest.validateUpdate(): Map<String, String> {
         errors["payload"] = "must_include_field"
         return errors
     }
-    name?.let { if (it.trim().isEmpty() || it.trim().length > MAX_CLUB_NAME_LENGTH) errors["name"] = "length_1_$MAX_CLUB_NAME_LENGTH" }
-    city?.let { if (it.trim().isEmpty() || it.trim().length > MAX_CITY_LENGTH) errors["city"] = "length_1_$MAX_CITY_LENGTH" }
+    name?.let {
+        if (it.trim().isEmpty() ||
+            it.trim().length > MAX_CLUB_NAME_LENGTH
+        ) {
+            errors["name"] = "length_1_$MAX_CLUB_NAME_LENGTH"
+        }
+    }
+    city?.let {
+        if (it.trim().isEmpty() ||
+            it.trim().length > MAX_CITY_LENGTH
+        ) {
+            errors["city"] = "length_1_$MAX_CITY_LENGTH"
+        }
+    }
     return errors
 }
 

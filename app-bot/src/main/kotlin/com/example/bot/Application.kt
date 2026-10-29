@@ -25,6 +25,7 @@ import com.example.bot.data.club.GuestListDbRepository
 import com.example.bot.data.club.GuestListEntryDbRepository
 import com.example.bot.data.coredata.CoreDataSeeder
 import com.example.bot.data.gamification.GamificationSettingsRepository
+import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import com.example.bot.data.privacy.PrivacyConfig
 import com.example.bot.data.promoter.PromoterBookingAssignmentsRepository
 import com.example.bot.data.security.UserIdentityProvisioner
@@ -63,8 +64,6 @@ import com.example.bot.notifications.TelegramOperationalNotificationService
 import com.example.bot.opschat.ClubOpsChatConfigRepository
 import com.example.bot.plugins.ActorMdcPlugin
 import com.example.bot.plugins.DataSourceHolder
-import com.example.bot.plugins.installPrivateClubContainment
-import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import com.example.bot.plugins.appConfig
 import com.example.bot.plugins.configureLoggingAndRequestId
 import com.example.bot.plugins.configureSecurity
@@ -77,6 +76,7 @@ import com.example.bot.plugins.installHttpSecurityFromEnv
 import com.example.bot.plugins.installJsonErrorPages
 import com.example.bot.plugins.installMetrics
 import com.example.bot.plugins.installMigrationsAndDatabase
+import com.example.bot.plugins.installPrivateClubContainment
 import com.example.bot.plugins.installRateLimitPluginDefaults
 import com.example.bot.plugins.installRequestGuardsFromEnv
 import com.example.bot.plugins.installWebAppCspFromEnv
@@ -144,6 +144,7 @@ import com.example.bot.telegram.SupportTelegramHandler
 import com.example.bot.telegram.TelegramCallbackRouter
 import com.example.bot.telegram.TelegramClient
 import com.example.bot.telegram.TelegramGuestFallbackHandler
+import com.example.bot.telegram.installDefaultCabinetMenu
 import com.example.bot.telegram.webhook.TelegramWebhookIngressMetrics
 import com.example.bot.telegram.webhook.TelegramWebhookIngressWorker
 import io.ktor.serialization.kotlinx.json.json
@@ -159,6 +160,7 @@ import io.ktor.server.plugins.conditionalheaders.ConditionalHeaders
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import io.micrometer.core.instrument.Metrics
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.koin.core.logger.Level
 import org.koin.ktor.ext.inject
@@ -321,6 +323,7 @@ fun Application.module() {
             botUsername = config.bot.username,
             miniAppUrl = config.miniAppUrl,
             qrSecretProvider = { System.getenv("QR_SECRET") ?: "" },
+            configuredOwnerId = config.bot.ownerId,
             hasClientMembership = { telegramId ->
                 clientContextRepository.context(telegramId, ClientAudience.Platform).isNotEmpty()
             },
@@ -342,6 +345,11 @@ fun Application.module() {
         )
 
     environment.monitor.subscribe(ApplicationStarted) {
+        launch {
+            if (!installDefaultCabinetMenu(config.miniAppUrl, telegramClient::send)) {
+                opsNotificationLogger.warn("telegram cabinet default menu unavailable")
+            }
+        }
         opsNotificationLogger.info("Starting TelegramOperationalNotificationService")
         opsNotificationService.start()
         telegramWebhookIngressWorker.start()
@@ -423,7 +431,7 @@ fun Application.module() {
     promoterQuotasAdminRoutes(promoterQuotaService = promoterQuotaService)
     promoterAdminRoutes(promoterAdminService = promoterAdminService)
     adminOpsChatsRoutes(repository = opsChatConfigRepository)
-    adminClubsRoutes(adminClubsRepository = adminClubsRepository)
+    adminClubsRoutes(adminClubsRepository = adminClubsRepository, clientContexts = clientContextRepository)
     adminHallsRoutes(adminHallsRepository = adminHallsRepository, adminClubsRepository = adminClubsRepository)
     adminHallPlanRoutes(adminHallsRepository = adminHallsRepository, hallPlansRepository = hallPlansRepository)
     adminTablesRoutes(adminTablesRepository = adminTablesRepository, adminHallsRepository = adminHallsRepository)

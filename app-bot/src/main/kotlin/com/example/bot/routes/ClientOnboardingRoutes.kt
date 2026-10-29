@@ -55,6 +55,8 @@ internal fun Application.registerClientOnboardingRoutes(
 }
 
 private fun Route.clientInvitationEndpoints(api: OnboardingHttp) {
+    get("/locations") { call.safeOnboarding { OnboardingLocations.countries() } }
+    post("/locations/search") { call.safeOnboarding { OnboardingLocations.search(call.onboardingBody()) } }
     post("/invitations/resolve") { api.read(call, OnboardingRead.INVITATION_RESOLVE, body = true) }
     get("/invitations/{id}") { api.read(call, OnboardingRead.INVITATION_STATUS, "id") }
     post("/invitations/{id}/claim") { api.mutate(call, OnboardingMutation.INVITATION_CLAIM, "id") }
@@ -62,6 +64,7 @@ private fun Route.clientInvitationEndpoints(api: OnboardingHttp) {
 }
 
 private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
+    post("/clients/{id}/clubs") { api.mutate(call, OnboardingMutation.CLUB_CREATE, "id") }
     post("/clients/{id}/applications") { api.mutate(call, OnboardingMutation.APPLICATION_CREATE, "id") }
     post("/clients/{id}/applications/search") {
         api.read(call, OnboardingRead.CLIENT_APPLICATION_SEARCH, "id", body = true)
@@ -83,6 +86,7 @@ private fun Route.platformInvitationEndpoints(api: OnboardingHttp) {
     post("/invitations/{id}/reissue") { api.mutate(call, OnboardingMutation.INVITATION_REISSUE, "id") }
     post("/clients/search") { api.read(call, OnboardingRead.PLATFORM_CLIENT_SEARCH, body = true) }
     get("/clients/{id}") { api.read(call, OnboardingRead.PLATFORM_CLIENT_GET, "id") }
+    post("/clients/{id}/limit") { api.mutate(call, OnboardingMutation.CLIENT_LIMIT_UPDATE, "id") }
     post("/clients/{id}/members/{userId}/revoke") { api.mutate(call, OnboardingMutation.MEMBER_REVOKE, "id") }
     post("/clients/{id}/members/{userId}/restore") { api.mutate(call, OnboardingMutation.MEMBER_RESTORE, "id") }
 }
@@ -130,6 +134,7 @@ private class OnboardingHttp(
         // This refusal happens before persistence, so callers can distinguish it from a lost response.
         if (issuesLink && username == null) throw OnboardingFailure(ErrorCodes.INVITATION_LINK_UNAVAILABLE)
         var body = call.onboardingBody()
+        if (operation == OnboardingMutation.CLUB_CREATE) body = OnboardingLocations.creationBody(body)
         if (operation in memberMutations) {
             val userId = call.positiveId("userId").toString()
             if (body["userId"] != null && body["userId"] != JsonPrimitive(userId)) {
@@ -189,6 +194,7 @@ private suspend fun ApplicationCall.safeOnboarding(block: suspend () -> JsonObje
                 "not_found" -> HttpStatusCode.NotFound
                 "forbidden" -> HttpStatusCode.Forbidden
                 "validation_error" -> HttpStatusCode.BadRequest
+                "location_required" -> HttpStatusCode.BadRequest
                 ErrorCodes.INVITATION_LINK_UNAVAILABLE -> HttpStatusCode.ServiceUnavailable
                 in conflictCodes -> HttpStatusCode.Conflict
                 else -> HttpStatusCode.InternalServerError
@@ -213,4 +219,7 @@ private val conflictCodes =
         ErrorCodes.INVALID_TRANSITION,
         ErrorCodes.idempotency_conflict,
         ErrorCodes.DUPLICATE_APPLICATION,
+        "club_limit_unset",
+        "club_limit_reached",
+        "club_limit_below_usage",
     )

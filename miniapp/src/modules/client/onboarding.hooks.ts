@@ -25,6 +25,19 @@ export function useRemote<T>(credential: string, path: string, body?: object) {
     return () => controller.abort();
   }, [credential, path, serialized, attempt]);
   const refresh = useCallback(() => setAttempt((value) => value + 1), []);
+  useEffect(() => {
+    const foreground = () => {
+      if (!document.hidden) refresh();
+    };
+    window.addEventListener('focus', foreground);
+    window.addEventListener('pageshow', foreground);
+    document.addEventListener('visibilitychange', foreground);
+    return () => {
+      window.removeEventListener('focus', foreground);
+      window.removeEventListener('pageshow', foreground);
+      document.removeEventListener('visibilitychange', foreground);
+    };
+  }, [refresh]);
   return { ...state, refresh };
 }
 

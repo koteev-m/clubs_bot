@@ -35,6 +35,7 @@ describe('fresh Telegram credentials on resume', () => {
           json: async () => ({
             clients: [
               { id: '20', name: 'Previously accessible client', clubs: [] },
+              { id: '21', name: 'Another accessible context', clubs: [] },
             ],
           }),
         } as Response)

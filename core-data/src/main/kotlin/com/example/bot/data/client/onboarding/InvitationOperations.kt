@@ -40,17 +40,20 @@ internal class InvitationOperations(
 
     fun issue(body: JsonObject): MutationResult {
         session.owner()
-        body.only(listOf("clientName", "recipientLabel"))
+        body.only(listOf("clientName", "recipientLabel", "allowedClubs"))
         val name = body.text("clientName", LABEL_LIMIT, required = true)
         val label = body.text("recipientLabel", LABEL_LIMIT, required = true)
+        val allowed = if (body.containsKey("allowedClubs")) parseAllowedClubs(body) else 1
         val clientId =
             sql.insert(
-                "INSERT INTO clients(display_name,is_active,created_at,updated_at) VALUES (?,FALSE,?,?)",
+                "INSERT INTO clients(display_name,is_active,allowed_clubs,created_at,updated_at) " +
+                    "VALUES (?,FALSE,?,?,?)",
                 name,
+                allowed,
                 session.now,
                 session.now,
             )
-        return create(clientId, label, null)
+        return create(clientId, label, null, "recipient_acceptance")
     }
 
     fun claim(
@@ -68,6 +71,15 @@ internal class InvitationOperations(
             return result(invitation, platform = false)
         }
         session.version(invitation, body)
+        return if (invitation["acceptance_policy"] == "recipient_acceptance") {
+            acceptRecipient(invitation)
+        } else {
+            claimForConfirmation(invitation)
+        }
+    }
+
+    private fun claimForConfirmation(invitation: DbRow): MutationResult {
+        val id = invitation.long("id")
         val code = (CODE_MINIMUM + SecureRandom().nextInt(CODE_RANGE)).toString()
         sql.update(
             "UPDATE client_invitations SET status='claimed',claimant_user_id=?,verification_code=?," +
@@ -104,7 +116,12 @@ internal class InvitationOperations(
                 if (sql.row("SELECT id FROM client_invitations WHERE replaces_invitation_id=?", id) != null) {
                     fail("invalid_transition")
                 }
-                create(invitation.long("client_id"), checkNotNull(invitation.getValue("recipient_label")), id)
+                create(
+                    invitation.long("client_id"),
+                    checkNotNull(invitation.getValue("recipient_label")),
+                    id,
+                    checkNotNull(invitation["acceptance_policy"]),
+                )
             }
             else -> fail("validation_error")
         }
@@ -153,16 +170,58 @@ internal class InvitationOperations(
         return result(row(invitation.long("id")), platform = true)
     }
 
+    private fun acceptRecipient(invitation: DbRow): MutationResult {
+        val clientId = invitation.long("client_id")
+        // Direct acceptance is exclusively for a newly issued empty cabinet, never an account transfer.
+        if (session.client(clientId).active()) fail("invalid_transition")
+        if (sql.row("SELECT client_id FROM client_memberships WHERE client_id=? LIMIT 1", clientId) != null ||
+            sql.row("SELECT client_id FROM client_clubs WHERE client_id=? LIMIT 1", clientId) != null ||
+            sql.row("SELECT client_id FROM client_club_applications WHERE client_id=? LIMIT 1", clientId) != null
+        ) {
+            fail("invalid_transition")
+        }
+        sql.update("UPDATE clients SET is_active=TRUE,updated_at=? WHERE id=?", session.now, clientId)
+        sql.update(
+            "INSERT INTO client_memberships(client_id,user_id,is_active,created_at,updated_at) VALUES (?,?,TRUE,?,?)",
+            clientId,
+            session.userId,
+            session.now,
+            session.now,
+        )
+        sql.update(
+            "INSERT INTO client_membership_grants(client_id,user_id,permission_code,is_active,created_at,updated_at) " +
+                "VALUES (?,?,?,TRUE,?,?)",
+            clientId,
+            session.userId,
+            MANAGE,
+            session.now,
+            session.now,
+        )
+        sql.update(
+            "UPDATE client_invitations SET status='accepted',open_marker=NULL,claimant_user_id=?," +
+                "claimed_at=?,accepted_at=?,updated_at=?,version=version+1 WHERE id=?",
+            session.userId,
+            session.now,
+            session.now,
+            session.now,
+            invitation.long("id"),
+        )
+        session.audit("client.invitation.accept", clientId, invitation.long("id"), invitation.long("version") + 1)
+        return result(row(invitation.long("id")), platform = false)
+    }
+
     private fun create(
         clientId: Long,
         label: String,
         previousId: Long?,
+        acceptancePolicy: String,
     ): MutationResult {
         val secret = randomToken()
         val id =
             sql.insert(
                 "INSERT INTO client_invitations(client_id,recipient_label,token_hash,status,open_marker,expires_at," +
-                    "replaces_invitation_id,created_at,updated_at) VALUES (?,?,?,'issued',1,?,?,?,?)",
+                    "replaces_invitation_id,created_at,updated_at,acceptance_policy) " +
+                    "VALUES (?,?,?,'issued',1,?,?,?,?,?)",
                 clientId,
                 label,
                 digest(secret),
@@ -170,6 +229,7 @@ internal class InvitationOperations(
                 previousId,
                 session.now,
                 session.now,
+                acceptancePolicy,
             )
         session.audit("client.invitation.issue", clientId, id, 1)
         val response = JsonObject(view(row(id), platform = true) + ("token" to JsonPrimitive(secret)))
@@ -266,6 +326,7 @@ internal class InvitationOperations(
             put("clientName", session.client(invitation.long("client_id")).getValue("display_name"))
             put("recipientLabel", if (platform) invitation.getValue("recipient_label") else "")
             put("status", state)
+            put("acceptanceMode", if (invitation["acceptance_policy"] == "recipient_acceptance") "direct" else "legacy")
             put("version", invitation.getValue("version"))
             put("expiresAt", invitation.instant("expires_at").toString())
             put(

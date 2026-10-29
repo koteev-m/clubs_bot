@@ -17,6 +17,8 @@ import com.example.bot.testing.createInitData
 import com.example.bot.webapp.TEST_BOT_TOKEN
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
@@ -35,6 +37,21 @@ import java.util.UUID
 import kotlin.test.assertEquals
 
 class ClientContextRoutesDataTest {
+    @Test
+    fun `client with legacy global assignment cannot bypass client creation through admin endpoint`() =
+        withDatabase { source ->
+            source.sql("INSERT INTO user_roles(user_id,role_code,scope_type) VALUES (99101,'OWNER','GLOBAL')")
+            withApp(source) {
+                val response =
+                    client.post("/api/admin/clubs") {
+                        header("X-Telegram-Init-Data", createInitData(userId = 99001))
+                        header("Content-Type", "application/json")
+                        setBody("""{"name":"Bypass","city":"Moscow"}""")
+                    }
+                response.assertClientError(HttpStatusCode.Forbidden, "forbidden")
+            }
+        }
+
     @Test
     fun `signed A B staff and membership-only identities see exact persisted grants`() =
         withDatabase { source ->
@@ -251,7 +268,7 @@ class ClientContextRoutesDataTest {
                 )
             }
             platformOwnerRoutes(99005) { TEST_BOT_TOKEN }
-            adminClubsRoutes(AdminClubsDbRepository(database)) { TEST_BOT_TOKEN }
+            adminClubsRoutes(AdminClubsDbRepository(database), JdbcClientContextRepository(source)) { TEST_BOT_TOKEN }
             val support = SupportServiceImpl(SupportRepository(database))
             supportRoutes(
                 supportService = support,
