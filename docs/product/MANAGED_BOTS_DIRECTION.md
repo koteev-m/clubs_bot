@@ -299,4 +299,226 @@ connection → client → разрешённый club → пользовател
 
 Это **предложение**, не автоматическое изменение принятого roadmap, не календарный
 план и не блокер приглашений. Публикация локального invitation candidate и будущий
-Stage update остаются отдельными действиями; текущая задача меняет только документы.
+Stage update остаются отдельными действиями; задача 2026-10-28 меняла только документы.
+
+<a id="first-managed-bot-contract"></a>
+## Первый клубный бот: техническое предложение — 2026-10-31
+
+**PROPOSED, решения владельца перечислены в конце.** Адресное исследование на
+`main 2ab62b042d3ca392733e52a1de15b0df7acce227`; без новых DEC/CLB, migrations,
+token lifecycle, BotFather или реальных Telegram connections. Прямо заданный
+scope: один branded guest bot → один непубличный клуб одного клиента; общая
+серверная платформа. Создание бота не публикует клуб. Night Concierge сохраняет
+платформенный вход и прежние гостевые сценарии до отдельно проверенного перехода.
+
+### Проверенные Telegram primitives и SDK
+
+Повторно прочитаны [Managed Bots](https://core.telegram.org/bots/features#managed-bots),
+[Bot API](https://core.telegram.org/bots/api) и
+[MTProto creation](https://core.telegram.org/api/bots/managed-bots).
+Пользовательское создание и ownership подтверждены документацией; MTProto
+user-session платформе не требуется и не разрешается этим предложением.
+
+В [newbot link](https://core.telegram.org/api/links#managed-bot-creation-request-links)
+нет документированного callback nonce. Bot API `ManagedBotUpdated` содержит
+только `user`/`bot`; нет reason, revision или request correlation. Поле `user`
+описано как создатель даже для уведомления об изменении owner. Поэтому событие
+не доказывает выбранный клуб или непрерывность владения. `getManagedBotToken`
+и `replaceManagedBotToken` принимают ID **бота** в `user_id`. `getMe` проверяет
+bot identity, но не owner. Keyboard request имеет `request_id`, однако схемы
+`ManagedBotUpdated`/`ManagedBotCreated` не обещают его эхо. Access settings
+позволяют ограничить аудиторию владельцем и выбранными пользователями.
+[Точные схемы](https://core.telegram.org/bots/api#managedbotupdated).
+
+- `gradle/libs.versions.toml` закрепляет Pengrad **9.2.0**. Повторное чтение cached
+  JAR подтвердило отсутствие Managed classes и поля `managed` у Update;
+  SHA-256 `4f172d2e71229cb54684dbe427d30be2640f0c44f4353333e0d5e10688641f79`.
+- [Официальные releases Pengrad](https://github.com/pengrad/java-telegram-bot-api/releases)
+  указывают появление ManagedBotUpdated/Get/ReplaceManagedBotToken в **9.6.0**;
+  текущий release **10.3.0**. Переход через 10.0 меняет Gson/OkHttp и Kotlin
+  Gradle plugin/toolchain. Release notes не доказывают совместимость с ClubsBot или
+  поддержку всех более новых methods в 9.6.0. Новый SDK здесь не устанавливался.
+
+### Выбор manager и compatibility boundary
+
+| Вариант | Последствие и статус |
+| --- | --- |
+| Night Concierge как manager | Меньше новых identities, но Bot Management Mode расширяет authority существующего production credential. Требует отдельного принятия; текущий token не менялся. |
+| **Отдельный management bot — рекомендация** | Собственные credential/ingress и management handlers, общие backend/DB. Дополнительные provisioning и Telegram переход; новая authority требует принятия владельцем. |
+| Pinned SDK upgrade | Typed updates/methods; нужны dependency verification, parser/HTTP fixtures и regression всех затронутых Telegram flows. Версия выбирается отдельным compatibility gate. |
+| **Узкий HTTP/JSON adapter — рекомендация для первого этапа** | Сохраняет 9.2.0 для legacy flows; manager methods и raw managed envelope имеют собственные DTO/error/redaction tests. Нельзя сначала пропускать managed payload через старый Pengrad parser: поле теряется. Это также непринятое техническое решение. |
+
+Manager обслуживает только onboarding/lifecycle; branded connection — только
+guest purpose указанного клуба. Ни одна из них не наследует platform-owner,
+GLOBAL, staff, finance или другие client permissions. Отдельные servers/DB не нужны.
+
+### Пользовательский путь и доверенная привязка
+
+1. В Night Concierge авторизованный клиент открывает профиль конкретного private
+   клуба и инициирует подключение. Сервер заново проверяет fresh signed identity,
+   active user/client/membership, exact client-club mapping и **отдельный** grant,
+   предлагаемый код `client.club.bot.manage`. `profile.write`, role name и GLOBAL
+   не заменяют его. Источник выдачи grant ещё должен утвердить владелец.
+2. Durable intent хранит manager bot ID, creator Telegram ID и внутренний user ID,
+   client/club IDs, `purpose=guest`, expiry/version/idempotency. Предложение:
+   TTL 30 минут, один незавершённый intent на `(manager, creator)`; при переключении
+   между двумя клиентами прежний intent нужно явно отменить или завершить.
+3. UI показывает организацию/клуб и открывает официальный
+   `https://t.me/newbot/<manager>/<suggested_username>?name=<suggested_name>`.
+   Имя — предложение; пользователь сам создаёт принадлежащего ему бота в Telegram.
+4. Только authenticated manager ingress принимает candidate из `managed_bot`:
+   доверенный manager, совпадающий creator, pending intent, ещё не связанный bot ID.
+   Событие не выбирает client/club по username/name/URL. Orphan/late/ambiguous
+   events сохраняются как неразрешённые и ничего не активируют.
+5. Вернувшись в кабинет, тот же creator явно подтверждает **конкретные** bot ID,
+   username, организацию и клуб: «Подключить @… к заведению …». Сервер принимает
+   opaque candidate ID + expectedVersion, повторяет все проверки и атомарно
+   резервирует уникальную связь. Произвольный bot ID из frontend не принимается.
+   Несколько candidates показываются явно, без выбора последнего по времени.
+6. Доверенный сервер получает token через manager, проверяет `getMe.id` и
+   `is_bot` против candidate, сохраняет credential отдельно от обычных проекций.
+   Provisioning выполняется durable шагами, без transaction через внешний HTTP:
+   restricted access → webhook/menu setup → readback → проверенный вход/ответ.
+7. Для приёмки доступ разрешён только owner/tester preview. Сервер проверяет
+   exact user/club и для preview; Telegram restriction — дополнительный барьер.
+   Обычный гость до отдельной публикации получает нейтральное «Клуб пока недоступен»;
+   private profile не выдаётся. Booking, рассылки и публикация не включаются.
+8. «Подключён» означает завершённый provisioning и проверенный правильный
+   inbound/outbound/initData path. Наличие token или `setWebhook ok` недостаточно.
+
+### Предлагаемые API, persistence и точки изменения
+
+Предлагаемая UI-проекция: `not_connected` / `pending_confirmation` / `connected` /
+`attention` → «Не подключён» / «Ожидает подтверждения» / «Подключён» /
+«Требует внимания». Pending/provisioning остаётся неприсоединённым состоянием;
+revoke хранится в истории и отображается как attention с причиной, без ложного success.
+Названия ниже — контракт к согласованию, не существующие endpoints/schema.
+
+| API под platform authentication | Назначение |
+| --- | --- |
+| `POST /api/client/clubs/{clubId}/bot-connection-intents` | Создать/повторить собственный intent |
+| `GET /api/client/clubs/{clubId}/bot-connection` | Sanitized status, candidates, identity, timestamps, availableActions |
+| `POST /api/client/clubs/{clubId}/bot-connection-intents/{intentId}/confirm` | Подтвердить серверный candidate для неизменного scope |
+| `POST /api/client/clubs/{clubId}/bot-connection-intents/{intentId}/cancel` | Отменить pending intent |
+| `POST /api/client/clubs/{clubId}/bot-connection/disconnect` | Закрыть authority без удаления истории |
+
+Mutations используют existing `ApiError`, fresh identity, Idempotency-Key,
+expectedVersion; ответы `no-store`, с прежними non-enumeration правилами. Read
+требует exact club.read; candidates/management actions — ещё bot.manage и creator
+match. Rotate/recover — отдельные подтверждаемые команды после принятия lifecycle.
+Никаких tokens/webhook secrets в этих API.
+
+Минимальная additive data model без назначения migration number:
+
+- Intents и observed candidates: scope/creator/manager, expiry/version, command
+  replay, trusted event provenance и audit; orphan events не создают connection.
+- Connections: stable ID, unique Telegram bot ID, manager ID, один client/club
+  composite FK, purpose, creator, owner evidence, state/version, security generation,
+  credential reference, health/reconcile time, revoke reason. Unique active guest
+  connection на клуб для первого этапа; cross-client reassignment запрещён.
+- Credential record/reference изолирован от DTO; encrypted bytes, key version,
+  nonce/tag и AEAD additional data с connection/client/club IDs при DB encryption.
+- Inbox/dedup/queue: `(telegram_bot_id, update_id)` вместо global update_id;
+  сохраняется при ротации. Legacy rows явно принадлежат platform bot; не стирать
+  их или обнулять dedup при migration. Durable enqueue до ACK, retry после restart.
+- Новые outbound intents фиксируют connection/client/club/user/action, generation,
+  payload identity, audit/idempotency. Retry не выбирает бота по текущему UI state.
+
+Адресные source anchors на base (app paths относительно
+`app-bot/src/main/kotlin/com/example/bot/`):
+
+| Surface | Текущее evidence → необходимая дельта |
+| --- | --- |
+| `di/OpsNotificationsModule.kt:13–26`, `telegram/TelegramClient.kt:24–66` | Singleton platform bot/client, cached bot ID → отдельный registry/resolver и scoped outbound для branded purpose; старый sender не перенаправлять. |
+| `routes/TelegramWebhookRoutes.kt:39–79`, `telegram/webhook/TelegramWebhookIngressWorker.kt:18–60` | Один secret; worker несёт только Update → trusted connection envelope до parsing/queue/dispatch. |
+| `core-data/src/main/kotlin/com/example/bot/data/security/webhook/WebhookSecurityTables.kt:23–53` | Global dedup/queue update_id → composite bot key и legacy-preserving migration. |
+| `telegram/TelegramCallbackRouter.kt:11–39`, `polling/PollingMain.kt:12–39` | Нет managed handler; polling allowlist не включает managed_bot → отдельный manager router, явные allowed_updates; не включать branded updates в legacy handlers. |
+| `plugins/ClientContextAuth.kt:21–69`, `routes/ClientContextRoutes.kt:25–53` | TrustedBotConnection и fresh HMAC есть, production adapter один → verified registry lookup и отдельная branded guest audience. |
+| `core-data/src/main/kotlin/com/example/bot/data/client/JdbcClientContextRepository.kt` | Fresh membership/mapping/exact grants → reuse predicates, новый grant без legacy fallback. |
+| `Application.kt`, `docker-compose.yml`, `Caddyfile` | Single platform credential/ingress → будущие scoped routes и secret injection; текущая задача deployment/config не меняет. |
+| `miniapp/src/modules/client/ClubProfile.tsx` | Сейчас честная статическая надпись → будущая серверная status projection и только реальные действия. |
+
+Webhook route может иметь opaque selector `/telegram/connections/{key}/webhook`.
+Selector выбирает server record, **не авторизует**. Separate constant-time secret
+check, active state/generation, bounded parser и trusted destination bot ID обязательны;
+body Update не является доказательством адресата. Неверный secret/body bot claim
+не попадает в чужой inbox. Manager events принимаются только manager ingress.
+
+Branded Mini App/API получает trusted connection из отдельного server route;
+проверяет initData HMAC нужным token, freshness и разрешённую guest/preview audience.
+Нет перебора токенов и fallback на Night Concierge. Клиентский URL/ID — selector,
+не authority. Все profile/files/cache/queue keys учитывают connection/client/club.
+
+### Credentials, revoke, rotation и пределы доказательства
+
+Предпочтение — trusted secret manager, **если его наличие/доступ подтверждены**;
+repository этого не доказал. Альтернатива для одного сервера — envelope encryption,
+root key вне БД/Git/образа, separate runtime access, key version и согласованные
+backup/recovery. Выбор store/key custody существенный и пока не принят.
+Manager token, branded token и webhook secret независимы. Token нельзя показывать
+Mini App, помещать в bundle, пользовательские/webhook URLs, логи, errors/traces,
+audit payload, ordinary API или Git. Стандартный Bot API требует token в
+**server-to-Telegram HTTPS path**; это протокольное исключение явно отделяется от
+запрета URL-утечек. Полный запрет token даже в этом transport path несовместим с
+обычным Bot API. HTTP logging/tracing обязаны редактировать path до сериализации.
+
+- Любой `managed_bot` для действующего connection сначала ставит `attention` и
+  увеличивает generation. Нельзя автоматически назвать событие безопасной ротацией
+  или передать клуб новому owner. Duplicate event не должен повторно менять state.
+- Local revoke/disconnect атомарно запрещает новые ingress/auth/send admissions,
+  инвалидирует caches/sessions и старые queued intents; remote cleanup — после
+  локального закрытия. История и private club сохраняются. Уже принятый Telegram
+  запрос нельзя отозвать задним числом; эту границу фиксируют audit/tests.
+- Каждый send повторяет fresh connection/client/club/user/action/generation checks
+  под per-connection admission serialization между всеми workers/processes с
+  durable generation/fence; одного JVM mutex недостаточно. Нельзя использовать default platform
+  sender при ошибке lookup или слать queued work после revoke. HTTP timeout не
+  доказывает отсутствие доставки; exactly-once Telegram send не обещается.
+- Rotation: pause/fence → trusted replacement → getMe identity → protected store
+  новой версии → новый webhook secret/setup/readback → проверенный preview → явный
+  resume. Lost response после replacement требует read/reconciliation, не слепого
+  повторного destructive replace. Old secret/initData/generation не принимаются.
+- Restart продолжает durable шаги; наличие credential не активирует connection.
+  Management outage, auth error, неизвестная owner continuity или потерянная история
+  переводят в attention, без auto-transfer/recovery по одному getMe.
+
+**UNKNOWN до отдельно разрешённой pilot acceptance:** точная owner/revoke semantics
+и completeness management notifications, особенно после длительного offline.
+Документированный Bot API getter current owner в проверенных разделах не найден;
+token access/getMe не доказывают owner. Нельзя обещать мгновенное обнаружение любого
+внешнего изменения. Требуется согласовать freshness deadline/watchdog, проверенный
+reconciliation и ручное восстановление при недоказуемой continuity. Отсутствие
+решения блокирует live readiness, но не synthetic tests предложенного контракта.
+
+### Проверки и readiness первого подключения
+
+| Набор | Обязательный результат будущей реализации |
+| --- | --- |
+| Client A/B | Один creator в двух клиентах, одинаковые имена, forged client/club/intent/candidate IDs, отсутствие grant, revoke membership между initiate/confirm, повторы/гонки: нет чужого binding/response/grant. |
+| Ingress | Secret A + route B, manager event на guest route, forged user/bot, malformed/oversize JSON, orphan/late event отвергнуты. Одинаковые update_id у разных ботов независимы; duplicate одного бота идемпотентен. |
+| Restart/faults | Crash до/после enqueue, token retrieval, webhook setup и DB step; lost ACK, stale worker claim, concurrent confirm не дают двойной связи или ложного connected. |
+| Revoke/rotation | Event во время send, queued retry после revoke, old secret/initData, owner change, management outage и lost replacement response закрываются безопасно, история остаётся. |
+| Isolation/redaction | Synthetic Telegram фиксирует правильного отправителя; нет platform fallback, чужих файлов/cache/PII; canaries token/initData отсутствуют в API/UI/log/error/trace. |
+| Gates | Ktor test host, Postgres integration/concurrency/migration, SDK/adapter parser fixtures, legacy Night Concierge regression, mobile browser; реальный Telegram iPhone acceptance только отдельным разрешением. |
+
+Первый реально работающий бот готов только после принятия решений ниже, local
+gates, проверенной identity/capability manager, creator-owned bot ID, durable recovery,
+isolated inbound/outbound/initData и проверенного revoke. Owner/tester должен реально
+открыть branded entry, получить ответ **от этого бота** и private preview только своего
+клуба. Публичная доступность/booking/рассылки остаются отдельными разрешениями.
+
+### Решения владельца перед реализацией
+
+1. Отдельный manager либо расширение authority Night Concierge.
+2. Exact bot.manage grant: кто выдаёт, кому, на какой клуб; без автоматического
+   наследования из profile.write/GLOBAL и без молчаливого backfill.
+3. Узкий server adapter либо pinned SDK upgrade с compatibility gate.
+4. Secret store, custody/backup/root key, transport-path исключение и redaction.
+5. Двухэтапное подтверждение, TTL 30 минут, один intent на creator/manager,
+   preview audience, explicit resume/recovery и запрет автоматической передачи owner.
+6. Owner continuity/reconciliation, допустимое окно обнаружения внешних изменений
+   и fail-closed freshness policy; pilot обязан проверить недокументированные границы.
+
+Один следующий шаг: принять этот ограниченный контракт для **локальной** реализации
+с synthetic Telegram и disposable PostgreSQL. Provisioning реального manager/бота,
+credentials, webhook и любой Stage/prod шаг требуют отдельного разрешения.

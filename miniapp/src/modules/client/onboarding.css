@@ -19,6 +19,17 @@
   padding: 0;
   min-width: 0;
 }
+.ob-timezone-correction summary {
+  display: list-item;
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+  color: #d5f58b;
+}
+.ob-timezone-correction summary:focus-visible {
+  outline: 2px solid #d5f58b;
+  outline-offset: 2px;
+}
 .ob-field {
   display: grid;
   gap: 8px;

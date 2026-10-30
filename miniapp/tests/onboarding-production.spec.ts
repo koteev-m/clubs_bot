@@ -48,6 +48,156 @@ const ordinaryHash =
   encodeURIComponent(ordinaryData.toString()) +
   '&tgWebAppVersion=7.10&tgWebAppPlatform=ios';
 
+test('mobile profile preserves timezone, refreshes the club name on Back and keeps organizations separate', async ({
+  page,
+}) => {
+  let stored = {
+    ...clubProfile,
+    clientName: 'Микс',
+    name: 'Бедолаги',
+    city: 'Moscow',
+    region: 'Moscow',
+    unit: '',
+  };
+  const patches: Record<string, unknown>[] = [];
+  const reads: string[] = [];
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    reads.push(path);
+    if (path.endsWith('/clubs/100/profile')) {
+      if (route.request().method() === 'PATCH') {
+        const body = route.request().postDataJSON();
+        patches.push(body);
+        stored = {
+          ...stored,
+          name: body.name,
+          description: body.description,
+          timezone: body.timezone,
+          version: '2',
+        };
+      }
+      return route.fulfill({ json: stored });
+    }
+    if (path.endsWith('/context'))
+      return route.fulfill({
+        json: {
+          clients: [
+            { id: '20', name: 'Микс', clubs: [stored] },
+            {
+              id: '21',
+              name: 'Другая организация',
+              clubs: [{ id: '101', name: 'Другой клуб' }],
+            },
+          ],
+        },
+      });
+    if (path.endsWith('/clients/20/onboarding'))
+      return route.fulfill({
+        json: {
+          id: '20',
+          name: 'Микс',
+          permissions: [],
+          clubs: [stored],
+          allowedClubs: 1,
+          createdClubs: 1,
+          availableClubs: 0,
+        },
+      });
+    if (path.endsWith('/clients/21/onboarding'))
+      return route.fulfill({
+        json: {
+          id: '21',
+          name: 'Другая организация',
+          permissions: [],
+          clubs: [{ id: '101', name: 'Другой клуб' }],
+        },
+      });
+    return route.fulfill({ status: 404, json: { code: 'not_found' } });
+  });
+  await page.goto('/app?mode=client' + ordinaryHash);
+  await page.getByRole('button', { name: /Микс/ }).click();
+  await expect(
+    page.getByText('Организация · клиентское пространство'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: /Бедолаги/ }).click();
+  await expect(page.getByText('Организация: Микс')).toBeVisible();
+  await expect(page.getByText('Moscow', { exact: true })).toHaveCount(1);
+  await expect(page.locator('dt', { hasText: 'Регион' })).toHaveCount(0);
+  await expect(page.locator('dt', { hasText: 'Помещение' })).toHaveCount(0);
+  await expect(page.getByText(/UTC\+03:00/)).toBeVisible();
+  await expect(page.getByLabel('Часовой пояс IANA')).toBeHidden();
+  await expect(
+    page.getByText('Бот не подключён', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Night Concierge открывает доступ к платформе/),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: /Подключ/ })).toHaveCount(0);
+  await page.getByLabel('Отображаемое название заведения').fill('Микс клуб');
+  await page.getByRole('button', { name: 'Сохранить профиль' }).click();
+  await expect(page.getByText('Сохранено', { exact: true })).toBeVisible();
+  expect(patches).toEqual([
+    {
+      name: 'Микс клуб',
+      description: '',
+      timezone: 'Europe/Moscow',
+      expectedVersion: '1',
+    },
+  ]);
+  await page.screenshot({
+    path: test.info().outputPath('profile-mobile-saved.png'),
+    fullPage: true,
+  });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page.getByRole('button', { name: 'Назад', exact: true }).click();
+  await expect(page).toHaveURL(/screen=client-space&resource=20/);
+  await expect(page.getByRole('button', { name: /Микс клуб/ })).toBeVisible();
+  await expect(page.getByText('Бедолаги', { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText('Другая организация', { exact: true }),
+  ).toHaveCount(0);
+  expect(
+    reads.filter((path) => path.endsWith('/clients/20/onboarding')).length,
+  ).toBeGreaterThanOrEqual(2);
+  expect(reads.some((path) => path.endsWith('/clients/21/onboarding'))).toBe(
+    false,
+  );
+  await page.getByRole('button', { name: /Микс клуб/ }).click();
+  await expect(page.getByLabel('Отображаемое название заведения')).toHaveValue(
+    'Микс клуб',
+  );
+  const nativeBack = () =>
+    page.evaluate(() => {
+      const telegram = window as unknown as {
+        Telegram: { WebView: { receiveEvent: (event: string) => void } };
+      };
+      telegram.Telegram.WebView.receiveEvent('back_button_pressed');
+    });
+  await page.getByLabel('Описание клуба').fill('Несохранённое описание');
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await nativeBack();
+  await expect(page.getByLabel('Описание клуба')).toHaveValue(
+    'Несохранённое описание',
+  );
+  await page.getByLabel('Описание клуба').fill('');
+  await nativeBack();
+  await expect(page.getByRole('button', { name: /Микс клуб/ })).toBeVisible();
+  await page.getByRole('button', { name: /Микс клуб/ }).click();
+  await page.goBack();
+  await expect(page.getByRole('button', { name: /Микс клуб/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Назад', exact: true }).click();
+  await page.getByRole('button', { name: /Другая организация/ }).click();
+  await expect(page.getByRole('button', { name: /Другой клуб/ })).toBeVisible();
+  await expect(page.getByText('Микс клуб', { exact: true })).toHaveCount(0);
+});
+
 test('direct creation keeps its pending intent through Back Forward, opens saved private profile and respects capacity on reentry', async ({
   page,
 }) => {
@@ -118,7 +268,7 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
   await page.getByLabel('Город', { exact: true }).fill('Москва');
   await page.getByLabel('Город и регион').selectOption('524901');
   await page.getByLabel('Полный адрес').fill('Synthetic Street 1');
-  await expect(page.getByLabel('Часовой пояс')).toHaveCount(0);
+  await expect(page.getByLabel('Часовой пояс IANA')).toHaveCount(0);
   await expect(page.getByRole('checkbox')).toHaveCount(0);
   await page.getByRole('button', { name: 'Создать заведение' }).click();
   await expect(
@@ -176,7 +326,10 @@ test('private profile validation, version conflict, access loss and foreground c
     if (route.request().method() === 'PATCH') {
       patches++;
       conflict = true;
-      return route.fulfill({ status: 409, json: { code: 'version_conflict' } });
+      return route.fulfill({
+        status: 409,
+        json: { code: 'version_conflict' },
+      });
     }
     return route.fulfill({
       json: conflict
@@ -185,17 +338,20 @@ test('private profile validation, version conflict, access loss and foreground c
     });
   });
   await page.goto('/app?mode=client&screen=club&resource=100' + ordinaryHash);
-  await page.getByLabel('Часовой пояс').fill('Unknown/Synthetic');
+  await page.getByText('Исправить часовой пояс', { exact: true }).click();
+  await page.getByLabel('Часовой пояс IANA').fill('Unknown/Synthetic');
   await page.getByRole('button', { name: 'Сохранить профиль' }).click();
   await expect(page.getByText(/Укажите часовой пояс IANA/)).toBeVisible();
   expect(patches).toBe(0);
-  await page.getByLabel('Часовой пояс').fill('Europe/Paris');
+  await page.getByLabel('Часовой пояс IANA').fill('Europe/Paris');
   await page.getByRole('button', { name: 'Сохранить профиль' }).click();
   await expect(page.getByText(/Запись уже изменена/)).toBeVisible();
   await expect(
     page.getByRole('heading', { name: 'Concurrent profile', exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel('Часовой пояс')).toHaveValue('Europe/Paris');
+  await expect(page.getByLabel('Часовой пояс IANA')).toHaveValue(
+    'Europe/Paris',
+  );
   await expect(
     page.getByRole('button', { name: 'Сохранить профиль' }),
   ).toBeDisabled();
@@ -203,12 +359,16 @@ test('private profile validation, version conflict, access loss and foreground c
   await page
     .getByRole('button', { name: 'Загрузить актуальный профиль' })
     .click();
-  await expect(page.getByLabel('Часовой пояс')).toHaveValue('Europe/Moscow');
+  await expect(page.getByLabel('Часовой пояс IANA')).toHaveValue(
+    'Europe/Moscow',
+  );
   revoked = true;
   await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
   await expect(page.getByText(/Доступ утрачен/)).toBeVisible();
   await expect(page.getByText('Synthetic Street 1')).toHaveCount(0);
-  await expect(page.getByLabel('Отображаемое название')).toHaveCount(0);
+  await expect(page.getByLabel('Отображаемое название заведения')).toHaveCount(
+    0,
+  );
   expect(patches).toBe(1);
 });
 
@@ -296,7 +456,9 @@ test('platform access refusal cannot be bypassed in production by OWNER query or
   });
   await page.goto('/app?mode=platform-owner&role=OWNER&scope=GLOBAL' + hash);
   await expect(
-    page.getByRole('heading', { name: 'Нет доступа к управлению платформой' }),
+    page.getByRole('heading', {
+      name: 'Нет доступа к управлению платформой',
+    }),
   ).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Пригласить клиента' }),
@@ -311,7 +473,9 @@ test('browser Back Forward retains creation fields without saving a draft', asyn
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/context'))
       return route.fulfill({
-        json: { clients: [{ id: '20', name: 'Synthetic Client', clubs: [] }] },
+        json: {
+          clients: [{ id: '20', name: 'Synthetic Client', clubs: [] }],
+        },
       });
     if (path.endsWith('/onboarding'))
       return route.fulfill({
@@ -494,7 +658,9 @@ test('Main Mini App resolves owner and client cabinets using server authority wi
         : route.fulfill({ status: 403, json: { code: 'forbidden' } });
     if (path.endsWith('/context'))
       return route.fulfill({
-        json: { clients: [{ id: '20', name: 'Synthetic Client', clubs: [] }] },
+        json: {
+          clients: [{ id: '20', name: 'Synthetic Client', clubs: [] }],
+        },
       });
     if (path.endsWith('/onboarding'))
       return route.fulfill({

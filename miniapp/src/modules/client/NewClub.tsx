@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { onboardingRequest, authorityLost } from './onboarding.api';
 import { useCommand, useRemote } from './onboarding.hooks';
 import { CommandState, Field, RemoteState, Shell } from './OnboardingShared';
+import { locationPresentation } from './profilePresentation';
 import {
   ClubApplication,
   ClubProfile,
@@ -210,16 +211,15 @@ export default function NewClub({
                       ...value,
                       cityId: city.id,
                       cityQuery: city.name,
-                      cityLabel: [city.name, city.region]
-                        .filter(Boolean)
-                        .join(', '),
+                      cityLabel: locationPresentation(city.name, city.region)
+                        .label,
                     });
                 }}
               >
                 <option value="">Выберите город и регион</option>
                 {cities.map((city) => (
                   <option key={city.id} value={city.id}>
-                    {city.name} — {city.region}
+                    {locationPresentation(city.name, city.region).label}
                   </option>
                 ))}
               </select>
