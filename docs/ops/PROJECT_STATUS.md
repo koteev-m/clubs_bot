@@ -1,5 +1,77 @@
 # Project status checkpoint
 
+## Runtime Brotli repair — CVE-2026-111497, 2026-10-30
+
+### Draft PR preparation continuation
+
+- Same existing worktree and base `7ab13a72bbbe2755e4fd28f629c7e9c965b82769`;
+  fresh live main read still matched. Branch `codex/fix-brotli-cve-2026-111497`.
+  User authorized exactly one commit, ordinary push and separate Draft PR;
+  no merge, rerun, manual Docker Publish or Stage/prod activity is authorized.
+- Existing PR Docker Image workflow now builds exact PR head separately on
+  native GitHub-hosted `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64).
+  Public repository/native standard-runner eligibility was verified. Each leg
+  loads its real image, checks architecture/revision, Brotli/OpenSSL pins,
+  default and actual UID/GID, Java 21 and migration launchers, then runs pinned
+  Trivy 0.69.3 against that image ID with unchanged HIGH/CRITICAL blocking policy.
+  Per-architecture evidence is retained even on failure. No image is published.
+- Matrix fail-fast is disabled; existing `build-and-push` check runs even after
+  failure/cancellation and accepts only success of the matrix. Branch protection
+  is unchanged and not claimed to have been reconfigured or independently audited.
+  Capability validator permits only this exact native matrix; global runner,
+  permissions, secret and publication restrictions remain enforced. Trivy action
+  inventory increases from four to five for the new PR scan, without suppression.
+- Preliminary YAML/capability validators, all extracted shell syntax, focused
+  Trivy inventory validation, 15 workflow regressions and diff whitespace PASS.
+  Addressed independent read-only review: no substantive findings. Dockerfile
+  bytes and positive-control reports match the earlier verified hashes; no repeat
+  old-image scan or local Java/multi-arch build. Hosted candidate builds/scans and
+  all PR CI results remain pending. Publication identity/check snapshot will be
+  recorded in the task handoff after the single authorized push and Draft PR.
+- Next step after publication: separately inspect completed checks for the exact
+  PR head, including both image architectures and the aggregate gate; do not merge.
+
+### Initial local package verification
+
+- Verdict: `BROTLI_FIX_REQUIRES_CI`. Local-only task, no numbered card allocated.
+  Live GitHub main and isolated detached worktree base matched
+  `7ab13a72bbbe2755e4fd28f629c7e9c965b82769` (PR #555 already merged).
+  Worktree: `/private/tmp/clubs-brotli-cve-2026-111497`; evidence and CI commands:
+  `/private/tmp/clubs-brotli-evidence/`. Primary dirty worktree was not edited.
+  Project identity guard passed, including exact candidate base; active foreign instructions = 0.
+- Root cause: pinned Noble runtime contains `libbrotli1=1.1.0-2build2`;
+  the published image reused its runtime APT layer dated 2026-10-01, without a
+  Brotli update/pin. Dockerfiles at `c0df96b` and `7ab13a7` are byte-identical.
+  [Ubuntu USN-8956-1](https://ubuntu.com/security/notices/USN-8956-1) fixes Noble in
+  `1.1.0-2ubuntu0.1`. Dockerfile now explicitly installs that exact version and
+  asserts it with `dpkg-query`, invalidating the old APT-layer cache key.
+- Sequential disposable runtime-base probes passed on linux/amd64 and linux/arm64,
+  each limited to 1 CPU / 512 MiB / 300 seconds. Unmodified signed Ubuntu APT
+  sources installed Brotli `1.1.0-2ubuntu0.1`, retained both OpenSSL pins
+  `3.0.13-0ubuntu3.16`, Java `21.0.11`, and app UID/GID `10001:10001`.
+  No broad upgrade. All other Dockerfile bytes, image bases, launchers,
+  healthcheck, workflows, signature/SBOM/provenance and Trivy policy are unchanged.
+- Trivy 0.69.3 (official archive checksum verified), fresh vulnerability DB
+  `2026-10-30T07:16:25Z` and Java DB `2026-10-30T00:58:38Z`: read-only scans of
+  both architectures of original digest
+  `sha256:849af460f4efb80977c2ae1ef38294ad252523eea2830636fdd37654ddda8f6c`
+  and previous Stage image digest
+  `sha256:06beaacac0ee820ed125c8c23885d30968869700bebacdbbd7ffc56f3533af08`
+  each exited 1 with exactly one unsuppressed HIGH: CVE-2026-111497 / libbrotli1
+  `1.1.0-2build2`; no other unsuppressed HIGH/CRITICAL OS/Java findings.
+  These are positive controls and published-image risk evidence, not live Stage observations.
+- Dockerfile preservation check, Linux full static quiesced-deployment validator,
+  workflow YAML/capability validators (32 files) and diff whitespace passed.
+  The first macOS release-validator attempt failed on Bash 3.2 `coproc` syntax;
+  Linux Bash resolved this environment limitation without source changes.
+  Candidate full Docker builds, candidate Trivy scans and app HTTP smoke remain
+  unverified; full JVM/PostgreSQL suites were deliberately not rerun.
+- No commit/push/PR/merge, workflow dispatch/rerun, publication, SSH, credentials,
+  live configuration or deployment changes. Prior permissions are not renewed.
+  Existing Stage environment/trust/release/migration gates remain mandatory.
+- Next owner action: review this two-file local diff and authorize a separate PR
+  cycle with both-architecture non-publishing candidate validation before merge.
+
 ## Release continuation — CLB-simplified-onboarding, 2026-10-29
 
 ### Second PR CI correction — 2026-10-29

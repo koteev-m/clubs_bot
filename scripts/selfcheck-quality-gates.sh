@@ -1736,8 +1736,8 @@ validate_trivy_action_inventory() {
       awk 'index($0, "aquasecurity/trivy-action@") { print }'
   )"
   action_count="$(printf '%s\n' "$action_lines" | awk 'NF { count++ } END { print count + 0 }')"
-  if [ "$action_count" -ne 4 ]; then
-    echo "expected exactly four active trivy-action references, found $action_count" >&2
+  if [ "$action_count" -ne 5 ]; then
+    echo "expected exactly five active trivy-action references, found $action_count" >&2
     return 1
   fi
 
@@ -1770,8 +1770,8 @@ validate_trivy_action_inventory() {
     printf '%s\n' "$active_lines" |
       awk '$0 == "trivyignores: .trivyignore" { count++ } END { print count + 0 }'
   )"
-  if [ "$trivyignores_count" -ne 4 ]; then
-    echo "expected exactly four supported trivyignores inputs" >&2
+  if [ "$trivyignores_count" -ne 5 ]; then
+    echo "expected exactly five supported trivyignores inputs" >&2
     return 1
   fi
 }
@@ -7021,6 +7021,7 @@ fi
 validate_trivy_filesystem_workflow "$security_scan_workflow"
 validate_trivy_runtime_workflow "$security_scan_workflow"
 validate_trivy_image_workflow "$docker_publish_workflow"
+ruby "$ROOT_DIR/scripts/tests/test_pr_image_workflow.rb"
 echo "quality-gate: Trivy workflow contract verified"
 
 validate_container_smoke_workflow "$container_smoke_workflow"

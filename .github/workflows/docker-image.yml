@@ -12,25 +12,109 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  image-security:
+    name: image-security (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate revision
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          mkdir -p image-evidence
+          printf '%s\n' "$CANDIDATE_SHA" > image-evidence/revision.txt
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 # v3.8.0
 
       - name: Build PR image (no push)
+        id: build
         uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         with:
           context: .
           file: Dockerfile
           push: false
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
+          platforms: linux/${{ matrix.arch }}
+          labels: org.opencontainers.image.revision=${{ env.CANDIDATE_SHA }}
+          cache-from: type=gha,scope=pr-image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=pr-image-${{ matrix.arch }}
           provenance: false
+
+      - name: Verify runtime image
+        env:
+          IMAGE_ID: ${{ steps.build.outputs.imageid }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker image inspect "$IMAGE_ID" > image-evidence/inspect.json
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE_ID")" = "linux/$EXPECTED_ARCH"
+          test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE_ID")" = '10001:10001'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_ID")" = "$CANDIDATE_SHA"
+          docker run --rm -i --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --cpus=1 --memory=512m \
+            --pids-limit=128 --entrypoint /bin/sh "$IMAGE_ID" -se \
+            > image-evidence/runtime.txt 2>&1 <<'PROBE'
+          test "$(id -u)" = 10001
+          test "$(id -g)" = 10001
+          test "$(dpkg-query -W -f='${Version}' libbrotli1)" = '1.1.0-2ubuntu0.1'
+          test "$(dpkg-query -W -f='${Version}' libssl3t64)" = '3.0.13-0ubuntu3.16'
+          test "$(dpkg-query -W -f='${Version}' openssl)" = '3.0.13-0ubuntu3.16'
+          dpkg-query -W libbrotli1 libssl3t64 openssl
+          java -version 2>&1 | grep 'version "21\.'
+          for launcher in app-bot app-bot-migrate app-bot-migrate-java app-bot-validate-schema; do
+            test -x "/opt/app/bin/$launcher"
+          done
+          test ! -e /opt/app/gradlew
+          PROBE
+
+      - name: Trivy PR image scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0, post-incident safe release
+        with:
+          scan-type: image
+          image-ref: ${{ steps.build.outputs.imageid }}
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore
+          format: json
+          list-all-pkgs: true
+          output: image-evidence/trivy.json
+          exit-code: 1
+          version: v0.69.3
+          timeout: 10m
+
+      - name: Preserve image verification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: pr-image-${{ matrix.arch }}-${{ env.CANDIDATE_SHA }}
+          path: image-evidence/
+          if-no-files-found: error
+
+  # Retain the existing check name; every matrix leg must succeed.
+  build-and-push:
+    needs: image-security
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both image architectures
+        env:
+          IMAGE_SECURITY_RESULT: ${{ needs.image-security.result }}
+        run: test "$IMAGE_SECURITY_RESULT" = success
