@@ -21,6 +21,7 @@ module WorkflowCapabilityPolicy
   module_function
 
   CANONICAL_PUBLISHER = ".github/workflows/docker-publish.yml"
+  PR_IMAGE_WORKFLOW = ".github/workflows/docker-image.yml"
   CANONICAL_PUBLISHER_JOB = "build-and-push"
   PROVENANCE_VERIFIER_PATH = "scripts/verify-oci-provenance.py"
   GRADLE_VERIFICATION_METADATA_PATH = "gradle/verification-metadata.xml"
@@ -2217,6 +2218,80 @@ module WorkflowCapabilityPolicy
     target&.first
   end
 
+  def validate_pr_image_workflow(workflow)
+    context = PR_IMAGE_WORKFLOW
+    triggers = workflow_triggers(workflow, context)
+    reject("#{context}: PR image triggers changed") unless triggers.keys.sort == %w[pull_request workflow_dispatch]
+    trigger_key = workflow.key?("on") ? "on" : true
+    validate_exact_value(workflow[trigger_key], {"pull_request" => nil, "workflow_dispatch" => nil}, context)
+    jobs = workflow.fetch("jobs")
+    reject("#{context}: both image matrix and aggregate gate are required") unless
+      jobs.keys.sort == %w[build-and-push image-security]
+    job = jobs.fetch("image-security")
+    reject("#{context}: image job may not be conditional or fail-open") if
+      (job.keys & %w[if continue-on-error needs]).any?
+    validate_exact_value(job["strategy"], {
+      "fail-fast" => false,
+      "matrix" => {"include" => [
+        {"arch" => "amd64", "runner" => "ubuntu-24.04"},
+        {"arch" => "arm64", "runner" => "ubuntu-24.04-arm"},
+      ]},
+    }, "#{context}/native matrix")
+    validate_exact_value(job["runs-on"], "${{ matrix.runner }}", context)
+    validate_exact_value(job["timeout-minutes"], 45, context)
+    candidate = "${{ github.event.pull_request.head.sha || github.sha }}"
+    validate_exact_value(job["env"], {"CANDIDATE_SHA" => candidate}, context)
+    steps = step_list(job, context)
+    names = ["Checkout", "Verify candidate revision", "Set up Docker Buildx",
+             "Build PR image (no push)", "Verify runtime image", "Trivy PR image scan",
+             "Preserve image verification evidence"]
+    reject("#{context}: image validation step inventory/order changed") unless steps.map { |s| s["name"] } == names
+    steps[0...-1].each do |step|
+      reject("#{context}: validation step may not be conditional or fail-open") if
+        (step.keys & %w[if continue-on-error]).any?
+    end
+    validate_exact_value(steps[0]["with"], {"persist-credentials" => false, "ref" => candidate}, context)
+    validate_exact_value(steps[0]["uses"], CHECKOUT_ACTION, context)
+    validate_exact_value(steps[2]["uses"], "docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5", context)
+    build = steps[3]
+    validate_exact_value(build["id"], "build", context)
+    validate_exact_value(build["uses"], "docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75", context)
+    validate_exact_value(build["with"], {
+      "context" => ".", "file" => "Dockerfile", "push" => false, "load" => true,
+      "platforms" => "linux/${{ matrix.arch }}",
+      "labels" => "org.opencontainers.image.revision=${{ env.CANDIDATE_SHA }}",
+      "cache-from" => "type=gha,scope=pr-image-${{ matrix.arch }}",
+      "cache-to" => "type=gha,mode=max,scope=pr-image-${{ matrix.arch }}",
+      "provenance" => false,
+    }, "#{context}/non-publishing image build")
+    runtime = steps[4]
+    validate_exact_value(runtime["env"], {
+      "IMAGE_ID" => "${{ steps.build.outputs.imageid }}", "EXPECTED_ARCH" => "${{ matrix.arch }}",
+    }, context)
+    required_runtime = [
+      'test "$(id -u)" = 10001', 'test "$(id -g)" = 10001',
+      'test "$(dpkg-query -W -f=\'${Version}\' libbrotli1)" = \'1.1.0-2ubuntu0.1\'',
+      'test "$(dpkg-query -W -f=\'${Version}\' libssl3t64)" = \'3.0.13-0ubuntu3.16\'',
+      'test "$(dpkg-query -W -f=\'${Version}\' openssl)" = \'3.0.13-0ubuntu3.16\'',
+    ]
+    reject("#{context}: runtime package/user assertion missing") unless
+      required_runtime.all? { |line| runtime.fetch("run").lines.map(&:strip).include?(line) }
+    scan = steps[5]
+    validate_exact_value(scan["uses"], TRIVY_ACTION, context)
+    validate_exact_value(scan["with"], {
+      "scan-type" => "image", "image-ref" => "${{ steps.build.outputs.imageid }}",
+      "severity" => "HIGH,CRITICAL", "trivyignores" => ".trivyignore",
+      "format" => "json", "list-all-pkgs" => true, "output" => "image-evidence/trivy.json",
+      "exit-code" => 1, "version" => "v0.69.3", "timeout" => "10m",
+    }, "#{context}/blocking image scan")
+    validate_exact_value(jobs["build-and-push"], {
+      "needs" => "image-security", "if" => "${{ always() }}", "runs-on" => "ubuntu-latest",
+      "steps" => [{"name" => "Require both image architectures",
+                   "env" => {"IMAGE_SECURITY_RESULT" => "${{ needs.image-security.result }}"},
+                   "run" => 'test "$IMAGE_SECURITY_RESULT" = success'}],
+    }, "#{context}/aggregate image gate")
+  end
+
   def run(root)
     ensure_regular_path(root, PROVENANCE_VERIFIER_PATH)
     validate_gradle_plugin_metadata(root)
@@ -2243,6 +2318,7 @@ module WorkflowCapabilityPolicy
 
       jobs = workflow["jobs"]
       reject("#{path}: jobs block must be a non-empty mapping") unless jobs.is_a?(Hash) && !jobs.empty?
+      validate_pr_image_workflow(workflow) if path == PR_IMAGE_WORKFLOW
       if path == CANONICAL_PUBLISHER
         inline_marker = INLINE_PROVENANCE_MARKERS.find { |marker| raw.include?(marker) }
         reject("#{path}: inline OCI provenance verifier is forbidden") if inline_marker
@@ -2333,6 +2409,8 @@ module WorkflowCapabilityPolicy
         native_prototype = path == ".github/workflows/tests.yml" && job_name == "amd64-runtime-prototype"
         dedicated_native = path == Clb91BNativeWorkflow::PATH && job_name == "native"
         expected_runner = (native_prototype || dedicated_native) ? "ubuntu-24.04" : "ubuntu-latest"
+        # Only the exact two-entry native matrix validated above may select a runner.
+        expected_runner = "${{ matrix.runner }}" if path == PR_IMAGE_WORKFLOW && job_name == "image-security"
         if native_prototype && job["if"] != "github.event_name == 'workflow_dispatch'"
           reject("#{context}: native prototype must be manual-only")
         end
