@@ -1,5 +1,87 @@
 # Project status checkpoint
 
+## Профиль заведения и контракт первого Managed Bot — 2026-10-31
+
+### Publication continuation
+
+- Пользователь разрешил ровно один commit, один обычный push и один Draft PR в
+  `main` для существующего UX-пакета. Merge, dispatch/release, deploy/runtime,
+  credentials и реализация Managed Bots не разрешены. Предыдущая local-only
+  boundary ниже описывает предыдущий этап, а не это разрешение.
+- Candidate `/private/tmp/clubs-profile-ux-managed`, planned branch
+  `codex/club-profile-ux`; live remote main/base/HEAD подтвердились на
+  `2ab62b042d3ca392733e52a1de15b0df7acce227`. Identity guard PASS,
+  active foreign instructions = 0. Все 19 candidate paths/hashes совпали с
+  `/private/tmp/clubs-profile-ux-evidence/final-files.json`; единственная новая
+  дельта после evidence — эта запись о публикации. Product/source/test/dist bytes
+  сохранены, обновление базы не требуется; посторонние worktrees не изменялись.
+- Publication preflight: `git diff --check`, оба Mini App dist validators,
+  5/5 packaged resource hashes, новые relative doc links, immutable concept source
+  и scoped credential-pattern scan PASS. Focused review UX/client isolation/token
+  exposure/API contracts: блокирующих findings нет; Managed Bots остаётся PROPOSED.
+  Прежние Vitest/TypeScript/ESLint/browser/build результаты ниже переиспользованы
+  для тех же bytes; suites повторно не запускались.
+- Commit/remote head/PR identity и единичный CI snapshot фиксируются в итоговом
+  handoff после публикации; CI completion не предполагается. Следующий шаг после
+  подачи Draft PR — отдельно проверить завершённые checks его точного commit.
+
+- **Verdict: `UX_FIX_READY` (local only).** Новая задача без выделенного CLB/DEC ID;
+  `CLB-profile-ux-managed` — только descriptive identity-guard label. Live
+  `git ls-remote origin refs/heads/main` подтвердил
+  `2ab62b042d3ca392733e52a1de15b0df7acce227`. Новый detached worktree
+  `/private/tmp/clubs-profile-ux-managed`, HEAD/base тот же, все изменения uncommitted.
+  Primary `codex/clb91-native-adapter-experiment` с чужими AGENTS/checkpoint и прежние
+  worktrees не изменялись. Guard `PROJECT_IDENTITY_OK`, active foreign instructions = 0.
+- Runtime evidence **со слов владельца**: deploy `41088340173` SUCCESS, V064 применена;
+  на iPhone создан private club и сохранены имя/описание. Нового runtime observation
+  в этой задаче нет. Main equality не выдаётся за отдельную проверку Stage.
+- UX: `ClubProfile.tsx` скрывает совпадающий регион/пустое помещение, отделяет имя
+  организации от имени заведения, показывает читаемый сохранённый timezone/current
+  offset и честное пояснение о неподключённом branded bot. Исправление IANA вынесено
+  в дополнительный раздел с прежним PATCH/version/grants. Server API/БД не менялись.
+  `profilePresentation.ts` используется также `NewClub.tsx`; нет Moscow-specific
+  перевода, изменения city ID/region/timezone или device/default подстановки.
+  Неразмеченные aliases имеющегося GeoNames не доказывают русский вариант; исходное
+  название сохраняется, уже локализованные значения отображаются без подмены.
+- `ClientAccess.tsx` возвращает в клиентское пространство профиля, заново читает
+  список и показывает сохранённое club.name без закрытия Mini App. Общего кеша
+  имён не обнаружено; client.name не переименовывается. Account switch, revoke,
+  late responses и cross-client ограничения сохранены.
+- Tests: relevant Vitest **76/76 PASS** (`src/modules/client`, `App.test.tsx`,
+  `client-entry.test.ts`); TypeScript и full ESLint `--max-warnings 0` **PASS**.
+  Production-dist Playwright **10/10 Chromium + 10/10 WebKit PASS**. После финального
+  wording/native Back изменения — affected recheck **4/4 PASS** на двух браузерах.
+  Проверены 390/320 px overflow, экранный/browser Back и SDK event
+  `back_button_pressed` с отказом потерять unsaved input; это synthetic Telegram
+  bridge/API fixtures, не реальный iPhone acceptance или серверный isolation test.
+- Build/package: `pnpm run build`, validator для `miniapp/dist` и
+  `app-bot/build/resources/main/webapp/app/react` **PASS**; 5 файлов побайтово равны.
+  Bounded `:app-bot:processResources --offline` **PASS**, cleanup verified, 6.728 s;
+  evidence `/private/tmp/clubs-profile-ux-evidence/gradle-resources-final/result.json`
+  и `packaging.json`. Tracked dist обновлён. JVM/Postgres suites не запускались:
+  серверный код не менялся. JAR/runtime не объявляются проверенными этой упаковкой.
+- Verification issues resolved: sandbox DNS мешал frozen pnpm install, а `ps` —
+  bounded runner; разрешённые повторные вызовы прошли. Ошибочный `--browser=all`
+  включил отсутствующий Firefox (2 environment launch failures); исправленный
+  selector Chromium/WebKit дал 4/4, Firefox вне заявленного scope. Существующие
+  Browserslist age/chunk-size warnings сохранены, dependencies/gates не ослаблялись.
+- Независимые scoped UX и contract reviews: существенных открытых findings нет.
+  Исправлены legacy timezone wording, точность SDK dependency claim и явная
+  межпроцессная generation/fence граница. Diff whitespace, новые локальные
+  doc links/source paths и неизменность `CONCEPT_SOURCE.md` проверены.
+- Часть B сохранена в [существующем направлении](../product/MANAGED_BOTS_DIRECTION.md#first-managed-bot-contract):
+  отдельный manager + узкий adapter рекомендованы, **не приняты**. Pengrad 9.2.0
+  действительно не имеет typed ManagedBotUpdated. Contract покрывает creator-bound
+  intent, явное подтверждение конкретного bot/club, trusted ingress/initData/outbound,
+  durable dedup, credentials, rotation/revoke, A/B/forged/restart tests и readiness.
+  Owner continuity/reconciliation и SDK compatibility остаются непроверенными;
+  live readiness требует согласования и отдельной Telegram acceptance.
+- Permissions boundary: без commit/push/PR/merge/deploy, Telegram API mutations,
+  BotFather, подключения ботов, credentials, Stage/prod/Caddy, публикации клуба,
+  booking/рассылок. Единственный следующий шаг: владельцу принять ограниченный
+  [контракт и перечисленные решения](../product/MANAGED_BOTS_DIRECTION.md#first-managed-bot-contract)
+  для локальной реализации первого подключения с synthetic Telegram и disposable DB.
+
 ## Runtime Brotli repair — CVE-2026-111497, 2026-10-30
 
 ### Draft PR preparation continuation

@@ -368,6 +368,21 @@ are recorded in [PROJECT_STATUS](../ops/PROJECT_STATUS.md). Historical A/B snaps
 above remain valid for their revisions; current target is
 [§29.10](PRODUCT_SPEC.md#simplified-client-onboarding).
 
+### Local profile UX delta — 2026-10-31
+
+Uncommitted candidate on `2ab62b042d3ca392733e52a1de15b0df7acce227`:
+`miniapp/src/modules/client/profilePresentation.ts`, `ClubProfile.tsx` and `NewClub.tsx`
+hide equivalent city/region and empty unit rows while retaining source names/data.
+The location API has no language-tagged aliases; no guessed Russian translation was
+added. The saved IANA zone drives readable current-offset display; explicit correction
+uses the existing versioned profile PATCH. Location mutation/API/schema are unchanged.
+`ClientAccess.tsx` returns to the profile's server-authorized client space and remounts
+its fresh read; no shared name cache was found or introduced. Client/club labels differ;
+bot status is still an honest static absence of lifecycle, with platform-entry context.
+Frontend/browser evidence and limits are in [checkpoint](../ops/PROJECT_STATUS.md).
+Managed Bots research is a [proposal](MANAGED_BOTS_DIRECTION.md#first-managed-bot-contract),
+not new production wiring, SDK support, migration or live connection evidence.
+
 | # | Domain | Status | Evidence | Wired/persistence/UI/missing summary |
 |---:|---|---|---|---|
 | 1 | Product identity and naming | `PARTIAL` | `app-bot/src/main/kotlin/com/example/bot/telegram/TelegramGuestFallbackHandler.kt:345-346`; `miniapp/src/main/resources/miniapp/index.html:7-14`; `docker-compose.yml:20-28` | Runtime surfaces say Night Concierge and «Куда пойдём?», while source says Telegram Club OS/iBota. No single canonical identity. |

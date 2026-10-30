@@ -274,7 +274,9 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        home={home}
+        home={(clientId) =>
+          clientId ? navigate({ type: 'space', id: clientId }) : home()
+        }
         reportDirty={reportDirty}
       />
     );
@@ -474,7 +476,11 @@ function ClientSpace({
     '/api/client/clients/' + id + '/onboarding',
   );
   return (
-    <Shell title={remote.data?.name ?? 'Клиентское пространство'} back={back}>
+    <Shell
+      title={remote.data?.name ?? 'Клиентское пространство'}
+      subtitle="Организация · клиентское пространство"
+      back={back}
+    >
       <RemoteState {...remote} />
       {remote.data && (
         <>

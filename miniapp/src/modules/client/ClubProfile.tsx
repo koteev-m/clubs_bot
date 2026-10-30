@@ -9,6 +9,7 @@ import {
   useUnsavedChanges,
 } from './OnboardingShared';
 import { ClubProfile as Profile } from './onboarding.types';
+import { locationPresentation, timezoneLabel } from './profilePresentation';
 
 type Fields = Pick<Profile, 'name' | 'description' | 'timezone'>;
 const fieldsOf = (profile: Profile): Fields => ({
@@ -25,12 +26,14 @@ function countryName(code: string): string {
   }
 }
 
-function validation(fields: Fields): string | null {
+function validation(fields: Fields, savedTimezone: string): string | null {
   if (!fields.name.trim() || fields.name.trim().length > 255)
     return 'Укажите название клуба от 1 до 255 символов.';
   if (fields.description.length > 2000)
     return 'Описание должно содержать не более 2000 символов.';
-  // The server validates against its IANA catalog as the final authority.
+  // A browser's older IANA catalog must not block saving an unchanged server zone.
+  if (fields.timezone === savedTimezone) return null;
+  // The server validates an explicit correction as the final authority.
   try {
     if (!fields.timezone.trim() || fields.timezone.trim().length > 64)
       throw new Error('Invalid timezone');
@@ -49,7 +52,7 @@ export default function ClubProfile({
 }: {
   credential: string;
   id: string;
-  home: () => void;
+  home: (clientId?: string) => void;
   reportDirty: (dirty: boolean) => void;
 }) {
   const path = '/api/client/clubs/' + id + '/profile';
@@ -104,27 +107,40 @@ export default function ClubProfile({
     remote.refresh();
   };
   const back = () => {
-    if (leave()) home();
+    if (leave()) home(profile?.clientId);
   };
+  const location =
+    profile && locationPresentation(profile.city, profile.region);
   return (
-    <Shell title={profile?.name ?? 'Профиль клуба'} back={back}>
+    <Shell
+      title={profile?.name ?? 'Профиль клуба'}
+      subtitle="Профиль заведения"
+      back={back}
+    >
       <RemoteState {...remote} />
       {profile && fields && !remote.loading && (
         <>
           <div className="po-context">
-            <strong>{profile.clientName}</strong>
+            <span>
+              Организация: <strong>{profile.clientName}</strong>
+            </span>
             <span className="po-context-badge">Непубличный</span>
           </div>
           <p className="po-notice">Бот не подключён</p>
+          <p className="po-muted">
+            Night Concierge открывает доступ к платформе. Отдельный
+            брендированный бот клуба подключается отдельно.
+          </p>
           <section className="po-card ob-card">
             <h2>Сохранённое заведение</h2>
             <dl className="po-details">
               {[
                 ['Страна', countryName(profile.countryCode)],
-                ['Город', profile.city],
-                ...(profile.region ? [['Регион', profile.region]] : []),
+                ['Город', location?.city],
+                ...(location?.region ? [['Регион', location.region]] : []),
                 ['Адрес', profile.address],
-                ['Помещение', profile.unit],
+                ...(profile.unit.trim() ? [['Помещение', profile.unit]] : []),
+                ['Часовой пояс (сейчас)', timezoneLabel(profile.timezone)],
               ].map(([label, value]) => (
                 <div key={label}>
                   <dt>{label}</dt>
@@ -133,7 +149,9 @@ export default function ClubProfile({
               ))}
             </dl>
             <p className="po-muted">
-              Эти сведения сохранены в профиле заведения.
+              Часовой пояс сохранён в профиле заведения. Если страна, город или
+              адрес указаны неверно, обратитесь к владельцу платформы для
+              уточнения местоположения.
             </p>
           </section>
           <form
@@ -141,7 +159,7 @@ export default function ClubProfile({
             onSubmit={(event) => {
               event.preventDefault();
               if (!canWrite || command.blocked || conflict || !dirty) return;
-              const problem = validation(fields);
+              const problem = validation(fields, profile.timezone);
               setValidationError(problem);
               if (problem) return;
               command.run(
@@ -156,7 +174,7 @@ export default function ClubProfile({
               className="ob-fields"
               disabled={!canWrite || command.blocked || conflict}
             >
-              <Field label="Отображаемое название">
+              <Field label="Отображаемое название заведения">
                 <input
                   value={fields.name}
                   maxLength={255}
@@ -166,6 +184,10 @@ export default function ClubProfile({
                   }
                 />
               </Field>
+              <p className="po-muted">
+                Это название в списке «Мои клубы». Название организации не
+                изменится.
+              </p>
               <Field label="Описание клуба">
                 <textarea
                   value={fields.description}
@@ -176,17 +198,27 @@ export default function ClubProfile({
                   }
                 />
               </Field>
-              <Field label="Часовой пояс">
-                <input
-                  value={fields.timezone}
-                  maxLength={64}
-                  placeholder="Europe/Moscow"
-                  required
-                  onChange={(event) =>
-                    setFields({ ...fields, timezone: event.target.value })
-                  }
-                />
-              </Field>
+              {canWrite && (
+                <details className="ob-timezone-correction">
+                  <summary>Исправить часовой пояс</summary>
+                  <p className="po-muted">
+                    Только если сохранённый пояс неверен. Уточните IANA-код у
+                    владельца платформы. Это исправление не меняет город или
+                    адрес и применяется после сохранения профиля.
+                  </p>
+                  <Field label="Часовой пояс IANA">
+                    <input
+                      value={fields.timezone}
+                      maxLength={64}
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        setFields({ ...fields, timezone: event.target.value })
+                      }
+                    />
+                  </Field>
+                </details>
+              )}
             </fieldset>
             {!canWrite && (
               <p className="po-muted">Профиль доступен только для просмотра.</p>

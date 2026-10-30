@@ -91,12 +91,16 @@ describe('private club onboarding B', () => {
   });
 
   it('keeps old approved data as history with explicit reuse and no approval consumption action', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => response(approved));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      response(approved),
+    );
     render(<ClientAccess initialToken={null} />);
     await screen.findByText('Synthetic Street 1');
     expect(screen.getByText('Test Unit')).toBeTruthy();
     expect(
-      screen.getByRole('button', { name: 'Использовать данные для создания' }),
+      screen.getByRole('button', {
+        name: 'Использовать данные для создания',
+      }),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Создать клуб' })).toBeNull();
   });
@@ -138,17 +142,22 @@ describe('private club onboarding B', () => {
           return response({ items: [], nextCursor: null });
         return response(stored);
       });
-    const view = render(<ClientAccess initialToken={null} />);
-    fireEvent.change(await screen.findByLabelText('Отображаемое название'), {
-      target: { value: 'Saved synthetic club' },
-    });
+    render(<ClientAccess initialToken={null} />);
+    fireEvent.change(
+      await screen.findByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Saved synthetic club' },
+      },
+    );
     fireEvent.change(screen.getByLabelText('Описание клуба'), {
       target: { value: 'Synthetic description' },
     });
-    fireEvent.change(screen.getByLabelText('Часовой пояс'), {
+    fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
       target: { value: 'Europe/Paris' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText('Сохранено');
     const saved = fetch.mock.calls.find(
       ([, options]) => options?.method === 'PATCH',
@@ -163,20 +172,100 @@ describe('private club onboarding B', () => {
       screen.getByText(/Последнее успешное сохранение/).querySelector('time')
         ?.dateTime,
     ).toBe('2026-10-28T13:00:00Z');
-    view.unmount();
-    window.history.replaceState({}, '', '/app?mode=client');
-    render(<ClientAccess initialToken={null} />);
-    fireEvent.click(
-      await screen.findByRole('button', { name: /Synthetic Client/ }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'В «Мои клубы»' }));
+    await screen.findByRole('heading', {
+      name: 'Synthetic Client',
+      level: 1,
+    });
     expect(screen.queryByText('Independent Client')).toBeNull();
+    expect(screen.queryByText('Synthetic Venue')).toBeNull();
     fireEvent.click(
       await screen.findByRole('button', { name: /Saved synthetic club/ }),
     );
-    await screen.findByLabelText('Отображаемое название');
+    await screen.findByLabelText('Отображаемое название заведения');
     expect(value('Описание клуба')).toBe('Synthetic description');
-    expect(value('Часовой пояс')).toBe('Europe/Paris');
+    expect(value('Часовой пояс IANA')).toBe('Europe/Paris');
+    expect(
+      fetch.mock.calls.some(([path]) =>
+        String(path).endsWith('/clients/21/onboarding'),
+      ),
+    ).toBe(false);
   });
+
+  it.each([
+    ['Moscow', 'Moscow', '', ''],
+    ['Москва', 'Москва', '   ', ''],
+    ['Paris', 'Île-de-France', 'Зал 2', 'Île-de-France'],
+    ['Paris', 'Texas', '', 'Texas'],
+  ])(
+    'renders source location %s / %s without losing distinguishing details',
+    async (city, region, unit, expectedRegion) => {
+      go('club', '100');
+      vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+        response({ ...profile, city, region, unit }),
+      );
+      render(<ClientAccess initialToken={null} />);
+      await screen.findByText(city, { selector: 'dd' });
+      expect(screen.queryByText('Регион', { selector: 'dt' }) !== null).toBe(
+        Boolean(expectedRegion),
+      );
+      if (expectedRegion)
+        expect(
+          screen.getByText(expectedRegion, { selector: 'dd' }),
+        ).toBeTruthy();
+      expect(
+        screen.queryByText('Помещение', { selector: 'dt' }) !== null,
+      ).toBe(Boolean(unit.trim()));
+      if (unit.trim())
+        expect(screen.getByText(unit, { selector: 'dd' })).toBeTruthy();
+      expect(screen.getByText('Бот не подключён')).toBeTruthy();
+      expect(
+        screen.getByText(/Night Concierge открывает доступ к платформе/),
+      ).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /Подключ/ })).toBeNull();
+      expect(screen.getByText('Организация:', { exact: false })).toBeTruthy();
+    },
+  );
+
+  it.each(['Asia/Kathmandu', 'America/New_York', 'Future/Server_Zone'])(
+    'preserves the saved %s zone during ordinary edits, even with older browser zone data',
+    async (timezone) => {
+      go('club', '100');
+      const fetch = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation((_path, options) =>
+          response({
+            ...profile,
+            timezone,
+            ...(options?.method === 'PATCH'
+              ? { name: 'Новое название', version: '2' }
+              : {}),
+          }),
+        );
+      render(<ClientAccess initialToken={null} />);
+      fireEvent.change(
+        await screen.findByLabelText('Отображаемое название заведения'),
+        { target: { value: 'Новое название' } },
+      );
+      expect(
+        screen.getByLabelText('Часовой пояс IANA').closest('details')?.open,
+      ).toBe(false);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Сохранить профиль' }),
+      );
+      await screen.findByText('Сохранено');
+      const patch = fetch.mock.calls.find(
+        ([, options]) => options?.method === 'PATCH',
+      );
+      expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
+        name: 'Новое название',
+        description: '',
+        timezone,
+        expectedVersion: '1',
+      });
+      expect(value('Часовой пояс IANA')).toBe(timezone);
+    },
+  );
 
   it('validates the name and timezone and leaves readonly location out of mutation payload', async () => {
     go('club', '100');
@@ -184,18 +273,28 @@ describe('private club onboarding B', () => {
       .spyOn(globalThis, 'fetch')
       .mockImplementation(() => response(profile));
     render(<ClientAccess initialToken={null} />);
-    fireEvent.change(await screen.findByLabelText('Отображаемое название'), {
-      target: { value: ' ' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.change(
+      await screen.findByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: ' ' },
+      },
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Укажите название клуба/);
-    fireEvent.change(screen.getByLabelText('Отображаемое название'), {
-      target: { value: 'Valid synthetic name' },
-    });
-    fireEvent.change(screen.getByLabelText('Часовой пояс'), {
+    fireEvent.change(
+      screen.getByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Valid synthetic name' },
+      },
+    );
+    fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
       target: { value: 'Unknown/Synthetic' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Укажите часовой пояс IANA/);
     expect(
       fetch.mock.calls.filter(([, options]) => options?.method === 'PATCH'),
@@ -220,7 +319,9 @@ describe('private club onboarding B', () => {
       ).toBeNull();
       expect(
         (
-          screen.getByLabelText('Отображаемое название') as HTMLInputElement
+          screen.getByLabelText(
+            'Отображаемое название заведения',
+          ) as HTMLInputElement
         ).closest('fieldset')?.disabled,
       ).toBe(true);
     },
@@ -237,15 +338,28 @@ describe('private club onboarding B', () => {
         : response(profile);
     });
     render(<ClientAccess initialToken={null} />);
-    await screen.findByText('Не удалось загрузить данные. Повторите попытку.');
+    await screen.findByText(
+      'Не удалось загрузить данные. Повторите попытку.',
+    );
     expect(screen.queryByText('Synthetic Street 1')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
-    fireEvent.change(await screen.findByLabelText('Отображаемое название'), {
-      target: { value: 'Preserved synthetic input' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
-    await screen.findByText('Проверьте заполненные поля и повторите действие.');
-    expect(value('Отображаемое название')).toBe('Preserved synthetic input');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Повторить загрузку' }),
+    );
+    fireEvent.change(
+      await screen.findByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Preserved synthetic input' },
+      },
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
+    await screen.findByText(
+      'Проверьте заполненные поля и повторите действие.',
+    );
+    expect(value('Отображаемое название заведения')).toBe(
+      'Preserved synthetic input',
+    );
     expect(screen.queryByText('Сохранено')).toBeNull();
   });
 
@@ -264,13 +378,20 @@ describe('private club onboarding B', () => {
         );
       });
     render(<ClientAccess initialToken={null} />);
-    fireEvent.change(await screen.findByLabelText('Отображаемое название'), {
-      target: { value: 'Unsaved synthetic input' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.change(
+      await screen.findByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Unsaved synthetic input' },
+      },
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Запись уже изменена/);
     await screen.findByRole('heading', { name: 'Concurrent name', level: 1 });
-    expect(value('Отображаемое название')).toBe('Unsaved synthetic input');
+    expect(value('Отображаемое название заведения')).toBe(
+      'Unsaved synthetic input',
+    );
     expect(
       (
         screen.getByRole('button', {
@@ -282,7 +403,9 @@ describe('private club onboarding B', () => {
       screen.getByRole('button', { name: 'Загрузить актуальный профиль' }),
     );
     await waitFor(() =>
-      expect(value('Отображаемое название')).toBe('Concurrent name'),
+      expect(value('Отображаемое название заведения')).toBe(
+        'Concurrent name',
+      ),
     );
     expect(
       fetch.mock.calls.filter(([, options]) => options?.method === 'PATCH'),
@@ -302,10 +425,15 @@ describe('private club onboarding B', () => {
         return response(profile);
       });
     render(<ClientAccess initialToken={null} />);
-    fireEvent.change(await screen.findByLabelText('Отображаемое название'), {
-      target: { value: 'Saved once' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.change(
+      await screen.findByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Saved once' },
+      },
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText('Результат операции пока неизвестен');
     fireEvent.click(
       screen.getByRole('button', { name: 'Повторить ту же операцию' }),
@@ -326,13 +454,20 @@ describe('private club onboarding B', () => {
         : response(profile),
     );
     render(<ClientAccess initialToken={null} />);
-    fireEvent.change(await screen.findByLabelText('Отображаемое название'), {
-      target: { value: 'Unsaved private name' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.change(
+      await screen.findByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Unsaved private name' },
+      },
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Доступ утрачен/);
     expect(screen.queryByText('Synthetic Street 1')).toBeNull();
-    expect(screen.queryByLabelText('Отображаемое название')).toBeNull();
+    expect(
+      screen.queryByLabelText('Отображаемое название заведения'),
+    ).toBeNull();
   });
 
   it('account switch clears the old profile and rejects a late successful mutation response', async () => {
@@ -354,10 +489,15 @@ describe('private club onboarding B', () => {
         return response(profile);
       });
     const view = render(<ClientAccess initialToken={null} />);
-    fireEvent.change(await screen.findByLabelText('Отображаемое название'), {
-      target: { value: 'Old private account' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.change(
+      await screen.findByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Old private account' },
+      },
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     auth.initData = 'synthetic-client-b';
     view.rerender(<ClientAccess initialToken={null} />);
     await screen.findByText(/Доступ утрачен/);
