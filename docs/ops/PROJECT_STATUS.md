@@ -1,5 +1,45 @@
 # Project status checkpoint
 
+## PR #559 Lint: visudo provider compatibility — local, 2026-10-31
+
+- **Publication continuation; full local selfcheck UNVERIFIED**. Test-only fix on PR head
+  `5757a687d14cec1b255865835d3b3e21db6660d6`, branch
+  `codex/fix-lint-visudo-provider`, worktree `/private/tmp/clubs-lint-visudo-fix`.
+  `CLB-lint-visudo-provider` is a descriptive label, not a new card. Identity guard
+  PASS; active foreign instructions = 0. Both prepared files matched their evidence.
+  The owner now authorizes one commit and one ordinary fast-forward push into the
+  existing Draft PR #559; no new PR, force push, manual Actions or server actions.
+- [Failed Lint run](https://github.com/koteev-m/clubs_bot/actions/runs/41210175191):
+  Ubuntu 26.04 default visudo-rs rejects the unchanged IPv4 host restriction.
+  The repository's stage contract targets original sudo >=1.9.15p5. Ubuntu retains
+  [original .ws utilities](https://ubuntu.com/server/docs/how-to/security/user-management/#sudo-rs).
+  The test now prefers absolute `/usr/sbin/visudo.ws`, with the existing path as
+  fallback only when .ws is absent; a parser failure never triggers fallback.
+- Disposable offline amd64 reproduction: Ubuntu 26.04 visudo-rs 0.2.13 returns 1
+  for the original fixture; visudo.ws 1.9.17p2 parses the same bytes successfully.
+  Corrected module: 24/24 PASS on macOS, Ubuntu 26.04 and Ubuntu 24.04 with original
+  sudo 1.9.15p5. Added 3 provider-selection cases, failure propagation and 10 exact
+  policy mutations (host/runas/SETENV/digest/command/arguments/extra grant) refused
+  before syntax parsing. Existing 12 workflow mutations still pass. No new skips.
+- Source review, AST and diff checks PASS. Production sudoers/template/wrapper,
+  digest, NOPASSWD/NOSETENV/no-arguments, host restriction, workflow/selfcheck gates,
+  follow-redirects and Mini App source/dist are unchanged. Installed stage policy
+  and provider were not inspected: SSH and real-server actions are forbidden.
+- Full `selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage`
+  did not pass locally: the unchanged secret-scanner Docker regressions fail before
+  this module (`unrecognized warning` on Darwin; read-only Git-history mount
+  verification in nested Docker). Earlier minimal-container attempts also lacked
+  executable temp storage/Docker CLI. These are retained environment failures,
+  not waived checks; no parser/guard was changed to accept them.
+- Evidence: `/private/tmp/clubs-lint-visudo-evidence/` (provider matrix, three test
+  logs, full selfcheck attempts, focused review and final diff). Only this checkpoint
+  and `scripts/tests/test_stage_apt_metadata_refresh.py` form this commit. Test bytes
+  remain identical to the 24/24 evidence; the only new delta is this checkpoint.
+  Publication identities are recorded in `/private/tmp/clubs-lint-visudo-publication/`.
+- The owner delegates final full selfcheck verification to ordinary automatic PR CI
+  without any gate waiver. It remains UNVERIFIED locally and is not claimed PASS.
+  Next step after push: check completed CI for the exact updated PR head.
+
 ## follow-redirects security fix — local, 2026-10-31
 
 ### Publication continuation
