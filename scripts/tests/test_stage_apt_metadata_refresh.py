@@ -241,12 +241,55 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(lines, ['@STAGE_PRINCIPAL@ 178.20.209.5 = (root:root) NOPASSWD: NOSETENV: sha256:'
                                 +r.WRAPPER_SHA256+' '+r.INSTALL+' ""'])
         # This validates a private fixture, never the machine's installed policy.
-        if Path('/usr/sbin/visudo').exists():
+        # The stage contract targets original sudo; Ubuntu 26.04's default is sudo-rs.
+        visudo = next((path for path in ('/usr/sbin/visudo.ws', '/usr/sbin/visudo')
+                       if Path(path).exists()), None)
+        if visudo is not None:
             with tempfile.NamedTemporaryFile(mode='w') as fixture:
                 fixture.write(template.replace('@STAGE_PRINCIPAL@','clb175_fixture'))
                 fixture.flush()
-                done=subprocess.run(['/usr/sbin/visudo','-c','-f',fixture.name],capture_output=True)
+                done=subprocess.run([visudo,'-c','-f',fixture.name],capture_output=True)
                 self.assertEqual(done.returncode,0,done.stderr.decode())
+
+    def test_sudoers_prefers_original_provider_with_legacy_path_fallback(self):
+        ws, legacy = '/usr/sbin/visudo.ws', '/usr/sbin/visudo'
+        for available, expected in (({ws, legacy}, ws), ({ws}, ws), ({legacy}, legacy)):
+            with self.subTest(available=available), \
+                 patch.object(Path, 'exists', lambda path: str(path) in available), \
+                 patch.object(subprocess, 'run', return_value=types.SimpleNamespace(returncode=0, stderr=b'')) as run:
+                self.test_sudoers_digest_no_arguments_and_visudo()
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0][:3], [expected, '-c', '-f'])
+                self.assertEqual(run.call_args.kwargs, {'capture_output': True})
+
+    def test_sudoers_provider_failure_never_falls_back_or_passes(self):
+        with patch.object(Path, 'exists', return_value=True), \
+             patch.object(subprocess, 'run', return_value=types.SimpleNamespace(returncode=1, stderr=b'invalid policy')) as run:
+            with self.assertRaises(AssertionError):
+                self.test_sudoers_digest_no_arguments_and_visudo()
+            run.assert_called_once()
+            self.assertEqual(run.call_args.args[0][0], '/usr/sbin/visudo.ws')
+
+    def test_sudoers_exact_contract_rejects_privilege_mutations_before_parser(self):
+        template=(ROOT/'scripts/deploy/stage-apt-metadata-refresh.sudoers.in').read_text()
+        mutations = {
+            'host-all': template.replace('178.20.209.5', 'ALL'),
+            'runas-all': template.replace('(root:root)', '(ALL:ALL)'),
+            'nopasswd-removed': template.replace('NOPASSWD: ', ''),
+            'setenv': template.replace('NOSETENV:', 'SETENV:'),
+            'digest-removed': template.replace('sha256:'+r.WRAPPER_SHA256+' ', ''),
+            'wrong-digest': template.replace(r.WRAPPER_SHA256, '0'*64),
+            'shell-command': template.replace(r.INSTALL, '/bin/sh'),
+            'arguments-unrestricted': template.replace(' ""', ''),
+            'argument-added': template.replace(' ""', ' update'),
+            'extra-grant': template+'@STAGE_PRINCIPAL@ ALL = (ALL:ALL) NOPASSWD: ALL\n',
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(name=name), patch.object(Path, 'read_text', return_value=mutation), \
+                 patch.object(subprocess, 'run') as run:
+                with self.assertRaises(AssertionError):
+                    self.test_sudoers_digest_no_arguments_and_visudo()
+                run.assert_not_called()
 
     def test_exact_validator_rejects_capability_mutations(self):
         ruby = r'''

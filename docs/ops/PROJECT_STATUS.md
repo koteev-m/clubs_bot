@@ -1,5 +1,97 @@
 # Project status checkpoint
 
+## PR #559 Lint: visudo provider compatibility — local, 2026-10-31
+
+- **Publication continuation; full local selfcheck UNVERIFIED**. Test-only fix on PR head
+  `5757a687d14cec1b255865835d3b3e21db6660d6`, branch
+  `codex/fix-lint-visudo-provider`, worktree `/private/tmp/clubs-lint-visudo-fix`.
+  `CLB-lint-visudo-provider` is a descriptive label, not a new card. Identity guard
+  PASS; active foreign instructions = 0. Both prepared files matched their evidence.
+  The owner now authorizes one commit and one ordinary fast-forward push into the
+  existing Draft PR #559; no new PR, force push, manual Actions or server actions.
+- [Failed Lint run](https://github.com/koteev-m/clubs_bot/actions/runs/41210175191):
+  Ubuntu 26.04 default visudo-rs rejects the unchanged IPv4 host restriction.
+  The repository's stage contract targets original sudo >=1.9.15p5. Ubuntu retains
+  [original .ws utilities](https://ubuntu.com/server/docs/how-to/security/user-management/#sudo-rs).
+  The test now prefers absolute `/usr/sbin/visudo.ws`, with the existing path as
+  fallback only when .ws is absent; a parser failure never triggers fallback.
+- Disposable offline amd64 reproduction: Ubuntu 26.04 visudo-rs 0.2.13 returns 1
+  for the original fixture; visudo.ws 1.9.17p2 parses the same bytes successfully.
+  Corrected module: 24/24 PASS on macOS, Ubuntu 26.04 and Ubuntu 24.04 with original
+  sudo 1.9.15p5. Added 3 provider-selection cases, failure propagation and 10 exact
+  policy mutations (host/runas/SETENV/digest/command/arguments/extra grant) refused
+  before syntax parsing. Existing 12 workflow mutations still pass. No new skips.
+- Source review, AST and diff checks PASS. Production sudoers/template/wrapper,
+  digest, NOPASSWD/NOSETENV/no-arguments, host restriction, workflow/selfcheck gates,
+  follow-redirects and Mini App source/dist are unchanged. Installed stage policy
+  and provider were not inspected: SSH and real-server actions are forbidden.
+- Full `selfcheck-quality-gates.sh --ci-delegated-release-state-and-corrected-stage`
+  did not pass locally: the unchanged secret-scanner Docker regressions fail before
+  this module (`unrecognized warning` on Darwin; read-only Git-history mount
+  verification in nested Docker). Earlier minimal-container attempts also lacked
+  executable temp storage/Docker CLI. These are retained environment failures,
+  not waived checks; no parser/guard was changed to accept them.
+- Evidence: `/private/tmp/clubs-lint-visudo-evidence/` (provider matrix, three test
+  logs, full selfcheck attempts, focused review and final diff). Only this checkpoint
+  and `scripts/tests/test_stage_apt_metadata_refresh.py` form this commit. Test bytes
+  remain identical to the 24/24 evidence; the only new delta is this checkpoint.
+  Publication identities are recorded in `/private/tmp/clubs-lint-visudo-publication/`.
+- The owner delegates final full selfcheck verification to ordinary automatic PR CI
+  without any gate waiver. It remains UNVERIFIED locally and is not claimed PASS.
+  Next step after push: check completed CI for the exact updated PR head.
+
+## follow-redirects security fix — local, 2026-10-31
+
+### Publication continuation
+
+- Пользователь разрешил один commit, один ordinary push без force и один Draft PR
+  в `main`; merge, rerun/dispatch, deploy, credentials и реальные данные запрещены.
+  Ниже сохранён snapshot завершённой local-only реализации.
+- Publication preflight: live main равен базе ниже, оба исходных файла/hash совпали
+  с `SECURITY_DEPENDENCY_FIX_READY`. Lockfile и dependency graph не меняются;
+  новая дельта — только эта запись. Прежние проверки переиспользуются для тех же bytes.
+- Commit/remote head/PR и единичный начальный CI snapshot фиксируются в итоговом
+  handoff `/private/tmp/clubs-follow-redirects-publication/handoff.json`.
+  Следующий шаг после Draft PR — проверить завершённые checks его точного commit.
+
+### Local verification snapshot
+
+- **SECURITY_DEPENDENCY_FIX_READY**, uncommitted. Новая задача без CLB ID;
+  `CLB-follow-redirects-security` — descriptive identity label. Live main/base/HEAD:
+  `196e3c7562a25b37ede4b0512847a8435a3bfe81` (merge #558).
+  Worktree `/private/tmp/clubs-follow-redirects-fix`, branch
+  `codex/fix-follow-redirects-116689`. Root/frontend identity guards PASS,
+  active foreign instructions = 0; остальные 29 рабочих копий сохранены.
+- Root cause: [Security Scan run 41160017775](https://github.com/koteev-m/clubs_bot/actions/runs/41160017775)
+  обнаруживает HIGH `CVE-2026-116689`: Axios 1.20.0 → locked follow-redirects 1.16.1.
+  [Axios 1.20.0](https://github.com/axios/axios/blob/v1.20.0/package.json) допускает
+  `^1.16.0`; patch 1.16.2 сохраняет Node >=4.0 и не добавляет dependencies.
+- Diff: четыре строки `miniapp/pnpm-lock.yaml` (version, edge, snapshot, npm SHA512)
+  и только этот checkpoint. Focused structural review всех 488 packages/snapshots:
+  importers, Axios 1.20.0 и остальные зависимости неизменны. Source, dist,
+  migrations, workflow/ignore/severity/exit-code и прочие gates не меняются.
+- Isolated pnpm 9.15.9 / Node 24.14.0: `install --frozen-lockfile` PASS;
+  `run typecheck`, `run lint:ci`, `run build` PASS. Relevant frontend tests:
+  **169/169, 16 files, без skips/failures**; loopback Axios redirect/limit/cancel
+  compatibility PASS. pnpm 11 дал лишнюю peer/libc reserialization и
+  `ERR_PNPM_IGNORED_BUILDS`; только его task-created artifacts убраны, global и
+  repository build policies не менялись. Details/logs сохранены в evidence.
+- 5/5 dist files побайтово равны main. Bounded `:app-bot:processResources --offline`
+  PASS, exit 0, 7.294 s, cleanup verified. Оба packaged Mini App validators PASS;
+  dist/resources hashes совпали. Существующие warnings не подавлялись.
+- Trivy **0.69.3**, image
+  `sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c`,
+  адресный `fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1`, неизменный
+  `.trivyignore`: original lockfile — ровно эта CVE/HIGH, exit 1; final minimal
+  lockfile на той же БД от 2026-10-31 — **0 findings, exit 0**. Inventory подтверждает
+  Axios 1.20.0 / follow-redirects 1.16.2; это не новый hosted CI result.
+- Evidence `/private/tmp/clubs-follow-redirects-evidence/`: registry metadata,
+  graph/review, command logs, test JSON, Trivy before/final, bounded packaging.
+  JVM/DB suites не запускались: серверный код/migrations неизменны. Hosted full CI
+  и Stage/prod не проверялись. Разрешены только local fix/tests/checks; commit,
+  push, PR, merge, rerun/dispatch, deploy и реальные данные не затрагивались.
+- Следующий шаг: отдельно разрешённый небольшой Draft PR по двум файлам.
+
 ## Client cabinet «Залы и столы» — local, 2026-10-31
 
 ### Publication continuation
