@@ -49,11 +49,13 @@ export default function ClubProfile({
   id,
   home,
   reportDirty,
+  openLayout,
 }: {
   credential: string;
   id: string;
   home: (clientId?: string) => void;
   reportDirty: (dirty: boolean) => void;
+  openLayout?: () => void;
 }) {
   const path = '/api/client/clubs/' + id + '/profile';
   const remote = useRemote<Profile>(credential, path);
@@ -154,6 +156,21 @@ export default function ClubProfile({
               уточнения местоположения.
             </p>
           </section>
+          {openLayout && profile.permissions.includes('client.club.read') && (
+            <button
+              className="po-card ob-card ob-row"
+              onClick={() => {
+                if (leave()) openLayout();
+              }}
+            >
+              <strong>Залы и столы</strong>
+              <small>
+                {profile.permissions.includes('client.club.layout.write')
+                  ? 'Настроить схему и столы'
+                  : 'Просмотреть схему и столы'}
+              </small>
+            </button>
+          )}
           <form
             noValidate
             onSubmit={(event) => {

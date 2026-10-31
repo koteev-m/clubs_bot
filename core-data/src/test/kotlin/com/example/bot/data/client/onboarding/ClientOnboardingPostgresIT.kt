@@ -8,6 +8,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.AfterAll
@@ -136,6 +137,121 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
             assertEquals(0, fixture.count("client_club_onboarding"))
             assertEquals(0, fixture.count("client_clubs"))
             assertEquals(0, fixture.count("client_club_grants"))
+        }
+
+    @Test
+    fun `layout mutation waiting on client lock rechecks exact grant revocation before persistence`() =
+        runBlocking<Unit> {
+            val club = create(approved())
+            val hall =
+                fixture.repository
+                    .mutate(
+                        fixture.alice,
+                        OnboardingMutation.CLUB_HALL_CREATE,
+                        club.id("id"),
+                        buildJsonObject { put("name", "Waiting hall") },
+                        "layout-waiting-create",
+                    ).firstHall()
+            val before = fixture.rows("SELECT * FROM hall_tables WHERE hall_id=${hall.id("id")}")
+            fixture.source.connection.use { blocker ->
+                blocker.autoCommit = false
+                val sql = OnboardingSql(blocker)
+                val blockerId = checkNotNull(sql.row("SELECT pg_backend_pid() AS pid")).long("pid").toInt()
+                sql.row("SELECT id FROM clients WHERE id=? FOR UPDATE", club.id("clientId"))
+                coroutineScope {
+                    val outcome =
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            try {
+                                fixture.repository.mutate(
+                                    fixture.alice,
+                                    OnboardingMutation.CLUB_TABLE_CREATE,
+                                    club.id("id"),
+                                    tableBody(hall),
+                                    "layout-waiting-table",
+                                )
+                                "unexpected_success"
+                            } catch (failure: OnboardingFailure) {
+                                failure.code
+                            }
+                        }
+                    try {
+                        awaitBlockedMutation(blockerId)
+                        sql.update(
+                            "UPDATE client_club_grants SET is_active=FALSE WHERE club_id=? AND permission_code=?",
+                            club.id("id"),
+                            WRITE_LAYOUT,
+                        )
+                        blocker.commit()
+                    } finally {
+                        blocker.rollback()
+                    }
+                    assertEquals("not_found", outcome.await())
+                }
+            }
+            assertEquals(before, fixture.rows("SELECT * FROM hall_tables WHERE hall_id=${hall.id("id")}"))
+            assertEquals("1", layout(club).firstHall().string("layoutRevision"))
+        }
+
+    @Test
+    fun `layout and image reads waiting on client lock see committed read grant revocation`() =
+        runBlocking<Unit> {
+            val club = create(approved())
+            val hall =
+                fixture.repository
+                    .mutate(
+                        fixture.alice,
+                        OnboardingMutation.CLUB_HALL_CREATE,
+                        club.id("id"),
+                        buildJsonObject { put("name", "Waiting read") },
+                        "layout-waiting-read-hall",
+                    ).firstHall()
+            listOf(OnboardingRead.CLUB_LAYOUT_GET, OnboardingRead.CLUB_PLAN_GET).forEach { operation ->
+                fixture.execute(
+                    "UPDATE client_club_grants SET is_active=TRUE WHERE club_id=${club.id(
+                        "id",
+                    )} AND permission_code='$READ_CLUB'",
+                )
+                fixture.source.connection.use { blocker ->
+                    blocker.autoCommit = false
+                    val sql = OnboardingSql(blocker)
+                    val blockerId = checkNotNull(sql.row("SELECT pg_backend_pid() AS pid")).long("pid").toInt()
+                    sql.row("SELECT id FROM clients WHERE id=? FOR UPDATE", club.id("clientId"))
+                    coroutineScope {
+                        val outcome =
+                            async(start = CoroutineStart.UNDISPATCHED) {
+                                try {
+                                    fixture.repository.read(
+                                        fixture.alice,
+                                        operation,
+                                        club.id("id"),
+                                        if (operation ==
+                                            OnboardingRead.CLUB_PLAN_GET
+                                        ) {
+                                            buildJsonObject { put("hallId", hall.getValue("id")) }
+                                        } else {
+                                            JsonObject(emptyMap())
+                                        },
+                                    )
+                                    "unexpected_success"
+                                } catch (failure: OnboardingFailure) {
+                                    failure.code
+                                }
+                            }
+                        try {
+                            awaitBlockedMutation(blockerId)
+                            sql.update(
+                                "UPDATE client_club_grants SET is_active=FALSE WHERE club_id=? AND permission_code=?",
+                                club.id("id"),
+                                READ_CLUB,
+                            )
+                            blocker.commit()
+                        } finally {
+                            blocker.rollback()
+                        }
+                        assertEquals("not_found", outcome.await())
+                    }
+                }
+            }
         }
 
     @Test

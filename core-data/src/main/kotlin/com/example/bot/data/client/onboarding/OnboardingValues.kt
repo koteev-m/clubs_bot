@@ -16,6 +16,7 @@ internal typealias DbRow = Map<String, String?>
 internal const val MANAGE = "client.application.manage"
 internal const val READ_CLUB = "client.club.read"
 internal const val WRITE_PROFILE = "client.club.profile.write"
+internal const val WRITE_LAYOUT = "client.club.layout.write"
 internal val onboardingJson = Json
 private const val TOKEN_BYTES = 32
 

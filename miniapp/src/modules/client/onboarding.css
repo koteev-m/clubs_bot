@@ -144,3 +144,23 @@
   align-items: center;
   justify-content: space-between;
 }
+
+.client-layout {
+  min-width: 0;
+}
+.client-layout input,
+.client-layout textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.client-layout input[type="file"] {
+  width: 100%;
+  font-size: 14px;
+}
+.client-layout > div {
+  padding-left: 0;
+  padding-right: 0;
+}
+.client-layout button {
+  overflow-wrap: anywhere;
+}

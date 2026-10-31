@@ -1,5 +1,20 @@
 # CONCEPT ↔ CODE: traceability и gaps
 
+## Bounded client-layout delta — 2026-10-31
+
+The owner's explicit layout task accepts the cabinet subset of `ONB-004`, recorded
+in [PRODUCT_SPEC §29.12](PRODUCT_SPEC.md#client-club-layout).
+The former administrative CRUD fragments remain isolated legacy paths. Local source
+from `main dbdbd2987298178ea22c06d8fe26302d1668ddec` now connects exact client read/layout
+grants, hall/table/image persistence and the existing editor inside `mode=cabinet`.
+This closes the local name/plan/table-placement UI wiring gap within the accepted
+scope; it does not complete the full onboarding master or accept unrelated capabilities.
+
+Traceability: [AS_BUILT local refresh](AS_BUILT.md#client-layout-local) →
+[API/storage/migration and test evidence](../ops/client-club-layout.md).
+No new decision ID, source rewrite, legacy removal, publication or runtime claim.
+The historical matrix below is preserved at its original baseline.
+
 Baseline: `df7685facb52a6e5731a520669dfa2c73f6ccf24`, 2026-08-17. Каждая строка — рекомендация аудита, не принятое решение. `Current status` использует product status enum; `Recommended disposition` — только `KEEP_AS_IS`, `REUSE_WITH_CHANGES`, `REPLACE`, `REMOVE_LEGACY`, `IMPLEMENT`, `DEFER`, `DECISION_REQUIRED`, `INVESTIGATE`.
 
 ## 1. Полная traceability matrix

@@ -29,7 +29,9 @@ class JdbcClientOnboardingRepository(
     ): JsonObject =
         withContext(dispatcher) {
             validateActor(actor)
-            transaction(readOnly = true) { sql ->
+            transaction(
+                readOnly = operation !in setOf(OnboardingRead.CLUB_LAYOUT_GET, OnboardingRead.CLUB_PLAN_GET),
+            ) { sql ->
                 val session =
                     OnboardingSession(
                         sql,
@@ -53,6 +55,8 @@ class JdbcClientOnboardingRepository(
                         )
                     OnboardingRead.CLIENT_APPLICATION_GET -> applications.get(required(resourceId), platform = false)
                     OnboardingRead.CLUB_PROFILE_GET -> ClubOnboardingOperations(session).get(required(resourceId))
+                    OnboardingRead.CLUB_LAYOUT_GET -> ClubLayoutOperations(session).get(required(resourceId))
+                    OnboardingRead.CLUB_PLAN_GET -> ClubLayoutOperations(session).plan(required(resourceId), body)
                     OnboardingRead.PLATFORM_INVITATION_GET -> invitations.get(required(resourceId), platform = true)
                     OnboardingRead.PLATFORM_CLIENT_SEARCH -> clients.search(body)
                     OnboardingRead.PLATFORM_CLIENT_GET -> clients.get(required(resourceId))
@@ -149,6 +153,10 @@ class JdbcClientOnboardingRepository(
                 ClientAccessOperations(session).change(required(resourceId), operation, body)
             OnboardingMutation.CLIENT_LIMIT_UPDATE -> ClientLimitOperations(session).update(required(resourceId), body)
             OnboardingMutation.CLUB_CREATE -> DirectClubOperations(session).create(required(resourceId), body)
+            OnboardingMutation.CLUB_HALL_CREATE, OnboardingMutation.CLUB_HALL_UPDATE,
+            OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_UPDATE,
+            OnboardingMutation.CLUB_PLAN_UPLOAD,
+            -> ClubLayoutOperations(session).mutate(required(resourceId), operation, body)
             OnboardingMutation.APPLICATION_CREATE -> applications.create(required(resourceId), body)
             OnboardingMutation.APPLICATION_UPDATE -> applications.update(required(resourceId), body)
             OnboardingMutation.APPLICATION_CREATE_CLUB ->
@@ -177,6 +185,7 @@ class JdbcClientOnboardingRepository(
             "member" -> ClientAccessOperations(session).memberView(command.long("client_id"), command.long("result_id"))
             "club_create" -> ClubOnboardingOperations(session).replayCreate(command.long("result_id"))
             "club_profile" -> ClubOnboardingOperations(session).get(command.long("result_id"), write = true)
+            "club_layout" -> ClubLayoutOperations(session).get(command.long("result_id"), write = true)
             else -> error("Invalid stored command result")
         }
     }

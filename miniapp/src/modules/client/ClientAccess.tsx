@@ -3,6 +3,7 @@ import { useInitData } from '../auth/hooks/useInitData';
 import NewClub, { blankNewVenue } from './NewClub';
 import { authorityLost } from './onboarding.api';
 import ClubProfile from './ClubProfile';
+import ClubLayout from './ClubLayout';
 import { scrubClientLaunchUrl } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -28,6 +29,7 @@ type Screen =
   | { type: 'space'; id: string }
   | { type: 'application'; id: string }
   | { type: 'club'; id: string }
+  | { type: 'layout'; id: string; hallId?: string }
   | { type: 'new'; id: string; previous?: ClubApplication }
   | { type: 'invitation'; id?: string };
 function savedScreen(): Screen {
@@ -39,6 +41,14 @@ function savedScreen(): Screen {
     return { type: 'application', id };
   if (params.get('screen') === 'invitation') return { type: 'invitation', id };
   if (params.get('screen') === 'new-club') return { type: 'new', id };
+  if (params.get('screen') === 'layout') {
+    const hallId = params.get('hall');
+    return {
+      type: 'layout',
+      id,
+      ...(hallId && /^[1-9][0-9]*$/.test(hallId) ? { hallId } : {}),
+    };
+  }
   if (params.get('screen') === 'club') return { type: 'club', id };
   return { type: 'home' };
 }
@@ -109,6 +119,10 @@ function ClientWorkspace({
   const pendingClient = useRef('');
   pendingClient.current = createClub.blocked ? draftClient : '';
   const dirty = useRef(false);
+  const layoutPending = useRef(false);
+  const reportLayoutPending = useCallback((value: boolean) => {
+    layoutPending.current = value;
+  }, []);
   const position = useRef(
     Number.isSafeInteger(window.history.state?.clientPosition)
       ? Number(window.history.state.clientPosition)
@@ -130,6 +144,9 @@ function ClientWorkspace({
       url.searchParams.set('mode', 'client');
       url.searchParams.delete('screen');
       url.searchParams.delete('resource');
+      url.searchParams.delete('hall');
+      if (next.type === 'layout' && next.hallId)
+        url.searchParams.set('hall', next.hallId);
       if (next.type !== 'home') {
         url.searchParams.set(
           'screen',
@@ -181,6 +198,10 @@ function ClientWorkspace({
         ? Number(event.state.clientPosition)
         : 0;
       if (nextPosition === position.current) return;
+      if (layoutPending.current) {
+        window.history.go(position.current - nextPosition);
+        return;
+      }
       if (
         dirty.current &&
         !window.confirm('Есть несохранённые изменения. Уйти без сохранения?')
@@ -268,6 +289,21 @@ function ClientWorkspace({
         reportDirty={reportDirty}
       />
     );
+  if (screen.type === 'layout')
+    return (
+      <ClubLayout
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        hallId={screen.hallId}
+        back={() => navigate({ type: 'club', id: screen.id })}
+        openHall={(hallId) =>
+          navigate({ type: 'layout', id: screen.id, hallId })
+        }
+        reportDirty={reportDirty}
+        reportPending={reportLayoutPending}
+      />
+    );
   if (screen.type === 'club')
     return (
       <ClubProfile
@@ -278,6 +314,7 @@ function ClientWorkspace({
           clientId ? navigate({ type: 'space', id: clientId }) : home()
         }
         reportDirty={reportDirty}
+        openLayout={() => navigate({ type: 'layout', id: screen.id })}
       />
     );
   return <ClientHome credential={credential} navigate={navigate} />;

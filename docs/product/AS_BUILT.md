@@ -1,5 +1,34 @@
 # AS_BUILT: repository snapshot
 
+<a id="client-layout-local"></a>
+## Bounded local refresh: client club layout, 2026-10-31
+
+Local uncommitted implementation from `main dbdbd2987298178ea22c06d8fe26302d1668ddec`
+in `/private/tmp/clubs-layout-worktree`; this is not a deployed-revision claim or
+a whole-repository audit. [Accepted scope](PRODUCT_SPEC.md#client-club-layout)
+is the bounded client-cabinet part of `ONB-004`.
+
+- `ClientOnboardingRoutes` registers `ClientLayoutRoutes` under the existing fresh
+  signed client guard. `ClubLayoutOperations`, `ClubLayoutViews`, `ClubLayoutTables`
+  and `ClubLayoutPlans` use the existing hall/zone/table/plan storage, client lifecycle
+  lock, command ledger and audit. Read and write have separate exact grants; parent
+  checks and current authority apply to every resource and replay.
+- Direct and historical approved creation include the creator grant atomically.
+  Paired V065 performs only the bounded active-prerequisite creator bootstrap,
+  rejecting ambiguous provenance and preserving inactive-grant tombstones. Explicit
+  revoke/restore behavior remains; no legacy role receives client authority.
+- `ClientAccess` → `ClubProfile` → `ClubLayout` injects the client API into the
+  existing `ClubHallsScreen`, `HallEditorScreen` and `HallPlanStage`. It supports
+  name-only halls, images, table metadata/coordinates, conflict/retry/Back handling
+  and access-loss cleanup. BIGINT IDs remain strings in the client path.
+- Legacy containment and administrative/public access boundaries are unchanged.
+  Calendar, booking, payments, staff, Managed Bots and publication are excluded.
+
+Commands, test counts, focused review and remaining unverified boundaries are
+recorded in the [local technical report](../ops/client-club-layout.md). Acceptance,
+source wiring and locally passing tests do not establish Stage/prod or real Telegram
+behavior. The historical snapshot below retains its original provenance.
+
 Аудит выполнен read-only по production/test source на branch `codex/product-rebaseline-audit`, HEAD `df7685facb52a6e5731a520669dfa2c73f6ccf24`, синхронному exact `origin/main`, 2026-08-17. Внешний deployment, VPS, Telegram configuration, runtime data и secrets не проверялись; фактическая доступность уже развёрнутого экземпляра поэтому `UNKNOWN`.
 
 Bounded refreshes: historical baseline audit above is preserved. After merged PR #479, only the private-`/start` identity boundary was selectively revalidated against current `main` commit `20aced05258ab8972b455c59b8038e9a4361f34e`. After merged PR #481, only the directly affected private-`/ask` club/category-selection and prompt-trust boundary was selectively revalidated against current `main` commit `249dedc0c511ea27308bbe57ebf4612c0a68ed09`. Merged PR #483 (production commit `f54426090b88f34963106533349cf6b81ad9bf32`, documentation commit `8d6578046e6c0923ca7f65fba15b1ea9c9658afe`, merge commit `09dfb37b9714dc3e4094278744e0b76baa8942d6`) received a bounded support-persistence refresh covering only ticket creation, status migration and legacy-mutation containment. Merged PR #484 (production commit `6c18a4041ee431f0fa5a86db3d516d6b4034a867`, documentation commit `20a3a6f99f67ceb45fb875b7933bdd709af376ce`, merge commit `f96b32de6a5e8d7e371bf0d7d5dde3e176a345f8`) received a bounded guest-ownership read refresh. Merged PR #485 (production commit `cfb77b3a9df3291038f0b2792d2185af12bf2aa3`, documentation commit `6b06cdea52a7ced43ddef5fd2cab177ff0e1190a`, merge commit `4146af8817a31d841df4ff51a4d2a4cb0929414c`) received the bounded staff read-surface and explicit-support-permission refresh below. Merged PR #486 (production commit `6de082b93d6e9ada9a857b3e5d953f8d56581693`, documentation commit `45b435b3d2bf65128a64632c7c5fdb48c2edb11f`, merge commit `4a1bc5aac2f5b491ddc608f3fa02d375f8633eae`) received the bounded take-and-reply refresh below. Merged PR #487 (production commit `63084ac39224359601f978f7a9bebf4d22f5fc3d`, documentation commit `bde4318b8f5896acd2e61642309dc107e8fd65d7`, merge commit `ce87a5a34fa7a077bcd9fa945901e72c13445822`) received the separate resolve/guest-resume/close refresh below. Merged PR #488 (implementation commit `fa62ef835348768c05b7ddf8ba224a6a8edfa805`, documentation commit `a44d5de9d0c5f86af5e2813245637ed1b0d4e308`, merge commit `9cffa3e8361f42b9a3c469ceebbff4fb0d0f3fe7`) received the truthful-delivery refresh below. Immutable test-only commit `e331c9991660f5d359aa22c9f73a9a4bcb7bd9af` receives the separate process-restart evidence refresh below; it changes no production source, migration or runtime endpoint, and no PR or merge commit is claimed for it. Guest-surface implementation `b5680a4c992f6f6f25e05e850eac97a0b473f0a4` is an ancestor of verified main `376969bbda6307b16caa464195996efa0dea4b4c` (CLB-126 preflight); its bounded implementation is present there. CLB-126 adds the separate local unpublished support transport refresh in §4.13. None of these refreshes is a whole-repository re-audit at its commit.

@@ -910,3 +910,43 @@ profile.write/version/idempotency контрактом. Это не измене
 «Бот не подключён» и различает Night Concierge как вход в платформу и будущий отдельный
 бот клуба, без неработающих кнопок. [Техническое предложение первого бота](MANAGED_BOTS_DIRECTION.md#first-managed-bot-contract)
 ещё требует принятия существенных решений и не является разрешением реализации.
+
+<a id="client-club-layout"></a>
+### 29.12. «Залы и столы» в клиентском кабинете — принято 2026-10-31
+
+Прямое указание владельца разрешает первый законченный раздел настройки private
+клуба в рамках `ONB-004`: «Мои заведения» → свой клуб → «Залы и столы». Это
+ограниченное расширение клиентского кабинета, без нового decision ID. Пользователь
+создаёт зал по названию, переименовывает его, загружает PNG/JPEG, размещает столы,
+задаёт номер/название/вместимость и сохраняет координаты с повторным открытием.
+Первый зал получает базовую зону без ручного geometry JSON. Существующий редактор
+и геометрия переиспользуются; отдельного второго редактора не создаётся.
+
+Чтение требует текущих active client/membership/mapping и exact
+`client.club.read`; изменение дополнительно требует exact
+`client.club.layout.write` для того же user/client/club. URL/mode, legacy
+`OWNER/GLOBAL`, staff role и profile.write сами по себе доступа не дают. Каждый
+hall/table/plan/image заново проверяется в конкретном club/client. Legacy
+containment, запрет публичного доступа к mapped private clubs и старые admin
+guards сохраняются.
+
+Оба пути создания клуба (direct и historical approved application) выдают
+layout.write подтверждённому создателю в одной транзакции с существующими grants.
+Для прежних private clubs допускается только проверяемое однократное предоставление
+по сохранённому `owner_user_id`, active membership, read и profile.write. Существующий
+inactive layout grant не активируется; остальные сотрудники и legacy owners не
+получают новых прав. Явный существующий revoke/restore контракт сохраняется.
+
+Сохранение использует текущие таблицы halls/zones/tables/plans, optimistic version,
+durable idempotency и audit в общей транзакции с повторной проверкой authority.
+Изображения ограничены PNG/JPEG, 5 MiB и проверяются сервером; координаты лежат
+в `[0,1]`. Клиентские ответы и изображения имеют no-store; потеря доступа очищает
+private UI state. Обычная навигация и Telegram BackButton сохраняются. Только
+работающие доступные действия показываются в кабинете.
+
+Календарь, бронирования, платежи, сотрудники, Managed Bots и публикация клуба не
+входят в этот раздел. Приёмка требует Ktor isolation, H2/disposable PostgreSQL
+migration/persistence/idempotency/rollback/concurrency/revoke, frontend/browser,
+TypeScript/ESLint, JVM/static и packaged Mini App gates. Принятие контракта не
+доказывает прохождение этих проверок или runtime; локальное evidence фиксируется
+в [техническом отчёте](../ops/client-club-layout.md).

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUiStore } from '../../../shared/store/ui';
 import {
   AdminApiError,
-  AdminTable,
   createHallTable,
   deleteHallTable,
   fetchHallPlanBlob,
@@ -11,8 +10,14 @@ import {
   updateHallTable,
   uploadHallPlan,
 } from '../api/admin.api';
-import { FieldErrors, mapAdminErrorMessage, mapValidationErrors } from '../utils/adminErrors';
+import {
+  FieldErrors,
+  mapAdminErrorMessage,
+  mapValidationErrors,
+} from '../utils/adminErrors';
 import HallPlanStage from './HallPlanStage';
+import { EditorTable, HallEditorApi, LayoutId } from './layoutEditor.types';
+import { useUnsavedChanges } from '../../client/OnboardingShared';
 
 const emptyForm = {
   tableNumber: '',
@@ -22,23 +27,49 @@ const emptyForm = {
 
 const maxFileSizeMb = 5;
 
-type HallEditorScreenProps = {
-  clubId: number;
-  hallId: number;
+type HallEditorScreenProps<Id extends LayoutId = number> = {
+  clubId: Id;
+  hallId: Id;
+  api?: HallEditorApi<Id>;
+  readOnly?: boolean;
+  reportDirty?: (dirty: boolean) => void;
+  onBackReady?: (back: () => void) => void;
   onBack: () => void;
 };
 
-export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorScreenProps) {
+const adminEditorApi: HallEditorApi = {
+  listHallTables,
+  createHallTable,
+  updateHallTable,
+  deleteHallTable,
+  uploadHallPlan,
+  fetchHallPlanBlob,
+};
+
+export default function HallEditorScreen<Id extends LayoutId = number>({
+  clubId,
+  hallId,
+  onBack,
+  api: suppliedApi,
+  readOnly = false,
+  reportDirty,
+  onBackReady,
+}: HallEditorScreenProps<Id>) {
+  const api = suppliedApi ?? (adminEditorApi as unknown as HallEditorApi<Id>);
   const addToast = useUiStore((state) => state.addToast);
-  const [planStatus, setPlanStatus] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
+  const [planStatus, setPlanStatus] = useState<
+    'loading' | 'ready' | 'empty' | 'error'
+  >('loading');
   const [planError, setPlanError] = useState<string | null>(null);
   const [planUrl, setPlanUrl] = useState<string | null>(null);
   const planEtagRef = useRef<string | null>(null);
   const planUrlRef = useRef<string | null>(null);
-  const [tablesStatus, setTablesStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [tablesStatus, setTablesStatus] = useState<
+    'loading' | 'ready' | 'error'
+  >('loading');
   const [tablesError, setTablesError] = useState<string | null>(null);
-  const [tables, setTables] = useState<AdminTable[]>([]);
-  const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
+  const [tables, setTables] = useState<EditorTable<Id>[]>([]);
+  const [selectedTableId, setSelectedTableId] = useState<Id | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [busy, setBusy] = useState(false);
@@ -76,9 +107,15 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
     setPlanStatus('loading');
     setPlanError(null);
 
-    fetchHallPlanBlob(clubId, hallId, planEtagRef.current, controller.signal)
+    api
+      .fetchHallPlanBlob(clubId, hallId, planEtagRef.current, controller.signal)
       .then((result) => {
-        if (requestId !== requestIdPlanRef.current) return;
+        if (
+          controller.signal.aborted ||
+          !mountedRef.current ||
+          requestId !== requestIdPlanRef.current
+        )
+          return;
         if (result.status === 304) {
           setPlanStatus(planUrlRef.current ? 'ready' : 'empty');
           return;
@@ -97,6 +134,8 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
           return;
         }
         const nextUrl = URL.createObjectURL(result.blob);
+        // Cleanup owns the URL immediately, including before React commits the next render.
+        planUrlRef.current = nextUrl;
         setPlanUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev);
           return nextUrl;
@@ -119,7 +158,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
       });
 
     return () => controller.abort();
-  }, [addToast, clubId, hallId, onBack, refreshIndex]);
+  }, [addToast, api, clubId, hallId, onBack, refreshIndex]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -127,7 +166,8 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
     setTablesStatus('loading');
     setTablesError(null);
 
-    listHallTables(hallId, controller.signal)
+    api
+      .listHallTables(hallId, controller.signal)
       .then((data) => {
         if (requestId !== requestIdTablesRef.current) return;
         setTables(data);
@@ -157,7 +197,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         addToast(message);
       });
     return () => controller.abort();
-  }, [addToast, hallId, onBack, refreshIndex]);
+  }, [addToast, api, hallId, onBack, refreshIndex]);
 
   useEffect(() => {
     setSelectedTableId((prev) => {
@@ -185,6 +225,14 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
     setFieldErrors({});
   }, [selectedTable]);
 
+  const dirty = Boolean(
+    selectedTable &&
+      (form.label !== selectedTable.label ||
+        form.capacity !== String(selectedTable.capacity) ||
+        form.tableNumber !== String(selectedTable.tableNumber)),
+  );
+  const leave = useUnsavedChanges(dirty || busy, reportDirty);
+
   const nextTableNumber = useMemo(() => {
     if (!tables.length) return 1;
     return Math.max(...tables.map((table) => table.tableNumber ?? 0)) + 1;
@@ -192,7 +240,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
 
   const handleUploadPlan = useCallback(
     async (file: File) => {
-      if (busy) return;
+      if (busy || readOnly || !leave()) return;
       if (!['image/png', 'image/jpeg'].includes(file.type)) {
         addToast('Поддерживаются только PNG и JPEG');
         return;
@@ -203,7 +251,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
       }
       setBusy(true);
       try {
-        await uploadHallPlan(hallId, file);
+        await api.uploadHallPlan(hallId, file);
         if (!mountedRef.current) return;
         addToast('План зала обновлен');
         reload();
@@ -217,16 +265,16 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         }
       }
     },
-    [addToast, busy, hallId, reload],
+    [addToast, api, busy, hallId, leave, readOnly, reload],
   );
 
   const handleCreateTable = useCallback(
     async (coords: { x: number; y: number }) => {
-      if (busy || previewMode) return;
+      if (busy || previewMode || readOnly || !leave()) return;
       setBusy(true);
       setFieldErrors({});
       try {
-        const created = await createHallTable(hallId, {
+        const created = await api.createHallTable(hallId, {
           label: `Стол ${nextTableNumber}`,
           capacity: 2,
           tableNumber: nextTableNumber,
@@ -254,18 +302,36 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         }
       }
     },
-    [addToast, busy, hallId, nextTableNumber, previewMode],
+    [
+      addToast,
+      api,
+      busy,
+      hallId,
+      leave,
+      nextTableNumber,
+      previewMode,
+      readOnly,
+    ],
   );
 
   const handleMoveTable = useCallback(
-    async (tableId: number, coords: { x: number; y: number }) => {
-      if (busy || previewMode) return;
+    async (tableId: Id, coords: { x: number; y: number }) => {
+      if (busy || previewMode || readOnly || !leave()) return;
       setBusy(true);
-      setTables((prev) => prev.map((table) => (table.id === tableId ? { ...table, ...coords } : table)));
+      setTables((prev) =>
+        prev.map((table) =>
+          table.id === tableId ? { ...table, ...coords } : table,
+        ),
+      );
       try {
-        const updated = await updateHallTable(hallId, tableId, { x: coords.x, y: coords.y });
+        const updated = await api.updateHallTable(hallId, tableId, {
+          x: coords.x,
+          y: coords.y,
+        });
         if (!mountedRef.current) return;
-        setTables((prev) => prev.map((table) => (table.id === updated.id ? updated : table)));
+        setTables((prev) =>
+          prev.map((table) => (table.id === updated.id ? updated : table)),
+        );
       } catch (error) {
         const normalized = error as AdminApiError;
         if (isAbortError(normalized)) return;
@@ -277,7 +343,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         }
       }
     },
-    [addToast, busy, hallId, previewMode, reload],
+    [addToast, api, busy, hallId, leave, previewMode, readOnly, reload],
   );
 
   const handleClearSelection = useCallback(() => {
@@ -286,7 +352,7 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
   }, []);
 
   const handleSaveMetadata = useCallback(async () => {
-    if (!selectedTable || busy || previewMode) return;
+    if (!selectedTable || busy || previewMode || readOnly) return;
     setBusy(true);
     setFieldErrors({});
     try {
@@ -295,9 +361,15 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         capacity: Number(form.capacity),
         tableNumber: Number(form.tableNumber),
       };
-      const updated = await updateHallTable(hallId, selectedTable.id, payload);
+      const updated = await api.updateHallTable(
+        hallId,
+        selectedTable.id,
+        payload,
+      );
       if (!mountedRef.current) return;
-      setTables((prev) => prev.map((table) => (table.id === updated.id ? updated : table)));
+      setTables((prev) =>
+        prev.map((table) => (table.id === updated.id ? updated : table)),
+      );
       addToast('Стол обновлен');
     } catch (error) {
       const normalized = error as AdminApiError;
@@ -315,17 +387,19 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         setBusy(false);
       }
     }
-  }, [addToast, busy, form, hallId, previewMode, selectedTable]);
+  }, [addToast, api, busy, form, hallId, previewMode, readOnly, selectedTable]);
 
   const handleDeleteTable = useCallback(async () => {
-    if (!selectedTable || busy || previewMode) return;
+    if (!selectedTable || busy || previewMode || readOnly) return;
     const confirmed = window.confirm('Удалить стол?');
     if (!confirmed) return;
     setBusy(true);
     try {
-      await deleteHallTable(hallId, selectedTable.id);
+      await api.deleteHallTable?.(hallId, selectedTable.id);
       if (!mountedRef.current) return;
-      setTables((prev) => prev.filter((table) => table.id !== selectedTable.id));
+      setTables((prev) =>
+        prev.filter((table) => table.id !== selectedTable.id),
+      );
       setSelectedTableId(null);
       addToast('Стол удален');
     } catch (error) {
@@ -337,26 +411,48 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         setBusy(false);
       }
     }
-  }, [addToast, busy, hallId, previewMode, selectedTable]);
+  }, [addToast, api, busy, hallId, previewMode, readOnly, selectedTable]);
 
-  const isReadOnly = previewMode || busy;
+  const back = useCallback(() => {
+    if (leave()) onBack();
+  }, [leave, onBack]);
+  useEffect(() => {
+    onBackReady?.(back);
+  }, [back, onBackReady]);
+  const isReadOnly = previewMode || busy || readOnly;
 
   return (
     <div className="space-y-6 px-4 pb-8">
       <div className="flex items-center justify-between">
-        <button type="button" className="text-sm text-blue-600" onClick={onBack} disabled={busy}>
+        <button
+          type="button"
+          className="text-sm text-blue-600"
+          onClick={back}
+          disabled={busy}
+        >
           ← Залы
         </button>
         <div className="flex items-center gap-2">
+          {!readOnly && (
+            <button
+              type="button"
+              className="rounded border border-gray-200 px-3 py-1 text-xs text-gray-700"
+              onClick={() => {
+                if (leave()) setPreviewMode((value) => !value);
+              }}
+              disabled={busy}
+            >
+              {previewMode ? 'Режим редактирования' : 'Режим превью'}
+            </button>
+          )}
           <button
             type="button"
-            className="rounded border border-gray-200 px-3 py-1 text-xs text-gray-700"
-            onClick={() => setPreviewMode((value) => !value)}
+            className="text-sm text-blue-600"
+            onClick={() => {
+              if (leave()) reload();
+            }}
             disabled={busy}
           >
-            {previewMode ? 'Режим редактирования' : 'Режим превью'}
-          </button>
-          <button type="button" className="text-sm text-blue-600" onClick={reload} disabled={busy}>
             Обновить
           </button>
         </div>
@@ -366,11 +462,20 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900">План зала</h2>
         </div>
-        {planStatus === 'loading' && <p className="mt-4 text-sm text-gray-500">Загрузка плана...</p>}
+        {planStatus === 'loading' && (
+          <p className="mt-4 text-sm text-gray-500">Загрузка плана...</p>
+        )}
         {planStatus === 'error' && (
           <div className="mt-4 space-y-2 text-sm text-gray-600">
             <p>{planError ?? 'Не удалось загрузить план'}</p>
-            <button type="button" className="text-blue-600" onClick={reload} disabled={busy}>
+            <button
+              type="button"
+              className="text-blue-600"
+              onClick={() => {
+                if (leave()) reload();
+              }}
+              disabled={busy}
+            >
               Повторить
             </button>
           </div>
@@ -378,20 +483,24 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
         {planStatus === 'empty' && (
           <div className="mt-4 space-y-3 text-sm text-gray-600">
             <p>План еще не загружен.</p>
-            <label className="flex flex-col gap-2">
-              <span className="text-xs text-gray-500">PNG/JPEG, до 5 МБ.</span>
-              <input
-                type="file"
-                accept="image/png,image/jpeg"
-                disabled={busy || previewMode}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  handleUploadPlan(file);
-                  event.target.value = '';
-                }}
-              />
-            </label>
+            {!readOnly && (
+              <label className="flex flex-col gap-2">
+                <span className="text-xs text-gray-500">
+                  PNG/JPEG, до 5 МБ.
+                </span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  disabled={isReadOnly}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    handleUploadPlan(file);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+            )}
           </div>
         )}
         {planStatus === 'ready' && planUrl && (
@@ -401,13 +510,19 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
               tables={tables}
               selectedTableId={selectedTableId}
               readOnly={isReadOnly}
-              onSelectTable={(tableId) => setSelectedTableId(tableId)}
+              onSelectTable={(tableId) => {
+                if (tableId !== selectedTableId && !leave()) return false;
+                setSelectedTableId(tableId);
+                return true;
+              }}
               onCreateTable={handleCreateTable}
               onMoveTable={handleMoveTable}
             />
-            {!previewMode && (
+            {!previewMode && !readOnly && (
               <label className="flex flex-col gap-2 text-sm text-gray-600">
-                <span className="text-xs text-gray-500">Обновить план (PNG/JPEG, до 5 МБ).</span>
+                <span className="text-xs text-gray-500">
+                  Обновить план (PNG/JPEG, до 5 МБ).
+                </span>
                 <input
                   type="file"
                   accept="image/png,image/jpeg"
@@ -427,11 +542,20 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
 
       <section className="rounded-lg bg-white p-4 shadow-sm">
         <h2 className="text-base font-semibold text-gray-900">Столы</h2>
-        {tablesStatus === 'loading' && <p className="mt-4 text-sm text-gray-500">Загрузка...</p>}
+        {tablesStatus === 'loading' && (
+          <p className="mt-4 text-sm text-gray-500">Загрузка...</p>
+        )}
         {tablesStatus === 'error' && (
           <div className="mt-4 space-y-2 text-sm text-gray-600">
             <p>{tablesError ?? 'Не удалось загрузить столы'}</p>
-            <button type="button" className="text-blue-600" onClick={reload} disabled={busy}>
+            <button
+              type="button"
+              className="text-blue-600"
+              onClick={() => {
+                if (leave()) reload();
+              }}
+              disabled={busy}
+            >
               Повторить
             </button>
           </div>
@@ -450,7 +574,9 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
                     ? 'border-blue-500 bg-blue-50 text-blue-600'
                     : 'border-gray-200 text-gray-600'
                 }`}
-                onClick={() => setSelectedTableId(table.id)}
+                onClick={() => {
+                  if (leave()) setSelectedTableId(table.id);
+                }}
                 disabled={busy}
               >
                 #{table.tableNumber} · {table.label}
@@ -465,14 +591,18 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
               <button
                 type="button"
                 className="text-xs text-blue-600"
-                onClick={handleClearSelection}
+                onClick={() => {
+                  if (leave()) handleClearSelection();
+                }}
                 disabled={busy}
               >
                 Снять выделение
               </button>
             )}
           </div>
-          {!selectedTable && <p className="text-sm text-gray-500">Выберите стол на плане.</p>}
+          {!selectedTable && (
+            <p className="text-sm text-gray-500">Выберите стол на плане.</p>
+          )}
           {selectedTable && (
             <div className="space-y-3">
               <div>
@@ -484,10 +614,19 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
                   type="number"
                   className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
                   value={form.tableNumber}
-                  onChange={(event) => setForm((prev) => ({ ...prev, tableNumber: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      tableNumber: event.target.value,
+                    }))
+                  }
                   disabled={isReadOnly}
                 />
-                {fieldErrors.tableNumber && <p className="mt-1 text-xs text-red-500">{fieldErrors.tableNumber}</p>}
+                {fieldErrors.tableNumber && (
+                  <p className="mt-1 text-xs text-red-500">
+                    {fieldErrors.tableNumber}
+                  </p>
+                )}
               </div>
               <div>
                 <label htmlFor="table-label" className="text-sm text-gray-600">
@@ -497,13 +636,22 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
                   id="table-label"
                   className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
                   value={form.label}
-                  onChange={(event) => setForm((prev) => ({ ...prev, label: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, label: event.target.value }))
+                  }
                   disabled={isReadOnly}
                 />
-                {fieldErrors.label && <p className="mt-1 text-xs text-red-500">{fieldErrors.label}</p>}
+                {fieldErrors.label && (
+                  <p className="mt-1 text-xs text-red-500">
+                    {fieldErrors.label}
+                  </p>
+                )}
               </div>
               <div>
-                <label htmlFor="table-capacity" className="text-sm text-gray-600">
+                <label
+                  htmlFor="table-capacity"
+                  className="text-sm text-gray-600"
+                >
                   Вместимость
                 </label>
                 <input
@@ -511,13 +659,24 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
                   type="number"
                   className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
                   value={form.capacity}
-                  onChange={(event) => setForm((prev) => ({ ...prev, capacity: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      capacity: event.target.value,
+                    }))
+                  }
                   disabled={isReadOnly}
                 />
-                {fieldErrors.capacity && <p className="mt-1 text-xs text-red-500">{fieldErrors.capacity}</p>}
+                {fieldErrors.capacity && (
+                  <p className="mt-1 text-xs text-red-500">
+                    {fieldErrors.capacity}
+                  </p>
+                )}
               </div>
-              {fieldErrors.payload && <p className="text-xs text-red-500">{fieldErrors.payload}</p>}
-              {!previewMode && (
+              {fieldErrors.payload && (
+                <p className="text-xs text-red-500">{fieldErrors.payload}</p>
+              )}
+              {!previewMode && !readOnly && (
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -527,14 +686,16 @@ export default function HallEditorScreen({ clubId, hallId, onBack }: HallEditorS
                   >
                     Сохранить
                   </button>
-                  <button
-                    type="button"
-                    className="rounded border border-red-200 px-4 py-2 text-sm text-red-600 disabled:opacity-50"
-                    onClick={handleDeleteTable}
-                    disabled={busy}
-                  >
-                    Удалить
-                  </button>
+                  {api.deleteHallTable && (
+                    <button
+                      type="button"
+                      className="rounded border border-red-200 px-4 py-2 text-sm text-red-600 disabled:opacity-50"
+                      onClick={handleDeleteTable}
+                      disabled={busy}
+                    >
+                      Удалить
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -392,3 +392,212 @@ test("lost committed invitation response replays one client and requires explici
   await owner.close();
   await recipient.close();
 });
+
+test("cabinet layout creates and renames halls, uploads a plan, saves tables and clears revoked access", async ({
+  browser,
+  request,
+  baseURL,
+}) => {
+  test.setTimeout(90000);
+  const ownerCredential = await identity(request, "owner");
+  const credential = await identity(request, "recipient");
+  const foreignCredential = await identity(request, "foreign");
+  const command = async (path: string, data: unknown, who = credential) => {
+    const response = await request.post(path, {
+      headers: {
+        "X-Telegram-Init-Data": who,
+        "Idempotency-Key": "layout-browser-" + crypto.randomUUID(),
+      },
+      data,
+    });
+    expect(response.ok(), await response.text()).toBe(true);
+    return response.json();
+  };
+  const invitation = await command(
+    "/api/platform/onboarding/invitations",
+    {
+      clientName: "Layout browser " + Date.now(),
+      recipientLabel: "Synthetic layout owner",
+    },
+    ownerCredential,
+  );
+  const token = new URL(invitation.invitationLink).searchParams
+    .get("startapp")!
+    .slice(3);
+  await command("/api/client/invitations/" + invitation.id + "/claim", {
+    token,
+    expectedVersion: invitation.version,
+  });
+  const profile = await command(
+    "/api/client/clients/" + invitation.clientId + "/clubs",
+    {
+      venueName: "Layout acceptance club",
+      countryCode: "RU",
+      cityId: "524901",
+      address: "Synthetic layout street " + Date.now(),
+    },
+  );
+  const page = await browser.newPage({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+  });
+  const paths: string[] = [];
+  page.on("request", (req) => {
+    if (new URL(req.url()).pathname.startsWith("/api/"))
+      paths.push(new URL(req.url()).pathname);
+  });
+  await page.goto("/app");
+  await open(page, "/app?mode=cabinet", credential);
+  const availableContext = await (
+    await request.get("/api/client/context", {
+      headers: { "X-Telegram-Init-Data": credential },
+    })
+  ).json();
+  if (availableContext.clients.length > 1) {
+    const organization = page.getByRole("button").filter({
+      has: page.getByText(invitation.clientName, { exact: true }),
+    });
+    await expect(organization).toBeVisible();
+    await organization.click();
+  }
+  await page.getByRole("button", { name: /Layout acceptance club/ }).click();
+  await page.getByRole("button", { name: /Залы и столы/ }).click();
+  await expect(page.getByLabel("JSON схемы")).toHaveCount(0);
+  await page.getByLabel("Название", { exact: true }).fill("Основной зал");
+  await page.getByRole("button", { name: "Создать", exact: true }).click();
+  await expect(page.getByText("Основной зал", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Редактировать", exact: true })
+    .click();
+  await page.getByLabel("Название", { exact: true }).fill("Первый зал");
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(page.getByText("Первый зал", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Открыть схему", exact: true })
+    .click();
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+    "base64",
+  );
+  await page
+    .locator("input[type=file]")
+    .setInputFiles({ name: "plan.png", mimeType: "image/png", buffer: png });
+  const image = page.getByTestId("hall-plan-image");
+  await expect(image).toBeVisible();
+  await expect
+    .poll(() => image.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
+  const stage = page.getByTestId("hall-plan-stage");
+  await stage.click({ position: { x: 150, y: 90 } });
+  await expect(page.getByLabel("Номер", { exact: true })).toHaveValue("1");
+  await page.getByLabel("Название", { exact: true }).fill("У окна");
+  await page.getByLabel("Вместимость").fill("6");
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(page.getByRole("button", { name: "#1 · У окна" })).toBeVisible();
+  const layoutPath = "/api/client/clubs/" + profile.id + "/layout";
+  const originalLayout = await (
+    await request.get(layoutPath, {
+      headers: { "X-Telegram-Init-Data": credential },
+    })
+  ).json();
+  const marker = page.locator('[data-testid^="table-marker-"]');
+  const markerBox = await marker.boundingBox();
+  const movedResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      /\/tables\/[1-9][0-9]*$/.test(new URL(response.url()).pathname) &&
+      response.ok(),
+  );
+  await page.mouse.move(
+    markerBox!.x + markerBox!.width / 2,
+    markerBox!.y + markerBox!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    markerBox!.x + markerBox!.width / 2 + 15,
+    markerBox!.y + markerBox!.height / 2 + 10,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  const moved = await (await movedResponse).json();
+  expect(moved.halls[0].tables[0].x).not.toBe(
+    originalLayout.halls[0].tables[0].x,
+  );
+  const before = await (
+    await request.get(layoutPath, {
+      headers: { "X-Telegram-Init-Data": credential },
+    })
+  ).json();
+  expect(before.halls).toHaveLength(1);
+  expect(before.halls[0].tables[0]).toMatchObject({
+    tableNumber: 1,
+    label: "У окна",
+    capacity: 6,
+  });
+  expect(before.halls[0].tables[0].x).toBe(moved.halls[0].tables[0].x);
+  expect(before.halls[0].tables[0].x).toBeGreaterThanOrEqual(0);
+  expect(before.halls[0].tables[0].x).toBeLessThanOrEqual(1);
+  const nativeBack = () =>
+    page.evaluate(() => {
+      const telegram = window as unknown as {
+        Telegram: { WebView: { receiveEvent: (event: string) => void } };
+      };
+      telegram.Telegram.WebView.receiveEvent("back_button_pressed");
+    });
+  await page.getByLabel("Название", { exact: true }).fill("Несохранённое");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await nativeBack();
+  await expect(page.getByLabel("Название", { exact: true })).toHaveValue(
+    "Несохранённое",
+  );
+  await page.getByLabel("Название", { exact: true }).fill("У окна");
+  await nativeBack();
+  await expect(
+    page.getByRole("button", { name: "Открыть схему" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Layout acceptance club", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Залы и столы/ }).click();
+  await page.getByRole("button", { name: "Открыть схему" }).click();
+  await page.getByRole("button", { name: "#1 · У окна" }).click();
+  await expect(page.getByLabel("Вместимость")).toHaveValue("6");
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  expect(paths.some((path) => path.startsWith("/api/admin/"))).toBe(false);
+  const foreign = await request.get(layoutPath, {
+    headers: { "X-Telegram-Init-Data": foreignCredential },
+  });
+  expect(foreign.status()).toBe(404);
+  const clientResponse = await request.get(
+    "/api/platform/onboarding/clients/" + invitation.clientId,
+    { headers: { "X-Telegram-Init-Data": ownerCredential } },
+  );
+  const detail = await clientResponse.json();
+  const member = detail.members.find(
+    (item: { active: boolean }) => item.active,
+  );
+  await command(
+    "/api/platform/onboarding/clients/" +
+      invitation.clientId +
+      "/members/" +
+      member.userId +
+      "/revoke",
+    { expectedVersion: member.version },
+    ownerCredential,
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+  await expect(page.getByText(/Доступ утрачен/)).toBeVisible();
+  await expect(image).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "#1 · У окна" })).toHaveCount(
+    0,
+  );
+  await page.close();
+});

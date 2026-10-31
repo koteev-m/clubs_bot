@@ -250,6 +250,16 @@ payload‑данные в логах не обнаружены. Логи огр�
 - Контент файла не логируется и не отражается в ошибках.
 - Проверки на клиенте — не безопасность; обязательны server‑side guards.
 
+Клиентский раздел использует отдельный
+`POST /api/client/clubs/{clubId}/halls/{hallId}/plan`: fresh signed identity,
+active client/membership и exact read + layout.write, parent checks и hall version.
+ImageIO проверяет фактический PNG/JPEG, ограничивает размеры до 25 млн пикселей
+и перекодирует файл без metadata/trailing content; вход и результат не больше
+5 MiB. Клиентское чтение изображения заново проверяет exact read и принадлежность
+hall/club, возвращает no-store/nosniff и не использует ETag/304. Административные
+и guest endpoints не открывают mapped private clubs. См.
+[локальный layout-контракт](ops/client-club-layout.md).
+
 ## 4) Cache headers
 
 - Все admin endpoints обязаны возвращать `Cache-Control: no-store` и `Vary: X-Telegram-Init-Data`.

@@ -164,6 +164,7 @@ internal class OnboardingFixture(
     fun failingAfterRepository(
         sqlPrefix: String,
         occurrence: Int = 1,
+        errorFactory: () -> Throwable = { SQLException("Synthetic post-step failure", "XX000") },
     ): JdbcClientOnboardingRepository {
         var remaining = occurrence
         val failingSource =
@@ -186,7 +187,7 @@ internal class OnboardingFixture(
                                     try {
                                         val value = statementMethod.invoke(result, *statementArguments.orEmpty())
                                         if (statementMethod.name == "executeUpdate" && --remaining == 0) {
-                                            throw SQLException("Synthetic post-step failure", "XX000")
+                                            throw errorFactory()
                                         }
                                         value
                                     } catch (failure: InvocationTargetException) {
