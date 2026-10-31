@@ -1,5 +1,57 @@
 # Project status checkpoint
 
+## follow-redirects security fix — local, 2026-10-31
+
+### Publication continuation
+
+- Пользователь разрешил один commit, один ordinary push без force и один Draft PR
+  в `main`; merge, rerun/dispatch, deploy, credentials и реальные данные запрещены.
+  Ниже сохранён snapshot завершённой local-only реализации.
+- Publication preflight: live main равен базе ниже, оба исходных файла/hash совпали
+  с `SECURITY_DEPENDENCY_FIX_READY`. Lockfile и dependency graph не меняются;
+  новая дельта — только эта запись. Прежние проверки переиспользуются для тех же bytes.
+- Commit/remote head/PR и единичный начальный CI snapshot фиксируются в итоговом
+  handoff `/private/tmp/clubs-follow-redirects-publication/handoff.json`.
+  Следующий шаг после Draft PR — проверить завершённые checks его точного commit.
+
+### Local verification snapshot
+
+- **SECURITY_DEPENDENCY_FIX_READY**, uncommitted. Новая задача без CLB ID;
+  `CLB-follow-redirects-security` — descriptive identity label. Live main/base/HEAD:
+  `196e3c7562a25b37ede4b0512847a8435a3bfe81` (merge #558).
+  Worktree `/private/tmp/clubs-follow-redirects-fix`, branch
+  `codex/fix-follow-redirects-116689`. Root/frontend identity guards PASS,
+  active foreign instructions = 0; остальные 29 рабочих копий сохранены.
+- Root cause: [Security Scan run 41160017775](https://github.com/koteev-m/clubs_bot/actions/runs/41160017775)
+  обнаруживает HIGH `CVE-2026-116689`: Axios 1.20.0 → locked follow-redirects 1.16.1.
+  [Axios 1.20.0](https://github.com/axios/axios/blob/v1.20.0/package.json) допускает
+  `^1.16.0`; patch 1.16.2 сохраняет Node >=4.0 и не добавляет dependencies.
+- Diff: четыре строки `miniapp/pnpm-lock.yaml` (version, edge, snapshot, npm SHA512)
+  и только этот checkpoint. Focused structural review всех 488 packages/snapshots:
+  importers, Axios 1.20.0 и остальные зависимости неизменны. Source, dist,
+  migrations, workflow/ignore/severity/exit-code и прочие gates не меняются.
+- Isolated pnpm 9.15.9 / Node 24.14.0: `install --frozen-lockfile` PASS;
+  `run typecheck`, `run lint:ci`, `run build` PASS. Relevant frontend tests:
+  **169/169, 16 files, без skips/failures**; loopback Axios redirect/limit/cancel
+  compatibility PASS. pnpm 11 дал лишнюю peer/libc reserialization и
+  `ERR_PNPM_IGNORED_BUILDS`; только его task-created artifacts убраны, global и
+  repository build policies не менялись. Details/logs сохранены в evidence.
+- 5/5 dist files побайтово равны main. Bounded `:app-bot:processResources --offline`
+  PASS, exit 0, 7.294 s, cleanup verified. Оба packaged Mini App validators PASS;
+  dist/resources hashes совпали. Существующие warnings не подавлялись.
+- Trivy **0.69.3**, image
+  `sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c`,
+  адресный `fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1`, неизменный
+  `.trivyignore`: original lockfile — ровно эта CVE/HIGH, exit 1; final minimal
+  lockfile на той же БД от 2026-10-31 — **0 findings, exit 0**. Inventory подтверждает
+  Axios 1.20.0 / follow-redirects 1.16.2; это не новый hosted CI result.
+- Evidence `/private/tmp/clubs-follow-redirects-evidence/`: registry metadata,
+  graph/review, command logs, test JSON, Trivy before/final, bounded packaging.
+  JVM/DB suites не запускались: серверный код/migrations неизменны. Hosted full CI
+  и Stage/prod не проверялись. Разрешены только local fix/tests/checks; commit,
+  push, PR, merge, rerun/dispatch, deploy и реальные данные не затрагивались.
+- Следующий шаг: отдельно разрешённый небольшой Draft PR по двум файлам.
+
 ## Client cabinet «Залы и столы» — local, 2026-10-31
 
 ### Publication continuation
