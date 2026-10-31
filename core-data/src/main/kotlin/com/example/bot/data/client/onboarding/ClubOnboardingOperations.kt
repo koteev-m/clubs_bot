@@ -95,7 +95,7 @@ internal class ClubOnboardingOperations(
             session.now,
             session.now,
         )
-        listOf(READ_CLUB, WRITE_PROFILE).forEach { permission ->
+        listOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT).forEach { permission ->
             sql.update(
                 "INSERT INTO client_club_grants(client_id,user_id,club_id,permission_code,is_active," +
                     "created_at,updated_at) VALUES (?,?,?,?,TRUE,?,?)",
@@ -131,6 +131,7 @@ internal class ClubOnboardingOperations(
                 ?: fail("not_found")
         val snapshot = approvedSnapshot(application)
         val canWrite = hasGrant(association, WRITE_PROFILE)
+        val canLayout = hasGrant(association, WRITE_LAYOUT)
         return buildJsonObject {
             put("id", clubId.toString())
             put("clientId", association.getValue("client_id"))
@@ -144,7 +145,11 @@ internal class ClubOnboardingOperations(
             put(
                 "permissions",
                 JsonArray(
-                    (listOf(READ_CLUB) + if (canWrite) listOf(WRITE_PROFILE) else emptyList()).map(::JsonPrimitive),
+                    (
+                        listOf(READ_CLUB) +
+                            (if (canWrite) listOf(WRITE_PROFILE) else emptyList()) +
+                            (if (canLayout) listOf(WRITE_LAYOUT) else emptyList())
+                    ).map(::JsonPrimitive),
                 ),
             )
             put("availableActions", JsonArray((if (canWrite) listOf("update") else emptyList()).map(::JsonPrimitive)))

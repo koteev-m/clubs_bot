@@ -1,20 +1,33 @@
-import { type MouseEvent, type PointerEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AdminTable } from '../api/admin.api';
-import { clientPointToNormalized, computeContainMetrics, ContainMetrics } from '../utils/containCoords';
+import {
+  type MouseEvent,
+  type PointerEvent,
+  type SyntheticEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { EditorTable, LayoutId } from './layoutEditor.types';
+import {
+  clientPointToNormalized,
+  computeContainMetrics,
+  ContainMetrics,
+} from '../utils/containCoords';
 
-export type HallPlanStageProps = {
+export type HallPlanStageProps<Id extends LayoutId = number> = {
   planUrl: string;
-  tables: AdminTable[];
-  selectedTableId: number | null;
+  tables: EditorTable<Id>[];
+  selectedTableId: Id | null;
   readOnly?: boolean;
-  onSelectTable: (tableId: number) => void;
+  onSelectTable: (tableId: Id) => boolean | void;
   onCreateTable: (coords: { x: number; y: number }) => void;
-  onMoveTable: (tableId: number, coords: { x: number; y: number }) => void;
+  onMoveTable: (tableId: Id, coords: { x: number; y: number }) => void;
 };
 
 const markerSize = 28;
 
-export default function HallPlanStage({
+export default function HallPlanStage<Id extends LayoutId = number>({
   planUrl,
   tables,
   selectedTableId,
@@ -22,19 +35,35 @@ export default function HallPlanStage({
   onSelectTable,
   onCreateTable,
   onMoveTable,
-}: HallPlanStageProps) {
+}: HallPlanStageProps<Id>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [imageSize, setImageSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const [metrics, setMetrics] = useState<ContainMetrics | null>(null);
-  const [dragging, setDragging] = useState<{ tableId: number; x: number; y: number } | null>(null);
-  const dragOriginRef = useRef<{ tableId: number; x: number; y: number } | null>(null);
-  const dragPositionRef = useRef<{ tableId: number; x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState<{
+    tableId: Id;
+    x: number;
+    y: number;
+  } | null>(null);
+  const dragOriginRef = useRef<{ tableId: Id; x: number; y: number } | null>(
+    null,
+  );
+  const dragPositionRef = useRef<{ tableId: Id; x: number; y: number } | null>(
+    null,
+  );
   const draggingMovedRef = useRef(false);
 
   const updateMetrics = useCallback(() => {
     if (!containerRef.current || !imageSize) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const next = computeContainMetrics(rect.width, rect.height, imageSize.width, imageSize.height);
+    const next = computeContainMetrics(
+      rect.width,
+      rect.height,
+      imageSize.width,
+      imageSize.height,
+    );
     setMetrics(next);
   }, [imageSize]);
 
@@ -53,12 +82,15 @@ export default function HallPlanStage({
     return () => observer.disconnect();
   }, [updateMetrics]);
 
-  const handleImageLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
-    const { naturalWidth, naturalHeight } = event.currentTarget;
-    if (naturalWidth > 0 && naturalHeight > 0) {
-      setImageSize({ width: naturalWidth, height: naturalHeight });
-    }
-  }, []);
+  const handleImageLoad = useCallback(
+    (event: SyntheticEvent<HTMLImageElement>) => {
+      const { naturalWidth, naturalHeight } = event.currentTarget;
+      if (naturalWidth > 0 && naturalHeight > 0) {
+        setImageSize({ width: naturalWidth, height: naturalHeight });
+      }
+    },
+    [],
+  );
 
   const handleStageClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -68,7 +100,12 @@ export default function HallPlanStage({
       }
       if (!containerRef.current || !metrics) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const normalized = clientPointToNormalized(event.clientX, event.clientY, rect, metrics);
+      const normalized = clientPointToNormalized(
+        event.clientX,
+        event.clientY,
+        rect,
+        metrics,
+      );
       if (!normalized) return;
       if (selectedTableId) {
         onMoveTable(selectedTableId, normalized);
@@ -80,9 +117,9 @@ export default function HallPlanStage({
   );
 
   const handlePointerDown = useCallback(
-    (event: PointerEvent<HTMLButtonElement>, table: AdminTable) => {
+    (event: PointerEvent<HTMLButtonElement>, table: EditorTable<Id>) => {
       event.stopPropagation();
-      onSelectTable(table.id);
+      if (onSelectTable(table.id) === false) return;
       if (readOnly) return;
       if (typeof event.currentTarget.setPointerCapture === 'function') {
         try {
@@ -97,8 +134,9 @@ export default function HallPlanStage({
     [onSelectTable, readOnly],
   );
 
-  const resetDragging = useCallback((tableId: number) => {
-    if (!dragOriginRef.current || dragOriginRef.current.tableId !== tableId) return;
+  const resetDragging = useCallback((tableId: Id) => {
+    if (!dragOriginRef.current || dragOriginRef.current.tableId !== tableId)
+      return;
     dragOriginRef.current = null;
     dragPositionRef.current = null;
     setDragging(null);
@@ -106,12 +144,18 @@ export default function HallPlanStage({
   }, []);
 
   const handlePointerMove = useCallback(
-    (event: PointerEvent<HTMLButtonElement>, table: AdminTable) => {
+    (event: PointerEvent<HTMLButtonElement>, table: EditorTable<Id>) => {
       if (readOnly) return;
       if (!containerRef.current || !metrics) return;
-      if (!dragOriginRef.current || dragOriginRef.current.tableId !== table.id) return;
+      if (!dragOriginRef.current || dragOriginRef.current.tableId !== table.id)
+        return;
       const rect = containerRef.current.getBoundingClientRect();
-      const normalized = clientPointToNormalized(event.clientX, event.clientY, rect, metrics);
+      const normalized = clientPointToNormalized(
+        event.clientX,
+        event.clientY,
+        rect,
+        metrics,
+      );
       if (!normalized) return;
       draggingMovedRef.current = true;
       const next = { tableId: table.id, x: normalized.x, y: normalized.y };
@@ -122,9 +166,10 @@ export default function HallPlanStage({
   );
 
   const handlePointerUp = useCallback(
-    (event: PointerEvent<HTMLButtonElement>, table: AdminTable) => {
+    (event: PointerEvent<HTMLButtonElement>, table: EditorTable<Id>) => {
       if (readOnly) return;
-      if (!dragOriginRef.current || dragOriginRef.current.tableId !== table.id) return;
+      if (!dragOriginRef.current || dragOriginRef.current.tableId !== table.id)
+        return;
       if (typeof event.currentTarget.releasePointerCapture === 'function') {
         try {
           event.currentTarget.releasePointerCapture(event.pointerId);
@@ -136,7 +181,11 @@ export default function HallPlanStage({
       const position = dragPositionRef.current;
       dragOriginRef.current = null;
       dragPositionRef.current = null;
-      if (!draggingMovedRef.current || !position || position.tableId !== table.id) {
+      if (
+        !draggingMovedRef.current ||
+        !position ||
+        position.tableId !== table.id
+      ) {
         setDragging(null);
         return;
       }
@@ -151,7 +200,7 @@ export default function HallPlanStage({
   );
 
   const handlePointerCancel = useCallback(
-    (event: PointerEvent<HTMLButtonElement>, table: AdminTable) => {
+    (event: PointerEvent<HTMLButtonElement>, table: EditorTable<Id>) => {
       if (typeof event.currentTarget.releasePointerCapture === 'function') {
         try {
           event.currentTarget.releasePointerCapture(event.pointerId);
@@ -165,11 +214,13 @@ export default function HallPlanStage({
   );
 
   const positions = useMemo(() => {
-    if (!metrics) return new Map<number, { left: number; top: number }>();
-    const map = new Map<number, { left: number; top: number }>();
+    if (!metrics) return new Map<Id, { left: number; top: number }>();
+    const map = new Map<Id, { left: number; top: number }>();
     tables.forEach((table) => {
       const source =
-        dragging && dragging.tableId === table.id ? { x: dragging.x, y: dragging.y } : table;
+        dragging && dragging.tableId === table.id
+          ? { x: dragging.x, y: dragging.y }
+          : table;
       const leftRaw = metrics.offsetX + source.x * metrics.width;
       const topRaw = metrics.offsetY + source.y * metrics.height;
       const left = Number.isFinite(leftRaw) ? leftRaw : 0;

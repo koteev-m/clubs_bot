@@ -23,11 +23,15 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.plugins.statuspages.exception
+import io.ktor.server.response.respondText
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.Test
@@ -58,6 +62,103 @@ class ClientOnboardingAuthTest {
             }
             coVerify(exactly = 0) { repository.read(any(), any(), any(), any()) }
             coVerify(exactly = 0) { repository.mutate(any(), any(), any(), any(), any()) }
+        }
+
+    @Test
+    fun `layout hall table and plan namespaces require fresh auth before any repository or body access`() =
+        withApp { repository ->
+            val paths =
+                listOf(
+                    HttpMethod.Get to "$C/clubs/1/layout",
+                    HttpMethod.Post to "$C/clubs/1/halls",
+                    HttpMethod.Patch to "$C/clubs/1/halls/2",
+                    HttpMethod.Post to "$C/clubs/1/halls/2/tables",
+                    HttpMethod.Patch to "$C/clubs/1/halls/2/tables/3",
+                    HttpMethod.Get to "$C/clubs/1/halls/2/plan",
+                    HttpMethod.Post to "$C/clubs/1/halls/2/plan",
+                )
+            for ((method, path) in paths) {
+                for (credential in listOf(
+                    null,
+                    "forged",
+                    signed(date = Instant.now().epochSecond - 90_000),
+                    signed(token = "222222:OTHER_SYNTHETIC_BOT"),
+                )) {
+                    client
+                        .request(path) {
+                            this.method = method
+                            if (credential != null) header(HEADER, credential)
+                            header("X-Telegram-Id", OWNER.toString())
+                            header("X-Debug-Roles", "OWNER,GLOBAL_ADMIN")
+                            setBody("malformed input")
+                        }.assertClientError(HttpStatusCode.Unauthorized, "unauthorized")
+                }
+                client
+                    .request("$path?clientId=999") {
+                        this.method = method
+                        header(HEADER, signed(user = CLIENT))
+                    }.assertClientError(HttpStatusCode.BadRequest, "validation_error")
+            }
+            coVerify(exactly = 0) { repository.read(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { repository.mutate(any(), any(), any(), any(), any()) }
+        }
+
+    @Test
+    fun `layout read image and mutation cancellation reaches application boundary`() {
+        for ((method, path) in listOf(
+            HttpMethod.Get to "$C/clubs/1/layout",
+            HttpMethod.Get to "$C/clubs/1/halls/2/plan",
+            HttpMethod.Post to "$C/clubs/1/halls",
+            HttpMethod.Post to "$C/clubs/1/halls/2/plan",
+        )) {
+            testApplication {
+                val context = mockk<ClientContextRepository>()
+                val repository = mockk<ClientOnboardingRepository>()
+                coEvery { repository.read(any(), any(), any(), any()) } throws
+                    CancellationException("synthetic cancellation")
+                coEvery { repository.mutate(any(), any(), any(), any(), any()) } throws
+                    CancellationException("synthetic cancellation")
+                var cancellations = 0
+                application {
+                    install(ContentNegotiation) { json() }
+                    install(StatusPages) {
+                        exception<CancellationException> { call, _ ->
+                            cancellations++
+                            call.respondText("cancelled", status = HttpStatusCode.ServiceUnavailable)
+                        }
+                    }
+                    clientOnboardingRoutes(context, repository, "synthetic_bot", OWNER) { TEST_BOT_TOKEN }
+                }
+                val response =
+                    client.request(path) {
+                        this.method = method
+                        header(HEADER, signed(user = CLIENT))
+                        header(KEY, "synthetic-cancel-key")
+                        if (method == HttpMethod.Post) {
+                            if (path.endsWith("/plan")) {
+                                header("Content-Type", "image/png")
+                                header("X-Layout-Version", "1")
+                                setBody(byteArrayOf(1, 2, 3))
+                            } else {
+                                setBody("{\"name\":\"cancelled\"}")
+                            }
+                        }
+                    }
+                assertEquals(1, cancellations)
+                assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
+                assertEquals("cancelled", response.bodyAsText())
+            }
+        }
+    }
+
+    @Test
+    fun `layout persistence failures use detail free common errors`() =
+        withApp { repository ->
+            coEvery { repository.read(any(), any(), any(), any()) } throws IllegalStateException(TOKEN)
+            val response = client.get("$C/clubs/1/layout") { header(HEADER, signed(user = CLIENT)) }
+            response.assertClientError(HttpStatusCode.InternalServerError, "internal_error")
+            assertFalse(response.bodyAsText().contains(TOKEN))
+            assertEquals("no-store", response.headers["Cache-Control"])
         }
 
     @Test
@@ -314,9 +415,10 @@ class ClientOnboardingAuthTest {
     private fun signed(
         user: Long = OWNER,
         date: Long = Instant.now().epochSecond,
+        token: String = TEST_BOT_TOKEN,
     ): String =
         WebAppInitDataTestHelper.createInitData(
-            TEST_BOT_TOKEN,
+            token,
             mapOf("user" to WebAppInitDataTestHelper.encodeUser(user), "auth_date" to date.toString()),
         )
 

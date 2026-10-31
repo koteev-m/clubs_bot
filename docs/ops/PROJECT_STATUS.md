@@ -1,5 +1,65 @@
 # Project status checkpoint
 
+## Client cabinet «Залы и столы» — local, 2026-10-31
+
+### Publication continuation
+
+- Пользователь разрешил один полный commit, один обычный push и один Draft PR в
+  `main`. Merge, workflow rerun/dispatch, deploy, реальные данные, Telegram,
+  secrets и GitHub Environment не разрешены. Local-only permissions ниже
+  относятся к завершённому этапу реализации.
+- Live `origin/main` и HEAD/base по-прежнему
+  `dbdbd2987298178ea22c06d8fe26302d1668ddec`; remote feature branch отсутствует.
+  `PROJECT_IDENTITY_OK`, active foreign instructions = 0. Все 50 paths/hashes и
+  digest полного candidate совпали с `LOCAL_LAYOUT_READY`; production, tests,
+  migrations и dist не меняются. Новая дельта — только публикационная запись в
+  этом checkpoint и техническом отчёте, включая уточнение лимита имени зала.
+- Предыдущие проверки переиспользуются для идентичных bytes. Адресные publication
+  review/checks и commit/remote head/Draft PR/initial CI фиксируются отдельно в
+  `/private/tmp/clubs-layout-publication/` и итоговом handoff. Остальные worktrees
+  сохраняются; CI completion и runtime не предполагаются.
+- Следующий шаг после подачи Draft PR — проверить завершённые CI checks точного
+  опубликованного commit; никаких rerun/dispatch/deploy автоматически.
+
+- Новая задача без выделенного CLB/DEC ID; `CLB-client-club-layout` — descriptive
+  identity label. Live main подтверждён как `dbdbd2987298178ea22c06d8fe26302d1668ddec`.
+  Изолированный worktree `/private/tmp/clubs-layout-worktree`, branch
+  `codex/client-club-layout`, HEAD/base тот же; изменения uncommitted. Root и
+  frontend identity guards PASS, active foreign instructions = 0. Primary checkout
+  с чужими изменениями AGENTS/checkpoint не редактировался.
+- Локальный раздел реализован: `mode=cabinet` → «Мои заведения» → клуб → «Залы и
+  столы». Name-only halls, PNG/JPEG, table number/name/capacity, drag/persist/reopen;
+  существующий editor/geometry/storage, отдельные exact read/layout.write,
+  атомарные creator grants в обоих путях, paired V065 creator-only bootstrap.
+  Legacy containment и unmapped boundaries сохранены.
+- Evidence: обычный JVM набор 1367 tests / 0 failures-errors / 1 existing disabled;
+  full core IT 474 / 0 / 10 existing conditional native-support skips; app IT
+  1025 / 0 / 0. После test-only LargeClass refactor — H2 69/69, PostgreSQL 76/76,
+  detektTest/ktlint PASS. Final unsliced ktlint 54 tasks PASS; final detektGate,
+  coverageGate, production dependency graph, logs policy и installDist PASS
+  (`quality-final`, exit 0, 100.968 s, owned cleanup verified).
+- Frontend 257/257, TypeScript/ESLint/build PASS; final packaged JDBC layout
+  Chromium + WebKit 2/2 PASS, prior onboarding regression 2/2 на каждом браузере.
+  Dist/resources/installed JAR содержат те же 5 файлов, paired V065 в core JAR
+  совпадают с source. Runtime Telegram/Stage этим не доказывается.
+- Независимый focused review: открытых blocking findings нет. Исправлены ambiguity
+  backfill/system audit, memory image IO, late response/blob cleanup, stale authority,
+  Back/drag veto и terminal saving flag после write denial. Test synchronization,
+  coroutine recovery assertion и local execution budgets исправлены без ослабления
+  source gates/baselines; детали и прежние failures сохранены в
+  [техническом отчёте](client-club-layout.md).
+- Evidence root `/private/tmp/clubs-layout-evidence/`: complete module XML,
+  source/review hash bindings, browser cohorts, packaging и bounded run records.
+  Final secret-scan result и final candidate manifest сохраняются там отдельными
+  artifacts после фиксации документации. Локальный outcome передаётся одним
+  итоговым handoff; не является publication/runtime approval.
+- Permissions: только local code/tests/docs и disposable resources. Ни commit,
+  push, PR, merge, dispatch, deploy, real data, Telegram configuration, external
+  secrets, ни публикация клуба не выполнялись. Unverified: hosted CI, real Telegram
+  iOS/Android, Stage/prod и десять прежних opt-in native-support adapters.
+- Один следующий шаг: отдельно разрешённая подготовка Draft PR по этому локальному
+  diff; все обязательные CI gates сохраняются.
+
 ## Профиль заведения и контракт первого Managed Bot — 2026-10-31
 
 ### Publication continuation

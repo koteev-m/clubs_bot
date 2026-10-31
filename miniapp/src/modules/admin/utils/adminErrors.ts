@@ -20,6 +20,11 @@ const errorMessages: Record<string, string> = {
   rate_limited: 'Слишком много запросов, попробуйте позже',
   request_timeout: 'Превышено время ожидания',
   internal_error: 'Ошибка сервера',
+  version_conflict:
+    'Схема уже изменена. Загрузите актуальные данные перед сохранением.',
+  idempotency_conflict:
+    'Команда уже использована с другими данными. Обновите состояние.',
+  unknown_outcome: 'Ответ не получен. Повторите ту же операцию.',
 };
 
 const detailMessages: Record<string, string> = {
@@ -50,7 +55,9 @@ export const mapAdminErrorMessage = (error: AdminApiError): string => {
   return error.message || 'Ошибка запроса';
 };
 
-export const mapValidationErrors = (error: AdminApiError): FieldErrors | null => {
+export const mapValidationErrors = (
+  error: AdminApiError,
+): FieldErrors | null => {
   if (error.code === 'hall_name_conflict') {
     return { name: 'Зал с таким названием уже существует' };
   }

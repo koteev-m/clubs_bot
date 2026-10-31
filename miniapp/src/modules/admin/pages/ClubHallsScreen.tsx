@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useUiStore } from '../../../shared/store/ui';
 import {
   AdminApiError,
-  AdminHall,
   createHall,
   deleteHall,
   isAbortError,
@@ -10,12 +9,23 @@ import {
   makeHallActive,
   updateHall,
 } from '../api/admin.api';
-import { mapAdminErrorMessage, mapValidationErrors, FieldErrors } from '../utils/adminErrors';
+import {
+  mapAdminErrorMessage,
+  mapValidationErrors,
+  FieldErrors,
+} from '../utils/adminErrors';
+import { ClubHallsApi, EditorHall, LayoutId } from './layoutEditor.types';
+import { useUnsavedChanges } from '../../client/OnboardingShared';
 
-type ClubHallsScreenProps = {
-  clubId: number;
+type ClubHallsScreenProps<Id extends LayoutId = number> = {
+  clubId: Id;
+  api?: ClubHallsApi<Id>;
+  clientMode?: boolean;
+  readOnly?: boolean;
+  reportDirty?: (dirty: boolean) => void;
+  onBackReady?: (back: () => void) => void;
   onBack: () => void;
-  onOpenEditor: (hallId: number) => void;
+  onOpenEditor: (hallId: Id) => void;
 };
 
 type FormMode = 'create' | 'edit';
@@ -26,16 +36,36 @@ const emptyForm = {
   isActive: false,
 };
 
-export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHallsScreenProps) {
+const adminHallsApi: ClubHallsApi = {
+  listHalls,
+  createHall,
+  updateHall,
+  deleteHall,
+  makeHallActive,
+};
+
+export default function ClubHallsScreen<Id extends LayoutId = number>({
+  clubId,
+  onBack,
+  onOpenEditor,
+  api: suppliedApi,
+  clientMode = false,
+  readOnly = false,
+  reportDirty,
+  onBackReady,
+}: ClubHallsScreenProps<Id>) {
+  const api = suppliedApi ?? (adminHallsApi as unknown as ClubHallsApi<Id>);
   const addToast = useUiStore((state) => state.addToast);
-  const [halls, setHalls] = useState<AdminHall[]>([]);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [halls, setHalls] = useState<EditorHall<Id>[]>([]);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
   const [form, setForm] = useState(emptyForm);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [editingHallId, setEditingHallId] = useState<number | null>(null);
+  const [editingHallId, setEditingHallId] = useState<Id | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const requestIdRef = useRef(0);
   const mountedRef = useRef(false);
@@ -54,7 +84,8 @@ export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHa
     const requestId = ++requestIdRef.current;
     setStatus('loading');
     setErrorMessage(null);
-    listHalls(clubId, controller.signal)
+    api
+      .listHalls(clubId, controller.signal)
       .then((data) => {
         if (requestId !== requestIdRef.current) return;
         setHalls(data);
@@ -84,9 +115,9 @@ export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHa
         addToast(message);
       });
     return () => controller.abort();
-  }, [addToast, clubId, onBack, refreshIndex]);
+  }, [addToast, api, clubId, onBack, refreshIndex]);
 
-  const handleEdit = useCallback((hall: AdminHall) => {
+  const handleEdit = useCallback((hall: EditorHall<Id>) => {
     setFormMode('edit');
     setEditingHallId(hall.id);
     setForm({ name: hall.name, geometryJson: '', isActive: hall.isActive });
@@ -102,20 +133,22 @@ export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHa
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (busy) return;
+    if (busy || readOnly) return;
     setBusy(true);
     setFieldErrors({});
     try {
       if (formMode === 'edit' && editingHallId) {
-        const payload: { name?: string; geometryJson?: string } = { name: form.name };
+        const payload: { name?: string; geometryJson?: string } = {
+          name: form.name,
+        };
         if (form.geometryJson.trim().length > 0) {
           payload.geometryJson = form.geometryJson;
         }
-        await updateHall(editingHallId, payload);
+        await api.updateHall(editingHallId, payload);
         if (!mountedRef.current) return;
         addToast('Зал обновлен');
       } else {
-        await createHall(clubId, {
+        await api.createHall(clubId, {
           name: form.name,
           geometryJson: form.geometryJson,
           isActive: form.isActive,
@@ -146,16 +179,27 @@ export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHa
         setBusy(false);
       }
     }
-  }, [addToast, busy, clubId, editingHallId, form, formMode, handleReset, reload]);
+  }, [
+    addToast,
+    api,
+    busy,
+    clubId,
+    editingHallId,
+    form,
+    formMode,
+    handleReset,
+    readOnly,
+    reload,
+  ]);
 
   const handleDelete = useCallback(
-    async (hallId: number) => {
-      if (busy) return;
+    async (hallId: Id) => {
+      if (busy || readOnly) return;
       const confirmed = window.confirm('Удалить зал?');
       if (!confirmed) return;
       setBusy(true);
       try {
-        await deleteHall(hallId);
+        await api.deleteHall?.(hallId);
         if (!mountedRef.current) return;
         addToast('Зал удален');
         reload();
@@ -174,15 +218,15 @@ export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHa
         }
       }
     },
-    [addToast, busy, reload],
+    [addToast, api, busy, readOnly, reload],
   );
 
   const handleMakeActive = useCallback(
-    async (hallId: number) => {
-      if (busy) return;
+    async (hallId: Id) => {
+      if (busy || readOnly) return;
       setBusy(true);
       try {
-        await makeHallActive(hallId);
+        await api.makeHallActive?.(hallId);
         if (!mountedRef.current) return;
         addToast('Зал активирован');
         reload();
@@ -201,121 +245,209 @@ export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHa
         }
       }
     },
-    [addToast, busy, reload],
+    [addToast, api, busy, readOnly, reload],
   );
 
-  const formTitle = useMemo(() => (formMode === 'edit' ? 'Редактировать зал' : 'Создать зал'), [formMode]);
+  const originalName = editingHallId
+    ? (halls.find((hall) => hall.id === editingHallId)?.name ?? '')
+    : '';
+  const dirty = form.name !== originalName || Boolean(form.geometryJson);
+  const leave = useUnsavedChanges(dirty || busy, reportDirty);
+  const back = useCallback(() => {
+    if (leave()) onBack();
+  }, [leave, onBack]);
+  useEffect(() => {
+    onBackReady?.(back);
+  }, [back, onBackReady]);
+
+  const formTitle = useMemo(
+    () => (formMode === 'edit' ? 'Редактировать зал' : 'Создать зал'),
+    [formMode],
+  );
 
   return (
     <div className="space-y-6 px-4 pb-8">
       <div className="flex items-center justify-between">
-        <button type="button" className="text-sm text-blue-600" onClick={onBack} disabled={busy}>
-          ← Клубы
+        <button
+          type="button"
+          className="text-sm text-blue-600"
+          onClick={back}
+          disabled={busy}
+        >
+          ← Клуб
         </button>
-        <button type="button" className="text-sm text-blue-600" onClick={reload} disabled={busy}>
+        <button
+          type="button"
+          className="text-sm text-blue-600"
+          onClick={() => {
+            if (leave()) reload();
+          }}
+          disabled={busy}
+        >
           Обновить
         </button>
       </div>
 
-      <section className="rounded-lg bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">{formTitle}</h2>
-          {formMode === 'edit' && (
-            <button type="button" className="text-sm text-blue-600" onClick={handleReset} disabled={busy}>
-              Сбросить
-            </button>
-          )}
-        </div>
-        <div className="mt-4 space-y-3">
-          <div>
-            <label htmlFor="hall-name" className="text-sm text-gray-600">
-              Название
-            </label>
-            <input
-              id="hall-name"
-              className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
-              value={form.name}
-              onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-              disabled={busy}
-            />
-            {fieldErrors.name && <p className="mt-1 text-xs text-red-500">{fieldErrors.name}</p>}
+      {!readOnly && (
+        <section className="rounded-lg bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">
+              {formTitle}
+            </h2>
+            {formMode === 'edit' && (
+              <button
+                type="button"
+                className="text-sm text-blue-600"
+                onClick={handleReset}
+                disabled={busy}
+              >
+                Сбросить
+              </button>
+            )}
           </div>
-          <div>
-            <label htmlFor="hall-geometry" className="text-sm text-gray-600">
-              JSON схемы
-            </label>
-            <textarea
-              id="hall-geometry"
-              className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
-              rows={4}
-              value={form.geometryJson}
-              onChange={(event) => setForm((prev) => ({ ...prev, geometryJson: event.target.value }))}
-              disabled={busy}
-              placeholder={formMode === 'edit' ? 'Оставьте пустым, если не хотите менять схему' : undefined}
-            />
-            {fieldErrors.geometryJson && <p className="mt-1 text-xs text-red-500">{fieldErrors.geometryJson}</p>}
-          </div>
-          {formMode === 'create' && (
-            <label className="flex items-center gap-2 text-sm text-gray-600">
+          <div className="mt-4 space-y-3">
+            <div>
+              <label htmlFor="hall-name" className="text-sm text-gray-600">
+                Название
+              </label>
               <input
-                type="checkbox"
-                checked={form.isActive}
-                onChange={(event) => setForm((prev) => ({ ...prev, isActive: event.target.checked }))}
+                id="hall-name"
+                className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
+                value={form.name}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, name: event.target.value }))
+                }
                 disabled={busy}
               />
-              Сделать активным
-            </label>
-          )}
-          {fieldErrors.payload && <p className="text-xs text-red-500">{fieldErrors.payload}</p>}
-          <button
-            type="button"
-            className="mt-2 w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            onClick={handleSubmit}
-            disabled={busy}
-          >
-            {formMode === 'edit' ? 'Сохранить' : 'Создать'}
-          </button>
-        </div>
-      </section>
+              {fieldErrors.name && (
+                <p className="mt-1 text-xs text-red-500">{fieldErrors.name}</p>
+              )}
+            </div>
+            {!clientMode && (
+              <div>
+                <label
+                  htmlFor="hall-geometry"
+                  className="text-sm text-gray-600"
+                >
+                  JSON схемы
+                </label>
+                <textarea
+                  id="hall-geometry"
+                  className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
+                  rows={4}
+                  value={form.geometryJson}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      geometryJson: event.target.value,
+                    }))
+                  }
+                  disabled={busy}
+                  placeholder={
+                    formMode === 'edit'
+                      ? 'Оставьте пустым, если не хотите менять схему'
+                      : undefined
+                  }
+                />
+                {fieldErrors.geometryJson && (
+                  <p className="mt-1 text-xs text-red-500">
+                    {fieldErrors.geometryJson}
+                  </p>
+                )}
+              </div>
+            )}
+            {!clientMode && formMode === 'create' && (
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={form.isActive}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      isActive: event.target.checked,
+                    }))
+                  }
+                  disabled={busy}
+                />
+                Сделать активным
+              </label>
+            )}
+            {fieldErrors.payload && (
+              <p className="text-xs text-red-500">{fieldErrors.payload}</p>
+            )}
+            <button
+              type="button"
+              className="mt-2 w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              onClick={handleSubmit}
+              disabled={busy}
+            >
+              {formMode === 'edit' ? 'Сохранить' : 'Создать'}
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Залы клуба #{clubId}</h2>
+          <h2 className="text-base font-semibold text-gray-900">
+            {clientMode ? 'Залы' : `Залы клуба #${clubId}`}
+          </h2>
         </div>
-        {status === 'loading' && <p className="mt-4 text-sm text-gray-500">Загрузка...</p>}
+        {status === 'loading' && (
+          <p className="mt-4 text-sm text-gray-500">Загрузка...</p>
+        )}
         {status === 'error' && (
           <div className="mt-4 space-y-2 text-sm text-gray-600">
             <p>{errorMessage ?? 'Не удалось загрузить залы'}</p>
-            <button type="button" className="text-blue-600" onClick={reload} disabled={busy}>
+            <button
+              type="button"
+              className="text-blue-600"
+              onClick={() => {
+                if (leave()) reload();
+              }}
+              disabled={busy}
+            >
               Повторить
             </button>
           </div>
         )}
-        {status === 'ready' && halls.length === 0 && <p className="mt-4 text-sm text-gray-500">Залов нет</p>}
+        {status === 'ready' && halls.length === 0 && (
+          <p className="mt-4 text-sm text-gray-500">Залов нет</p>
+        )}
         {status === 'ready' && halls.length > 0 && (
           <div className="mt-4 space-y-3">
             {halls.map((hall) => (
               <div
                 key={hall.id}
                 className={`rounded border p-3 ${
-                  hall.isActive ? 'border-green-200 bg-green-50' : 'border-gray-100'
+                  hall.isActive
+                    ? 'border-green-200 bg-green-50'
+                    : 'border-gray-100'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{hall.name}</p>
-                    <p className="text-xs text-gray-500">Ревизия: {hall.layoutRevision}</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {hall.name}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Ревизия: {hall.layoutRevision}
+                    </p>
                   </div>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs ${
-                      hall.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                    }`}
-                  >
-                    {hall.isActive ? 'Активный' : 'Неактивный'}
-                  </span>
+                  {!clientMode && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        hall.isActive
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      {hall.isActive ? 'Активный' : 'Неактивный'}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {!hall.isActive && (
+                  {!readOnly && api.makeHallActive && !hall.isActive && (
                     <button
                       type="button"
                       className="rounded border border-blue-200 px-3 py-1 text-xs text-blue-600"
@@ -325,30 +457,38 @@ export default function ClubHallsScreen({ clubId, onBack, onOpenEditor }: ClubHa
                       Сделать активным
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="rounded border border-gray-200 px-3 py-1 text-xs text-gray-700"
-                    onClick={() => handleEdit(hall)}
-                    disabled={busy}
-                  >
-                    Редактировать
-                  </button>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className="rounded border border-gray-200 px-3 py-1 text-xs text-gray-700"
+                      onClick={() => {
+                        if (leave()) handleEdit(hall);
+                      }}
+                      disabled={busy}
+                    >
+                      Редактировать
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="rounded border border-blue-200 px-3 py-1 text-xs text-blue-600"
-                    onClick={() => onOpenEditor(hall.id)}
+                    onClick={() => {
+                      if (leave()) onOpenEditor(hall.id);
+                    }}
                     disabled={busy}
                   >
-                    Редактор
+                    {readOnly ? 'Схема и столы' : 'Открыть схему'}
                   </button>
-                  <button
-                    type="button"
-                    className="rounded border border-red-200 px-3 py-1 text-xs text-red-600"
-                    onClick={() => handleDelete(hall.id)}
-                    disabled={busy}
-                  >
-                    Удалить
-                  </button>
+                  {!readOnly && api.deleteHall && (
+                    <button
+                      type="button"
+                      className="rounded border border-red-200 px-3 py-1 text-xs text-red-600"
+                      onClick={() => handleDelete(hall.id)}
+                      disabled={busy}
+                    >
+                      Удалить
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

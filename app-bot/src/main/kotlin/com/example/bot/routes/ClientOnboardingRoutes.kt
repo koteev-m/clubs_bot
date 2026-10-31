@@ -40,6 +40,7 @@ internal fun Application.registerClientOnboardingRoutes(
     configuredOwnerId: Long?,
 ) {
     val api = OnboardingHttp(repository, botUsername)
+    registerClientLayoutRoutes(repository)
     routing {
         route("/api/client") {
             // The shared /api/client route receives its single guard in clientContextRoutes.

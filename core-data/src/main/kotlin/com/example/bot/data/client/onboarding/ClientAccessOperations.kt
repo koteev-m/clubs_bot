@@ -204,7 +204,7 @@ internal class ClientAccessOperations(
                 grant.only(listOf("clubId", "permission"))
                 val clubId = grant.id("clubId")
                 val permission = grant.string("permission")
-                if (permission !in setOf(READ_CLUB, WRITE_PROFILE)) fail("validation_error")
+                if (permission !in setOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT)) fail("validation_error")
                 clubId to permission
             }
         if (requestedGrants.distinct().size != requestedGrants.size) fail("validation_error")
