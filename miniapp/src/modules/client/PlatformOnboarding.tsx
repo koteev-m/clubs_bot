@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Building2, LayoutGrid, Settings, Users } from 'lucide-react';
+import { Building2, LayoutGrid, Users } from 'lucide-react';
 import { ApplicationList } from './ClientAccess';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -17,18 +17,24 @@ import {
   invitationLabels,
   Membership,
   Page,
+  PlatformClub,
 } from './onboarding.types';
 import { authorityLost, errorMessage } from './onboarding.api';
 import { InvitationDraft, useInvitationDraft } from './useInvitationDraft';
 
 type OwnerScreen =
-  | { type: 'overview' | 'invite' | 'clients' | 'applications' }
+  | { type: 'overview' | 'invite' | 'clubs' | 'clients' | 'applications' }
   | { type: 'invitation' | 'client' | 'application'; id: string };
 function currentScreen(): OwnerScreen {
   const params = new URLSearchParams(window.location.search);
   const type = params.get('screen');
   const id = params.get('resource');
-  if (type === 'invite' || type === 'clients' || type === 'applications')
+  if (
+    type === 'invite' ||
+    type === 'clubs' ||
+    type === 'clients' ||
+    type === 'applications'
+  )
     return { type };
   if (
     (type === 'invitation' || type === 'client' || type === 'application') &&
@@ -67,7 +73,10 @@ function PlatformNavigation({
 }) {
   const [screen, setScreen] = useState<OwnerScreen>(currentScreen);
   const limitDraft = useClientLimitDraft(credential);
+  const lifecycle = useClientLifecycle(credential);
   const navigate = useCallback((next: OwnerScreen, replace = false) => {
+    const current = currentScreen();
+    if (!replace && JSON.stringify(current) === JSON.stringify(next)) return;
     const url = new URL(window.location.href);
     url.searchParams.set('mode', 'platform-owner');
     if (next.type === 'overview') url.searchParams.delete('screen');
@@ -117,6 +126,7 @@ function PlatformNavigation({
     return (
       <OwnerClient
         limitDraft={limitDraft}
+        lifecycle={lifecycle}
         key={screen.id}
         credential={credential}
         id={screen.id}
@@ -138,9 +148,11 @@ function PlatformNavigation({
       title={
         overview
           ? 'Управление платформой'
-          : screen.type === 'applications'
-            ? 'Заявки на подключение'
-            : 'Клиенты и доступы'
+          : screen.type === 'clubs'
+            ? 'Клубы платформы'
+            : screen.type === 'applications'
+              ? 'Заявки на подключение'
+              : 'Клиенты и доступы'
       }
       subtitle={
         overview ? 'Клиенты, приглашения и разрешённые заведения.' : undefined
@@ -153,7 +165,10 @@ function PlatformNavigation({
             <LayoutGrid size={21} />
             <span>Обзор</span>
           </button>
-          <button onClick={() => navigate({ type: 'clients' })}>
+          <button
+            aria-current={screen.type === 'clubs' ? 'page' : undefined}
+            onClick={() => navigate({ type: 'clubs' })}
+          >
             <Building2 size={21} />
             <span>Клубы</span>
           </button>
@@ -164,11 +179,6 @@ function PlatformNavigation({
             <Users size={21} />
             <span>Доступы</span>
           </button>
-          <button disabled>
-            <Settings size={21} />
-            <span>Настройки</span>
-            <small>Позже</small>
-          </button>
         </nav>
       }
     >
@@ -178,6 +188,7 @@ function PlatformNavigation({
             <strong>Платформа</strong>
             <span className="po-context-badge">Обзор</span>
           </div>
+          <OwnerOverview credential={credential} />
           <button
             className="po-primary"
             onClick={() => navigate({ type: 'invite' })}
@@ -198,12 +209,19 @@ function PlatformNavigation({
           </button>
         </>
       )}
-      {screen.type === 'clients' ? (
+      {screen.type === 'clubs' && (
+        <OwnerClubs
+          credential={credential}
+          open={(id) => navigate({ type: 'client', id })}
+        />
+      )}
+      {screen.type === 'clients' && (
         <OwnerClients
           credential={credential}
           open={(client) => navigate({ type: 'client', id: client.id })}
         />
-      ) : (
+      )}
+      {screen.type === 'applications' && (
         <ApplicationList
           credential={credential}
           path="/api/platform/onboarding/applications/search"
@@ -592,6 +610,110 @@ function OwnerInvitation({
   );
 }
 
+function OwnerOverview({ credential }: { credential: string }) {
+  const remote = useRemote<{
+    clients: number;
+    archivedClients: number;
+    clubs: number;
+    activeMembers: number;
+    openInvitations: number;
+  }>(credential, '/api/platform/onboarding/summary');
+  return (
+    <section aria-label="Сводка платформы">
+      <RemoteState {...remote} />
+      {remote.data && (
+        <dl className="po-stats">
+          {[
+            ['Организации вне архива', remote.data.clients],
+            ['Заведения клиентов', remote.data.clubs],
+            ['Активные пользовательские доступы', remote.data.activeMembers],
+            ['Действующие приглашения', remote.data.openInvitations],
+          ].map(([label, value]) => (
+            <div className="po-card" key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
+}
+
+function OwnerClubs({
+  credential,
+  open,
+}: {
+  credential: string;
+  open: (id: string) => void;
+}) {
+  const [cursor, setCursor] = useState<string>();
+  const remote = useRemote<Page<PlatformClub>>(
+    credential,
+    '/api/platform/onboarding/clubs/search',
+    {
+      limit: 50,
+      ...(cursor ? { cursor } : {}),
+    },
+  );
+  return (
+    <section aria-label="Заведения платформы">
+      <p className="po-muted">
+        Сохранённые заведения и их клиентские организации. Публичность и доступ
+        пользователей — разные состояния.
+      </p>
+      <RemoteState {...remote} />
+      {remote.data?.items.length === 0 && (
+        <p className="po-card ob-card">Заведений клиентов пока нет.</p>
+      )}
+      {remote.data?.items.map((club) => (
+        <section className="po-card ob-card" key={club.id}>
+          <h2>{club.name}</h2>
+          <p>Организация: {club.clientName}</p>
+          <p>{club.published ? 'Опубликован' : 'Не опубликован'}</p>
+          {!club.published && (
+            <p className="po-muted">
+              Заведение пока недоступно гостям и для бронирования.
+            </p>
+          )}
+          <p>
+            Организация:{' '}
+            {club.clientArchived
+              ? 'В архиве'
+              : club.clientActive
+                ? 'Активна'
+                : 'Ожидает подтверждения'}
+          </p>
+          <button className="ob-button" onClick={() => open(club.clientId)}>
+            Доступы организации «{club.clientName}»
+          </button>
+        </section>
+      ))}
+      {cursor && (
+        <button className="ob-button" onClick={() => setCursor(undefined)}>
+          В начало списка
+        </button>
+      )}
+      {remote.data?.nextCursor && (
+        <button
+          className="ob-button"
+          onClick={() => setCursor(remote.data?.nextCursor ?? undefined)}
+        >
+          Следующая страница
+        </button>
+      )}
+    </section>
+  );
+}
+
+function organizationLabel(client: ClientSummary) {
+  return client.archived
+    ? 'Организация в архиве'
+    : client.active
+      ? 'Организация активна'
+      : 'Организация ожидает подтверждения';
+}
+
 function OwnerClients({
   credential,
   open,
@@ -600,18 +722,34 @@ function OwnerClients({
   open: (client: ClientSummary) => void;
 }) {
   const [cursor, setCursor] = useState<string>();
+  const [status, setStatus] = useState('active');
   const remote = useRemote<Page<ClientSummary>>(
     credential,
     '/api/platform/onboarding/clients/search',
-    { limit: 50, ...(cursor ? { cursor } : {}) },
+    { limit: 50, status, ...(cursor ? { cursor } : {}) },
   );
   return (
     <>
+      <Field label="Список организаций">
+        <select
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value);
+            setCursor(undefined);
+          }}
+        >
+          <option value="active">Вне архива</option>
+          <option value="archived">В архиве</option>
+          <option value="all">Все организации</option>
+        </select>
+      </Field>
+      <p className="po-muted">
+        Статус организации не означает доступ пользователя. Отзыв полномочий
+        сохраняет организацию и её данные.
+      </p>
       <RemoteState {...remote} />
       {remote.data?.items.length === 0 && (
-        <p className="po-card ob-card">
-          Клиентов пока нет. Создайте приглашение.
-        </p>
+        <p className="po-card ob-card">В этом списке организаций пока нет.</p>
       )}
       {remote.data?.items.map((client) => (
         <button
@@ -620,7 +758,10 @@ function OwnerClients({
           onClick={() => open(client)}
         >
           <strong>{client.name}</strong>
-          <small>{client.active ? 'Активен' : 'Ожидает подтверждения'}</small>
+          <small>{organizationLabel(client)}</small>
+          {client.activeMembers !== undefined && (
+            <small>Активных пользователей: {client.activeMembers}</small>
+          )}
         </button>
       ))}
       {cursor && (
@@ -646,7 +787,9 @@ function OwnerClient({
   back,
   open,
   limitDraft,
+  lifecycle,
 }: {
+  lifecycle: ReturnType<typeof useClientLifecycle>;
   limitDraft: ReturnType<typeof useClientLimitDraft>;
   credential: string;
   id: string;
@@ -662,11 +805,32 @@ function OwnerClient({
       <RemoteState {...remote} />
       {remote.data && (
         <>
-          <ClientLimit
-            draft={limitDraft}
+          <section className="po-card ob-card">
+            <h2>{organizationLabel(remote.data)}</h2>
+            <p>
+              Активных пользователей:{' '}
+              {remote.data.activeMembers ??
+                remote.data.members.filter((member) => member.active).length}
+            </p>
+            <p className="po-muted">
+              Отзыв доступа отключает пользователя. Организация, заведения и
+              история сохраняются.
+            </p>
+          </section>
+          <ClientLifecycle
+            draft={lifecycle}
             client={remote.data}
             updated={remote.refresh}
           />
+          {!remote.data.archived && (
+            <>
+              <ClientLimit
+                draft={limitDraft}
+                client={remote.data}
+                updated={remote.refresh}
+              />
+            </>
+          )}
           <section className="ob-section">
             <h2>Доступы</h2>
             {remote.data.members.length === 0 && <p>Доступы ещё не выданы</p>}
@@ -677,6 +841,7 @@ function OwnerClient({
                 clientId={id}
                 credential={credential}
                 updated={remote.refresh}
+                readOnly={remote.data?.archived}
               />
             ))}
           </section>
@@ -711,12 +876,111 @@ function OwnerClient({
   );
 }
 
+function useClientLifecycle(credential: string) {
+  const command = useCommand<ClientDetail>(credential);
+  const [target, setTarget] = useState('');
+  const [result, setResult] = useState<ClientDetail>();
+  return { command, target, setTarget, result, setResult };
+}
+
+const archiveBlockerLabels: Record<string, string> = {
+  clubs: 'есть связанные заведения',
+  active_memberships: 'есть активные пользовательские доступы',
+  active_grants: 'есть действующие полномочия',
+  active_invitations: 'есть действующие приглашения',
+};
+
+function ClientLifecycle({
+  draft,
+  client,
+  updated,
+}: {
+  draft: ReturnType<typeof useClientLifecycle>;
+  client: ClientDetail;
+  updated: () => void;
+}) {
+  const { command, target, result } = draft;
+  useEffect(() => {
+    if (result?.id === client.id) {
+      draft.setResult(undefined);
+      updated();
+    }
+  }, [result, client.id, draft, updated]);
+  const ownCommand = target === client.id;
+  return (
+    <section className="po-card ob-card" aria-label="Архив организации">
+      <h2>
+        {client.archived ? 'Организация в архиве' : 'Архивирование организации'}
+      </h2>
+      <p>
+        Архив скрывает пустую организацию из основного списка и закрывает
+        доступ. История сохраняется. Восстановление организации не возвращает
+        отозванные пользовательские права.
+      </p>
+      {!client.archived && Boolean(client.archiveBlockers?.length) && (
+        <p>
+          Пока нельзя архивировать:{' '}
+          {client.archiveBlockers
+            ?.map((reason) => archiveBlockerLabels[reason] ?? reason)
+            .join('; ')}
+          .
+        </p>
+      )}
+      {client.availableActions
+        ?.filter((action) => action === 'archive' || action === 'restore')
+        .map((action) => (
+          <button
+            key={action}
+            className="ob-button"
+            disabled={command.blocked || !client.version}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  action === 'archive'
+                    ? 'Архивировать пустую организацию? История сохранится.'
+                    : 'Восстановить организацию? Отозванные пользовательские права останутся отключены.',
+                )
+              )
+                return;
+              command.reset();
+              draft.setTarget(client.id);
+              command.run(
+                '/api/platform/onboarding/clients/' + client.id + '/' + action,
+                { expectedVersion: client.version },
+                draft.setResult,
+              );
+            }}
+          >
+            {action === 'archive'
+              ? 'Архивировать организацию'
+              : 'Восстановить организацию'}
+          </button>
+        ))}
+      {ownCommand && <CommandState command={command} refresh={updated} />}
+      {!ownCommand && command.blocked && (
+        <p role="status">
+          Операция для другой организации ожидает результата. Вернитесь в её
+          карточку и повторите ту же команду.
+        </p>
+      )}
+    </section>
+  );
+}
+
+const clubPermissionLabels: Record<string, string> = {
+  'client.club.read': 'чтение клуба',
+  'client.club.profile.write': 'редактирование профиля',
+  'client.club.layout.write': 'редактирование залов и столов',
+};
+
 function MemberAccess({
   credential,
   clientId,
   member,
   updated,
+  readOnly = false,
 }: {
+  readOnly?: boolean;
   credential: string;
   clientId: string;
   member: Membership;
@@ -739,126 +1003,138 @@ function MemberAccess({
       </h3>
       <p className="po-muted">Telegram ID: {member.telegramUserId}</p>
       <p>{member.active ? 'Доступ активен' : 'Доступ отозван'}</p>
-      {member.active ? (
-        <>
-          {member.permissions.includes('client.application.manage') && (
-            <p>Управление заявками</p>
-          )}
-          {member.clubGrants
-            .filter((grant) => grant.active)
-            .map((grant) => (
-              <p key={grant.clubId + grant.permission}>
-                {grant.clubName}:{' '}
-                {grant.permission === 'client.club.profile.write'
-                  ? 'редактирование профиля'
-                  : 'чтение клуба'}
-              </p>
-            ))}
-          <button
-            className="ob-button ob-danger"
-            disabled={command.blocked}
-            onClick={() => {
-              if (
-                window.confirm(
-                  'Отозвать доступ к этому пространству, заявкам и клубам? Данные сохранятся.',
-                )
-              )
-                command.run(
-                  '/api/platform/onboarding/clients/' +
-                    clientId +
-                    '/members/' +
-                    member.userId +
-                    '/revoke',
-                  { userId: member.userId, expectedVersion: member.version },
-                  updated,
-                );
-            }}
-          >
-            Отозвать доступ
-          </button>
-        </>
+      {readOnly ? (
+        <p>Организация в архиве. Управление доступом недоступно.</p>
       ) : (
         <>
-          <p>
-            Отметьте только те прежние полномочия, которые нужно вернуть. Доступ
-            к остальным клубам не появится.
-          </p>
-          {member.restorablePermissions.includes(
-            'client.application.manage',
-          ) && (
-            <label className="ob-check">
-              <input
-                type="checkbox"
-                checked={manage}
-                onChange={(event) => setManage(event.target.checked)}
-              />
-              <span>Управление заявками</span>
-            </label>
-          )}
-          {member.clubGrants.map((grant) => (
-            <label className="ob-check" key={grant.clubId + grant.permission}>
-              <input
-                type="checkbox"
-                checked={grants.includes(grant.clubId + ':' + grant.permission)}
-                onChange={(event) =>
-                  setGrants((value) =>
-                    event.target.checked
-                      ? [...value, grant.clubId + ':' + grant.permission]
-                      : value.filter(
-                          (item) =>
-                            item !== grant.clubId + ':' + grant.permission,
-                        ),
+          {member.active ? (
+            <>
+              {member.permissions.includes('client.application.manage') && (
+                <p>Управление заявками</p>
+              )}
+              {member.clubGrants
+                .filter((grant) => grant.active)
+                .map((grant) => (
+                  <p key={grant.clubId + grant.permission}>
+                    {grant.clubName}:{' '}
+                    {clubPermissionLabels[grant.permission] ?? grant.permission}
+                  </p>
+                ))}
+              <button
+                className="ob-button ob-danger"
+                disabled={command.blocked}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Отозвать доступ к этому пространству, заявкам и клубам? Данные сохранятся.',
+                    )
+                  )
+                    command.run(
+                      '/api/platform/onboarding/clients/' +
+                        clientId +
+                        '/members/' +
+                        member.userId +
+                        '/revoke',
+                      {
+                        userId: member.userId,
+                        expectedVersion: member.version,
+                      },
+                      updated,
+                    );
+                }}
+              >
+                Отозвать доступ
+              </button>
+            </>
+          ) : (
+            <>
+              <p>
+                Отметьте только те прежние полномочия, которые нужно вернуть.
+                Доступ к остальным клубам не появится.
+              </p>
+              {member.restorablePermissions.includes(
+                'client.application.manage',
+              ) && (
+                <label className="ob-check">
+                  <input
+                    type="checkbox"
+                    checked={manage}
+                    onChange={(event) => setManage(event.target.checked)}
+                  />
+                  <span>Управление заявками</span>
+                </label>
+              )}
+              {member.clubGrants.map((grant) => (
+                <label
+                  className="ob-check"
+                  key={grant.clubId + grant.permission}
+                >
+                  <input
+                    type="checkbox"
+                    checked={grants.includes(
+                      grant.clubId + ':' + grant.permission,
+                    )}
+                    onChange={(event) =>
+                      setGrants((value) =>
+                        event.target.checked
+                          ? [...value, grant.clubId + ':' + grant.permission]
+                          : value.filter(
+                              (item) =>
+                                item !== grant.clubId + ':' + grant.permission,
+                            ),
+                      )
+                    }
+                  />
+                  <span>
+                    {grant.clubName}:{' '}
+                    {clubPermissionLabels[grant.permission] ?? grant.permission}
+                  </span>
+                </label>
+              ))}
+              <label className="ob-check">
+                <input
+                  type="checkbox"
+                  checked={confirmed}
+                  onChange={(event) => setConfirmed(event.target.checked)}
+                />
+                <span>
+                  Восстановить доступ этому же Telegram-аккаунту только с
+                  выбранными полномочиями.
+                </span>
+              </label>
+              <button
+                className="ob-button"
+                disabled={command.blocked || !confirmed}
+                onClick={() =>
+                  command.run(
+                    '/api/platform/onboarding/clients/' +
+                      clientId +
+                      '/members/' +
+                      member.userId +
+                      '/restore',
+                    {
+                      userId: member.userId,
+                      expectedVersion: member.version,
+                      permissions: manage ? ['client.application.manage'] : [],
+                      clubGrants: member.clubGrants
+                        .filter((grant) =>
+                          grants.includes(
+                            grant.clubId + ':' + grant.permission,
+                          ),
+                        )
+                        .map((grant) => ({
+                          clubId: grant.clubId,
+                          permission: grant.permission,
+                        })),
+                    },
+                    updated,
                   )
                 }
-              />
-              <span>
-                {grant.clubName}:{' '}
-                {grant.permission === 'client.club.profile.write'
-                  ? 'редактирование профиля'
-                  : 'чтение клуба'}
-              </span>
-            </label>
-          ))}
-          <label className="ob-check">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-            />
-            <span>
-              Восстановить доступ этому же Telegram-аккаунту только с выбранными
-              полномочиями.
-            </span>
-          </label>
-          <button
-            className="ob-button"
-            disabled={command.blocked || !confirmed}
-            onClick={() =>
-              command.run(
-                '/api/platform/onboarding/clients/' +
-                  clientId +
-                  '/members/' +
-                  member.userId +
-                  '/restore',
-                {
-                  userId: member.userId,
-                  expectedVersion: member.version,
-                  permissions: manage ? ['client.application.manage'] : [],
-                  clubGrants: member.clubGrants
-                    .filter((grant) =>
-                      grants.includes(grant.clubId + ':' + grant.permission),
-                    )
-                    .map((grant) => ({
-                      clubId: grant.clubId,
-                      permission: grant.permission,
-                    })),
-                },
-                updated,
-              )
-            }
-          >
-            Восстановить выбранный доступ
-          </button>
+              >
+                Восстановить выбранный доступ
+              </button>
+            </>
+          )}
         </>
       )}
       <CommandState command={command} refresh={updated} />

@@ -126,6 +126,7 @@ internal class ClientContextPostgresIT : ClientContextContract() {
     @Test
     fun `rollback keeps authority and commit is visible to the next SELECT`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             fixture.dataSource.connection.use { writer ->
                 writer.autoCommit = false
                 writer.createStatement().use {
@@ -163,6 +164,7 @@ internal class ClientContextPostgresIT : ClientContextContract() {
     @Test
     fun `in flight SELECT retains its snapshot while the next read sees committed revocation`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             fixture.dataSource.connection.use { blocker ->
                 blocker.autoCommit = false
                 blocker.createStatement().use { it.execute("SELECT pg_advisory_xact_lock(61001001)") }
@@ -192,6 +194,7 @@ internal class ClientContextPostgresIT : ClientContextContract() {
 
     @Test
     fun `independent JVM restarts retain persisted records and observe later revocation`() {
+        fixture.upgradeForCurrentReads()
         assertEquals("CLIENT_CONTEXT=101:1001,1002", runReadProcess())
         assertEquals("CLIENT_CONTEXT=101:1001,1002", runReadProcess())
         fixture.execute(
@@ -203,6 +206,7 @@ internal class ClientContextPostgresIT : ClientContextContract() {
     @Test
     fun `GET leaves PostgreSQL rows and sequences unchanged`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             val before = fixture.allSnapshot()
             val sequences =
                 fixture.rows(

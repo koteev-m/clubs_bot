@@ -8,6 +8,9 @@ export default defineConfig({
   testIgnore: [
     'onboarding-integrated.spec.ts',
     'onboarding-production.spec.ts',
+    // These suites exercise the packaged entry with playwright.owner-ux.config.ts.
+    'owner-ux-map.spec.ts',
+    'owner-map-preview.spec.ts',
   ],
   outputDir: join(
     tmpdir(),

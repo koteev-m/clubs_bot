@@ -131,7 +131,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   expect(commands).toHaveLength(2);
   expect(commands[0]).toEqual(commands[1]);
   await expect(
-    recipient.getByText("Непубличный", { exact: true }),
+    recipient.getByText("Не опубликован", { exact: true }),
   ).toBeVisible();
   await expect(
     recipient.getByText("Synthetic Street 1, помещение 2", { exact: true }),

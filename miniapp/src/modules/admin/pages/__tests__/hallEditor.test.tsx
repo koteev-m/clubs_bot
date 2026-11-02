@@ -10,6 +10,7 @@ import HallEditorScreen from '../HallEditorScreen';
 import HallPlanStage from '../HallPlanStage';
 import { useUiStore } from '../../../../shared/store/ui';
 import {
+  AdminApiError,
   createHallTable,
   fetchHallPlanBlob,
   listHallTables,
@@ -162,6 +163,25 @@ describe('hall editor interactions', () => {
       });
     });
     expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('does not present a failed table read as an empty saved preview', async () => {
+    setupPlanMocks();
+    vi.mocked(listHallTables).mockRejectedValue(
+      new AdminApiError('Unavailable', { status: 503 }),
+    );
+    render(
+      <HallEditorScreen
+        clubId={2}
+        hallId={10}
+        onBack={vi.fn()}
+        readOnly
+        previewOnly
+      />,
+    );
+    await screen.findByRole('button', { name: 'Повторить загрузку столов' });
+    expect(screen.queryByText('Сохранённых столов пока нет.')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Карточка стола' })).toBeNull();
   });
 
   it('does not spam update on drag', async () => {
@@ -335,15 +355,21 @@ describe('hall editor interactions', () => {
     fireEvent.load(image);
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Режим превью' }),
+      await screen.findByRole('button', { name: 'Предпросмотр для гостя' }),
     );
 
-    fireEvent.click(stage, { clientX: 100, clientY: 50 });
+    const previewStage = await screen.findByTestId('hall-plan-stage');
+    mockStageRect(previewStage);
+    fireEvent.load(screen.getByTestId('hall-plan-image'));
+    fireEvent.click(previewStage, { clientX: 100, clientY: 50 });
 
     const marker = await screen.findByTestId('table-marker-1');
     fireEvent.pointerDown(marker, { clientX: 60, clientY: 20, pointerId: 1 });
     fireEvent.pointerMove(marker, { clientX: 90, clientY: 40, pointerId: 1 });
     fireEvent.pointerUp(marker, { clientX: 90, clientY: 40, pointerId: 1 });
+    fireEvent.click(marker);
+    expect(screen.getByRole('region', { name: 'Карточка стола' })).toBeTruthy();
+    expect(screen.getByText('2 мест')).toBeTruthy();
 
     await waitFor(() => {
       expect(createHallTable).not.toHaveBeenCalled();

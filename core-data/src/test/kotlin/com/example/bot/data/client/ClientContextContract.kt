@@ -52,6 +52,7 @@ internal abstract class ClientContextContract {
     @Test
     fun `owners staff unknown user and membership only receive exactly their own read context`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             assertEquals(
                 listOf(ClientContext(101, "Client A", listOf(ClientClub(1001, "A1"), ClientClub(1002, "A2")))),
                 context(880061001),
@@ -70,6 +71,7 @@ internal abstract class ClientContextContract {
     @Test
     fun `client audience restricts memberships and clubs without granting anything`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             val source = mutableSetOf(1001L)
             val audience = ClientAudience.Client(101, source)
             source.add(1002L)
@@ -95,6 +97,7 @@ internal abstract class ClientContextContract {
     @Test
     fun `revocation is fresh at each read and one membership cannot revoke another`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             assertEquals(listOf(101L, 102L), context(880061006).map { it.id })
             fixture.execute("UPDATE client_club_grants SET is_active=FALSE WHERE client_id=101 AND user_id=5006")
             assertEquals(
@@ -118,6 +121,7 @@ internal abstract class ClientContextContract {
     @Test
     fun `default inactive states never grant access and legacy club active flag is not authority`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             fixture.execute(
                 "INSERT INTO clients(id,display_name) VALUES (103,'Inactive client')",
                 "INSERT INTO client_memberships(client_id,user_id) VALUES (102,5001)",
@@ -195,6 +199,7 @@ internal abstract class ClientContextContract {
     @Test
     fun `read is immutable and supports IDs above JS safe integer without narrowing`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             val before = fixture.allSnapshot()
             repeat(2) {
                 assertEquals(
@@ -220,6 +225,7 @@ internal abstract class ClientContextContract {
     @Test
     fun `legacy roles and support permissions stay separate in both directions`() =
         runBlocking<Unit> {
+            fixture.upgradeForCurrentReads()
             val database = Database.connect(fixture.dataSource)
             val roles = ExposedUserRoleRepository(database)
             val permissions = ExposedUserRolePermissionRepository(database)

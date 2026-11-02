@@ -62,6 +62,7 @@ internal class InvitationOperations(
     ): MutationResult {
         body.only(listOf("token", "expectedVersion"))
         val invitation = locked(id)
+        session.requireUnarchived(invitation.long("client_id"))
         if (invitation["token_hash"] != digest(token(body))) fail("not_found")
         val claimant = invitation["claimant_user_id"]?.toLong()
         if (claimant != null && claimant != session.userId) fail("not_found")
@@ -102,6 +103,7 @@ internal class InvitationOperations(
         session.owner()
         body.only(listOf("expectedVersion"))
         val invitation = locked(id)
+        session.requireUnarchived(invitation.long("client_id"))
         session.version(invitation, body)
         return when (operation) {
             OnboardingMutation.INVITATION_CONFIRM -> confirm(invitation)
@@ -272,6 +274,7 @@ internal class InvitationOperations(
         invitation: DbRow,
         preview: Boolean,
     ) {
+        session.requireUnarchived(invitation.long("client_id"))
         val claimant = invitation["claimant_user_id"]?.toLong()
         if (claimant != null && claimant != session.userId) fail("not_found")
         if (!preview && claimant == null) fail("not_found")
@@ -308,7 +311,9 @@ internal class InvitationOperations(
                 sql.row("SELECT * FROM users WHERE id=?", id)
             }
         val actions =
-            if (platform) {
+            if (session.client(invitation.long("client_id"))["archived_at"] != null) {
+                emptyList()
+            } else if (platform) {
                 when (state) {
                     "issued" -> listOf("revoke", "reissue")
                     "claimed" -> listOf("confirm", "revoke", "reissue")

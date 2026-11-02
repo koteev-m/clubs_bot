@@ -24,6 +24,7 @@ internal class ClientContextReadBoundaryTest {
         runBlocking<Unit> {
             ClientContextFixture.h2().use { fixture ->
                 fixture.seed()
+                fixture.upgradeForCurrentReads()
                 val source = RecordingClientDataSource(fixture.dataSource)
                 val repository = JdbcClientContextRepository(source)
                 repository.context(880061001, ClientAudience.Client(101, setOf(1001)))
@@ -46,6 +47,7 @@ internal class ClientContextReadBoundaryTest {
         runBlocking<Unit> {
             ClientContextFixture.h2().use { fixture ->
                 fixture.seed()
+                fixture.upgradeForCurrentReads()
                 var failure: Exception? = null
                 val source =
                     object : DataSource by fixture.dataSource {

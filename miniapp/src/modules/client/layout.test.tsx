@@ -263,12 +263,15 @@ describe('cabinet uses the shared layout editor', () => {
     expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Схема и столы' }));
     await screen.findByTestId('hall-plan-image');
+    fireEvent.click(screen.getByRole('button', { name: '#1 · Частный стол' }));
+    expect(screen.getByRole('region', { name: 'Карточка стола' })).toBeTruthy();
     expect(document.querySelector('input[type=file]')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
     revoked = true;
     fireEvent(window, new Event('pageshow'));
     await screen.findByText(/Доступ утрачен или запись недоступна/);
     expect(screen.queryByTestId('hall-plan-image')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Карточка стола' })).toBeNull();
     expect(screen.queryByText('Частный стол')).toBeNull();
     await waitFor(() =>
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:private-plan'),

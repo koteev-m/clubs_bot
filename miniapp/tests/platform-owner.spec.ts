@@ -25,7 +25,7 @@ test('local platform preview has truthful states, mobile layout and real back/fo
   await expect(
     page.getByText('Данные не подключены', { exact: true }),
   ).toHaveCount(2);
-  for (const name of ['Клубы Позже', 'Доступы Позже', 'Настройки Позже']) {
+  for (const name of ['Клубы Позже', 'Доступы Позже']) {
     await expect(page.getByRole('button', { name })).toBeDisabled();
   }
   for (const width of [320, 390, 430]) {

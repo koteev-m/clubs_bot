@@ -332,8 +332,15 @@ function ClientHome({
     '/api/client/context',
   );
   useEffect(() => {
-    if (remote.data?.clients.length === 1)
-      navigate({ type: 'space', id: remote.data.clients[0].id }, true);
+    if (remote.data?.clients.length === 1) {
+      const client = remote.data.clients[0];
+      navigate(
+        client.clubs?.length === 1
+          ? { type: 'club', id: client.clubs[0].id }
+          : { type: 'space', id: client.id },
+        true,
+      );
+    }
   }, [remote.data, navigate]);
   return (
     <Shell

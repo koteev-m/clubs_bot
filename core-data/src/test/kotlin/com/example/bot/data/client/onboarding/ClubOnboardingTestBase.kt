@@ -5,7 +5,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /** Runs unchanged against H2 and PostgreSQL 16, with distinct connections for racing commands. */
-internal abstract class ClubOnboardingTestBase : OnboardingFoundationContract() {
+internal abstract class ClubOnboardingTestBase : ClientLifecycleContract() {
     protected suspend fun approved(): JsonObject = fixture.approved(fixture.accept().id("clientId"))
 
     protected suspend fun create(

@@ -44,7 +44,7 @@ describe('platform owner local screens', () => {
     expect(screen.getAllByText('Данные не подключены')).toHaveLength(2);
     expect(screen.getByText('Список клубов пока недоступен')).toBeTruthy();
     expect(screen.queryByText(/^\d+$/)).toBeNull();
-    for (const name of ['Клубы', 'Доступы', 'Настройки']) {
+    for (const name of ['Клубы', 'Доступы']) {
       expect(
         (
           screen.getByRole('button', {

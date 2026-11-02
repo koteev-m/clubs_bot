@@ -146,6 +146,8 @@ export default function ClubLayout({
                   clubId={id}
                   hallId={hallId}
                   api={api.editor}
+                  clientMode
+                  previewOnly={!canWrite}
                   readOnly={
                     !canWrite || state.pending || state.error?.status === 409
                   }

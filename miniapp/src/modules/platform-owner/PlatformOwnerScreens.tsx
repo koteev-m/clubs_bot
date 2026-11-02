@@ -8,7 +8,6 @@ import {
   LayoutGrid,
   LockKeyhole,
   Send,
-  Settings,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -22,7 +21,6 @@ const navigation = [
   { label: 'Обзор', icon: LayoutGrid, available: true },
   { label: 'Клубы', icon: Building2, available: false },
   { label: 'Доступы', icon: Users, available: false },
-  { label: 'Настройки', icon: Settings, available: false },
 ];
 
 /** Shared presentation; live entry is mounted only after the server access check. */

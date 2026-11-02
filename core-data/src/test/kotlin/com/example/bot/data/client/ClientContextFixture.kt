@@ -62,6 +62,19 @@ internal class ClientContextFixture(
             .target(target ?: "61")
             .load()
 
+    /** Runtime repository reads use the current schema; V061 schema contracts keep their fixed boundary. */
+    fun upgradeForCurrentReads() {
+        Flyway
+            .configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/migration/common", "classpath:db/migration/$vendor")
+            .load()
+            .also {
+                it.migrate()
+                it.validate()
+            }
+    }
+
     fun execute(vararg sql: String) {
         dataSource.connection.use { connection ->
             sql.forEach { connection.createStatement().use { statement -> statement.execute(it) } }

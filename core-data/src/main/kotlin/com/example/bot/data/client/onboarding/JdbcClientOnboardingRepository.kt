@@ -59,6 +59,8 @@ class JdbcClientOnboardingRepository(
                     OnboardingRead.CLUB_PLAN_GET -> ClubLayoutOperations(session).plan(required(resourceId), body)
                     OnboardingRead.PLATFORM_INVITATION_GET -> invitations.get(required(resourceId), platform = true)
                     OnboardingRead.PLATFORM_CLIENT_SEARCH -> clients.search(body)
+                    OnboardingRead.PLATFORM_CLUB_SEARCH -> clients.searchClubs(body)
+                    OnboardingRead.PLATFORM_SUMMARY -> clients.platformSummary()
                     OnboardingRead.PLATFORM_CLIENT_GET -> clients.get(required(resourceId))
                     OnboardingRead.PLATFORM_APPLICATION_SEARCH -> applications.search(null, platform = true, body)
                     OnboardingRead.PLATFORM_APPLICATION_GET -> applications.get(required(resourceId), platform = true)
@@ -152,6 +154,8 @@ class JdbcClientOnboardingRepository(
             OnboardingMutation.MEMBER_REVOKE, OnboardingMutation.MEMBER_RESTORE ->
                 ClientAccessOperations(session).change(required(resourceId), operation, body)
             OnboardingMutation.CLIENT_LIMIT_UPDATE -> ClientLimitOperations(session).update(required(resourceId), body)
+            OnboardingMutation.CLIENT_ARCHIVE, OnboardingMutation.CLIENT_RESTORE ->
+                ClientLifecycleOperations(session).change(required(resourceId), operation, body)
             OnboardingMutation.CLUB_CREATE -> DirectClubOperations(session).create(required(resourceId), body)
             OnboardingMutation.CLUB_HALL_CREATE, OnboardingMutation.CLUB_HALL_UPDATE,
             OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_UPDATE,
@@ -181,7 +185,7 @@ class JdbcClientOnboardingRepository(
         return when (command["result_type"]) {
             "invitation" -> InvitationOperations(session).get(command.long("result_id"), platform)
             "application" -> ApplicationOperations(session).get(command.long("result_id"), platform)
-            "client_limit" -> ClientAccessOperations(session).get(command.long("client_id"))
+            "client_limit", "client_lifecycle" -> ClientAccessOperations(session).get(command.long("client_id"))
             "member" -> ClientAccessOperations(session).memberView(command.long("client_id"), command.long("result_id"))
             "club_create" -> ClubOnboardingOperations(session).replayCreate(command.long("result_id"))
             "club_profile" -> ClubOnboardingOperations(session).get(command.long("result_id"), write = true)
@@ -222,6 +226,8 @@ class JdbcClientOnboardingRepository(
         val OWNER_OPERATIONS =
             setOf(
                 OnboardingMutation.CLIENT_LIMIT_UPDATE,
+                OnboardingMutation.CLIENT_ARCHIVE,
+                OnboardingMutation.CLIENT_RESTORE,
                 OnboardingMutation.INVITATION_ISSUE,
                 OnboardingMutation.INVITATION_CONFIRM,
                 OnboardingMutation.INVITATION_REVOKE,

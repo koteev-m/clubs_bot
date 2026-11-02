@@ -268,14 +268,16 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
   return (
     <div className="space-y-6 px-4 pb-8">
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          className="text-sm text-blue-600"
-          onClick={back}
-          disabled={busy}
-        >
-          ← Клуб
-        </button>
+        {!clientMode && (
+          <button
+            type="button"
+            className="text-sm text-blue-600"
+            onClick={back}
+            disabled={busy}
+          >
+            ← Клуб
+          </button>
+        )}
         <button
           type="button"
           className="text-sm text-blue-600"

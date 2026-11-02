@@ -13,10 +13,76 @@ internal class ClientAccessOperations(
 
     fun search(body: JsonObject): JsonObject {
         session.owner()
+        body.only(listOf("cursor", "limit", "status"))
+        val limit = pageLimit(body)
+        val filter =
+            when (body.string("status") ?: "active") {
+                "active" -> " AND archived_at IS NULL"
+                "archived" -> " AND archived_at IS NOT NULL"
+                "all" -> ""
+                else -> fail("validation_error")
+            }
+        val clients =
+            sql.rows(
+                "SELECT * FROM clients WHERE id>?" + filter + " ORDER BY id LIMIT ?",
+                cursor(body),
+                limit + 1,
+            )
+        return page(clients.map(::summary), limit)
+    }
+
+    fun platformSummary(): JsonObject {
+        session.owner()
+        val counts =
+            checkNotNull(
+                sql.row(
+                    "SELECT (SELECT COUNT(*) FROM clients WHERE archived_at IS NULL) AS clients," +
+                        "(SELECT COUNT(*) FROM clients WHERE archived_at IS NOT NULL) AS archived_clients," +
+                        "(SELECT COUNT(*) FROM client_clubs) AS clubs," +
+                        "(SELECT COUNT(*) FROM client_memberships m JOIN clients c ON c.id=m.client_id " +
+                        "WHERE m.is_active=TRUE AND c.is_active=TRUE AND c.archived_at IS NULL) AS active_members," +
+                        "(SELECT COUNT(*) FROM client_invitations i JOIN clients c ON c.id=i.client_id " +
+                        "WHERE c.archived_at IS NULL AND i.status IN ('issued','claimed') AND i.expires_at>?) " +
+                        "AS open_invitations",
+                    session.now,
+                ),
+            )
+        return buildJsonObject {
+            put("clients", counts.long("clients"))
+            put("archivedClients", counts.long("archived_clients"))
+            put("clubs", counts.long("clubs"))
+            put("activeMembers", counts.long("active_members"))
+            put("openInvitations", counts.long("open_invitations"))
+        }
+    }
+
+    fun searchClubs(body: JsonObject): JsonObject {
+        session.owner()
         body.only(listOf("cursor", "limit"))
         val limit = pageLimit(body)
-        val clients = sql.rows("SELECT * FROM clients WHERE id>? ORDER BY id LIMIT ?", cursor(body), limit + 1)
-        return page(clients.map(::summary), limit)
+        val rows =
+            sql.rows(
+                "SELECT c.id,c.name,c.is_active,m.client_id,o.display_name," +
+                    "o.is_active AS client_active,o.archived_at " +
+                    "FROM clubs c JOIN client_clubs m ON m.club_id=c.id JOIN clients o ON o.id=m.client_id " +
+                    "WHERE c.id>? ORDER BY c.id LIMIT ?",
+                cursor(body),
+                limit + 1,
+            )
+        return page(
+            rows.map {
+                buildJsonObject {
+                    put("id", it.getValue("id"))
+                    put("name", it.getValue("name"))
+                    put("clientId", it.getValue("client_id"))
+                    put("clientName", it.getValue("display_name"))
+                    put("published", it.active())
+                    put("clientActive", it.active("client_active"))
+                    put("clientArchived", it["archived_at"] != null)
+                }
+            },
+            limit,
+        )
     }
 
     fun get(clientId: Long): JsonObject {
@@ -174,6 +240,7 @@ internal class ClientAccessOperations(
         userId: Long,
         body: JsonObject,
     ) {
+        session.requireUnarchived(clientId)
         if (!session.client(clientId).active()) fail("not_found")
         val permissions = body["permissions"] as? JsonArray ?: fail("validation_error")
         val grants = body["clubGrants"] as? JsonArray ?: fail("validation_error")
@@ -260,6 +327,7 @@ internal class ClientAccessOperations(
             put("id", client.getValue("id"))
             put("name", client.getValue("display_name"))
             put("active", client.active())
+            ClientLifecycleOperations(session).view(client).forEach { (key, value) -> put(key, value) }
             ClientLimitOperations(session).view(client.long("id")).forEach { (key, value) -> put(key, value) }
         }
 }

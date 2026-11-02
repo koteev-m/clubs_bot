@@ -131,6 +131,7 @@ describe('connected onboarding screens', () => {
   });
 
   it('shows only authorized client and clubs, and requires server create authority', async () => {
+    window.history.replaceState({}, '', '/app?mode=client&screen=client-space&resource=20');
     const approved: ClubApplication = {
       ...draft,
       status: 'approved',

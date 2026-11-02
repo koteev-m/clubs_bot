@@ -166,6 +166,9 @@ class ClientOnboardingAuthTest {
         withApp { repository ->
             for (path in listOf(
                 "$P/invitations",
+                "$P/clients/1/archive",
+                "$P/clients/1/restore",
+                "$P/clubs/search",
                 "$C/invitations/resolve",
                 "$P/applications/search",
                 "$C/applications/1/club",
@@ -203,7 +206,14 @@ class ClientOnboardingAuthTest {
     @Test
     fun `legacy owner headers and another signed user cannot enter platform onboarding`() =
         withApp { repository ->
-            for (path in listOf("$P/invitations", "$P/applications/1/approve", "$P/clients/1/members/2/restore")) {
+            for (path in listOf(
+                "$P/invitations",
+                "$P/applications/1/approve",
+                "$P/clients/1/members/2/restore",
+                "$P/clients/1/archive",
+                "$P/clients/1/restore",
+                "$P/clubs/search",
+            )) {
                 client
                     .post(path) {
                         header(HEADER, signed(user = CLIENT))
@@ -213,6 +223,23 @@ class ClientOnboardingAuthTest {
                     }.assertClientError(HttpStatusCode.Forbidden, "forbidden")
             }
             coVerify(exactly = 0) { repository.mutate(any(), any(), any(), any(), any()) }
+        }
+
+    @Test
+    fun `owner summary requires fresh exact identity and never trusts owner presentation`() =
+        withApp { repository ->
+            for (credential in listOf(null, "forged", signed(user = CLIENT))) {
+                val response =
+                    client.get("$P/summary?mode=platform-owner") {
+                        if (credential != null) header(HEADER, credential)
+                        header("X-Debug-Roles", "OWNER")
+                    }
+                assertTrue(
+                    response.status in
+                        listOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.BadRequest),
+                )
+            }
+            coVerify(exactly = 0) { repository.read(any(), any(), any(), any()) }
         }
 
     @Test
@@ -352,6 +379,7 @@ class ClientOnboardingAuthTest {
                 "invalid_transition",
                 "idempotency_conflict",
                 "duplicate_application",
+                "client_not_empty",
             )) {
                 coEvery { repository.mutate(any(), any(), any(), any(), any()) } throws OnboardingFailure(code)
                 client

@@ -172,7 +172,7 @@ describe('private club onboarding B', () => {
       screen.getByText(/Последнее успешное сохранение/).querySelector('time')
         ?.dateTime,
     ).toBe('2026-10-28T13:00:00Z');
-    fireEvent.click(screen.getByRole('button', { name: 'В «Мои клубы»' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Организация и другие заведения' }));
     await screen.findByRole('heading', {
       name: 'Synthetic Client',
       level: 1,
