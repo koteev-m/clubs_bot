@@ -15,6 +15,7 @@ export function Shell({
   subtitle,
   owner = false,
   back,
+  backLabel = 'Назад',
   children,
   navigation,
 }: {
@@ -22,6 +23,7 @@ export function Shell({
   subtitle?: string;
   owner?: boolean;
   back?: () => void;
+  backLabel?: string;
   children: React.ReactNode;
   navigation?: React.ReactNode;
 }) {
@@ -30,7 +32,28 @@ export function Shell({
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
     window.scrollTo(0, 0);
-  }, [title]);
+    heading.current?.closest('main')?.scrollTo?.(0, 0);
+  }, [title, subtitle]);
+  useEffect(() => {
+    const surface = heading.current?.closest<HTMLElement>('.platform-owner');
+    const resize = () => {
+      const height =
+        webApp.viewportHeight ||
+        window.visualViewport?.height ||
+        window.innerHeight;
+      if (height > 0)
+        surface?.style.setProperty('--po-viewport-height', `${height}px`);
+    };
+    resize();
+    webApp.onEvent?.('viewportChanged', resize);
+    window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    return () => {
+      webApp.offEvent?.('viewportChanged', resize);
+      window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+    };
+  }, [webApp]);
   useEffect(() => {
     if (!back) return;
     webApp.BackButton?.show();
@@ -57,7 +80,7 @@ export function Shell({
         <main className="po-main">
           {back && (
             <button className="po-back" type="button" onClick={back}>
-              <ArrowLeft size={18} aria-hidden="true" /> Назад
+              <ArrowLeft size={18} aria-hidden="true" /> {backLabel}
             </button>
           )}
           <div className="po-page-title">

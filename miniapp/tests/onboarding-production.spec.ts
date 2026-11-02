@@ -156,7 +156,7 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
       ),
     ).toBe(true);
   }
-  await page.getByRole('button', { name: 'Назад', exact: true }).click();
+  await page.getByRole('button', { name: 'Организация и другие заведения', exact: true }).click();
   await expect(page).toHaveURL(/screen=client-space&resource=20/);
   await expect(page.getByRole('button', { name: /Микс клуб/ })).toBeVisible();
   await expect(page.getByText('Бедолаги', { exact: true })).toHaveCount(0);
@@ -282,7 +282,7 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
   );
   await page.evaluate(() => window.dispatchEvent(new Event('pageshow')));
   await page.getByRole('button', { name: 'Повторить ту же операцию' }).click();
-  await expect(page.getByText('Непубличный', { exact: true })).toBeVisible();
+  await expect(page.getByText('Не опубликован', { exact: true })).toBeVisible();
   await expect(
     page.getByText('Бот не подключён', { exact: true }),
   ).toBeVisible();
@@ -295,6 +295,8 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
     address: 'Synthetic Street 1',
   });
   await page.goto('/app?mode=client' + ordinaryHash);
+  await expect(page.getByRole('heading', { name: 'Synthetic Venue', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Организация и другие заведения' }).click();
   await expect(
     page.getByRole('button', { name: 'Создать заведение' }),
   ).toBeDisabled();
@@ -610,11 +612,11 @@ test('owner invitation draft and pending intent survive Back Forward without ret
   ).toBeDisabled();
   const retry = page.getByRole('button', { name: 'Проверить результат' });
   await retry.scrollIntoViewIfNeeded();
-  const beforeRetry = await page.evaluate(() => window.scrollY);
+  const beforeRetry = await page.locator('.po-main').evaluate((node) => node.scrollTop);
   expect(beforeRetry).toBeGreaterThan(0);
   await retry.click();
   await expect(page.getByText('Создаём приглашение…')).toBeVisible();
-  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  expect(await page.locator('.po-main').evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
   releaseReplay();
   await expect(
     page.getByRole('heading', { name: 'Ссылка не получена' }),

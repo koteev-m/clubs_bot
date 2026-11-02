@@ -172,7 +172,7 @@ describe('simplified onboarding', () => {
     expect(screen.queryByLabelText('Комментарий')).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Создать заведение' }));
-    await screen.findByText('Непубличный');
+    await screen.findByText('Не опубликован');
     expect(screen.getByText('Бот не подключён')).toBeTruthy();
     const create = fetch.mock.calls.find(([path]) =>
       String(path).endsWith('/clubs'),
@@ -233,7 +233,7 @@ describe('simplified onboarding', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Повторить ту же операцию' }),
     );
-    await screen.findByText('Непубличный');
+    await screen.findByText('Не опубликован');
     const commands = fetch.mock.calls.filter(([path]) =>
       String(path).endsWith('/clubs'),
     );

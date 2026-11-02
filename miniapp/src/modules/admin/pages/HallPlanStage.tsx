@@ -20,18 +20,18 @@ export type HallPlanStageProps<Id extends LayoutId = number> = {
   tables: EditorTable<Id>[];
   selectedTableId: Id | null;
   readOnly?: boolean;
+  markerSize?: number;
   onSelectTable: (tableId: Id) => boolean | void;
   onCreateTable: (coords: { x: number; y: number }) => void;
   onMoveTable: (tableId: Id, coords: { x: number; y: number }) => void;
 };
-
-const markerSize = 28;
 
 export default function HallPlanStage<Id extends LayoutId = number>({
   planUrl,
   tables,
   selectedTableId,
   readOnly = false,
+  markerSize = 28,
   onSelectTable,
   onCreateTable,
   onMoveTable,
@@ -119,8 +119,8 @@ export default function HallPlanStage<Id extends LayoutId = number>({
   const handlePointerDown = useCallback(
     (event: PointerEvent<HTMLButtonElement>, table: EditorTable<Id>) => {
       event.stopPropagation();
-      if (onSelectTable(table.id) === false) return;
       if (readOnly) return;
+      if (onSelectTable(table.id) === false) return;
       if (typeof event.currentTarget.setPointerCapture === 'function') {
         try {
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -233,7 +233,7 @@ export default function HallPlanStage<Id extends LayoutId = number>({
   return (
     <div
       ref={containerRef}
-      className="relative w-full overflow-hidden rounded-lg bg-gray-100"
+      className={`relative w-full rounded-lg bg-gray-100 ${readOnly ? 'overflow-visible' : 'overflow-hidden'}`}
       style={{ aspectRatio: '16 / 9' }}
       onClick={handleStageClick}
       data-testid="hall-plan-stage"
@@ -254,11 +254,13 @@ export default function HallPlanStage<Id extends LayoutId = number>({
             key={table.id}
             type="button"
             data-testid={`table-marker-${table.id}`}
+            aria-label={`Стол ${table.tableNumber}: ${table.label}, мест: ${table.capacity}`}
+            aria-pressed={isSelected}
             className={`absolute flex h-7 w-7 items-center justify-center rounded-full border text-[10px] font-semibold shadow-sm transition ${
               isSelected
                 ? 'border-blue-500 bg-blue-600 text-white'
                 : 'border-white bg-white text-gray-700'
-            } ${readOnly ? 'cursor-default' : 'cursor-grab'} select-none`}
+            } ${readOnly ? 'cursor-pointer' : 'cursor-grab'} select-none`}
             style={{
               left: position.left - markerSize / 2,
               top: position.top - markerSize / 2,
@@ -270,7 +272,10 @@ export default function HallPlanStage<Id extends LayoutId = number>({
             onPointerMove={(event) => handlePointerMove(event, table)}
             onPointerUp={(event) => handlePointerUp(event, table)}
             onPointerCancel={(event) => handlePointerCancel(event, table)}
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (readOnly || event.detail === 0) onSelectTable(table.id);
+            }}
           >
             {table.tableNumber}
           </button>

@@ -16,6 +16,7 @@ import {
   mapValidationErrors,
 } from '../utils/adminErrors';
 import HallPlanStage from './HallPlanStage';
+import HallPlanViewer from './HallPlanViewer';
 import { EditorTable, HallEditorApi, LayoutId } from './layoutEditor.types';
 import { useUnsavedChanges } from '../../client/OnboardingShared';
 
@@ -32,6 +33,8 @@ type HallEditorScreenProps<Id extends LayoutId = number> = {
   hallId: Id;
   api?: HallEditorApi<Id>;
   readOnly?: boolean;
+  previewOnly?: boolean;
+  clientMode?: boolean;
   reportDirty?: (dirty: boolean) => void;
   onBackReady?: (back: () => void) => void;
   onBack: () => void;
@@ -52,6 +55,8 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
   onBack,
   api: suppliedApi,
   readOnly = false,
+  previewOnly = false,
+  clientMode = false,
   reportDirty,
   onBackReady,
 }: HallEditorScreenProps<Id>) {
@@ -420,29 +425,43 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
     onBackReady?.(back);
   }, [back, onBackReady]);
   const isReadOnly = previewMode || busy || readOnly;
+  const showPreview = previewMode || previewOnly;
 
   return (
     <div className="space-y-6 px-4 pb-8">
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          className="text-sm text-blue-600"
-          onClick={back}
-          disabled={busy}
-        >
-          ← Залы
-        </button>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {!clientMode && (
+          <button
+            type="button"
+            className="text-sm text-blue-600"
+            onClick={back}
+            disabled={busy}
+          >
+            ← Залы
+          </button>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
           {!readOnly && (
             <button
               type="button"
-              className="rounded border border-gray-200 px-3 py-1 text-xs text-gray-700"
+              className="ob-button"
               onClick={() => {
-                if (leave()) setPreviewMode((value) => !value);
+                if (!leave()) return;
+                if (selectedTable) {
+                  setForm({
+                    tableNumber: String(selectedTable.tableNumber),
+                    label: selectedTable.label,
+                    capacity: String(selectedTable.capacity),
+                  });
+                  setFieldErrors({});
+                }
+                setPreviewMode((value) => !value);
               }}
               disabled={busy}
             >
-              {previewMode ? 'Режим редактирования' : 'Режим превью'}
+              {previewMode
+                ? 'Вернуться к редактированию'
+                : 'Предпросмотр для гостя'}
             </button>
           )}
           <button
@@ -505,19 +524,40 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
         )}
         {planStatus === 'ready' && planUrl && (
           <div className="mt-4 space-y-3">
-            <HallPlanStage
-              planUrl={planUrl}
-              tables={tables}
-              selectedTableId={selectedTableId}
-              readOnly={isReadOnly}
-              onSelectTable={(tableId) => {
-                if (tableId !== selectedTableId && !leave()) return false;
-                setSelectedTableId(tableId);
-                return true;
-              }}
-              onCreateTable={handleCreateTable}
-              onMoveTable={handleMoveTable}
-            />
+            {showPreview ? (
+              tablesStatus === 'ready' ? (
+                <HallPlanViewer planUrl={planUrl} tables={tables} />
+              ) : tablesStatus === 'loading' ? (
+                <p className="text-sm text-gray-500" role="status">
+                  Загрузка столов…
+                </p>
+              ) : (
+                <div className="space-y-2 text-sm text-gray-600" role="alert">
+                  <p>{tablesError ?? 'Не удалось загрузить столы'}</p>
+                  <button
+                    type="button"
+                    className="text-blue-600"
+                    onClick={reload}
+                  >
+                    Повторить загрузку столов
+                  </button>
+                </div>
+              )
+            ) : (
+              <HallPlanStage
+                planUrl={planUrl}
+                tables={tables}
+                selectedTableId={selectedTableId}
+                readOnly={isReadOnly}
+                onSelectTable={(tableId) => {
+                  if (tableId !== selectedTableId && !leave()) return false;
+                  setSelectedTableId(tableId);
+                  return true;
+                }}
+                onCreateTable={handleCreateTable}
+                onMoveTable={handleMoveTable}
+              />
+            )}
             {!previewMode && !readOnly && (
               <label className="flex flex-col gap-2 text-sm text-gray-600">
                 <span className="text-xs text-gray-500">
@@ -540,168 +580,181 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
         )}
       </section>
 
-      <section className="rounded-lg bg-white p-4 shadow-sm">
-        <h2 className="text-base font-semibold text-gray-900">Столы</h2>
-        {tablesStatus === 'loading' && (
-          <p className="mt-4 text-sm text-gray-500">Загрузка...</p>
-        )}
-        {tablesStatus === 'error' && (
-          <div className="mt-4 space-y-2 text-sm text-gray-600">
-            <p>{tablesError ?? 'Не удалось загрузить столы'}</p>
-            <button
-              type="button"
-              className="text-blue-600"
-              onClick={() => {
-                if (leave()) reload();
-              }}
-              disabled={busy}
-            >
-              Повторить
-            </button>
-          </div>
-        )}
-        {tablesStatus === 'ready' && tables.length === 0 && (
-          <p className="mt-4 text-sm text-gray-500">Столов пока нет</p>
-        )}
-        {tablesStatus === 'ready' && tables.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {tables.map((table) => (
-              <button
-                key={table.id}
-                type="button"
-                className={`rounded border px-3 py-1 text-xs ${
-                  table.id === selectedTableId
-                    ? 'border-blue-500 bg-blue-50 text-blue-600'
-                    : 'border-gray-200 text-gray-600'
-                }`}
-                onClick={() => {
-                  if (leave()) setSelectedTableId(table.id);
-                }}
-                disabled={busy}
-              >
-                #{table.tableNumber} · {table.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="mt-6 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-gray-800">Выбранный стол</p>
-            {selectedTable && (
-              <button
-                type="button"
-                className="text-xs text-blue-600"
-                onClick={() => {
-                  if (leave()) handleClearSelection();
-                }}
-                disabled={busy}
-              >
-                Снять выделение
-              </button>
-            )}
-          </div>
-          {!selectedTable && (
-            <p className="text-sm text-gray-500">Выберите стол на плане.</p>
+      {!showPreview && (
+        <section className="rounded-lg bg-white p-4 shadow-sm">
+          <h2 className="text-base font-semibold text-gray-900">Столы</h2>
+          {tablesStatus === 'loading' && (
+            <p className="mt-4 text-sm text-gray-500">Загрузка...</p>
           )}
-          {selectedTable && (
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="table-number" className="text-sm text-gray-600">
-                  Номер
-                </label>
-                <input
-                  id="table-number"
-                  type="number"
-                  className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
-                  value={form.tableNumber}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      tableNumber: event.target.value,
-                    }))
-                  }
-                  disabled={isReadOnly}
-                />
-                {fieldErrors.tableNumber && (
-                  <p className="mt-1 text-xs text-red-500">
-                    {fieldErrors.tableNumber}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label htmlFor="table-label" className="text-sm text-gray-600">
-                  Название
-                </label>
-                <input
-                  id="table-label"
-                  className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
-                  value={form.label}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, label: event.target.value }))
-                  }
-                  disabled={isReadOnly}
-                />
-                {fieldErrors.label && (
-                  <p className="mt-1 text-xs text-red-500">
-                    {fieldErrors.label}
-                  </p>
-                )}
-              </div>
-              <div>
-                <label
-                  htmlFor="table-capacity"
-                  className="text-sm text-gray-600"
-                >
-                  Вместимость
-                </label>
-                <input
-                  id="table-capacity"
-                  type="number"
-                  className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
-                  value={form.capacity}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      capacity: event.target.value,
-                    }))
-                  }
-                  disabled={isReadOnly}
-                />
-                {fieldErrors.capacity && (
-                  <p className="mt-1 text-xs text-red-500">
-                    {fieldErrors.capacity}
-                  </p>
-                )}
-              </div>
-              {fieldErrors.payload && (
-                <p className="text-xs text-red-500">{fieldErrors.payload}</p>
-              )}
-              {!previewMode && !readOnly && (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                    onClick={handleSaveMetadata}
-                    disabled={busy}
-                  >
-                    Сохранить
-                  </button>
-                  {api.deleteHallTable && (
-                    <button
-                      type="button"
-                      className="rounded border border-red-200 px-4 py-2 text-sm text-red-600 disabled:opacity-50"
-                      onClick={handleDeleteTable}
-                      disabled={busy}
-                    >
-                      Удалить
-                    </button>
-                  )}
-                </div>
-              )}
+          {tablesStatus === 'error' && (
+            <div className="mt-4 space-y-2 text-sm text-gray-600">
+              <p>{tablesError ?? 'Не удалось загрузить столы'}</p>
+              <button
+                type="button"
+                className="text-blue-600"
+                onClick={() => {
+                  if (leave()) reload();
+                }}
+                disabled={busy}
+              >
+                Повторить
+              </button>
             </div>
           )}
-        </div>
-      </section>
+          {tablesStatus === 'ready' && tables.length === 0 && (
+            <p className="mt-4 text-sm text-gray-500">Столов пока нет</p>
+          )}
+          {tablesStatus === 'ready' && tables.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {tables.map((table) => (
+                <button
+                  key={table.id}
+                  type="button"
+                  className={`rounded border px-3 py-1 text-xs ${
+                    table.id === selectedTableId
+                      ? 'border-blue-500 bg-blue-50 text-blue-600'
+                      : 'border-gray-200 text-gray-600'
+                  }`}
+                  onClick={() => {
+                    if (leave()) setSelectedTableId(table.id);
+                  }}
+                  disabled={busy}
+                >
+                  #{table.tableNumber} · {table.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="mt-6 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-gray-800">
+                Выбранный стол
+              </p>
+              {selectedTable && (
+                <button
+                  type="button"
+                  className="text-xs text-blue-600"
+                  onClick={() => {
+                    if (leave()) handleClearSelection();
+                  }}
+                  disabled={busy}
+                >
+                  Снять выделение
+                </button>
+              )}
+            </div>
+            {!selectedTable && (
+              <p className="text-sm text-gray-500">Выберите стол на плане.</p>
+            )}
+            {selectedTable && (
+              <div className="space-y-3">
+                <div>
+                  <label
+                    htmlFor="table-number"
+                    className="text-sm text-gray-600"
+                  >
+                    Номер
+                  </label>
+                  <input
+                    id="table-number"
+                    type="number"
+                    className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
+                    value={form.tableNumber}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        tableNumber: event.target.value,
+                      }))
+                    }
+                    disabled={isReadOnly}
+                  />
+                  {fieldErrors.tableNumber && (
+                    <p className="mt-1 text-xs text-red-500">
+                      {fieldErrors.tableNumber}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label
+                    htmlFor="table-label"
+                    className="text-sm text-gray-600"
+                  >
+                    Название
+                  </label>
+                  <input
+                    id="table-label"
+                    className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
+                    value={form.label}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        label: event.target.value,
+                      }))
+                    }
+                    disabled={isReadOnly}
+                  />
+                  {fieldErrors.label && (
+                    <p className="mt-1 text-xs text-red-500">
+                      {fieldErrors.label}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label
+                    htmlFor="table-capacity"
+                    className="text-sm text-gray-600"
+                  >
+                    Вместимость
+                  </label>
+                  <input
+                    id="table-capacity"
+                    type="number"
+                    className="mt-1 w-full rounded border border-gray-200 px-3 py-2 text-sm"
+                    value={form.capacity}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        capacity: event.target.value,
+                      }))
+                    }
+                    disabled={isReadOnly}
+                  />
+                  {fieldErrors.capacity && (
+                    <p className="mt-1 text-xs text-red-500">
+                      {fieldErrors.capacity}
+                    </p>
+                  )}
+                </div>
+                {fieldErrors.payload && (
+                  <p className="text-xs text-red-500">{fieldErrors.payload}</p>
+                )}
+                {!previewMode && !readOnly && (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      onClick={handleSaveMetadata}
+                      disabled={busy}
+                    >
+                      Сохранить
+                    </button>
+                    {api.deleteHallTable && (
+                      <button
+                        type="button"
+                        className="rounded border border-red-200 px-4 py-2 text-sm text-red-600 disabled:opacity-50"
+                        onClick={handleDeleteTable}
+                        disabled={busy}
+                      >
+                        Удалить
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

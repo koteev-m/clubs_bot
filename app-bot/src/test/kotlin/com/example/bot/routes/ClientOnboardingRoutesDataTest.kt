@@ -1,41 +1,90 @@
 package com.example.bot.routes
 
-import com.example.bot.data.client.JdbcClientContextRepository
-import com.example.bot.data.client.onboarding.JdbcClientOnboardingRepository
-import com.example.bot.plugins.installJsonErrorPages
-import com.example.bot.webapp.TEST_BOT_TOKEN
-import com.example.bot.webapp.WebAppInitDataTestHelper
-import io.ktor.client.request.header
-import io.ktor.client.request.request
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
-import io.ktor.serialization.kotlinx.json.json
-import io.ktor.server.application.install
-import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.server.testing.ApplicationTestBuilder
-import io.ktor.server.testing.testApplication
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import org.flywaydb.core.Flyway
-import org.h2.jdbcx.JdbcDataSource
 import org.junit.jupiter.api.Test
 import java.net.URI
 import java.time.Duration
 import java.time.Instant
-import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class ClientOnboardingRoutesDataTest {
+open class ClientOnboardingRoutesDataTest : ClientOnboardingRoutesTestBase() {
+    @Test
+    fun `owner can archive only empty clients filter and restore without reviving revoked access`() =
+        database { source ->
+            withApp(source) {
+                val issued =
+                    ok(
+                        P + "/invitations",
+                        OWNER,
+                        obj(
+                            "clientName" to "Archive",
+                            "recipientLabel" to "Recipient",
+                        ),
+                    )
+                val clientId = issued.string("clientId")
+                val before = ok(P + "/clients/$clientId", OWNER)
+                requestAs(P + "/clients/$clientId/archive", FOREIGN, version(before))
+                    .assertClientError(HttpStatusCode.Forbidden, "forbidden")
+                requestAs(P + "/clients/$clientId/archive", OWNER, version(before))
+                    .assertClientError(HttpStatusCode.Conflict, "client_not_empty")
+                ok(
+                    C + "/invitations/${issued.string("id")}/claim",
+                    RECIPIENT,
+                    obj("token" to issued.string("token"), "expectedVersion" to issued.string("version")),
+                )
+                val active = ok(P + "/clients/$clientId", OWNER)
+                val member =
+                    active
+                        .getValue("members")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                ok(P + "/clients/$clientId/members/${member.string("userId")}/revoke", OWNER, version(member))
+                val revoked = ok(P + "/clients/$clientId", OWNER)
+                assertEquals(JsonPrimitive(true), revoked["active"])
+                assertEquals(JsonPrimitive(0L), revoked["activeMembers"])
+                val archived =
+                    ok(P + "/clients/$clientId/archive", OWNER, version(revoked), key = "archive-http-lost-response")
+                assertEquals(JsonPrimitive(true), archived["archived"])
+                assertEquals(
+                    archived,
+                    ok(P + "/clients/$clientId/archive", OWNER, version(revoked), key = "archive-http-lost-response"),
+                )
+                assertTrue(ok(P + "/clients/search", OWNER, obj()).getValue("items").jsonArray.isEmpty())
+                assertEquals(
+                    1,
+                    ok(P + "/clients/search", OWNER, obj("status" to "archived")).getValue("items").jsonArray.size,
+                )
+                requestAs(C + "/clients/$clientId/onboarding", RECIPIENT)
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                requestAs(C + "/invitations/resolve", RECIPIENT, obj("token" to issued.string("token")))
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                requestAs(P + "/clients/$clientId/restore", OWNER, version(revoked))
+                    .assertClientError(HttpStatusCode.Conflict, "version_conflict")
+                val restored = ok(P + "/clients/$clientId/restore", OWNER, version(archived))
+                assertEquals(JsonPrimitive(false), restored["archived"])
+                assertEquals(JsonPrimitive(0L), restored["activeMembers"])
+                requestAs(C + "/clients/$clientId/onboarding", RECIPIENT)
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_memberships WHERE is_active=FALSE"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_invitations"))
+                val summary = ok(P + "/summary", OWNER)
+                assertEquals(JsonPrimitive(1L), summary["clients"])
+                assertEquals(JsonPrimitive(0L), summary["activeMembers"])
+                assertTrue(ok(P + "/clubs/search", OWNER, obj()).getValue("items").jsonArray.isEmpty())
+                requestAs(P + "/summary", FOREIGN).assertClientError(HttpStatusCode.Forbidden, "forbidden")
+                requestAs(P + "/clubs/search", FOREIGN, obj()).assertClientError(HttpStatusCode.Forbidden, "forbidden")
+            }
+        }
+
     @Test
     fun `one action accepts invitation and direct creation enforces owner managed client limit`() =
         database { source ->
@@ -323,7 +372,7 @@ class ClientOnboardingRoutesDataTest {
                     )
                 assertEquals(profile, repeat)
                 assertEquals(profile, ok(C + "/applications/$applicationId/club", RECIPIENT, version(approved)))
-                assertEquals("FALSE", source.scalar("SELECT is_active FROM clubs WHERE id=$clubId"))
+                assertEquals("1", source.scalar("SELECT COUNT(*) FROM clubs WHERE id=$clubId AND is_active=FALSE"))
                 assertEquals("1", source.scalar("SELECT COUNT(*) FROM client_club_onboarding"))
                 assertEquals("Synthetic Street 1", profile.string("address"))
                 requestAs(C + "/clubs/$clubId/profile", FOREIGN).assertClientError(HttpStatusCode.NotFound, "not_found")
@@ -516,127 +565,4 @@ class ClientOnboardingRoutesDataTest {
                 )
             }
         }
-
-    private fun database(block: (JdbcDataSource) -> Unit) {
-        val source =
-            JdbcDataSource().apply {
-                setURL(
-                    "jdbc:h2:mem:onboarding_api_${UUID.randomUUID()};" +
-                        "MODE=PostgreSQL;DATABASE_TO_UPPER=false;DB_CLOSE_DELAY=-1",
-                )
-                user = "sa"
-                password = ""
-            }
-        Flyway
-            .configure()
-            .dataSource(
-                source,
-            ).locations("classpath:db/migration/common", "classpath:db/migration/h2")
-            .load()
-            .migrate()
-        try {
-            block(source)
-        } finally {
-            source.connection.use { it.createStatement().use { statement -> statement.execute("SHUTDOWN") } }
-        }
-    }
-
-    private fun withApp(
-        source: JdbcDataSource,
-        block: suspend ApplicationTestBuilder.() -> Unit,
-    ) = testApplication {
-        application {
-            install(ContentNegotiation) { json() }
-            installJsonErrorPages()
-            clientOnboardingRoutes(
-                JdbcClientContextRepository(source),
-                JdbcClientOnboardingRepository(source, OWNER),
-                "synthetic_bot",
-                OWNER,
-            ) {
-                TEST_BOT_TOKEN
-            }
-        }
-        block()
-    }
-
-    private suspend fun ApplicationTestBuilder.requestAs(
-        path: String,
-        user: Long,
-        body: JsonObject? = null,
-        method: HttpMethod = if (body == null) HttpMethod.Get else HttpMethod.Post,
-        key: String = UUID.randomUUID().toString(),
-    ): HttpResponse =
-        client.request(path) {
-            this.method = method
-            header("X-Telegram-Init-Data", signed(user))
-            if (body != null) {
-                header("Content-Type", "application/json")
-                header("Idempotency-Key", key)
-                setBody(body.toString())
-            }
-        }
-
-    private suspend fun ApplicationTestBuilder.ok(
-        path: String,
-        user: Long,
-        body: JsonObject? = null,
-        method: HttpMethod = if (body == null) HttpMethod.Get else HttpMethod.Post,
-        key: String = UUID.randomUUID().toString(),
-    ): JsonObject {
-        val response = requestAs(path, user, body, method, key)
-        val text = response.bodyAsText()
-        assertEquals(HttpStatusCode.OK, response.status, text)
-        assertEquals("no-store", response.headers["Cache-Control"])
-        return Json.parseToJsonElement(text).jsonObject
-    }
-
-    private fun signed(user: Long): String =
-        WebAppInitDataTestHelper.createInitData(
-            TEST_BOT_TOKEN,
-            mapOf(
-                "user" to WebAppInitDataTestHelper.encodeUser(user),
-                "auth_date" to Instant.now().epochSecond.toString(),
-                "start_param" to "ci_" + "s".repeat(43),
-            ),
-        )
-
-    private fun obj(vararg pairs: Pair<String, String>) =
-        JsonObject(
-            pairs.associate {
-                it.first to
-                    JsonPrimitive(it.second)
-            },
-        )
-
-    private fun JsonObject.string(name: String) = getValue(name).jsonPrimitive.content
-
-    private fun version(value: JsonObject) = obj("expectedVersion" to value.string("version"))
-
-    private fun venue() =
-        obj(
-            "venueName" to "Synthetic Venue",
-            "countryCode" to "RU",
-            "city" to "Synthetic City",
-            "address" to "Synthetic Street 1",
-            "timezone" to "Europe/Moscow",
-        )
-
-    private fun JdbcDataSource.scalar(sql: String): String =
-        connection.use { connection ->
-            connection.createStatement().use { statement ->
-                statement.executeQuery(sql).use { rows ->
-                    check(rows.next())
-                    rows.getString(1)
-                }
-            }
-        }
-
-    private companion object {
-        const val P = "/api/platform/onboarding"
-        const val C = "/api/client"
-        const val OWNER = 998101L
-        const val RECIPIENT = 998102L
-        const val FOREIGN = 998103L
-    }
 }

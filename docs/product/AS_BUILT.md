@@ -1,5 +1,28 @@
 # AS_BUILT: repository snapshot
 
+## Bounded local refresh: owner UX and saved layout preview, 2026-11-02
+
+Local candidate from `ab8bfaa6bbb80c1fd5fa6c91ffdb2ca12ba7e729`, branch
+`codex/owner-ux-map`, isolated copy `/private/tmp/clubs-owner-ux-map-20261102`.
+This is source wiring evidence, not a deployed revision. Accepted boundary:
+[PRODUCT_SPEC §29.13](PRODUCT_SPEC.md#owner-ux-and-map).
+
+- Owner summary and mapped clubs use separate exact-owner reads. Organization
+  archive uses paired V066, lifecycle version, durable command/audit transaction,
+  fresh emptiness checks and shared client lock. Archived clients are excluded
+  from authority and invitation acceptance; restore does not restore grants.
+- React owner navigation now has three real sections. The shared cabinet Shell
+  scrolls content separately from bottom navigation, handles current Telegram
+  viewport and safe-area; a single accessible club opens directly with an
+  explicit organization path. User access and organization states are labelled
+  separately. Private clubs say «Не опубликован» with the guest/booking boundary.
+- HallPlanViewer reuses HallPlanStage and the canonical saved layout/image; table
+  tap/list opens saved number/name/capacity, with 44px markers and 100–300% zoom.
+  It has no mutation API or guest publication. Access-loss removes private UI.
+
+Current checks, review and unverified device/runtime boundaries are recorded in
+[PROJECT_STATUS](../ops/PROJECT_STATUS.md); earlier evidence below is historical.
+
 <a id="client-layout-local"></a>
 ## Bounded local refresh: client club layout, 2026-10-31
 

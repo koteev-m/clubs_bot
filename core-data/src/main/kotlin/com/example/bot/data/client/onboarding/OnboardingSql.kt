@@ -160,11 +160,16 @@ internal class OnboardingSession(
         lock: Boolean = false,
     ): DbRow = sql.row("SELECT * FROM clients WHERE id=?" + if (lock) " FOR UPDATE" else "", id) ?: fail("not_found")
 
+    fun requireUnarchived(clientId: Long) {
+        if (client(clientId)["archived_at"] != null) fail("not_found")
+    }
+
     fun member(
         clientId: Long,
         memberId: Long = userId ?: fail("not_found"),
         manage: Boolean = true,
     ): DbRow {
+        requireUnarchived(clientId)
         if (!client(clientId).active()) fail("not_found")
         val member =
             sql

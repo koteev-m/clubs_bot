@@ -85,6 +85,10 @@ private fun Route.platformInvitationEndpoints(api: OnboardingHttp) {
     post("/invitations/{id}/confirm") { api.mutate(call, OnboardingMutation.INVITATION_CONFIRM, "id") }
     post("/invitations/{id}/revoke") { api.mutate(call, OnboardingMutation.INVITATION_REVOKE, "id") }
     post("/invitations/{id}/reissue") { api.mutate(call, OnboardingMutation.INVITATION_REISSUE, "id") }
+    get("/summary") { api.read(call, OnboardingRead.PLATFORM_SUMMARY) }
+    post("/clubs/search") { api.read(call, OnboardingRead.PLATFORM_CLUB_SEARCH, body = true) }
+    post("/clients/{id}/archive") { api.mutate(call, OnboardingMutation.CLIENT_ARCHIVE, "id") }
+    post("/clients/{id}/restore") { api.mutate(call, OnboardingMutation.CLIENT_RESTORE, "id") }
     post("/clients/search") { api.read(call, OnboardingRead.PLATFORM_CLIENT_SEARCH, body = true) }
     get("/clients/{id}") { api.read(call, OnboardingRead.PLATFORM_CLIENT_GET, "id") }
     post("/clients/{id}/limit") { api.mutate(call, OnboardingMutation.CLIENT_LIMIT_UPDATE, "id") }
@@ -220,6 +224,7 @@ private val conflictCodes =
         ErrorCodes.INVALID_TRANSITION,
         ErrorCodes.idempotency_conflict,
         ErrorCodes.DUPLICATE_APPLICATION,
+        "client_not_empty",
         "club_limit_unset",
         "club_limit_reached",
         "club_limit_below_usage",

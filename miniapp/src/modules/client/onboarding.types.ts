@@ -41,6 +41,12 @@ export interface ClubProfile {
   availableActions: string[];
 }
 export interface ClientSummary {
+  archived?: boolean;
+  archivedAt?: string | null;
+  version?: string;
+  activeMembers?: number;
+  archiveBlockers?: string[];
+  availableActions?: string[];
   limitVersion?: string;
   allowedClubs?: number | null;
   createdClubs?: number;
@@ -49,6 +55,15 @@ export interface ClientSummary {
   name: string;
   active?: boolean;
   clubs?: Club[];
+}
+export interface PlatformClub {
+  id: string;
+  name: string;
+  clientId: string;
+  clientName: string;
+  published: boolean;
+  clientActive: boolean;
+  clientArchived: boolean;
 }
 export interface Membership {
   userId: string;

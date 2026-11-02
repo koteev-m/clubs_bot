@@ -29,10 +29,18 @@ test('server-confirmed owner can navigate both real screens without invitation e
     );
     expect(new URL(request.url()).search).toBe('');
     const access = new URL(request.url()).pathname === '/api/platform/access';
-    if (access) expect(request.postData()).toBeNull();
-    else expect(request.postDataJSON()).toEqual({ limit: 50 });
+    expect(request.method()).toBe('GET');
+    expect(request.postData()).toBeNull();
     await route.fulfill({
-      json: access ? { platformOwner: true } : { items: [], nextCursor: null },
+      json: access
+        ? { platformOwner: true }
+        : {
+            clients: 0,
+            archivedClients: 0,
+            clubs: 0,
+            activeMembers: 0,
+            openInvitations: 0,
+          },
     });
   });
   await page.goto(
@@ -50,9 +58,7 @@ test('server-confirmed owner can navigate both real screens without invitation e
   await expect(
     page.getByRole('heading', { name: 'Пригласить клиента' }),
   ).toBeVisible();
-  await expect(
-    page.getByLabel('Название клиентского пространства'),
-  ).toBeVisible();
+  await expect(page.getByLabel('Название клиента или компании')).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Создать ссылку' }),
   ).toBeVisible();
@@ -74,7 +80,7 @@ test('server-confirmed owner can navigate both real screens without invitation e
     requests.every((value) =>
       [
         'GET /api/platform/access',
-        'POST /api/platform/onboarding/applications/search',
+        'GET /api/platform/onboarding/summary',
       ].includes(value),
     ),
   ).toBe(true);

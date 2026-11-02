@@ -950,3 +950,50 @@ migration/persistence/idempotency/rollback/concurrency/revoke, frontend/browser,
 TypeScript/ESLint, JVM/static и packaged Mini App gates. Принятие контракта не
 доказывает прохождение этих проверок или runtime; локальное evidence фиксируется
 в [техническом отчёте](../ops/client-club-layout.md).
+
+<a id="owner-ux-and-map"></a>
+### 29.13. Кабинет платформы, архив пустой организации и предпросмотр — принято 2026-11-02
+
+Прямое указание владельца разрешает локальное исправление кабинетов от
+`main ab8bfaa6bbb80c1fd5fa6c91ffdb2ca12ba7e729`, без нового decision/card ID.
+«Обзор» показывает подтверждённую сводку и действия; «Клубы» — отдельный список
+сохранённых mapped заведений с организациями и состоянием публичности;
+«Доступы» — организации, пользователи, приглашения, отзыв/восстановление точных
+полномочий. Несуществующий раздел настроек не выводится как действующий пункт.
+Статус организации отделён от пользовательского доступа. Read, profile.write и
+layout.write имеют разные подписи; exact platform-owner authority не меняется.
+
+Архивирование — обратимое независимое состояние `clients.archived_at` с
+`lifecycle_version`, а не изменение onboarding `is_active`. Только exact owner
+может архивировать клиента без любых связанных заведений, активных memberships
+или grants и неистёкших приглашений issued/claimed. История, audit, пользователи,
+приглашения и приложения сохраняются; физического DELETE нет. Восстановление
+организации не восстанавливает отозванные права, не обновляет сроки и состояния
+приглашений. Архивный клиент не авторизует чтение/запись и не принимает старые
+приглашения. Проверки и все конкурирующие writers используют общий client row lock.
+
+Owner API: `GET /api/platform/onboarding/summary`,
+`POST /api/platform/onboarding/clubs/search` (cursor/limit),
+`POST /api/platform/onboarding/clients/search` с фильтром `status`:
+`active` (default, все вне архива, включая ожидающие), `archived`, `all`.
+Client summary/detail дополнены archived/archivedAt/version/activeMembers,
+archiveBlockers и availableActions. `POST .../clients/{id}/archive|restore`
+требует expectedVersion и Idempotency-Key; mutation, durable command и audit
+атомарны. Конфликты возвращаются в существующем error envelope.
+
+На iPhone нижняя панель находится вне прокручиваемого содержимого, учитывает
+текущую высоту Telegram viewport и safe-area. Telegram BackButton, экранный Back и
+Browser Back/Forward сохраняются; внутренние дубли Back убраны. При одном клиенте
+и одном доступном клубе вход сразу открывает клуб с явным переходом к организации
+и другим заведениям; несколько клиентов/клубов сохраняют выбор. Private-клуб
+подписан «Не опубликован»: пока недоступен гостям и для бронирования.
+«Бот не подключён» остаётся фактическим состоянием.
+
+«Предпросмотр для гостя» доступен только внутри авторизованного layout-кабинета.
+Переиспользует HallPlanStage, текущие layout API/storage, нормализованные координаты
+и сохранённые номер/название/вместимость стола. Touch targets не менее 44px,
+масштабирование и список столов обеспечивают мобильный выбор. Предпросмотр не
+создаёт booking/HOLD, не рассчитывает доступность и не открывает private данные
+гостю. Guest API, публикация, Managed Bots, платежи, календарь и сотрудники остаются
+за пределами задачи. Проверки и ограничения — в текущем repository checkpoint;
+локальная готовность не доказывает runtime или реальный iPhone.

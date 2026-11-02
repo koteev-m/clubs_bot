@@ -1,5 +1,71 @@
 # Project status checkpoint
 
+## Owner UX and saved map preview — local candidate, 2026-11-02
+
+- Scope: direct owner instruction, no new card/decision ID. Exact base/HEAD
+  `ab8bfaa6bbb80c1fd5fa6c91ffdb2ca12ba7e729`, branch `codex/owner-ux-map`, isolated
+  local copy `/private/tmp/clubs-owner-ux-map-20261102`, origin `koteev-m/clubs_bot`.
+  The original checkout remains on `e83f80609b7e1534043c7d05a399ff05524223f5` with
+  its pre-existing `AGENTS.md`/checkpoint edits; existing copies were preserved.
+- Result: three real platform sections, truthful organization/user/publication
+  statuses and permission labels, mobile viewport/safe-area navigation and Back,
+  direct single-club entry with organization path, reversible empty-client archive,
+  saved-table interactive read-only preview (44px markers, contain coordinates,
+  100–300% zoom/list/card). Canonical layout storage/API reused; no guest API,
+  booking/HOLD, club publication, Managed Bots, payments, calendar or staff setup.
+- Archive contract: independent archived_at/lifecycle_version; exact owner only;
+  no club mappings, active memberships/grants or live invitations; client row lock,
+  expected version, durable idempotency and atomic audit. Restore changes only the
+  organization archive state. History is retained. Paired V066 preserves existing
+  rows. [Accepted scope](../product/PRODUCT_SPEC.md#owner-ux-and-map),
+  [bounded source wiring](../product/AS_BUILT.md).
+- Verified frontend: all Vitest 268/268; TypeScript and zero-warning ESLint; build
+  and Mini App dist validator. Packaged mobile Chromium/WebKit: owner 6/6 and map
+  2/2; existing owner WebKit 8/8; existing packaged onboarding WebKit 10/10 (8
+  unchanged scenarios plus 2 affected rechecks). Scroll, 320/390/430px widths,
+  540/620/844px heights, simulated Telegram resize/Back and safe-area, Browser
+  Back/Forward, table image/tap/zoom/coordinates/reentry and access-loss checked.
+- Verification errors corrected: archive/navigation test mocks updated for their
+  actual endpoints; same-document preview reentry explicitly reloads the fixture;
+  old onboarding assertions now expect direct single-club entry and inspect the
+  real .po-main scroll container. No test/gate suppression. pnpm frozen install
+  reused exact lockfile; an ignored esbuild lifecycle script was not approved or
+  configured, and installed binary successfully built the app. Dependency bytes
+  and lockfile unchanged. Build retains existing size/Browserslist warnings.
+- Verified backend: H2 onboarding repository 81/81, PostgreSQL16 repository
+  88/88; Ktor exact-owner auth 15/15, real JDBC routes H2 7/7 and PostgreSQL 7/7;
+  fresh/65→66 migration preservation, audit rollback, version/idempotency and
+  claim/reissue/member-restore/club-create races PASS. Updated context fixtures:
+  H2 10/10, read-boundary 4/4, PostgreSQL 16/16, affected static PASS. Historical
+  V061 schema/metadata/constraint checks are retained; only current read scenarios
+  explicitly migrate before their snapshots. No missing-column failure is waived.
+- Verdict: **OWNER_UX_AND_MAP_READY**. Final command
+  `./gradlew test detektGate ktlintCheck coverageGate verifyResolvedProductionDependencyGraph :app-bot:installDist :app-bot:checkLogsPolicy --no-build-cache --continue`
+  PASS, exit 0, 1m 3s. JVM XML totals: **1381 tests, 0 failures/errors, 1 existing
+  disabled GuestFlowStartTest**; no new skip. Full ktlint, detekt report-integrity,
+  coverage, resolved production dependencies, logs policy and distribution gates
+  passed. Packaged app-bot.jar React entry and every asset equal final dist bytes.
+  Initial stale absolute-path cache reports and the corrected fixture failures
+  remain in evidence; no source formatting, baseline or gate was relaxed for them.
+  Focused independent review found no blocking authority/data/mobile findings;
+  active-tab duplicate history entry was fixed and rechecked. Production manifest
+  SHA-256 at review: `54bde043cd8884a6f0d7b0500eca1e36311e36c2596b70a79c508521de2233f2`.
+- Device/runtime boundary: real iPhone/Telegram app, deployed revision, shared DB
+  migrations and stage/prod remain unverified. No commit, push, PR, merge, dispatch,
+  deploy, SSH, real-data SQL, Telegram or server-secret change is authorized or done.
+- Changed surfaces: owner routes and client context/onboarding repositories;
+  new ClientLifecycleOperations and paired V066; client PlatformOnboarding,
+  ClientAccess, ClubProfile, OnboardingShared, API types/errors; owner screens/CSS;
+  ClubLayout, ClubHallsScreen, HallEditorScreen, HallPlanStage and new HallPlanViewer;
+  focused H2/PG/Ktor/frontend/browser tests/configs, rebuilt Mini App dist and these
+  product/checkpoint docs. Full path/hash inventory and complete candidate patch:
+  `/private/tmp/owner-ux-evidence/`; detailed DB XML remains under
+  `/private/tmp/owner-ux-backend-resolved/`, `/private/tmp/owner-ux-backend-pg/` and
+  `/private/tmp/owner-ux-client-context-final/`. Task-owned PostgreSQL was removed
+  only after its exact name/ownership-label verification; no other container touched.
+- Local Draft PR candidate is ready; nothing is committed or published.
+  One next step: separately authorize Draft PR publication from this exact candidate.
+
 ## PR #559 Lint: visudo provider compatibility — local, 2026-10-31
 
 - **Publication continuation; full local selfcheck UNVERIFIED**. Test-only fix on PR head

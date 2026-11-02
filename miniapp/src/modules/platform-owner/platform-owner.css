@@ -4,11 +4,12 @@
   --po-line: #2e3b3d;
   --po-muted: #a9b8b9;
   --po-accent: #d5f58b;
-  min-height: 100vh;
-  min-height: var(--tg-viewport-stable-height, 100svh);
+  height: 100vh;
+  height: var(--po-viewport-height, var(--tg-viewport-height, 100dvh));
+  overflow: hidden;
   background: var(--po-bg);
   color: #f4f5ef;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.5;
   color-scheme: dark;
@@ -31,12 +32,16 @@
   outline: none;
 }
 .po-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   max-width: 480px;
   margin: 0 auto;
   padding-left: max(20px, env(safe-area-inset-left, 0px));
   padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
 .po-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -75,7 +80,18 @@
   white-space: nowrap;
 }
 .po-main {
-  padding-bottom: 24px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-bottom: calc(
+    24px +
+      max(
+        env(safe-area-inset-bottom, 0px),
+        var(--tg-safe-area-inset-bottom, 0px)
+      ) +
+      var(--tg-content-safe-area-inset-bottom, 0px)
+  );
 }
 .po-eyebrow {
   color: var(--po-accent);
@@ -105,6 +121,8 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
   padding: 14px 0;
   border-top: 1px solid var(--po-line);
   border-bottom: 1px solid var(--po-line);
@@ -237,8 +255,10 @@
   margin-top: 18px;
 }
 .po-nav {
+  flex-shrink: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
   background: var(--po-bg);
   border-top: 1px solid var(--po-line);
   padding-top: 12px;

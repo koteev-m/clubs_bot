@@ -65,7 +65,7 @@ class JdbcClientContextRepository(
                     JOIN clubs k ON k.id = mapping.club_id
                     WHERE g.is_active = TRUE AND g.permission_code = ?$clubRestriction
                 ) authorized ON authorized.client_id = c.id AND authorized.user_id = u.id
-                WHERE u.telegram_user_id = ? AND c.is_active = TRUE AND m.is_active = TRUE
+                WHERE u.telegram_user_id = ? AND c.is_active = TRUE AND c.archived_at IS NULL AND m.is_active = TRUE
                 $clientRestriction$detailRestriction
                 ORDER BY c.id, authorized.club_id
                 """.trimIndent()

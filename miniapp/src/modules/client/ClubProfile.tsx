@@ -118,6 +118,7 @@ export default function ClubProfile({
       title={profile?.name ?? 'Профиль клуба'}
       subtitle="Профиль заведения"
       back={back}
+      backLabel="Организация и другие заведения"
     >
       <RemoteState {...remote} />
       {profile && fields && !remote.loading && (
@@ -126,8 +127,11 @@ export default function ClubProfile({
             <span>
               Организация: <strong>{profile.clientName}</strong>
             </span>
-            <span className="po-context-badge">Непубличный</span>
+            <span className="po-context-badge">Не опубликован</span>
           </div>
+          <p className="po-muted">
+            Заведение пока недоступно гостям и для бронирования.
+          </p>
           <p className="po-notice">Бот не подключён</p>
           <p className="po-muted">
             Night Concierge открывает доступ к платформе. Отдельный
@@ -277,9 +281,6 @@ export default function ClubProfile({
         </>
       )}
       <CommandState command={command} refresh={refresh} />
-      <button className="ob-button" onClick={back}>
-        В «Мои клубы»
-      </button>
     </Shell>
   );
 }
