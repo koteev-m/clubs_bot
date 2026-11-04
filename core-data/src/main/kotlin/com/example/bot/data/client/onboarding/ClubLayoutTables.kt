@@ -1,117 +1,254 @@
 package com.example.bot.data.client.onboarding
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import java.math.BigDecimal
 
-/** Mutations stay on the caller's authorized, locked transaction and hall. */
+/** The caller owns the authorized client and club locks before table operations. */
 internal class ClubLayoutTables(
     private val session: OnboardingSession,
 ) {
     private val sql get() = session.sql
 
     fun create(
+        clubId: Long,
         hallId: Long,
+        operation: OnboardingMutation,
         body: JsonObject,
-    ): Long {
-        body.only(TABLE_FIELDS + listOf("hallId", "expectedVersion"))
-        val fields = tableFields(body)
-        requireTableNumber(hallId, fields.number)
+    ): List<Long> {
+        val drafts =
+            if (operation == OnboardingMutation.CLUB_TABLE_BATCH_CREATE) {
+                batch(body)
+            } else {
+                body.only(TABLE_FIELDS + HALL_FIELDS)
+                listOf(
+                    TableDraft(
+                        body.tableNumber("tableNumber"),
+                        body.text("label", LABEL_LIMIT, required = true),
+                        body.capacity(MAX_BOOKING_CAPACITY),
+                        body.deposit(),
+                        body.position(),
+                    ),
+                )
+            }
+        drafts.forEach { requireFreeNumber(clubId, it.number) }
         val zone =
             sql.row("SELECT zone_id FROM hall_zones WHERE hall_id=? ORDER BY sort_order,id LIMIT 1", hallId)
                 ?: fail("not_found")
-        return sql.insert(
-            "INSERT INTO hall_tables(hall_id,table_number,label,capacity,zone_id,x,y,created_at,updated_at) " +
-                "VALUES (?,?,?,?,?,?,?,?,?)",
-            hallId,
-            fields.number,
-            fields.label,
-            fields.capacity,
-            zone.getValue("zone_id"),
-            fields.x,
-            fields.y,
-            session.now,
-            session.now,
-        )
+        return drafts.map { insert(clubId, hallId, checkNotNull(zone["zone_id"]), it) }
     }
 
     fun update(
+        clubId: Long,
         hallId: Long,
         body: JsonObject,
     ): Long {
-        body.only(TABLE_FIELDS + listOf("hallId", "tableId", "expectedVersion"))
-        if (TABLE_FIELDS.none { body.containsKey(it) }) fail("validation_error")
-        val tableId = body.id("tableId")
-        val existing =
-            sql.row("SELECT * FROM hall_tables WHERE id=? AND hall_id=? AND is_active=TRUE", tableId, hallId)
+        body.only(TABLE_FIELDS + HALL_FIELDS + "tableId")
+        if (TABLE_FIELDS.none { it in body }) fail("validation_error")
+        val id = body.id("tableId")
+        val old =
+            sql.row("SELECT * FROM hall_tables WHERE id=? AND hall_id=? AND is_active=TRUE", id, hallId)
                 ?: fail("not_found")
-        val fields = tableFields(JsonObject(ClubLayoutViews(sql).table(existing) + body))
-        requireTableNumber(hallId, fields.number, tableId)
-        sql.update(
-            "UPDATE hall_tables SET table_number=?,label=?,capacity=?,x=?,y=?,updated_at=? WHERE id=? AND hall_id=?",
-            fields.number,
-            fields.label,
-            fields.capacity,
-            fields.x,
-            fields.y,
-            session.now,
-            tableId,
-            hallId,
-        )
-        return tableId
+        val bookingId = old["booking_table_id"]?.toLong()
+        val number = if ("tableNumber" in body) body.tableNumber("tableNumber") else old.long("table_number").toInt()
+        val label =
+            if ("label" in
+                body
+            ) {
+                body.text("label", LABEL_LIMIT, required = true)
+            } else {
+                checkNotNull(old["label"])
+            }
+        val maxCapacity = if (bookingId == null) MAX_LEGACY_CAPACITY else MAX_BOOKING_CAPACITY
+        val capacity = if ("capacity" in body) body.capacity(maxCapacity) else old.long("capacity").toInt()
+        if (number.toLong() != old.long("table_number")) requireFreeNumber(clubId, number, id, bookingId)
+        if (bookingId == null) {
+            if ("minDeposit" in body) fail("table_link_required")
+            sql.update("UPDATE hall_tables SET table_number=?,capacity=? WHERE id=?", number, capacity, id)
+        } else {
+            updateBooking(clubId, bookingId, number, capacity, body)
+        }
+        updateLayout(id, hallId, old, label, body)
+        return id
     }
 
-    private fun requireTableNumber(
+    private fun batch(body: JsonObject): List<TableDraft> {
+        body.only(HALL_FIELDS + listOf("tableNumbers", "capacity"))
+        val values = body["tableNumbers"] as? JsonArray ?: fail("validation_error")
+        if (values.size !in 1..MAX_BATCH) fail("validation_error")
+        val numbers = values.map { positiveNumber(it as? JsonPrimitive) }
+        if (numbers.toSet().size != numbers.size) fail("table_number_conflict")
+        val capacity = body.capacity(MAX_BOOKING_CAPACITY)
+        return numbers.map { TableDraft(it, "Стол $it", capacity, BigDecimal.ZERO, null) }
+    }
+
+    private fun insert(
+        clubId: Long,
         hallId: Long,
-        number: Int,
-        excluded: Long = 0,
-    ) {
-        if (sql.row(
-                "SELECT id FROM hall_tables WHERE hall_id=? AND table_number=? AND is_active=TRUE AND id<>?",
-                hallId,
-                number,
-                excluded,
-            ) !=
-            null
-        ) {
-            fail("table_number_conflict")
-        }
-    }
-
-    private fun tableFields(body: JsonObject): LayoutTableFields {
-        fun integer(key: String): Int =
-            (body[key] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull ?: fail("validation_error")
-
-        fun coordinate(key: String): Double {
-            val value =
-                (body[key] as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull ?: fail("validation_error")
-            if (!value.isFinite() || value !in 0.0..1.0) fail("validation_error")
-            return value
-        }
-        val number = integer("tableNumber")
-        val capacity = integer("capacity")
-        if (number <= 0 || capacity !in 1..MAX_CAPACITY) fail("validation_error")
-        return LayoutTableFields(
-            number,
-            body.text("label", LABEL_LIMIT, required = true),
-            capacity,
-            coordinate("x"),
-            coordinate("y"),
+        zone: String,
+        draft: TableDraft,
+    ): Long {
+        val bookingId =
+            sql.insert(
+                "INSERT INTO tables(club_id,table_number,capacity,min_deposit,active) VALUES (?,?,?,?,FALSE)",
+                clubId,
+                draft.number,
+                draft.capacity,
+                draft.deposit,
+            )
+        return sql.insert(
+            "INSERT INTO hall_tables(hall_id,table_number,label,capacity,zone_id,x,y,is_placed," +
+                "booking_table_id,booking_club_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            hallId,
+            draft.number,
+            draft.label,
+            draft.capacity,
+            zone,
+            draft.position?.x ?: LEGACY_COORDINATE,
+            draft.position?.y ?: LEGACY_COORDINATE,
+            draft.position != null,
+            bookingId,
+            clubId,
+            session.now,
+            session.now,
         )
     }
+
+    private fun updateBooking(
+        clubId: Long,
+        bookingId: Long,
+        number: Int,
+        capacity: Int,
+        body: JsonObject,
+    ) {
+        // The FK updates the layout projection when its authoritative booking fields change.
+        if ("minDeposit" in body) {
+            sql.update(
+                "UPDATE tables SET table_number=?,capacity=?,min_deposit=? WHERE id=? AND club_id=?",
+                number,
+                capacity,
+                body.deposit(),
+                bookingId,
+                clubId,
+            )
+        } else if ("tableNumber" in body || "capacity" in body) {
+            sql.update(
+                "UPDATE tables SET table_number=?,capacity=? WHERE id=? AND club_id=?",
+                number,
+                capacity,
+                bookingId,
+                clubId,
+            )
+        }
+    }
+
+    private fun updateLayout(
+        id: Long,
+        hallId: Long,
+        old: DbRow,
+        label: String,
+        body: JsonObject,
+    ) {
+        if ("x" !in body && "y" !in body) {
+            sql.update("UPDATE hall_tables SET label=?,updated_at=? WHERE id=?", label, session.now, id)
+            return
+        }
+        val position = body.position()
+        if (position != null &&
+            !old.placed() &&
+            sql.row("SELECT hall_id FROM hall_plans WHERE hall_id=?", hallId) == null
+        ) {
+            fail("hall_plan_required")
+        }
+        sql.update(
+            "UPDATE hall_tables SET label=?,x=?,y=?,is_placed=?,updated_at=? WHERE id=?",
+            label,
+            position?.x ?: checkNotNull(old["x"]).toDouble(),
+            position?.y ?: checkNotNull(old["y"]).toDouble(),
+            position != null,
+            session.now,
+            id,
+        )
+    }
+
+    private fun requireFreeNumber(
+        clubId: Long,
+        number: Int,
+        layoutId: Long = 0,
+        bookingId: Long? = null,
+    ) {
+        val layout =
+            sql.row(
+                "SELECT ht.id FROM hall_tables ht JOIN halls h ON h.id=ht.hall_id " +
+                    "WHERE h.club_id=? AND ht.table_number=? AND ht.id<>? LIMIT 1",
+                clubId,
+                number,
+                layoutId,
+            )
+        val booking =
+            sql.row(
+                "SELECT id FROM tables WHERE club_id=? AND table_number=? AND id<>? LIMIT 1",
+                clubId,
+                number,
+                bookingId ?: 0L,
+            )
+        if (layout != null || booking != null) fail("table_number_conflict")
+    }
+
+    private fun JsonObject.tableNumber(key: String): Int = positiveNumber(this[key] as? JsonPrimitive)
+
+    private fun positiveNumber(value: JsonPrimitive?): Int =
+        value?.takeUnless { it.isString }?.intOrNull?.takeIf { it > 0 } ?: fail("validation_error")
+
+    private fun JsonObject.capacity(max: Int): Int =
+        tableNumber("capacity").takeIf { it <= max } ?: fail("validation_error")
+
+    private fun JsonObject.deposit(): BigDecimal {
+        val value = this["minDeposit"] ?: return BigDecimal.ZERO
+        val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: fail("validation_error")
+        if (!DEPOSIT.matches(text)) fail("validation_error")
+        return text.toBigDecimal()
+    }
+
+    private fun JsonObject.position(): TablePosition? =
+        when {
+            "x" !in this && "y" !in this -> null
+            this["x"] == JsonNull && this["y"] == JsonNull -> null
+            else -> TablePosition(coordinate("x"), coordinate("y"))
+        }
+
+    private fun JsonObject.coordinate(key: String): Double =
+        (this[key] as? JsonPrimitive)
+            ?.takeUnless { it.isString }
+            ?.doubleOrNull
+            ?.takeIf { it.isFinite() && it in 0.0..1.0 }
+            ?: fail("validation_error")
 
     private companion object {
         const val LABEL_LIMIT = 100
-        const val MAX_CAPACITY = 100
-        val TABLE_FIELDS = listOf("tableNumber", "label", "capacity", "x", "y")
+        const val MAX_BATCH = 100
+        const val MAX_BOOKING_CAPACITY = 50
+        const val MAX_LEGACY_CAPACITY = 100
+        const val LEGACY_COORDINATE = 0.5
+        val DEPOSIT = Regex("[0-9]{1,10}(\\.[0-9]{1,2})?")
+        val TABLE_FIELDS = listOf("tableNumber", "label", "capacity", "minDeposit", "x", "y")
+        val HALL_FIELDS = listOf("hallId", "expectedVersion")
     }
 }
 
-private data class LayoutTableFields(
+private data class TableDraft(
     val number: Int,
     val label: String,
     val capacity: Int,
+    val deposit: BigDecimal,
+    val position: TablePosition?,
+)
+
+private data class TablePosition(
     val x: Double,
     val y: Double,
 )

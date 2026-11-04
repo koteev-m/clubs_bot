@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { ClientLayout } from '../src/modules/client/layout.api';
 
 const clubId = '9007199254740999';
 const hallId = '9007199254741000';
@@ -23,7 +24,7 @@ const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nmWQAAAAASUVORK5CYII=',
   'base64',
 );
-const layout = {
+const layout: ClientLayout = {
   id: clubId,
   clubId,
   clientId: '20',
@@ -152,4 +153,171 @@ test('saved guest preview selects real tables, keeps contain coordinates across 
   expect(
     reads.some((path) => /booking|hold|geojson|api\/admin/.test(path)),
   ).toBe(false);
+});
+
+test('mobile editor places saved physical tables and keeps the original command after a lost response', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const current = structuredClone(layout);
+  const hall = current.halls[0];
+  hall.tables = [];
+  const savedPlan = hall.plan;
+  hall.plan = null;
+  const writes: { method: string; key: string; body: string }[] = [];
+  let uploads = 0;
+  let loseNextSave = false;
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    if (path.endsWith('/layout')) return route.fulfill({ json: current });
+    if (path.endsWith('/plan')) {
+      if (method === 'POST') {
+        uploads += 1;
+        hall.plan = savedPlan;
+        return route.fulfill({ json: current });
+      }
+      return route.fulfill({ contentType: 'image/png', body: png });
+    }
+    const body = request.postData();
+    if (!body || !/\/tables(?:\/(?:batch|\d+))?$/.test(path))
+      return route.fulfill({ status: 404, json: { code: 'not_found' } });
+    writes.push({ method, key: request.headers()['idempotency-key'], body });
+    const fields = request.postDataJSON();
+    if (method === 'POST') {
+      for (const number of fields.tableNumbers) {
+        hall.tables.push({
+          id: String(BigInt(tableId) + BigInt(hall.tables.length)),
+          hallId,
+          tableNumber: number,
+          label: `Стол ${number}`,
+          capacity: fields.capacity,
+          bookingLinked: true,
+          x: null,
+          y: null,
+        });
+      }
+    } else if (method === 'PATCH') {
+      const saved = hall.tables.find((table) => path.endsWith('/' + table.id))!;
+      delete fields.expectedVersion;
+      Object.assign(saved, fields);
+      if (loseNextSave) {
+        loseNextSave = false;
+        return route.abort();
+      }
+    }
+    return route.fulfill({ json: current });
+  });
+
+  await page.goto(entry);
+  await expect(
+    page.getByRole('heading', { name: 'Список столов' }),
+  ).toBeVisible();
+  await expect(page.getByText('План еще не загружен.')).toBeVisible();
+  await page.getByRole('button', { name: 'Добавить столы' }).tap();
+  await page.getByLabel('Способ добавления').selectOption('list');
+  await page.getByLabel('Номера столов').fill('101, 107, 101');
+  await expect(
+    page.getByRole('button', { name: 'Создать столы' }),
+  ).toBeDisabled();
+  await expect(page.getByText(/Повторяются или уже заняты/)).toBeVisible();
+  await page.getByLabel('Способ добавления').selectOption('range');
+  await page
+    .getByRole('textbox', { name: 'Первый номер', exact: true })
+    .fill('101');
+  await page.getByLabel('Количество столов').fill('15');
+  await expect(
+    page.getByText(/Номера для создания: 101, 102, 103/),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Создать столы' }).tap();
+  await expect(page.getByText('На схеме: 0 из 15')).toBeVisible();
+  expect(
+    hall.tables.every((table) => table.x === null && table.y === null),
+  ).toBe(true);
+  expect(writes.map(({ method }) => method)).toEqual(['POST']);
+  await page
+    .locator('input[type=file]')
+    .setInputFiles({ name: 'hall.png', mimeType: 'image/png', buffer: png });
+  const stage = page.getByTestId('hall-plan-stage');
+  await expect
+    .poll(() =>
+      page
+        .getByTestId('hall-plan-image')
+        .evaluate((img) => (img as HTMLImageElement).naturalWidth),
+    )
+    .toBeGreaterThan(0);
+  const box = (await stage.boundingBox())!;
+  for (let index = 0; index < 15; index += 1) {
+    await stage.tap({
+      position: {
+        x: box.width / 2 + (((index % 5) + 0.5) / 5 - 0.5) * box.height,
+        y: ((Math.floor(index / 5) + 0.5) / 3) * box.height,
+      },
+    });
+    const picker = page.getByRole('region', {
+      name: 'Выбор неразмещённого стола',
+    });
+    await expect(
+      picker.getByRole('button', { name: /^Разместить №/ }),
+    ).toHaveCount(15 - index);
+    await picker
+      .getByRole('button', {
+        name: new RegExp(`^Разместить №${101 + index} ·`),
+      })
+      .tap();
+    await expect(page.getByText(`На схеме: ${index + 1} из 15`)).toBeVisible();
+  }
+  const marker = page.getByTestId('table-marker-' + tableId);
+  expect(writes.filter(({ method }) => method === 'POST')).toHaveLength(1);
+  const originalX = hall.tables[0].x!;
+  await marker.scrollIntoViewIfNeeded();
+  const markerBox = (await marker.boundingBox())!;
+  await page.mouse.move(
+    markerBox.x + markerBox.width / 2,
+    markerBox.y + markerBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    markerBox.x + markerBox.width / 2 + 12,
+    markerBox.y + markerBox.height / 2 + 10,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  await expect.poll(() => hall.tables[0].x!).toBeGreaterThan(originalX);
+  await expect(page.getByLabel('Название', { exact: true })).toBeEditable();
+
+  await page.getByLabel('Название', { exact: true }).fill('В центре');
+  loseNextSave = true;
+  await page.getByRole('button', { name: 'Сохранить и завершить' }).tap();
+  const retry = page.getByRole('button', { name: 'Повторить ту же операцию' });
+  await expect(retry).toBeVisible();
+  await expect(page.getByLabel('Название', { exact: true })).toHaveValue(
+    'В центре',
+  );
+  const pending = writes.at(-1)!;
+  await retry.tap();
+  await expect(
+    page.getByRole('button', { name: '#101 · В центре' }),
+  ).toBeVisible();
+  expect(pending.key).toBeTruthy();
+  expect(writes.at(-1)).toEqual(pending);
+
+  await marker.tap();
+  await page.getByRole('button', { name: 'Убрать со схемы' }).tap();
+  await expect(page.getByText('На схеме: 14 из 15')).toBeVisible();
+  await expect(marker).toHaveCount(0);
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'replacement.png',
+    mimeType: 'image/png',
+    buffer: png,
+  });
+  await expect.poll(() => uploads).toBe(2);
+  await page.goto(entry);
+  await page.reload();
+  await expect(page.getByText('На схеме: 14 из 15')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '#101 · В центре' }),
+  ).toBeVisible();
+  expect(hall.tables).toHaveLength(15);
 });

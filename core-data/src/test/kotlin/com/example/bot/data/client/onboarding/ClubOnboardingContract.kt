@@ -34,7 +34,10 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             assertEquals(approved.id("authorUserId"), association.long("owner_user_id"))
             assertEquals(approved.id("clientId"), association.long("client_id"))
             val grants = fixture.rows("SELECT * FROM client_club_grants ORDER BY permission_code")
-            assertEquals(setOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT), grants.map { it["permission_code"] }.toSet())
+            assertEquals(
+                setOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT, WRITE_CALENDAR, WRITE_BOOKING_RULES),
+                grants.map { it["permission_code"] }.toSet(),
+            )
             assertTrue(grants.all { it.active() && it.long("user_id") == approved.id("authorUserId") })
             assertEquals(fixture.baseline["user_roles"], fixture.rows("SELECT * FROM user_roles ORDER BY id"))
             val app = fixture.repository.read(fixture.alice, OnboardingRead.CLIENT_APPLICATION_GET, approved.id("id"))
@@ -131,7 +134,7 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             )
             assertEquals(1, fixture.count("client_club_onboarding"))
             assertEquals(1, fixture.rows("SELECT * FROM audit_log WHERE action='client.club.create'").size)
-            assertEquals(3, fixture.count("client_club_grants"))
+            assertEquals(5, fixture.count("client_club_grants"))
         }
 
     @Test
@@ -343,7 +346,10 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             val clubs = old.rows("SELECT * FROM clubs ORDER BY id")
             val users = old.rows("SELECT * FROM users ORDER BY id")
             old.migrate()
-            assertEquals(clubs, old.rows("SELECT * FROM clubs ORDER BY id"))
+            assertEquals(
+                clubs.map { it + ("calendar_version" to "1") },
+                old.rows("SELECT * FROM clubs ORDER BY id"),
+            )
             assertEquals(users, old.rows("SELECT * FROM users ORDER BY id"))
             assertEquals(0, old.count("client_club_onboarding"))
             assertEquals(0, old.count("client_clubs"))

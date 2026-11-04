@@ -18,8 +18,9 @@ internal class ClubLayoutOperations(
         clubId: Long,
         write: Boolean = false,
     ): JsonObject {
-        val clientId = authorize(clubId, write)
-        val writable = hasGrant(clientId, clubId, WRITE_LAYOUT)
+        val clientId = session.requireClubGrant(clubId, WRITE_LAYOUT.takeIf { write })
+        val writable = session.hasClubGrant(clientId, clubId, WRITE_LAYOUT)
+        val views = ClubLayoutViews(sql)
         return buildJsonObject {
             put("id", clubId.toString())
             put("clubId", clubId.toString())
@@ -30,10 +31,11 @@ internal class ClubLayoutOperations(
                     (listOf(READ_CLUB) + if (writable) listOf(WRITE_LAYOUT) else emptyList()).map(::JsonPrimitive),
                 ),
             )
+            put("reservedTableNumbers", views.reservedNumbers(clubId))
             put(
                 "halls",
                 JsonArray(
-                    sql.rows("SELECT * FROM halls WHERE club_id=? ORDER BY id", clubId).map(ClubLayoutViews(sql)::hall),
+                    sql.rows("SELECT * FROM halls WHERE club_id=? ORDER BY id", clubId).map { views.hall(it) },
                 ),
             )
         }
@@ -44,7 +46,7 @@ internal class ClubLayoutOperations(
         body: JsonObject,
     ): JsonObject {
         body.only(listOf("hallId"))
-        authorize(clubId, write = false)
+        session.requireClubGrant(clubId)
         val hallId = body.id("hallId")
         hall(clubId, hallId)
         return sql.connection
@@ -69,8 +71,9 @@ internal class ClubLayoutOperations(
         operation: OnboardingMutation,
         body: JsonObject,
     ): MutationResult {
-        val clientId = authorize(clubId, write = true)
-        var tableId: Long? = null
+        val clientId = session.requireClubGrant(clubId, WRITE_LAYOUT)
+        session.calendarClub(clubId, lock = true)
+        var tableIds = emptyList<Long>()
         val hallId =
             if (operation == OnboardingMutation.CLUB_HALL_CREATE) {
                 createHall(clubId, body)
@@ -80,8 +83,10 @@ internal class ClubLayoutOperations(
                 if (body.id("expectedVersion") != hall.long("layout_revision")) fail("version_conflict")
                 when (operation) {
                     OnboardingMutation.CLUB_HALL_UPDATE -> updateHall(clubId, hallId, body)
-                    OnboardingMutation.CLUB_TABLE_CREATE -> tableId = ClubLayoutTables(session).create(hallId, body)
-                    OnboardingMutation.CLUB_TABLE_UPDATE -> tableId = ClubLayoutTables(session).update(hallId, body)
+                    OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_BATCH_CREATE ->
+                        tableIds = ClubLayoutTables(session).create(clubId, hallId, operation, body)
+                    OnboardingMutation.CLUB_TABLE_UPDATE ->
+                        tableIds = listOf(ClubLayoutTables(session).update(clubId, hallId, body))
                     OnboardingMutation.CLUB_PLAN_UPLOAD -> ClubLayoutPlans(session).upload(hallId, body)
                     else -> fail("validation_error")
                 }
@@ -98,6 +103,7 @@ internal class ClubLayoutOperations(
                 OnboardingMutation.CLUB_HALL_CREATE -> "client.club.layout.hall.create"
                 OnboardingMutation.CLUB_HALL_UPDATE -> "client.club.layout.hall.update"
                 OnboardingMutation.CLUB_TABLE_CREATE -> "client.club.layout.table.create"
+                OnboardingMutation.CLUB_TABLE_BATCH_CREATE -> "client.club.layout.table.batch_create"
                 OnboardingMutation.CLUB_TABLE_UPDATE -> "client.club.layout.table.update"
                 else -> "client.club.layout.plan.upload"
             }
@@ -111,43 +117,12 @@ internal class ClubLayoutOperations(
             session.correlation,
             buildJsonObject {
                 put("hallId", hallId.toString())
-                tableId?.let { put("tableId", it.toString()) }
+                tableIds.singleOrNull()?.let { put("tableId", it.toString()) }
+                if (tableIds.size > 1) put("tableIds", JsonArray(tableIds.map { JsonPrimitive(it.toString()) }))
             },
         )
         return MutationResult("club_layout", clubId, clientId, get(clubId, write = true))
     }
-
-    private fun authorize(
-        clubId: Long,
-        write: Boolean,
-    ): Long {
-        val mapping = sql.row("SELECT client_id FROM client_clubs WHERE club_id=?", clubId) ?: fail("not_found")
-        val clientId = mapping.long("client_id")
-        session.client(clientId, lock = true)
-        session.member(clientId, manage = false)
-        // Re-read the mapping and all authority after acquiring the shared lifecycle lock.
-        if (!hasGrant(clientId, clubId, READ_CLUB) ||
-            (write && !hasGrant(clientId, clubId, WRITE_LAYOUT))
-        ) {
-            fail("not_found")
-        }
-        return clientId
-    }
-
-    private fun hasGrant(
-        clientId: Long,
-        clubId: Long,
-        permission: String,
-    ): Boolean =
-        sql.row(
-            "SELECT g.club_id FROM client_club_grants g JOIN client_clubs m ON m.client_id=g.client_id " +
-                "AND m.club_id=g.club_id WHERE g.client_id=? AND g.club_id=? AND g.user_id=? " +
-                "AND g.permission_code=? AND g.is_active=TRUE",
-            clientId,
-            clubId,
-            session.userId,
-            permission,
-        ) != null
 
     private fun hall(
         clubId: Long,

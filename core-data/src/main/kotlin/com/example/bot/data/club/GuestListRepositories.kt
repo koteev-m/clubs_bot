@@ -8,7 +8,9 @@ import com.example.bot.club.GuestListOwnerType
 import com.example.bot.club.GuestListStatus
 import com.example.bot.club.InvitationChannel
 import com.example.bot.data.booking.BookingStatus
+import com.example.bot.data.booking.BookingStatusNames
 import com.example.bot.data.booking.BookingsTable
+import com.example.bot.data.booking.core.LegacyBookingAdmission
 import com.example.bot.data.db.withTxRetry
 import com.example.bot.data.privacy.LegacyResource
 import com.example.bot.data.privacy.isMappedClub
@@ -31,6 +33,7 @@ import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
+import java.sql.Connection
 import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -750,53 +753,73 @@ class CheckinDbRepository(
     ): CheckinRecord? {
         val createdAt = now()
         return withTxRetry {
-            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                val updated =
-                    if (allowedFromStatuses.isNotEmpty()) {
-                        val allowedNames = allowedFromStatuses.map { it.name }
-                        BookingsTable.update({
-                            (BookingsTable.id eq bookingId) and (BookingsTable.status inList allowedNames)
-                        }) { statement ->
-                            statement[status] = bookingStatus.name
-                            statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
-                        }
-                    } else {
-                        1
-                    }
-
-                if (updated == 0) {
+            newSuspendedTransaction(
+                context = Dispatchers.IO,
+                db = db,
+                transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
+            ) {
+                val activatesBooking =
+                    allowedFromStatuses.isNotEmpty() &&
+                        bookingStatus.name in BookingStatusNames.ACTIVE_FOR_TABLE_OCCUPANCY
+                if (activatesBooking && LegacyBookingAdmission().fencesBooking(bookingId)) {
                     return@newSuspendedTransaction null
                 }
-
-                val id =
-                    CheckinsTable.insert {
-                        it[clubId] = checkin.clubId
-                        it[eventId] = checkin.eventId
-                        it[subjectType] = checkin.subjectType.name
-                        it[CheckinsTable.subjectId] = checkin.subjectId
-                        it[checkedBy] = checkin.checkedBy
-                        it[method] = checkin.method.name
-                        it[resultStatus] = checkin.resultStatus.name
-                        it[denyReason] = checkin.denyReason
-                        it[occurredAt] = checkin.occurredAt.toOffsetDateTime()
-                        it[CheckinsTable.createdAt] = createdAt
-                    } get CheckinsTable.id
-
-                CheckinRecord(
-                    id = id,
-                    clubId = checkin.clubId,
-                    eventId = checkin.eventId,
-                    subjectType = checkin.subjectType,
-                    subjectId = checkin.subjectId,
-                    checkedBy = checkin.checkedBy,
-                    method = checkin.method,
-                    resultStatus = checkin.resultStatus,
-                    denyReason = checkin.denyReason,
-                    occurredAt = checkin.occurredAt,
-                    createdAt = createdAt.toInstantUtc(),
-                )
+                insertBookingCheckinInTransaction(checkin, bookingId, bookingStatus, allowedFromStatuses, createdAt)
             }
         }
+    }
+
+    internal fun insertBookingCheckinInTransaction(
+        checkin: NewCheckin,
+        bookingId: java.util.UUID,
+        bookingStatus: BookingStatus,
+        allowedFromStatuses: Set<BookingStatus> = setOf(BookingStatus.BOOKED),
+        createdAt: OffsetDateTime = now(),
+    ): CheckinRecord? {
+        val updated =
+            if (allowedFromStatuses.isNotEmpty()) {
+                val allowedNames = allowedFromStatuses.map { it.name }
+                BookingsTable.update({
+                    (BookingsTable.id eq bookingId) and (BookingsTable.status inList allowedNames)
+                }) { statement ->
+                    statement[status] = bookingStatus.name
+                    statement[updatedAt] = Instant.now(clock).toOffsetDateTime()
+                }
+            } else {
+                1
+            }
+
+        if (updated == 0) {
+            return null
+        }
+
+        val id =
+            CheckinsTable.insert {
+                it[clubId] = checkin.clubId
+                it[eventId] = checkin.eventId
+                it[subjectType] = checkin.subjectType.name
+                it[CheckinsTable.subjectId] = checkin.subjectId
+                it[checkedBy] = checkin.checkedBy
+                it[method] = checkin.method.name
+                it[resultStatus] = checkin.resultStatus.name
+                it[denyReason] = checkin.denyReason
+                it[occurredAt] = checkin.occurredAt.toOffsetDateTime()
+                it[CheckinsTable.createdAt] = createdAt
+            } get CheckinsTable.id
+
+        return CheckinRecord(
+            id = id,
+            clubId = checkin.clubId,
+            eventId = checkin.eventId,
+            subjectType = checkin.subjectType,
+            subjectId = checkin.subjectId,
+            checkedBy = checkin.checkedBy,
+            method = checkin.method,
+            resultStatus = checkin.resultStatus,
+            denyReason = checkin.denyReason,
+            occurredAt = checkin.occurredAt,
+            createdAt = createdAt.toInstantUtc(),
+        )
     }
 
     suspend fun findBySubject(
@@ -805,16 +828,22 @@ class CheckinDbRepository(
     ): CheckinRecord? =
         withTxRetry {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                CheckinsTable
-                    .selectAll()
-                    .where {
-                        (CheckinsTable.subjectType eq subjectType.name) and
-                            (CheckinsTable.subjectId eq subjectId)
-                    }.limit(1)
-                    .firstOrNull()
-                    ?.toCheckinRecord()
+                findCheckinInTransaction(subjectType, subjectId)
             }
         }
+
+    internal fun findCheckinInTransaction(
+        subjectType: CheckinSubjectType,
+        subjectId: String,
+    ): CheckinRecord? =
+        CheckinsTable
+            .selectAll()
+            .where {
+                (CheckinsTable.subjectType eq subjectType.name) and
+                    (CheckinsTable.subjectId eq subjectId)
+            }.limit(1)
+            .firstOrNull()
+            ?.toCheckinRecord()
 
     suspend fun listByEvent(
         clubId: Long? = null,

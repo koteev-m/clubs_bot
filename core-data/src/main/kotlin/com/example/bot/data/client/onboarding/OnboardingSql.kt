@@ -189,6 +189,38 @@ internal class OnboardingSession(
         return member
     }
 
+    fun requireClubGrant(
+        clubId: Long,
+        writePermission: String? = null,
+        lockClient: Boolean = true,
+    ): Long {
+        val mapping = sql.row("SELECT client_id FROM client_clubs WHERE club_id=?", clubId) ?: fail("not_found")
+        val clientId = mapping.long("client_id")
+        if (lockClient) client(clientId, lock = true)
+        member(clientId, manage = false)
+        if (!hasClubGrant(clientId, clubId, READ_CLUB) ||
+            (writePermission != null && !hasClubGrant(clientId, clubId, writePermission))
+        ) {
+            fail("not_found")
+        }
+        return clientId
+    }
+
+    fun hasClubGrant(
+        clientId: Long,
+        clubId: Long,
+        permission: String,
+    ): Boolean =
+        sql.row(
+            "SELECT g.club_id FROM client_club_grants g JOIN client_clubs m ON m.client_id=g.client_id " +
+                "AND m.club_id=g.club_id WHERE g.client_id=? AND g.club_id=? AND g.user_id=? " +
+                "AND g.permission_code=? AND g.is_active=TRUE",
+            clientId,
+            clubId,
+            userId,
+            permission,
+        ) != null
+
     fun version(
         row: DbRow,
         body: JsonObject,

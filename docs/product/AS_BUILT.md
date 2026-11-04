@@ -1,5 +1,240 @@
 # AS_BUILT: repository snapshot
 
+## Bounded local refresh: booking cutover fence
+
+V073 is empty on migration. A row reserves an exact club, canonical night
+and booking table for exclusive protected admission. Composite foreign keys
+bind both the V070 event link and V072 table link to that club. The only
+activation helper lives in test sources. It requires an already mapped
+private club, current grants and verified links, and refuses active
+obligations. This does not activate the table or route guest traffic.
+
+Legacy DB HOLD, direct booking, confirm, HOLD prolong/consume, active status
+writes and legacy session opens check admission before acquiring slot or
+child locks. The lock is on the existing client-club mapping. A legacy
+writer holds it until commit. Test activation takes that lock first, then
+the protected client/club and linked-event locks. It reads under
+READ COMMITTED and rechecks the obligations after waiting. Protected
+writers retain their club lock and V071 replay. Legacy seating checks the
+stored booking ID and the explicit layout reference because the old route
+can supply the latter. A malformed overlap is refused without inferring a
+new relationship from table numbers.
+
+A3 and the direct promoter assignment use the same uncached ownership guard
+inside BookingState. The optional legacy WebApp raw INSERT also excludes
+mapped clubs in its transaction. Application onboarding only creates client
+mappings with new clubs. The verified boundary assumes this existing
+containment and a fleet running the guards. A legacy process without these
+checks, raw SQL, or adoption of an existing A3 club with in-flight memory
+state is outside this local proof. A future activation must prove that those
+writers are quiescent before enabling any guest route.
+
+## Bounded local refresh: protected booking and table occupancy
+
+New protected DB HOLD and confirm resolve their booking-table ID through
+the unique, active V072 hall-table link. They read open table sessions using
+the saved V070 legacy UTC start in the same transaction as the obligation.
+The protected booking and seating writers serialize on the club row. New
+reservation commands check occupancy before the slot lock and again before
+writing. An occupied table blocks confirm without consuming its HOLD.
+Closed sessions leave the other booking and HOLD checks in force.
+On PostgreSQL the protected booking club lock and the shared linked-event
+lock exclude row updates while allowing legacy foreign-key checks from a
+writer that already owns the slot lock.
+
+Authorized V071 replay still precedes occupancy checks. A live HOLD can
+replay its existing result and a completed confirm returns the stored booking
+even if a session appeared later. A changed payload or revoked grant still
+prevents replay. No new migration or guest wiring is involved.
+
+The legacy `BookingHoldRepository.createHold` and
+`BookingRepository.confirmFromHold` paths reached from `SecuredBookingRoutes`
+do not take the club lock or check sessions. `AdminTableOpsRoutes` also uses
+the independent legacy session writer. A disposable PostgreSQL control
+demonstrated that direct legacy HOLD can commit after a competing protected
+seat and leave both rows. The private-club boundary remains in place. Sharing
+a table and night with those writers requires an explicit cutover contract.
+
+## Bounded local refresh: canonical table availability
+
+The private owner booking preview requests one club, canonical night and
+hall through the existing client namespace. It checks current
+`client.club.read`, active membership and client mapping, and the recorded
+creator boundary. The route reads a single repeatable-read snapshot without
+locking for update. It projects layout IDs and status codes only. The
+snapshot shows the sampled time in the club's timezone.
+
+V070 verifies the scheduled night and both event boundaries. V072 verifies
+the table identity. The projection uses unexpired HOLDs, BOOKED and SEATED
+bookings, and OPEN sessions keyed by the saved legacy UTC start. Conflicting
+evidence produces an unknown status. An open session alongside a booking
+also stays unknown until the records have a proven shared identity. An
+inactive booking row produces unavailable. The map, table list and card use the same result. A refresh
+failure clears the previous statuses. Guest booking remains disconnected.
+
+Proposed staff permission matrix for separate approval
+
+| Capability | Proposed scope |
+| --- | --- |
+| View table statuses | Exact club-scoped occupancy read |
+| Seat and release tables | Separate exact club-scoped session write |
+| Record or adjust deposits | Separate exact club-scoped finance write |
+| Configure halls and tables | Existing exact `client.club.layout.write` |
+
+The proposal assigns no grants. Runtime authorization must resolve a current
+actor, client and club, with operation-specific permission checks. A role
+name alone conveys no permission in this proposal.
+
+## Bounded local refresh: linked table sessions and deposits
+
+The disconnected table-operations adapter resolves a physical table using its
+client, club, hall and layout identity. It requires an active hall and both
+active table rows, plus their same-club V072 link. Under the club lock it
+verifies the V070 event and uses the link's saved legacy UTC start for all
+session, deposit and shift keys.
+
+Seating, the optional initial deposit and their audit records commit in one
+transaction. Repeating seating for an occupied table writes nothing. A
+request based on an earlier session also cannot reseat a freed table.
+Inspection checks active sessions, recorded deposits, live HOLDs and
+overlapping bookings. Closing a session and adjusting a deposit match the
+resolved booking table and the supplied session identity. Deposit adjustments
+append to the existing ledger.
+
+Writes require a pre-existing draft shift and hold its row lock until commit.
+The existing shift-close operation uses that same row. The adapter has no
+route or DI binding. Staff authorization must join the transaction before
+the club lock when a caller is wired. Stop-sales and linked-table activation
+remain separate. Guest availability and HOLD still need to account for open
+table sessions before a shared runtime can be enabled.
+
+## Bounded local refresh: unified physical tables
+
+The client hall editor starts with its saved table list. Single and atomic
+batch creation work before an image is uploaded. The plan adds markers for
+existing unplaced tables. Moving or clearing a marker preserves the table,
+and replacing a plan preserves normalized marker coordinates.
+The API returns null coordinates while the saved placement flag is clear.
+
+V072 pairs new cabinet tables with one inactive DB booking row. Composite
+foreign keys enforce the club and hall parents. The booking row owns the
+number and capacity, and an update cascade keeps the linked layout fields
+consistent. The booking decimal is edited in its own representation.
+The closed guest preview shows confirmed links and omits monetary amounts.
+Existing rows keep their IDs, raw monetary values and previously displayed
+positions. Their links remain unset until a separately authorized process.
+
+Existing legacy layout writers exclude mapped clubs. The table-operations
+route still reads legacy layout IDs and uses them as session table keys,
+whose database foreign key points to booking tables. Mapped private clubs
+remain fenced from those operations. A future cutover must resolve the
+explicit link before session, deposit or guest writes. No automatic
+activation, historical backfill or physical deletion runs in this slice.
+
+## Bounded local refresh: owner guest booking preview
+
+The club cabinet offers a read-only mobile preview for the recorded club
+creator with current exact `client.club.read`. The read uses saved halls,
+images and table details, the canonical calendar, saved arrival rules, and
+V070 link verification. It shows the business date and actual wall times.
+The existing hall viewer handles interactive markers and the table list.
+
+The preview reports `TABLE_MAPPING_REQUIRED`. Layout `hall_tables` and
+booking `tables` have separate identities. Display properties and matching
+numeric IDs do not prove a relationship. Availability stays unknown and
+HOLD, confirm and guest booking history stay inaccessible in this preview.
+The V071 write path remains internal with cabinet authorization. The guest
+routes, A3, payments, QR, check-in and Telegram wiring keep their prior paths.
+
+## Bounded local refresh: protected night check-in, 2026-11-03
+
+The local core-data command handles manual Host admission for a DB booking
+with a known guest in a mapped private club. It requires current client
+membership, the exact `client.club.read` grant and an existing club-scoped
+Entry Manager, Manager or Club Admin role. Both registered check-in
+families and Telegram still use their existing wiring.
+
+The command locks the client and club before locking the legacy event and
+booking. It verifies the scheduled canonical night, the unique V070 link,
+both saved UTC boundaries and the booking slot. New admission is limited to
+the linked interval, including the start and excluding the end.
+Admission and replay use timestamps at database precision.
+
+The booking transition to `SEATED`, check-in, visit and success audit share
+one transaction. The visit keeps the legacy `event_id` and the verified
+`night_start_utc`. The existing visit uniqueness constraint and the audit
+fingerprint distinguish a replay from a conflicting or historical partial
+admission. This slice uses the existing schema through V071. Reward delivery
+is outside the local command and requires a replay-safe contract before
+runtime adoption.
+
+## Bounded local refresh: protected night HOLD and confirm, 2026-11-03
+
+The core-data repositories have explicit internal methods for the cabinet
+prototype. The running application's booking routes and DI use the existing
+legacy methods. The prototype checks the current exact cabinet grants and
+accepts private mapped clubs with a versioned, uniquely linked night.
+
+Writes acquire the client and club row locks before the legacy slot lock.
+They verify the canonical and legacy UTC windows on the write connection.
+Confirm checks and locks its original HOLD before inserting a booking,
+consuming the HOLD and committing its command result.
+
+V071 stores scoped command hashes, result IDs and original HOLD expiration.
+An expired or cleaned-up HOLD cannot be recreated by replay. Confirm can
+replay the existing booking after consuming its HOLD. The H2 migration also
+removes the obsolete V1 status check while retaining V7's booking statuses.
+Guest enablement still requires a common contract for the other writers,
+guest authorization and resolution of the applicable open decisions.
+
+## Bounded local refresh: canonical night event links, 2026-11-03
+
+V070 adds an empty, one-to-one bridge between existing canonical nights and
+legacy events. Both foreign keys enforce the same club and restrict deletion.
+The link retains the exact UTC boundaries of the legacy event. No legacy
+references, times or rows are rewritten by the migration.
+
+- GET `/api/client/calendar/nights/{id}/legacy-event` classifies candidates
+  using the stored business date, zone and UTC window. Several plausible
+  events make the link ambiguous while each event retains its own identity.
+- POST to the same private API path requires current `client.club.read` and
+  `client.club.calendar.write` grants, a
+  scheduled night, the current calendar version and an exact, unique match.
+  The command shares the calendar's client and club locks. Link, version,
+  audit and durable command receipt commit together. Calendar reconciliation
+  refuses to change the interval or cancel a linked night.
+- Guest readers and writers still use their existing paths in the local
+  source. Deployment, validation against Stage and a shared lock contract
+  with booking, finance and A3 are separate steps.
+
+## Bounded local refresh: canonical operational nights, 2026-11-03
+
+Local candidate in `/private/tmp/clubs-table-editor-ux-20261103` at
+`9d4f54ce1da8796572e705af2bd16fee2392b5a5`. The accepted target and runtime
+boundary are recorded in [DEC-008](OPEN_DECISIONS.md#dec-008--canonical-operational-night-definition).
+
+- V069 adds the opening-day flag to the existing calendar rules. The shared
+  schedule resolver interprets both wall-clock boundaries in the club's IANA
+  zone. A DST gap moves the wall time forward, and an overlap uses the earlier
+  offset.
+- The cabinet registry assigns a stable ID to `(club_id, business_date)`.
+  Calendar save and explicit reconciliation write under the shared client and
+  club locks. They reconcile the next 56 business dates, future dated rules
+  and already materialized future nights. GET projects unmaterialized dates
+  from saved rules and uses stored windows for dates with a canonical record.
+- A safe cancellation stores a tombstone and the last window. Safe reopening
+  uses the same ID. Audit keeps before and after values. Started windows and
+  legacy commitments are protected. The same resolver feeds the existing
+  booking-rule preview.
+- Legacy `events` feed public and booking readers. Bookings, HOLDs, lists and
+  check-in can reference event IDs, and several operations use
+  `(club_id, night_start_utc)`. The cabinet keeps this legacy data separate.
+  Legacy events and dependent operational records in the business date or
+  actual interval block the transaction. Event adoption, reference migration
+  and verification against the deployed guest runtime are separate steps.
+
+Verification and open integration work are tracked in [PROJECT_STATUS](../ops/PROJECT_STATUS.md).
+
 ## Bounded local refresh: owner UX and saved layout preview, 2026-11-02
 
 Local candidate from `ab8bfaa6bbb80c1fd5fa6c91ffdb2ca12ba7e729`, branch

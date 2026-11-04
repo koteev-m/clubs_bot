@@ -95,7 +95,7 @@ internal class ClubOnboardingOperations(
             session.now,
             session.now,
         )
-        listOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT).forEach { permission ->
+        listOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT, WRITE_CALENDAR, WRITE_BOOKING_RULES).forEach { permission ->
             sql.update(
                 "INSERT INTO client_club_grants(client_id,user_id,club_id,permission_code,is_active," +
                     "created_at,updated_at) VALUES (?,?,?,?,TRUE,?,?)",
@@ -125,13 +125,15 @@ internal class ClubOnboardingOperations(
         val association = association(clubId)
         authorize(association, write)
         // No club or submitted profile data is loaded before current exact authority is checked.
-        val club = sql.row("SELECT name,description,timezone FROM clubs WHERE id=?", clubId) ?: fail("not_found")
+        val club =
+            sql.row("SELECT name,description,timezone,is_active FROM clubs WHERE id=?", clubId) ?: fail("not_found")
         val application =
             sql.row("SELECT * FROM client_club_applications WHERE id=?", association.long("application_id"))
                 ?: fail("not_found")
         val snapshot = approvedSnapshot(application)
         val canWrite = hasGrant(association, WRITE_PROFILE)
         val canLayout = hasGrant(association, WRITE_LAYOUT)
+        val canCalendar = hasGrant(association, WRITE_CALENDAR)
         return buildJsonObject {
             put("id", clubId.toString())
             put("clientId", association.getValue("client_id"))
@@ -148,10 +150,12 @@ internal class ClubOnboardingOperations(
                     (
                         listOf(READ_CLUB) +
                             (if (canWrite) listOf(WRITE_PROFILE) else emptyList()) +
-                            (if (canLayout) listOf(WRITE_LAYOUT) else emptyList())
+                            (if (canLayout) listOf(WRITE_LAYOUT) else emptyList()) +
+                            (if (canCalendar) listOf(WRITE_CALENDAR) else emptyList())
                     ).map(::JsonPrimitive),
                 ),
             )
+            put("canPreviewBooking", !club.active() && association.long("owner_user_id") == session.userId)
             put("availableActions", JsonArray((if (canWrite) listOf("update") else emptyList()).map(::JsonPrimitive)))
         }
     }

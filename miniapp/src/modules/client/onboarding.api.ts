@@ -2,6 +2,7 @@ export class OnboardingError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
+    public readonly businessDate?: string,
   ) {
     super('Onboarding request failed');
   }
@@ -61,7 +62,21 @@ export async function onboardingRequest<T>(
         window.dispatchEvent(
           new CustomEvent('client-authority-lost', { detail: credential }),
         );
-      throw new OnboardingError(response.status, code);
+      const details =
+        data && typeof data === 'object' && 'details' in data
+          ? data.details
+          : null;
+      const date =
+        details && typeof details === 'object' && 'businessDate' in details
+          ? details.businessDate
+          : null;
+      throw new OnboardingError(
+        response.status,
+        code,
+        typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+          ? date
+          : undefined,
+      );
     }
     return (await response.json()) as T;
   } catch (error) {
@@ -88,6 +103,33 @@ export function errorMessage(error: unknown): string {
     return 'Лимит не может быть меньше количества уже созданных заведений.';
   if (error.code === 'location_required' || error.code === 'location_not_found')
     return 'Выберите город и регион из списка. Если город не найден, уточните страну или название.';
+  const date = error.businessDate
+    ? ' (' + error.businessDate.split('-').reverse().join('.') + ')'
+    : '';
+  if (error.code === 'calendar_night_dependencies')
+    return (
+      'Ночь' +
+      date +
+      ' связана с событием, бронями, удержаниями или операционными записями. Календарь не сохранён.'
+    );
+  if (error.code === 'calendar_night_started')
+    return (
+      'Ночь' +
+      date +
+      ' уже началась или новые часы относятся к прошлому. Календарь не сохранён.'
+    );
+  if (error.code === 'calendar_night_overlap')
+    return (
+      'Ночь' +
+      date +
+      ' пересекается с другой клубной ночью. Проверьте даты и часы.'
+    );
+  if (error.code === 'calendar_night_invalid')
+    return (
+      'Для ночи' + date + ' нельзя рассчитать интервал с учётом перевода часов.'
+    );
+  if (error.code === 'calendar_night_cutover_required')
+    return 'Согласование ночей пока доступно только для неопубликованных клубов.';
   if (error.code === 'version_conflict')
     return 'Запись уже изменена. Обновите данные перед повторным действием.';
   if (error.code === 'client_not_empty')

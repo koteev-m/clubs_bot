@@ -433,7 +433,9 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
                       {hall.name}
                     </p>
                     <p className="text-xs text-gray-500">
-                      Ревизия: {hall.layoutRevision}
+                      {clientMode
+                        ? `Столов: ${hall.tableCount ?? 0}`
+                        : `Ревизия: ${hall.layoutRevision}`}
                     </p>
                   </div>
                   {!clientMode && (

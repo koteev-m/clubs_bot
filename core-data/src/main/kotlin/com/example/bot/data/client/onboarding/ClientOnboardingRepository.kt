@@ -18,6 +18,11 @@ enum class OnboardingRead {
     CLIENT_APPLICATION_GET,
     CLUB_PROFILE_GET,
     CLUB_LAYOUT_GET,
+    CLUB_CALENDAR_GET,
+    CLUB_NIGHT_EVENT_CANDIDATE,
+    CLUB_BOOKING_RULES_GET,
+    CLUB_BOOKING_PREVIEW_GET,
+    CLUB_TABLE_AVAILABILITY_GET,
     CLUB_PLAN_GET,
     PLATFORM_INVITATION_GET,
     PLATFORM_CLIENT_SEARCH,
@@ -49,8 +54,12 @@ enum class OnboardingMutation {
     CLUB_HALL_CREATE,
     CLUB_HALL_UPDATE,
     CLUB_TABLE_CREATE,
+    CLUB_TABLE_BATCH_CREATE,
     CLUB_TABLE_UPDATE,
     CLUB_PLAN_UPLOAD,
+    CLUB_CALENDAR_UPDATE,
+    CLUB_NIGHT_EVENT_LINK,
+    CLUB_BOOKING_RULES_UPDATE,
     CLIENT_LIMIT_UPDATE,
     CLIENT_ARCHIVE,
     CLIENT_RESTORE,
@@ -59,6 +68,7 @@ enum class OnboardingMutation {
 
 class OnboardingFailure(
     val code: String,
+    val details: Map<String, String>? = null,
 ) : RuntimeException(code)
 
 interface ClientOnboardingRepository {

@@ -42,6 +42,9 @@ internal fun Application.registerClientLayoutRoutes(repository: ClientOnboarding
             post("/halls") { http.mutate(call, OnboardingMutation.CLUB_HALL_CREATE) }
             patch("/halls/{hallId}") { http.mutate(call, OnboardingMutation.CLUB_HALL_UPDATE, "hallId") }
             post("/halls/{hallId}/tables") { http.mutate(call, OnboardingMutation.CLUB_TABLE_CREATE, "hallId") }
+            post(
+                "/halls/{hallId}/tables/batch",
+            ) { http.mutate(call, OnboardingMutation.CLUB_TABLE_BATCH_CREATE, "hallId") }
             patch("/halls/{hallId}/tables/{tableId}") {
                 http.mutate(call, OnboardingMutation.CLUB_TABLE_UPDATE, "hallId", "tableId")
             }
@@ -163,7 +166,9 @@ private suspend fun ApplicationCall.layoutResponse(block: suspend () -> Unit) {
                 "validation_error" -> HttpStatusCode.BadRequest
                 "payload_too_large" -> HttpStatusCode.PayloadTooLarge
                 "unsupported_media_type" -> HttpStatusCode.UnsupportedMediaType
-                "version_conflict", "idempotency_conflict", "hall_name_conflict", "table_number_conflict" ->
+                "version_conflict", "idempotency_conflict", "hall_name_conflict", "table_number_conflict",
+                "table_link_required", "hall_plan_required",
+                ->
                     HttpStatusCode.Conflict
                 else -> HttpStatusCode.InternalServerError
             }

@@ -1,5 +1,363 @@
 # Project status checkpoint
 
+## Booking cutover fence — local candidate, 2026-11-04
+
+- Verdict **BOOKING_CUTOVER_FENCE_READY** for the local mapped-club boundary.
+- `PROJECT_IDENTITY_OK` on `codex/table-editor-ux` in
+  `/private/tmp/clubs-table-editor-ux-20261103` at
+  `9d4f54ce1da8796572e705af2bd16fee2392b5a5`.
+- V073 starts empty and pins the exact same-club V070/V072 links.
+  Only a test fixture enables a pair. Legacy DB writers and activation
+  share the admission lock. Protected writers retain the club lock and
+  V071 replay. Already committed active obligations block activation.
+- Passed 79 targeted repository cases and 135 Ktor cases, including
+  PostgreSQL 16 and H2 migration and direct BookingState checks.
+  The final targeted recheck passed 26 repository cases and 10 Ktor cases.
+- Runtime routing and private-club containment remain in place. The
+  next local step is to prove a deployment drain for old processes and
+  already-running in-memory writers before authorizing any guest cutover.
+
+## Protected booking and table occupancy — local candidate, 2026-11-04
+
+- Verdict **CANONICAL_BOOKING_OCCUPANCY_READY** for the protected writers.
+- `PROJECT_IDENTITY_OK` on `codex/table-editor-ux` in
+  `/private/tmp/clubs-table-editor-ux-20261103` at
+  `9d4f54ce1da8796572e705af2bd16fee2392b5a5`.
+- Protected HOLD and confirm reject an open session for the verified
+  V070/V072 table and legacy UTC start under the shared club lock. A rejected
+  confirm preserves the HOLD. V071 authorized replay stays read-only and
+  returns its existing result.
+- Passed 66 targeted repository tests on disposable H2 and PostgreSQL and
+  74 Ktor tests. Independent PostgreSQL connections confirmed both lock
+  orders, rollback and the direct legacy writer counterexample.
+- Legacy HOLD and confirm still bypass the club and session check. Guest
+  routes and staff writers remain disconnected from this protected contract.
+  The next local step is a cutover boundary that excludes legacy writers for
+  each enabled table and night.
+
+## Canonical table availability — local candidate, 2026-11-04
+
+- Verdict **CANONICAL_TABLE_AVAILABILITY_READY** for private preview reads.
+- `PROJECT_IDENTITY_OK` on `codex/table-editor-ux` in
+  `/private/tmp/clubs-table-editor-ux-20261103` at
+  `9d4f54ce1da8796572e705af2bd16fee2392b5a5`.
+- Private owner preview reads one snapshot of V070/V072, unexpired HOLDs,
+  active bookings and open sessions. Unavailable and conflicting evidence
+  are distinct. The map, list and detail card share the snapshot.
+- All 26 targeted Ktor cases passed, including the disposable PostgreSQL
+  and H2 availability, concurrency and tenant-boundary cases. TypeScript,
+  ESLint, 277 Vitest and 16 mobile Chromium/WebKit checks passed.
+- Staff grants and guest booking remain separate. Next local step is
+  validating that protected HOLD and confirm reject an open table session
+  under the shared lock before any guest rollout.
+
+## Linked table sessions and deposits — local candidate, 2026-11-03
+
+- Verdict **UNIFIED_TABLE_OPERATIONS_READY** for internal persistence.
+- `PROJECT_IDENTITY_OK` on `codex/table-editor-ux` in
+  `/private/tmp/clubs-table-editor-ux-20261103` at
+  `9d4f54ce1da8796572e705af2bd16fee2392b5a5`.
+- The internal adapter resolves V072 by client, club, hall and layout ID.
+  It uses the verified V070 legacy UTC start for finance keys and writes
+  only with an existing draft shift locked. Seating and its optional
+  deposit, ledger and audit share one transaction. The existing ledger
+  stores deposit adjustments and table session identity fences retries.
+- Six H2 and ten PostgreSQL adapter cases passed. PostgreSQL blocked
+  concurrent seats and both seat/close orders on separate connections.
+  Eighteen legacy repository and 33 targeted Ktor tests passed.
+- Legacy routes retain their private-club boundary. No staff endpoint is
+  registered. The next local decision is the exact staff permission
+  boundary for exposing the adapter, including occupancy reads.
+
+## Unified physical tables — local candidate, 2026-11-03
+
+- Verdict **UNIFIED_CLUB_TABLES_READY** for the private club cabinet.
+- Worktree `/private/tmp/clubs-table-editor-ux-20261103`, branch
+  `codex/table-editor-ux`, HEAD `9d4f54ce1da8796572e705af2bd16fee2392b5a5`.
+  `PROJECT_IDENTITY_OK`. The cabinet uses the current hall editor and
+  creates physical tables before plan placement.
+- V072 gives each new layout row one same-club, inactive booking row.
+  Database uniqueness and composite foreign keys guard identity and keep
+  number and capacity synchronized. Batch creation and marker changes use
+  current layout grants, the shared club lock, hall revision, durable command
+  replay and audit. Booking values retain the existing decimal format.
+- Historical layout and booking rows keep their original IDs and values.
+  Their links remain unset. Clearing a marker affects placement only.
+  The guest preview reports the saved link status and omits deposit amounts.
+- The V071→V072 upgrade, concurrent cross-hall writes, revoke, idempotent
+  replay and audit rollback passed in disposable H2 and PostgreSQL Ktor tests.
+  Full JVM tests passed 1,431 with one existing skip. TypeScript, ESLint,
+  276 Vitest cases and 16 mobile Chromium/WebKit cases passed.
+- Guest operations remain disconnected. Table operations still need to
+  resolve the explicit booking ID instead of using the legacy layout ID.
+  Next local step is a separately authorized table-operations adapter
+  against the saved link, including its session and deposit writers.
+
+## Guest booking owner preview — local candidate, 2026-11-03
+
+- Verdict **PARTIAL_BLOCKED** for guest checkout. DEC-018/B selects the
+  existing DB/PostgreSQL lifecycle. DEC-009/C selects per-club payment policy
+  with `NONE` for the first release. These decisions leave the guest route
+  cutover and provider integration separate.
+- Worktree `/private/tmp/clubs-table-editor-ux-20261103`, branch
+  `codex/table-editor-ux`, HEAD `9d4f54ce1da8796572e705af2bd16fee2392b5a5`.
+  `PROJECT_IDENTITY_OK`. The private club creator with current
+  `client.club.read` opens **Гостевой предпросмотр** from the club profile.
+  The screen reads saved nights, verifies V070, reads the layout and displays
+  the saved arrival rule. Table selection and guest count are visual drafts.
+  A matching layout ID or number yields no booking-table authority.
+- Disposable H2 and PostgreSQL passed four preview Ktor cases. The broader
+  targeted runs passed 57 application tests and 38 core-data tests,
+  including private-club containment and the existing V071 concurrency and
+  replay cases. Full JVM tests passed 1,427 with one existing skip. TypeScript,
+  ESLint, 276 Vitest cases and 16 mobile Chromium/WebKit cases passed.
+  Focused review, Detekt, ktlint, coverage, strict dependency verification,
+  logs policy and the Mini App dist validator passed.
+- Proposed mapping for owner approval: an explicit, audited, versioned,
+  same-club link between existing `hall_tables.id` and `tables.id`.
+  Start with one-to-one uniqueness and restrictive foreign keys. A link
+  carries the club and hall keys needed to enforce both parents. Keep legacy
+  booking/table IDs intact. Refuse missing or conflicting links. Verify
+  capacity, price units and active state using authoritative DB table data
+  under the shared club lock before availability or HOLD.
+- V071 retains cabinet authorization. Guest identity, published-club
+  authorization, application of saved booking rules to the command and
+  access to the guest's durable booking history need a separate contract.
+  QR, payment provider, guest runtime, finance, check-in and Telegram are
+  outside this slice. Next local step is owner approval of the explicit
+  table mapping contract.
+
+## Protected night check-in and visit — local candidate, 2026-11-03
+
+- Verdict **NIGHT_CHECKIN_CONTRACT_READY** for manual Host admission of a DB
+  booking with a known guest in a mapped private club. Registered worktree
+  `/private/tmp/clubs-table-editor-ux-20261103`, branch
+  `codex/table-editor-ux`, HEAD `9d4f54ce1da8796572e705af2bd16fee2392b5a5`,
+  `PROJECT_IDENTITY_OK`.
+- Fresh club-scoped Host authority and exact `client.club.read` precede the
+  event and booking locks. The command checks the unique V070 link, the
+  scheduled night and both UTC boundaries under the shared club lock.
+  Seat, check-in, visit and success audit commit together. Replay uses the
+  existing audit and visit IDs. The original event ID and legacy visit
+  timestamp stay intact. The schema remains V071.
+- Disposable PostgreSQL tests used independent actor backend PIDs and a
+  separate observer to verify both calendar orders, club-before-child locking,
+  visit visibility, and concurrent admission for the same guest. They also
+  covered midnight, DST overlap, ambiguous or stale links, revocation and
+  forced failures during visit and audit writes. H2 covered replay after
+  closure, exact time boundaries and historical partial admission.
+- 49 targeted core-data tests and 74 app-bot checks passed. The full JVM
+  run passed 1,425 tests with one existing skip. Focused review covered
+  lock order, scope, timestamp precision, replay and rollback.
+  Detekt, ktlint, coverage, dependency verification, log policy and
+  installDist passed. The installed JARs contain all ten V067–V071 migration
+  files and the incoming Mini App dist byte for byte.
+- Both registered check-in families, DI, QR and Telegram retain their prior
+  wiring. Reward delivery, the other check-in family, guest-list admissions,
+  finance/table and A3 writers remain separate cutover work. DEC-009 and
+  DEC-018 remain open. Next local step is a two-connection PostgreSQL proof
+  for the finance shift writer against the calendar's club lock.
+
+## Protected night HOLD and confirm — local candidate, 2026-11-03
+
+- Verdict **NIGHT_HOLD_CONTRACT_READY** for the disconnected local path.
+  Focused review covered lock order, post-lock validation, grant revocation,
+  replay and rollback.
+- Registered worktree `/private/tmp/clubs-table-editor-ux-20261103`, HEAD
+  `9d4f54ce1da8796572e705af2bd16fee2392b5a5`, `PROJECT_IDENTITY_OK`.
+- Explicit core-data methods use fresh cabinet grants, client and club
+  locks, exact canonical and legacy windows, and the existing slot lock.
+  Confirm preserves the original HOLD on rejection or rollback.
+- V071 adds durable scoped command results. An expired HOLD key cannot
+  create another HOLD. Confirm returns the existing booking after consuming
+  the original HOLD. H2 drops the superseded V1 status check and keeps V7.
+- Existing guest routing and DI still use the legacy methods. Other
+  writers and future guest authorization remain outside the protected path.
+  DEC-009 and DEC-018 remain open. The next local step is a two-connection
+  check-in and visit writer proof against the same club lock.
+- Disposable PostgreSQL and H2 passed all 24 targeted core-data tests,
+  including the three previously failing probes. All 67 relevant Ktor
+  tests passed. The full JVM run passed 1,421 tests with one existing skip.
+  Detekt, ktlint, coverage, dependency graph, log policy and installDist
+  passed. Both packaged V071 migrations and the incoming Mini App bytes
+  match their sources. All eight V067–V070 migration files match incoming
+  hashes. Stage, guest integration and process-level rollout remain unverified.
+
+## Night lock concurrency — local evidence, 2026-11-03
+
+- Verdict **NIGHT_LOCK_CONTRACT_GAP**. Registered worktree
+  `/private/tmp/clubs-table-editor-ux-20261103`, HEAD
+  `9d4f54ce1da8796572e705af2bd16fee2392b5a5`, `PROJECT_IDENTITY_OK`.
+- `NightLockConcurrencyPostgresIT` passed seven observations on disposable
+  PostgreSQL 16. Two actor backend PIDs and a separate observer verified
+  blocking edges with `pg_blocking_pids`. HOLD and calendar can proceed
+  independently. Confirm can wait at the booking INSERT while calendar owns
+  the club lock. The existing event guard protects the old interval in
+  both orders, and V070 links and calendar writes serialize.
+- The strict probes ran with `CLUBS_VERIFY_NIGHT_LOCK_CONTRACT=1` and
+  `:core-data:test --rerun -PrunIT=true --tests '*NightLockConcurrencyPostgresIT'`.
+  All three
+  failed as observed. An injected legacy event after calendar commit lets
+  the repository accept a closed or retimed slot. Replaying a HOLD key after
+  expiry cleanup inserts a new row. These probes share a synthetic mapped
+  club and exercise repositories directly.
+- Focused review, `detektTest`, `ktlintTestSourceSetCheck` and
+  `git diff --check` passed. The full JVM suite was outside this test-only slice.
+- Production code, V067–V070 and the five incoming local blocks remain
+  intact. Guest routing retains its legacy club containment. DEC-009 and
+  DEC-018 remain open. Next local step: add the shared club lock, post-lock
+  validation and durable replay to a disabled integration path for DB
+  HOLD/confirm, and use the strict probes as acceptance tests.
+
+## Canonical night event links — local candidate, 2026-11-03
+
+- Verdict **CANONICAL_NIGHT_LINKS_READY**. Focused review covered same-club
+  foreign keys, exact interval matching, tenant grants, the lock order,
+  replay and rollback.
+- DEC-008 C compatibility slice in
+  `/private/tmp/clubs-table-editor-ux-20261103`, branch `codex/table-editor-ux`,
+  HEAD `9d4f54ce1da8796572e705af2bd16fee2392b5a5`, `PROJECT_IDENTITY_OK`.
+- V070 adds a same-club, one-to-one bridge with restrictive foreign keys and
+  the verified legacy UTC window. The private client API classifies candidates
+  and accepts an explicit, versioned link using current calendar grants.
+  Calendar, link, audit and replay use the existing transaction patterns.
+- A linked interval is frozen even if the legacy event drifts. Guest readers
+  and writers retain their existing keys and behavior.
+- 18 new Ktor cases and 38 prior calendar and booking-rule regressions
+  passed across disposable H2 and PostgreSQL 16. A V069 fixture verified
+  Flyway upgrade and continued legacy event reads and HOLD writes with an
+  empty link table. The full JVM suite passed 1,418 tests with one existing
+  skip. Detekt, ktlint, coverage, dependency graph and logs policy passed.
+  The installed JARs contain V070 and the incoming Mini App dist byte for byte.
+  All six V067–V069 migration files and the table editor match incoming hashes.
+- Stage and mixed-version runtime remain unverified. DEC-009 and DEC-018
+  remain open. The next local step is to prove the shared DB HOLD/confirm
+  and calendar lock in two-connection tests before enabling any guest path.
+
+## Canonical operational nights — local candidate, 2026-11-03
+
+- Verdict **CANONICAL_NIGHTS_READY**. Focused review covered date and DST
+  semantics, tenant grants, stable identity, legacy dependency checks,
+  cancellation, replay and atomic rollback.
+- Owner accepted DEC-008 option C. Worktree
+  `/private/tmp/clubs-table-editor-ux-20261103`, branch `codex/table-editor-ux`,
+  HEAD `9d4f54ce1da8796572e705af2bd16fee2392b5a5`, `PROJECT_IDENTITY_OK`.
+  Previous local editor, calendar and booking rules are retained.
+- V069 stores the opening offset on existing rules. Tuesday can open Wednesday
+  at 00:00 and close Wednesday at 08:00. The shared schedule resolves the
+  actual wall dates using the club's IANA zone. Legacy V067 and V068 are unchanged.
+- The cabinet registry assigns one immutable ID per club and business date.
+  Calendar save and explicit sync reconcile 56 business dates, future dated
+  rules and existing future nights. GET has no materialization side effect.
+  Cancelled rows retain the ID and last interval. Safe reopening uses the same
+  ID. Before and after values are audited in the same transaction.
+- Legacy `events` are already served by guest/booking readers and include
+  cascade or set-null foreign keys. Finance and visits can be keyed by a
+  timestamp independently of any event. V069 keeps those records separate.
+  Event or slot windows and operational timestamps that intersect the
+  business date or actual interval fail closed with a dated conflict.
+  Started nights are frozen. Explicit calendar writes remain limited to
+  private clubs with exact client grants.
+- Targeted checks passed 16 canonical-night Ktor cases and 22 calendar and
+  booking-rules Ktor regressions across disposable H2 and PostgreSQL 16.
+  Ten domain tests cover overnight ordering, DST and booking-rules behavior.
+  Full JVM checks finished with 1,409 passes and one existing skip. Detekt,
+  ktlint, coverage, dependency graph and logs policy passed. The first logs
+  assertion failure did not reproduce in subsequent runs. JaCoCo still
+  reports the known refund/cancel class mismatch warnings.
+- TypeScript, ESLint, 274 Vitest tests, 14 mobile Chromium/WebKit scenarios,
+  10 packaged onboarding scenarios and the Mini App dist validator passed.
+  The installed JARs match the tested Mini App dist and both V069 files.
+  Five table editor files and the four V067/V068 files match the incoming bytes.
+- DEC-009 and DEC-018 remain open. No guest integration, legacy adoption,
+  production migration, real booking operation or external publication
+  was performed. Next local step: design the legacy-reference mapping and
+  writer lock contract before any guest cutover.
+
+## Client booking rules — local candidate, 2026-11-03
+
+- Verdict **CLIENT_BOOKING_RULES_READY**. Focused review covered tenant and
+  creator authority, calendar reuse, rule ordering, retry and migration.
+- Scope includes the private cabinet settings and preview for ONB-005, CAL-005,
+  BKG-006 and HOLD-001–004. Registered worktree
+  `/private/tmp/clubs-table-editor-ux-20261103`, branch `codex/table-editor-ux`,
+  HEAD `9d4f54ce1da8796572e705af2bd16fee2392b5a5`, `PROJECT_IDENTITY_OK`.
+- Open the club profile and select **Правила бронирования**. The exact
+  `client.club.read` grant permits viewing. Editing requires the exact
+  `client.club.booking_rules.write` grant. V068 stores club settings against
+  the tenant mapping and bootstraps only eligible creators with active prior
+  grants. Membership restoration leaves the booking rules grant revoked.
+- The cabinet starts with a cut-off 120 minutes before closing and 30 minutes
+  of retention after the guest's stated arrival. Arrival and preliminary HOLD
+  stay unset until the owner enters values. Legacy availability uses a cut-off
+  60 minutes before opening and arrival 120 minutes after opening capped at
+  closing. A3 defaults to a 10-minute HOLD and an arrival window from 15 minutes
+  before to 45 minutes after opening. Legacy and promoter-template HOLDs use
+  7 and 15 minutes respectively. Secured DB HOLD requires a positive TTL in
+  the request, and DB confirmation persists no arrival deadline.
+- The cabinet expresses the arrival deadline as elapsed minutes after opening.
+  The server projects saved rules onto the existing calendar's upcoming nights
+  and flags time ordering conflicts. The cabinet accepts minute offsets from
+  0 to 1,440 and a positive HOLD up to 1,440 minutes. These bounds and the
+  displayed instants apply to the cabinet. V067 migrations remain byte-identical.
+- Saves use the shared client lock, optimistic version, durable command replay
+  and atomic audit. A conflict keeps edited fields until the owner reviews the
+  current version. An unknown result keeps the original command and key.
+- Full JVM suite passed with 1,401 successes and one existing skip. Targeted
+  verification passed all 10 new Ktor scenarios across H2 and PostgreSQL 16,
+  12 calendar regressions and 3 domain scenarios. Detekt, ktlint, coverage,
+  dependency graph, logs policy and secret scan passed. JaCoCo reported the
+  existing refund/cancel class mismatch warnings.
+- Frontend verification passed 273 Vitest tests, TypeScript, ESLint, 14 mobile
+  Chromium/WebKit scenarios and 10 packaged onboarding scenarios. The installed
+  JAR resources match the validated Mini App dist. Real Telegram, remote CI and
+  deployed runtime remain unverified. The five incoming table editor files and
+  both V067 migrations match their baseline hashes.
+- [DEC-008, DEC-009 and DEC-018](../product/OPEN_DECISIONS.md#dec-008--canonical-operational-night-definition)
+  remain open. Guest runtime activation, cross-club defaults for arrival and
+  HOLD, and the resulting booking lifecycle are pending those decisions.
+  The next local step is to record DEC-008 before planning runtime integration.
+
+## Client club calendar — local candidate, 2026-11-03
+
+- Verdict: **CLIENT_CALENDAR_READY**, local only. Focused review checked exact
+  tenant authority, retry/replay, conflicts, DST, migration and packaging.
+- Scope: private cabinet calendar for CAL-001–CAL-003 and ONB-003; guest CAL-004
+  remains separate. Registered worktree `/private/tmp/clubs-table-editor-ux-20261103`,
+  branch `codex/table-editor-ux`, HEAD/local `origin/main`
+  `9d4f54ce1da8796572e705af2bd16fee2392b5a5`; `PROJECT_IDENTITY_OK`. The five
+  incoming `TABLE_EDITOR_UX_READY` source/test files retain their original hashes.
+- Path: client cabinet → club profile → **Календарь клуба**. Weekly rules, dated
+  changes and holidays persist in `club_hours`, `club_exceptions` and
+  `club_holidays`. Paired V067 adds the calendar version, an explicit next-day
+  flag and exact `client.club.calendar.write`; existing rules keep inferred
+  overnight semantics. Bootstrap is limited to eligible confirmed private-club
+  owners with current grants. Read requires `client.club.read` and current client
+  membership; mutations also require the new exact grant.
+- Save checks the version and saved timezone under the client lock. Rule changes,
+  audit and durable command record commit together. A conflict retains the draft;
+  the owner can reapply changed days/dates to the latest version. An unknown
+  result is retried with the original payload and idempotency key.
+- The server preview preserves the date on which the night starts, uses the
+  club's stored IANA zone, gives date changes precedence over holidays and weekly
+  rules, and includes nights still in progress. DST gaps shift forward; overlaps
+  use the earlier offset. Collapsed intervals appear as warnings. The cabinet
+  keeps one preview item per business date and does not materialize events.
+- Local evidence: all 12 calendar Ktor/JDBC cases passed on disposable H2
+  and PostgreSQL 16, including fresh and 66→67 migrations, app restart/replay,
+  audit rollback, races and tenant isolation. Full JVM suite with integrations:
+  1,661 passed, 11 existing skips, zero failures. Detekt, ktlint, coverage,
+  production dependency graph, logs policy and secret scan passed. JaCoCo
+  reported class/execution-data mismatch warnings for refund/cancel DTOs.
+- Frontend: 271 Vitest tests, TypeScript, ESLint, Vite and dist validation;
+  12 packaged mobile Chromium/WebKit and 10 packaged onboarding scenarios.
+  Installed JAR's React entry and assets match the tested dist byte for byte.
+- [DEC-008](../product/OPEN_DECISIONS.md#dec-008--canonical-operational-night-definition)
+  still gates the guest cutover. No public guest availability, club publication,
+  booking, HOLD or notification changes. Real Telegram devices, remote CI and
+  deployed environments are unverified. No commit or publication performed.
+  Next step: continue the next agreed local block in this worktree.
+
 ## Owner UX and saved map preview — local candidate, 2026-11-02
 
 - Scope: direct owner instruction, no new card/decision ID. Exact base/HEAD

@@ -50,12 +50,18 @@ export default function ClubProfile({
   home,
   reportDirty,
   openLayout,
+  openCalendar,
+  openBookingRules,
+  openBookingPreview,
 }: {
   credential: string;
   id: string;
   home: (clientId?: string) => void;
   reportDirty: (dirty: boolean) => void;
   openLayout?: () => void;
+  openCalendar?: () => void;
+  openBookingRules?: () => void;
+  openBookingPreview?: () => void;
 }) {
   const path = '/api/client/clubs/' + id + '/profile';
   const remote = useRemote<Profile>(credential, path);
@@ -175,6 +181,44 @@ export default function ClubProfile({
               </small>
             </button>
           )}
+          {openCalendar && profile.permissions.includes('client.club.read') && (
+            <button
+              className="po-card ob-card ob-row"
+              onClick={() => {
+                if (leave()) openCalendar();
+              }}
+            >
+              <strong>Календарь клуба</strong>
+              <small>
+                {profile.permissions.includes('client.club.calendar.write')
+                  ? 'Настроить рабочие ночи'
+                  : 'Посмотреть рабочие ночи'}
+              </small>
+            </button>
+          )}
+          {openBookingRules && profile.permissions.includes('client.club.read') && (
+            <button
+              className="po-card ob-card ob-row"
+              onClick={() => {
+                if (leave()) openBookingRules();
+              }}
+            >
+              <strong>Правила бронирования</strong>
+              <small>Настройки и предпросмотр по календарю клуба</small>
+            </button>
+          )}
+          {openBookingPreview &&
+            profile.canPreviewBooking && (
+              <button
+                className="po-card ob-card ob-row"
+                onClick={() => {
+                  if (leave()) openBookingPreview();
+                }}
+              >
+                <strong>Гостевой предпросмотр</strong>
+                <small>Ночи, схема зала и карточки столов</small>
+              </button>
+            )}
           <form
             noValidate
             onSubmit={(event) => {

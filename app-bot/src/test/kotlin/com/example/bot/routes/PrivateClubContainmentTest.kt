@@ -5,10 +5,14 @@ import com.example.bot.booking.a3.ConfirmResult
 import com.example.bot.booking.a3.HoldResult
 import com.example.bot.data.admin.AdminClubsDbRepository
 import com.example.bot.data.admin.AdminHallsDbRepository
+import com.example.bot.data.booking.TableDepositRepository
+import com.example.bot.data.booking.TableSessionRepository
 import com.example.bot.data.club.GuestListRepositoryImpl
 import com.example.bot.data.club.WaitlistRepositoryImpl
 import com.example.bot.data.clubs.ClubsDbRepository
 import com.example.bot.data.clubs.EventsDbRepository
+import com.example.bot.data.finance.ShiftReportRepository
+import com.example.bot.data.gamification.GamificationSettingsRepository
 import com.example.bot.data.layout.LayoutDbRepository
 import com.example.bot.data.music.MusicItemRepositoryImpl
 import com.example.bot.data.music.MusicLikesRepositoryImpl
@@ -16,6 +20,8 @@ import com.example.bot.data.music.MusicPlaylistRepositoryImpl
 import com.example.bot.data.music.TrackOfNightRepositoryImpl
 import com.example.bot.data.privacy.JdbcLegacyClubAccess
 import com.example.bot.data.privacy.LegacyClubAccess
+import com.example.bot.data.visits.NightOverrideRepository
+import com.example.bot.data.visits.VisitRepository
 import com.example.bot.music.MusicService
 import com.example.bot.plugins.DataSourceHolder
 import com.example.bot.plugins.configureSecurity
@@ -43,6 +49,7 @@ import io.ktor.server.plugins.autohead.AutoHeadResponse
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
@@ -148,6 +155,41 @@ class PrivateClubContainmentTest {
                     }
                 assertEquals(HttpStatusCode.OK, response.status)
                 assertTrue(response.bodyAsText().contains("Legacy renamed"))
+            }
+        }
+
+    @Test
+    fun `explicitly linked private table is fenced from legacy table operations`() =
+        withDatabase { source ->
+            source.sql("UPDATE hall_tables SET booking_table_id=8204,booking_club_id=8201 WHERE id=8203")
+            source.sql(
+                "INSERT INTO club_operational_nights(id,client_id,club_id,business_date,timezone,start_at,end_at," +
+                    "source,status,created_at,updated_at) SELECT 8220,101,club_id,DATE '2030-01-01','UTC'," +
+                    "start_at,end_at,'EXCEPTION','SCHEDULED',start_at,start_at FROM events WHERE id=8205",
+            )
+            source.sql(
+                "INSERT INTO canonical_night_event_links" +
+                    "(canonical_night_id,event_id,club_id,legacy_start_at,legacy_end_at) " +
+                    "SELECT 8220,id,club_id,start_at,end_at FROM events WHERE id=8205",
+            )
+            source.sql("INSERT INTO booking_cutover_fences VALUES (8201,8220,8204)")
+            withApp(source) {
+                val mapped = "/api/admin/clubs/8201/nights/2030-01-01T19:00:00Z"
+                val legacy = "/api/admin/clubs/8101/nights/2030-01-01T19:00:00Z"
+                assertEquals(HttpStatusCode.OK, client.get("$legacy/tables") { identity() }.status)
+                for ((method, path) in listOf(
+                    HttpMethod.Get to "tables",
+                    HttpMethod.Post to "tables/8203/seat",
+                    HttpMethod.Post to "tables/8203/free",
+                    HttpMethod.Put to "deposits/8204",
+                )) {
+                    val response =
+                        client.request("$mapped/$path") {
+                            this.method = method
+                            identity()
+                        }
+                    assertEquals(HttpStatusCode.NotFound, response.status, "$method $path")
+                }
             }
         }
 
@@ -424,6 +466,18 @@ class PrivateClubContainmentTest {
             adminHallsRoutes(AdminHallsDbRepository(database), AdminClubsDbRepository(database)) { TEST_BOT_TOKEN }
             adminHallPlanRoutes(AdminHallsDbRepository(database), layout) { TEST_BOT_TOKEN }
             adminTablesRoutes(layout, AdminHallsDbRepository(database)) { TEST_BOT_TOKEN }
+            adminTableOpsRoutes(
+                adminTablesRepository = layout,
+                tableSessionRepository = TableSessionRepository(database),
+                tableDepositRepository = TableDepositRepository(database),
+                shiftReportRepository = ShiftReportRepository(database),
+                visitRepository = VisitRepository(database),
+                nightOverrideRepository = NightOverrideRepository(database),
+                gamificationSettingsRepository = GamificationSettingsRepository(database),
+                auditLogger = mockk(),
+                guestQrResolver = mockk(),
+                botTokenProvider = { TEST_BOT_TOKEN },
+            )
             bookingA3Routes(state, botTokenProvider = { TEST_BOT_TOKEN })
             promoterQuotasAdminRoutes(PromoterQuotaService(InMemoryPromoterQuotaRepository(), Clock.systemUTC()), {
                 TEST_BOT_TOKEN

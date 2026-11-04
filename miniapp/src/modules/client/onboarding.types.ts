@@ -37,6 +37,7 @@ export interface ClubProfile {
   unit: string;
   version: string;
   savedAt: string;
+  canPreviewBooking?: boolean;
   permissions: string[];
   availableActions: string[];
 }

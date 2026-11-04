@@ -27,6 +27,10 @@ sealed interface BookingCoreError {
 
     data object EventNotFound : BookingCoreError
 
+    data object LegacyWriterFenced : BookingCoreError
+
+    data object TableOccupied : BookingCoreError
+
     data object TableNotFound : BookingCoreError
 }
 

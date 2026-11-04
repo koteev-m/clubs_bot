@@ -58,6 +58,8 @@ data class ClubHour(
     val dayOfWeek: DayOfWeek,
     val open: LocalTime,
     val close: LocalTime,
+    val closeNextDay: Boolean? = null,
+    val startNextDay: Boolean? = null,
 )
 
 /**
@@ -68,6 +70,8 @@ data class ClubHoliday(
     val isOpen: Boolean,
     val overrideOpen: LocalTime?,
     val overrideClose: LocalTime?,
+    val closeNextDay: Boolean? = null,
+    val startNextDay: Boolean? = null,
 )
 
 /**
@@ -78,6 +82,8 @@ data class ClubException(
     val isOpen: Boolean,
     val overrideOpen: LocalTime?,
     val overrideClose: LocalTime?,
+    val closeNextDay: Boolean? = null,
+    val startNextDay: Boolean? = null,
 )
 
 /**
@@ -318,6 +324,15 @@ class OperatingRulesResolver(
             }
         }
         return merged
+    }
+
+    companion object {
+        /** Cabinet preview only: date rules never materialize events or change guest availability. */
+        fun previewCalendar(
+            rules: CalendarRules,
+            zone: ZoneId,
+            now: Instant,
+        ): CalendarPreview = calendarPreview(rules, zone, now)
     }
 
     private fun shouldMerge(

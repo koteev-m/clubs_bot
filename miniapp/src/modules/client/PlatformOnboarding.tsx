@@ -967,10 +967,14 @@ function ClientLifecycle({
   );
 }
 
+const bookingRulesPermission = 'client.club.booking_rules.write';
+
 const clubPermissionLabels: Record<string, string> = {
   'client.club.read': 'чтение клуба',
   'client.club.profile.write': 'редактирование профиля',
   'client.club.layout.write': 'редактирование залов и столов',
+  'client.club.calendar.write': 'редактирование календаря клуба',
+  [bookingRulesPermission]: 'редактирование правил бронирования',
 };
 
 function MemberAccess({
@@ -987,6 +991,9 @@ function MemberAccess({
   updated: () => void;
 }) {
   const command = useCommand<Membership>(credential);
+  const restorableClubGrants = member.clubGrants.filter(
+    (grant) => grant.permission !== bookingRulesPermission,
+  );
   const [manage, setManage] = useState(false);
   const [grants, setGrants] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState(false);
@@ -1064,7 +1071,7 @@ function MemberAccess({
                   <span>Управление заявками</span>
                 </label>
               )}
-              {member.clubGrants.map((grant) => (
+              {restorableClubGrants.map((grant) => (
                 <label
                   className="ob-check"
                   key={grant.clubId + grant.permission}
@@ -1116,7 +1123,7 @@ function MemberAccess({
                       userId: member.userId,
                       expectedVersion: member.version,
                       permissions: manage ? ['client.application.manage'] : [],
-                      clubGrants: member.clubGrants
+                      clubGrants: restorableClubGrants
                         .filter((grant) =>
                           grants.includes(
                             grant.clubId + ':' + grant.permission,

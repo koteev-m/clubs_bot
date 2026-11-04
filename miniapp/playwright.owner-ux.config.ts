@@ -5,7 +5,13 @@ import { join } from 'node:path';
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['owner-ux-map.spec.ts', 'owner-map-preview.spec.ts'],
+  testMatch: [
+    'owner-ux-map.spec.ts',
+    'owner-map-preview.spec.ts',
+    'client-calendar.spec.ts',
+    'client-booking-rules.spec.ts',
+    'client-guest-booking-preview.spec.ts',
+  ],
   outputDir: join(tmpdir(), `clubs-owner-ux-${randomUUID()}`),
   use: {
     baseURL: 'http://127.0.0.1:5183',

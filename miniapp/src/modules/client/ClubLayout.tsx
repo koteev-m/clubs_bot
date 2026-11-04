@@ -149,7 +149,9 @@ export default function ClubLayout({
                   clientMode
                   previewOnly={!canWrite}
                   readOnly={
-                    !canWrite || state.pending || state.error?.status === 409
+                    !canWrite ||
+                    state.pending ||
+                    state.error?.code === 'version_conflict'
                   }
                   onBack={editorBack}
                   onBackReady={receiveBack}
@@ -162,7 +164,9 @@ export default function ClubLayout({
                   api={api.halls}
                   clientMode
                   readOnly={
-                    !canWrite || state.pending || state.error?.status === 409
+                    !canWrite ||
+                    state.pending ||
+                    state.error?.code === 'version_conflict'
                   }
                   onBack={profileBack}
                   onOpenEditor={openEditor}

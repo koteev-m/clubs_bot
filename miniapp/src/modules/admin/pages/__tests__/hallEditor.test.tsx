@@ -284,7 +284,7 @@ describe('hall editor interactions', () => {
     });
   });
 
-  it('creates second table after clearing selection', async () => {
+  it('creates two tables in succession without a redundant metadata write', async () => {
     setupPlanMocks();
     vi.mocked(listHallTables).mockResolvedValue([]);
     vi.mocked(createHallTable)
@@ -332,14 +332,67 @@ describe('hall editor interactions', () => {
       expect(createHallTable).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Снять выделение' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Готово' }));
 
+    expect(screen.getByText(/чтобы добавить следующий стол/)).toBeTruthy();
+    expect(updateHallTable).not.toHaveBeenCalled();
     fireEvent.click(stage, { clientX: 120, clientY: 60 });
 
     await waitFor(() => {
       expect(createHallTable).toHaveBeenCalledTimes(2);
+    });
+    expect(updateHallTable).not.toHaveBeenCalled();
+  });
+
+  it('keeps selection and input on failure; deselects only after the edit is saved', async () => {
+    setupPlanMocks();
+    setupTablesMock();
+    const [original] = await listHallTables(10);
+    let succeed!: (table: typeof original) => void;
+    vi.mocked(updateHallTable)
+      .mockRejectedValueOnce(new AdminApiError('Unavailable', { status: 503 }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            succeed = resolve;
+          }),
+      );
+    render(<HallEditorScreen clubId={2} hallId={10} onBack={vi.fn()} />);
+    const stage = await screen.findByTestId('hall-plan-stage');
+    mockStageRect(stage);
+    fireEvent.load(screen.getByTestId('hall-plan-image'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: '#1 · Table 1' }),
+    );
+    fireEvent.change(screen.getByLabelText('Вместимость'), {
+      target: { value: '6' },
+    });
+    const finish = screen.getByRole('button', {
+      name: 'Сохранить и завершить',
+    }) as HTMLButtonElement;
+    fireEvent.click(finish);
+    expect((await screen.findByRole('alert')).textContent).toBeTruthy();
+    expect(screen.getByText('Редактирование стола №1')).toBeTruthy();
+    expect(
+      (screen.getByLabelText('Вместимость') as HTMLInputElement).value,
+    ).toBe('6');
+    fireEvent.click(finish);
+    expect(finish.disabled).toBe(true);
+    expect(
+      screen.getByTestId('table-marker-1').getAttribute('aria-pressed'),
+    ).toBe('true');
+    fireEvent.click(stage, { clientX: 120, clientY: 60 });
+    expect(updateHallTable).toHaveBeenCalledTimes(2);
+    expect(createHallTable).not.toHaveBeenCalled();
+    await act(async () => succeed({ ...original, capacity: 6 }));
+    expect(
+      screen.getByTestId('table-marker-1').getAttribute('aria-pressed'),
+    ).toBe('false');
+    expect(screen.getByText(/чтобы добавить следующий стол/)).toBeTruthy();
+    expect(updateHallTable).toHaveBeenLastCalledWith(10, 1, {
+      label: 'Table 1',
+      capacity: 6,
+      tableNumber: 1,
     });
   });
 
@@ -376,7 +429,9 @@ describe('hall editor interactions', () => {
       expect(updateHallTable).not.toHaveBeenCalled();
     });
 
-    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /Готово|Сохранить и завершить/ }),
+    ).toBeNull();
     expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
   });
 });

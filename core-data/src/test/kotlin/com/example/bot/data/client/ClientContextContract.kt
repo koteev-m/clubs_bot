@@ -244,7 +244,12 @@ internal abstract class ClientContextContract {
             )
             assertNull(fixture.repository.club(880061002, platform, 1002))
             assertEquals(emptyList<ClientContext>(), context(880061005))
-            assertEquals(fixture.legacyBefore, fixture.legacySnapshot())
+            // Preserve all legacy values and assert the additive V067 default on each existing club.
+            val expected =
+                fixture.legacyBefore.mapValues { (table, rows) ->
+                    if (table == "clubs") rows.map { it + "1" } else rows
+                }
+            assertEquals(expected, fixture.legacySnapshot())
         }
 
     @Test

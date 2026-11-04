@@ -11,13 +11,16 @@ export interface ClientLayoutTable {
   tableNumber: number;
   label: string;
   capacity: number;
-  x: number;
-  y: number;
+  bookingDeposit?: string | null;
+  bookingLinked?: boolean;
+  x: number | null;
+  y: number | null;
 }
 export interface ClientLayoutHall {
   id: string;
   name: string;
   layoutRevision: string;
+  tableCount?: number;
   tables: ClientLayoutTable[];
   plan: null | { contentType: string; sha256: string; sizeBytes: number };
 }
@@ -26,6 +29,7 @@ export interface ClientLayout {
   clubId: string;
   clientId: string;
   permissions: string[];
+  reservedTableNumbers?: number[];
   halls: ClientLayoutHall[];
 }
 interface Pending {
@@ -228,6 +232,7 @@ export function createClientLayoutApi(
     clubId,
     name: value.name,
     layoutRevision: value.layoutRevision,
+    tableCount: value.tableCount ?? value.tables.length,
     isActive: true,
   });
   const halls: ClubHallsApi<string> = {
@@ -250,32 +255,55 @@ export function createClientLayoutApi(
       return editorHall(result.halls.find((item) => item.id === id)!);
     },
   };
+  const createTables = async (id: string, suffix: string, fields: object) => {
+    const previous = new Set(hall(id).tables.map((table) => table.id));
+    const result = await mutate('/halls/' + id + '/tables' + suffix, {
+      ...fields,
+      expectedVersion: hall(id).layoutRevision,
+    });
+    return (
+      result.halls
+        .find((item) => item.id === id)
+        ?.tables.filter((table) => !previous.has(table.id)) ?? []
+    );
+  };
+  const createOne = async (id: string, fields: object) => {
+    const created = (await createTables(id, '', fields))[0];
+    if (!created) throw new AdminApiError('Обновите список столов.');
+    return created;
+  };
+  const patchTable = async (id: string, tableId: string, fields: object) => {
+    const result = await mutate(
+      '/halls/' + id + '/tables/' + tableId,
+      { ...fields, expectedVersion: hall(id).layoutRevision },
+      'PATCH',
+    );
+    const updated = result.halls
+      .find((item) => item.id === id)
+      ?.tables.find((item) => item.id === tableId);
+    if (!updated) throw new AdminApiError('Обновите список столов.');
+    return updated;
+  };
   const editor: HallEditorApi<string> = {
     async listHallTables(id, signal) {
       await load(signal);
       return hall(id).tables;
     },
-    async createHallTable(id, fields) {
-      const previous = new Set(hall(id).tables.map((item) => item.id));
-      const result = await mutate('/halls/' + id + '/tables', {
-        ...fields,
-        expectedVersion: hall(id).layoutRevision,
-      });
-      const created = result.halls
-        .find((item) => item.id === id)
-        ?.tables.find((item) => !previous.has(item.id));
-      if (!created) throw new AdminApiError('Обновите список столов.');
-      return created;
-    },
-    async updateHallTable(id, tableId, fields) {
-      const result = await mutate(
-        '/halls/' + id + '/tables/' + tableId,
-        { ...fields, expectedVersion: hall(id).layoutRevision },
-        'PATCH',
-      );
-      return result.halls
-        .find((item) => item.id === id)!
-        .tables.find((item) => item.id === tableId)!;
+    createHallTable: createOne,
+    updateHallTable: patchTable,
+    physical: {
+      reservedNumbers: () =>
+        current?.reservedTableNumbers ??
+        current?.halls.flatMap((item) =>
+          item.tables.map((table) => table.tableNumber),
+        ) ??
+        [],
+      create: createOne,
+      createBatch: (id, tableNumbers, capacity) =>
+        createTables(id, '/batch', { tableNumbers, capacity }),
+      update: patchTable,
+      place: (id, table, point) =>
+        patchTable(id, table, point ?? { x: null, y: null }),
     },
     async uploadHallPlan(id, file) {
       return mutate(
