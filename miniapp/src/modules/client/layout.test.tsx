@@ -93,7 +93,7 @@ afterEach(() => {
 });
 
 describe('cabinet uses the shared layout editor', () => {
-  it('creates a hall without JSON, uploads a plan, adds and edits a table, and protects native Back input', async () => {
+  it('creates a table before the plan, places and edits it, and protects native Back input', async () => {
     let stored: ClientLayout = {
       id: club,
       clubId: club,
@@ -136,16 +136,26 @@ describe('cabinet uses the shared layout editor', () => {
               sha256: 'synthetic',
               sizeBytes: 4,
             };
-            first.layoutRevision = '2';
+            first.layoutRevision = '3';
             return json(stored);
           }
           return new Response(new Blob(['plan'], { type: 'image/png' }));
         }
         const body = JSON.parse(String(options?.body));
         if (path.endsWith('/tables')) {
-          expect(body.expectedVersion).toBe('2');
-          first.tables = [{ ...body, id: table, hallId: hall }];
-          first.layoutRevision = '3';
+          expect(body.expectedVersion).toBe('1');
+          expect(body.x).toBeUndefined();
+          first.tables = [
+            {
+              ...body,
+              id: table,
+              hallId: hall,
+              x: null,
+              y: null,
+              bookingLinked: true,
+            },
+          ];
+          first.layoutRevision = '2';
           return json(stored);
         }
         if (path.endsWith('/tables/' + table)) {
@@ -168,6 +178,17 @@ describe('cabinet uses the shared layout editor', () => {
     await screen.findByText('Первый зал', { exact: true });
     fireEvent.click(screen.getByRole('button', { name: 'Открыть схему' }));
     await screen.findByText('План еще не загружен.');
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Добавить столы' }),
+    );
+    fireEvent.change(screen.getByLabelText('Номер нового стола'), {
+      target: { value: '1' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Создать стол' }),
+    );
+    await screen.findByRole('button', { name: '#1 · Стол 1' });
+    expect(stored.halls[0].tables[0].x).toBeNull();
     const input = document.querySelector('input[type=file]')!;
     fireEvent.change(input, {
       target: {
@@ -178,7 +199,11 @@ describe('cabinet uses the shared layout editor', () => {
     stage.getBoundingClientRect = () => rect;
     fireEvent.load(screen.getByTestId('hall-plan-image'));
     fireEvent.click(stage, { clientX: 100, clientY: 50 });
-    await screen.findByRole('button', { name: '#1 · Стол 1' });
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Разместить №1 · Стол 1' }),
+    );
+    await screen.findByTestId('table-marker-' + table);
+    expect(patches[0]).toEqual({ x: 0.5, y: 0.5, expectedVersion: '3' });
     fireEvent.change(screen.getByLabelText('Название', { exact: true }), {
       target: { value: 'У окна' },
     });
@@ -190,7 +215,7 @@ describe('cabinet uses the shared layout editor', () => {
     fireEvent.pointerMove(marker, { clientX: 140, clientY: 70, pointerId: 1 });
     fireEvent.pointerUp(marker, { clientX: 140, clientY: 70, pointerId: 1 });
     expect(window.confirm).toHaveBeenCalled();
-    expect(patches).toHaveLength(0);
+    expect(patches).toHaveLength(1);
     expect(
       (screen.getByLabelText('Название', { exact: true }) as HTMLInputElement)
         .value,
@@ -204,13 +229,15 @@ describe('cabinet uses the shared layout editor', () => {
       (screen.getByLabelText('Название', { exact: true }) as HTMLInputElement)
         .value,
     ).toBe('У окна');
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить и завершить' }),
+    );
     await screen.findByRole('button', { name: '#1 · У окна' });
-    expect(patches[0]).toEqual({
+    expect(patches[1]).toEqual({
       tableNumber: 1,
       label: 'У окна',
       capacity: 6,
-      expectedVersion: '3',
+      expectedVersion: '4',
     });
     expect(fetch).toHaveBeenCalled();
     expect(paths.some((path) => path.includes('/api/admin/'))).toBe(false);
@@ -332,7 +359,9 @@ describe('cabinet mutation access loss', () => {
     fireEvent.change(screen.getByLabelText('Название', { exact: true }), {
       target: { value: 'Изменённый стол' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить и завершить' }),
+    );
     await screen.findByText(/Доступ утрачен или запись недоступна/);
     expect(
       screen.queryByRole('button', { name: 'Повторить ту же операцию' }),

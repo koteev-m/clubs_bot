@@ -1,0 +1,53 @@
+.cc-rules,
+.cc-preview ol,
+.cc-date-add,
+.cc-rule,
+.cc-conflict {
+  display: grid;
+  min-width: 0;
+  gap: 0.65rem;
+}
+
+.cc-rules {
+  margin-bottom: 0.85rem;
+}
+
+.cc-rules section {
+  margin-bottom: 0;
+}
+
+.cc-rule {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.75rem;
+  padding: 0.65rem;
+}
+
+.cc-rule legend {
+  padding-inline: 0.3rem;
+  font-weight: 600;
+}
+
+.cc-times,
+.cc-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  gap: 0.6rem;
+}
+
+.cc-rules input:not([type='checkbox']),
+.cc-rules select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cc-preview ol {
+  list-style: none;
+  padding: 0;
+}
+
+.cc-preview li {
+  display: grid;
+  padding: 0.65rem 0;
+  gap: 0.15rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}

@@ -30,8 +30,18 @@ class JdbcClientOnboardingRepository(
         withContext(dispatcher) {
             validateActor(actor)
             transaction(
-                readOnly = operation !in setOf(OnboardingRead.CLUB_LAYOUT_GET, OnboardingRead.CLUB_PLAN_GET),
+                readOnly =
+                    operation !in
+                        setOf(
+                            OnboardingRead.CLUB_LAYOUT_GET,
+                            OnboardingRead.CLUB_PLAN_GET,
+                            OnboardingRead.CLUB_CALENDAR_GET,
+                            OnboardingRead.CLUB_NIGHT_EVENT_CANDIDATE,
+                            OnboardingRead.CLUB_BOOKING_RULES_GET,
+                            OnboardingRead.CLUB_BOOKING_PREVIEW_GET,
+                        ),
             ) { sql ->
+                val snapshotAt = if (operation == OnboardingRead.CLUB_TABLE_AVAILABILITY_GET) clock.instant() else null
                 val session =
                     OnboardingSession(
                         sql,
@@ -55,6 +65,21 @@ class JdbcClientOnboardingRepository(
                         )
                     OnboardingRead.CLIENT_APPLICATION_GET -> applications.get(required(resourceId), platform = false)
                     OnboardingRead.CLUB_PROFILE_GET -> ClubOnboardingOperations(session).get(required(resourceId))
+                    OnboardingRead.CLUB_BOOKING_RULES_GET ->
+                        ClubBookingRulesOperations(session).get(required(resourceId))
+                    OnboardingRead.CLUB_BOOKING_PREVIEW_GET -> ClubBookingPreview(session).get(required(resourceId))
+                    OnboardingRead.CLUB_TABLE_AVAILABILITY_GET ->
+                        ClubTableAvailability(session).get(
+                            required(resourceId),
+                            body.id("nightId"),
+                            body.id("hallId"),
+                            checkNotNull(snapshotAt),
+                        )
+                    OnboardingRead.CLUB_CALENDAR_GET -> ClubCalendarOperations(session).get(required(resourceId))
+                    OnboardingRead.CLUB_NIGHT_EVENT_CANDIDATE ->
+                        ClubNightEventLinks(
+                            session,
+                        ).classify(required(resourceId))
                     OnboardingRead.CLUB_LAYOUT_GET -> ClubLayoutOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_PLAN_GET -> ClubLayoutOperations(session).plan(required(resourceId), body)
                     OnboardingRead.PLATFORM_INVITATION_GET -> invitations.get(required(resourceId), platform = true)
@@ -157,8 +182,16 @@ class JdbcClientOnboardingRepository(
             OnboardingMutation.CLIENT_ARCHIVE, OnboardingMutation.CLIENT_RESTORE ->
                 ClientLifecycleOperations(session).change(required(resourceId), operation, body)
             OnboardingMutation.CLUB_CREATE -> DirectClubOperations(session).create(required(resourceId), body)
+            OnboardingMutation.CLUB_BOOKING_RULES_UPDATE ->
+                ClubBookingRulesOperations(session).update(required(resourceId), body)
+            OnboardingMutation.CLUB_CALENDAR_UPDATE ->
+                ClubCalendarOperations(
+                    session,
+                ).update(required(resourceId), body)
+            OnboardingMutation.CLUB_NIGHT_EVENT_LINK -> ClubNightEventLinks(session).link(required(resourceId), body)
             OnboardingMutation.CLUB_HALL_CREATE, OnboardingMutation.CLUB_HALL_UPDATE,
-            OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_UPDATE,
+            OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_BATCH_CREATE,
+            OnboardingMutation.CLUB_TABLE_UPDATE,
             OnboardingMutation.CLUB_PLAN_UPLOAD,
             -> ClubLayoutOperations(session).mutate(required(resourceId), operation, body)
             OnboardingMutation.APPLICATION_CREATE -> applications.create(required(resourceId), body)
@@ -189,6 +222,9 @@ class JdbcClientOnboardingRepository(
             "member" -> ClientAccessOperations(session).memberView(command.long("client_id"), command.long("result_id"))
             "club_create" -> ClubOnboardingOperations(session).replayCreate(command.long("result_id"))
             "club_profile" -> ClubOnboardingOperations(session).get(command.long("result_id"), write = true)
+            "club_booking_rules" -> ClubBookingRulesOperations(session).get(command.long("result_id"), write = true)
+            "club_calendar" -> ClubCalendarOperations(session).get(command.long("result_id"), write = true)
+            "club_night_event_link" -> ClubNightEventLinks(session).receipt(command.long("result_id"))
             "club_layout" -> ClubLayoutOperations(session).get(command.long("result_id"), write = true)
             else -> error("Invalid stored command result")
         }

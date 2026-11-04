@@ -3,6 +3,9 @@ import { useInitData } from '../auth/hooks/useInitData';
 import NewClub, { blankNewVenue } from './NewClub';
 import { authorityLost } from './onboarding.api';
 import ClubProfile from './ClubProfile';
+import ClubCalendar from './ClubCalendar';
+import ClubBookingRules from './ClubBookingRules';
+import GuestBookingPreview from './GuestBookingPreview';
 import ClubLayout from './ClubLayout';
 import { scrubClientLaunchUrl } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
@@ -29,6 +32,9 @@ type Screen =
   | { type: 'space'; id: string }
   | { type: 'application'; id: string }
   | { type: 'club'; id: string }
+  | { type: 'calendar'; id: string }
+  | { type: 'booking-rules'; id: string }
+  | { type: 'booking-preview'; id: string }
   | { type: 'layout'; id: string; hallId?: string }
   | { type: 'new'; id: string; previous?: ClubApplication }
   | { type: 'invitation'; id?: string };
@@ -49,6 +55,9 @@ function savedScreen(): Screen {
       ...(hallId && /^[1-9][0-9]*$/.test(hallId) ? { hallId } : {}),
     };
   }
+  if (params.get('screen') === 'booking-preview') return { type: 'booking-preview', id };
+  if (params.get('screen') === 'booking-rules') return { type: 'booking-rules', id };
+  if (params.get('screen') === 'calendar') return { type: 'calendar', id };
   if (params.get('screen') === 'club') return { type: 'club', id };
   return { type: 'home' };
 }
@@ -119,9 +128,9 @@ function ClientWorkspace({
   const pendingClient = useRef('');
   pendingClient.current = createClub.blocked ? draftClient : '';
   const dirty = useRef(false);
-  const layoutPending = useRef(false);
-  const reportLayoutPending = useCallback((value: boolean) => {
-    layoutPending.current = value;
+  const sectionPending = useRef(false);
+  const reportSectionPending = useCallback((value: boolean) => {
+    sectionPending.current = value;
   }, []);
   const position = useRef(
     Number.isSafeInteger(window.history.state?.clientPosition)
@@ -198,7 +207,7 @@ function ClientWorkspace({
         ? Number(event.state.clientPosition)
         : 0;
       if (nextPosition === position.current) return;
-      if (layoutPending.current) {
+      if (sectionPending.current) {
         window.history.go(position.current - nextPosition);
         return;
       }
@@ -289,6 +298,38 @@ function ClientWorkspace({
         reportDirty={reportDirty}
       />
     );
+  if (screen.type === 'booking-preview')
+    return (
+      <GuestBookingPreview
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        back={() => navigate({ type: 'club', id: screen.id })}
+        reportDirty={reportDirty}
+      />
+    );
+  if (screen.type === 'booking-rules')
+    return (
+      <ClubBookingRules
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        back={() => navigate({ type: 'club', id: screen.id })}
+        reportDirty={reportDirty}
+        reportPending={reportSectionPending}
+      />
+    );
+  if (screen.type === 'calendar')
+    return (
+      <ClubCalendar
+        key={screen.id}
+        credential={credential}
+        id={screen.id}
+        back={() => navigate({ type: 'club', id: screen.id })}
+        reportDirty={reportDirty}
+        reportPending={reportSectionPending}
+      />
+    );
   if (screen.type === 'layout')
     return (
       <ClubLayout
@@ -301,7 +342,7 @@ function ClientWorkspace({
           navigate({ type: 'layout', id: screen.id, hallId })
         }
         reportDirty={reportDirty}
-        reportPending={reportLayoutPending}
+        reportPending={reportSectionPending}
       />
     );
   if (screen.type === 'club')
@@ -315,6 +356,9 @@ function ClientWorkspace({
         }
         reportDirty={reportDirty}
         openLayout={() => navigate({ type: 'layout', id: screen.id })}
+        openCalendar={() => navigate({ type: 'calendar', id: screen.id })}
+        openBookingRules={() => navigate({ type: 'booking-rules', id: screen.id })}
+        openBookingPreview={() => navigate({ type: 'booking-preview', id: screen.id })}
       />
     );
   return <ClientHome credential={credential} navigate={navigate} />;

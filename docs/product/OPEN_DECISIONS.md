@@ -168,27 +168,21 @@
 
 ## `DEC-008` — canonical operational-night definition
 
-- **Context:** source определяет overnight interval в TZ клуба; разные current paths используют event timestamps и hardcoded policy.
-- **Source tension:** business date ночи начала, weekly rules + exceptions/holidays, end-relative cutoff.
-- **Code tension:** resolver моделирует это, DB adapter rules пуст, finance/table/check-in keys используют timestamps.
-- **Options:** (A) materialized Event — единственный canonical night; (B) rules on demand; (C) rules генерируют/materialize canonical Night record.
-- **Recommendation:** C — rule engine создаёт/обновляет immutable-identifiable operational nights, а все domains ссылаются на один ID/start.
-- **Consequences:** A проще, но ручной calendar; B осложняет устойчивые ссылки/audit; C требует reconciliation/migration design.
+- **Решение владельца от 2026-11-03:** вариант C. Недельные правила, праздничные правила и исключения создают и согласуют каноническую операционную ночь.
+- **Контракт:** одна клубная дата на клуб получает постоянный ID. Запись хранит клубную дату, IANA TZ и фактические моменты открытия и закрытия. Открытие можно отнести к клубной дате либо к следующим календарным суткам, включая 00:00.
+- **Изменения:** допустимый перенос, отмена и повторное открытие сохраняют ID и историю. При связанных обязательствах изменение времени и отмена требуют отдельной процедуры. Календарная правка сама по себе не удаляет и не переносит брони, HOLD, посещения и финансовые записи.
+- **Разрешённый локальный этап:** закрытый кабинет с точными client grants и явной связью между существующей канонической ночью и одним точным legacy `event`. Дополнительные мероприятия сохраняют самостоятельные ID. Неоднозначные кандидаты требуют разбирательства перед привязкой. Связь замораживает интервал и защищает исходные ссылки.
+- **Граница runtime:** активация гостевых, финансовых и check-in путей требует отдельного решения и общей блокировки writers. Принятые DEC-009 и DEC-018 определяют целевой путь бронирования. Guest cutover требует отдельного разрешения.
 - **Depends on:** `DEC-003`.
-- **Blocks:** `DEC-009`, `DEC-010`, `DEC-011`, `DEC-012`, `DEC-013`, `DEC-018`.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-009` — booking payment/deposit boundary
 
-- **Context:** source показывает депозит до confirmation, но не определяет online payment obligation.
-- **Source tension:** booking flow содержит расчёт депозита; table operations проводят фактические deposits.
-- **Code tension:** payment/refund infrastructure присутствует, route stack в основном unwired; A3 confirm не платёжный.
-- **Options:** (A) reservation без online payment, депозит только на месте; (B) provider deposit до confirm; (C) per-club policy `NONE/PROVIDER_DEPOSIT`; (D) Stars для допустимого digital scope.
-- **Recommendation:** C с initial MVP policy `NONE`, пока business/legal/payment requirements не определены.
-- **Consequences:** A/C позволяют shipping guest flow быстрее; B требует end-to-end payment, refund, webhook and reconciliation; Stars нельзя выбирать без классификации товара.
+- **Решение владельца от 2026-11-03:** вариант C. Политика оплаты задаётся для клуба. Первый рабочий вариант использует `NONE`.
+- **Контракт первого запуска:** подтверждение не требует онлайн-платежа. Минимальный депозит стола показывается как условие бронирования. Подтверждение само по себе не фиксирует оплату или внесение депозита.
+- **Следующий режим:** `PROVIDER_DEPOSIT` сохраняется для отдельной реализации. Его включение требует отдельного контракта платежей, возвратов, webhook и reconciliation.
 - **Depends on:** `DEC-008`.
-- **Blocks:** `DEC-014`, `DEC-018`.
-- **Status:** `DECISION_REQUIRED`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-010` — GuestList MVP: names, links или оба
 
@@ -317,15 +311,11 @@
 
 ## `DEC-018` — retain/replace booking/check-in/payment implementations
 
-- **Context:** duplicate registered booking routes and multiple QR/check-in/payment stacks create competing ownership; actual HOLD/confirm selector choice is deterministic, not random.
-- **Source tension:** source assumes one lifecycle and one pass.
-- **Code tension:** in-memory A3 and DB secured hold/confirm share paths, but extra `authorize`/`clubScoped` selectors make the secured DB branch selected; A3 handlers are shadowed for those methods and their React DTO returns `invalid_payload`. Other booking/payment routes are unwired; two check-in families are wired.
-- **Options:** (A) retain A3 and remove DB route; (B) retain DB booking service and adapt UI; (C) new orchestrator over selected repositories; payment deferred or included separately.
-- **Recommendation:** B for persistence: adapt the client to the selected DB contract, then remove the shadowed A3 route only in an authorized code task; retain existing check-in DB service behind a unified pass adapter; keep payment disabled until `DEC-009`.
-- **Consequences:** response DTO/UI changes and combined-routing tests are required; A would intentionally reverse the current selected production path and lose restart durability; C is larger.
-- **Depends on:** `DEC-008`, `DEC-009`, `DEC-011`, `DEC-020`.
-- **Blocks:** none.
-- **Status:** `DECISION_REQUIRED`.
+- **Решение владельца от 2026-11-03:** вариант B. Каноническая основа бронирования — существующий DB/PostgreSQL booking lifecycle.
+- **Контракт:** гостевой UI использует DB HOLD и confirm с устойчивым хранением результата. Каноническая ночь и явная связь V070 задают событие. Политика первого запуска — `NONE` по DEC-009.
+- **Граница:** существующие A3 и гостевые маршруты сохраняются до отдельного разрешения на cutover. QR/Night Pass и check-in требуют собственной проверки совместимости.
+- **Depends on:** `DEC-008`, `DEC-009`. Для Night Pass и check-in применяются также `DEC-011` и `DEC-020`.
+- **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-019` — existing capabilities outside `CONCEPT_SOURCE`
 

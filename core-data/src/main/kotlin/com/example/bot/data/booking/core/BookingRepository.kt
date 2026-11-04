@@ -35,6 +35,7 @@ import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransacti
 import org.jetbrains.exposed.sql.update
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -44,6 +45,23 @@ import kotlin.time.Duration.Companion.seconds
 
 private val ACTIVE_STATUSES = listOf(BookingStatus.BOOKED.name, BookingStatus.SEATED.name)
 private const val HOLD_SLOT_LOCK_NAMESPACE = "booking_hold_slot"
+private const val MAX_HOLD_GUESTS = 50
+
+private val holdsWithTables =
+    BookingHoldsTable.join(
+        TablesTable,
+        joinType = JoinType.INNER,
+        onColumn = BookingHoldsTable.tableId,
+        otherColumn = TablesTable.id,
+    )
+
+private fun tableClubId(
+    tableId: Long,
+    lock: Boolean = false,
+): Long? {
+    val query = TablesTable.selectAll().where { TablesTable.id eq tableId }
+    return (if (lock) query.forUpdate() else query).singleOrNull()?.get(TablesTable.clubId)
+}
 
 sealed interface BookingCancellationResult {
     data class Cancelled(
@@ -132,47 +150,48 @@ class BookingRepository(
         val start = slotStart.toOffsetDateTime()
         val end = slotEnd.toOffsetDateTime()
         return try {
-            withTxRetry {
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    acquireHoldSlotLockIfPostgres(tableId, start, end)
-                    val existingByKey =
-                        BookingsTable
-                            .selectAll()
-                            .where { BookingsTable.idempotencyKey eq idempotencyKey }
-                            .limit(1)
-                            .firstOrNull()
-                    if (existingByKey != null) {
-                        return@newSuspendedTransaction BookingCoreResult.Failure(
-                            BookingCoreError.IdempotencyConflict,
-                        )
-                    }
-                    val activeExists =
-                        BookingsTable
-                            .selectAll()
-                            .where {
-                                (BookingsTable.tableId eq tableId) and
-                                    (BookingsTable.slotStart eq start) and
-                                    (BookingsTable.slotEnd eq end) and
-                                    (BookingsTable.status inList ACTIVE_STATUSES)
-                            }.empty()
-                            .not()
-                    if (activeExists) {
-                        BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
-                    } else {
-                        BookingCoreResult.Success(
-                            insertBooking(
-                                clubId = clubId,
-                                tableId = tableId,
-                                slotStart = start,
-                                slotEnd = end,
-                                guests = guests,
-                                minRate = minRate,
-                                idempotencyKey = idempotencyKey,
-                                guestUserId = guestUserId,
-                                promoterUserId = promoterUserId,
-                            ),
-                        )
-                    }
+            legacyBookingTransaction(db) {
+                if (legacyReservationFenced(tableId, slotStart, slotEnd)) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.LegacyWriterFenced)
+                }
+                acquireHoldSlotLockIfPostgres(tableId, start, end)
+                val existingByKey =
+                    BookingsTable
+                        .selectAll()
+                        .where { BookingsTable.idempotencyKey eq idempotencyKey }
+                        .limit(1)
+                        .firstOrNull()
+                if (existingByKey != null) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(
+                        BookingCoreError.IdempotencyConflict,
+                    )
+                }
+                val activeExists =
+                    BookingsTable
+                        .selectAll()
+                        .where {
+                            (BookingsTable.tableId eq tableId) and
+                                (BookingsTable.slotStart eq start) and
+                                (BookingsTable.slotEnd eq end) and
+                                (BookingsTable.status inList ACTIVE_STATUSES)
+                        }.empty()
+                        .not()
+                if (activeExists) {
+                    BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
+                } else {
+                    BookingCoreResult.Success(
+                        insertBooking(
+                            clubId = clubId,
+                            tableId = tableId,
+                            slotStart = start,
+                            slotEnd = end,
+                            guests = guests,
+                            minRate = minRate,
+                            idempotencyKey = idempotencyKey,
+                            guestUserId = guestUserId,
+                            promoterUserId = promoterUserId,
+                        ),
+                    )
                 }
             }
         } catch (ex: Throwable) {
@@ -194,99 +213,105 @@ class BookingRepository(
         promoterUserId: Long? = null,
     ): BookingCoreResult<BookingRecord> =
         try {
-            withTxRetry {
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    val initialHold =
-                        BookingHoldsTable
-                            .selectAll()
-                            .where { BookingHoldsTable.id eq holdId }
-                            .limit(1)
-                            .firstOrNull()
-                            ?: return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            legacyBookingTransaction(db) {
+                val initialHold =
+                    BookingHoldsTable
+                        .selectAll()
+                        .where { BookingHoldsTable.id eq holdId }
+                        .limit(1)
+                        .firstOrNull()
+                        ?: return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
 
-                    val tableId = initialHold[BookingHoldsTable.tableId]
-                    val slotStart = initialHold[BookingHoldsTable.slotStart]
-                    val slotEnd = initialHold[BookingHoldsTable.slotEnd]
-                    acquireHoldSlotLockIfPostgres(tableId, slotStart, slotEnd)
+                val tableId = initialHold[BookingHoldsTable.tableId]
+                val slotStart = initialHold[BookingHoldsTable.slotStart]
+                val slotEnd = initialHold[BookingHoldsTable.slotEnd]
+                if (legacyReservationFenced(initialHold)) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.LegacyWriterFenced)
+                }
+                acquireHoldSlotLockIfPostgres(tableId, slotStart, slotEnd)
 
-                    val now = Instant.now(clock)
-                    val holdRow =
-                        BookingHoldsTable
-                            .selectAll()
-                            .where { BookingHoldsTable.id eq holdId }
-                            .limit(1)
-                            .firstOrNull()
-                            ?: return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+                val now = Instant.now(clock)
+                val holdRow =
+                    BookingHoldsTable
+                        .selectAll()
+                        .where { BookingHoldsTable.id eq holdId }
+                        .limit(1)
+                        .firstOrNull()
+                        ?: return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
 
-                    val expiresAt = holdRow[BookingHoldsTable.expiresAt].toInstant()
-                    BookingHoldsTable.deleteWhere { BookingHoldsTable.id eq holdId }
-                    if (expiresAt.isBefore(now)) {
-                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.HoldExpired)
-                    }
+                if (!sameHoldSlot(initialHold, holdRow) ||
+                    holdRow[BookingHoldsTable.eventId] != initialHold[BookingHoldsTable.eventId]
+                ) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+                }
+                val expiresAt = holdRow[BookingHoldsTable.expiresAt].toInstant()
+                BookingHoldsTable.deleteWhere { BookingHoldsTable.id eq holdId }
+                if (expiresAt.isBefore(now)) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+                }
 
-                    val existingByKey =
-                        BookingsTable
-                            .selectAll()
-                            .where { BookingsTable.idempotencyKey eq idempotencyKey }
-                            .limit(1)
-                            .firstOrNull()
-                    if (existingByKey != null) {
-                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.IdempotencyConflict)
-                    }
+                val existingByKey =
+                    BookingsTable
+                        .selectAll()
+                        .where { BookingsTable.idempotencyKey eq idempotencyKey }
+                        .limit(1)
+                        .firstOrNull()
+                if (existingByKey != null) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.IdempotencyConflict)
+                }
 
-                    val hasActiveBooking =
-                        BookingsTable
-                            .selectAll()
-                            .where {
-                                (BookingsTable.tableId eq tableId) and
-                                    (BookingsTable.slotStart eq slotStart) and
-                                    (BookingsTable.slotEnd eq slotEnd) and
-                                    (BookingsTable.status inList ACTIVE_STATUSES)
-                            }.empty()
-                            .not()
-                    if (hasActiveBooking) {
-                        return@newSuspendedTransaction BookingCoreResult.Failure(
-                            BookingCoreError.DuplicateActiveBooking,
-                        )
-                    }
-
-                    val hasActiveHold =
-                        BookingHoldsTable
-                            .selectAll()
-                            .where {
-                                (BookingHoldsTable.id neq holdId) and
-                                    (BookingHoldsTable.tableId eq tableId) and
-                                    (BookingHoldsTable.slotStart eq slotStart) and
-                                    (BookingHoldsTable.slotEnd eq slotEnd) and
-                                    (BookingHoldsTable.expiresAt greater now.toOffsetDateTime())
-                            }.empty()
-                            .not()
-                    if (hasActiveHold) {
-                        return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.ActiveHoldExists)
-                    }
-
-                    val tableRow =
-                        TablesTable
-                            .selectAll()
-                            .where { TablesTable.id eq tableId }
-                            .limit(1)
-                            .firstOrNull()
-                            ?: return@newSuspendedTransaction BookingCoreResult.Failure(BookingCoreError.TableNotFound)
-
-                    BookingCoreResult.Success(
-                        insertBooking(
-                            clubId = tableRow[TablesTable.clubId],
-                            tableId = tableId,
-                            slotStart = slotStart,
-                            slotEnd = slotEnd,
-                            guests = holdRow[BookingHoldsTable.guestsCount],
-                            minRate = holdRow[BookingHoldsTable.minDeposit],
-                            idempotencyKey = idempotencyKey,
-                            guestUserId = guestUserId,
-                            promoterUserId = promoterUserId,
-                        ),
+                val hasActiveBooking =
+                    BookingsTable
+                        .selectAll()
+                        .where {
+                            (BookingsTable.tableId eq tableId) and
+                                (BookingsTable.slotStart eq slotStart) and
+                                (BookingsTable.slotEnd eq slotEnd) and
+                                (BookingsTable.status inList ACTIVE_STATUSES)
+                        }.empty()
+                        .not()
+                if (hasActiveBooking) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(
+                        BookingCoreError.DuplicateActiveBooking,
                     )
                 }
+
+                val hasActiveHold =
+                    BookingHoldsTable
+                        .selectAll()
+                        .where {
+                            (BookingHoldsTable.id neq holdId) and
+                                (BookingHoldsTable.tableId eq tableId) and
+                                (BookingHoldsTable.slotStart eq slotStart) and
+                                (BookingHoldsTable.slotEnd eq slotEnd) and
+                                (BookingHoldsTable.expiresAt greater now.toOffsetDateTime())
+                        }.empty()
+                        .not()
+                if (hasActiveHold) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.ActiveHoldExists)
+                }
+
+                val tableRow =
+                    TablesTable
+                        .selectAll()
+                        .where { TablesTable.id eq tableId }
+                        .limit(1)
+                        .firstOrNull()
+                        ?: return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.TableNotFound)
+
+                BookingCoreResult.Success(
+                    insertBooking(
+                        clubId = tableRow[TablesTable.clubId],
+                        tableId = tableId,
+                        slotStart = slotStart,
+                        slotEnd = slotEnd,
+                        guests = holdRow[BookingHoldsTable.guestsCount],
+                        minRate = holdRow[BookingHoldsTable.minDeposit],
+                        idempotencyKey = idempotencyKey,
+                        guestUserId = guestUserId,
+                        promoterUserId = promoterUserId,
+                    ),
+                )
             }
         } catch (ex: Throwable) {
             when {
@@ -297,21 +322,118 @@ class BookingRepository(
             }
         }
 
+    internal suspend fun confirmCanonicalHold(
+        scope: CanonicalBookingScope,
+        holdId: UUID,
+        idempotencyKey: String,
+    ): BookingCoreResult<BookingRecord> =
+        canonicalBookingTransaction(db) {
+            val command = scope.command(CanonicalBookingOperation.CONFIRM, idempotencyKey, holdId)
+            val initialClub =
+                holdsWithTables.selectAll().where { BookingHoldsTable.id eq holdId }.singleOrNull()?.get(
+                    TablesTable.clubId,
+                )
+            val canonical = CanonicalBookingTransaction(scope, clock)
+            val userId =
+                canonical.lockClub(initialClub, command)
+                    ?: return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            canonical.receipt(command)?.let {
+                return@canonicalBookingTransaction replayCanonicalBooking(scope, userId, command, it)
+            }
+            // Discover the slot only under the club lock. Check the locked row again before consuming it.
+            val hold =
+                BookingHoldsTable.selectAll().where { BookingHoldsTable.id eq holdId }.singleOrNull()
+                    ?: return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            if (hold[BookingHoldsTable.holderUserId] != userId || !canonical.ownsHold(holdId)) {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            }
+            val tableId = hold[BookingHoldsTable.tableId]
+            val start = hold[BookingHoldsTable.slotStart]
+            val end = hold[BookingHoldsTable.slotEnd]
+            val night =
+                canonical.matchingNight(start.toInstant(), end.toInstant())
+                    ?: return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.EventNotFound)
+            canonical.tableConflict(tableId, night)?.let {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(it)
+            }
+            acquireHoldSlotLockIfPostgres(tableId, start, end)
+            if (tableClubId(tableId, lock = true) != scope.clubId) {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            }
+            val current =
+                BookingHoldsTable
+                    .selectAll()
+                    .where { BookingHoldsTable.id eq holdId }
+                    .forUpdate()
+                    .singleOrNull()
+                    ?: return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            if (current[BookingHoldsTable.holderUserId] != userId ||
+                current[BookingHoldsTable.eventId] != scope.eventId ||
+                !sameHoldSlot(hold, current)
+            ) {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            }
+            canonical.tableConflict(tableId, night)?.let {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(it)
+            }
+            val now = clock.instant()
+            if (!current[BookingHoldsTable.expiresAt].toInstant().isAfter(now) || !end.toInstant().isAfter(now)) {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+            }
+            canonical.conflict(tableId, start.toInstant(), end.toInstant(), now, holdId)?.let {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(it)
+            }
+            val booking =
+                insertBooking(
+                    clubId = scope.clubId,
+                    tableId = tableId,
+                    slotStart = start,
+                    slotEnd = end,
+                    guests = current[BookingHoldsTable.guestsCount],
+                    minRate = current[BookingHoldsTable.minDeposit],
+                    idempotencyKey = canonicalStorageKey(),
+                    guestUserId = userId,
+                    promoterUserId = null,
+                    canonicalEventId = scope.eventId,
+                )
+            check(BookingHoldsTable.deleteWhere { BookingHoldsTable.id eq holdId } == 1)
+            canonical.record(command, booking.id)
+            BookingCoreResult.Success(booking)
+        }
+
+    private fun replayCanonicalBooking(
+        scope: CanonicalBookingScope,
+        userId: Long,
+        command: CanonicalBookingCommand,
+        receipt: CanonicalBookingReceipt,
+    ): BookingCoreResult<BookingRecord> {
+        if (receipt.requestHash !=
+            command.requestHash
+        ) {
+            return BookingCoreResult.Failure(BookingCoreError.IdempotencyConflict)
+        }
+        val booking =
+            BookingsTable
+                .selectAll()
+                .where {
+                    (BookingsTable.id eq receipt.resultId) and (BookingsTable.clubId eq scope.clubId) and
+                        (BookingsTable.guestUserId eq userId)
+                }.singleOrNull()
+        return booking?.let { BookingCoreResult.Success(it.toBookingRecord()) }
+            ?: BookingCoreResult.Failure(BookingCoreError.BookingNotFound)
+    }
+
     suspend fun setStatus(
         id: UUID,
         newStatus: BookingStatus,
     ): BookingCoreResult<BookingRecord> =
         try {
-            val record =
-                withTxRetry {
-                    newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                        updateStatusInternal(id, newStatus)
-                    }
+            legacyBookingTransaction(db) {
+                if (newStatus.name in ACTIVE_STATUSES && LegacyBookingAdmission().fencesBooking(id)) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.LegacyWriterFenced)
                 }
-            if (record != null) {
-                BookingCoreResult.Success(record)
-            } else {
-                BookingCoreResult.Failure(BookingCoreError.BookingNotFound)
+                updateStatusInternal(id, newStatus)?.let { BookingCoreResult.Success(it) }
+                    ?: BookingCoreResult.Failure(BookingCoreError.BookingNotFound)
             }
         } catch (ex: Throwable) {
             when {
@@ -391,6 +513,7 @@ class BookingRepository(
         idempotencyKey: String,
         guestUserId: Long?,
         promoterUserId: Long?,
+        canonicalEventId: Long? = null,
     ): BookingRecord {
         val now = Instant.now(clock)
         val tableRow =
@@ -400,21 +523,23 @@ class BookingRepository(
                 .limit(1)
                 .firstOrNull()
                 ?: throw IllegalStateException("table $tableId not found")
-        val eventRow =
-            EventsTable
-                .selectAll()
-                .where {
-                    (EventsTable.clubId eq tableRow[TablesTable.clubId]) and
-                        (EventsTable.startAt eq slotStart) and
-                        (EventsTable.endAt eq slotEnd)
-                }.limit(1)
-                .firstOrNull()
+        val eventId =
+            canonicalEventId
+                ?: EventsTable
+                    .selectAll()
+                    .where {
+                        (EventsTable.clubId eq tableRow[TablesTable.clubId]) and
+                            (EventsTable.startAt eq slotStart) and
+                            (EventsTable.endAt eq slotEnd)
+                    }.limit(1)
+                    .firstOrNull()
+                    ?.get(EventsTable.id)
                 ?: throw IllegalStateException("event for slot not found")
         val id = UUID.randomUUID()
         val qrSecret = UUID.randomUUID().toString().replace("-", "")
         BookingsTable.insert {
             it[BookingsTable.id] = id
-            it[BookingsTable.eventId] = eventRow[EventsTable.id]
+            it[BookingsTable.eventId] = eventId
             it[BookingsTable.clubId] = clubId
             it[BookingsTable.tableId] = tableId
             it[BookingsTable.tableNumber] = tableRow[TablesTable.tableNumber]
@@ -565,14 +690,6 @@ class BookingHoldRepository(
     private val db: Database,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    private val holdsWithTables =
-        BookingHoldsTable.join(
-            TablesTable,
-            joinType = JoinType.INNER,
-            onColumn = BookingHoldsTable.tableId,
-            otherColumn = TablesTable.id,
-        )
-
     suspend fun createHold(
         tableId: Long,
         slotStart: Instant,
@@ -584,59 +701,60 @@ class BookingHoldRepository(
         val start = slotStart.toOffsetDateTime()
         val end = slotEnd.toOffsetDateTime()
         return try {
-            withTxRetry {
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    acquireHoldSlotLockIfPostgres(tableId, start, end)
-                    val now = Instant.now(clock)
-                    val existingByKey =
-                        holdsWithTables
-                            .selectAll()
-                            .where { BookingHoldsTable.idempotencyKey eq idempotencyKey }
-                            .limit(1)
-                            .firstOrNull()
-                    if (existingByKey != null) {
-                        return@newSuspendedTransaction BookingCoreResult.Success(
-                            existingByKey.toBookingHold(),
-                        )
-                    }
-                    val existingBooking =
-                        BookingsTable
+            legacyBookingTransaction(db) {
+                if (legacyReservationFenced(tableId, slotStart, slotEnd)) {
+                    return@legacyBookingTransaction BookingCoreResult.Failure(BookingCoreError.LegacyWriterFenced)
+                }
+                acquireHoldSlotLockIfPostgres(tableId, start, end)
+                val now = Instant.now(clock)
+                val existingByKey =
+                    holdsWithTables
+                        .selectAll()
+                        .where { BookingHoldsTable.idempotencyKey eq idempotencyKey }
+                        .limit(1)
+                        .firstOrNull()
+                if (existingByKey != null) {
+                    return@legacyBookingTransaction BookingCoreResult.Success(
+                        existingByKey.toBookingHold(),
+                    )
+                }
+                val existingBooking =
+                    BookingsTable
+                        .selectAll()
+                        .where {
+                            (BookingsTable.tableId eq tableId) and
+                                (BookingsTable.slotStart eq start) and
+                                (BookingsTable.slotEnd eq end) and
+                                (BookingsTable.status inList ACTIVE_STATUSES)
+                        }.empty()
+                        .not()
+                if (existingBooking) {
+                    BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
+                } else {
+                    val activeExists =
+                        BookingHoldsTable
                             .selectAll()
                             .where {
-                                (BookingsTable.tableId eq tableId) and
-                                    (BookingsTable.slotStart eq start) and
-                                    (BookingsTable.slotEnd eq end) and
-                                    (BookingsTable.status inList ACTIVE_STATUSES)
+                                (BookingHoldsTable.tableId eq tableId) and
+                                    (BookingHoldsTable.slotStart eq start) and
+                                    (BookingHoldsTable.slotEnd eq end) and
+                                    (BookingHoldsTable.expiresAt greater now.toOffsetDateTime())
                             }.empty()
                             .not()
-                    if (existingBooking) {
-                        BookingCoreResult.Failure(BookingCoreError.DuplicateActiveBooking)
+                    if (activeExists) {
+                        BookingCoreResult.Failure(BookingCoreError.ActiveHoldExists)
                     } else {
-                        val activeExists =
-                            BookingHoldsTable
-                                .selectAll()
-                                .where {
-                                    (BookingHoldsTable.tableId eq tableId) and
-                                        (BookingHoldsTable.slotStart eq start) and
-                                        (BookingHoldsTable.slotEnd eq end) and
-                                        (BookingHoldsTable.expiresAt greater now.toOffsetDateTime())
-                                }.empty()
-                                .not()
-                        if (activeExists) {
-                            BookingCoreResult.Failure(BookingCoreError.ActiveHoldExists)
-                        } else {
-                            BookingCoreResult.Success(
-                                insertHold(
-                                    tableId,
-                                    start,
-                                    end,
-                                    guestsCount,
-                                    ttl,
-                                    now,
-                                    idempotencyKey,
-                                ),
-                            )
-                        }
+                        BookingCoreResult.Success(
+                            insertHold(
+                                tableId,
+                                start,
+                                end,
+                                guestsCount,
+                                ttl,
+                                now,
+                                idempotencyKey,
+                            ),
+                        )
                     }
                 }
             }
@@ -649,15 +767,117 @@ class BookingHoldRepository(
         }
     }
 
+    internal suspend fun createCanonicalHold(
+        scope: CanonicalBookingScope,
+        tableId: Long,
+        slotStart: Instant,
+        slotEnd: Instant,
+        guestsCount: Int,
+        ttl: Duration,
+        idempotencyKey: String,
+    ): BookingCoreResult<BookingHold> =
+        canonicalBookingTransaction(db) {
+            require(guestsCount in 1..MAX_HOLD_GUESTS)
+            require(!ttl.isNegative && !ttl.isZero && ttl.seconds <= Int.MAX_VALUE)
+            val command =
+                scope.command(
+                    CanonicalBookingOperation.HOLD,
+                    idempotencyKey,
+                    tableId,
+                    slotStart,
+                    slotEnd,
+                    guestsCount,
+                    ttl,
+                )
+            val canonical = CanonicalBookingTransaction(scope, clock)
+            val userId =
+                canonical.lockClub(tableClubId(tableId), command)
+                    ?: return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.TableNotFound)
+            canonical.receipt(command)?.let {
+                return@canonicalBookingTransaction replayCanonicalHold(scope, canonical, command, it, userId)
+            }
+            val night =
+                canonical.matchingNight(slotStart, slotEnd)
+                    ?: return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.EventNotFound)
+            canonical.tableConflict(tableId, night)?.let {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(it)
+            }
+            val start = slotStart.toOffsetDateTime()
+            val end = slotEnd.toOffsetDateTime()
+            acquireHoldSlotLockIfPostgres(tableId, start, end)
+            if (tableClubId(tableId, lock = true) != scope.clubId) {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.TableNotFound)
+            }
+            canonical.tableConflict(tableId, night)?.let {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(it)
+            }
+            val now = clock.instant()
+            if (!slotEnd.isAfter(
+                    now,
+                )
+            ) {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(BookingCoreError.EventNotFound)
+            }
+            canonical.conflict(tableId, slotStart, slotEnd, now)?.let {
+                return@canonicalBookingTransaction BookingCoreResult.Failure(it)
+            }
+            val hold =
+                insertHold(
+                    tableId,
+                    start,
+                    end,
+                    guestsCount,
+                    ttl,
+                    now,
+                    canonicalStorageKey(),
+                    canonicalEventId = scope.eventId,
+                    holderUserId = userId,
+                )
+            canonical.record(command, hold.id, hold.expiresAt)
+            BookingCoreResult.Success(hold)
+        }
+
+    private fun replayCanonicalHold(
+        scope: CanonicalBookingScope,
+        canonical: CanonicalBookingTransaction,
+        command: CanonicalBookingCommand,
+        receipt: CanonicalBookingReceipt,
+        userId: Long,
+    ): BookingCoreResult<BookingHold> {
+        if (receipt.requestHash !=
+            command.requestHash
+        ) {
+            return BookingCoreResult.Failure(BookingCoreError.IdempotencyConflict)
+        }
+        val now = clock.instant()
+        val recordedExpiry = checkNotNull(receipt.holdExpiresAt)
+        val hold =
+            holdsWithTables
+                .selectAll()
+                .where {
+                    (BookingHoldsTable.id eq receipt.resultId) and (BookingHoldsTable.holderUserId eq userId) and
+                        (TablesTable.clubId eq scope.clubId) and (BookingHoldsTable.eventId eq scope.eventId)
+                }.singleOrNull()
+                ?.toBookingHold()
+        return when {
+            recordedExpiry <= now -> BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+            hold == null -> BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
+            hold.expiresAt <= now || hold.slotEnd <= now -> BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+            canonical.matchingNight(hold.slotStart, hold.slotEnd, requireVersion = false) == null ->
+                BookingCoreResult.Failure(BookingCoreError.EventNotFound)
+            minOf(recordedExpiry, hold.expiresAt, hold.slotEnd) <= clock.instant() ->
+                BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+            else -> BookingCoreResult.Success(hold)
+        }
+    }
+
     suspend fun prolongHold(
         id: UUID,
         ttl: java.time.Duration,
     ): BookingCoreResult<BookingHold> =
         try {
-            withTxRetry {
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    prolongHoldInternal(id, ttl)
-                }
+            legacyBookingTransaction(db) {
+                prolongHoldInternal(id, ttl)
             }
         } catch (ex: Throwable) {
             when {
@@ -668,10 +888,8 @@ class BookingHoldRepository(
 
     suspend fun consumeHold(id: UUID): BookingCoreResult<BookingHold> =
         try {
-            withTxRetry {
-                newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                    consumeHoldInternal(id)
-                }
+            legacyBookingTransaction(db) {
+                consumeHoldInternal(id)
             }
         } catch (ex: Throwable) {
             when {
@@ -709,6 +927,8 @@ class BookingHoldRepository(
         ttl: java.time.Duration,
         now: Instant,
         idempotencyKey: String,
+        canonicalEventId: Long? = null,
+        holderUserId: Long? = null,
     ): BookingHold {
         val tableRow =
             TablesTable
@@ -717,23 +937,25 @@ class BookingHoldRepository(
                 .limit(1)
                 .firstOrNull()
                 ?: throw IllegalStateException("table $tableId not found")
-        val eventRow =
-            EventsTable
-                .selectAll()
-                .where {
-                    (EventsTable.clubId eq tableRow[TablesTable.clubId]) and
-                        (EventsTable.startAt eq slotStart) and
-                        (EventsTable.endAt eq slotEnd)
-                }.limit(1)
-                .firstOrNull()
+        val eventId =
+            canonicalEventId
+                ?: EventsTable
+                    .selectAll()
+                    .where {
+                        (EventsTable.clubId eq tableRow[TablesTable.clubId]) and
+                            (EventsTable.startAt eq slotStart) and
+                            (EventsTable.endAt eq slotEnd)
+                    }.limit(1)
+                    .firstOrNull()
+                    ?.get(EventsTable.id)
                 ?: throw IllegalStateException("event for hold slot not found")
         val expiresAt = now.plus(ttl).toOffsetDateTime()
         val id = UUID.randomUUID()
         BookingHoldsTable.insert {
             it[BookingHoldsTable.id] = id
-            it[BookingHoldsTable.eventId] = eventRow[EventsTable.id]
+            it[BookingHoldsTable.eventId] = eventId
             it[BookingHoldsTable.tableId] = tableId
-            it[BookingHoldsTable.holderUserId] = null
+            it[BookingHoldsTable.holderUserId] = holderUserId
             it[BookingHoldsTable.guestsCount] = guestsCount
             it[BookingHoldsTable.minDeposit] = tableRow[TablesTable.minDeposit]
             it[BookingHoldsTable.slotStart] = slotStart
@@ -745,7 +967,7 @@ class BookingHoldRepository(
             id = id,
             clubId = tableRow[TablesTable.clubId],
             tableId = tableId,
-            eventId = eventRow[EventsTable.id],
+            eventId = eventId,
             slotStart = slotStart.toInstant(),
             slotEnd = slotEnd.toInstant(),
             expiresAt = expiresAt.toInstant(),
@@ -783,12 +1005,15 @@ class BookingHoldRepository(
                 .firstOrNull()
                 ?: return BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
         val expiresAt = row[BookingHoldsTable.expiresAt].toInstant()
+        val fenced = legacyReservationFenced(row)
         val now = Instant.now(clock)
-        val outcome =
-            if (expiresAt.isBefore(now)) {
+        return when {
+            fenced -> BookingCoreResult.Failure(BookingCoreError.LegacyWriterFenced)
+            expiresAt.isBefore(now) -> {
                 BookingHoldsTable.deleteWhere { BookingHoldsTable.id eq id }
                 BookingCoreResult.Failure(BookingCoreError.HoldExpired)
-            } else {
+            }
+            else -> {
                 val newExpiry = now.plus(ttl).toOffsetDateTime()
                 BookingHoldsTable.update({ BookingHoldsTable.id eq id }) {
                     it[BookingHoldsTable.expiresAt] = newExpiry
@@ -796,7 +1021,7 @@ class BookingHoldRepository(
                 val hold = row.toBookingHold()
                 BookingCoreResult.Success(hold.copy(expiresAt = newExpiry.toInstant()))
             }
-        return outcome
+        }
     }
 
     private fun consumeHoldInternal(id: UUID): BookingCoreResult<BookingHold> {
@@ -807,15 +1032,46 @@ class BookingHoldRepository(
                 .limit(1)
                 .firstOrNull()
                 ?: return BookingCoreResult.Failure(BookingCoreError.HoldNotFound)
-        val expiresAt = row[BookingHoldsTable.expiresAt].toInstant()
-        val now = Instant.now(clock)
-        BookingHoldsTable.deleteWhere { BookingHoldsTable.id eq id }
-        return if (expiresAt.isBefore(now)) {
-            BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+        return if (legacyReservationFenced(row)) {
+            BookingCoreResult.Failure(BookingCoreError.LegacyWriterFenced)
         } else {
-            BookingCoreResult.Success(row.toBookingHold())
+            val expiresAt = row[BookingHoldsTable.expiresAt].toInstant()
+            val now = Instant.now(clock)
+            BookingHoldsTable.deleteWhere { BookingHoldsTable.id eq id }
+            if (expiresAt.isBefore(now)) {
+                BookingCoreResult.Failure(BookingCoreError.HoldExpired)
+            } else {
+                BookingCoreResult.Success(row.toBookingHold())
+            }
         }
     }
+}
+
+private fun sameHoldSlot(
+    before: ResultRow,
+    current: ResultRow,
+): Boolean =
+    before[BookingHoldsTable.tableId] == current[BookingHoldsTable.tableId] &&
+        before[BookingHoldsTable.slotStart].isEqual(current[BookingHoldsTable.slotStart]) &&
+        before[BookingHoldsTable.slotEnd].isEqual(current[BookingHoldsTable.slotEnd])
+
+private fun legacyReservationFenced(row: ResultRow): Boolean =
+    legacyReservationFenced(
+        row[BookingHoldsTable.tableId],
+        row[BookingHoldsTable.slotStart].toInstant(),
+        row[BookingHoldsTable.slotEnd].toInstant(),
+        row[BookingHoldsTable.eventId],
+    )
+
+private fun legacyReservationFenced(
+    tableId: Long,
+    start: Instant,
+    end: Instant,
+    eventId: Long? = null,
+): Boolean {
+    val clubId = tableClubId(tableId) ?: return true
+    val admission = LegacyBookingAdmission()
+    return admission.lock(clubId) && admission.fencesReservation(clubId, tableId, start, end, eventId)
 }
 
 private fun acquireHoldSlotLockIfPostgres(

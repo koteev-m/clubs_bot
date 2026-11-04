@@ -24,6 +24,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.flywaydb.core.Flyway
 import org.h2.jdbcx.JdbcDataSource
+import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -31,7 +32,12 @@ import kotlin.test.assertEquals
 
 /** Shared Ktor data contract transport; database fixtures remain disposable. */
 open class ClientOnboardingRoutesTestBase {
-    protected open fun database(block: (DataSource) -> Unit) {
+    protected open fun database(block: (DataSource) -> Unit) = databaseAt(null, block)
+
+    protected open fun databaseAt(
+        target: String?,
+        block: (DataSource) -> Unit,
+    ) {
         val source =
             JdbcDataSource().apply {
                 setURL(
@@ -46,6 +52,7 @@ open class ClientOnboardingRoutesTestBase {
             .dataSource(
                 source,
             ).locations("classpath:db/migration/common", "classpath:db/migration/h2")
+            .apply { target?.let { target(it) } }
             .load()
             .migrate()
         try {
@@ -57,6 +64,7 @@ open class ClientOnboardingRoutesTestBase {
 
     protected fun withApp(
         source: DataSource,
+        clock: Clock = Clock.systemUTC(),
         block: suspend ApplicationTestBuilder.() -> Unit,
     ) = testApplication {
         application {
@@ -64,7 +72,7 @@ open class ClientOnboardingRoutesTestBase {
             installJsonErrorPages()
             clientOnboardingRoutes(
                 JdbcClientContextRepository(source),
-                JdbcClientOnboardingRepository(source, OWNER),
+                JdbcClientOnboardingRepository(source, OWNER, clock),
                 "synthetic_bot",
                 OWNER,
             ) {

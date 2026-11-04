@@ -83,7 +83,7 @@ internal class DirectClubOperations(
             session.now,
             session.now,
         )
-        listOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT).forEach { permission ->
+        listOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT, WRITE_CALENDAR, WRITE_BOOKING_RULES).forEach { permission ->
             sql.update(
                 "INSERT INTO client_club_grants(client_id,user_id,club_id,permission_code,is_active," +
                     "created_at,updated_at) VALUES (?,?,?,?,TRUE,?,?)",
@@ -108,9 +108,11 @@ internal class DirectClubOperations(
     ): JsonObject {
         val profile = profile(clubId)
         authorize(profile, write)
-        val club = sql.row("SELECT name,description,timezone FROM clubs WHERE id=?", clubId) ?: fail("not_found")
+        val club =
+            sql.row("SELECT name,description,timezone,is_active FROM clubs WHERE id=?", clubId) ?: fail("not_found")
         val canWrite = hasGrant(profile, WRITE_PROFILE)
         val canLayout = hasGrant(profile, WRITE_LAYOUT)
+        val canCalendar = hasGrant(profile, WRITE_CALENDAR)
         return buildJsonObject {
             put("id", clubId.toString())
             put("clientId", profile.getValue("client_id"))
@@ -130,10 +132,12 @@ internal class DirectClubOperations(
                     (
                         listOf(READ_CLUB) +
                             (if (canWrite) listOf(WRITE_PROFILE) else emptyList()) +
-                            (if (canLayout) listOf(WRITE_LAYOUT) else emptyList())
+                            (if (canLayout) listOf(WRITE_LAYOUT) else emptyList()) +
+                            (if (canCalendar) listOf(WRITE_CALENDAR) else emptyList())
                     ).map(::JsonPrimitive),
                 ),
             )
+            put("canPreviewBooking", !club.active() && profile.long("owner_user_id") == session.userId)
             put("availableActions", JsonArray((if (canWrite) listOf("update") else emptyList()).map(::JsonPrimitive)))
         }
     }

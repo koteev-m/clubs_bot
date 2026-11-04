@@ -15,12 +15,20 @@ import {
   ContainMetrics,
 } from '../utils/containCoords';
 
+export type TableBadge = {
+  label: string;
+  symbol: string;
+  color: string;
+};
+
 export type HallPlanStageProps<Id extends LayoutId = number> = {
   planUrl: string;
   tables: EditorTable<Id>[];
   selectedTableId: Id | null;
   readOnly?: boolean;
   markerSize?: number;
+  tableBadge?: (table: EditorTable<Id>) => TableBadge;
+  moveOnEmptyClick?: boolean;
   onSelectTable: (tableId: Id) => boolean | void;
   onCreateTable: (coords: { x: number; y: number }) => void;
   onMoveTable: (tableId: Id, coords: { x: number; y: number }) => void;
@@ -32,6 +40,8 @@ export default function HallPlanStage<Id extends LayoutId = number>({
   selectedTableId,
   readOnly = false,
   markerSize = 28,
+  tableBadge,
+  moveOnEmptyClick = true,
   onSelectTable,
   onCreateTable,
   onMoveTable,
@@ -107,19 +117,26 @@ export default function HallPlanStage<Id extends LayoutId = number>({
         metrics,
       );
       if (!normalized) return;
-      if (selectedTableId) {
+      if (selectedTableId && moveOnEmptyClick) {
         onMoveTable(selectedTableId, normalized);
       } else {
         onCreateTable(normalized);
       }
     },
-    [metrics, onCreateTable, onMoveTable, readOnly, selectedTableId],
+    [
+      metrics,
+      moveOnEmptyClick,
+      onCreateTable,
+      onMoveTable,
+      readOnly,
+      selectedTableId,
+    ],
   );
 
   const handlePointerDown = useCallback(
     (event: PointerEvent<HTMLButtonElement>, table: EditorTable<Id>) => {
       event.stopPropagation();
-      if (readOnly) return;
+      if (readOnly || table.x === null || table.y === null) return;
       if (onSelectTable(table.id) === false) return;
       if (typeof event.currentTarget.setPointerCapture === 'function') {
         try {
@@ -221,6 +238,7 @@ export default function HallPlanStage<Id extends LayoutId = number>({
         dragging && dragging.tableId === table.id
           ? { x: dragging.x, y: dragging.y }
           : table;
+      if (source.x === null || source.y === null) return;
       const leftRaw = metrics.offsetX + source.x * metrics.width;
       const topRaw = metrics.offsetY + source.y * metrics.height;
       const left = Number.isFinite(leftRaw) ? leftRaw : 0;
@@ -249,17 +267,20 @@ export default function HallPlanStage<Id extends LayoutId = number>({
         const position = positions.get(table.id);
         if (!position) return null;
         const isSelected = table.id === selectedTableId;
+        const badge = tableBadge?.(table);
         return (
           <button
             key={table.id}
             type="button"
             data-testid={`table-marker-${table.id}`}
-            aria-label={`Стол ${table.tableNumber}: ${table.label}, мест: ${table.capacity}`}
+            aria-label={`Стол ${table.tableNumber}: ${table.label}, мест: ${table.capacity}${badge ? `, ${badge.label}` : ''}`}
             aria-pressed={isSelected}
             className={`absolute flex h-7 w-7 items-center justify-center rounded-full border text-[10px] font-semibold shadow-sm transition ${
-              isSelected
-                ? 'border-blue-500 bg-blue-600 text-white'
-                : 'border-white bg-white text-gray-700'
+              badge
+                ? `${badge.color} flex-col leading-none ${isSelected ? 'ring-2 ring-blue-600' : ''}`
+                : isSelected
+                  ? 'border-blue-500 bg-blue-600 text-white'
+                  : 'border-white bg-white text-gray-700'
             } ${readOnly ? 'cursor-pointer' : 'cursor-grab'} select-none`}
             style={{
               left: position.left - markerSize / 2,
@@ -278,6 +299,7 @@ export default function HallPlanStage<Id extends LayoutId = number>({
             }}
           >
             {table.tableNumber}
+            {badge && <span aria-hidden="true">{badge.symbol}</span>}
           </button>
         );
       })}

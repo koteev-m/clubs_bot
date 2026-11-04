@@ -75,6 +75,16 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     post("/applications/{id}/submit") { api.mutate(call, OnboardingMutation.APPLICATION_SUBMIT, "id") }
     post("/applications/{id}/cancel") { api.mutate(call, OnboardingMutation.APPLICATION_CANCEL, "id") }
     post("/applications/{id}/club") { api.mutate(call, OnboardingMutation.APPLICATION_CREATE_CLUB, "id") }
+    get("/clubs/{id}/booking-rules") { api.read(call, OnboardingRead.CLUB_BOOKING_RULES_GET, "id") }
+    patch("/clubs/{id}/booking-rules") { api.mutate(call, OnboardingMutation.CLUB_BOOKING_RULES_UPDATE, "id") }
+    get("/clubs/{id}/calendar") { api.read(call, OnboardingRead.CLUB_CALENDAR_GET, "id") }
+    patch("/clubs/{id}/calendar") { api.mutate(call, OnboardingMutation.CLUB_CALENDAR_UPDATE, "id") }
+    get("/calendar/nights/{id}/legacy-event") { api.read(call, OnboardingRead.CLUB_NIGHT_EVENT_CANDIDATE, "id") }
+    post("/calendar/nights/{id}/legacy-event") { api.mutate(call, OnboardingMutation.CLUB_NIGHT_EVENT_LINK, "id") }
+    get("/clubs/{id}/booking-preview") { api.read(call, OnboardingRead.CLUB_BOOKING_PREVIEW_GET, "id") }
+    get("/clubs/{id}/booking-preview/nights/{nightId}/halls/{hallId}/availability") {
+        api.read(call, OnboardingRead.CLUB_TABLE_AVAILABILITY_GET, "id", pathIds = listOf("nightId", "hallId"))
+    }
     get("/clubs/{id}/profile") { api.read(call, OnboardingRead.CLUB_PROFILE_GET, "id") }
     patch("/clubs/{id}/profile") { api.mutate(call, OnboardingMutation.CLUB_PROFILE_UPDATE, "id") }
 }
@@ -116,12 +126,17 @@ private class OnboardingHttp(
         operation: OnboardingRead,
         idParameter: String? = null,
         body: Boolean = false,
+        pathIds: List<String> = emptyList(),
     ) = call.safeOnboarding {
         repository.read(
             call.onboardingActor(),
             operation,
             idParameter?.let { call.positiveId(it) },
-            if (body) call.onboardingBody() else JsonObject(emptyMap()),
+            if (body) {
+                call.onboardingBody()
+            } else {
+                JsonObject(pathIds.associateWith { JsonPrimitive(call.positiveId(it).toString()) })
+            },
         )
     }
 
@@ -138,7 +153,16 @@ private class OnboardingHttp(
         val issuesLink = operation in invitationIssuers
         // This refusal happens before persistence, so callers can distinguish it from a lost response.
         if (issuesLink && username == null) throw OnboardingFailure(ErrorCodes.INVITATION_LINK_UNAVAILABLE)
-        var body = call.onboardingBody()
+        var body =
+            call.onboardingBody(
+                if (operation ==
+                    OnboardingMutation.CLUB_CALENDAR_UPDATE
+                ) {
+                    CALENDAR_BODY_BYTES
+                } else {
+                    MAX_BODY_BYTES
+                },
+            )
         if (operation == OnboardingMutation.CLUB_CREATE) body = OnboardingLocations.creationBody(body)
         if (operation in memberMutations) {
             val userId = call.positiveId("userId").toString()
@@ -173,9 +197,9 @@ private fun ApplicationCall.positiveId(parameter: String): Long =
     parameters[parameter]?.takeIf { POSITIVE_ID.matches(it) }?.toLongOrNull()
         ?: throw OnboardingFailure("validation_error")
 
-private suspend fun ApplicationCall.onboardingBody(): JsonObject {
-    val bytes = receiveChannel().readRemaining(MAX_BODY_BYTES + 1).readByteArray()
-    if (bytes.size > MAX_BODY_BYTES) invalidOnboardingInput()
+private suspend fun ApplicationCall.onboardingBody(limit: Long = MAX_BODY_BYTES): JsonObject {
+    val bytes = receiveChannel().readRemaining(limit + 1).readByteArray()
+    if (bytes.size > limit) invalidOnboardingInput()
     return try {
         Json.parseToJsonElement(bytes.decodeToString(throwOnInvalidSequence = true)) as? JsonObject
             ?: invalidOnboardingInput()
@@ -205,13 +229,14 @@ private suspend fun ApplicationCall.safeOnboarding(block: suspend () -> JsonObje
                 else -> HttpStatusCode.InternalServerError
             }
         val code = if (status == HttpStatusCode.InternalServerError) ErrorCodes.internal_error else failure.code
-        respondError(status, code)
+        respondError(status, code, details = failure.details)
     } catch (_: Exception) {
         // No exception text/body/credential is logged or returned.
         respondError(HttpStatusCode.InternalServerError, ErrorCodes.internal_error)
     }
 }
 
+private const val CALENDAR_BODY_BYTES = 65_536L
 private const val MAX_BODY_BYTES = 16_384L
 private val POSITIVE_ID = Regex("[1-9][0-9]*")
 private val BOT_USERNAME = Regex("[A-Za-z][A-Za-z0-9_]{4,31}")
@@ -225,6 +250,12 @@ private val conflictCodes =
         ErrorCodes.idempotency_conflict,
         ErrorCodes.DUPLICATE_APPLICATION,
         "client_not_empty",
+        "calendar_night_dependencies",
+        "calendar_night_started",
+        "calendar_night_invalid",
+        "calendar_night_overlap",
+        "calendar_night_cutover_required",
+        "calendar_night_event_conflict",
         "club_limit_unset",
         "club_limit_reached",
         "club_limit_below_usage",

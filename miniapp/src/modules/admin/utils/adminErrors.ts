@@ -11,6 +11,8 @@ const errorMessages: Record<string, string> = {
   table_not_found: 'Стол не найден',
   hall_name_conflict: 'Зал с таким названием уже существует',
   table_number_conflict: 'Номер стола уже используется',
+  table_link_required: 'Стол требует подключения к бронированию',
+  hall_plan_required: 'Сначала загрузите план зала',
   invalid_json: 'Некорректные данные',
   validation_error: 'Проверьте заполнение формы',
   invalid_table_coords: 'Некорректные координаты стола',

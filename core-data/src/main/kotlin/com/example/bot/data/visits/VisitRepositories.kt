@@ -12,8 +12,10 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.statements.UpdateBuilder
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.update
 import java.time.Clock
@@ -137,34 +139,51 @@ class VisitRepository(
     private val clock: Clock = Clock.systemUTC(),
 ) {
     suspend fun tryCheckIn(input: VisitCheckInInput): VisitCheckInResult {
-        val now = Instant.now(clock).toOffsetDateTimeUtc()
-        val nightStart = input.nightStartUtc.toOffsetDateTimeUtc()
-        val firstCheckin = input.firstCheckinAt.toOffsetDateTimeUtc()
-        val cutoff = input.effectiveEarlyCutoffAt
-        val isEarly = cutoff != null && !input.firstCheckinAt.isAfter(cutoff)
+        val now = Instant.now(clock)
         return withRetriedTx(name = "visit.checkin", database = db) {
             newSuspendedTransaction(context = Dispatchers.IO, db = db) {
-                val inserted =
-                    ClubVisitsTable.insertIgnore {
-                        it[clubId] = input.clubId
-                        it[nightStartUtc] = nightStart
-                        it[eventId] = input.eventId
-                        it[userId] = input.userId
-                        it[firstCheckinAt] = firstCheckin
-                        it[actorUserId] = input.actorUserId
-                        it[actorRole] = input.actorRole?.name
-                        it[entryType] = input.entryType
-                        it[ClubVisitsTable.isEarly] = isEarly
-                        it[hasTable] = false
-                        it[createdAt] = now
-                        it[updatedAt] = now
-                    }
-                val visit =
-                    findVisit(input.clubId, nightStart, input.userId)
-                        ?: error("Failed to load club visit after insert")
-                VisitCheckInResult(created = inserted.insertedCount > 0, visit = visit)
+                insertCheckInInTransaction(input, now, hasTable = false, ignoreExisting = true)
             }
         }
+    }
+
+    internal fun insertCheckInInTransaction(
+        input: VisitCheckInInput,
+        now: Instant,
+        hasTable: Boolean,
+        ignoreExisting: Boolean,
+    ): VisitCheckInResult {
+        val inserted =
+            if (ignoreExisting) {
+                ClubVisitsTable.insertIgnore { it.setCheckIn(input, now, hasTable) }
+            } else {
+                ClubVisitsTable.insert { it.setCheckIn(input, now, hasTable) }
+            }
+        val visit =
+            findCheckInInTransaction(input.clubId, input.nightStartUtc, input.userId)
+                ?: error("Failed to load club visit after insert")
+        return VisitCheckInResult(created = inserted.insertedCount > 0, visit = visit)
+    }
+
+    private fun UpdateBuilder<*>.setCheckIn(
+        input: VisitCheckInInput,
+        now: Instant,
+        hasTable: Boolean,
+    ) {
+        val cutoff = input.effectiveEarlyCutoffAt
+        val timestamp = now.toOffsetDateTimeUtc()
+        this[ClubVisitsTable.clubId] = input.clubId
+        this[ClubVisitsTable.nightStartUtc] = input.nightStartUtc.toOffsetDateTimeUtc()
+        this[ClubVisitsTable.eventId] = input.eventId
+        this[ClubVisitsTable.userId] = input.userId
+        this[ClubVisitsTable.firstCheckinAt] = input.firstCheckinAt.toOffsetDateTimeUtc()
+        this[ClubVisitsTable.actorUserId] = input.actorUserId
+        this[ClubVisitsTable.actorRole] = input.actorRole?.name
+        this[ClubVisitsTable.entryType] = input.entryType
+        this[ClubVisitsTable.isEarly] = cutoff != null && !input.firstCheckinAt.isAfter(cutoff)
+        this[ClubVisitsTable.hasTable] = hasTable
+        this[ClubVisitsTable.createdAt] = timestamp
+        this[ClubVisitsTable.updatedAt] = timestamp
     }
 
     suspend fun markHasTable(
@@ -191,40 +210,34 @@ class VisitRepository(
         userId: Long,
         clubId: Long,
         sinceUtc: Instant? = null,
-    ): Long =
-        countVisitsBase(userId, clubId, sinceUtc) { it }
+    ): Long = countVisitsBase(userId, clubId, sinceUtc) { it }
 
     suspend fun countEarlyVisits(
         userId: Long,
         clubId: Long,
         sinceUtc: Instant? = null,
-    ): Long =
-        countVisitsBase(userId, clubId, sinceUtc) { query -> query.andWhere { ClubVisitsTable.isEarly eq true } }
+    ): Long = countVisitsBase(userId, clubId, sinceUtc) { query -> query.andWhere { ClubVisitsTable.isEarly eq true } }
 
     suspend fun countTableNights(
         userId: Long,
         clubId: Long,
         sinceUtc: Instant? = null,
-    ): Long =
-        countVisitsBase(userId, clubId, sinceUtc) { query -> query.andWhere { ClubVisitsTable.hasTable eq true } }
+    ): Long = countVisitsBase(userId, clubId, sinceUtc) { query -> query.andWhere { ClubVisitsTable.hasTable eq true } }
 
     suspend fun countNightUniqueVisitors(
         clubId: Long,
         nightStartUtc: Instant,
-    ): Long =
-        countNightDistinct(clubId, nightStartUtc) { it }
+    ): Long = countNightDistinct(clubId, nightStartUtc) { it }
 
     suspend fun countNightEarlyVisits(
         clubId: Long,
         nightStartUtc: Instant,
-    ): Long =
-        countNightDistinct(clubId, nightStartUtc) { query -> query.andWhere { ClubVisitsTable.isEarly eq true } }
+    ): Long = countNightDistinct(clubId, nightStartUtc) { query -> query.andWhere { ClubVisitsTable.isEarly eq true } }
 
     suspend fun countNightTableNights(
         clubId: Long,
         nightStartUtc: Instant,
-    ): Long =
-        countNightDistinct(clubId, nightStartUtc) { query -> query.andWhere { ClubVisitsTable.hasTable eq true } }
+    ): Long = countNightDistinct(clubId, nightStartUtc) { query -> query.andWhere { ClubVisitsTable.hasTable eq true } }
 
     private suspend fun countVisitsBase(
         userId: Long,
@@ -269,16 +282,16 @@ class VisitRepository(
         }
     }
 
-    private fun findVisit(
+    internal fun findCheckInInTransaction(
         clubId: Long,
-        nightStartUtc: java.time.OffsetDateTime,
+        nightStartUtc: Instant,
         userId: Long,
     ): ClubVisit? =
         ClubVisitsTable
             .selectAll()
             .where {
                 (ClubVisitsTable.clubId eq clubId) and
-                    (ClubVisitsTable.nightStartUtc eq nightStartUtc) and
+                    (ClubVisitsTable.nightStartUtc eq nightStartUtc.toOffsetDateTimeUtc()) and
                     (ClubVisitsTable.userId eq userId)
             }.orderBy(ClubVisitsTable.id, SortOrder.ASC)
             .limit(1)

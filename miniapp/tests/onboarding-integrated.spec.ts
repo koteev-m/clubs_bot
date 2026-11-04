@@ -492,7 +492,7 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   await expect(page.getByLabel("Номер", { exact: true })).toHaveValue("1");
   await page.getByLabel("Название", { exact: true }).fill("У окна");
   await page.getByLabel("Вместимость").fill("6");
-  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await page.getByRole("button", { name: "Сохранить и завершить", exact: true }).click();
   await expect(page.getByRole("button", { name: "#1 · У окна" })).toBeVisible();
   const layoutPath = "/api/client/clubs/" + profile.id + "/layout";
   const originalLayout = await (

@@ -100,6 +100,20 @@
 | `HOLD-003` | HOLD должен истекать по правилам и не может удерживаться бесконечно. | `SOURCE` | `CONCEPT_SOURCE.md:L199-L203 — §4.2 «HOLD не держится бесконечно»` | `CAL-005` |
 | `HOLD-004` | Lifecycle должен явно различать HOLD, подтверждение, отмену, post-arrival удержание, no-show и освобождение. | `SOURCE` | `CONCEPT_SOURCE.md:L172-L190 — §4.1 «Booking/HOLD lifecycle»; CONCEPT_SOURCE.md:L317-L327 — §7.1 «Освобождение / no-show»` | `BKG-004`, `BKG-005`, `BKG-006` |
 
+### Каноническая реализация и политика оплаты
+
+По [DEC-018/B](OPEN_DECISIONS.md#dec-018--retainreplace-bookingcheck-inpayment-implementations)
+`BKG-001`–`BKG-004` и `HOLD-001`–`HOLD-004` используют существующий
+DB/PostgreSQL lifecycle. Выбор стола требует явного соответствия точки
+сохранённой схемы и DB-стола, а выбранная ночь требует проверенной связи V070
+с существующим событием. Запуск гостевого контура имеет отдельное разрешение.
+
+По [DEC-009/C](OPEN_DECISIONS.md#dec-009--booking-paymentdeposit-boundary)
+политика оплаты относится к клубу. Первый вариант использует `NONE`.
+Гость видит минимальный депозит стола как условие бронирования и явно
+подтверждает бронь без обязательной онлайн-оплаты. Подтверждение не означает,
+что депозит внесён. `PROVIDER_DEPOSIT` остаётся отдельным этапом.
+
 ## 8. Mini App navigation и surfaces
 
 | Requirement ID | Нормализованное требование | Тип | Source locator | Dependencies |
@@ -405,6 +419,7 @@ iBota не является способом обойти этот порядо�
 | DEC-004 | `ACCEPTED_DECISION` — first-release role boundary | Первый release включает Гостя, Host/Менеджера входа, Менеджера клуба, Админа клуба и Owner; target distinction Менеджера зала сохраняется через mapping `DEC-005`; Promoter, Финансовый менеджер, DJ, Главный админ и Главный менеджер сети сохраняются в target model, но не входят в release; permission matrix этим решением не определяется | Pilot release; role slices | [DEC-004](OPEN_DECISIONS.md#dec-004--mvp-role-set) |
 | DEC-005 | `ACCEPTED_DECISION` — role/RBAC mapping | `GUEST`, `ENTRY_MANAGER`, объединённый для Менеджера зала/клуба `MANAGER`, `CLUB_ADMIN`, `OWNER`; первые три staff roles ограничены CLUB scope, `OWNER` сохраняет GLOBAL scope, а полномочия задаются role + scope + explicit permission; critical actions требуют confirmation/audit, existing `GLOBAL_ADMIN`/`HEAD_MANAGER`/`PROMOTER` не удаляются и не входят в новые first-release flows | Pilot release; RBAC foundation | [DEC-005](OPEN_DECISIONS.md#dec-005--различия-host-entrance-manager-floor-manager-club-manager-и-admin) |
 | DEC-007 | `ACCEPTED_DECISION` — canonical guest navigation boundary | Future canonical guest home — новый minimal role-aware shell с target IA Клубы/Календарь/Схема или Столы/Мои брони/Пропуск/Мои ночи/Музыка/Вопросы; section активируется только после accepted dependencies, complete wiring, RBAC и staging smoke; first support slice остаётся private `/start → /ask`, не зависит от Mini App redesign и не активирует iBota; final labels зависят от `DEC-001`, cutover — от `DEC-017` | Guest shell after first slice; private support slice | [DEC-007](OPEN_DECISIONS.md#dec-007--canonical-guest-homenavigation) |
+| DEC-008 | `ACCEPTED_DECISION` — canonical operational nights | Вариант C для CAL-001–003. Правила согласуют одну операционную ночь на клубную дату с постоянным ID, IANA TZ и фактическими моментами открытия и закрытия. Клубная дата может предшествовать открытию, включая следующее 00:00. Безопасная отмена и допустимый перенос сохраняют ID и историю. Связанные обязательства требуют отдельной процедуры | Основа в кабинете клуба. Гостевой переход и сопоставление legacy записей отдельным этапом | [DEC-008](OPEN_DECISIONS.md#dec-008--canonical-operational-night-definition) |
 | DEC-017 | `ACCEPTED_DECISION` — Mini App implementation strategy | Новый role-aware shell становится canonical; current React можно переиспользовать выборочно только после проверки requirements/API/RBAC/packaging; static `/app` — temporary fallback, не target; итог — один `/app`, один build/package/serve pipeline и один source of assets; navigation после wiring/RBAC/tests/smoke, explicit cutover перед legacy removal; private support flow и bounded staff inbox не зависят от полного redesign | Canonical Mini App cutover; bounded support surface | [DEC-017](OPEN_DECISIONS.md#dec-017--retainreplace-current-mini-app-implementations) |
 | DEC-025 | `ACCEPTED_DECISION` — support taxonomy/RBAC/lifecycle | Guest выбирает одну из семи accepted categories; inbox/view/reply/status доступны только `MANAGER`/`CLUB_ADMIN` в matching CLUB scope через отдельные explicit permissions, `ENTRY_MANAGER` denied, `OWNER` не получает operational reply автоматически, guest видит только own thread; lifecycle `NEW → IN_PROGRESS → RESOLVED → CLOSED` с explicit take/resolve/close, first reply starts work, guest message reopens only `RESOLVED`, `CLOSED` terminal, `WAITING` deferred; staff reply/status/close/delivery result audited without message-body duplication; SLA/priority/escalation/automation/reopen/AI excluded | Private Support Loop | [DEC-025](OPEN_DECISIONS.md#dec-025--support-taxonomy-and-lifecycle) |
 | DEC-028 | `AMEND` — active accepted extension | Reminder перед canonical expiry сохраняется, но выбор HOLD expiry, arrival-retention completion или обоих событий, а также trigger/timing/recipients/channel/repeats/anti-spam остаётся unresolved до canonical booking lifecycle; не first slice и не navigation до этого решения | Booking lifecycle phase | [DEC-028](OPEN_DECISIONS.md#dec-028--reminder-скоро-слетит) |
@@ -916,11 +931,22 @@ profile.write/version/idempotency контрактом. Это не измене
 
 Прямое указание владельца разрешает первый законченный раздел настройки private
 клуба в рамках `ONB-004`: «Мои заведения» → свой клуб → «Залы и столы». Это
-ограниченное расширение клиентского кабинета, без нового decision ID. Пользователь
-создаёт зал по названию, переименовывает его, загружает PNG/JPEG, размещает столы,
-задаёт номер/название/вместимость и сохраняет координаты с повторным открытием.
-Первый зал получает базовую зону без ручного geometry JSON. Существующий редактор
-и геометрия переиспользуются; отдельного второго редактора не создаётся.
+ограниченное расширение клиентского кабинета, без нового decision ID.
+
+Уточнённый сценарий владельца начинается со списка залов с фактическим числом
+столов. Внутри зала владелец создаёт физические столы до загрузки изображения,
+по одному, диапазоном или явным списком номеров. Номер сохраняет уникальность
+в пределах клуба. После загрузки PNG/JPEG свободная точка плана открывает
+список неразмещённых столов этого зала. Перемещение, снятие маркера и замена
+изображения сохраняют физический стол и его историю. Существующий редактор,
+геометрия и просмотрщик переиспользуются.
+
+Новая карточка физического стола создаёт согласованные записи схемы и
+DB-бронирования в одной транзакции. Booking-запись определяет номер,
+вместимость и собственный формат минимального депозита. Неявное сопоставление
+прежних записей и конвертация их денежных значений запрещены. Исторические
+карточки доступны со статусом «Требует подключения». Запуск гостевых
+операций остаётся отдельным этапом по DEC-018/B и DEC-009/C.
 
 Чтение требует текущих active client/membership/mapping и exact
 `client.club.read`; изменение дополнительно требует exact
@@ -944,8 +970,8 @@ durable idempotency и audit в общей транзакции с повтор�
 private UI state. Обычная навигация и Telegram BackButton сохраняются. Только
 работающие доступные действия показываются в кабинете.
 
-Календарь, бронирования, платежи, сотрудники, Managed Bots и публикация клуба не
-входят в этот раздел. Приёмка требует Ktor isolation, H2/disposable PostgreSQL
+Календарь, гостевые HOLD и бронирования, платежи, сотрудники, Managed Bots и
+публикация клуба не входят в этот раздел. Приёмка требует Ktor isolation, H2/disposable PostgreSQL
 migration/persistence/idempotency/rollback/concurrency/revoke, frontend/browser,
 TypeScript/ESLint, JVM/static и packaged Mini App gates. Принятие контракта не
 доказывает прохождение этих проверок или runtime; локальное evidence фиксируется

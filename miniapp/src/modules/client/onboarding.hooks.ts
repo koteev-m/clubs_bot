@@ -1,31 +1,46 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { OnboardingError, onboardingRequest } from './onboarding.api';
 
-export function useRemote<T>(credential: string, path: string, body?: object) {
+export function useRemote<T>(
+  credential: string,
+  path: string | null,
+  body?: object,
+) {
   const serialized = body === undefined ? undefined : JSON.stringify(body);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<{
+    path?: string;
+    serialized?: string;
+    credential?: string;
+    attempt?: number;
     data?: T;
     error?: unknown;
     loading: boolean;
   }>({ loading: true });
   useEffect(() => {
+    if (!path) {
+      setState({ loading: false });
+      return;
+    }
     const controller = new AbortController();
-    setState({ loading: true });
+    const request = { path, serialized, credential, attempt };
     onboardingRequest<T>(credential, path, {
       signal: controller.signal,
       body: serialized === undefined ? undefined : JSON.parse(serialized),
     })
       .then((data) => {
-        if (!controller.signal.aborted) setState({ data, loading: false });
+        if (!controller.signal.aborted)
+          setState({ ...request, data, loading: false });
       })
       .catch((error) => {
-        if (!controller.signal.aborted) setState({ error, loading: false });
+        if (!controller.signal.aborted)
+          setState({ ...request, error, loading: false });
       });
     return () => controller.abort();
   }, [credential, path, serialized, attempt]);
   const refresh = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => {
+    if (!path) return;
     const foreground = () => {
       if (!document.hidden) refresh();
     };
@@ -37,8 +52,15 @@ export function useRemote<T>(credential: string, path: string, body?: object) {
       window.removeEventListener('pageshow', foreground);
       document.removeEventListener('visibilitychange', foreground);
     };
-  }, [refresh]);
-  return { ...state, refresh };
+  }, [path, refresh]);
+  const current =
+    state.path === path &&
+    state.serialized === serialized &&
+    state.credential === credential &&
+    state.attempt === attempt;
+  return current
+    ? { data: state.data, error: state.error, loading: state.loading, refresh }
+    : { loading: path !== null, refresh };
 }
 
 interface PendingCommand<T> {
