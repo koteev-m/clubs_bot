@@ -35,9 +35,52 @@ import javax.imageio.ImageIO
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class ClientLayoutRoutesDataTest {
+    @Test
+    fun `same club hall endpoints return independent PNG JPEG and empty plans after restart`() =
+        database { source ->
+            lateinit var club: String
+            lateinit var ids: List<String>
+            val png = image()
+            val jpeg = image("jpeg")
+            withApp(source) {
+                club = createClub(RECIPIENT, "Independent")
+                ids =
+                    listOf("Main", "Welcome", "Empty").map { name ->
+                        ok("$C/clubs/$club/halls", RECIPIENT, obj("name" to name))
+                            .getValue("halls")
+                            .jsonArray
+                            .last()
+                            .jsonObject
+                            .string("id")
+                    }
+                assertEquals(HttpStatusCode.OK, upload("$C/clubs/$club/halls/${ids[0]}", RECIPIENT, png, "1").status)
+                assertEquals(
+                    HttpStatusCode.OK,
+                    upload("$C/clubs/$club/halls/${ids[1]}", RECIPIENT, jpeg, "1", type = "image/jpeg").status,
+                )
+            }
+            withApp(source) {
+                val saved = ok("$C/clubs/$club/layout", RECIPIENT).getValue("halls").jsonArray.map { it.jsonObject }
+                assertNotEquals(
+                    saved[0].getValue("plan").jsonObject["sha256"],
+                    saved[1].getValue("plan").jsonObject["sha256"],
+                )
+                assertEquals("1", saved[2].version())
+                for ((id, bytes) in listOf(ids[0] to png, ids[1] to jpeg)) {
+                    val plan = requestAs("$C/clubs/$club/halls/$id/plan", RECIPIENT)
+                    assertEquals(HttpStatusCode.OK, plan.status)
+                    assertEquals("no-store", plan.headers["Cache-Control"])
+                    assertContentEquals(bytes, plan.bodyAsBytes())
+                }
+                requestAs("$C/clubs/$club/halls/${ids[2]}/plan", RECIPIENT)
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+            }
+        }
+
     @Test
     fun `cabinet creates edits uploads and reopens layout with persisted optimistic versions`() =
         database { source ->
@@ -395,9 +438,9 @@ class ClientLayoutRoutesDataTest {
             setBody(bytes)
         }
 
-    private fun image(): ByteArray =
+    private fun image(format: String = "png"): ByteArray =
         ByteArrayOutputStream().use { stream ->
-            ImageIO.write(BufferedImage(4, 3, BufferedImage.TYPE_INT_RGB), "png", stream)
+            ImageIO.write(BufferedImage(4, 3, BufferedImage.TYPE_INT_RGB), format, stream)
             stream.toByteArray()
         }
 

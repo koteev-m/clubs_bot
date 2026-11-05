@@ -48,6 +48,71 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it('never applies the HOLD recommendation on read or unrelated save and clears it only by owner action', async () => {
+  let saved = { ...initial, rules: { ...initial.rules, holdMinutes: 17 } };
+  const writes: Record<string, unknown>[] = [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_, request) => {
+    if (request?.method !== 'PATCH') return reply(saved);
+    const { expectedVersion, ...rules } = JSON.parse(String(request.body));
+    writes.push({ expectedVersion, ...rules });
+    saved = { ...saved, version: String(Number(saved.version) + 1), rules };
+    return reply(saved);
+  });
+  mount();
+  const hold = await screen.findByRole<HTMLInputElement>('textbox', {
+    name: /Время на оформление/,
+  });
+  expect(hold.value).toBe('17');
+  expect(writes).toHaveLength(0);
+  expect(screen.getByText(/Рекомендуем 10 минут/)).toBeTruthy();
+  fireEvent.change(
+    screen.getByRole('textbox', { name: /Прекращение онлайн/ }),
+    { target: { value: '90' } },
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
+  await screen.findByText('Сохранено');
+  expect(writes[0]).toMatchObject({
+    holdMinutes: 17,
+    arrivalMinutes: null,
+    cutoffMinutes: 90,
+  });
+  fireEvent.change(hold, { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1]).toMatchObject({ holdMinutes: null, arrivalMinutes: null });
+});
+
+it('warns about a contradictory draft before saving while preserving the saved values', async () => {
+  const saved: BookingRulesView = {
+    ...initial,
+    nights: [
+      {
+        businessDate: '2026-11-06',
+        opensAt: '2026-11-07T00:00+03:00',
+        closesAt: '2026-11-07T12:00+03:00',
+        cutoffAt: '2026-11-07T10:00+03:00',
+        arrivalBy: null,
+        cutoffAtOrBeforeOpen: false,
+        arrivalAtOrAfterClose: false,
+        cutoffAfterArrival: false,
+      },
+    ],
+  };
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(reply(saved));
+  mount();
+  const arrival = await screen.findByRole<HTMLInputElement>('textbox', {
+    name: /Предельное время прибытия/,
+  });
+  fireEvent.change(arrival, { target: { value: '180' } });
+  expect(
+    screen.getByText(/Проверьте черновик для ночей 2026-11-06/),
+  ).toBeTruthy();
+  expect(saved.rules.arrivalMinutes).toBeNull();
+  expect(
+    fetch.mock.calls.every(([, request]) => request?.method !== 'PATCH'),
+  ).toBe(true);
+});
+
 it('retains an edit after a conflict and preserves a concurrent change to a different field', async () => {
   let stored = initial;
   const patches: unknown[] = [];
@@ -72,7 +137,7 @@ it('retains an edit after a conflict and preserves a concurrent change to a diff
   });
   mount();
   const hold = await screen.findByRole<HTMLInputElement>('textbox', {
-    name: /Предварительное удержание/,
+    name: /Время на оформление/,
   });
   fireEvent.change(hold, { target: { value: '1.5' } });
   fireEvent.click(screen.getByRole('button', { name: 'Сохранить правила' }));

@@ -11,6 +11,7 @@ export default defineConfig({
     // These suites exercise the packaged entry with playwright.owner-ux.config.ts.
     'owner-ux-map.spec.ts',
     'owner-map-preview.spec.ts',
+    'owner-setup.spec.ts',
   ],
   outputDir: join(
     tmpdir(),

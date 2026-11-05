@@ -164,3 +164,34 @@
 .client-layout button {
   overflow-wrap: anywhere;
 }
+
+/* The shared legacy editor adopts the cabinet palette only inside this surface. */
+.client-layout :is(.bg-white, .bg-gray-50, .bg-green-50, .bg-blue-50) {
+  background: var(--po-card);
+  color: #f4f5ef;
+}
+.client-layout :is(.text-gray-900, .text-gray-800, .text-gray-700) {
+  color: #f4f5ef;
+}
+.client-layout :is(.text-gray-600, .text-gray-500) {
+  color: #b9c6c3;
+}
+.client-layout :is(.text-blue-600, .text-blue-700) {
+  color: var(--po-accent);
+}
+.client-layout :is(.text-red-500, .text-red-600, .text-red-700) {
+  color: #ffc5b6;
+}
+.client-layout :is(input, textarea, select, option) {
+  background: var(--po-bg);
+  color: #f4f5ef;
+  border-color: #72817b;
+}
+.client-layout :is(input, textarea, select):focus-visible {
+  outline: 2px solid var(--po-accent);
+  outline-offset: 3px;
+}
+.client-layout ::placeholder {
+  color: #a9b8b9;
+  opacity: 1;
+}

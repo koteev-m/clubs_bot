@@ -41,7 +41,7 @@ const eventStatus = {
   UNLINKED: 'Для этой ночи ещё не связано событие.',
   INVALID_LINK: 'Связь с событием не подтверждает расписание этой ночи.',
   NOT_MATERIALIZED:
-    'Ночь рассчитана по расписанию. Её ещё нужно согласовать в календаре.',
+    'Ночь рассчитана по расписанию. Нажмите «Сформировать ближайшие ночи» в календаре.',
 };
 
 export default function GuestBookingPreview({
@@ -226,6 +226,15 @@ export default function GuestBookingPreview({
                   Статусы показывают состояние на момент снимка и могут
                   измениться.
                 </p>
+                <p>
+                  «Оформляют бронь (HOLD)» — стол временно удерживается на время
+                  оформления. Это ещё не подтверждённая бронь. Предпросмотр не
+                  создаёт удержание.
+                </p>
+                <p>
+                  «Требуется настройка» — доступность не подтверждена. Такой
+                  стол нельзя считать свободным; причина указана в карточке.
+                </p>
                 <ul
                   aria-label="Легенда занятости"
                   className="flex flex-wrap gap-2 text-sm"
@@ -362,11 +371,32 @@ function PreviewHall({
         tableDetails={(table) => {
           const state = byTable.get(table.id);
           const reason = state?.reason;
+          const knownReason =
+            reason && Object.hasOwn(availabilityReasons, reason);
           const key = `${night?.businessDate ?? ''}:${hall.id}:${table.id}`;
           return (
             <>
-              {reason && Object.hasOwn(availabilityReasons, reason) && (
-                <p>{availabilityReasons[reason]}</p>
+              {knownReason && <p>{availabilityReasons[reason]}</p>}
+              {(!state || state.status === 'UNKNOWN') && !knownReason && (
+                <p>
+                  {!night?.nightId
+                    ? 'Для выбранной ночи нет сохранённого номера. Сформируйте ближайшие ночи в календаре.'
+                    : !snapshot
+                      ? 'Нет актуального подтверждённого снимка занятости. Нажмите «Обновить занятость».'
+                      : 'Снимок не подтвердил состояние этого стола. Обновите занятость и проверьте его подключение.'}
+                </p>
+              )}
+              {state?.status === 'HOLD' && (
+                <p>
+                  Другой гость оформляет бронь. Стол временно удерживается до
+                  завершения оформления или истечения срока HOLD.
+                </p>
+              )}
+              {state?.status === 'UNAVAILABLE' && !knownReason && (
+                <p>
+                  Стол недоступен в выбранную ночь. Обновите занятость и
+                  проверьте настройки зала, стола и ночи.
+                </p>
               )}
               <p>
                 {table.bookingLinked

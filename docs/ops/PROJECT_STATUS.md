@@ -1,5 +1,65 @@
 # Project status checkpoint
 
+## Owner setup UX — Draft PR preparation, 2026-11-05
+
+- Task `CLB-owner-setup-ux` continues in the registered `owner-setup-ux` worktree
+  on branch `codex/owner-setup-ux`, base and freshly fetched `origin/main`
+  `46db7930f951ff115426d66576731089d75ffc75`; `PROJECT_IDENTITY_OK`.
+  The complete earlier candidate was backed up before publication preparation.
+- The user now authorizes one commit, one ordinary non-force push and one
+  Draft PR into `main`, plus one bounded CI snapshot for the exact published
+  SHA. Merge, deploy, workflow dispatch and further staging investigation are
+  not authorized. Earlier no-publication boundaries below describe their own
+  local snapshots and are superseded only for this narrow publication step.
+- Focused review confirms editor state isolation by club/hall, stale success
+  and error fencing, readable table creation, canonical-date explanations,
+  unchanged reconciliation commands and rule values, and safe preview labels.
+  Backend production source, grants, booking runtime and V067–V073 are unchanged.
+- The original staging image incident remains **EVIDENCE_REQUIRED**. Publishing
+  the confirmed editor lifecycle fix does not prove the staging root cause.
+  Manual Main/Welcome verification after a separately authorized stage deploy
+  is mandatory. No new staging/browser/database/image investigation occurred.
+- Saved source/artifact digests and successful checks are reused for identical
+  bytes. Only this checkpoint and publication evidence are new documentation.
+  [Publication handoff](owner-setup-ux-pr.md) records scope, review, validation
+  and [the publication digest inventory](owner-setup-ux-pr-evidence.json).
+  The exact commit, PR URL and bounded CI result belong to the publication
+  response/GitHub record; no terminal CI success is assumed.
+- Next: manual review of the single Draft PR and its hosted CI result before
+  any separate merge or staging-deployment authorization.
+
+## Owner setup UX — local candidate, 2026-11-05
+
+- Task `CLB-owner-setup-ux`, user-authorized technical label, no new card.
+  Verdict **PARTIAL_BLOCKED**: local UX and regression protection implemented;
+  the original staging duplicate-image incident has no saved-data/rendering
+  attribution without separately authorized read-only evidence.
+- Isolated worktree `/Users/maksimmartynov/.codex/worktrees/owner-setup-ux/clubs_bot`,
+  detached HEAD/base/fetched `origin/main`
+  `46db7930f951ff115426d66576731089d75ffc75`; `PROJECT_IDENTITY_OK`.
+  Other worktrees and pre-existing edits are preserved. No commit/publication.
+- Hall sessions, images, tables and late reads/errors are fenced per hall.
+  Matching saved plan hashes receive a separate data diagnostic. Table forms
+  use explicit readable colors with scoped cabinet styles and club-wide number
+  conflict explanations. Calendar previews describe Friday's party opening
+  Saturday 00:00 and closing Saturday 12:00 before save; reconciliation and
+  booking-rule commands retain their contracts. HOLD/UNKNOWN/unavailable states
+  have human explanations and keep safe preview-only behavior.
+- Evidence: full frontend suite 289 PASS plus final affected 9 PASS (one new
+  late-error case); 20 packaged Chromium/WebKit cases plus final affected 10
+  PASS; 575 repository cases (10 existing skips), 63 fresh H2/PostgreSQL Ktor
+  cases, final two-database hall recheck, and 7 domain calendar cases PASS.
+  Full ordinary JVM/coverage gate: 1,447 cases, one existing skip, no failures.
+  Detekt, fresh baseline-aware ktlint, TypeScript/ESLint, dist validation and
+  installDist PASS. Final frozen-source evidence and qualifications:
+  [handoff](owner-setup-ux.md), [digests](owner-setup-ux-evidence.json).
+- V067–V073 and backend production source are unchanged. No stage/prod access,
+  real data repair, publication, guest/staff/payment cutover, commit, push, PR,
+  dispatch or deploy. Physical iPhone/Telegram execution remains unverified.
+- Next: read-only reproduction of the original incident with affected hall
+  identities and saved plan hash metadata, through separately authorized stage
+  access or sanitized evidence supplied by the owner.
+
 ## Booking cutover fence — local candidate, 2026-11-04
 
 - Verdict **BOOKING_CUTOVER_FENCE_READY** for the local mapped-club boundary.

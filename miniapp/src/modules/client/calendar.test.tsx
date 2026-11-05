@@ -76,20 +76,24 @@ it('keeps the draft on a version conflict and resubmits only the reviewed change
   });
   mount();
   const fridayFieldset = await screen.findByRole('group', { name: 'Пятница' });
-  fireEvent.change(within(fridayFieldset).getByLabelText('Начало'), {
+  fireEvent.change(within(fridayFieldset).getByLabelText('Время открытия'), {
     target: { value: '20:30' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Сохранить календарь' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить расписание' }));
   const reapply = await screen.findByRole('button', {
     name: 'Перенести мои правки на актуальную версию',
   });
   expect(
-    (within(fridayFieldset).getByLabelText('Начало') as HTMLInputElement).value,
+    (
+      within(fridayFieldset).getByLabelText(
+        'Время открытия',
+      ) as HTMLInputElement
+    ).value,
   ).toBe('20:30');
   expect(
     (
       screen.getByRole('button', {
-        name: 'Сохранить календарь',
+        name: 'Сохранить расписание',
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(true);
@@ -100,11 +104,11 @@ it('keeps the draft on a version conflict and resubmits only the reviewed change
   expect(
     (
       within(screen.getByRole('group', { name: 'Суббота' })).getByLabelText(
-        'Рабочий день',
+        'Проводим вечеринку',
       ) as HTMLInputElement
     ).checked,
   ).toBe(true);
-  fireEvent.click(screen.getByRole('button', { name: 'Сохранить календарь' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить расписание' }));
   await screen.findByText('Сохранено');
   expect(mutations).toHaveLength(2);
   expect(mutations[1].key).not.toBe(mutations[0].key);
@@ -127,7 +131,7 @@ it('refreshes read authority without displaying calendar data after revocation',
   mount();
   await screen.findByText('Календарь доступен только для просмотра.');
   expect(
-    screen.queryByRole('button', { name: 'Сохранить календарь' }),
+    screen.queryByRole('button', { name: 'Сохранить расписание' }),
   ).toBeNull();
   allowed = false;
   act(() => {
@@ -153,10 +157,11 @@ it('shows the blocked business date and keeps the draft when dependencies preven
   );
   mount();
   const friday = await screen.findByRole('group', { name: 'Пятница' });
-  const openingDay =
-    within(friday).getByLabelText<HTMLSelectElement>('День открытия');
+  const openingDay = within(friday).getByLabelText<HTMLSelectElement>(
+    'Когда открываемся относительно дня вечеринки',
+  );
   fireEvent.change(openingDay, { target: { value: 'next' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Сохранить календарь' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить расписание' }));
   await screen.findByText(/Ночь \(03\.11\.2026\) связана/);
   expect(openingDay.value).toBe('next');
   expect(screen.queryByText('Сохранено')).toBeNull();

@@ -42,6 +42,7 @@ type HallEditorScreenProps<Id extends LayoutId = number> = {
   readOnly?: boolean;
   previewOnly?: boolean;
   clientMode?: boolean;
+  reservedTableLocations?: Record<number, string>;
   reportDirty?: (dirty: boolean) => void;
   onBackReady?: (back: () => void) => void;
   onBack: () => void;
@@ -57,6 +58,15 @@ const adminEditorApi: HallEditorApi = {
 };
 
 export default function HallEditorScreen<Id extends LayoutId = number>({
+  ...props
+}: HallEditorScreenProps<Id>) {
+  // A hall owns the entire editor lifetime, including URLs, requests, drafts and mutations.
+  return (
+    <HallEditorSession key={`${props.clubId}:${props.hallId}`} {...props} />
+  );
+}
+
+function HallEditorSession<Id extends LayoutId = number>({
   clubId,
   hallId,
   onBack,
@@ -64,6 +74,7 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
   readOnly = false,
   previewOnly = false,
   clientMode = false,
+  reservedTableLocations,
   reportDirty,
   onBackReady,
 }: HallEditorScreenProps<Id>) {
@@ -161,7 +172,12 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
         setPlanStatus('ready');
       })
       .catch((error: AdminApiError) => {
-        if (requestId !== requestIdPlanRef.current) return;
+        if (
+          controller.signal.aborted ||
+          !mountedRef.current ||
+          requestId !== requestIdPlanRef.current
+        )
+          return;
         if (isAbortError(error)) return;
         if (error.status === 403) {
           addToast(mapAdminErrorMessage(error));
@@ -186,12 +202,22 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
     api
       .listHallTables(hallId, controller.signal)
       .then((data) => {
-        if (requestId !== requestIdTablesRef.current) return;
+        if (
+          controller.signal.aborted ||
+          !mountedRef.current ||
+          requestId !== requestIdTablesRef.current
+        )
+          return;
         setTables(data);
         setTablesStatus('ready');
       })
       .catch((error: AdminApiError) => {
-        if (requestId !== requestIdTablesRef.current) return;
+        if (
+          controller.signal.aborted ||
+          !mountedRef.current ||
+          requestId !== requestIdTablesRef.current
+        )
+          return;
         if (isAbortError(error)) return;
         if (error.status === 403) {
           addToast(mapAdminErrorMessage(error));
@@ -365,7 +391,12 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
       );
     } catch (error) {
       if (mountedRef.current && !isAbortError(error)) {
-        setCreationError(mapAdminErrorMessage(error as AdminApiError));
+        const normalized = error as AdminApiError;
+        setCreationError(
+          normalized.code === 'table_number_conflict'
+            ? `Не удалось создать столы №${draft.numbers.join(', №')}: номер уже занят в клубе. Обновите данные и выберите свободные номера.`
+            : mapAdminErrorMessage(normalized),
+        );
       }
     } finally {
       if (mountedRef.current) setBusy(false);
@@ -535,6 +566,7 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
         (creationOpen ? (
           <div className="mt-3 space-y-2">
             <ClubTableCreationForm
+              locations={reservedTableLocations}
               reserved={physical.reservedNumbers()}
               busy={busy || readOnly}
               onSave={(draft) => void handleCreatePhysical(draft)}
@@ -930,6 +962,7 @@ export default function HallEditorScreen<Id extends LayoutId = number>({
               )
             ) : (
               <HallPlanStage
+                key={planUrl}
                 planUrl={planUrl}
                 tables={tables}
                 selectedTableId={selectedTableId}

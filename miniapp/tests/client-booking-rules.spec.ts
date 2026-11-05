@@ -87,14 +87,16 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     page.getByRole('button', { name: /Правила бронирования/ }).click();
   await open();
   const cutoff = page.getByRole('textbox', {
-    name: /Прекращать онлайн-бронирование/,
+    name: /Прекращение онлайн-бронирования/,
   });
-  const arrival = page.getByRole('textbox', { name: /Ожидать гостя/ });
+  const arrival = page.getByRole('textbox', {
+    name: /Предельное время прибытия/,
+  });
   const hold = page.getByRole('textbox', {
-    name: /Предварительное удержание/,
+    name: /Время на оформление/,
   });
   const retention = page.getByRole('textbox', {
-    name: /Удерживать бронь после/,
+    name: /Ожидание гостя после/,
   });
   await expect(cutoff).toHaveValue('120');
   await expect(arrival).toHaveValue('');
@@ -135,8 +137,6 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     page.locator('time[datetime="2026-10-25T02:30+01:00"]'),
   ).toBeVisible();
   await expect(
-    page.getByText(
-      'Бронирование прекращается позже требуемого времени прибытия.',
-    ),
+    page.getByText(/Проверьте правила: онлайн-бронирование остаётся открытым/),
   ).toBeVisible();
 });

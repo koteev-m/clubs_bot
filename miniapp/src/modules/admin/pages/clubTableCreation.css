@@ -1,0 +1,52 @@
+.club-table-creation {
+  color-scheme: light;
+  color: #111827;
+  background: #ffffff;
+}
+.club-table-creation input,
+.club-table-creation textarea,
+.club-table-creation select,
+.club-table-creation option {
+  color: #111827;
+  background: #ffffff;
+}
+.club-table-creation ::placeholder {
+  color: #4b5563;
+  opacity: 1;
+}
+.club-table-creation [role="alert"] {
+  color: #991b1b;
+}
+.club-table-creation :is(input, select, textarea, button):focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 3px;
+}
+.club-table-creation :disabled {
+  opacity: 1;
+  color: #4b5563;
+  background: #e5e7eb;
+  cursor: default;
+}
+.client-layout .club-table-creation {
+  color-scheme: dark;
+  color: #f4f5ef;
+  background: var(--po-card, #192426);
+}
+.client-layout .club-table-creation :is(input, select, textarea, option) {
+  color: #f4f5ef;
+  background: var(--po-bg, #10191b);
+  border-color: #72817b;
+}
+.client-layout .club-table-creation ::placeholder {
+  color: #a9b8b9;
+}
+.client-layout .club-table-creation [role="alert"] {
+  color: #ffc5b6;
+}
+.client-layout .club-table-creation :focus-visible {
+  outline-color: var(--po-accent, #d5f58b);
+}
+.client-layout .club-table-creation :disabled {
+  color: #a9b8b9;
+  background: #2e3b3d;
+}

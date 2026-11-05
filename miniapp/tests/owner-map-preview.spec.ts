@@ -221,7 +221,7 @@ test('mobile editor places saved physical tables and keeps the original command 
   await expect(
     page.getByRole('button', { name: 'Создать столы' }),
   ).toBeDisabled();
-  await expect(page.getByText(/Повторяются или уже заняты/)).toBeVisible();
+  await expect(page.getByText(/№101 повторяется в списке/)).toBeVisible();
   await page.getByLabel('Способ добавления').selectOption('range');
   await page
     .getByRole('textbox', { name: 'Первый номер', exact: true })

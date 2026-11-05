@@ -59,6 +59,65 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it.each([
+  ['HOLD', undefined, 'Другой гость оформляет бронь.'],
+  ['UNKNOWN', 'TABLE_UNLINKED', 'У стола нет подтверждённой связи'],
+  ['UNKNOWN', 'FUTURE_REASON', 'Снимок не подтвердил состояние этого стола.'],
+  ['UNAVAILABLE', 'NIGHT_CANCELLED', 'Клубная ночь отменена.'],
+  ['UNAVAILABLE', undefined, 'Стол недоступен в выбранную ночь.'],
+])(
+  'explains %s with reason %s without exposing a booking command',
+  async (status, reason, explanation) => {
+    const request = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (path) =>
+        new Response(
+          JSON.stringify(
+            String(path).endsWith('/availability')
+              ? {
+                  clubId: '42',
+                  hallId: '7',
+                  nightId: '20',
+                  businessDate: '2026-11-06',
+                  layoutRevision: '1',
+                  sampledAt: '2026-11-05T12:00:00Z',
+                  tables: [{ id: '51', status, reason }],
+                }
+              : {
+                  ...club,
+                  nights: [
+                    {
+                      nightId: '20',
+                      businessDate: '2026-11-06',
+                      opensAt: '2026-11-07T00:00+03:00',
+                      closesAt: '2026-11-07T12:00+03:00',
+                      cutoffAt: '2026-11-07T10:00+03:00',
+                      arrivalBy: null,
+                      eventStatus: 'VERIFIED',
+                    },
+                  ],
+                },
+          ),
+        ),
+    );
+    mount();
+    const list = await screen.findByLabelText('Столы на схеме');
+    const table = await within(list).findByRole('button', {
+      name: /^#8 · У окна/,
+    });
+    fireEvent.click(table);
+    const card = screen.getByRole('region', { name: 'Карточка стола' });
+    await within(card).findByText(new RegExp(explanation!));
+    expect(card.textContent).not.toContain('Свободен');
+    expect(
+      screen.getByRole<HTMLButtonElement>('button', { name: 'Удержать стол' })
+        .disabled,
+    ).toBe(true);
+    expect(request.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(
+      true,
+    );
+  },
+);
+
 it('shows saved table details without pretending the table is available or sending a mutation', async () => {
   const request = vi
     .spyOn(globalThis, 'fetch')
@@ -71,7 +130,7 @@ it('shows saved table details without pretending the table is available or sendi
   expect(screen.getByText('Требует подключения')).toBeTruthy();
   expect(
     screen.getByRole('region', { name: 'Карточка стола' }).textContent,
-  ).toContain('Невозможно определить доступность');
+  ).toContain('Требуется настройка');
   const guests = screen.getByRole<HTMLInputElement>('spinbutton', {
     name: 'Количество гостей',
   });
@@ -156,7 +215,7 @@ it('discards the previous table state on refresh failure and accepts only the se
   fireEvent.click(screen.getByRole('button', { name: 'Обновить занятость' }));
   await screen.findByText(/Не удалось получить актуальный снимок/);
   expect(card.textContent).not.toContain('Свободен');
-  expect(card.textContent).toContain('Невозможно определить доступность');
+  expect(card.textContent).toContain('Требуется настройка');
   responseMode = 'OCCUPIED';
   fireEvent.change(screen.getByRole('combobox', { name: 'Клубная ночь' }), {
     target: { value: '2026-10-25' },
