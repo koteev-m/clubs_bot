@@ -30,12 +30,16 @@ FROM docker.io/library/eclipse-temurin:21.0.11_10-jre-noble@sha256:ca397720325ce
 WORKDIR /opt/app
 
 USER root
-# Ubuntu noble security fixes for CVE-2026-84782 and CVE-2026-111497; fail closed if unavailable.
+# Ubuntu noble fixes for CVE-2026-84782, CVE-2026-111497 and CVE-2026-109518; fail closed.
 # Exact versions also change the apt-layer cache key on security updates.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends curl \
+# Disable retries while the vulnerable APT client installs its own security update.
+RUN apt-get -o Acquire::Retries=0 update \
+ && apt-get -o Acquire::Retries=0 install -y --no-install-recommends curl \
+    apt=2.8.4ubuntu0.1 libapt-pkg6.0t64=2.8.4ubuntu0.1 \
     libssl3t64=3.0.13-0ubuntu3.16 openssl=3.0.13-0ubuntu3.16 \
     libbrotli1=1.1.0-2ubuntu0.1 \
+ && test "$(dpkg-query -W -f='${Version}' apt)" = '2.8.4ubuntu0.1' \
+ && test "$(dpkg-query -W -f='${Version}' libapt-pkg6.0t64)" = '2.8.4ubuntu0.1' \
  && test "$(dpkg-query -W -f='${Version}' libssl3t64)" = '3.0.13-0ubuntu3.16' \
  && test "$(dpkg-query -W -f='${Version}' openssl)" = '3.0.13-0ubuntu3.16' \
  && test "$(dpkg-query -W -f='${Version}' libbrotli1)" = '1.1.0-2ubuntu0.1' \

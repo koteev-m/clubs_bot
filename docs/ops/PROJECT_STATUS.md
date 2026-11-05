@@ -1,5 +1,27 @@
 # Project status checkpoint
 
+## PR #562 — targeted runtime APT security fix, 2026-11-05
+
+- Task `CLB-owner-setup-ux`, registered `owner-setup-ux` worktree, branch
+  `codex/owner-setup-ux`, verified local/PR parent
+  `2ae70a29331803c9708512e1fa0943fdf93922c7`; `PROJECT_IDENTITY_OK`.
+- The pinned runtime base supplies APT `2.8.3`. Explicitly install and assert
+  `apt` and `libapt-pkg6.0t64` `2.8.4ubuntu0.1` for CVE-2026-109518, with
+  `Acquire::Retries=0`. Existing OpenSSL/Brotli pins and security gates remain.
+- Official signed Ubuntu sources resolve the fix on both architectures. Actual
+  production Dockerfile builds, runtime probes, Trivy HIGH/CRITICAL and synthetic
+  DEV HTTP smoke pass for amd64 and arm64. Local amd64 uses emulation.
+  Workflow YAML/capability validators, 15 workflow regression cases and the
+  Linux quiesced-deployment validator pass. [Security evidence](pr562-apt-security.md).
+- UX/application/dependency/migration bytes and `.trivyignore` remain identical
+  to the verified parent. Main/Welcome staging root cause remains
+  **EVIDENCE_REQUIRED**; no new staging access or data/image change occurred.
+- User authorizes exactly one additional commit and non-force push to the
+  existing Draft PR, plus one bounded CI snapshot for its new SHA. Hosted results
+  and publication identity belong to the final response/GitHub record; local
+  checks do not prove hosted CI success. No merge, deploy or workflow dispatch.
+- Next: review the exact new SHA's hosted CI before a separate merge decision.
+
 ## Owner setup UX — Draft PR preparation, 2026-11-05
 
 - Task `CLB-owner-setup-ux` continues in the registered `owner-setup-ux` worktree
