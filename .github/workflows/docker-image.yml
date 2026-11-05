@@ -75,10 +75,12 @@ jobs:
             > image-evidence/runtime.txt 2>&1 <<'PROBE'
           test "$(id -u)" = 10001
           test "$(id -g)" = 10001
+          test "$(dpkg-query -W -f='${Version}' apt)" = '2.8.4ubuntu0.1'
+          test "$(dpkg-query -W -f='${Version}' libapt-pkg6.0t64)" = '2.8.4ubuntu0.1'
           test "$(dpkg-query -W -f='${Version}' libbrotli1)" = '1.1.0-2ubuntu0.1'
           test "$(dpkg-query -W -f='${Version}' libssl3t64)" = '3.0.13-0ubuntu3.16'
           test "$(dpkg-query -W -f='${Version}' openssl)" = '3.0.13-0ubuntu3.16'
-          dpkg-query -W libbrotli1 libssl3t64 openssl
+          dpkg-query -W apt libapt-pkg6.0t64 libbrotli1 libssl3t64 openssl
           java -version 2>&1 | grep 'version "21\.'
           for launcher in app-bot app-bot-migrate app-bot-migrate-java app-bot-validate-schema; do
             test -x "/opt/app/bin/$launcher"

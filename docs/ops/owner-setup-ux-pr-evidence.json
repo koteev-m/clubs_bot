@@ -1,0 +1,280 @@
+{
+  "task": "CLB-owner-setup-ux",
+  "repository": "koteev-m/clubs_bot",
+  "base": "46db7930f951ff115426d66576731089d75ffc75",
+  "branch": "codex/owner-setup-ux",
+  "date": "2026-11-05",
+  "publication_scope": "one commit; one non-force push; one Draft PR to main; one bounded exact-SHA CI snapshot",
+  "incident_verdict": "EVIDENCE_REQUIRED",
+  "manual_Main_Welcome_recheck_required": true,
+  "original_manifest_sha256": "483bc377c9b5d567f62707ca44a82d202854ccc848acfb7920b3a493bca9928e",
+  "original_candidate_backup": "/private/tmp/owner-setup-ux-publication-backup-20261105",
+  "implementation_and_test_bytes_match_original": true,
+  "new_publication_docs": [
+    "docs/ops/PROJECT_STATUS.md",
+    "docs/ops/owner-setup-ux-pr.md",
+    "docs/ops/owner-setup-ux-pr-evidence.json"
+  ],
+  "backend_production_grants_runtime_unchanged": true,
+  "V067_V073_unchanged": [
+    "core-data/src/main/resources/db/migration/h2/V069__canonical_operational_nights.sql",
+    "core-data/src/main/resources/db/migration/h2/V072__unified_client_tables.sql",
+    "core-data/src/main/resources/db/migration/h2/V073__booking_cutover_fences.sql",
+    "core-data/src/main/resources/db/migration/h2/V071__canonical_booking_commands.sql",
+    "core-data/src/main/resources/db/migration/h2/V070__canonical_night_event_links.sql",
+    "core-data/src/main/resources/db/migration/h2/V068__client_club_booking_rules.sql",
+    "core-data/src/main/resources/db/migration/h2/V067__client_club_calendar.sql",
+    "core-data/src/main/resources/db/migration/postgresql/V069__canonical_operational_nights.sql",
+    "core-data/src/main/resources/db/migration/postgresql/V072__unified_client_tables.sql",
+    "core-data/src/main/resources/db/migration/postgresql/V073__booking_cutover_fences.sql",
+    "core-data/src/main/resources/db/migration/postgresql/V071__canonical_booking_commands.sql",
+    "core-data/src/main/resources/db/migration/postgresql/V070__canonical_night_event_links.sql",
+    "core-data/src/main/resources/db/migration/postgresql/V068__client_club_booking_rules.sql",
+    "core-data/src/main/resources/db/migration/postgresql/V067__client_club_calendar.sql"
+  ],
+  "installed_app_jar_sha256": "48c0abeb53c45e236c3decb22fb48e8545b14bbad1453452a00797d063775b2a",
+  "reused_checks": {
+    "identity": "PROJECT_IDENTITY_OK",
+    "full_vitest": {
+      "passed": 289,
+      "failed": 0
+    },
+    "final_affected_vitest": {
+      "passed": 9,
+      "failed": 0,
+      "new_late_error_case": 1
+    },
+    "full_packaged_mobile_browser": {
+      "passed": 20,
+      "failed": 0
+    },
+    "final_affected_browser": {
+      "passed": 10,
+      "failed": 0
+    },
+    "repository_h2_postgres": {
+      "tests": 575,
+      "failed": 0,
+      "skipped": 10
+    },
+    "new_hall_h2_postgres_recheck": {
+      "passed": 2,
+      "failed": 0
+    },
+    "fresh_ktor_h2_postgres": {
+      "passed": 63,
+      "failed": 0
+    },
+    "domain_calendar_dst": {
+      "passed": 7,
+      "failed": 0
+    },
+    "ordinary_jvm": {
+      "tests": 1447,
+      "failed": 0,
+      "skipped": 1
+    },
+    "coverageGate": "PASS, unchanged refund/cancel DTO execution-data mismatch warnings",
+    "detektGate": "PASS",
+    "ktlintCheck": "PASS, fresh reports, existing baselines unchanged",
+    "typescript": "PASS",
+    "eslint_zero_warnings": "PASS",
+    "dist_validation": "PASS",
+    "installDist": "PASS",
+    "V067_V073": "14 files byte-identical",
+    "secret_scan_final_result_log": "/private/tmp/owner-setup-secret-scan-final.log"
+  },
+  "focused_review": "PASS for publication; original staging incident remains EVIDENCE_REQUIRED; no independent reviewer claimed",
+  "publication_checks": {
+    "candidate_scope": "PASS",
+    "artifact_match": "PASS",
+    "secret_scan_final_result_log": "/private/tmp/owner-setup-ux-pr-secret-scan.log"
+  },
+  "files": [
+    {
+      "path": "app-bot/src/test/kotlin/com/example/bot/routes/ClientLayoutRoutesDataTest.kt",
+      "sha256": "e178ee20eb84f744b42d64cfa187f96230fd459baa959906f0de1d5a172aca08",
+      "bytes": 21920
+    },
+    {
+      "path": "core-data/src/test/kotlin/com/example/bot/data/client/onboarding/ClubLayoutContract.kt",
+      "sha256": "3e5a48e33ed06a7717bff844627427d81de32cc937106b764e4cf15193a43200",
+      "bytes": 27399
+    },
+    {
+      "path": "docs/ops/PROJECT_STATUS.md",
+      "sha256": "d122ea83a939eff617732fa9d16896d1049cc8faa48e7f7cd2189e16e38c64d6",
+      "bytes": 390581
+    },
+    {
+      "path": "docs/ops/owner-setup-ux-evidence.json",
+      "sha256": "483bc377c9b5d567f62707ca44a82d202854ccc848acfb7920b3a493bca9928e",
+      "bytes": 7757
+    },
+    {
+      "path": "docs/ops/owner-setup-ux-pr.md",
+      "sha256": "489c73632a66597ef684063d3f09fbb174f0660b26960120e58bedc1092029b9",
+      "bytes": 7124
+    },
+    {
+      "path": "docs/ops/owner-setup-ux.md",
+      "sha256": "5020d8ee2a77b38220a78dfddb80559c416060b2d472db5b9ee0bfb9cf062e57",
+      "bytes": 12163
+    },
+    {
+      "path": "miniapp/dist/assets/PlatformOwnerScreens-DzP1kAV0.js",
+      "deleted": true
+    },
+    {
+      "path": "miniapp/dist/assets/PlatformOwnerScreens-IlEbiyQT.js",
+      "sha256": "de6df79f728ed17234e48fc50a9b5575973ddf1927d85061d3a2f4fcd85d5946",
+      "bytes": 40745
+    },
+    {
+      "path": "miniapp/dist/assets/index-Bf4bXh6_.js",
+      "sha256": "4867f0b00ffc5fd90e8ea0a65f9725933af886c175992b30f0a7b8ba1d61c672",
+      "bytes": 642142
+    },
+    {
+      "path": "miniapp/dist/assets/index-CYjLIpp8.js",
+      "deleted": true
+    },
+    {
+      "path": "miniapp/dist/assets/index-D-10vcF6.css",
+      "deleted": true
+    },
+    {
+      "path": "miniapp/dist/assets/index-Ybi8r-YL.css",
+      "sha256": "deefaa96e8150e701f8d3b6b3151b25ea9a5602926fe31d7c740c777839900f2",
+      "bytes": 30431
+    },
+    {
+      "path": "miniapp/dist/index.html",
+      "sha256": "136fa2d3e754ea3111ad013eeaddef44d9a13153769011949f28b25ad61f3020",
+      "bytes": 449
+    },
+    {
+      "path": "miniapp/playwright.config.ts",
+      "sha256": "66b6f5d6cc9c9268414988a8e58e1afba08dea5ba178b59430d28dd2e8aca1b0",
+      "bytes": 698
+    },
+    {
+      "path": "miniapp/playwright.owner-ux.config.ts",
+      "sha256": "02f3896d496800af4841bee1eac34aab7ce63b0e1bfb36a9146f8723b201458f",
+      "bytes": 923
+    },
+    {
+      "path": "miniapp/src/modules/admin/pages/ClubTableCreationForm.tsx",
+      "sha256": "7170ad7c756d3d9d26630b300691275a4dcfd8dae6e3ff2d1e2f34ad0b87c12d",
+      "bytes": 7622
+    },
+    {
+      "path": "miniapp/src/modules/admin/pages/HallEditorScreen.tsx",
+      "sha256": "44ac6875e700f4c0ef82b34b0a1d0921c3ee70c7ac963f4ba1a828a578e27b85",
+      "bytes": 35884
+    },
+    {
+      "path": "miniapp/src/modules/admin/pages/HallPlanViewer.tsx",
+      "sha256": "5e07a65432146b6deca27abe2e1470fa2289a07eb1502bf87929f9c5ea22484a",
+      "bytes": 6584
+    },
+    {
+      "path": "miniapp/src/modules/admin/pages/clubTableCreation.css",
+      "sha256": "09abe783730fd76b71f7e10dce81711a7c6e4b51be79a3e321c6ae8ff2b28eaa",
+      "bytes": 1228
+    },
+    {
+      "path": "miniapp/src/modules/client/CalendarRulesEditor.tsx",
+      "sha256": "ed289c9a37ec01cd0fec5a1fcccbcb9aa97062b55d4f61614e5abb632eddb976",
+      "bytes": 9847
+    },
+    {
+      "path": "miniapp/src/modules/client/ClubBookingRules.tsx",
+      "sha256": "85a9df4b626d3c673076c17d20480453969443296b07335b5084bd84a7045f99",
+      "bytes": 13254
+    },
+    {
+      "path": "miniapp/src/modules/client/ClubCalendar.tsx",
+      "sha256": "24215da4bccb1c1952a66df77967e94017513da4802bb5b51b3dddef314b5248",
+      "bytes": 12201
+    },
+    {
+      "path": "miniapp/src/modules/client/ClubLayout.tsx",
+      "sha256": "e0f487f9df44b4269bd637143692c3a33e5db6193424fc032276656ed3d2c401",
+      "bytes": 8160
+    },
+    {
+      "path": "miniapp/src/modules/client/GuestBookingPreview.tsx",
+      "sha256": "f1fb9e1e695dc13a6023a490739086409a48c0eab1291b8c80b77e67133822ea",
+      "bytes": 17558
+    },
+    {
+      "path": "miniapp/src/modules/client/booking-rules.test.tsx",
+      "sha256": "0080017a7dd654879f2ce87fd376fa82867e01c818fc71939e2b79005b44c0d9",
+      "bytes": 6307
+    },
+    {
+      "path": "miniapp/src/modules/client/calendar.test.tsx",
+      "sha256": "51c94bbbae34c5f2e6a3669171b54ca6d5e93e6bb9fdc0d8aecc0d3044e6f534",
+      "bytes": 5325
+    },
+    {
+      "path": "miniapp/src/modules/client/calendar.ts",
+      "sha256": "d5f4eca61f2c833401d82c42324f1971f7881f5e6c51c4faba8e1ae53666690a",
+      "bytes": 7158
+    },
+    {
+      "path": "miniapp/src/modules/client/guest-booking-preview.test.tsx",
+      "sha256": "939881adf6553f1b1f024ede6d4c38369f351018e8e02b98472b1332d70e89ea",
+      "bytes": 7995
+    },
+    {
+      "path": "miniapp/src/modules/client/onboarding.css",
+      "sha256": "3a5641c197be0e011db851fa2e54b8817f026f8af31140f033d70611b15d9ac3",
+      "bytes": 3561
+    },
+    {
+      "path": "miniapp/src/modules/client/owner-setup.test.tsx",
+      "sha256": "69373a481ea848e0ca80edad2b2e90b735f12ccdd94ee749d1c9179b36d9aaaa",
+      "bytes": 10410
+    },
+    {
+      "path": "miniapp/src/modules/client/tableAvailability.ts",
+      "sha256": "1a58ae7ebcce27bb004c29902d92dbfcc15c68758fb6683161eb88d6a95abaa5",
+      "bytes": 2315
+    },
+    {
+      "path": "miniapp/tests/client-booking-rules.spec.ts",
+      "sha256": "9a18a97ed25ea2396ff1dd8079b48b4206ea3fc47b99e65ebd0893ebcf6e6e0d",
+      "bytes": 4947
+    },
+    {
+      "path": "miniapp/tests/client-calendar.spec.ts",
+      "sha256": "40640e74bfb3960fff766821bb858c14e9b4ee52cc7acbecf6a9d5b3dc65d071",
+      "bytes": 6452
+    },
+    {
+      "path": "miniapp/tests/client-guest-booking-preview.spec.ts",
+      "sha256": "5354ba387cbe3e1914584b8bd8aece74dca0865c2ad1e4f938d9f8857ef513ce",
+      "bytes": 8086
+    },
+    {
+      "path": "miniapp/tests/owner-map-preview.spec.ts",
+      "sha256": "c58477b373b7d8b5d496d817dd68e041d7c6dad11dca6f552b5e81eeb806cabc",
+      "bytes": 12149
+    },
+    {
+      "path": "miniapp/tests/owner-setup.spec.ts",
+      "sha256": "1f9c2a080457f99285839c41c23dd0f927634fbeb2c4deae60bebbefb0113f7b",
+      "bytes": 9490
+    }
+  ],
+  "prohibited_actions": [
+    "merge",
+    "deploy",
+    "workflow_dispatch",
+    "new staging investigation",
+    "server database connection",
+    "real image modification"
+  ]
+}

@@ -1,6 +1,13 @@
 import { useId, useState } from 'react';
 import { Field } from './OnboardingShared';
-import { defaultHours, Hours, Rule, Rules } from './calendar';
+import {
+  defaultHours,
+  describeNight,
+  Hours,
+  nextWeekday,
+  Rule,
+  Rules,
+} from './calendar';
 
 const weekdays = [
   'Понедельник',
@@ -15,25 +22,30 @@ const weekdays = [
 function NightHours({
   hours,
   update,
+  businessDate,
 }: {
   hours: Hours;
   update: (hours: Hours) => void;
+  businessDate: string;
 }) {
+  const description = describeNight(businessDate, hours);
   return (
     <>
-      <Field label="День открытия">
+      <Field label="Когда открываемся относительно дня вечеринки">
         <select
           value={hours.startNextDay ? 'next' : 'same'}
           onChange={(event) =>
             update({ ...hours, startNextDay: event.target.value === 'next' })
           }
         >
-          <option value="same">В клубную дату</option>
-          <option value="next">На следующий календарный день</option>
+          <option value="same">
+            В день вечеринки · {weekdayName(businessDate)}
+          </option>
+          <option value="next">После полуночи · на следующий день</option>
         </select>
       </Field>
       <div className="cc-times">
-        <Field label="Начало">
+        <Field label="Время открытия">
           <input
             type="time"
             step="1"
@@ -41,7 +53,7 @@ function NightHours({
             onChange={(event) => update({ ...hours, open: event.target.value })}
           />
         </Field>
-        <Field label="Окончание">
+        <Field label="Время закрытия">
           <input
             type="time"
             step="1"
@@ -60,12 +72,16 @@ function NightHours({
             update({ ...hours, nextDay: event.target.checked })
           }
         />
-        <span>На следующий день</span>
+        <span>Закрытие на следующий день после открытия</span>
       </label>
       <p className="po-muted">
-        Отметьте для окончания на следующий календарный день после открытия. Для
-        открытия ровно в полночь выберите 00:00 и нужный день открытия.
+        Не отмечайте, если открытие и закрытие приходятся на одну календарную
+        дату.
       </p>
+      <div aria-live="polite" className="po-notice">
+        <p>{description.text}</p>
+        <p>{description.dates}</p>
+      </div>
     </>
   );
 }
@@ -77,6 +93,10 @@ const closed: Rule = {
   nextDay: false,
 };
 const open: Rule = { mode: 'open', ...defaultHours };
+const weekdayName = (date: string) =>
+  new Intl.DateTimeFormat('ru-RU', { weekday: 'long', timeZone: 'UTC' }).format(
+    new Date(date + 'T00:00:00Z'),
+  );
 type DatedRule = Rules['holidays'][number];
 
 function replaceDate(
@@ -122,11 +142,11 @@ function DatedRules({
       <p className="po-muted">
         {holiday
           ? 'Укажите праздничные ночи или дни, когда клуб закрыт. Изменение на ту же дату имеет приоритет.'
-          : 'Добавьте дополнительную ночь, измените часы или отмените ночь. Выберите клубную дату, даже если фактическое открытие после полуночи.'}
+          : 'Добавьте дополнительную ночь, измените часы или отмените ночь. Выберите дату вечеринки, даже если клуб откроется после полуночи на следующий день.'}
       </p>
       {!readOnly && (
         <fieldset className="cc-date-add" disabled={disabled}>
-          <Field label={holiday ? 'Дата праздника' : 'Клубная дата ночи'}>
+          <Field label={holiday ? 'Дата праздника' : 'Дата вечеринки'}>
             <input
               type="date"
               min="0001-01-01"
@@ -189,6 +209,7 @@ function DatedRules({
           </Field>
           {row.mode === 'open' && (
             <NightHours
+              businessDate={row.date}
               hours={row}
               update={(hours) =>
                 update(replaceDate(rows, row.date, { ...row, ...hours }))
@@ -215,11 +236,13 @@ export function CalendarRulesEditor({
   onChange,
   disabled,
   readOnly,
+  referenceDate,
 }: {
   value: Rules;
   onChange: (rules: Rules) => void;
   disabled: boolean;
   readOnly: boolean;
+  referenceDate: string;
 }) {
   const updateDay = (day: number, rule: Rule | null) => {
     const weekly = value.weekly.filter((row) => row.day !== day);
@@ -231,8 +254,11 @@ export function CalendarRulesEditor({
       <section className="po-card ob-card cc-rules">
         <h2>Рабочая неделя</h2>
         <p className="po-muted">
-          Клубная дата определяет, к какому дню относится ночь. Ночь вторника
-          может открыться в среду в 00:00 и закончиться в среду в 08:00.
+          Выберите день, к которому относится вечеринка. Например, вечеринка
+          пятницы может открыться в субботу в 00:00 и закончиться в субботу в
+          12:00. Даты ниже — ближайший пример каждого недельного правила.
+          Исключения, праздники и перевод часов учитываются в расчёте после
+          сохранения.
         </p>
         {weekdays.map((name, index) => {
           const day = index + 1;
@@ -248,10 +274,11 @@ export function CalendarRulesEditor({
                     updateDay(day, event.target.checked ? open : null)
                   }
                 />
-                <span>Рабочий день</span>
+                <span>Проводим вечеринку</span>
               </label>
               {row && (
                 <NightHours
+                  businessDate={nextWeekday(referenceDate, day)}
                   hours={row}
                   update={(hours) => updateDay(day, { ...row, ...hours })}
                 />

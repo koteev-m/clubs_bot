@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import './clubTableCreation.css';
 
 export type TableCreation = {
   mode: 'single' | 'range' | 'list';
@@ -38,16 +39,20 @@ function proposedNumbers(
 
 export default function ClubTableCreationForm({
   reserved,
+  locations = {},
   busy,
   onSave,
   onClose,
 }: {
   reserved: number[];
+  locations?: Record<number, string>;
   busy: boolean;
   onSave: (creation: TableCreation) => void;
   onClose: () => void;
 }) {
   const modeId = useId();
+  const numbersHint = useId();
+  const depositHint = useId();
   const [mode, setMode] = useState<TableCreation['mode']>('single');
   const [first, setFirst] = useState('');
   const [count, setCount] = useState('');
@@ -76,11 +81,11 @@ export default function ClubTableCreationForm({
     capacityValue <= 50 &&
     (mode !== 'single' || validDeposit);
   const inputClass =
-    'block min-h-[44px] w-full rounded border border-gray-300 px-3 text-gray-900';
+    'block min-h-[44px] w-full rounded border border-gray-300 bg-white px-3 text-gray-900';
   return (
     <form
       aria-label="Создание столов"
-      className="space-y-3 rounded-lg border border-gray-200 p-3 text-sm"
+      className="club-table-creation space-y-3 rounded-lg border border-gray-200 p-3 text-sm"
       onSubmit={(event) => {
         event.preventDefault();
         if (!valid || busy) return;
@@ -115,6 +120,8 @@ export default function ClubTableCreationForm({
           <input
             className={inputClass}
             inputMode="numeric"
+            aria-describedby={numbersHint}
+            aria-invalid={duplicates.length > 0}
             disabled={busy}
             value={first}
             onChange={(event) => setFirst(event.target.value)}
@@ -127,6 +134,7 @@ export default function ClubTableCreationForm({
           <input
             className={inputClass}
             inputMode="numeric"
+            aria-describedby={numbersHint}
             disabled={busy}
             value={count}
             onChange={(event) => setCount(event.target.value)}
@@ -138,6 +146,8 @@ export default function ClubTableCreationForm({
           Номера столов
           <textarea
             className={inputClass}
+            aria-describedby={numbersHint}
+            aria-invalid={duplicates.length > 0}
             placeholder="Например, 7, 10, 15"
             disabled={busy}
             value={list}
@@ -174,12 +184,14 @@ export default function ClubTableCreationForm({
           <input
             className={inputClass}
             inputMode="decimal"
+            aria-invalid={!validDeposit}
+            aria-describedby={!validDeposit ? depositHint : undefined}
             disabled={busy}
             value={deposit}
             onChange={(event) => setDeposit(event.target.value)}
           />
           {!validDeposit && (
-            <span role="alert">
+            <span role="alert" id={depositHint}>
               Укажите число с точкой и не более двух знаков после неё.
             </span>
           )}
@@ -191,11 +203,22 @@ export default function ClubTableCreationForm({
           ? numbers.join(', ')
           : '—'}
       </p>
-      {duplicates.length > 0 && (
-        <p role="alert">
-          Повторяются или уже заняты в клубе: {duplicates.join(', ')}.
+      <div id={numbersHint} aria-live="polite">
+        <p>
+          Номер стола должен быть уникальным во всём клубе, включая другие залы.
         </p>
-      )}
+        {duplicates.length > 0 && (
+          <p role="alert">
+            {duplicates
+              .map((number) =>
+                occupied.has(number)
+                  ? `№${number} уже занят ${locations[number] ? `в зале «${locations[number]}»` : 'в клубе'}.`
+                  : `№${number} повторяется в списке.`,
+              )
+              .join(' ')}
+          </p>
+        )}
+      </div>
       <div className="flex flex-wrap gap-2">
         <button
           className="min-h-[44px] rounded bg-blue-600 px-3 text-white disabled:opacity-50"

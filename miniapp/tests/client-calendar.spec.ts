@@ -83,12 +83,22 @@ test('private calendar configures nights on mobile and safely retries a lost res
     page.getByRole('heading', { name: 'Календарь клуба' }),
   ).toBeVisible();
   const friday = page.getByRole('group', { name: 'Пятница' });
-  await friday.getByLabel('Рабочий день').check();
-  await friday.getByLabel('Начало').fill('00:00');
-  await friday.getByLabel('Окончание').fill('12:00');
-  await friday.getByLabel('День открытия').selectOption('next');
-  await friday.getByLabel('На следующий день', { exact: true }).uncheck();
-  await page.getByLabel('Клубная дата ночи').fill('2026-11-06');
+  await friday.getByLabel('Проводим вечеринку').check();
+  await friday.getByLabel('Время открытия').fill('00:00');
+  await friday.getByLabel('Время закрытия').fill('12:00');
+  await friday
+    .getByLabel('Когда открываемся относительно дня вечеринки')
+    .selectOption('next');
+  await friday
+    .getByLabel('Закрытие на следующий день после открытия', { exact: true })
+    .uncheck();
+  await expect(
+    friday.getByText(
+      'Вечеринка пятницы. Открытие: суббота, 00:00. Закрытие: суббота, 12:00.',
+    ),
+  ).toBeVisible();
+  expect(mutations).toHaveLength(0);
+  await page.getByLabel('Дата вечеринки').fill('2026-11-06');
   await page
     .getByRole('button', { name: 'Отменить ночь', exact: true })
     .click();
@@ -97,7 +107,7 @@ test('private calendar configures nights on mobile and safely retries a lost res
   expect(
     await page.locator('.po-main').evaluate((node) => node.scrollWidth),
   ).toBeLessThanOrEqual(320);
-  await page.getByRole('button', { name: 'Сохранить календарь' }).click();
+  await page.getByRole('button', { name: 'Сохранить расписание' }).click();
   await expect(
     page.getByText('Результат операции пока неизвестен'),
   ).toBeVisible();
@@ -112,7 +122,7 @@ test('private calendar configures nights on mobile and safely retries a lost res
   await expect(
     page.getByRole('heading', { name: 'Календарь клуба' }),
   ).toBeVisible();
-  await expect(friday.getByLabel('Начало')).toHaveValue(/00:00/);
+  await expect(friday.getByLabel('Время открытия')).toHaveValue(/00:00/);
   await page.getByRole('button', { name: 'Повторить ту же операцию' }).click();
   await expect(page.getByText('Ночь 13.11.2026')).toBeVisible();
   await expect(
@@ -134,9 +144,22 @@ test('private calendar configures nights on mobile and safely retries a lost res
   await page.getByRole('button', { name: 'Профиль клуба' }).click();
   await page.getByRole('button', { name: /Календарь клуба/ }).click();
   await expect(page.getByText('Ночь 13.11.2026')).toBeVisible();
-  await expect(friday.getByLabel('Окончание')).toHaveValue(/12:00/);
-  await expect(friday.getByLabel('День открытия')).toHaveValue('next');
+  await expect(friday.getByLabel('Время закрытия')).toHaveValue(/12:00/);
+  await expect(
+    friday.getByLabel('Когда открываемся относительно дня вечеринки'),
+  ).toHaveValue('next');
   await expect(
     page.getByRole('group', { name: '06.11.2026' }).getByLabel('Режим'),
   ).toHaveValue('closed');
+  await page
+    .getByRole('button', { name: 'Сформировать ближайшие ночи' })
+    .click();
+  await expect.poll(() => mutations.length).toBe(3);
+  expect(mutations[2].body).toMatchObject({
+    reconcile: true,
+    expectedVersion: '2',
+    weekly: [],
+    exceptions: [],
+    holidays: [],
+  });
 });

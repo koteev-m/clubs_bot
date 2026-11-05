@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.awt.image.BufferedImage
@@ -23,6 +24,87 @@ import javax.imageio.ImageIO
 
 /** Same persistence, migration and racing-command assertions run on H2 and disposable PostgreSQL. */
 internal abstract class ClubLayoutContract : ClubLayoutMigrationContract() {
+    @Test
+    fun `three halls keep independent PNG JPEG empty plans tables and coordinates after reopen and replacement`() =
+        runBlocking<Unit> {
+            val club = create(approved())
+            val ids =
+                listOf("Main", "Welcome", "Empty").map { label ->
+                    val result =
+                        command(club, OnboardingMutation.CLUB_HALL_CREATE, buildJsonObject { put("name", label) })
+                    result
+                        .getValue("halls")
+                        .jsonArray
+                        .last()
+                        .jsonObject
+                        .id("id")
+                }
+
+            suspend fun saved(id: Long) =
+                layout(club)
+                    .getValue("halls")
+                    .jsonArray
+                    .single { it.jsonObject.id("id") == id }
+                    .jsonObject
+            command(club, OnboardingMutation.CLUB_TABLE_CREATE, tableBody(saved(ids[0]), 7))
+            command(
+                club,
+                OnboardingMutation.CLUB_TABLE_CREATE,
+                JsonObject(tableBody(saved(ids[1]), 8) + mapOf("x" to JsonPrimitive(0.9), "y" to JsonPrimitive(0.1))),
+            )
+            upload(club, saved(ids[0]), png())
+            val beforeA = saved(ids[0])
+            upload(club, saved(ids[1]), raster("jpeg"), contentType = "image/jpeg")
+            assertEquals(beforeA, saved(ids[0]))
+            assertNotEquals(plan(club, saved(ids[0])).string("sha256"), plan(club, saved(ids[1])).string("sha256"))
+            val beforeB = saved(ids[1])
+            val beforeEmpty = saved(ids[2])
+            expect("not_found") { plan(club, beforeEmpty) }
+            expect("table_number_conflict") {
+                command(club, OnboardingMutation.CLUB_TABLE_CREATE, tableBody(saved(ids[1]), 7))
+            }
+            upload(club, saved(ids[0]), raster("png", 3, 2))
+            assertEquals(beforeB, saved(ids[1]))
+            assertEquals(beforeEmpty, saved(ids[2]))
+            val fresh = JdbcClientOnboardingRepository(fixture.source, fixture.owner.telegramUserId, fixture.clock)
+            val reopened = fresh.read(fixture.alice, OnboardingRead.CLUB_LAYOUT_GET, club.id("id"))
+            assertEquals(layout(club), reopened)
+            val halls = reopened.getValue("halls").jsonArray.map { it.jsonObject }
+            assertEquals(
+                JsonPrimitive(7),
+                halls[0]
+                    .getValue("tables")
+                    .jsonArray
+                    .single()
+                    .jsonObject["tableNumber"],
+            )
+            assertEquals(
+                JsonPrimitive(0.25),
+                halls[0]
+                    .getValue("tables")
+                    .jsonArray
+                    .single()
+                    .jsonObject["x"],
+            )
+            assertEquals(
+                JsonPrimitive(8),
+                halls[1]
+                    .getValue("tables")
+                    .jsonArray
+                    .single()
+                    .jsonObject["tableNumber"],
+            )
+            assertEquals(
+                JsonPrimitive(0.9),
+                halls[1]
+                    .getValue("tables")
+                    .jsonArray
+                    .single()
+                    .jsonObject["x"],
+            )
+            assertTrue(halls[2].getValue("tables").jsonArray.isEmpty())
+        }
+
     @Test
     fun `direct club creation grants layout only to its confirmed creator and staff read remains read only`() =
         runBlocking<Unit> {

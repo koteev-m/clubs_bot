@@ -5,7 +5,7 @@ export const tableStatuses = {
     color: 'border-emerald-700 bg-emerald-100 text-emerald-900',
   },
   HOLD: {
-    label: 'Временный HOLD',
+    label: 'Оформляют бронь (HOLD)',
     symbol: 'H',
     color: 'border-amber-700 bg-amber-100 text-amber-900',
   },
@@ -25,7 +25,7 @@ export const tableStatuses = {
     color: 'border-gray-600 bg-gray-200 text-gray-900',
   },
   UNKNOWN: {
-    label: 'Невозможно определить доступность',
+    label: 'Требуется настройка',
     symbol: '?',
     color: 'border-slate-500 bg-white text-slate-800',
   },

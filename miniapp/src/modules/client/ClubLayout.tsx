@@ -92,6 +92,18 @@ export default function ClubLayout({
   const canWrite = Boolean(
     state.layout?.permissions.includes('client.club.layout.write'),
   );
+  const selectedHall = state.layout?.halls.find((hall) => hall.id === hallId);
+  const matchingPlans = selectedHall?.plan
+    ? state.layout?.halls.filter(
+        (hall) =>
+          hall.id !== hallId && hall.plan?.sha256 === selectedHall.plan?.sha256,
+      )
+    : [];
+  const tableLocations = Object.fromEntries(
+    state.layout?.halls.flatMap((hall) =>
+      hall.tables.map((table) => [table.tableNumber, hall.name]),
+    ) ?? [],
+  );
   return (
     <Shell
       title="Залы и столы"
@@ -135,6 +147,20 @@ export default function ClubLayout({
           )}
           {state.layout && (
             <div className="client-layout">
+              {selectedHall && (
+                <p className="po-muted">
+                  Зал «{selectedHall.name}». Здесь показаны только его схема и
+                  столы.
+                </p>
+              )}
+              {Boolean(matchingPlans?.length) && (
+                <p className="po-notice" role="status">
+                  В сохранённых данных этого зала и{' '}
+                  {matchingPlans?.map((hall) => `«${hall.name}»`).join(', ')}{' '}
+                  одинаковое изображение. Схемы хранятся отдельно: загрузка
+                  нового PNG/JPEG изменит только выбранный зал.
+                </p>
+              )}
               {!canWrite && (
                 <p className="po-muted">
                   Залы и столы доступны только для просмотра.
@@ -147,6 +173,7 @@ export default function ClubLayout({
                   hallId={hallId}
                   api={api.editor}
                   clientMode
+                  reservedTableLocations={tableLocations}
                   previewOnly={!canWrite}
                   readOnly={
                     !canWrite ||

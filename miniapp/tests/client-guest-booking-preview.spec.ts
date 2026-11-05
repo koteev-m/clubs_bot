@@ -181,11 +181,9 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
   await expect(
     page.getByText(/Не удалось получить актуальный снимок/),
   ).toBeVisible();
-  await expect(marker).toHaveAccessibleName(
-    /Невозможно определить доступность/,
-  );
+  await expect(marker).toHaveAccessibleName(/Требуется настройка/);
   await expect(
-    card.getByText(/Доступность.*Невозможно определить/),
+    card.getByText(/Доступность.*Требуется настройка/),
   ).toBeVisible();
   snapshotError = false;
   firstNightStatus = 'OCCUPIED';

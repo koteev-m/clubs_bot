@@ -12,29 +12,29 @@ import {
 const fields = [
   {
     id: 'cutoffMinutes',
-    label: 'Прекращать онлайн-бронирование за',
-    hint: 'Минуты до окончания ночи. Исходное значение — 120.',
+    label: 'Прекращение онлайн-бронирования · минут до закрытия',
+    hint: 'За сколько минут до закрытия перестать принимать онлайн-брони. Например, закрытие в 12:00, значение 120 — приём до 10:00.',
     min: 0,
     required: true,
   },
   {
     id: 'arrivalMinutes',
-    label: 'Ожидать гостя не позднее чем через',
-    hint: 'Минуты после открытия. Пустое поле означает, что клуб пока не выбрал время.',
+    label: 'Предельное время прибытия · минут после открытия',
+    hint: 'До какого времени гость должен заявить прибытие. Например, открытие в 00:00, значение 180 — прибыть до 03:00. Пустое поле — время не задано.',
     min: 0,
     required: false,
   },
   {
     id: 'holdMinutes',
-    label: 'Предварительное удержание стола',
-    hint: 'Минуты с начала HOLD. Пустое поле означает, что клуб пока не выбрал срок.',
+    label: 'Время на оформление брони (HOLD) · минут',
+    hint: 'Выбранный стол временно удерживается, пока гость оформляет бронь. Рекомендуем 10 минут: начало в 21:00 — до 21:10. Пустое поле — срок не задан. Рекомендация не меняет сохранённое значение.',
     min: 1,
     required: false,
   },
   {
     id: 'retentionMinutes',
-    label: 'Удерживать бронь после заявленного прибытия',
-    hint: 'Минуты после времени, указанного гостем. Исходное значение — 30.',
+    label: 'Ожидание гостя после заявленного прибытия · минут',
+    hint: 'Сколько ждать опаздывающего гостя с подтверждённой бронью. Например, прибытие в 01:00, значение 30 — ждать до 01:30. Это отдельный срок от HOLD при оформлении.',
     min: 0,
     required: true,
   },
@@ -76,13 +76,13 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
     >
       <h2 id="booking-rules-preview">Предпросмотр сохранённых правил</h2>
       <p>
-        HOLD:{' '}
+        Время на оформление (HOLD):{' '}
         {view.rules.holdMinutes === null
           ? 'срок не задан'
-          : `${view.rules.holdMinutes} мин с начала HOLD`}
+          : `${view.rules.holdMinutes} мин с начала оформления`}
       </p>
       <p>
-        Удержание брони: {view.rules.retentionMinutes} мин после заявленного
+        Ожидание гостя: {view.rules.retentionMinutes} мин после заявленного
         гостем времени.
       </p>
       {view.nights.length === 0 && (
@@ -129,7 +129,11 @@ function BookingPreview({ view }: { view: BookingRulesView }) {
             <p>Время прибытия приходится на закрытие или позже.</p>
           )}
           {night.cutoffAfterArrival && (
-            <p>Бронирование прекращается позже требуемого времени прибытия.</p>
+            <p className="po-notice" role="status">
+              Проверьте правила: онлайн-бронирование остаётся открытым после
+              предельного времени прибытия. Гость сможет начать оформление,
+              когда прибыть вовремя уже нельзя.
+            </p>
           )}
         </details>
       ))}
@@ -211,6 +215,18 @@ export default function ClubBookingRules({
     command.blocked ||
     Boolean(needsReview) ||
     denied;
+  const draftRules =
+    view && draft ? parseRules(draft.edits, view.rules) : undefined;
+  const contradictoryDates =
+    draftRules?.arrivalMinutes != null && view
+      ? view.nights
+          .filter(
+            (night) =>
+              Date.parse(night.closesAt) - draftRules.cutoffMinutes! * 60000 >
+              Date.parse(night.opensAt) + draftRules.arrivalMinutes! * 60000,
+          )
+          .map((night) => night.businessDate)
+      : [];
 
   return (
     <Shell
@@ -282,6 +298,13 @@ export default function ClubBookingRules({
               <p className="po-notice" role="alert">
                 Введите целое число минут от 0 до {maxMinutes}. Для HOLD укажите
                 минимум 1 минуту или оставьте поле пустым.
+              </p>
+            )}
+            {contradictoryDates.length > 0 && (
+              <p className="po-notice" role="status">
+                Проверьте черновик для ночей {contradictoryDates.join(', ')}:
+                онлайн-бронирование закончится позже предельного времени
+                прибытия. Измените один из сроков, если это не задумано.
               </p>
             )}
             {needsReview && view.canWrite && !command.blocked && (

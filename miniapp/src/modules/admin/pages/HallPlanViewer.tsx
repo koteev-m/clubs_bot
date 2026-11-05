@@ -98,6 +98,7 @@ export default function HallPlanViewer<Id extends LayoutId = number>({
               data-testid="hall-plan-zoom"
             >
               <HallPlanStage
+                key={planUrl}
                 planUrl={planUrl}
                 tables={tables}
                 selectedTableId={selected?.id ?? null}

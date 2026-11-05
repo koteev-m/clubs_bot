@@ -179,6 +179,52 @@ export function weekday(date: string) {
   return weekdays.format(new Date(date + 'T00:00:00Z'));
 }
 
+const partyDays = [
+  'воскресенья',
+  'понедельника',
+  'вторника',
+  'среды',
+  'четверга',
+  'пятницы',
+  'субботы',
+];
+
+/** Calendar arithmetic on wall dates only. DST instants remain server-owned. */
+export function shiftDate(date: string, days: number) {
+  const value = new Date(date + 'T00:00:00Z');
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+export function clubToday(timezone: string) {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)!.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+export function nextWeekday(date: string, day: number) {
+  const current = new Date(date + 'T00:00:00Z').getUTCDay() || 7;
+  return shiftDate(date, (day - current + 7) % 7);
+}
+
+export function describeNight(businessDate: string, hours: Hours) {
+  const time = (value: string | null) =>
+    value?.match(/^\d{2}:\d{2}:00$/) ? value.slice(0, 5) : value || '—';
+  const opening = shiftDate(businessDate, hours.startNextDay ? 1 : 0);
+  const closing = shiftDate(opening, hours.nextDay ? 1 : 0);
+  const party = partyDays[new Date(businessDate + 'T00:00:00Z').getUTCDay()];
+  return {
+    text: `Вечеринка ${party}. Открытие: ${weekday(opening)}, ${time(hours.open)}. Закрытие: ${weekday(closing)}, ${time(hours.close)}.`,
+    dates: `Дата вечеринки: ${dateLabel(businessDate)}. Открытие: ${dateLabel(opening)}. Закрытие: ${dateLabel(closing)}.`,
+  };
+}
+
 /** Render the wall time and offset returned by the server; the device's zone is irrelevant. */
 export function localLabel(iso: string) {
   const [date, timeWithOffset] = iso.split('T');

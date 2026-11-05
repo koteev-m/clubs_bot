@@ -9,6 +9,7 @@ import {
 } from './OnboardingShared';
 import {
   calendarBody,
+  clubToday,
   calendarChanges,
   calendarValidation,
   CalendarView,
@@ -41,7 +42,13 @@ function CalendarPreview({
         Ближайшие клубные ночи
       </h2>
       <p className="po-muted">По сохранённому расписанию. Время местное.</p>
-      {view.nights.length === 0 && <p>Нет запланированных ночей.</p>}
+      {view.nights.length === 0 && (
+        <p>
+          В ближайшем расписании пока нет ночей. Выберите день вечеринки и часы
+          ниже, затем нажмите «Сохранить расписание». Если расписание уже
+          сохранено, нажмите «Сформировать ближайшие ночи».
+        </p>
+      )}
       <ol>
         {view.nights.map((night) => (
           <li key={night.businessDate}>
@@ -53,7 +60,7 @@ function CalendarPreview({
               {sources[night.source]} ·{' '}
               {night.nightId
                 ? `№ ${night.nightId}`
-                : 'По правилам, ещё не согласована'}
+                : 'Рассчитана по расписанию · ещё не сформирована'}
             </span>
             <span>
               Начало:{' '}
@@ -253,11 +260,14 @@ export default function ClubCalendar({
                   )
                 }
               >
-                Согласовать ближайшие ночи
+                Сформировать ближайшие ночи
               </button>
               <p className="po-muted">
-                Согласование сохраняет номера ночей на ближайшие 56 клубных дат
-                и для будущих разовых правил.
+                Это отдельное действие по сохранённому расписанию: сохраняет
+                постоянные номера ночей на ближайшие 56 календарных дней и для
+                будущих разовых правил. Существующие ночи сверяются с правилами;
+                защищённые изменения могут быть отклонены. Мероприятия и брони
+                не создаются, клуб не публикуется.
               </p>
             </>
           )}
@@ -272,7 +282,14 @@ export default function ClubCalendar({
                 command.run(path, calendarBody(base, changes), accept, 'PATCH');
             }}
           >
+            <p className="po-muted">
+              «Сохранить расписание» сохраняет ваши правки и обновляет
+              затронутые ночи по действующим правилам. «Сформировать ближайшие
+              ночи» применяет уже сохранённое расписание к ближайшему периоду.
+              Оба действия требуют вашего нажатия.
+            </p>
             <CalendarRulesEditor
+              referenceDate={clubToday(view.timezone)}
               value={view.canWrite ? draft : view}
               onChange={(rules) => {
                 setDraft(rules);
@@ -298,7 +315,7 @@ export default function ClubCalendar({
                 type="submit"
                 disabled={blocked || !dirty || writeDenied}
               >
-                Сохранить календарь
+                Сохранить расписание
               </button>
             )}
           </form>
