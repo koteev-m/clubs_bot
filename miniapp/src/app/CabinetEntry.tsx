@@ -75,11 +75,17 @@ export default function CabinetEntry() {
   });
   useEffect(() => {
     const controller = new AbortController();
-    setAccess({
+    setAccess((previous) => ({
       credential: initData,
       epoch: refreshEpoch,
-      status: initData ? "loading" : "unauthorized",
-    });
+      status: !initData
+        ? "unauthorized"
+        : previous.credential === initData &&
+            previous.status === "allowed" &&
+            lastAuthorized.current?.destination === "client"
+          ? "allowed"
+          : "loading",
+    }));
     if (initData) {
       resolveCabinet(
         initData,
@@ -125,7 +131,9 @@ export default function CabinetEntry() {
     return () => controller.abort();
   }, [initData, refreshEpoch, attempt]);
   const status =
-    access.credential === initData && access.epoch === refreshEpoch
+    access.credential === initData &&
+    (access.epoch === refreshEpoch ||
+      (access.status === "allowed" && mounted?.destination === "client"))
       ? access.status
       : "loading";
   const current =

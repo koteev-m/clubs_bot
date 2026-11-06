@@ -62,6 +62,15 @@ function savedScreen(): Screen {
   return { type: 'home' };
 }
 
+// Keep the logical parent alongside the browser entry for Back and Forward.
+function screenKey(screen: Screen): string {
+  return [
+    screen.type,
+    'id' in screen ? screen.id : '',
+    screen.type === 'layout' ? screen.hallId : '',
+  ].join(':');
+}
+
 export default function ClientAccess({
   initialToken,
   onTokenConsumed,
@@ -128,6 +137,8 @@ function ClientWorkspace({
   const pendingClient = useRef('');
   pendingClient.current = createClub.blocked ? draftClient : '';
   const dirty = useRef(false);
+  const offerInitialShortcut = useRef(screen.type === 'home');
+  const approvedBack = useRef<number | null>(null);
   const sectionPending = useRef(false);
   const reportSectionPending = useCallback((value: boolean) => {
     sectionPending.current = value;
@@ -167,8 +178,16 @@ function ClientWorkspace({
         );
         if (next.id) url.searchParams.set('resource', next.id);
       }
+      offerInitialShortcut.current = false;
+      const previousKey = replace
+        ? window.history.state?.clientPrevious
+        : screenKey(savedScreen());
       if (!replace) position.current += 1;
-      const state = { onboarding: true, clientPosition: position.current };
+      const state = {
+        onboarding: true,
+        clientPosition: position.current,
+        clientPrevious: previousKey,
+      };
       if (replace) window.history.replaceState(state, '', url);
       else window.history.pushState(state, '', url);
       if (
@@ -196,9 +215,27 @@ function ClientWorkspace({
     },
     [draftClient, createClub.blocked, previous?.id],
   );
+  const goBack = (parent: Screen) => {
+    if (approvedBack.current !== null) return;
+    if (
+      position.current > 0 &&
+      window.history.state?.clientPrevious === screenKey(parent)
+    ) {
+      // The screen already approved departure, including its unsaved draft.
+      approvedBack.current = position.current - 1;
+      window.history.back();
+    } else {
+      // Deep links may start with no in-app parent entry.
+      navigate(parent, true);
+    }
+  };
   useEffect(() => {
     window.history.replaceState(
-      { onboarding: true, clientPosition: position.current },
+      {
+        ...window.history.state,
+        onboarding: true,
+        clientPosition: position.current,
+      },
       '',
       window.location.href,
     );
@@ -207,11 +244,14 @@ function ClientWorkspace({
         ? Number(event.state.clientPosition)
         : 0;
       if (nextPosition === position.current) return;
-      if (sectionPending.current) {
+      const approved = approvedBack.current === nextPosition;
+      approvedBack.current = null;
+      if (!approved && sectionPending.current) {
         window.history.go(position.current - nextPosition);
         return;
       }
       if (
+        !approved &&
         dirty.current &&
         !window.confirm('Есть несохранённые изменения. Уйти без сохранения?')
       ) {
@@ -219,6 +259,7 @@ function ClientWorkspace({
         return;
       }
       position.current = nextPosition;
+      offerInitialShortcut.current = false;
       dirty.current = false;
       let next = savedScreen();
       if (next.type === 'new') {
@@ -242,6 +283,7 @@ function ClientWorkspace({
     setToken(null);
     onTokenConsumed?.();
     navigate({ type: 'home' });
+    offerInitialShortcut.current = true;
   }, [navigate, onTokenConsumed]);
   if (screen.type === 'invitation')
     return (
@@ -264,7 +306,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={home}
+        back={() => goBack({ type: 'home' })}
         navigate={navigate}
       />
     );
@@ -337,7 +379,13 @@ function ClientWorkspace({
         credential={credential}
         id={screen.id}
         hallId={screen.hallId}
-        back={() => navigate({ type: 'club', id: screen.id })}
+        back={() =>
+          goBack(
+            screen.hallId
+              ? { type: 'layout', id: screen.id }
+              : { type: 'club', id: screen.id },
+          )
+        }
         openHall={(hallId) =>
           navigate({ type: 'layout', id: screen.id, hallId })
         }
@@ -352,7 +400,7 @@ function ClientWorkspace({
         credential={credential}
         id={screen.id}
         home={(clientId) =>
-          clientId ? navigate({ type: 'space', id: clientId }) : home()
+          goBack(clientId ? { type: 'space', id: clientId } : { type: 'home' })
         }
         reportDirty={reportDirty}
         openLayout={() => navigate({ type: 'layout', id: screen.id })}
@@ -361,22 +409,34 @@ function ClientWorkspace({
         openBookingPreview={() => navigate({ type: 'booking-preview', id: screen.id })}
       />
     );
-  return <ClientHome credential={credential} navigate={navigate} />;
+  return (
+    <ClientHome
+      credential={credential}
+      navigate={navigate}
+      offerShortcut={offerInitialShortcut.current}
+    />
+  );
 }
 
 function ClientHome({
   credential,
   navigate,
+  offerShortcut,
 }: {
   credential: string;
   navigate: (screen: Screen, replace?: boolean) => void;
+  offerShortcut: boolean;
 }) {
   const remote = useRemote<{ clients: ClientSummary[] }>(
     credential,
     '/api/client/context',
   );
   useEffect(() => {
-    if (remote.data?.clients.length === 1) {
+    if (
+      offerShortcut &&
+      savedScreen().type === 'home' &&
+      remote.data?.clients.length === 1
+    ) {
       const client = remote.data.clients[0];
       navigate(
         client.clubs?.length === 1
@@ -385,11 +445,12 @@ function ClientHome({
         true,
       );
     }
-  }, [remote.data, navigate]);
+  }, [remote.data, navigate, offerShortcut]);
   return (
     <Shell
       title="Мои заведения"
       subtitle="Ваши клиентские пространства и разрешённые заведения."
+      closeAtRoot
     >
       <RemoteState {...remote} />
       {remote.data?.clients.length === 0 && (

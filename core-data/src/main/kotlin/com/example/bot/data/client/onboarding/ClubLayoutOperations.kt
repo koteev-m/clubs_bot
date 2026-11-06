@@ -74,6 +74,7 @@ internal class ClubLayoutOperations(
         val clientId = session.requireClubGrant(clubId, WRITE_LAYOUT)
         session.calendarClub(clubId, lock = true)
         var tableIds = emptyList<Long>()
+        var planRemoved: Boolean? = null
         val hallId =
             if (operation == OnboardingMutation.CLUB_HALL_CREATE) {
                 createHall(clubId, body)
@@ -88,13 +89,16 @@ internal class ClubLayoutOperations(
                     OnboardingMutation.CLUB_TABLE_UPDATE ->
                         tableIds = listOf(ClubLayoutTables(session).update(clubId, hallId, body))
                     OnboardingMutation.CLUB_PLAN_UPLOAD -> ClubLayoutPlans(session).upload(hallId, body)
+                    OnboardingMutation.CLUB_PLAN_REMOVE -> planRemoved = ClubLayoutPlans(session).remove(hallId, body)
                     else -> fail("validation_error")
                 }
-                sql.update(
-                    "UPDATE halls SET layout_revision=layout_revision+1,updated_at=? WHERE id=?",
-                    session.now,
-                    hallId,
-                )
+                if (planRemoved != false) {
+                    sql.update(
+                        "UPDATE halls SET layout_revision=layout_revision+1,updated_at=? WHERE id=?",
+                        session.now,
+                        hallId,
+                    )
+                }
                 hallId
             }
         val version = hall(clubId, hallId).long("layout_revision")
@@ -105,6 +109,7 @@ internal class ClubLayoutOperations(
                 OnboardingMutation.CLUB_TABLE_CREATE -> "client.club.layout.table.create"
                 OnboardingMutation.CLUB_TABLE_BATCH_CREATE -> "client.club.layout.table.batch_create"
                 OnboardingMutation.CLUB_TABLE_UPDATE -> "client.club.layout.table.update"
+                OnboardingMutation.CLUB_PLAN_REMOVE -> "client.club.layout.plan.remove"
                 else -> "client.club.layout.plan.upload"
             }
         sql.audit(
@@ -117,6 +122,7 @@ internal class ClubLayoutOperations(
             session.correlation,
             buildJsonObject {
                 put("hallId", hallId.toString())
+                planRemoved?.let { put("removed", it) }
                 tableIds.singleOrNull()?.let { put("tableId", it.toString()) }
                 if (tableIds.size > 1) put("tableIds", JsonArray(tableIds.map { JsonPrimitive(it.toString()) }))
             },

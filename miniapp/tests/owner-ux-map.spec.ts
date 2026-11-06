@@ -269,12 +269,14 @@ test('single club opens directly with organization path; multiple contexts keep 
   await expect(
     page.getByRole('button', { name: 'Создать заведение', exact: true }),
   ).toBeVisible();
-  await page.goBack();
+  await page.getByRole('button', { name: /Первый клуб.*Открыть клуб/ }).click();
   await expect(page.getByRole('heading', { name: profile.name })).toBeVisible();
-  await page.goForward();
+  await page.goBack();
   await expect(
     page.getByText('Организация · клиентское пространство'),
   ).toBeVisible();
+  await page.goForward();
+  await expect(page.getByRole('heading', { name: profile.name })).toBeVisible();
   multiple = true;
   await page.goto('/app?mode=client' + telegramHash);
   await expect(

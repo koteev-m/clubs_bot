@@ -192,7 +192,7 @@ class JdbcClientOnboardingRepository(
             OnboardingMutation.CLUB_HALL_CREATE, OnboardingMutation.CLUB_HALL_UPDATE,
             OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_BATCH_CREATE,
             OnboardingMutation.CLUB_TABLE_UPDATE,
-            OnboardingMutation.CLUB_PLAN_UPLOAD,
+            OnboardingMutation.CLUB_PLAN_UPLOAD, OnboardingMutation.CLUB_PLAN_REMOVE,
             -> ClubLayoutOperations(session).mutate(required(resourceId), operation, body)
             OnboardingMutation.APPLICATION_CREATE -> applications.create(required(resourceId), body)
             OnboardingMutation.APPLICATION_UPDATE -> applications.update(required(resourceId), body)

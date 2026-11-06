@@ -50,6 +50,9 @@ internal fun Application.registerClientLayoutRoutes(repository: ClientOnboarding
             }
             get("/halls/{hallId}/plan") { http.plan(call) }
             post("/halls/{hallId}/plan") { http.upload(call) }
+            post("/halls/{hallId}/plan/remove") {
+                http.mutate(call, OnboardingMutation.CLUB_PLAN_REMOVE, "hallId")
+            }
         }
     }
 }

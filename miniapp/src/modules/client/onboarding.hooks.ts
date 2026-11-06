@@ -5,14 +5,17 @@ export function useRemote<T>(
   credential: string,
   path: string | null,
   body?: object,
+  { retainOnForeground = false }: { retainOnForeground?: boolean } = {},
 ) {
   const serialized = body === undefined ? undefined : JSON.stringify(body);
   const [attempt, setAttempt] = useState(0);
+  const [foregroundEpoch, setForegroundEpoch] = useState(0);
   const [state, setState] = useState<{
     path?: string;
     serialized?: string;
     credential?: string;
     attempt?: number;
+    foregroundEpoch?: number;
     data?: T;
     error?: unknown;
     loading: boolean;
@@ -23,7 +26,7 @@ export function useRemote<T>(
       return;
     }
     const controller = new AbortController();
-    const request = { path, serialized, credential, attempt };
+    const request = { path, serialized, credential, attempt, foregroundEpoch };
     onboardingRequest<T>(credential, path, {
       signal: controller.signal,
       body: serialized === undefined ? undefined : JSON.parse(serialized),
@@ -37,12 +40,15 @@ export function useRemote<T>(
           setState({ ...request, error, loading: false });
       });
     return () => controller.abort();
-  }, [credential, path, serialized, attempt]);
+  }, [credential, path, serialized, attempt, foregroundEpoch]);
   const refresh = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => {
     if (!path) return;
     const foreground = () => {
-      if (!document.hidden) refresh();
+      if (!document.hidden) {
+        if (retainOnForeground) setForegroundEpoch((value) => value + 1);
+        else refresh();
+      }
     };
     window.addEventListener('focus', foreground);
     window.addEventListener('pageshow', foreground);
@@ -52,12 +58,14 @@ export function useRemote<T>(
       window.removeEventListener('pageshow', foreground);
       document.removeEventListener('visibilitychange', foreground);
     };
-  }, [path, refresh]);
+  }, [path, refresh, retainOnForeground]);
   const current =
     state.path === path &&
     state.serialized === serialized &&
     state.credential === credential &&
-    state.attempt === attempt;
+    state.attempt === attempt &&
+    (state.foregroundEpoch === foregroundEpoch ||
+      (retainOnForeground && state.data !== undefined));
   return current
     ? { data: state.data, error: state.error, loading: state.loading, refresh }
     : { loading: path !== null, refresh };

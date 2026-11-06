@@ -195,3 +195,53 @@
   color: #a9b8b9;
   opacity: 1;
 }
+
+.client-hall-card {
+  border: 1px solid #72817b;
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--po-bg);
+}
+.client-hall-name {
+  color: #f4f5ef;
+  font-size: clamp(1.375rem, 5vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.client-hall-count {
+  margin-top: 6px;
+  color: #c9d3cf;
+  font-size: 0.9375rem;
+}
+.client-hall-open {
+  min-height: 44px;
+}
+.client-plan-actions {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 14px 0;
+}
+.client-plan-file {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+}
+.client-plan-file input::file-selector-button {
+  min-height: 44px;
+  border: 1px solid var(--po-accent);
+  border-radius: 10px;
+  padding-inline: 12px;
+  margin-inline-end: 8px;
+  background: var(--po-bg);
+  color: var(--po-accent);
+}
+.client-plan-file input:disabled {
+  opacity: 0.55;
+}
+@media (max-width: 380px) {
+  .client-hall-open {
+    width: 100%;
+  }
+}

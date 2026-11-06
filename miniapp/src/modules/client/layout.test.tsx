@@ -176,7 +176,7 @@ describe('cabinet uses the shared layout editor', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
     await screen.findByText('Первый зал', { exact: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Открыть схему' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть зал' }));
     await screen.findByText('План еще не загружен.');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Добавить столы' }),
@@ -288,11 +288,14 @@ describe('cabinet uses the shared layout editor', () => {
     await screen.findByText('Доступный зал');
     expect(screen.queryByRole('button', { name: 'Создать' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Схема и столы' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть зал' }));
     await screen.findByTestId('hall-plan-image');
     fireEvent.click(screen.getByRole('button', { name: '#1 · Частный стол' }));
     expect(screen.getByRole('region', { name: 'Карточка стола' })).toBeTruthy();
-    expect(document.querySelector('input[type=file]')).toBeNull();
+    expect(screen.getByLabelText('Заменить схему')).toHaveProperty(
+      'disabled',
+      true,
+    );
     expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull();
     revoked = true;
     fireEvent(window, new Event('pageshow'));
@@ -306,8 +309,12 @@ describe('cabinet uses the shared layout editor', () => {
     act(() => {
       for (const back of [...backs]) back();
     });
-    expect(window.location.search).toContain('screen=club');
-    expect(window.location.search).not.toContain('screen=layout');
+    await waitFor(() => expect(window.location.search).not.toContain('hall='));
+    expect(window.location.search).toContain('screen=layout');
+    fireEvent.click(screen.getByRole('button', { name: /^Назад$/ }));
+    await waitFor(() =>
+      expect(window.location.search).toContain('screen=club'),
+    );
   });
 });
 
@@ -352,9 +359,7 @@ describe('cabinet mutation access loss', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: /Залы и столы/ }),
     );
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Открыть схему' }),
-    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Открыть зал' }));
     fireEvent.click(await screen.findByRole('button', { name: '#1 · Стол' }));
     fireEvent.change(screen.getByLabelText('Название', { exact: true }), {
       target: { value: 'Изменённый стол' },

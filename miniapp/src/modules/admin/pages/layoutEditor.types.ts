@@ -63,6 +63,7 @@ export interface HallEditorApi<Id extends LayoutId = number> {
   ) => Promise<EditorTable<Id>>;
   deleteHallTable?: (hall: Id, table: Id) => Promise<void>;
   uploadHallPlan: (hall: Id, file: File) => Promise<unknown>;
+  removeHallPlan?: (hall: Id) => Promise<unknown>;
   fetchHallPlanBlob: (
     club: Id,
     hall: Id,

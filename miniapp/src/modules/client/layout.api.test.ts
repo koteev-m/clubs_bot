@@ -152,6 +152,39 @@ describe('client layout adapter', () => {
     expect(states.at(-1)?.layout).toBeUndefined();
     await expect(api.load()).rejects.toMatchObject({ status: 404 });
   });
+  it('rechecks a raced image absence and clears the conflict only after an explicit refresh', async () => {
+    const states: LayoutState[] = [];
+    const lost = vi.fn();
+    const removed = data('2');
+    removed.halls[0].plan = null;
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json(data()))
+      .mockResolvedValueOnce(json(data()))
+      .mockResolvedValueOnce(json({ code: 'not_found' }, 404))
+      .mockResolvedValueOnce(json(removed))
+      .mockResolvedValueOnce(json(removed))
+      .mockResolvedValueOnce(json(removed));
+    const api = createClientLayoutApi(
+      'signed-client',
+      club,
+      (state) => states.push(state),
+      lost,
+    );
+    await api.load();
+    await expect(api.editor.fetchHallPlanBlob(club, hall)).resolves.toEqual({
+      status: 404,
+    });
+    expect(lost).not.toHaveBeenCalled();
+    await api.revalidate();
+    expect(states.at(-1)?.error?.code).toBe('version_conflict');
+    await expect(api.editor.removeHallPlan!(hall)).rejects.toMatchObject({
+      code: 'version_conflict',
+    });
+    await api.load();
+    expect(states.at(-1)?.error).toBeUndefined();
+    expect(states.at(-1)?.layout?.halls[0].plan).toBeNull();
+    api.dispose();
+  });
   it('does not let an older read restore permission or revision after a newer response', async () => {
     const old = deferred<Response>();
     const states: LayoutState[] = [];

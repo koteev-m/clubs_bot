@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useUiStore } from '../../../shared/store/ui';
 import {
   AdminApiError,
@@ -40,11 +48,13 @@ type HallEditorScreenProps<Id extends LayoutId = number> = {
   hallId: Id;
   api?: HallEditorApi<Id>;
   readOnly?: boolean;
+  savedPlan?: boolean;
+  editBlockedReason?: string;
   previewOnly?: boolean;
   clientMode?: boolean;
   reservedTableLocations?: Record<number, string>;
   reportDirty?: (dirty: boolean) => void;
-  onBackReady?: (back: () => void) => void;
+  onBackReady?: (back: (() => void) | null) => void;
   onBack: () => void;
 };
 
@@ -74,6 +84,8 @@ function HallEditorSession<Id extends LayoutId = number>({
   readOnly = false,
   previewOnly = false,
   clientMode = false,
+  savedPlan,
+  editBlockedReason,
   reservedTableLocations,
   reportDirty,
   onBackReady,
@@ -83,8 +95,11 @@ function HallEditorSession<Id extends LayoutId = number>({
   const [planStatus, setPlanStatus] = useState<
     'loading' | 'ready' | 'empty' | 'error'
   >('loading');
+  const planActionsHint = useId();
+  const [planActionError, setPlanActionError] = useState('');
   const [planError, setPlanError] = useState<string | null>(null);
   const [planUrl, setPlanUrl] = useState<string | null>(null);
+  const hasSavedPlan = savedPlan ?? Boolean(planUrl);
   const planEtagRef = useRef<string | null>(null);
   const planUrlRef = useRef<string | null>(null);
   const [tablesStatus, setTablesStatus] = useState<
@@ -284,39 +299,74 @@ function HallEditorSession<Id extends LayoutId = number>({
     return Math.max(...tables.map((table) => table.tableNumber ?? 0)) + 1;
   }, [tables]);
 
-  const handleUploadPlan = useCallback(
-    async (file: File) => {
-      if (busy || readOnly || !leave()) return;
-      if (!['image/png', 'image/jpeg'].includes(file.type)) {
-        addToast('Поддерживаются только PNG и JPEG');
-        return;
+  const planBlockedReason =
+    editBlockedReason ??
+    (busy
+      ? 'Дождитесь завершения операции.'
+      : previewMode
+        ? 'Вернитесь к редактированию, чтобы изменить изображение.'
+        : undefined);
+
+  const changePlan = async (
+    change: () => Promise<unknown>,
+    message: string,
+  ) => {
+    setBusy(true);
+    setPlanActionError('');
+    try {
+      await change();
+      if (!mountedRef.current) return;
+      if (clientMode) {
+        setSelectedTableId(null);
+        setCreationOpen(false);
+        setPlacePoint(null);
       }
-      if (file.size > maxFileSizeMb * 1024 * 1024) {
-        addToast(`Размер файла не более ${maxFileSizeMb} МБ`);
-        return;
-      }
-      setBusy(true);
-      try {
-        await api.uploadHallPlan(hallId, file);
-        if (!mountedRef.current) return;
-        addToast(
-          clientMode
-            ? 'План обновлён. Проверьте положение маркеров.'
-            : 'План зала обновлен',
-        );
-        reload();
-      } catch (error) {
-        const normalized = error as AdminApiError;
-        if (isAbortError(normalized)) return;
-        addToast(mapAdminErrorMessage(normalized));
-      } finally {
-        if (mountedRef.current) {
-          setBusy(false);
-        }
-      }
-    },
-    [addToast, api, busy, clientMode, hallId, leave, readOnly, reload],
-  );
+      addToast(message);
+      reload();
+    } catch (error) {
+      const normalized = error as AdminApiError;
+      if (!mountedRef.current || isAbortError(normalized)) return;
+      const text = mapAdminErrorMessage(normalized);
+      if (clientMode) setPlanActionError(text);
+      addToast(text);
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  const handleUploadPlan = (file: File) => {
+    if (busy || readOnly || previewMode || !leave()) return;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      const message = 'Поддерживаются только PNG и JPEG';
+      if (clientMode) setPlanActionError(message);
+      addToast(message);
+      return;
+    }
+    if (file.size > maxFileSizeMb * 1024 * 1024) {
+      const message = `Размер файла не более ${maxFileSizeMb} МБ`;
+      if (clientMode) setPlanActionError(message);
+      addToast(message);
+      return;
+    }
+    void changePlan(
+      () => api.uploadHallPlan(hallId, file),
+      clientMode && hasSavedPlan
+        ? 'Схема заменена. Проверьте положение маркеров.'
+        : 'План зала обновлен',
+    );
+  };
+
+  const handleRemovePlan = () => {
+    const remove = api.removeHallPlan;
+    if (!remove || planBlockedReason || readOnly || !leave()) return;
+    if (
+      window.confirm(
+        'Удалить изображение схемы? Столы и координаты маркеров сохранятся.',
+      )
+    ) {
+      void changePlan(() => remove(hallId), 'Изображение схемы удалено.');
+    }
+  };
 
   const handleCreateTable = useCallback(
     async (coords: { x: number; y: number }) => {
@@ -546,8 +596,9 @@ function HallEditorSession<Id extends LayoutId = number>({
   const back = useCallback(() => {
     if (leave()) onBack();
   }, [leave, onBack]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onBackReady?.(back);
+    return () => onBackReady?.(null);
   }, [back, onBackReady]);
   const isReadOnly = previewMode || busy || readOnly;
   const showPreview = previewMode || previewOnly;
@@ -816,7 +867,7 @@ function HallEditorSession<Id extends LayoutId = number>({
           </button>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          {!readOnly && (
+          {(!readOnly || previewMode) && (
             <button
               type="button"
               className="ob-button"
@@ -840,16 +891,18 @@ function HallEditorSession<Id extends LayoutId = number>({
                 : 'Предпросмотр для гостя'}
             </button>
           )}
-          <button
-            type="button"
-            className="text-sm text-blue-600"
-            onClick={() => {
-              if (leave()) reload();
-            }}
-            disabled={busy}
-          >
-            Обновить
-          </button>
+          {(!clientMode || !onBackReady) && (
+            <button
+              type="button"
+              className="text-sm text-blue-600"
+              onClick={() => {
+                if (leave()) reload();
+              }}
+              disabled={busy}
+            >
+              Обновить
+            </button>
+          )}
         </div>
       </div>
 
@@ -861,10 +914,59 @@ function HallEditorSession<Id extends LayoutId = number>({
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900">План зала</h2>
         </div>
+        {clientMode && (
+          <div className="client-plan-actions">
+            <label className="client-plan-file">
+              <strong>
+                {hasSavedPlan ? 'Заменить схему' : 'Загрузить схему'}
+              </strong>
+              <input
+                type="file"
+                accept="image/png,image/jpeg"
+                aria-describedby={planActionsHint}
+                disabled={isReadOnly}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = '';
+                  if (file) handleUploadPlan(file);
+                }}
+              />
+            </label>
+            <p className="text-sm text-gray-600" id={planActionsHint}>
+              PNG/JPEG, до 5 МБ.
+              {hasSavedPlan &&
+                ' После замены проверьте положение сохранённых маркеров.'}
+              {planBlockedReason && (
+                <span className="block" role="status">
+                  {planBlockedReason}
+                </span>
+              )}
+            </p>
+            {hasSavedPlan && api.removeHallPlan && (
+              <button
+                className="ob-button ob-danger"
+                type="button"
+                aria-describedby={planActionsHint}
+                disabled={isReadOnly}
+                onClick={handleRemovePlan}
+              >
+                Удалить изображение схемы
+              </button>
+            )}
+            {planActionError && (
+              <p className="text-sm text-red-600" role="alert">
+                {planActionError}
+              </p>
+            )}
+          </div>
+        )}
         {physical && tablesStatus === 'ready' && (
           <div className="mt-2 space-y-1 text-sm text-gray-700">
             <p>
-              На схеме: {tables.length - unplaced.length} из {tables.length}
+              {clientMode && !hasSavedPlan
+                ? 'Столов с сохранёнными координатами'
+                : 'На схеме'}
+              : {tables.length - unplaced.length} из {tables.length}
             </p>
             <p>Неразмещённые столы</p>
             {unplaced.length ? (
@@ -899,7 +1001,7 @@ function HallEditorSession<Id extends LayoutId = number>({
         {planStatus === 'empty' && (
           <div className="mt-4 space-y-3 text-sm text-gray-600">
             <p>План еще не загружен.</p>
-            {!readOnly && (
+            {!clientMode && !readOnly && (
               <label className="flex flex-col gap-2">
                 <span className="text-xs text-gray-500">
                   PNG/JPEG, до 5 МБ.
@@ -1017,7 +1119,7 @@ function HallEditorSession<Id extends LayoutId = number>({
                 </button>
               </section>
             )}
-            {!previewMode && !readOnly && (
+            {!clientMode && !previewMode && !readOnly && (
               <label className="flex flex-col gap-2 text-sm text-gray-600">
                 <span className="text-xs text-gray-500">
                   Обновить план (PNG/JPEG, до 5 МБ).

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useTelegram } from '../../app/providers/TelegramProvider';
 import { errorMessage } from './onboarding.api';
@@ -16,6 +16,7 @@ export function Shell({
   owner = false,
   back,
   backLabel = 'Назад',
+  closeAtRoot = false,
   children,
   navigation,
 }: {
@@ -24,6 +25,7 @@ export function Shell({
   owner?: boolean;
   back?: () => void;
   backLabel?: string;
+  closeAtRoot?: boolean;
   children: React.ReactNode;
   navigation?: React.ReactNode;
 }) {
@@ -54,15 +56,26 @@ export function Shell({
       window.visualViewport?.removeEventListener('resize', resize);
     };
   }, [webApp]);
+  const latestBack = useRef(back);
+  useLayoutEffect(() => {
+    latestBack.current = back;
+  }, [back]);
+  const hasBack = Boolean(back);
   useEffect(() => {
-    if (!back) return;
-    webApp.BackButton?.show();
-    webApp.BackButton?.onClick(back);
+    const button = webApp.BackButton;
+    if (!button) return;
+    if (!hasBack) {
+      button.hide();
+      return;
+    }
+    const goBack = () => latestBack.current?.();
+    button.onClick(goBack);
+    button.show();
     return () => {
-      webApp.BackButton?.offClick(back);
-      webApp.BackButton?.hide();
+      button.offClick(goBack);
+      button.hide();
     };
-  }, [back, webApp]);
+  }, [hasBack, webApp]);
   return (
     <div className="platform-owner" lang="ru">
       <div className="po-container">
@@ -93,6 +106,19 @@ export function Shell({
             {subtitle && <p>{subtitle}</p>}
           </div>
           {children}
+          {closeAtRoot &&
+            !hasBack &&
+            webApp.initData &&
+            webApp.platform !== 'unknown' &&
+            typeof webApp.close === 'function' && (
+              <button
+                className="ob-button"
+                type="button"
+                onClick={() => webApp.close()}
+              >
+                Закрыть приложение
+              </button>
+            )}
         </main>
         {navigation}
       </div>
@@ -351,11 +377,22 @@ export function ApplicationSummary({
     </>
   );
 }
+export function useTelegramClosingConfirmation(active: boolean) {
+  const webApp = useTelegram();
+  useEffect(() => {
+    if (!active) return;
+    webApp.enableClosingConfirmation?.();
+    return () => {
+      webApp.disableClosingConfirmation?.();
+    };
+  }, [active, webApp]);
+}
+
 export function useUnsavedChanges(
   dirty: boolean,
   reportDirty?: (dirty: boolean) => void,
 ) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     reportDirty?.(dirty);
     return () => reportDirty?.(false);
   }, [dirty, reportDirty]);
@@ -368,7 +405,10 @@ export function useUnsavedChanges(
     window.addEventListener('beforeunload', prevent);
     return () => window.removeEventListener('beforeunload', prevent);
   }, [dirty]);
-  return () =>
-    !dirty ||
-    window.confirm('Есть несохранённые изменения. Уйти без сохранения?');
+  return useCallback(
+    () =>
+      !dirty ||
+      window.confirm('Есть несохранённые изменения. Уйти без сохранения?'),
+    [dirty],
+  );
 }
