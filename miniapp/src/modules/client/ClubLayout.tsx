@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ClubHallsScreen from '../admin/pages/ClubHallsScreen';
 import HallEditorScreen from '../admin/pages/HallEditorScreen';
 import { mapAdminErrorMessage } from '../admin/utils/adminErrors';
 import { createClientLayoutApi, LayoutState } from './layout.api';
-import { Shell, useUnsavedChanges } from './OnboardingShared';
+import {
+  Shell,
+  useTelegramClosingConfirmation,
+  useUnsavedChanges,
+} from './OnboardingShared';
 
 export default function ClubLayout({
   credential,
@@ -18,7 +22,7 @@ export default function ClubLayout({
   id: string;
   hallId?: string;
   back: () => void;
-  openHall: (hall?: string) => void;
+  openHall: (hall: string) => void;
   reportDirty: (dirty: boolean) => void;
   reportPending: (pending: boolean) => void;
 }) {
@@ -32,25 +36,24 @@ export default function ClubLayout({
   const childBack = useRef<(() => void) | null>(null);
   const navigation = useRef({ back, openHall });
   navigation.current = { back, openHall };
-  const profileBack = useCallback(() => navigation.current.back(), []);
+  const sectionBack = useCallback(() => navigation.current.back(), []);
   const openEditor = useCallback(
-    (hall?: string) => navigation.current.openHall(hall),
+    (hall: string) => navigation.current.openHall(hall),
     [],
   );
-  const api = useMemo(
-    () =>
-      createClientLayoutApi(credential, id, setState, () => setDenied(true)),
-    [credential, id],
-  );
+  const [api, setApi] = useState<ReturnType<typeof createClientLayoutApi>>();
   useEffect(() => {
-    reportPending(state.pending || state.saving);
+    reportPending(state.saving);
     return () => reportPending(false);
-  }, [state.pending, state.saving, reportPending]);
+  }, [state.saving, reportPending]);
   const leave = useUnsavedChanges(
     dirty || state.pending || state.saving,
     reportDirty,
   );
-  const receiveBack = useCallback((handler: () => void) => {
+  useTelegramClosingConfirmation(
+    !denied && (dirty || state.pending || state.saving),
+  );
+  const receiveBack = useCallback((handler: (() => void) | null) => {
     childBack.current = handler;
   }, []);
   const reportChildDirty = useCallback((value: boolean) => setDirty(value), []);
@@ -60,18 +63,29 @@ export default function ClubLayout({
       navigation.current.back();
       return;
     }
-    if (state.pending || state.saving) {
-      // Keep the original idempotency key and intent available until its result is known.
+    if (state.saving) return;
+    if (state.pending) {
+      if (
+        window.confirm(
+          'Результат операции неизвестен. Перед уходом можно повторить её с тем же ключом. Всё равно уйти?',
+        )
+      )
+        back();
       return;
     }
     if (childBack.current) childBack.current();
     else if (leave()) back();
   };
   useEffect(() => {
-    void api.load().catch(() => undefined);
-    return () => api.dispose();
-  }, [api]);
+    const adapter = createClientLayoutApi(credential, id, setState, () =>
+      setDenied(true),
+    );
+    setApi(adapter);
+    void adapter.load().catch(() => undefined);
+    return () => adapter.dispose();
+  }, [credential, id]);
   useEffect(() => {
+    if (!api) return;
     const foreground = () => {
       if (!document.hidden) void api.revalidate().catch(() => undefined);
     };
@@ -84,14 +98,33 @@ export default function ClubLayout({
       document.removeEventListener('visibilitychange', foreground);
     };
   }, [api]);
-  const editorBack = useCallback(() => navigation.current.openHall(), []);
-  const reload = () => {
-    if (state.pending || state.saving || !leave()) return;
-    setRefresh((value) => value + 1);
+  const [refreshing, setRefreshing] = useState(false);
+  const reload = async () => {
+    if (!api || refreshing || state.pending || state.saving || !leave()) return;
+    setRefreshing(true);
+    try {
+      await api.load();
+      setRefresh((value) => value + 1);
+    } catch {
+      // The adapter has already published the error.
+    } finally {
+      setRefreshing(false);
+    }
   };
   const canWrite = Boolean(
     state.layout?.permissions.includes('client.club.layout.write'),
   );
+  const editBlocked = state.saving
+    ? 'Сохранение… Дождитесь завершения операции.'
+    : state.pending
+      ? 'Сначала повторите незавершённую операцию.'
+      : !canWrite
+        ? 'У вас есть право только на просмотр.'
+        : refreshing
+          ? 'Загружаем актуальные данные.'
+          : state.error?.code === 'version_conflict'
+            ? 'Данные зала изменились. Загрузите актуальные данные перед редактированием.'
+            : undefined;
   const selectedHall = state.layout?.halls.find((hall) => hall.id === hallId);
   const matchingPlans = selectedHall?.plan
     ? state.layout?.halls.filter(
@@ -104,14 +137,11 @@ export default function ClubLayout({
       hall.tables.map((table) => [table.tableNumber, hall.name]),
     ) ?? [],
   );
+  if (!api) return null;
   return (
     <Shell
-      title="Залы и столы"
-      subtitle={
-        hallId
-          ? state.layout?.halls.find((hall) => hall.id === hallId)?.name
-          : 'Настройка схемы заведения'
-      }
+      title={selectedHall?.name ?? 'Залы и столы'}
+      subtitle={hallId ? 'Схема и столы зала' : 'Настройка схемы заведения'}
       back={goBack}
     >
       {denied ? (
@@ -124,6 +154,11 @@ export default function ClubLayout({
           {state.error && (
             <p className="po-notice" role="alert">
               {mapAdminErrorMessage(state.error)}
+            </p>
+          )}
+          {state.saving && (
+            <p className="po-notice" role="status">
+              {editBlocked}
             </p>
           )}
           {state.pending && !state.saving && (
@@ -147,11 +182,16 @@ export default function ClubLayout({
           )}
           {state.layout && (
             <div className="client-layout">
-              {selectedHall && (
-                <p className="po-muted">
-                  Зал «{selectedHall.name}». Здесь показаны только его схема и
-                  столы.
-                </p>
+              {!state.pending && (
+                <button
+                  className="ob-button"
+                  disabled={refreshing}
+                  onClick={() => void reload()}
+                >
+                  {refreshing
+                    ? 'Загружаем актуальные данные…'
+                    : 'Загрузить актуальные данные'}
+                </button>
               )}
               {Boolean(matchingPlans?.length) && (
                 <p className="po-notice" role="status">
@@ -166,45 +206,39 @@ export default function ClubLayout({
                   Залы и столы доступны только для просмотра.
                 </p>
               )}
-              {hallId ? (
+              {selectedHall ? (
                 <HallEditorScreen
-                  key={hallId + ':' + refresh}
+                  key={selectedHall.id + ':' + refresh}
                   clubId={id}
-                  hallId={hallId}
+                  hallId={selectedHall.id}
                   api={api.editor}
                   clientMode
+                  savedPlan={Boolean(selectedHall.plan)}
+                  editBlockedReason={editBlocked}
                   reservedTableLocations={tableLocations}
                   previewOnly={!canWrite}
-                  readOnly={
-                    !canWrite ||
-                    state.pending ||
-                    state.error?.code === 'version_conflict'
-                  }
-                  onBack={editorBack}
+                  readOnly={Boolean(editBlocked)}
+                  onBack={sectionBack}
                   onBackReady={receiveBack}
                   reportDirty={reportChildDirty}
                 />
+              ) : hallId ? (
+                <p className="po-notice" role="alert">
+                  Этот зал недоступен. Вернитесь к списку залов.
+                </p>
               ) : (
                 <ClubHallsScreen
                   key={id + ':' + refresh}
                   clubId={id}
                   api={api.halls}
                   clientMode
-                  readOnly={
-                    !canWrite ||
-                    state.pending ||
-                    state.error?.code === 'version_conflict'
-                  }
-                  onBack={profileBack}
+                  readOnly={Boolean(editBlocked)}
+                  openDisabled={state.pending}
+                  onBack={sectionBack}
                   onOpenEditor={openEditor}
                   onBackReady={receiveBack}
                   reportDirty={reportChildDirty}
                 />
-              )}
-              {!state.pending && (
-                <button className="ob-button" onClick={reload}>
-                  Загрузить актуальные данные
-                </button>
               )}
             </div>
           )}
@@ -222,8 +256,8 @@ export default function ClubLayout({
         </>
       )}
       {denied && (
-        <button className="ob-button" onClick={back}>
-          Вернуться к клубу
+        <button className="ob-button" onClick={goBack}>
+          {hallId ? 'Вернуться к списку залов' : 'Вернуться к клубу'}
         </button>
       )}
     </Shell>

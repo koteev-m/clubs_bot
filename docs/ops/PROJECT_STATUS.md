@@ -1,5 +1,39 @@
 # Project status checkpoint
 
+## Owner layout navigation and image commands, 2026-11-06
+
+- Task `CLB-owner-setup-ux`. GitHub `main` and the isolated detached worktree
+  `/private/tmp/clb-owner-setup-ux-a74574e4.UbFlIc/clubs_bot` started at
+  `a74574e4ac5675cb2023a447dae8a457fe80e544`. `PROJECT_IDENTITY_OK`.
+  Publication branch `codex/owner-layout-nav-ux`. Scope is one commit, a
+  non-force push, one Draft PR and a bounded CI snapshot. Existing worktrees
+  and their edits were preserved.
+- Hall names have prominent cards and editor headings. PNG/JPEG up to 5 MiB
+  can be uploaded or replaced. The cabinet explains when actions are blocked
+  and keeps a version conflict active until an explicit fresh read.
+- `POST /api/client/clubs/{clubId}/halls/{hallId}/plan/remove` takes
+  `expectedVersion` and `Idempotency-Key`. It uses fresh client identity, exact
+  layout write authority, hall scope, the current command ledger and audit.
+  It removes only the image row. An already empty hall keeps its revision.
+  Replay reads current authorized state and cannot remove a newer image.
+- A held foreground response reproduced a lost first click on the packaged base
+  in both `client` and `cabinet` modes. The profile removed the action during
+  refresh, and cabinet entry hid the client workspace during its access check.
+  The same-identity checks now preserve the visible target until their result.
+  Owner Back shares one handler with the page, follows browser history when
+  the logical parent is available, and replaces direct-link entries otherwise.
+  The cabinet root exposes Telegram close and hides Back.
+- Local checks cover Ktor, H2, disposable PostgreSQL 16, 292 Vitest cases,
+  26 mobile Chromium/WebKit owner cases, 10 packaged onboarding cases and
+  one packaged Ktor/H2 browser journey.
+  The JVM coverage, Detekt, baseline-aware ktlint, strict dependency graph
+  and Mini App packaging gates passed. No release, staging access, real image
+  operation, booking or payment change.
+  Physical iPhone and Telegram WebView behavior still need verification.
+- Next: review the Draft PR and its exact-head CI before any merge decision.
+  The iPhone hall and Back/close smoke requires a separately authorized
+  rollout and a disposable club with uploaded test images.
+
 ## PR #562 — targeted runtime APT security fix, 2026-11-05
 
 - Task `CLB-owner-setup-ux`, registered `owner-setup-ux` worktree, branch

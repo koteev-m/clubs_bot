@@ -231,7 +231,9 @@ test('mobile editor places saved physical tables and keeps the original command 
     page.getByText(/Номера для создания: 101, 102, 103/),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Создать столы' }).tap();
-  await expect(page.getByText('На схеме: 0 из 15')).toBeVisible();
+  await expect(
+    page.getByText('Столов с сохранёнными координатами: 0 из 15'),
+  ).toBeVisible();
   expect(
     hall.tables.every((table) => table.x === null && table.y === null),
   ).toBe(true);

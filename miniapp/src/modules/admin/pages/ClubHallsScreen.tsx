@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useUiStore } from '../../../shared/store/ui';
 import {
   AdminApiError,
@@ -22,8 +29,9 @@ type ClubHallsScreenProps<Id extends LayoutId = number> = {
   api?: ClubHallsApi<Id>;
   clientMode?: boolean;
   readOnly?: boolean;
+  openDisabled?: boolean;
   reportDirty?: (dirty: boolean) => void;
-  onBackReady?: (back: () => void) => void;
+  onBackReady?: (back: (() => void) | null) => void;
   onBack: () => void;
   onOpenEditor: (hallId: Id) => void;
 };
@@ -51,6 +59,7 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
   api: suppliedApi,
   clientMode = false,
   readOnly = false,
+  openDisabled = false,
   reportDirty,
   onBackReady,
 }: ClubHallsScreenProps<Id>) {
@@ -256,8 +265,9 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
   const back = useCallback(() => {
     if (leave()) onBack();
   }, [leave, onBack]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onBackReady?.(back);
+    return () => onBackReady?.(null);
   }, [back, onBackReady]);
 
   const formTitle = useMemo(
@@ -265,32 +275,7 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
     [formMode],
   );
 
-  return (
-    <div className="space-y-6 px-4 pb-8">
-      <div className="flex items-center justify-between">
-        {!clientMode && (
-          <button
-            type="button"
-            className="text-sm text-blue-600"
-            onClick={back}
-            disabled={busy}
-          >
-            ← Клуб
-          </button>
-        )}
-        <button
-          type="button"
-          className="text-sm text-blue-600"
-          onClick={() => {
-            if (leave()) reload();
-          }}
-          disabled={busy}
-        >
-          Обновить
-        </button>
-      </div>
-
-      {!readOnly && (
+  const hallForm = (
         <section className="rounded-lg bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900">
@@ -387,7 +372,36 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
             </button>
           </div>
         </section>
-      )}
+  );
+
+  return (
+    <div className="space-y-6 px-4 pb-8">
+      <div className="flex items-center justify-between">
+        {!clientMode && (
+          <button
+            type="button"
+            className="text-sm text-blue-600"
+            onClick={back}
+            disabled={busy}
+          >
+            ← Клуб
+          </button>
+        )}
+        {!clientMode && (
+          <button
+            type="button"
+            className="text-sm text-blue-600"
+            onClick={() => {
+              if (leave()) reload();
+            }}
+            disabled={busy}
+          >
+            Обновить
+          </button>
+        )}
+      </div>
+
+      {!clientMode && !readOnly && hallForm}
 
       <section className="rounded-lg bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
@@ -421,18 +435,28 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
             {halls.map((hall) => (
               <div
                 key={hall.id}
-                className={`rounded border p-3 ${
-                  hall.isActive
-                    ? 'border-green-200 bg-green-50'
-                    : 'border-gray-100'
-                }`}
+                className={
+                  clientMode
+                    ? 'client-hall-card'
+                    : `rounded border p-3 ${hall.isActive ? 'border-green-200 bg-green-50' : 'border-gray-100'}`
+                }
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {hall.name}
-                    </p>
-                    <p className="text-xs text-gray-500">
+                    {clientMode ? (
+                      <h3 className="client-hall-name">{hall.name}</h3>
+                    ) : (
+                      <p className="text-sm font-medium text-gray-900">
+                        {hall.name}
+                      </p>
+                    )}
+                    <p
+                      className={
+                        clientMode
+                          ? 'client-hall-count'
+                          : 'text-xs text-gray-500'
+                      }
+                    >
                       {clientMode
                         ? `Столов: ${hall.tableCount ?? 0}`
                         : `Ревизия: ${hall.layoutRevision}`}
@@ -475,13 +499,21 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
                   )}
                   <button
                     type="button"
-                    className="rounded border border-blue-200 px-3 py-1 text-xs text-blue-600"
+                    className={
+                      clientMode
+                        ? 'po-primary client-hall-open'
+                        : 'rounded border border-blue-200 px-3 py-1 text-xs text-blue-600'
+                    }
                     onClick={() => {
                       if (leave()) onOpenEditor(hall.id);
                     }}
-                    disabled={busy}
+                    disabled={busy || openDisabled}
                   >
-                    {readOnly ? 'Схема и столы' : 'Открыть схему'}
+                    {clientMode
+                      ? 'Открыть зал'
+                      : readOnly
+                        ? 'Схема и столы'
+                        : 'Открыть схему'}
                   </button>
                   {!readOnly && api.deleteHall && (
                     <button
@@ -499,6 +531,7 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
           </div>
         )}
       </section>
+      {clientMode && !readOnly && hallForm}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -78,6 +79,27 @@ class ClientLayoutRoutesDataTest {
                 }
                 requestAs("$C/clubs/$club/halls/${ids[2]}/plan", RECIPIENT)
                     .assertClientError(HttpStatusCode.NotFound, "not_found")
+                val path = "$C/clubs/$club/halls/${ids[0]}"
+                val body = obj("expectedVersion" to saved[0].version())
+                requestAs("$path/plan/remove", RECIPIENT, obj("expectedVersion" to "1"))
+                    .assertClientError(HttpStatusCode.Conflict, "version_conflict")
+                requestAs(
+                    "$path/plan/remove",
+                    RECIPIENT,
+                    obj("expectedVersion" to saved[0].version(), "hallId" to ids[1]),
+                ).assertClientError(HttpStatusCode.BadRequest, "validation_error")
+                val removed = ok("$path/plan/remove", RECIPIENT, body, key = "main-image-response-lost")
+                assertEquals(removed, ok("$path/plan/remove", RECIPIENT, body, key = "main-image-response-lost"))
+                val remaining = removed.getValue("halls").jsonArray.map { it.jsonObject }
+                assertEquals(JsonNull, remaining[0]["plan"])
+                val empty = obj("expectedVersion" to remaining[0].version())
+                assertEquals(removed, ok("$path/plan/remove", RECIPIENT, empty))
+                assertEquals(saved[1], remaining[1])
+            }
+            withApp(source) {
+                requestAs("$C/clubs/$club/halls/${ids[0]}/plan", RECIPIENT)
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                assertContentEquals(jpeg, requestAs("$C/clubs/$club/halls/${ids[1]}/plan", RECIPIENT).bodyAsBytes())
             }
         }
 
@@ -225,6 +247,8 @@ class ClientLayoutRoutesDataTest {
                         HttpMethod.Patch,
                     ).assertClientError(HttpStatusCode.NotFound, "not_found")
                     upload(path, user, image, "1").assertClientError(HttpStatusCode.NotFound, "not_found")
+                    requestAs("$path/plan/remove", user, obj("expectedVersion" to "1"))
+                        .assertClientError(HttpStatusCode.NotFound, "not_found")
                 }
                 requestAs(
                     "$C/clubs/$b/halls/$idB/tables/$tableA",
@@ -265,6 +289,8 @@ class ClientLayoutRoutesDataTest {
                 val read = ok("$C/clubs/$club/layout", RECIPIENT)
                 assertFalse(read["permissions"]!!.jsonArray.contains(JsonPrimitive("client.club.layout.write")))
                 assertEquals(HttpStatusCode.OK, requestAs("$path/plan", RECIPIENT).status)
+                requestAs("$path/plan/remove", RECIPIENT, obj("expectedVersion" to "2"))
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
                 requestAs("$C/clubs/$club/halls", RECIPIENT, obj("name" to "No"))
                     .assertClientError(HttpStatusCode.NotFound, "not_found")
                 requestAs("$C/clubs/$club/halls", RECIPIENT, obj("name" to "Saved"), key = "revoke-created-hall")
@@ -298,6 +324,9 @@ class ClientLayoutRoutesDataTest {
                 val club = createClub(RECIPIENT, "Validation")
                 val hall = ok("$C/clubs/$club/halls", RECIPIENT, obj("name" to "Valid")).hall()
                 val path = "$C/clubs/$club/halls/${hall.string("id")}"
+                client
+                    .request("$path/plan/remove") { method = HttpMethod.Post }
+                    .assertClientError(HttpStatusCode.Unauthorized, "unauthorized")
                 requestAs("$C/clubs/$club/halls", RECIPIENT, obj("name" to "Spoof", "clientId" to "999"))
                     .assertClientError(HttpStatusCode.BadRequest, "validation_error")
                 upload(path, RECIPIENT, "<svg/>".toByteArray(), hall.version(), type = "image/svg+xml")

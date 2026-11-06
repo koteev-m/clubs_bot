@@ -122,7 +122,9 @@ it('switches PNG JPEG and empty halls without leaking a plan, tables or a draft,
   ).toBe(false);
   view.rerender(<ClubLayout {...props} hallId="1" />);
   await screen.findByRole('button', { name: '#7 · Стол 7' });
-  fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Загрузить актуальные данные' }),
+  );
   await waitFor(() =>
     expect(screen.getByAltText('План зала').getAttribute('src')).toBe(
       'blob:image/png',

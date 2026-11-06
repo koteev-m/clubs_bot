@@ -460,7 +460,15 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
     await expect(organization).toBeVisible();
     await organization.click();
   }
-  await page.getByRole("button", { name: /Layout acceptance club/ }).click();
+  const clubButton = page.getByRole("button", {
+    name: /Layout acceptance club/,
+  });
+  const clubProfile = page.getByRole("heading", {
+    name: "Layout acceptance club",
+    exact: true,
+  });
+  await expect(clubProfile.or(clubButton)).toBeVisible();
+  if (await clubButton.isVisible()) await clubButton.click();
   await page.getByRole("button", { name: /Залы и столы/ }).click();
   await expect(page.getByLabel("JSON схемы")).toHaveCount(0);
   await page.getByLabel("Название", { exact: true }).fill("Основной зал");
@@ -472,16 +480,21 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   await page.getByLabel("Название", { exact: true }).fill("Первый зал");
   await page.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(page.getByText("Первый зал", { exact: true })).toBeVisible();
-  await page
-    .getByRole("button", { name: "Открыть схему", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
+  await page.getByRole("button", { name: "Добавить столы" }).click();
+  await page.getByLabel("Номер нового стола").fill("1");
+  await page.getByRole("button", { name: "Создать стол", exact: true }).click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
     "base64",
   );
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({ name: "plan.png", mimeType: "image/png", buffer: png });
+  const uploadPlan = page.getByLabel("Загрузить схему", { exact: true });
+  await expect(uploadPlan).toBeEnabled();
+  await uploadPlan.setInputFiles({
+    name: "plan.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
   const image = page.getByTestId("hall-plan-image");
   await expect(image).toBeVisible();
   await expect
@@ -489,6 +502,8 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
     .toBeGreaterThan(0);
   const stage = page.getByTestId("hall-plan-stage");
   await stage.click({ position: { x: 150, y: 90 } });
+  await page.getByRole("button", { name: /Разместить №1/ }).click();
+  await page.getByRole("button", { name: /#1 ·/ }).click();
   await expect(page.getByLabel("Номер", { exact: true })).toHaveValue("1");
   await page.getByLabel("Название", { exact: true }).fill("У окна");
   await page.getByLabel("Вместимость").fill("6");
@@ -501,12 +516,16 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
     })
   ).json();
   const marker = page.locator('[data-testid^="table-marker-"]');
+  await marker.click();
+  await expect(page.getByLabel("Вместимость")).toHaveValue("6");
+  await marker.scrollIntoViewIfNeeded();
   const markerBox = await marker.boundingBox();
   const movedResponse = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" &&
       /\/tables\/[1-9][0-9]*$/.test(new URL(response.url()).pathname) &&
       response.ok(),
+    { timeout: 5000 },
   );
   await page.mouse.move(
     markerBox!.x + markerBox!.width / 2,
@@ -552,15 +571,13 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   );
   await page.getByLabel("Название", { exact: true }).fill("У окна");
   await nativeBack();
-  await expect(
-    page.getByRole("button", { name: "Открыть схему" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Открыть зал" })).toBeVisible();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Layout acceptance club", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: /Залы и столы/ }).click();
-  await page.getByRole("button", { name: "Открыть схему" }).click();
+  await page.getByRole("button", { name: "Открыть зал" }).click();
   await page.getByRole("button", { name: "#1 · У окна" }).click();
   await expect(page.getByLabel("Вместимость")).toHaveValue("6");
   for (const width of [390, 320]) {
@@ -571,6 +588,22 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
       ),
     ).toBe(true);
   }
+  const removedResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/plan/remove") && response.ok(),
+  );
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Удалить изображение схемы" }).click();
+  const removed = await (await removedResponse).json();
+  expect(removed.halls[0].plan).toBeNull();
+  expect(removed.halls[0].tables).toEqual(before.halls[0].tables);
+  await expect(image).toHaveCount(0);
+  await expect(uploadPlan).toBeEnabled();
+  await uploadPlan.setInputFiles({
+    name: "restored.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await expect(image).toBeVisible();
   expect(paths.some((path) => path.startsWith("/api/admin/"))).toBe(false);
   const foreign = await request.get(layoutPath, {
     headers: { "X-Telegram-Init-Data": foreignCredential },

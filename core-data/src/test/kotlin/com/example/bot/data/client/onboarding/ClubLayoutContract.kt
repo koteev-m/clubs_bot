@@ -106,6 +106,47 @@ internal abstract class ClubLayoutContract : ClubLayoutMigrationContract() {
         }
 
     @Test
+    fun `remove image is transactional idempotent and never removes tables or their coordinates`() =
+        runBlocking<Unit> {
+            val club = create(approved())
+            val hall = command(club, OnboardingMutation.CLUB_HALL_CREATE, name()).firstHall()
+            val withTable = command(club, OnboardingMutation.CLUB_TABLE_CREATE, tableBody(hall)).firstHall()
+            val uploaded = upload(club, withTable, png()).firstHall()
+            val remove = OnboardingMutation.CLUB_PLAN_REMOVE
+            val body = withHall(uploaded, JsonObject(emptyMap()))
+            val key = "remove-lost-response"
+            expect("version_conflict") { command(club, remove, withHall(withTable, JsonObject(emptyMap()))) }
+
+            val before = layoutState()
+            val repository = fixture.failingAfterRepository("INSERT INTO client_commands")
+            try {
+                repository.mutate(fixture.alice, remove, club.id("id"), body, key)
+                error("Command failure must roll back image removal")
+            } catch (_: SQLException) {
+                assertEquals(before, layoutState())
+                assertEquals("image/png", plan(club, uploaded).string("contentType"))
+            }
+
+            val outcomes = race({ command(club, remove, body, key) }, { command(club, remove, body, key) })
+            assertEquals(listOf("ok", "ok"), outcomes)
+            val removed = layout(club).firstHall()
+            assertEquals(JsonPrimitive(uploaded.id("layoutRevision").inc().toString()), removed["layoutRevision"])
+            assertEquals("null", removed["plan"].toString())
+            assertEquals(uploaded["tables"], removed["tables"])
+            expect("not_found") { plan(club, removed) }
+            assertEquals(1, fixture.rows("SELECT id FROM audit_log WHERE action='client.club.layout.plan.remove'").size)
+
+            val noImage = withHall(removed, JsonObject(emptyMap()))
+            assertEquals(removed, command(club, remove, noImage).firstHall())
+            expect("idempotency_conflict") { command(club, remove, noImage, key) }
+            val replaced = upload(club, removed, raster("jpeg"), contentType = "image/jpeg").firstHall()
+            assertEquals(replaced, command(club, remove, body, key).firstHall())
+            assertEquals("image/jpeg", plan(club, replaced).string("contentType"))
+            fixture.execute("UPDATE client_club_grants SET is_active=FALSE WHERE permission_code='$WRITE_LAYOUT'")
+            expect("not_found") { command(club, remove, body, key) }
+        }
+
+    @Test
     fun `direct club creation grants layout only to its confirmed creator and staff read remains read only`() =
         runBlocking<Unit> {
             val accepted = fixture.claim(fixture.issueDirect())

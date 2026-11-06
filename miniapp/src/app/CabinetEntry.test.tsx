@@ -39,6 +39,13 @@ beforeEach(() => {
 });
 
 describe("server-authorized main cabinet entry", () => {
+  it("shows the Telegram authorization screen when launch data is missing", async () => {
+    auth.initData = "";
+    render(<CabinetEntry />);
+    await screen.findByRole("heading", { name: "Нужна авторизация в Telegram" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("routes an exact owner without a guest or client probe", async () => {
     request.mockResolvedValueOnce({ platformOwner: true });
     expect(await resolveCabinet("signed-owner", signal())).toBe("owner");

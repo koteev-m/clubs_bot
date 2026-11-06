@@ -62,9 +62,25 @@ export function createClientLayoutApi(
   let denied = false;
   let readSequence = 0;
   let acceptedRead = 0;
+  let observedLayout: ClientLayout | undefined;
+  let conflict: AdminApiError | undefined;
+  const revisions = (snapshot: ClientLayout) =>
+    JSON.stringify(
+      snapshot.halls.map(({ id, layoutRevision }) => [id, layoutRevision]),
+    );
+  const versionConflict = () =>
+    new AdminApiError(
+      'Схема изменена. Загрузите актуальные данные перед сохранением.',
+      { status: 409, code: 'version_conflict' },
+    );
   const publish = (error?: AdminApiError) => {
     if (!lifetime.signal.aborted)
-      changed({ layout: current, pending: Boolean(pending), saving, error });
+      changed({
+        layout: current,
+        pending: Boolean(pending),
+        saving,
+        error: conflict ?? error,
+      });
   };
   const deny = () => {
     if (lifetime.signal.aborted || denied) return;
@@ -73,6 +89,7 @@ export function createClientLayoutApi(
     current = undefined;
     pending = undefined;
     saving = false;
+    conflict = undefined;
     publish(
       new AdminApiError('Доступ утрачен или запись недоступна.', {
         status: 404,
@@ -86,6 +103,7 @@ export function createClientLayoutApi(
     path: string,
     options: RequestInit = {},
     external?: AbortSignal,
+    allowMissingPlan = false,
   ): Promise<Response> => {
     if (denied || lifetime.signal.aborted)
       throw new AdminApiError('Доступ утрачен.', {
@@ -109,6 +127,7 @@ export function createClientLayoutApi(
         referrerPolicy: 'no-referrer',
       });
       if (!response.ok) {
+        if (allowMissingPlan && response.status === 404) return response;
         const data = await response.json().catch(() => null);
         if ([401, 403, 404].includes(response.status)) deny();
         throw new AdminApiError('Не удалось выполнить действие.', {
@@ -131,7 +150,7 @@ export function createClientLayoutApi(
       external?.removeEventListener('abort', abort);
     }
   };
-  const accept = (layout: ClientLayout) => {
+  const validate = (layout: ClientLayout) => {
     if (denied || lifetime.signal.aborted)
       throw new AdminApiError('Запрос отменён', { isAbort: true });
     // A response cannot retarget the adapter to a different client/club.
@@ -145,11 +164,15 @@ export function createClientLayoutApi(
         code: 'not_found',
       });
     }
+  };
+  const accept = (layout: ClientLayout) => {
+    validate(layout);
     current = layout;
+    conflict = undefined;
     publish();
     return layout;
   };
-  const load = async (signal?: AbortSignal) => {
+  const load = async (signal?: AbortSignal, adopt = true) => {
     const started = generation;
     const sequence = ++readSequence;
     let layout: ClientLayout;
@@ -158,16 +181,30 @@ export function createClientLayoutApi(
         await request(layoutPath, {}, signal)
       ).json()) as ClientLayout;
     } catch (error) {
-      if (!signal?.aborted) publish(error as AdminApiError);
+      if (
+        !signal?.aborted &&
+        started === generation &&
+        sequence >= acceptedRead
+      )
+        publish(error as AdminApiError);
       throw error;
     }
     if (signal?.aborted)
       throw new AdminApiError('Запрос отменён', { isAbort: true });
-    if (denied || lifetime.signal.aborted) return accept(layout);
-    if (current && (started !== generation || sequence < acceptedRead))
-      return current;
+    validate(layout);
+    if (current && started !== generation) return current;
+    if (current && sequence < acceptedRead)
+      return adopt && !pending && observedLayout
+        ? accept(observedLayout)
+        : current;
     acceptedRead = sequence;
-    return accept(layout);
+    observedLayout = layout;
+    if (!current || (adopt && !pending)) return accept(layout);
+    if (!pending && revisions(current) !== revisions(layout))
+      conflict ??= versionConflict();
+    current = { ...current, permissions: layout.permissions };
+    publish();
+    return current;
   };
   const hall = (id: string) => {
     const value = current?.halls.find((item) => item.id === id);
@@ -192,11 +229,13 @@ export function createClientLayoutApi(
       const layout = (await result.json()) as ClientLayout;
       pending = undefined;
       saving = false;
+      generation += 1;
       return accept(layout);
     } catch (error) {
       const normalized = error as AdminApiError;
       saving = false;
       if (normalized.status && normalized.status < 500) pending = undefined;
+      if (normalized.code === 'version_conflict') conflict = normalized;
       publish(normalized);
       throw normalized;
     }
@@ -214,6 +253,7 @@ export function createClientLayoutApi(
         status: 403,
         code: 'forbidden',
       });
+    if (conflict) throw conflict;
     const file = body instanceof File;
     pending = {
       path: base + path,
@@ -237,7 +277,7 @@ export function createClientLayoutApi(
   });
   const halls: ClubHallsApi<string> = {
     async listHalls(_id, signal) {
-      return (await load(signal)).halls.map(editorHall);
+      return (await load(signal, false)).halls.map(editorHall);
     },
     async createHall(_id, fields) {
       const previous = new Set(current?.halls.map((item) => item.id));
@@ -286,7 +326,7 @@ export function createClientLayoutApi(
   };
   const editor: HallEditorApi<string> = {
     async listHallTables(id, signal) {
-      await load(signal);
+      await load(signal, false);
       return hall(id).tables;
     },
     createHallTable: createOne,
@@ -313,15 +353,48 @@ export function createClientLayoutApi(
         hall(id).layoutRevision,
       );
     },
+    async removeHallPlan(id) {
+      return mutate('/halls/' + id + '/plan/remove', {
+        expectedVersion: hall(id).layoutRevision,
+      });
+    },
     async fetchHallPlanBlob(_club, id, _etag, signal) {
       // Metadata distinguishes an empty plan from a refused resource; a binary 404 always clears the scene.
-      await load(signal);
+      await load(signal, false);
       if (!hall(id).plan) return { status: 404 };
+      const started = generation;
       const response = await request(
         base + '/halls/' + id + '/plan',
         {},
         signal,
+        true,
       );
+      if (response.status === 404) {
+        // The plan can disappear between the fresh metadata and image requests.
+        // Confirm absence through a new authorized, same-hall metadata response.
+        try {
+          const latest = (await (
+            await request(layoutPath, {}, signal)
+          ).json()) as ClientLayout;
+          if (signal?.aborted)
+            throw new AdminApiError('Запрос отменён', { isAbort: true });
+          validate(latest);
+          if (latest.halls.find((item) => item.id === id)?.plan === null) {
+            if (started === generation) {
+              conflict ??= versionConflict();
+              publish();
+            }
+            return { status: 404 };
+          }
+        } catch (error) {
+          if (signal?.aborted || lifetime.signal.aborted) throw error;
+        }
+        deny();
+        throw new AdminApiError('Изображение недоступно.', {
+          status: 404,
+          code: 'not_found',
+        });
+      }
       const blob = await response.blob();
       if (denied || lifetime.signal.aborted || signal?.aborted)
         throw new AdminApiError('Запрос отменён', { isAbort: true });
@@ -333,47 +406,7 @@ export function createClientLayoutApi(
     editor,
     load,
     async revalidate() {
-      const started = generation;
-      const sequence = ++readSequence;
-      let layout: ClientLayout;
-      try {
-        layout = (await (await request(layoutPath)).json()) as ClientLayout;
-      } catch (error) {
-        publish(error as AdminApiError);
-        throw error;
-      }
-      if (
-        lifetime.signal.aborted ||
-        denied ||
-        sequence < acceptedRead ||
-        started !== generation
-      )
-        return;
-      acceptedRead = sequence;
-      if (
-        layout.clubId !== clubId ||
-        !layout.permissions.includes('client.club.read')
-      ) {
-        deny();
-        return;
-      }
-      if (!current || pending || saving) return;
-      const changedLayout =
-        JSON.stringify(
-          current.halls.map((item) => [item.id, item.layoutRevision]),
-        ) !==
-        JSON.stringify(
-          layout.halls.map((item) => [item.id, item.layoutRevision]),
-        );
-      current = { ...current, permissions: layout.permissions };
-      publish(
-        changedLayout
-          ? new AdminApiError(
-              'Схема изменена. Загрузите актуальные данные перед сохранением.',
-              { status: 409, code: 'version_conflict' },
-            )
-          : undefined,
-      );
+      await load(undefined, false);
     },
     async retry() {
       if (pending && !saving) return execute(pending);

@@ -60,6 +60,14 @@ internal class ClubLayoutPlans(
         }
     }
 
+    fun remove(
+        hallId: Long,
+        body: JsonObject,
+    ): Boolean {
+        body.only(listOf("hallId", "expectedVersion"))
+        return session.sql.update("DELETE FROM hall_plans WHERE hall_id=?", hallId) != 0
+    }
+
     private fun sanitized(
         source: ByteArray,
         contentType: String,

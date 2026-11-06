@@ -6,6 +6,7 @@ import {
   Field,
   RemoteState,
   Shell,
+  useTelegramClosingConfirmation,
   useUnsavedChanges,
 } from './OnboardingShared';
 import { ClubProfile as Profile } from './onboarding.types';
@@ -64,7 +65,9 @@ export default function ClubProfile({
   openBookingPreview?: () => void;
 }) {
   const path = '/api/client/clubs/' + id + '/profile';
-  const remote = useRemote<Profile>(credential, path);
+  const remote = useRemote<Profile>(credential, path, undefined, {
+    retainOnForeground: true,
+  });
   const command = useCommand<Profile>(credential);
   const [profile, setProfile] = useState<Profile>();
   const [fields, setFields] = useState<Fields>();
@@ -94,6 +97,7 @@ export default function ClubProfile({
       JSON.stringify(fields) !== JSON.stringify(fieldsOf(profile)),
   );
   const leave = useUnsavedChanges(dirty || command.unknown, reportDirty);
+  useTelegramClosingConfirmation(dirty || command.saving || command.unknown);
   const accept = (result: Profile) => {
     setProfile(result);
     setFields(fieldsOf(result));
@@ -127,7 +131,7 @@ export default function ClubProfile({
       backLabel="Организация и другие заведения"
     >
       <RemoteState {...remote} />
-      {profile && fields && !remote.loading && (
+      {profile && fields && !remote.loading && !remote.error && (
         <>
           <div className="po-context">
             <span>
