@@ -25,6 +25,7 @@ internal class CanonicalBookingH2Test {
             val oldHold = legacy.createHold(LEGACY, START, END, 2, TTL, "legacy-before-v071").success()
             assertEquals(1, flyway(source, "71").migrate().migrationsExecuted)
             assertEquals(1, flyway(source, "72").migrate().migrationsExecuted)
+            assertEquals(1, flyway(source, "73").migrate().migrationsExecuted)
             assertEquals(1, flyway(source).migrate().migrationsExecuted)
             flyway(source).validate()
             source.seedPhysicalTable()

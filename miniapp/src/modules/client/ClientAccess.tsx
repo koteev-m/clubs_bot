@@ -7,6 +7,8 @@ import ClubCalendar from './ClubCalendar';
 import ClubBookingRules from './ClubBookingRules';
 import GuestBookingPreview from './GuestBookingPreview';
 import ClubLayout from './ClubLayout';
+import ClubFinance from './ClubFinance';
+import ClubModules from './ClubModules';
 import { scrubClientLaunchUrl } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -33,6 +35,8 @@ type Screen =
   | { type: 'application'; id: string }
   | { type: 'club'; id: string }
   | { type: 'calendar'; id: string }
+  | { type: 'finance'; id: string }
+  | { type: 'modules'; id: string }
   | { type: 'booking-rules'; id: string }
   | { type: 'booking-preview'; id: string }
   | { type: 'layout'; id: string; hallId?: string }
@@ -55,8 +59,12 @@ function savedScreen(): Screen {
       ...(hallId && /^[1-9][0-9]*$/.test(hallId) ? { hallId } : {}),
     };
   }
-  if (params.get('screen') === 'booking-preview') return { type: 'booking-preview', id };
-  if (params.get('screen') === 'booking-rules') return { type: 'booking-rules', id };
+  if (params.get('screen') === 'booking-preview')
+    return { type: 'booking-preview', id };
+  if (params.get('screen') === 'booking-rules')
+    return { type: 'booking-rules', id };
+  if (params.get('screen') === 'finance') return { type: 'finance', id };
+  if (params.get('screen') === 'modules') return { type: 'modules', id };
   if (params.get('screen') === 'calendar') return { type: 'calendar', id };
   if (params.get('screen') === 'club') return { type: 'club', id };
   return { type: 'home' };
@@ -361,6 +369,19 @@ function ClientWorkspace({
         reportPending={reportSectionPending}
       />
     );
+  if (screen.type === 'finance' || screen.type === 'modules') {
+    const Component = screen.type === 'finance' ? ClubFinance : ClubModules;
+    return (
+      <Component
+        key={screen.type + ':' + screen.id}
+        credential={credential}
+        id={screen.id}
+        back={() => goBack({ type: 'club', id: screen.id })}
+        reportDirty={reportDirty}
+        reportPending={reportSectionPending}
+      />
+    );
+  }
   if (screen.type === 'calendar')
     return (
       <ClubCalendar
@@ -404,9 +425,15 @@ function ClientWorkspace({
         }
         reportDirty={reportDirty}
         openLayout={() => navigate({ type: 'layout', id: screen.id })}
+        openFinance={() => navigate({ type: 'finance', id: screen.id })}
+        openModules={() => navigate({ type: 'modules', id: screen.id })}
         openCalendar={() => navigate({ type: 'calendar', id: screen.id })}
-        openBookingRules={() => navigate({ type: 'booking-rules', id: screen.id })}
-        openBookingPreview={() => navigate({ type: 'booking-preview', id: screen.id })}
+        openBookingRules={() =>
+          navigate({ type: 'booking-rules', id: screen.id })
+        }
+        openBookingPreview={() =>
+          navigate({ type: 'booking-preview', id: screen.id })
+        }
       />
     );
   return (

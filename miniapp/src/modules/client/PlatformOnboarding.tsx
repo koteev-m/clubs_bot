@@ -974,6 +974,10 @@ const clubPermissionLabels: Record<string, string> = {
   'client.club.profile.write': 'редактирование профиля',
   'client.club.layout.write': 'редактирование залов и столов',
   'client.club.calendar.write': 'редактирование календаря клуба',
+  'client.club.finance.read': 'чтение финансового шаблона',
+  'client.club.finance.write': 'редактирование финансового шаблона',
+  'client.club.modules.read': 'чтение настроек модулей',
+  'client.club.modules.write': 'редактирование настроек модулей',
   [bookingRulesPermission]: 'редактирование правил бронирования',
 };
 

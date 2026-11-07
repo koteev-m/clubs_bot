@@ -9,6 +9,7 @@ import {
 } from './onboarding.types';
 import '../platform-owner/platform-owner.css';
 import './onboarding.css';
+import './client-theme.css';
 
 export function Shell({
   title,
@@ -77,7 +78,10 @@ export function Shell({
     };
   }, [hasBack, webApp]);
   return (
-    <div className="platform-owner" lang="ru">
+    <div
+      className={`platform-owner${owner ? '' : ' client-cabinet'}`}
+      lang="ru"
+    >
       <div className="po-container">
         <header className="po-header">
           <div className="po-brand">

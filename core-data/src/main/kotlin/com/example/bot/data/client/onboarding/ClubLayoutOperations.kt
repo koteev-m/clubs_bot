@@ -74,6 +74,7 @@ internal class ClubLayoutOperations(
         val clientId = session.requireClubGrant(clubId, WRITE_LAYOUT)
         session.calendarClub(clubId, lock = true)
         var tableIds = emptyList<Long>()
+        var zoneId: Long? = null
         var planRemoved: Boolean? = null
         val hallId =
             if (operation == OnboardingMutation.CLUB_HALL_CREATE) {
@@ -84,6 +85,10 @@ internal class ClubLayoutOperations(
                 if (body.id("expectedVersion") != hall.long("layout_revision")) fail("version_conflict")
                 when (operation) {
                     OnboardingMutation.CLUB_HALL_UPDATE -> updateHall(clubId, hallId, body)
+                    OnboardingMutation.CLUB_ZONE_CREATE, OnboardingMutation.CLUB_ZONE_UPDATE,
+                    OnboardingMutation.CLUB_ZONE_REMOVE,
+                    ->
+                        zoneId = ClubLayoutZones(session).mutate(hallId, operation, body)
                     OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_BATCH_CREATE ->
                         tableIds = ClubLayoutTables(session).create(clubId, hallId, operation, body)
                     OnboardingMutation.CLUB_TABLE_UPDATE ->
@@ -106,6 +111,9 @@ internal class ClubLayoutOperations(
             when (operation) {
                 OnboardingMutation.CLUB_HALL_CREATE -> "client.club.layout.hall.create"
                 OnboardingMutation.CLUB_HALL_UPDATE -> "client.club.layout.hall.update"
+                OnboardingMutation.CLUB_ZONE_CREATE -> "client.club.layout.zone.create"
+                OnboardingMutation.CLUB_ZONE_UPDATE -> "client.club.layout.zone.update"
+                OnboardingMutation.CLUB_ZONE_REMOVE -> "client.club.layout.zone.remove"
                 OnboardingMutation.CLUB_TABLE_CREATE -> "client.club.layout.table.create"
                 OnboardingMutation.CLUB_TABLE_BATCH_CREATE -> "client.club.layout.table.batch_create"
                 OnboardingMutation.CLUB_TABLE_UPDATE -> "client.club.layout.table.update"
@@ -123,6 +131,7 @@ internal class ClubLayoutOperations(
             buildJsonObject {
                 put("hallId", hallId.toString())
                 planRemoved?.let { put("removed", it) }
+                zoneId?.let { put("zoneId", it.toString()) }
                 tableIds.singleOrNull()?.let { put("tableId", it.toString()) }
                 if (tableIds.size > 1) put("tableIds", JsonArray(tableIds.map { JsonPrimitive(it.toString()) }))
             },

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import ClubZones from './ClubZones';
 import ClubHallsScreen from '../admin/pages/ClubHallsScreen';
 import HallEditorScreen from '../admin/pages/HallEditorScreen';
 import { mapAdminErrorMessage } from '../admin/utils/adminErrors';
@@ -33,6 +34,7 @@ export default function ClubLayout({
   const [denied, setDenied] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [dirty, setDirty] = useState(false);
+  const [zonesDirty, setZonesDirty] = useState(false);
   const childBack = useRef<(() => void) | null>(null);
   const navigation = useRef({ back, openHall });
   navigation.current = { back, openHall };
@@ -47,11 +49,11 @@ export default function ClubLayout({
     return () => reportPending(false);
   }, [state.saving, reportPending]);
   const leave = useUnsavedChanges(
-    dirty || state.pending || state.saving,
+    dirty || zonesDirty || state.pending || state.saving,
     reportDirty,
   );
   useTelegramClosingConfirmation(
-    !denied && (dirty || state.pending || state.saving),
+    !denied && (dirty || zonesDirty || state.pending || state.saving),
   );
   const receiveBack = useCallback((handler: (() => void) | null) => {
     childBack.current = handler;
@@ -73,6 +75,7 @@ export default function ClubLayout({
         back();
       return;
     }
+    if (zonesDirty && !leave()) return;
     if (childBack.current) childBack.current();
     else if (leave()) back();
   };
@@ -175,7 +178,8 @@ export default function ClubLayout({
                   void api
                     .retry()
                     .then((result) => {
-                      if (result) setRefresh((value) => value + 1);
+                      if (result?.refreshEditor)
+                        setRefresh((value) => value + 1);
                     })
                     .catch(() => undefined);
                 }}
@@ -211,21 +215,30 @@ export default function ClubLayout({
                 </p>
               )}
               {selectedHall ? (
-                <HallEditorScreen
-                  key={selectedHall.id + ':' + refresh}
-                  clubId={id}
-                  hallId={selectedHall.id}
-                  api={api.editor}
-                  clientMode
-                  savedPlan={Boolean(selectedHall.plan)}
-                  editBlockedReason={editBlocked}
-                  reservedTableLocations={tableLocations}
-                  previewOnly={!canWrite}
-                  readOnly={Boolean(editBlocked)}
-                  onBack={sectionBack}
-                  onBackReady={receiveBack}
-                  reportDirty={reportChildDirty}
-                />
+                <>
+                  <ClubZones
+                    key={'zones:' + id + ':' + selectedHall.id}
+                    hall={selectedHall}
+                    api={api.zones}
+                    blocked={Boolean(editBlocked)}
+                    reportDirty={setZonesDirty}
+                  />
+                  <HallEditorScreen
+                    key={selectedHall.id + ':' + refresh}
+                    clubId={id}
+                    hallId={selectedHall.id}
+                    api={api.editor}
+                    clientMode
+                    savedPlan={Boolean(selectedHall.plan)}
+                    editBlockedReason={editBlocked}
+                    reservedTableLocations={tableLocations}
+                    previewOnly={!canWrite}
+                    readOnly={Boolean(editBlocked)}
+                    onBack={sectionBack}
+                    onBackReady={receiveBack}
+                    reportDirty={reportChildDirty}
+                  />
+                </>
               ) : hallId ? (
                 <p className="po-notice" role="alert">
                   Этот зал недоступен. Вернитесь к списку залов.
