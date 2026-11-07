@@ -1,0 +1,99 @@
+/* Client surfaces follow the Telegram theme; platform administration keeps its palette. */
+.client-cabinet {
+  --ob-text: #f4f5ef;
+  --ob-label: #c9d3cf;
+  --ob-line: #72817b;
+  --ob-danger: #ffc5b6;
+  --ob-danger-line: #7c514b;
+  --ob-soft: #1e2a23;
+  --ob-disabled: #2e3b3d;
+  --ob-primary-text: #162019;
+  --ob-primary-hover: #e1ffa5;
+  color: var(--ob-text);
+}
+[data-theme="light"] .client-cabinet {
+  --po-bg: #f4f6f2;
+  --po-card: #ffffff;
+  --po-line: #c3cec5;
+  --po-muted: #4d6056;
+  --po-accent: #315e27;
+  --ob-text: #18271f;
+  --ob-label: #3d5146;
+  --ob-line: #738579;
+  --ob-danger: #972c20;
+  --ob-danger-line: #b35c50;
+  --ob-soft: #e7eee2;
+  --ob-disabled: #e1e7df;
+  --ob-primary-text: #ffffff;
+  --ob-primary-hover: #254c1d;
+  color-scheme: light;
+}
+.client-cabinet :is(.po-back, .po-brand-symbol span) {
+  color: var(--ob-text);
+}
+.client-cabinet :is(.po-stats dt, .po-stats dd, .po-nav button) {
+  color: var(--po-muted);
+}
+.client-cabinet .po-nav button[aria-current] {
+  color: var(--po-accent);
+}
+.client-cabinet :is(.po-context-badge, .po-icon) {
+  background: var(--ob-soft);
+  color: var(--po-accent);
+}
+.client-cabinet .po-primary {
+  color: var(--ob-primary-text);
+}
+.client-cabinet .po-primary:hover {
+  background: var(--ob-primary-hover);
+}
+.client-cabinet .po-notice {
+  border-color: var(--ob-line);
+  background: var(--ob-soft);
+}
+.client-cabinet :is(input, textarea, select) {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 16px;
+}
+.client-cabinet .ob-field {
+  min-width: 0;
+}
+.client-cabinet select {
+  appearance: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 46px;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%23738579' stroke-width='2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.client-cabinet ::placeholder {
+  color: var(--po-muted);
+  opacity: 1;
+}
+.client-cabinet .client-layout .club-table-creation {
+  color-scheme: inherit;
+  color: var(--ob-text);
+  background: var(--po-card);
+}
+.client-cabinet
+  .client-layout
+  .club-table-creation
+  :is(input, select, textarea, option) {
+  color: var(--ob-text);
+  background-color: var(--po-bg);
+  border-color: var(--ob-line);
+}
+.client-cabinet .client-layout .club-table-creation ::placeholder {
+  color: var(--po-muted);
+}
+.client-cabinet .client-layout .club-table-creation [role="alert"] {
+  color: var(--ob-danger);
+}
+.client-cabinet .client-layout .club-table-creation :disabled {
+  color: var(--po-muted);
+  background-color: var(--ob-disabled);
+}

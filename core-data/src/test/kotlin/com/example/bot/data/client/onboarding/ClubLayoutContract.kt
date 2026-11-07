@@ -557,7 +557,7 @@ internal abstract class ClubLayoutContract : ClubLayoutMigrationContract() {
             ) { command(club, OnboardingMutation.CLUB_TABLE_CREATE, tableBody(layout(club).firstHall())) }
         }
 
-    private suspend fun command(
+    protected suspend fun command(
         club: JsonObject,
         operation: OnboardingMutation,
         body: JsonObject,
@@ -598,7 +598,7 @@ internal abstract class ClubLayoutContract : ClubLayoutMigrationContract() {
         },
     )
 
-    private fun name() = buildJsonObject { put("name", "Основной") }
+    protected fun name() = buildJsonObject { put("name", "Основной") }
 
     protected fun JsonObject.firstHall() = getValue("halls").jsonArray.first().jsonObject
 
@@ -640,7 +640,7 @@ internal abstract class ClubLayoutContract : ClubLayoutMigrationContract() {
             output.toByteArray()
         }
 
-    private fun layoutState() =
+    protected fun layoutState() =
         listOf("halls", "hall_zones", "hall_tables", "hall_plans", "client_commands", "audit_log").associateWith {
             fixture.rows("SELECT * FROM $it ORDER BY 1")
         }

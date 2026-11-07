@@ -75,6 +75,10 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     post("/applications/{id}/submit") { api.mutate(call, OnboardingMutation.APPLICATION_SUBMIT, "id") }
     post("/applications/{id}/cancel") { api.mutate(call, OnboardingMutation.APPLICATION_CANCEL, "id") }
     post("/applications/{id}/club") { api.mutate(call, OnboardingMutation.APPLICATION_CREATE_CLUB, "id") }
+    get("/clubs/{id}/modules-settings") { api.read(call, OnboardingRead.CLUB_MODULE_SETTINGS_GET, "id") }
+    patch("/clubs/{id}/modules-settings") { api.mutate(call, OnboardingMutation.CLUB_MODULE_SETTINGS_UPDATE, "id") }
+    get("/clubs/{id}/finance/template") { api.read(call, OnboardingRead.CLUB_FINANCE_GET, "id") }
+    post("/clubs/{id}/finance/template") { api.mutate(call, OnboardingMutation.CLUB_FINANCE_UPDATE, "id") }
     get("/clubs/{id}/booking-rules") { api.read(call, OnboardingRead.CLUB_BOOKING_RULES_GET, "id") }
     patch("/clubs/{id}/booking-rules") { api.mutate(call, OnboardingMutation.CLUB_BOOKING_RULES_UPDATE, "id") }
     get("/clubs/{id}/calendar") { api.read(call, OnboardingRead.CLUB_CALENDAR_GET, "id") }
@@ -250,6 +254,7 @@ private val conflictCodes =
         ErrorCodes.idempotency_conflict,
         ErrorCodes.DUPLICATE_APPLICATION,
         "client_not_empty",
+        "finance_group_in_use",
         "calendar_night_dependencies",
         "calendar_night_started",
         "calendar_night_invalid",

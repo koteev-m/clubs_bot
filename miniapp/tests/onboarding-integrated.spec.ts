@@ -1,4 +1,11 @@
-import { expect, test, APIRequestContext, Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  APIRequestContext,
+  Page,
+  Locator,
+} from "@playwright/test";
+import { contrast, telegramTheme } from "./telegram-theme";
 
 async function identity(
   request: APIRequestContext,
@@ -393,7 +400,7 @@ test("lost committed invitation response replays one client and requires explici
   await recipient.close();
 });
 
-test("cabinet layout creates and renames halls, uploads a plan, saves tables and clears revoked access", async ({
+test("cabinet layout zones finance modules persist and clear revoked access", async ({
   browser,
   request,
   baseURL,
@@ -470,8 +477,12 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   await expect(clubProfile.or(clubButton)).toBeVisible();
   if (await clubButton.isVisible()) await clubButton.click();
   const setup = page.getByRole("region", { name: "Подготовка клуба" });
-  await expect(setup.getByText("Добавьте зал и загрузите его схему.")).toBeVisible();
-  await expect(setup.getByText("Сформировано ближайших ночей: 0 из 0.")).toBeVisible();
+  await expect(
+    setup.getByText("Добавьте зал и загрузите его схему."),
+  ).toBeVisible();
+  await expect(
+    setup.getByText("Сформировано ближайших ночей: 0 из 0."),
+  ).toBeVisible();
   await setup.getByRole("button", { name: "Залы и столы" }).click();
   await expect(page.getByLabel("JSON схемы")).toHaveCount(0);
   await page.getByLabel("Название", { exact: true }).fill("Основной зал");
@@ -513,8 +524,90 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   await expect(page.getByLabel("Номер", { exact: true })).toHaveValue("1");
   await page.getByLabel("Название", { exact: true }).fill("У окна");
   await page.getByLabel("Вместимость").fill("6");
-  await page.getByRole("button", { name: "Сохранить и завершить", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Сохранить и завершить", exact: true })
+    .click();
   await expect(page.getByRole("button", { name: "#1 · У окна" })).toBeVisible();
+  const zones = page.getByRole("region", { name: "Зоны зала" });
+  await zones.getByLabel("Новая зона").fill("Балкон");
+  await zones.getByRole("button", { name: "Добавить зону" }).click();
+  await expect(zones.getByLabel("Название зоны «Балкон»")).toBeVisible();
+  await zones.getByLabel("Название зоны «Балкон»").fill("Терраса");
+  await zones
+    .locator("form")
+    .filter({ has: page.getByLabel("Название зоны «Балкон»") })
+    .getByRole("button", { name: "Сохранить название зоны" })
+    .click();
+  await expect(zones.getByLabel("Название зоны «Терраса»")).toHaveValue(
+    "Терраса",
+  );
+  await zones
+    .getByLabel("Зона стола 1 · У окна")
+    .selectOption({ label: "Терраса" });
+  const draftZone = zones.getByLabel(/^Название зоны/).first();
+  const originalZoneName = await draftZone.inputValue();
+  const draftZoneForm = zones.locator("form").filter({
+    has: page.getByLabel("Название зоны «" + originalZoneName + "»", { exact: true }),
+  });
+  await draftZone.fill("Несохранённая зона A");
+  const zoneCommands: { key: string | undefined; body: string | null }[] = [];
+  await page.route(
+    "**/api/client/clubs/" + profile.id + "/halls/*/zones",
+    async (route) => {
+      zoneCommands.push({
+        key: route.request().headers()["idempotency-key"],
+        body: route.request().postData(),
+      });
+      if (zoneCommands.length === 1) {
+        const committed = await route.fetch();
+        expect(committed.ok()).toBe(true);
+        return route.abort();
+      }
+      return route.continue();
+    },
+  );
+  await zones.getByLabel("Новая зона").fill("Зона B после повтора");
+  await zones.getByRole("button", { name: "Добавить зону" }).click();
+  await page.getByRole("button", { name: "Повторить ту же операцию" }).click();
+  await expect(
+    zones.getByLabel("Название зоны «Зона B после повтора»"),
+  ).toBeVisible();
+  await expect(draftZone).toHaveValue("Несохранённая зона A");
+  await expect(
+    zones.getByLabel("Зона стола 1 · У окна").locator("option:checked"),
+  ).toHaveText("Терраса");
+  await expect(zones.getByLabel("Новая зона")).toHaveValue("");
+  await expect(draftZoneForm.getByRole("status")).toHaveCount(0);
+  expect(zoneCommands).toHaveLength(2);
+  expect(zoneCommands[1]).toEqual(zoneCommands[0]);
+  await draftZoneForm
+    .getByRole("button", { name: "Отменить изменения" })
+    .click();
+  await expect(draftZone).toHaveValue(originalZoneName);
+  // The other draft still has its pre-B version; rereading does not rebase it.
+  await zones.getByRole("button", { name: "Сохранить зону стола 1" }).click();
+  const assignment = zones
+    .locator("form")
+    .filter({ has: page.getByLabel("Зона стола 1 · У окна") });
+  await expect(assignment.getByRole("alert")).toContainText("Зал изменён");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Загрузить актуальные данные" })
+    .click();
+  await expect(
+    zones.getByLabel("Зона стола 1 · У окна").locator("option:checked"),
+  ).toHaveText("Терраса");
+  await assignment.getByRole("button", { name: "Отменить изменения" }).click();
+  await zones
+    .getByLabel("Зона стола 1 · У окна")
+    .selectOption({ label: "Терраса" });
+  await zones.getByRole("button", { name: "Сохранить зону стола 1" }).click();
+  await expect(
+    zones.getByRole("button", { name: "Сохранить зону стола 1" }),
+  ).toBeDisabled();
+  await expect(
+    zones.getByRole("button", { name: "Удалить зону «Терраса»" }),
+  ).toBeDisabled();
   const layoutPath = "/api/client/clubs/" + profile.id + "/layout";
   const originalLayout = await (
     await request.get(layoutPath, {
@@ -665,6 +758,165 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   await page.getByRole("button", { name: "Залы и столы", exact: true }).click();
   await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
   await expect(image).toBeVisible();
+  await expect(zones.getByLabel("Название зоны «Терраса»")).toHaveValue(
+    "Терраса",
+  );
+  const zoneSelection = await zones
+    .getByLabel("Зона стола 1 · У окна")
+    .inputValue();
+  expect(zoneSelection).toBe(before.halls[0].tables[0].zoneId);
+  await nativeBack();
+  await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await setup
+    .getByRole("button", { name: "Финансовые настройки", exact: true })
+    .click();
+  const bracelets = page.getByRole("region", { name: "Типы браслетов" });
+  const categories = page.getByRole("region", { name: "Категории выручки" });
+  const articles = page.getByRole("region", { name: "Статьи выручки" });
+  await bracelets
+    .getByRole("button", { name: "Добавить тип браслета" })
+    .click();
+  await bracelets
+    .getByLabel("Название", { exact: true })
+    .fill("Браслет владельца");
+  await bracelets.getByLabel("Порядок отображения").fill("2");
+  await bracelets.getByRole("button", { name: "Сохранить настройку" }).click();
+  await expect(
+    bracelets.getByRole("heading", { name: "Браслет владельца" }),
+  ).toBeVisible();
+  await categories
+    .getByRole("button", { name: "Добавить категорию", exact: true })
+    .click();
+  await categories.getByLabel("Название", { exact: true }).fill("Услуги клуба");
+  await categories.getByRole("button", { name: "Сохранить настройку" }).click();
+  await expect(
+    categories.getByRole("heading", { name: "Услуги клуба" }),
+  ).toBeVisible();
+  await articles
+    .getByRole("button", { name: "Добавить статью", exact: true })
+    .click();
+  await articles.getByLabel("Название", { exact: true }).fill("Входные билеты");
+  await articles
+    .getByLabel("Категория выручки")
+    .selectOption({ label: "Услуги клуба" });
+  await articles.getByLabel("Включать в общую выручку").check();
+  await articles.getByLabel("Показывать отдельно").check();
+  const captureConfiguration = async (name: string, control: Locator) => {
+    for (const colorScheme of ["light", "dark"] as const) {
+      await telegramTheme(page, colorScheme);
+      await control.scrollIntoViewIfNeeded();
+      await expect(control).toBeVisible();
+      expect(await contrast(control)).toBeGreaterThanOrEqual(4.5);
+      expect(
+        await contrast(page.locator(".client-cabinet")),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: test.info().outputPath(`owner-config-${name}-${colorScheme}.png`),
+      });
+    }
+  };
+  for (const colorScheme of ["light", "dark"] as const) {
+    await telegramTheme(page, colorScheme);
+    const category = articles.getByLabel("Категория выручки");
+    expect((await category.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await contrast(category)).toBeGreaterThanOrEqual(4.5);
+  }
+  await captureConfiguration(
+    "finance",
+    articles.getByRole("button", { name: "Сохранить настройку" }),
+  );
+  await articles.getByRole("button", { name: "Сохранить настройку" }).click();
+  await expect(
+    articles.getByText(/Входит в общую выручку.*Показывается отдельно/),
+  ).toBeVisible();
+  await nativeBack();
+  await setup
+    .getByRole("button", { name: "Финансовые настройки", exact: true })
+    .click();
+  await expect(
+    bracelets.getByRole("heading", { name: "Браслет владельца" }),
+  ).toBeVisible();
+  await articles
+    .getByRole("button", { name: "Изменить Входные билеты" })
+    .click();
+  await expect(
+    articles.getByLabel("Категория выручки").locator("option:checked"),
+  ).toHaveText("Услуги клуба");
+  await expect(articles.getByLabel("Включать в общую выручку")).toBeChecked();
+  await expect(articles.getByLabel("Показывать отдельно")).toBeChecked();
+  await articles.getByRole("button", { name: "Отменить изменения" }).click();
+  await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await setup
+    .getByRole("button", { name: "Настройки модулей", exact: true })
+    .click();
+  await page.getByLabel("Ранний приход · минут после начала ночи").fill("180");
+  await captureConfiguration(
+    "modules",
+    page.getByRole("button", { name: "Сохранить правило" }),
+  );
+  await page.getByRole("button", { name: "Сохранить правило" }).click();
+  await expect(
+    page.getByText("Сохранено: 180 мин после начала ночи."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Музыка", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Нет настройки включения музыки для клуба/),
+  ).toBeVisible();
+  await nativeBack();
+  await setup
+    .getByRole("button", { name: "Настройки модулей", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Ранний приход · минут после начала ночи"),
+  ).toHaveValue("180");
+  await page
+    .getByRole("button", { name: "Назад к клубу", exact: true })
+    .click();
+  await expect(
+    setup.getByText(/типов браслетов 1, категорий 1, статей 1/),
+  ).toBeVisible();
+  await expect(
+    setup.getByText(
+      "Настройки доступны в закрытом кабинете. Гостевое бронирование выключено.",
+    ),
+  ).toBeVisible();
+  for (const colorScheme of ["light", "dark"] as const) {
+    await telegramTheme(page, colorScheme);
+    await setup
+      .getByRole("heading", { name: "Финансовый шаблон", exact: true })
+      .scrollIntoViewIfNeeded();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath(`owner-config-setup-${colorScheme}.png`),
+      fullPage: true,
+    });
+  }
+  expect(paths.some((path) => path.startsWith("/api/admin/"))).toBe(false);
+  for (const suffix of ["/finance/template", "/modules-settings"]) {
+    const foreignConfig = await request.get(
+      `/api/client/clubs/${profile.id}${suffix}`,
+      {
+        headers: { "X-Telegram-Init-Data": foreignCredential },
+      },
+    );
+    expect(foreignConfig.status()).toBe(404);
+  }
+  await setup
+    .getByRole("button", { name: "Залы и столы", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
   const foreign = await request.get(layoutPath, {
     headers: { "X-Telegram-Init-Data": foreignCredential },
   });

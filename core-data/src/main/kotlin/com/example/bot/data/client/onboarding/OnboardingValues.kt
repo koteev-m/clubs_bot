@@ -15,6 +15,10 @@ internal typealias DbRow = Map<String, String?>
 
 internal const val MANAGE = "client.application.manage"
 internal const val READ_CLUB = "client.club.read"
+internal const val READ_MODULES = "client.club.modules.read"
+internal const val WRITE_MODULES = "client.club.modules.write"
+internal const val READ_FINANCE = "client.club.finance.read"
+internal const val WRITE_FINANCE = "client.club.finance.write"
 internal const val WRITE_PROFILE = "client.club.profile.write"
 internal const val WRITE_LAYOUT = "client.club.layout.write"
 internal const val WRITE_CALENDAR = "client.club.calendar.write"

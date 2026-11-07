@@ -41,6 +41,116 @@ import kotlin.test.assertTrue
 
 class ClientLayoutRoutesDataTest {
     @Test
+    fun `zone routes persist rename assignment and enforce identity version and safe removal`() =
+        database { source ->
+            lateinit var club: String
+            lateinit var zone: String
+            lateinit var path: String
+            lateinit var saved: JsonObject
+            withApp(source) {
+                club = createClub(RECIPIENT, "Zones")
+                var hall = ok("$C/clubs/$club/halls", RECIPIENT, obj("name" to "Зал")).hall()
+                path = "$C/clubs/$club/halls/${hall.string("id")}"
+                val create = obj("name" to "Балкон", "expectedVersion" to hall.version())
+                requestAs("$path/zones", FOREIGN, create).assertClientError(HttpStatusCode.NotFound, "not_found")
+                requestAs("$path/zones", OWNER, create).assertClientError(HttpStatusCode.NotFound, "not_found")
+                val created = ok("$path/zones", RECIPIENT, create, key = "zones-create-replay")
+                assertEquals(created, ok("$path/zones", RECIPIENT, create, key = "zones-create-replay"))
+                hall = created.hall()
+                zone =
+                    hall
+                        .getValue("zones")
+                        .jsonArray
+                        .last()
+                        .jsonObject
+                        .string("id")
+                requestAs(
+                    "$path/zones",
+                    RECIPIENT,
+                    create,
+                ).assertClientError(HttpStatusCode.Conflict, "version_conflict")
+                requestAs(
+                    "$path/zones/$zone",
+                    RECIPIENT,
+                    obj("name" to "Подмена", "expectedVersion" to hall.version(), "zoneId" to zone),
+                    HttpMethod.Patch,
+                ).assertClientError(HttpStatusCode.BadRequest, "validation_error")
+                hall =
+                    ok(
+                        "$path/zones/$zone",
+                        RECIPIENT,
+                        obj("name" to "Терраса", "expectedVersion" to hall.version()),
+                        HttpMethod.Patch,
+                    ).hall()
+                hall =
+                    ok(
+                        "$path/tables",
+                        RECIPIENT,
+                        JsonObject(
+                            obj("expectedVersion" to hall.version(), "label" to "Стол 8") +
+                                mapOf(
+                                    "tableNumber" to JsonPrimitive(8),
+                                    "capacity" to JsonPrimitive(4),
+                                    "x" to JsonPrimitive(0.2),
+                                    "y" to JsonPrimitive(0.3),
+                                ),
+                        ),
+                    ).hall()
+                val table =
+                    hall
+                        .getValue("tables")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                saved =
+                    ok(
+                        "$path/tables/${table.string("id")}",
+                        RECIPIENT,
+                        obj("zoneId" to zone, "expectedVersion" to hall.version()),
+                        HttpMethod.Patch,
+                    )
+                val assigned =
+                    saved
+                        .hall()
+                        .getValue("tables")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                assertEquals(JsonObject(table - "zoneId"), JsonObject(assigned - "zoneId"))
+                assertEquals(zone, assigned.string("zoneId"))
+                requestAs("$path/zones/$zone/remove", RECIPIENT, obj("expectedVersion" to saved.hall().version()))
+                    .assertClientError(HttpStatusCode.Conflict, "zone_in_use")
+            }
+            withApp(source) {
+                assertEquals(saved, ok("$C/clubs/$club/layout", RECIPIENT))
+                assertEquals(
+                    "Терраса",
+                    saved
+                        .hall()
+                        .getValue("zones")
+                        .jsonArray
+                        .last()
+                        .jsonObject
+                        .string("name"),
+                )
+                source.sql(
+                    "UPDATE client_club_grants SET is_active=FALSE WHERE permission_code='client.club.layout.write'",
+                )
+                requestAs(
+                    "$path/zones/$zone",
+                    RECIPIENT,
+                    obj(
+                        "name" to "Denied",
+                        "expectedVersion" to saved.hall().version(),
+                    ),
+                    HttpMethod.Patch,
+                ).assertClientError(HttpStatusCode.NotFound, "not_found")
+                source.sql("UPDATE client_memberships SET is_active=FALSE")
+                requestAs("$C/clubs/$club/layout", RECIPIENT).assertClientError(HttpStatusCode.NotFound, "not_found")
+            }
+        }
+
+    @Test
     fun `same club hall endpoints return independent PNG JPEG and empty plans after restart`() =
         database { source ->
             lateinit var club: String

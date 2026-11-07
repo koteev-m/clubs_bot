@@ -53,6 +53,8 @@ type Props = {
   home: (clientId?: string) => void;
   reportDirty: (dirty: boolean) => void;
   openLayout?: () => void;
+  openFinance?: () => void;
+  openModules?: () => void;
   openCalendar?: () => void;
   openBookingRules?: () => void;
   openBookingPreview?: () => void;
@@ -70,6 +72,8 @@ function ClubProfileEditor({
   home,
   reportDirty,
   openLayout,
+  openFinance,
+  openModules,
   openCalendar,
   openBookingRules,
   openBookingPreview,
@@ -278,6 +282,18 @@ function ClubProfileEditor({
                 profile={profile}
                 openProfile={
                   canWrite ? () => profileFields.current?.focus() : undefined
+                }
+                openFinance={
+                  openFinance &&
+                  (() => {
+                    if (leave()) openFinance();
+                  })
+                }
+                openModules={
+                  openModules &&
+                  (() => {
+                    if (leave()) openModules();
+                  })
                 }
                 openLayout={
                   openLayout &&

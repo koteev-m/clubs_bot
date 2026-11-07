@@ -60,6 +60,160 @@ afterEach(() => {
 });
 
 describe('client layout adapter', () => {
+  it.each([false, true])(
+    'write-only revoke fences late zone success and stale reads, restoration=%s',
+    async (restore) => {
+      const writeResponse = deferred<Response>();
+      const oldRead = deferred<Response>();
+      const states: LayoutState[] = [];
+      const fetch = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(json(data('5')))
+        .mockImplementationOnce(() => writeResponse.promise)
+        .mockImplementationOnce(() => oldRead.promise)
+        .mockResolvedValueOnce(
+          json({ ...data('4'), permissions: ['client.club.read'] }),
+        );
+      const api = createClientLayoutApi(
+        'signed-client',
+        club,
+        (state) => states.push(state),
+        vi.fn(),
+      );
+      await api.load();
+      const confirmed = vi.fn();
+      const write = api.zones.create(hall, 'Балкон', '5', confirmed);
+      const olderRead = api.revalidate();
+      await api.revalidate();
+      expect(states.at(-1)?.layout?.permissions).toEqual(['client.club.read']);
+      expect(states.at(-1)?.layout?.halls[0].layoutRevision).toBe('5');
+      expect(states.at(-1)?.pending).toBe(true);
+      if (restore) {
+        fetch.mockResolvedValueOnce(json(data('6')));
+        await api.revalidate();
+      }
+      writeResponse.resolve(
+        json({
+          ...data('7'),
+          halls: [{ ...data('7').halls[0], name: 'Forbidden late result' }],
+        }),
+      );
+      await expect(write).rejects.toMatchObject({ code: 'authority_changed' });
+      oldRead.resolve(json(data('99')));
+      await olderRead;
+      expect(states.at(-1)?.layout?.halls[0].layoutRevision).toBe('5');
+      expect(states.at(-1)?.layout?.halls[0].name).toBe('Основной зал');
+      expect(
+        states.at(-1)?.layout?.permissions.includes('client.club.layout.write'),
+      ).toBe(restore);
+      expect(states.at(-1)?.pending).toBe(false);
+      expect(confirmed).not.toHaveBeenCalled();
+      api.dispose();
+    },
+  );
+
+  it('write-only revoke retains unknown zone intent for exact idempotent replay', async () => {
+    let failWrite!: (error: Error) => void;
+    const unknown = new Promise<Response>((_resolve, reject) => {
+      failWrite = reject;
+    });
+    const states: LayoutState[] = [];
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json(data()))
+      .mockImplementationOnce(() => unknown)
+      .mockResolvedValueOnce(
+        json({ ...data(), permissions: ['client.club.read'] }),
+      );
+    const api = createClientLayoutApi(
+      'signed-client',
+      club,
+      (state) => states.push(state),
+      vi.fn(),
+    );
+    await api.load();
+    const write = api.zones.create(hall, 'Балкон', '1');
+    await api.revalidate();
+    failWrite(new Error('lost after authority changed'));
+    await expect(write).rejects.toMatchObject({ code: 'unknown_outcome' });
+    expect(states.at(-1)?.pending).toBe(true);
+    fetch.mockResolvedValueOnce(json(data()));
+    await api.revalidate();
+    fetch.mockResolvedValueOnce(json(data('2')));
+    await api.retry();
+    expect(fetch.mock.calls[4][1]?.body).toBe(fetch.mock.calls[1][1]?.body);
+    expect(fetch.mock.calls[4][1]?.headers).toEqual(
+      fetch.mock.calls[1][1]?.headers,
+    );
+    expect(states.at(-1)?.pending).toBe(false);
+    api.dispose();
+  });
+
+  it('zone commands retain the exact unknown intent and idempotency key on retry', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json(data()))
+      .mockRejectedValueOnce(new Error('lost response'))
+      .mockResolvedValueOnce(json(data('2')));
+    const api = createClientLayoutApi('signed-client', club, vi.fn(), vi.fn());
+    await api.load();
+    const confirmed = vi.fn();
+    await expect(
+      api.zones.create(hall, 'Балкон', '1', confirmed),
+    ).rejects.toMatchObject({
+      code: 'unknown_outcome',
+    });
+    expect(confirmed).not.toHaveBeenCalled();
+    expect((await api.retry())?.refreshEditor).toBe(false);
+    expect(confirmed).toHaveBeenCalledTimes(1);
+    await api.retry();
+    expect(confirmed).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[1][0]).toBe(
+      '/api/client/clubs/' + club + '/halls/' + hall + '/zones',
+    );
+    expect(fetch.mock.calls[1][1]?.body).toBe(fetch.mock.calls[2][1]?.body);
+    expect(fetch.mock.calls[1][1]?.headers).toEqual(
+      fetch.mock.calls[2][1]?.headers,
+    );
+    expect(JSON.parse(String(fetch.mock.calls[1][1]?.body))).toEqual({
+      name: 'Балкон',
+      expectedVersion: '1',
+    });
+    api.dispose();
+  });
+
+  it('zone assignment uses exact table and zone strings and cannot resurrect revoked state', async () => {
+    const late = deferred<Response>();
+    const changed = vi.fn();
+    const lost = vi.fn();
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json(data()))
+      .mockImplementationOnce(() => late.promise)
+      .mockResolvedValueOnce(json({ code: 'not_found' }, 404));
+    const api = createClientLayoutApi('signed-client', club, changed, lost);
+    await api.load();
+    const confirmed = vi.fn();
+    const write = api.zones.assign(
+      hall,
+      table,
+      '9007199254740999',
+      '1',
+      confirmed,
+    );
+    await expect(api.revalidate()).rejects.toMatchObject({ status: 404 });
+    late.resolve(json(data('2')));
+    await expect(write).rejects.toBeDefined();
+    expect(JSON.parse(String(fetch.mock.calls[1][1]?.body))).toEqual({
+      zoneId: '9007199254740999',
+      expectedVersion: '1',
+    });
+    expect(lost).toHaveBeenCalledOnce();
+    expect(confirmed).not.toHaveBeenCalled();
+    expect(changed.mock.calls.at(-1)?.[0].layout).toBeUndefined();
+    api.dispose();
+  });
+
   it('preserves BIGINT IDs, exact paths and optimistic revision for table edits', async () => {
     const fetch = vi
       .spyOn(globalThis, 'fetch')
@@ -127,7 +281,9 @@ describe('client layout adapter', () => {
       .mockResolvedValueOnce(json(data()))
       .mockResolvedValueOnce(json(data('2')));
     const api = createClientLayoutApi('signed-client', club, vi.fn(), vi.fn());
-    const file = new File(['synthetic png'], 'plan.png', { type: 'image/png' });
+    const file = new File(['synthetic png'], 'plan.png', {
+      type: 'image/png',
+    });
     await api.load();
     await api.editor.uploadHallPlan(hall, file);
     expect(fetch.mock.calls[1][0]).toBe(

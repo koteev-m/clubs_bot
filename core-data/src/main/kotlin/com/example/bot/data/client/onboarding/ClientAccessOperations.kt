@@ -272,7 +272,16 @@ internal class ClientAccessOperations(
                 val clubId = grant.id("clubId")
                 val permission = grant.string("permission")
                 if (permission !in
-                    setOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT, WRITE_CALENDAR)
+                    setOf(
+                        READ_CLUB,
+                        WRITE_PROFILE,
+                        WRITE_LAYOUT,
+                        WRITE_CALENDAR,
+                        READ_FINANCE,
+                        WRITE_FINANCE,
+                        READ_MODULES,
+                        WRITE_MODULES,
+                    )
                 ) {
                     fail("validation_error")
                 }
