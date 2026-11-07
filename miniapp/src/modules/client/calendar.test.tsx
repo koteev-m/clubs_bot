@@ -166,3 +166,127 @@ it('shows the blocked business date and keeps the draft when dependencies preven
   expect(openingDay.value).toBe('next');
   expect(screen.queryByText('Сохранено')).toBeNull();
 });
+
+it('explains inherited dated hours without contradicting the saved overnight preview on reopen', async () => {
+  let saved: CalendarView = {
+    ...base,
+    weekly: [
+      {
+        ...friday,
+        open: '00:00',
+        close: '12:00',
+        startNextDay: true,
+        nextDay: false,
+      },
+    ],
+    holidays: [
+      {
+        date: '2026-11-06',
+        mode: 'open',
+        open: null,
+        close: null,
+        nextDay: false,
+      },
+    ],
+    nights: [
+      {
+        businessDate: '2026-11-06',
+        nightId: '100',
+        source: 'HOLIDAY',
+        opensAt: '2026-11-07T00:00+00:00',
+        closesAt: '2026-11-07T12:00+00:00',
+      },
+    ],
+  };
+  const writes: Record<string, unknown>[] = [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_, request) => {
+    if (request?.method === 'PATCH') {
+      const body = JSON.parse(String(request.body));
+      writes.push(body);
+      saved = {
+        ...saved,
+        version: '2',
+        holidays: body.holidays,
+        nights: [
+          {
+            ...saved.nights[0],
+            opensAt: '2026-11-06T00:00+00:00',
+            closesAt: '2026-11-06T12:00+00:00',
+          },
+        ],
+      };
+    }
+    return reply(saved);
+  });
+  const check = async () => {
+    const holiday = within(
+      await screen.findByRole('group', { name: '06.11.2026' }),
+    );
+    expect(holiday.getByText(/сервер берёт их из расписания/)).toBeTruthy();
+    expect(holiday.queryByText(/Дата вечеринки:/)).toBeNull();
+    const opening = holiday.getByLabelText<HTMLSelectElement>(
+      'Когда открываемся относительно дня вечеринки',
+    );
+    expect(opening.value).toBe('schedule');
+    expect(screen.getByText(/07.11.2026 00:00/)).toBeTruthy();
+    expect(screen.getByText(/07.11.2026 12:00/)).toBeTruthy();
+  };
+  const first = mount();
+  await check();
+  first.unmount();
+  const reopened = mount();
+  await check();
+  const holiday = within(screen.getByRole('group', { name: '06.11.2026' }));
+  fireEvent.change(holiday.getByLabelText('Время открытия'), {
+    target: { value: '00:00' },
+  });
+  fireEvent.change(holiday.getByLabelText('Время закрытия'), {
+    target: { value: '12:00' },
+  });
+  expect(
+    holiday.getByLabelText<HTMLSelectElement>(
+      'Когда открываемся относительно дня вечеринки',
+    ).value,
+  ).toBe('schedule');
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить расписание' }));
+  await screen.findByText(
+    'Выберите день открытия для правила с собственными часами.',
+  );
+  expect(writes).toHaveLength(0);
+  fireEvent.change(
+    holiday.getByLabelText('Когда открываемся относительно дня вечеринки'),
+    {
+      target: { value: 'same' },
+    },
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Сохранить расписание' }));
+  await screen.findByText('Сохранено');
+  expect(writes).toEqual([
+    {
+      expectedVersion: '1',
+      timezone: base.timezone,
+      weekly: [],
+      exceptions: [],
+      holidays: [
+        {
+          date: '2026-11-06',
+          mode: 'open',
+          open: '00:00',
+          close: '12:00',
+          nextDay: false,
+        },
+      ],
+    },
+  ]);
+  reopened.unmount();
+  mount();
+  const own = within(await screen.findByRole('group', { name: '06.11.2026' }));
+  expect(
+    own.getByLabelText<HTMLSelectElement>(
+      'Когда открываемся относительно дня вечеринки',
+    ).value,
+  ).toBe('same');
+  expect(own.getByLabelText<HTMLInputElement>('Время открытия').value).toBe(
+    '00:00',
+  );
+});

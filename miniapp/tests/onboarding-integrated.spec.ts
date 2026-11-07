@@ -469,7 +469,10 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   });
   await expect(clubProfile.or(clubButton)).toBeVisible();
   if (await clubButton.isVisible()) await clubButton.click();
-  await page.getByRole("button", { name: /Залы и столы/ }).click();
+  const setup = page.getByRole("region", { name: "Подготовка клуба" });
+  await expect(setup.getByText("Добавьте зал и загрузите его схему.")).toBeVisible();
+  await expect(setup.getByText("Сформировано ближайших ночей: 0 из 0.")).toBeVisible();
+  await setup.getByRole("button", { name: "Залы и столы" }).click();
   await expect(page.getByLabel("JSON схемы")).toHaveCount(0);
   await page.getByLabel("Название", { exact: true }).fill("Основной зал");
   await page.getByRole("button", { name: "Создать", exact: true }).click();
@@ -477,7 +480,10 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   await page
     .getByRole("button", { name: "Редактировать", exact: true })
     .click();
-  await page.getByLabel("Название", { exact: true }).fill("Первый зал");
+  const rename = page.locator(".client-hall-card").getByRole("form", {
+    name: "Редактирование названия зала",
+  });
+  await rename.getByLabel("Название зала").fill("Первый зал");
   await page.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(page.getByText("Первый зал", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
@@ -605,6 +611,60 @@ test("cabinet layout creates and renames halls, uploads a plan, saves tables and
   });
   await expect(image).toBeVisible();
   expect(paths.some((path) => path.startsWith("/api/admin/"))).toBe(false);
+  const calendarPath = `/api/client/clubs/${profile.id}/calendar`;
+  const headers = { "X-Telegram-Init-Data": credential };
+  const calendar = await (await request.get(calendarPath, { headers })).json();
+  const savedCalendar = await request.patch(calendarPath, {
+    headers: {
+      ...headers,
+      "Idempotency-Key": "preview-browser-" + crypto.randomUUID(),
+    },
+    data: {
+      expectedVersion: calendar.version,
+      timezone: calendar.timezone,
+      weekly: [],
+      holidays: [],
+      exceptions: [
+        {
+          date: "2090-11-06",
+          mode: "open",
+          open: "22:00",
+          close: "04:00",
+          nextDay: true,
+        },
+      ],
+    },
+  });
+  expect(savedCalendar.ok(), await savedCalendar.text()).toBe(true);
+  const night = (await savedCalendar.json()).nights[0];
+  expect(night.nightId).toMatch(/^[1-9][0-9]*$/);
+  await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await page.getByRole("button", { name: "Назад", exact: true }).click();
+  const availability = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.includes(
+      `/booking-preview/nights/${night.nightId}/halls/`,
+    ),
+  );
+  await page
+    .getByRole("button", { name: "Гостевой предпросмотр", exact: true })
+    .click();
+  const snapshot = await availability;
+  expect(snapshot.ok()).toBe(true);
+  const availabilityView = await snapshot.json();
+  expect(availabilityView.nightId).toBe(night.nightId);
+  expect(availabilityView.tables).toContainEqual(
+    expect.objectContaining({
+      status: "UNAVAILABLE",
+      reason: "BOOKING_TABLE_INACTIVE",
+    }),
+  );
+  await expect(page.getByText(/Снимок на/)).toBeVisible();
+  await page.getByRole("button", { name: /#1 · У окна.*Недоступен/ }).click();
+  await expect(page.getByText("Стол отключён для продаж.")).toBeVisible();
+  await page.getByRole("button", { name: "Назад", exact: true }).click();
+  await page.getByRole("button", { name: "Залы и столы", exact: true }).click();
+  await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
+  await expect(image).toBeVisible();
   const foreign = await request.get(layoutPath, {
     headers: { "X-Telegram-Init-Data": foreignCredential },
   });

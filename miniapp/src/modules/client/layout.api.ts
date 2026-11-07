@@ -13,6 +13,12 @@ export interface ClientLayoutTable {
   capacity: number;
   bookingDeposit?: string | null;
   bookingLinked?: boolean;
+  bookingLinkStatus?:
+    | 'ACTIVE_LINK'
+    | 'TABLE_UNLINKED'
+    | 'TABLE_LINK_MISMATCH'
+    | 'BOOKING_TABLE_INACTIVE'
+    | 'LAYOUT_INACTIVE';
   x: number | null;
   y: number | null;
 }
@@ -32,6 +38,18 @@ export interface ClientLayout {
   reservedTableNumbers?: number[];
   halls: ClientLayoutHall[];
 }
+export const toEditorHall = (
+  clubId: string,
+  value: ClientLayoutHall,
+): EditorHall<string> => ({
+  id: value.id,
+  clubId,
+  name: value.name,
+  layoutRevision: value.layoutRevision,
+  tableCount: value.tableCount ?? value.tables.length,
+  isActive: true,
+});
+
 interface Pending {
   path: string;
   method: string;
@@ -51,6 +69,7 @@ export function createClientLayoutApi(
   clubId: string,
   changed: (state: LayoutState) => void,
   lost: () => void,
+  planSnapshot?: Pick<ClientLayoutHall, 'id' | 'layoutRevision' | 'plan'>,
 ) {
   const base = '/api/client/clubs/' + clubId;
   const layoutPath = base + '/layout';
@@ -126,9 +145,11 @@ export function createClientLayoutApi(
         credentials: 'same-origin',
         referrerPolicy: 'no-referrer',
       });
+      if (controller.signal.aborted) throw new Error('Request aborted');
       if (!response.ok) {
         if (allowMissingPlan && response.status === 404) return response;
         const data = await response.json().catch(() => null);
+        if (controller.signal.aborted) throw new Error('Request aborted');
         if ([401, 403, 404].includes(response.status)) deny();
         throw new AdminApiError('Не удалось выполнить действие.', {
           status: response.status,
@@ -156,6 +177,7 @@ export function createClientLayoutApi(
     // A response cannot retarget the adapter to a different client/club.
     if (
       layout.clubId !== clubId ||
+      (current && current.clientId !== layout.clientId) ||
       !layout.permissions.includes('client.club.read')
     ) {
       deny();
@@ -168,6 +190,7 @@ export function createClientLayoutApi(
   const accept = (layout: ClientLayout) => {
     validate(layout);
     current = layout;
+    observedLayout = layout;
     conflict = undefined;
     publish();
     return layout;
@@ -230,6 +253,20 @@ export function createClientLayoutApi(
       pending = undefined;
       saving = false;
       generation += 1;
+      validate(layout);
+      const newer = [current, observedLayout].find((snapshot) =>
+        snapshot?.halls.some((saved) => {
+          const returned = layout.halls.find((item) => item.id === saved.id);
+          return (
+            returned &&
+            BigInt(saved.layoutRevision) > BigInt(returned.layoutRevision)
+          );
+        }),
+      );
+      if (newer) {
+        current = newer;
+        throw versionConflict();
+      }
       return accept(layout);
     } catch (error) {
       const normalized = error as AdminApiError;
@@ -267,24 +304,18 @@ export function createClientLayoutApi(
     };
     return execute(pending);
   };
-  const editorHall = (value: ClientLayoutHall): EditorHall<string> => ({
-    id: value.id,
-    clubId,
-    name: value.name,
-    layoutRevision: value.layoutRevision,
-    tableCount: value.tableCount ?? value.tables.length,
-    isActive: true,
-  });
   const halls: ClubHallsApi<string> = {
     async listHalls(_id, signal) {
-      return (await load(signal, false)).halls.map(editorHall);
+      return (await load(signal, false)).halls.map((value) =>
+        toEditorHall(clubId, value),
+      );
     },
     async createHall(_id, fields) {
       const previous = new Set(current?.halls.map((item) => item.id));
       const result = await mutate('/halls', { name: fields.name });
       const created = result.halls.find((item) => !previous.has(item.id));
       if (!created) throw new AdminApiError('Обновите список залов.');
-      return editorHall(created);
+      return toEditorHall(clubId, created);
     },
     async updateHall(id, fields) {
       const result = await mutate(
@@ -292,7 +323,7 @@ export function createClientLayoutApi(
         { name: fields.name, expectedVersion: hall(id).layoutRevision },
         'PATCH',
       );
-      return editorHall(result.halls.find((item) => item.id === id)!);
+      return toEditorHall(clubId, result.halls.find((item) => item.id === id)!);
     },
   };
   const createTables = async (id: string, suffix: string, fields: object) => {
@@ -359,46 +390,69 @@ export function createClientLayoutApi(
       });
     },
     async fetchHallPlanBlob(_club, id, _etag, signal) {
-      // Metadata distinguishes an empty plan from a refused resource; a binary 404 always clears the scene.
       await load(signal, false);
-      if (!hall(id).plan) return { status: 404 };
+      const initialHall = hall(id);
+      const matchingPlan = () => {
+        const latest = observedLayout?.halls.find((item) => item.id === id);
+        return (
+          latest?.layoutRevision === initialHall.layoutRevision &&
+          latest.plan?.sha256 === initialHall.plan?.sha256 &&
+          (!planSnapshot ||
+            (planSnapshot.id === id &&
+              planSnapshot.layoutRevision === initialHall.layoutRevision &&
+              planSnapshot.plan?.sha256 === initialHall.plan?.sha256))
+        );
+      };
+      if (!matchingPlan()) throw versionConflict();
+      if (!initialHall.plan) return { status: 404 };
       const started = generation;
+      const ensureCurrent = () => {
+        if (
+          started !== generation ||
+          lifetime.signal.aborted ||
+          signal?.aborted
+        )
+          throw new AdminApiError('Запрос отменён', { isAbort: true });
+      };
       const response = await request(
         base + '/halls/' + id + '/plan',
         {},
         signal,
         true,
       );
+      ensureCurrent();
       if (response.status === 404) {
-        // The plan can disappear between the fresh metadata and image requests.
-        // Confirm absence through a new authorized, same-hall metadata response.
-        try {
-          const latest = (await (
-            await request(layoutPath, {}, signal)
-          ).json()) as ClientLayout;
-          if (signal?.aborted)
-            throw new AdminApiError('Запрос отменён', { isAbort: true });
-          validate(latest);
-          if (latest.halls.find((item) => item.id === id)?.plan === null) {
-            if (started === generation) {
-              conflict ??= versionConflict();
-              publish();
-            }
-            return { status: 404 };
-          }
-        } catch (error) {
-          if (signal?.aborted || lifetime.signal.aborted) throw error;
+        // A binary 404 is ambiguous. Only the authorized metadata read can
+        // distinguish a removed image, a changed hall, and lost access.
+        await load(signal, false);
+        ensureCurrent();
+        const latest = observedLayout?.halls.find((item) => item.id === id);
+        if ((!latest || !latest.plan) && !planSnapshot) return { status: 404 };
+        if (!matchingPlan()) {
+          throw versionConflict();
         }
-        deny();
-        throw new AdminApiError('Изображение недоступно.', {
-          status: 404,
-          code: 'not_found',
-        });
+        throw new AdminApiError(
+          'Не удалось загрузить изображение. Повторите загрузку.',
+          {
+            code: 'request_failed',
+          },
+        );
       }
-      const blob = await response.blob();
-      if (denied || lifetime.signal.aborted || signal?.aborted)
-        throw new AdminApiError('Запрос отменён', { isAbort: true });
-      return { status: 200, blob };
+      const bytes = await response.arrayBuffer();
+      ensureCurrent();
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      const hash = Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, '0'),
+      ).join('');
+      ensureCurrent();
+      if (hash !== initialHall.plan.sha256) throw versionConflict();
+      await load(signal, false);
+      ensureCurrent();
+      if (!matchingPlan()) throw versionConflict();
+      return {
+        status: 200,
+        blob: new Blob([bytes], { type: initialHall.plan.contentType }),
+      };
     },
   };
   return {

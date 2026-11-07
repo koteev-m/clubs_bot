@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { ClientLayout } from '../src/modules/client/layout.api';
 
@@ -37,7 +38,7 @@ const layout: ClientLayout = {
       plan: {
         contentType: 'image/png',
         sizeBytes: png.length,
-        sha256: 'synthetic',
+        sha256: createHash('sha256').update(png).digest('hex'),
       },
       tables: [
         {

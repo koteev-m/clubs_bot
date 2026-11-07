@@ -308,7 +308,7 @@ describe('owner UX and client navigation', () => {
     expect(location.search).toContain('screen=club&resource=100');
     expect(screen.getByText('Не опубликован')).toBeTruthy();
     expect(
-      screen.getByText('Заведение пока недоступно гостям и для бронирования.'),
+      screen.getByText(/Гостевое бронирование выключено/),
     ).toBeTruthy();
     const event = telegram.onEvent.mock.calls.findLast(
       ([name]) => name === 'viewportChanged',

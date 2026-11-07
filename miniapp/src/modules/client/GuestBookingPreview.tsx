@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import HallPlanViewer from '../admin/pages/HallPlanViewer';
 import { dateLabel, localLabel, weekday } from './calendar';
 import { ClientLayoutHall, createClientLayoutApi } from './layout.api';
 import { useRemote } from './onboarding.hooks';
-import { OnboardingError } from './onboarding.api';
+import { authorityLost } from './onboarding.api';
 import {
   availabilityReasons,
   type AvailabilitySnapshot,
@@ -17,7 +17,7 @@ import {
   useUnsavedChanges,
 } from './OnboardingShared';
 
-interface PreviewNight {
+export interface PreviewNight {
   nightId?: string | null;
   businessDate: string;
   opensAt: string;
@@ -27,7 +27,7 @@ interface PreviewNight {
   eventStatus: keyof typeof eventStatus;
 }
 
-interface Preview {
+export interface Preview {
   clubId: string;
   name: string;
   timezone: string;
@@ -41,7 +41,7 @@ const eventStatus = {
   UNLINKED: 'Для этой ночи ещё не связано событие.',
   INVALID_LINK: 'Связь с событием не подтверждает расписание этой ночи.',
   NOT_MATERIALIZED:
-    'Ночь рассчитана по расписанию. Нажмите «Сформировать ближайшие ночи» в календаре.',
+    'Ночь рассчитана по расписанию. Снимок занятости доступен после её сохранения.',
 };
 
 export default function GuestBookingPreview({
@@ -58,6 +58,17 @@ export default function GuestBookingPreview({
   const remote = useRemote<Preview>(
     credential,
     `/api/client/clubs/${id}/booking-preview`,
+  );
+  const refreshPreview = remote.refresh;
+  const refreshedPlan = useRef<string>();
+  const reloadChangedPlan = useCallback(
+    (snapshot: string, explicit = false) => {
+      if (!explicit && refreshedPlan.current === snapshot) return false;
+      refreshedPlan.current = snapshot;
+      refreshPreview();
+      return true;
+    },
+    [refreshPreview],
   );
   const [deniedView, setDeniedView] = useState<Preview>();
   const planDenied = Boolean(remote.data && deniedView === remote.data);
@@ -77,23 +88,36 @@ export default function GuestBookingPreview({
     view?.nights.find((item) => item.businessDate === nightDate) ??
     view?.nights[0];
   const hall = view?.halls.find((item) => item.id === hallId) ?? view?.halls[0];
+  const nightId =
+    night?.nightId && /^[1-9][0-9]*$/.test(night.nightId)
+      ? night.nightId
+      : undefined;
   const availability = useRemote<AvailabilitySnapshot>(
     credential,
-    night?.nightId && hall
-      ? `/api/client/clubs/${id}/booking-preview/nights/${night.nightId}/halls/${hall.id}/availability`
+    nightId && hall
+      ? `/api/client/clubs/${id}/booking-preview/nights/${nightId}/halls/${hall.id}/availability`
       : null,
   );
-  const availabilityDenied =
-    availability.error instanceof OnboardingError &&
-    [401, 403, 404].includes(availability.error.status);
+  const availabilityDenied = authorityLost(availability.error);
   useEffect(() => {
     if (availabilityDenied) denyPlan();
   }, [availabilityDenied, denyPlan]);
+  const accessLost =
+    authorityLost(remote.error) ||
+    planDenied ||
+    availabilityDenied ||
+    Boolean(remote.data && remote.data.clubId !== id);
+  useEffect(() => {
+    if (!accessLost) return;
+    setNightDate('');
+    setHallId('');
+    setDrafts({});
+  }, [accessLost]);
   const snapshot = availability.data;
   const matchingSnapshot =
     snapshot?.clubId === id &&
     snapshot.hallId === hall?.id &&
-    snapshot.nightId === night?.nightId &&
+    snapshot.nightId === nightId &&
     snapshot.businessDate === night?.businessDate;
   const validSnapshot =
     matchingSnapshot &&
@@ -102,6 +126,17 @@ export default function GuestBookingPreview({
     Number.isFinite(Date.parse(snapshot.sampledAt))
       ? snapshot
       : undefined;
+  const snapshotMessage = !night
+    ? 'Нет клубной ночи для проверки занятости.'
+    : !nightId && night.eventStatus === 'NOT_MATERIALIZED'
+      ? 'Ночь ещё не сохранена. Снимок занятости пока недоступен.'
+      : !nightId
+        ? 'Сервер не подтвердил номер ночи. Повторите загрузку предпросмотра.'
+        : availability.loading
+          ? 'Загружаем занятость столов…'
+          : availability.error
+            ? 'Не удалось получить актуальный снимок. Обновите занятость.'
+            : 'Нет подтверждённого снимка занятости. Обновите занятость.';
   const refreshAvailability = () => {
     if (matchingSnapshot && snapshot.layoutRevision !== hall?.layoutRevision) {
       remote.refresh();
@@ -121,7 +156,9 @@ export default function GuestBookingPreview({
       {!planDenied && remote.data && !view && (
         <p role="alert">Не удалось подтвердить данные предпросмотра.</p>
       )}
-      {(remote.error != null || planDenied) && (
+      {(planDenied ||
+        Boolean(remote.data && !view) ||
+        (night && !nightId && night.eventStatus !== 'NOT_MATERIALIZED')) && (
         <button className="ob-button" type="button" onClick={remote.refresh}>
           Повторить загрузку
         </button>
@@ -191,7 +228,7 @@ export default function GuestBookingPreview({
                 </select>
               </Field>
               <div className="space-y-2" aria-label="Снимок занятости">
-                {night?.nightId && (
+                {nightId && (
                   <button
                     type="button"
                     className="ob-button"
@@ -213,13 +250,9 @@ export default function GuestBookingPreview({
                     {' · '}
                     {view.timezone}
                   </p>
-                ) : night?.nightId && availability.loading ? (
-                  <p role="status">Загружаем занятость столов…</p>
                 ) : (
-                  <p role={night?.nightId ? 'alert' : undefined}>
-                    {night?.nightId
-                      ? 'Не удалось получить актуальный снимок. Обновите занятость.'
-                      : 'Снимок доступен для сохранённой клубной ночи.'}
+                  <p role={availability.error ? 'alert' : 'status'}>
+                    {snapshotMessage}
                   </p>
                 )}
                 <p>
@@ -232,8 +265,8 @@ export default function GuestBookingPreview({
                   создаёт удержание.
                 </p>
                 <p>
-                  «Требуется настройка» — доступность не подтверждена. Такой
-                  стол нельзя считать свободным; причина указана в карточке.
+                  Неопределённый статус не подтверждает, что стол свободен.
+                  Причина указана в карточке.
                 </p>
                 <ul
                   aria-label="Легенда занятости"
@@ -259,6 +292,8 @@ export default function GuestBookingPreview({
                 hall={hall}
                 night={night}
                 snapshot={validSnapshot}
+                snapshotMessage={snapshotMessage}
+                onPlanChanged={reloadChangedPlan}
                 drafts={drafts}
                 onGuests={(key, count) =>
                   setDrafts((previous) => ({ ...previous, [key]: count }))
@@ -287,6 +322,8 @@ function PreviewHall({
   hall,
   night,
   snapshot,
+  snapshotMessage,
+  onPlanChanged,
   drafts,
   onGuests,
   onDenied,
@@ -296,14 +333,21 @@ function PreviewHall({
   hall: ClientLayoutHall;
   night?: PreviewNight;
   snapshot?: AvailabilitySnapshot;
+  snapshotMessage: string;
+  onPlanChanged: (snapshot: string, explicit?: boolean) => boolean;
   drafts: Record<string, number>;
   onGuests: (key: string, guests: number) => void;
   onDenied: () => void;
 }) {
-  const [plan, setPlan] = useState<{ url?: string; failed?: boolean }>({});
+  const [plan, setPlan] = useState<{
+    url?: string;
+    failed?: boolean;
+    changed?: boolean;
+  }>({});
   const [attempt, retryPlan] = useState(0);
   const hasPlan = Boolean(hall.plan);
   const hallId = hall.id;
+  const planKey = hallId + ':' + hall.layoutRevision + ':' + hall.plan?.sha256;
   useEffect(() => {
     if (!hasPlan) return;
     setPlan({});
@@ -313,6 +357,7 @@ function PreviewHall({
       clubId,
       () => undefined,
       onDenied,
+      hall,
     );
     let url: string | undefined;
     void api.editor
@@ -326,15 +371,28 @@ function PreviewHall({
           setPlan({ failed: true });
         }
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setPlan({ failed: true });
+      .catch((error: { code?: string }) => {
+        if (controller.signal.aborted) return;
+        const changed = error.code === 'version_conflict';
+        if (changed && onPlanChanged(planKey)) return;
+        setPlan({ failed: true, changed });
       });
     return () => {
       controller.abort();
       api.dispose();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [credential, clubId, hallId, hasPlan, attempt, onDenied]);
+  }, [
+    credential,
+    clubId,
+    hallId,
+    hasPlan,
+    hall,
+    attempt,
+    onDenied,
+    onPlanChanged,
+    planKey,
+  ]);
   if (hasPlan && !plan.url && !plan.failed) {
     return <p role="status">Загружаем схему…</p>;
   }
@@ -352,7 +410,10 @@ function PreviewHall({
           <button
             className="ob-button"
             type="button"
-            onClick={() => retryPlan((value) => value + 1)}
+            onClick={() => {
+              if (plan.changed) onPlanChanged(planKey, true);
+              else retryPlan((value) => value + 1);
+            }}
           >
             Повторить загрузку схемы
           </button>
@@ -366,7 +427,7 @@ function PreviewHall({
           const status = byTable.get(table.id)?.status;
           return status && Object.hasOwn(tableStatuses, status)
             ? tableStatuses[status]
-            : tableStatuses.UNKNOWN;
+            : { ...tableStatuses.UNKNOWN, label: 'Доступность не проверена' };
         }}
         tableDetails={(table) => {
           const state = byTable.get(table.id);
@@ -379,11 +440,9 @@ function PreviewHall({
               {knownReason && <p>{availabilityReasons[reason]}</p>}
               {(!state || state.status === 'UNKNOWN') && !knownReason && (
                 <p>
-                  {!night?.nightId
-                    ? 'Для выбранной ночи нет сохранённого номера. Сформируйте ближайшие ночи в календаре.'
-                    : !snapshot
-                      ? 'Нет актуального подтверждённого снимка занятости. Нажмите «Обновить занятость».'
-                      : 'Снимок не подтвердил состояние этого стола. Обновите занятость и проверьте его подключение.'}
+                  {snapshot
+                    ? 'Снимок не подтвердил состояние этого стола. Обновите занятость и проверьте его подключение.'
+                    : snapshotMessage}
                 </p>
               )}
               {state?.status === 'HOLD' && (

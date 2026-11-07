@@ -63,7 +63,11 @@ const rect = {
   y: 0,
   toJSON: () => ({}),
 };
-beforeEach(() => {
+beforeEach(async () => {
+  const { webcrypto } = await vi.importActual<{ webcrypto: Crypto }>(
+    'node:crypto',
+  );
+  vi.stubGlobal('crypto', webcrypto);
   window.history.replaceState(
     {},
     '',
@@ -88,6 +92,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   backs.clear();
   vi.restoreAllMocks();
 });
@@ -133,13 +138,16 @@ describe('cabinet uses the shared layout editor', () => {
             expect(options.body).toBeInstanceOf(File);
             first.plan = {
               contentType: 'image/png',
-              sha256: 'synthetic',
+              sha256:
+                '64879f7d6b960a01909762d911a32d4582c20010c5641ee90278b644a9e3b525',
               sizeBytes: 4,
             };
             first.layoutRevision = '3';
             return json(stored);
           }
-          return new Response(new Blob(['plan'], { type: 'image/png' }));
+          return new Response('plan', {
+            headers: { 'Content-Type': 'image/png' },
+          });
         }
         const body = JSON.parse(String(options?.body));
         if (path.endsWith('/tables')) {
@@ -184,9 +192,7 @@ describe('cabinet uses the shared layout editor', () => {
     fireEvent.change(screen.getByLabelText('Номер нового стола'), {
       target: { value: '1' },
     });
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Создать стол' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Создать стол' }));
     await screen.findByRole('button', { name: '#1 · Стол 1' });
     expect(stored.halls[0].tables[0].x).toBeNull();
     const input = document.querySelector('input[type=file]')!;
@@ -255,7 +261,12 @@ describe('cabinet uses the shared layout editor', () => {
           id: hall,
           name: 'Доступный зал',
           layoutRevision: '1',
-          plan: { contentType: 'image/png', sha256: 'synthetic', sizeBytes: 4 },
+          plan: {
+            contentType: 'image/png',
+            sha256:
+              '64879f7d6b960a01909762d911a32d4582c20010c5641ee90278b644a9e3b525',
+            sizeBytes: 4,
+          },
           tables: [
             {
               id: table,
@@ -279,7 +290,9 @@ describe('cabinet uses the shared layout editor', () => {
           availableActions: [],
         });
       if (String(input).endsWith('/plan'))
-        return new Response(new Blob(['plan'], { type: 'image/png' }));
+        return new Response('plan', {
+          headers: { 'Content-Type': 'image/png' },
+        });
       return json(layout);
     });
     render(<ClientAccess initialToken={null} />);

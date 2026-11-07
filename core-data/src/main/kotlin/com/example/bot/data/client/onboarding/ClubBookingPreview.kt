@@ -66,7 +66,12 @@ internal class ClubBookingPreview(
     ): JsonObject {
         val nightId = night.nightId
         val status = if (nightId == null) "NOT_MATERIALIZED" else eventStatus(clubId, nightId, zone.id)
-        return JsonObject(json() + ("eventStatus" to JsonPrimitive(status)))
+        val metadata =
+            buildJsonObject {
+                put("nightId", nightId?.toString())
+                put("eventStatus", status)
+            }
+        return JsonObject(json() + metadata)
     }
 
     private fun eventStatus(

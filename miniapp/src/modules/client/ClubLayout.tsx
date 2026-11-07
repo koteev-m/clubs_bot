@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ClubHallsScreen from '../admin/pages/ClubHallsScreen';
 import HallEditorScreen from '../admin/pages/HallEditorScreen';
 import { mapAdminErrorMessage } from '../admin/utils/adminErrors';
-import { createClientLayoutApi, LayoutState } from './layout.api';
+import { createClientLayoutApi, LayoutState, toEditorHall } from './layout.api';
 import {
   Shell,
   useTelegramClosingConfirmation,
@@ -125,6 +125,8 @@ export default function ClubLayout({
           : state.error?.code === 'version_conflict'
             ? 'Данные зала изменились. Загрузите актуальные данные перед редактированием.'
             : undefined;
+  const nameConflict =
+    state.error?.code === 'hall_name_conflict' ? state.error : undefined;
   const selectedHall = state.layout?.halls.find((hall) => hall.id === hallId);
   const matchingPlans = selectedHall?.plan
     ? state.layout?.halls.filter(
@@ -151,7 +153,7 @@ export default function ClubLayout({
         </p>
       ) : (
         <>
-          {state.error && (
+          {state.error && !nameConflict && (
             <p className="po-notice" role="alert">
               {mapAdminErrorMessage(state.error)}
             </p>
@@ -172,7 +174,9 @@ export default function ClubLayout({
                 onClick={() => {
                   void api
                     .retry()
-                    .then(() => setRefresh((value) => value + 1))
+                    .then((result) => {
+                      if (result) setRefresh((value) => value + 1);
+                    })
                     .catch(() => undefined);
                 }}
               >
@@ -232,6 +236,10 @@ export default function ClubLayout({
                   clubId={id}
                   api={api.halls}
                   clientMode
+                  clientNameConflict={nameConflict}
+                  clientHalls={state.layout.halls.map((hall) =>
+                    toEditorHall(id, hall),
+                  )}
                   readOnly={Boolean(editBlocked)}
                   openDisabled={state.pending}
                   onBack={sectionBack}

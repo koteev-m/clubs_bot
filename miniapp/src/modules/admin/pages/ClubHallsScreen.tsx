@@ -28,6 +28,8 @@ type ClubHallsScreenProps<Id extends LayoutId = number> = {
   clubId: Id;
   api?: ClubHallsApi<Id>;
   clientMode?: boolean;
+  clientHalls?: EditorHall<Id>[];
+  clientNameConflict?: AdminApiError;
   readOnly?: boolean;
   openDisabled?: boolean;
   reportDirty?: (dirty: boolean) => void;
@@ -58,6 +60,8 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
   onOpenEditor,
   api: suppliedApi,
   clientMode = false,
+  clientHalls,
+  clientNameConflict,
   readOnly = false,
   openDisabled = false,
   reportDirty,
@@ -65,7 +69,7 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
 }: ClubHallsScreenProps<Id>) {
   const api = suppliedApi ?? (adminHallsApi as unknown as ClubHallsApi<Id>);
   const addToast = useUiStore((state) => state.addToast);
-  const [halls, setHalls] = useState<EditorHall<Id>[]>([]);
+  const [loadedHalls, setHalls] = useState<EditorHall<Id>[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
     'loading',
   );
@@ -76,6 +80,11 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [editingHallId, setEditingHallId] = useState<Id | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
+  const halls = clientHalls ?? loadedHalls;
+  const hasSnapshot = clientHalls !== undefined;
+  const listStatus = hasSnapshot ? 'ready' : status;
+  const submitting = useRef(false);
+  const renameInput = useRef<HTMLInputElement>(null);
   const requestIdRef = useRef(0);
   const mountedRef = useRef(false);
 
@@ -89,6 +98,7 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
   }, []);
 
   useEffect(() => {
+    if (hasSnapshot) return;
     const controller = new AbortController();
     const requestId = ++requestIdRef.current;
     setStatus('loading');
@@ -124,15 +134,29 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
         addToast(message);
       });
     return () => controller.abort();
-  }, [addToast, api, clubId, onBack, refreshIndex]);
+  }, [addToast, api, clubId, hasSnapshot, onBack, refreshIndex]);
 
-  const handleEdit = useCallback((hall: EditorHall<Id>) => {
-    setFormMode('edit');
-    setEditingHallId(hall.id);
-    setForm({ name: hall.name, geometryJson: '', isActive: hall.isActive });
-    setFieldErrors({});
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  useEffect(() => {
+    if (clientNameConflict) {
+      setFieldErrors(mapValidationErrors(clientNameConflict) ?? {});
+    }
+  }, [clientNameConflict]);
+
+  const handleEdit = useCallback(
+    (hall: EditorHall<Id>) => {
+      setFormMode('edit');
+      setEditingHallId(hall.id);
+      setForm({ name: hall.name, geometryJson: '', isActive: hall.isActive });
+      setFieldErrors({});
+      if (!clientMode) window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    [clientMode],
+  );
+
+  useLayoutEffect(() => {
+    if (editingHallId !== null)
+      renameInput.current?.focus({ preventScroll: true });
+  }, [editingHallId]);
 
   const handleReset = useCallback(() => {
     setFormMode('create');
@@ -142,7 +166,12 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (busy || readOnly) return;
+    if (busy || readOnly || submitting.current) return;
+    if (clientMode && !form.name.trim()) {
+      setFieldErrors({ name: 'Укажите название зала' });
+      return;
+    }
+    submitting.current = true;
     setBusy(true);
     setFieldErrors({});
     try {
@@ -167,7 +196,7 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
       }
       if (!mountedRef.current) return;
       handleReset();
-      reload();
+      if (!hasSnapshot) reload();
     } catch (error) {
       const normalized = error as AdminApiError;
       if (isAbortError(normalized)) return;
@@ -184,6 +213,7 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
         addToast(mapAdminErrorMessage(normalized));
       }
     } finally {
+      submitting.current = false;
       if (mountedRef.current) {
         setBusy(false);
       }
@@ -192,11 +222,13 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
     addToast,
     api,
     busy,
+    clientMode,
     clubId,
     editingHallId,
     form,
     formMode,
     handleReset,
+    hasSnapshot,
     readOnly,
     reload,
   ]);
@@ -409,10 +441,10 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
             {clientMode ? 'Залы' : `Залы клуба #${clubId}`}
           </h2>
         </div>
-        {status === 'loading' && (
+        {listStatus === 'loading' && (
           <p className="mt-4 text-sm text-gray-500">Загрузка...</p>
         )}
-        {status === 'error' && (
+        {listStatus === 'error' && (
           <div className="mt-4 space-y-2 text-sm text-gray-600">
             <p>{errorMessage ?? 'Не удалось загрузить залы'}</p>
             <button
@@ -427,10 +459,10 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
             </button>
           </div>
         )}
-        {status === 'ready' && halls.length === 0 && (
+        {listStatus === 'ready' && halls.length === 0 && (
           <p className="mt-4 text-sm text-gray-500">Залов нет</p>
         )}
-        {status === 'ready' && halls.length > 0 && (
+        {listStatus === 'ready' && halls.length > 0 && (
           <div className="mt-4 space-y-3">
             {halls.map((hall) => (
               <div
@@ -485,10 +517,14 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
                       Сделать активным
                     </button>
                   )}
-                  {!readOnly && (
+                  {!readOnly && (!clientMode || editingHallId !== hall.id) && (
                     <button
                       type="button"
-                      className="rounded border border-gray-200 px-3 py-1 text-xs text-gray-700"
+                      className={
+                        clientMode
+                          ? 'ob-button'
+                          : 'rounded border border-gray-200 px-3 py-1 text-xs text-gray-700'
+                      }
                       onClick={() => {
                         if (leave()) handleEdit(hall);
                       }}
@@ -526,12 +562,66 @@ export default function ClubHallsScreen<Id extends LayoutId = number>({
                     </button>
                   )}
                 </div>
+                {clientMode && editingHallId === hall.id && (
+                  <form
+                    className="client-hall-rename ob-fields"
+                    aria-label="Редактирование названия зала"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleSubmit();
+                    }}
+                  >
+                    <label htmlFor="client-hall-name">Название зала</label>
+                    <input
+                      id="client-hall-name"
+                      ref={renameInput}
+                      value={form.name}
+                      maxLength={255}
+                      required
+                      disabled={busy || readOnly}
+                      aria-invalid={Boolean(fieldErrors.name)}
+                      aria-describedby={
+                        fieldErrors.name ? 'client-hall-name-error' : undefined
+                      }
+                      onChange={(event) => {
+                        setForm({ ...form, name: event.target.value });
+                        setFieldErrors({});
+                      }}
+                    />
+                    {fieldErrors.name && (
+                      <p
+                        id="client-hall-name-error"
+                        className="po-notice"
+                        role="alert"
+                      >
+                        {fieldErrors.name}
+                      </p>
+                    )}
+                    <div className="client-hall-rename-actions">
+                      <button
+                        type="submit"
+                        className="po-primary"
+                        disabled={busy || readOnly || !dirty}
+                      >
+                        Сохранить
+                      </button>
+                      <button
+                        type="button"
+                        className="ob-button"
+                        disabled={busy || openDisabled}
+                        onClick={handleReset}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             ))}
           </div>
         )}
       </section>
-      {clientMode && !readOnly && hallForm}
+      {clientMode && !readOnly && formMode === 'create' && hallForm}
     </div>
   );
 }

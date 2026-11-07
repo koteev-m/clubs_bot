@@ -12,6 +12,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.ApplicationTestBuilder
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -67,6 +68,7 @@ open class ClientBookingPreviewRoutesTest : ClientOnboardingRoutesTestBase() {
                 val initial = ok(path, RECIPIENT)
                 assertEquals("TABLE_MAPPING_REQUIRED", initial.string("bookingBlocker"))
                 assertEquals("UNLINKED", initial.firstNight().string("eventStatus"))
+                assertEquals(night.string("nightId"), initial.firstNight().string("nightId"))
                 assertEquals("2026-10-24", initial.firstNight().string("businessDate"))
                 assertEquals("2026-10-25T02:00+02:00", initial.firstNight().string("opensAt"))
                 assertEquals("2026-10-25T08:00+01:00", initial.firstNight().string("closesAt"))
@@ -96,6 +98,88 @@ open class ClientBookingPreviewRoutesTest : ClientOnboardingRoutesTestBase() {
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM booking_holds"))
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM bookings"))
                 assertEquals("0", source.scalar("SELECT COUNT(*) FROM payments"))
+            }
+        }
+
+    @Test
+    fun `preview night identity drives availability while projected nights have no id`() =
+        database { source ->
+            withApp(source, CLOCK) {
+                val fixture = availabilityFixture(source)
+                linkAvailability(fixture)
+                source.hold(2, fixture.eventId, "2026-10-23T12:01:00Z")
+                source.execute(
+                    "INSERT INTO club_hours(club_id,dow,open_local,close_local) " +
+                        "VALUES (${fixture.clubId},5,'22:00','23:00')",
+                )
+                val path = "$C/clubs/${fixture.clubId}/booking-preview"
+                val preview = ok(path, RECIPIENT)
+                val nights = preview.getValue("nights").jsonArray.map { it.jsonObject }
+                val stored = nights.single { it.string("eventStatus") == "VERIFIED" }
+                val projected = nights.first { it.string("eventStatus") == "NOT_MATERIALIZED" }
+                assertEquals(JsonNull, projected["nightId"])
+                assertEquals(fixture.nightId, stored.string("nightId"))
+                val hallId = preview.firstHall().string("id")
+                val snapshot = ok("$path/nights/${stored.string("nightId")}/halls/$hallId/availability", RECIPIENT)
+                assertEquals("HOLD", snapshot.tables().getValue("9002").string("status"))
+                assertEquals("0", source.scalar("SELECT COUNT(*) FROM bookings"))
+            }
+        }
+
+    @Test
+    fun `setup reads are private and cannot outlive the exact club grant`() =
+        database { source ->
+            withApp(source, CLOCK) {
+                val club = createClub(RECIPIENT)
+                createClub(FOREIGN)
+                val clubId = club.string("id")
+                val base = "$C/clubs/$clubId"
+                val paths = listOf("profile", "layout", "calendar", "booking-rules", "booking-preview")
+                for (path in paths) {
+                    val response = requestAs("$base/$path", RECIPIENT)
+                    assertEquals(HttpStatusCode.OK, response.status)
+                    assertEquals("no-store", response.headers["Cache-Control"])
+                    requestAs("$base/$path", FOREIGN).assertClientError(HttpStatusCode.NotFound, "not_found")
+                }
+                source.execute(
+                    "UPDATE client_club_grants SET is_active=FALSE WHERE club_id=$clubId " +
+                        "AND permission_code='client.club.read'",
+                )
+                for (path in paths) {
+                    requestAs("$base/$path", RECIPIENT).assertClientError(HttpStatusCode.NotFound, "not_found")
+                }
+            }
+        }
+
+    @Test
+    fun `hall rename preserves club uniqueness version checks and exact replay`() =
+        database { source ->
+            withApp(source, CLOCK) {
+                val club = createClub(RECIPIENT)
+                val clubId = club.string("id")
+                val base = "$C/clubs/$clubId"
+                val welcome = ok("$base/halls", RECIPIENT, obj("name" to "Welcome")).firstHall()
+                ok("$base/halls", RECIPIENT, obj("name" to "Main"))
+                val path = "$base/halls/${welcome.string("id")}"
+                val revision = welcome.string("layoutRevision")
+                val duplicate = obj("name" to "Main", "expectedVersion" to revision)
+                requestAs(path, RECIPIENT, duplicate, HttpMethod.Patch)
+                    .assertClientError(HttpStatusCode.Conflict, "hall_name_conflict")
+
+                val rename = obj("name" to "Entrance", "expectedVersion" to revision)
+                val renamed = ok(path, RECIPIENT, rename, HttpMethod.Patch, key = "welcome-rename")
+                assertEquals("Entrance", renamed.firstHall().string("name"))
+                val replay = ok(path, RECIPIENT, rename, HttpMethod.Patch, key = "welcome-rename")
+                assertEquals(renamed, replay)
+                requestAs(path, RECIPIENT, rename, HttpMethod.Patch)
+                    .assertClientError(HttpStatusCode.Conflict, "version_conflict")
+                source.execute(
+                    "UPDATE client_club_grants SET is_active=FALSE WHERE club_id=$clubId " +
+                        "AND permission_code='client.club.layout.write'",
+                )
+                requestAs(path, RECIPIENT, rename, HttpMethod.Patch, key = "welcome-rename")
+                    .assertClientError(HttpStatusCode.NotFound, "not_found")
+                assertEquals("Entrance", ok("$base/layout", RECIPIENT).firstHall().string("name"))
             }
         }
 
@@ -137,6 +221,12 @@ open class ClientBookingPreviewRoutesTest : ClientOnboardingRoutesTestBase() {
         database { source ->
             withApp(source, CLOCK) {
                 val f = availabilityFixture(source)
+                val layout = ok("$C/clubs/${f.clubId}/layout", RECIPIENT)
+                val tableLinks = layout.firstHall().tables()
+                assertEquals("ACTIVE_LINK", tableLinks.getValue("9001").string("bookingLinkStatus"))
+                assertEquals("TABLE_UNLINKED", tableLinks.getValue("9009").string("bookingLinkStatus"))
+                assertEquals("BOOKING_TABLE_INACTIVE", tableLinks.getValue("9010").string("bookingLinkStatus"))
+                assertFalse("9011" in tableLinks)
                 val unlinked = ok(f.path, RECIPIENT)
                 assertEquals("EVENT_UNLINKED", unlinked.tables().getValue("9001").string("reason"))
                 linkAvailability(f)

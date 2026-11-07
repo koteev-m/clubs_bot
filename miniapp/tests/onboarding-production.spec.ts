@@ -127,7 +127,7 @@ test('mobile profile preserves timezone, refreshes the club name on Back and kee
   await expect(page.getByText(/UTC\+03:00/)).toBeVisible();
   await expect(page.getByLabel('Часовой пояс IANA')).toBeHidden();
   await expect(
-    page.getByText('Бот не подключён', { exact: true }),
+    page.getByText('Отдельный бот клуба', { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText(/Night Concierge открывает доступ к платформе/),
@@ -284,7 +284,7 @@ test('direct creation keeps its pending intent through Back Forward, opens saved
   await page.getByRole('button', { name: 'Повторить ту же операцию' }).click();
   await expect(page.getByText('Не опубликован', { exact: true })).toBeVisible();
   await expect(
-    page.getByText('Бот не подключён', { exact: true }),
+    page.getByText('Отдельный бот клуба', { exact: true }),
   ).toBeVisible();
   expect(creates).toHaveLength(2);
   expect(creates[0]).toEqual(creates[1]);

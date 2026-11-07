@@ -9,6 +9,7 @@ import {
 } from './OnboardingShared';
 import {
   calendarBody,
+  calendarDraft,
   clubToday,
   calendarChanges,
   calendarValidation,
@@ -149,7 +150,9 @@ export default function ClubCalendar({
           : next,
       );
       setDraft((previous) =>
-        base && BigInt(base.version) > BigInt(next.version) ? previous : next,
+        base && BigInt(base.version) > BigInt(next.version)
+          ? previous
+          : calendarDraft(next),
       );
     }
   }, [remote.data, dirty, command.blocked, conflict, base]);
@@ -177,7 +180,7 @@ export default function ClubCalendar({
   const accept = (saved: CalendarView) => {
     setLatest(saved);
     setBase(saved);
-    setDraft(saved);
+    setDraft(calendarDraft(saved));
     setReviewedConflict(false);
     setValidation(null);
     refresh();
@@ -230,7 +233,7 @@ export default function ClubCalendar({
                   className="ob-button"
                   disabled={checking || writeDenied || !stale}
                   onClick={() => {
-                    setDraft(reapplyChanges(view, changes));
+                    setDraft(reapplyChanges(calendarDraft(view), changes));
                     setBase(view);
                     setConflict(false);
                     setReviewedConflict(true);

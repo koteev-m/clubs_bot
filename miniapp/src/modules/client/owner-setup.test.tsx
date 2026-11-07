@@ -5,9 +5,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ClubLayout from './ClubLayout';
+import { useUiStore } from '../../shared/store/ui';
 import { ClientLayout } from './layout.api';
 import ClubTableCreationForm from '../admin/pages/ClubTableCreationForm';
 import HallEditorScreen from '../admin/pages/HallEditorScreen';
@@ -21,7 +23,15 @@ vi.mock('../../app/providers/TelegramProvider', () => ({
 beforeEach(() => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
 });
+beforeEach(async () => {
+  const { webcrypto } = await vi.importActual<{ webcrypto: Crypto }>(
+    'node:crypto',
+  );
+  vi.stubGlobal('crypto', webcrypto);
+});
+
 afterEach(() => {
+  vi.unstubAllGlobals();
   cleanup();
   vi.restoreAllMocks();
 });
@@ -45,14 +55,24 @@ const layout: ClientLayout = {
       id: '1',
       name: 'Main',
       layoutRevision: '1',
-      plan: { contentType: 'image/png', sha256: 'A', sizeBytes: 8 },
+      plan: {
+        contentType: 'image/png',
+        sha256:
+          '559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd',
+        sizeBytes: 8,
+      },
       tables: [hallTable('1', 7)],
     },
     {
       id: '2',
       name: 'Welcome',
       layoutRevision: '1',
-      plan: { contentType: 'image/jpeg', sha256: 'B', sizeBytes: 8 },
+      plan: {
+        contentType: 'image/jpeg',
+        sha256:
+          'df7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c',
+        sizeBytes: 8,
+      },
       tables: [hallTable('2', 8)],
     },
     { id: '3', name: 'Empty', layoutRevision: '1', plan: null, tables: [] },
@@ -146,7 +166,7 @@ it('keeps a saved duplicate-image diagnosis separate from transient hall state',
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (path) =>
     String(path).endsWith('/layout')
       ? new Response(JSON.stringify(duplicated))
-      : new Response(new Blob(['A'])),
+      : new Response('A'),
   );
   Object.defineProperty(URL, 'createObjectURL', {
     configurable: true,
@@ -306,4 +326,261 @@ it('describes Friday after midnight without changing canonical flags, including 
     startNextDay: true,
     nextDay: false,
   });
+});
+
+it('renames only the selected card with one versioned command and no read after success', async () => {
+  let finish!: (response: Response) => void;
+  const saving = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (_path, options) =>
+      options?.method === 'PATCH'
+        ? saving
+        : new Response(JSON.stringify(layout)),
+    );
+  render(<ClubLayout {...props} />);
+  const main = (await screen.findByRole('heading', { name: 'Main' })).closest(
+    '.client-hall-card',
+  )!;
+  const welcome = screen
+    .getByRole('heading', { name: 'Welcome' })
+    .closest('.client-hall-card')!;
+  vi.mocked(window.scrollTo).mockClear();
+  fireEvent.click(
+    within(welcome as HTMLElement).getByRole('button', {
+      name: 'Редактировать',
+    }),
+  );
+  const form = within(welcome as HTMLElement).getByRole('form', {
+    name: 'Редактирование названия зала',
+  });
+  const name = within(form).getByRole<HTMLInputElement>('textbox', {
+    name: 'Название зала',
+  });
+  expect(name.value).toBe('Welcome');
+  expect(document.activeElement).toBe(name);
+  expect(within(main as HTMLElement).queryByRole('form')).toBeNull();
+  expect(screen.queryByText('Создать зал')).toBeNull();
+  expect(window.scrollTo).not.toHaveBeenCalled();
+  fireEvent.change(name, { target: { value: 'Вход' } });
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(fetch.mock.calls).toHaveLength(2);
+  const [path, options] = fetch.mock.calls[1];
+  expect(path).toBe('/api/client/clubs/42/halls/2');
+  expect(options?.method).toBe('PATCH');
+  expect(JSON.parse(String(options?.body))).toEqual({
+    name: 'Вход',
+    expectedVersion: '1',
+  });
+  expect(options?.headers).toHaveProperty('Idempotency-Key');
+  expect(
+    within(form).getByRole<HTMLButtonElement>('button', { name: 'Отмена' })
+      .disabled,
+  ).toBe(true);
+  finish(
+    new Response(
+      JSON.stringify({
+        ...layout,
+        halls: layout.halls.map((hall) =>
+          hall.id === '2'
+            ? { ...hall, name: 'Вход', layoutRevision: '2' }
+            : hall,
+        ),
+      }),
+    ),
+  );
+  await within(welcome as HTMLElement).findByRole('heading', { name: 'Вход' });
+  expect(within(welcome as HTMLElement).queryByRole('form')).toBeNull();
+  expect(
+    within(main as HTMLElement).getByRole('heading', { name: 'Main' }),
+  ).toBeTruthy();
+  expect(fetch.mock.calls).toHaveLength(2);
+});
+
+it('keeps a duplicate draft in its card and lets the owner explicitly cancel', async () => {
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (_path, options) =>
+      options?.method === 'PATCH'
+        ? new Response(JSON.stringify({ code: 'hall_name_conflict' }), {
+            status: 409,
+          })
+        : new Response(JSON.stringify(layout)),
+    );
+  render(<ClubLayout {...props} />);
+  const card = (
+    await screen.findByRole('heading', { name: 'Welcome' })
+  ).closest<HTMLElement>('.client-hall-card')!;
+  fireEvent.click(within(card).getByRole('button', { name: 'Редактировать' }));
+  const input = within(card).getByRole<HTMLInputElement>('textbox');
+  fireEvent.change(input, { target: { value: 'Main' } });
+  fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+  await within(card).findByRole('alert');
+  expect(input.value).toBe('Main');
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  expect(
+    within(card).getByText('Зал с таким названием уже существует'),
+  ).toBeTruthy();
+  fireEvent.click(within(card).getByRole('button', { name: 'Отмена' }));
+  expect(within(card).queryByRole('textbox')).toBeNull();
+  expect(within(card).getByRole('heading', { name: 'Welcome' })).toBeTruthy();
+  expect(fetch.mock.calls).toHaveLength(2);
+});
+
+it('retains the rename draft after a version conflict until the owner accepts a reload', async () => {
+  let refreshed = false;
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (_path, options) => {
+      if (options?.method === 'PATCH') {
+        refreshed = true;
+        return new Response(JSON.stringify({ code: 'version_conflict' }), {
+          status: 409,
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          ...layout,
+          halls: layout.halls.map((hall) =>
+            refreshed && hall.id === '2'
+              ? { ...hall, name: 'С сервера', layoutRevision: '2' }
+              : hall,
+          ),
+        }),
+      );
+    });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  render(<ClubLayout {...props} />);
+  const card = (
+    await screen.findByRole('heading', { name: 'Welcome' })
+  ).closest<HTMLElement>('.client-hall-card')!;
+  fireEvent.click(within(card).getByRole('button', { name: 'Редактировать' }));
+  const input = within(card).getByRole<HTMLInputElement>('textbox');
+  fireEvent.change(input, { target: { value: 'Черновик' } });
+  fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+  await screen.findByRole('alert');
+  expect(input.value).toBe('Черновик');
+  expect(
+    within(card).getByRole<HTMLButtonElement>('button', { name: 'Сохранить' })
+      .disabled,
+  ).toBe(true);
+  const reload = screen.getByRole('button', {
+    name: 'Загрузить актуальные данные',
+  });
+  fireEvent.click(reload);
+  expect(fetch.mock.calls).toHaveLength(2);
+  confirm.mockReturnValue(true);
+  fireEvent.click(reload);
+  await screen.findByRole('heading', { name: 'С сервера' });
+  expect(
+    screen.queryByRole('form', { name: 'Редактирование названия зала' }),
+  ).toBeNull();
+  expect(fetch.mock.calls).toHaveLength(3);
+});
+
+it.each(['saved', 'conflict'] as const)(
+  'replays the same rename after a lost response and handles %s',
+  async (outcome) => {
+    const patches: Array<RequestInit> = [];
+    const renamed = {
+      ...layout,
+      halls: layout.halls.map((hall) =>
+        hall.id === '2' ? { ...hall, name: 'Вход', layoutRevision: '2' } : hall,
+      ),
+    };
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (_path, options) => {
+        if (options?.method !== 'PATCH')
+          return new Response(JSON.stringify(layout));
+        patches.push(options);
+        if (patches.length === 1)
+          throw new TypeError('Synthetic connection loss');
+        if (outcome === 'conflict')
+          return new Response(JSON.stringify({ code: 'hall_name_conflict' }), {
+            status: 409,
+          });
+        return new Response(JSON.stringify(renamed));
+      });
+    render(<ClubLayout {...props} />);
+    const card = (
+      await screen.findByRole('heading', { name: 'Welcome' })
+    ).closest<HTMLElement>('.client-hall-card')!;
+    fireEvent.click(
+      within(card).getByRole('button', { name: 'Редактировать' }),
+    );
+    const input = within(card).getByRole<HTMLInputElement>('textbox');
+    fireEvent.change(input, { target: { value: 'Вход' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+    const retry = await screen.findByRole('button', {
+      name: 'Повторить ту же операцию',
+    });
+    expect(input.value).toBe('Вход');
+    expect(input.disabled).toBe(true);
+    fireEvent.click(retry);
+    if (outcome === 'saved') {
+      await screen.findByRole('heading', { name: 'Вход' });
+      expect(
+        screen.queryByRole('form', { name: 'Редактирование названия зала' }),
+      ).toBeNull();
+    } else {
+      await within(card).findByText('Зал с таким названием уже существует');
+      expect(input.value).toBe('Вход');
+      expect(input.disabled).toBe(false);
+    }
+    expect(patches).toHaveLength(2);
+    expect(patches[1].body).toBe(patches[0].body);
+    expect(patches[1].headers).toEqual(patches[0].headers);
+    expect(fetch.mock.calls).toHaveLength(3);
+  },
+);
+
+it('final review regression: an inline rename cannot roll the card back past a layout already read from the server', async () => {
+  const initialToasts = useUiStore.getState().toasts.length;
+  const rename = (name: string, version: string) => ({
+    ...layout,
+    halls: layout.halls.map((hall) =>
+      hall.id === '2' ? { ...hall, name, layoutRevision: version } : hall,
+    ),
+  });
+  const recent = rename('Уже изменён в другой вкладке', '3');
+  let reads = 0;
+  let finish!: (result: Response) => void;
+  const write = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_path, options) => {
+    if (options?.method === 'PATCH') return write;
+    return Response.json(++reads === 1 ? layout : recent);
+  });
+  render(<ClubLayout {...props} />);
+  const card = (
+    await screen.findByRole('heading', { name: 'Welcome' })
+  ).closest<HTMLElement>('.client-hall-card')!;
+  fireEvent.click(within(card).getByRole('button', { name: 'Редактировать' }));
+  fireEvent.change(within(card).getByRole('textbox'), {
+    target: { value: 'Моя правка' },
+  });
+  fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+  const alreadySampledWrite = Response.json(rename('Моя правка', '2'));
+  await act(async () => fireEvent.focus(window));
+  expect(reads).toBe(2);
+  await act(async () => finish(alreadySampledWrite));
+  expect(
+    within(card).queryByRole('heading', {
+      name: 'Уже изменён в другой вкладке',
+    }),
+  ).not.toBeNull();
+  expect(within(card).getByRole<HTMLInputElement>('textbox').value).toBe(
+    'Моя правка',
+  );
+  expect(useUiStore.getState().toasts.slice(initialToasts)).not.toContain(
+    'Зал обновлен',
+  );
+  expect(
+    screen.getByRole('button', { name: 'Загрузить актуальные данные' }),
+  ).toBeTruthy();
 });

@@ -5,8 +5,19 @@ export function useRemote<T>(
   credential: string,
   path: string | null,
   body?: object,
-  { retainOnForeground = false }: { retainOnForeground?: boolean } = {},
+  {
+    retainOnForeground = false,
+    onSuccess,
+    onError,
+  }: {
+    retainOnForeground?: boolean;
+    onSuccess?: (data: T) => void;
+    onError?: (error: unknown) => void;
+  } = {},
 ) {
+  const callbacks = useRef({ onSuccess, onError });
+  callbacks.current = { onSuccess, onError };
+  const activeRead = useRef<AbortController>();
   const serialized = body === undefined ? undefined : JSON.stringify(body);
   const [attempt, setAttempt] = useState(0);
   const [foregroundEpoch, setForegroundEpoch] = useState(0);
@@ -20,28 +31,38 @@ export function useRemote<T>(
     error?: unknown;
     loading: boolean;
   }>({ loading: true });
+  const cancel = useCallback(() => {
+    activeRead.current?.abort();
+    setState({ loading: false });
+  }, []);
   useEffect(() => {
     if (!path) {
       setState({ loading: false });
       return;
     }
     const controller = new AbortController();
+    activeRead.current = controller;
     const request = { path, serialized, credential, attempt, foregroundEpoch };
     onboardingRequest<T>(credential, path, {
       signal: controller.signal,
       body: serialized === undefined ? undefined : JSON.parse(serialized),
     })
       .then((data) => {
-        if (!controller.signal.aborted)
-          setState({ ...request, data, loading: false });
+        if (controller.signal.aborted) return;
+        callbacks.current.onSuccess?.(data);
+        setState({ ...request, data, loading: false });
       })
       .catch((error) => {
-        if (!controller.signal.aborted)
-          setState({ ...request, error, loading: false });
+        if (controller.signal.aborted) return;
+        callbacks.current.onError?.(error);
+        setState({ ...request, error, loading: false });
       });
     return () => controller.abort();
   }, [credential, path, serialized, attempt, foregroundEpoch]);
-  const refresh = useCallback(() => setAttempt((value) => value + 1), []);
+  const refresh = useCallback(() => {
+    cancel();
+    setAttempt((value) => value + 1);
+  }, [cancel]);
   useEffect(() => {
     if (!path) return;
     const foreground = () => {
@@ -67,8 +88,15 @@ export function useRemote<T>(
     (state.foregroundEpoch === foregroundEpoch ||
       (retainOnForeground && state.data !== undefined));
   return current
-    ? { data: state.data, error: state.error, loading: state.loading, refresh }
-    : { loading: path !== null, refresh };
+    ? {
+        data: state.data,
+        error: state.error,
+        loading: state.loading,
+        revalidating: state.foregroundEpoch !== foregroundEpoch,
+        refresh,
+        cancel,
+      }
+    : { loading: path !== null, revalidating: false, refresh, cancel };
 }
 
 interface PendingCommand<T> {
@@ -77,9 +105,14 @@ interface PendingCommand<T> {
   method: string;
   key: string;
   unknown?: boolean;
-  onSuccess: (data: T) => void;
+  onSuccess: (data: T) => void | boolean;
 }
-export function useCommand<T>(credential: string) {
+export function useCommand<T>(
+  credential: string,
+  { onError }: { onError?: (error: unknown) => void } = {},
+) {
+  const callbacks = useRef({ onError });
+  callbacks.current = { onError };
   const [state, setState] = useState<{
     saving: boolean;
     unknown: boolean;
@@ -117,8 +150,8 @@ export function useCommand<T>(credential: string) {
       });
       if (controller.signal.aborted) return;
       pending.current = null;
-      setState({ saving: false, unknown: false, success: true });
-      command.onSuccess(result);
+      const accepted = command.onSuccess(result);
+      setState({ saving: false, unknown: false, success: accepted !== false });
     } catch (error) {
       if (controller.signal.aborted) return;
       const unknown =
@@ -127,10 +160,16 @@ export function useCommand<T>(credential: string) {
         (error.status === 0 || error.status >= 500);
       command.unknown = unknown;
       if (!unknown) pending.current = null;
+      callbacks.current.onError?.(error);
       setState({ saving: false, unknown, success: false, error });
     } finally {
       if (!controller.signal.aborted) executing.current = false;
     }
+  };
+  const retry = (onSuccess?: PendingCommand<T>['onSuccess']) => {
+    if (!pending.current || executing.current) return;
+    if (onSuccess) pending.current.onSuccess = onSuccess;
+    void execute(pending.current);
   };
   return {
     ...state,
@@ -138,7 +177,7 @@ export function useCommand<T>(credential: string) {
     run(
       path: string,
       body: object,
-      onSuccess: (data: T) => void,
+      onSuccess: (data: T) => void | boolean,
       method = 'POST',
     ) {
       if (pending.current || state.saving) return;
@@ -153,8 +192,9 @@ export function useCommand<T>(credential: string) {
       void execute(command);
     },
     retry() {
-      if (pending.current) void execute(pending.current);
+      retry();
     },
+    retryWith: retry,
     reset() {
       // A pending unknown command must be retried with its original intent.
       if (pending.current || executing.current) return;

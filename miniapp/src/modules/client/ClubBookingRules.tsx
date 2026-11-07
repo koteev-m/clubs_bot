@@ -55,6 +55,7 @@ type Night = {
   cutoffAfterArrival: boolean;
 };
 export type BookingRulesView = {
+  clubId: string;
   name: string;
   timezone: string;
   version: string;

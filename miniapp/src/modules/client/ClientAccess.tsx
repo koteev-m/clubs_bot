@@ -346,7 +346,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => navigate({ type: 'club', id: screen.id })}
+        back={() => goBack({ type: 'club', id: screen.id })}
         reportDirty={reportDirty}
       />
     );
@@ -356,7 +356,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => navigate({ type: 'club', id: screen.id })}
+        back={() => goBack({ type: 'club', id: screen.id })}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />
@@ -367,7 +367,7 @@ function ClientWorkspace({
         key={screen.id}
         credential={credential}
         id={screen.id}
-        back={() => navigate({ type: 'club', id: screen.id })}
+        back={() => goBack({ type: 'club', id: screen.id })}
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
       />

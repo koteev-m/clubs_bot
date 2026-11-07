@@ -25,7 +25,7 @@ export const tableStatuses = {
     color: 'border-gray-600 bg-gray-200 text-gray-900',
   },
   UNKNOWN: {
-    label: 'Требуется настройка',
+    label: 'Доступность не подтверждена',
     symbol: '?',
     color: 'border-slate-500 bg-white text-slate-800',
   },

@@ -28,10 +28,14 @@ internal class ClubLayoutViews(
         preview: Boolean = false,
     ): JsonObject {
         val hallId = hall.long("id")
+        val clubId = hall.long("club_id")
         val plan = sql.row("SELECT content_type,sha256,size_bytes FROM hall_plans WHERE hall_id=?", hallId)
         val tables =
             sql.rows(
-                "SELECT ht.*,bt.min_deposit AS booking_min_deposit FROM hall_tables ht " +
+                "SELECT ht.*,bt.min_deposit AS booking_min_deposit,bt.active AS booking_active," +
+                    "CASE WHEN bt.table_number=ht.table_number AND bt.capacity=ht.capacity " +
+                    "THEN bt.id END AS verified_table_id " +
+                    "FROM hall_tables ht " +
                     "LEFT JOIN tables bt ON bt.id=ht.booking_table_id AND bt.club_id=ht.booking_club_id " +
                     "WHERE ht.hall_id=?" + (if (preview) "" else " AND ht.is_active=TRUE") +
                     " ORDER BY ht.table_number,ht.id",
@@ -42,7 +46,7 @@ internal class ClubLayoutViews(
             put("name", hall.getValue("name"))
             put("layoutRevision", hall.getValue("layout_revision"))
             put("tableCount", tables.size)
-            put("tables", JsonArray(tables.map { table(it, preview) }))
+            put("tables", JsonArray(tables.map { table(it, hall, clubId, preview) }))
             put(
                 "plan",
                 plan?.let {
@@ -58,6 +62,8 @@ internal class ClubLayoutViews(
 
     private fun table(
         table: DbRow,
+        hall: DbRow,
+        clubId: Long,
         preview: Boolean,
     ): JsonObject =
         buildJsonObject {
@@ -68,7 +74,12 @@ internal class ClubLayoutViews(
             put("capacity", table.long("capacity"))
             put("bookingLinked", table["booking_table_id"] != null)
             put("placed", table.placed())
-            if (!preview) put("bookingDeposit", table["booking_min_deposit"])
+            if (!preview) {
+                put("bookingDeposit", table["booking_min_deposit"])
+                val issue =
+                    if (!hall.active() || !table.active()) "LAYOUT_INACTIVE" else table.bookingTableIssue(clubId)
+                put("bookingLinkStatus", issue ?: "ACTIVE_LINK")
+            }
             put("x", table.coordinate("x"))
             put("y", table.coordinate("y"))
         }
