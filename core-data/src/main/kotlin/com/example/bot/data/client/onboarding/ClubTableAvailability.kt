@@ -133,20 +133,28 @@ internal class ClubTableAvailability(
         hallActive: Boolean,
         nightIssue: String?,
         facts: List<String>,
-    ): Availability =
-        when {
-            !hallActive || !active() -> Availability("UNAVAILABLE", "LAYOUT_INACTIVE")
-            this["booking_table_id"] == null -> Availability("UNKNOWN", "TABLE_UNLINKED")
-            this["verified_table_id"] == null || this["booking_club_id"]?.toLongOrNull() != clubId ->
-                Availability("UNKNOWN", "TABLE_LINK_MISMATCH")
-            !active("booking_active") -> Availability("UNAVAILABLE", "BOOKING_TABLE_INACTIVE")
+    ): Availability {
+        if (!hallActive || !active()) return Availability("UNAVAILABLE", "LAYOUT_INACTIVE")
+        val issue = bookingTableIssue(clubId)
+        return when {
+            issue == "BOOKING_TABLE_INACTIVE" -> Availability("UNAVAILABLE", issue)
+            issue != null -> Availability("UNKNOWN", issue)
             nightIssue != null -> Availability("UNKNOWN", nightIssue)
             facts.size > 1 || "CONFLICT" in facts -> Availability("UNKNOWN", "OCCUPANCY_CONFLICT")
             else -> Availability(facts.singleOrNull() ?: "FREE")
         }
+    }
 
     private data class Availability(
         val status: String,
         val reason: String? = null,
     )
 }
+
+internal fun DbRow.bookingTableIssue(clubId: Long): String? =
+    when {
+        this["booking_table_id"] == null -> "TABLE_UNLINKED"
+        this["verified_table_id"] == null || this["booking_club_id"]?.toLongOrNull() != clubId -> "TABLE_LINK_MISMATCH"
+        !active("booking_active") -> "BOOKING_TABLE_INACTIVE"
+        else -> null
+    }

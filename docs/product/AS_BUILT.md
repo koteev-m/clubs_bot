@@ -1,5 +1,47 @@
 # AS_BUILT: repository snapshot
 
+## Bounded local refresh: owner club setup
+
+The unpublished candidate over `aeb80259f7208deee78c38dd5e68ebd899c2aa96`
+continues [private owner setup](PRODUCT_SPEC.md#owner-club-setup).
+`ClubProfile` renders `ClubSetup` from the existing signed, no-store profile,
+layout, calendar, booking-rules and owner booking-preview reads. It counts
+placed tables only on saved plans, and counts materialized nights within
+the calendar response. Rule version 1 denotes initial values. Night checks
+compare business dates and actual time windows across reads and compare
+canonical IDs for event links. A mismatch withholds readiness and offers a
+retry. A temporary preview read failure preserves an authorized entry point.
+
+`ClubLayoutViews` now returns `bookingLinkStatus` for tables in the existing
+layout response. It shares booking link validation with
+`ClubTableAvailability`. `ClubBookingPreview` includes the materialized
+`nightId` used to check the event link so the preview can request the existing
+availability snapshot for that night and hall. Projected nights without a
+stored ID never issue an availability request. Neither projection grants
+guest access. The profile and its setup actions use the existing exact
+client and club grants and the preview also requires owner identity.
+
+In client mode, `ClubHallsScreen` edits the selected card and renders the
+snapshot from the same layout adapter that owns the versioned mutation and
+its retry. An image 404 is checked against authorized metadata. Temporary
+errors and concurrent replacement preserve access to the layout. Profile
+drafts keep their original version. The owner can explicitly reapply edits
+to unchanged fields after a conflict. Calendar, rules and preview return
+through the cabinet history, and dated rules with inherited hours refer to
+the server preview. A profile denial increments an authority epoch and cancels
+the active read. Old command results remain fenced after a later authorized
+read. An unresolved command retains its payload and key across that recovery.
+Profile results and hall command results cannot replace a known newer version.
+The setup view remounts on saved timezone changes and checks response timezones.
+Preview entry uses the confirmed profile permission and remembers explicit
+refusal through temporary reads. Image bytes must match the saved SHA-256 and
+the hall revision is checked before and after loading. A preview mismatch
+refreshes the full snapshot once, then keeps an explicit retry. The dated-hours
+draft preserves inherited opening days as null and requires an explicit day
+when converting to complete custom hours. Admin hall editing retains its
+existing flow. This is source and local-test evidence for a private cabinet. See the
+[repository checkpoint](../ops/PROJECT_STATUS.md) for verification and limits.
+
 ## Bounded local refresh: booking cutover fence
 
 V073 is empty on migration. A row reserves an exact club, canonical night

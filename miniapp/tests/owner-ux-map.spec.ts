@@ -261,7 +261,7 @@ test('single club opens directly with organization path; multiple contexts keep 
   await expect(page).toHaveURL(/screen=club&resource=100/);
   await expect(page.getByText('Не опубликован', { exact: true })).toBeVisible();
   await expect(
-    page.getByText('Бот не подключён', { exact: true }),
+    page.getByText('Отдельный бот клуба', { exact: true }),
   ).toBeVisible();
   await page
     .getByRole('button', { name: 'Организация и другие заведения' })

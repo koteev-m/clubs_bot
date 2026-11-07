@@ -14,6 +14,7 @@ vi.mock('../../app/providers/TelegramProvider', () => ({
 }));
 
 const initial: BookingRulesView = {
+  clubId: '42',
   name: 'Клуб',
   timezone: 'Europe/Berlin',
   version: '1',

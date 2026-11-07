@@ -8,6 +8,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -22,6 +23,37 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 open class ClientCalendarRoutesDataTest : ClientOnboardingRoutesTestBase() {
+    @Test
+    fun `dated hours inherit the Friday overnight start and accept an explicit complete override`() =
+        database { source ->
+            withApp(source, CLOCK) {
+                val club = createClub(RECIPIENT)
+                val clubId = club.string("id")
+                val path = "$C/clubs/$clubId/calendar"
+                val initial = ok(path, RECIPIENT)
+                val weekly =
+                    """[{"day":5,"mode":"open","open":"00:00","close":"12:00","nextDay":false,"startNextDay":true}]"""
+                ok(path, RECIPIENT, calendarBody(initial, weekly = weekly), HttpMethod.Patch)
+                source.execute(
+                    "INSERT INTO club_holidays(club_id,date,is_open,override_open_local,override_close_local," +
+                        "close_next_day,start_next_day) VALUES ($clubId,'2026-11-06',TRUE,NULL,NULL,NULL,FALSE)",
+                )
+                val inherited = ok(path, RECIPIENT)
+                val holiday = inherited.rules("holidays").single().jsonObject
+                assertEquals(JsonNull, holiday["open"])
+                assertEquals(JsonNull, holiday["close"])
+                assertEquals(JsonPrimitive(false), holiday["startNextDay"])
+                assertEquals("2026-11-07T00:00+03:00", inherited.rules("nights").first().string("opensAt"))
+                assertEquals("2026-11-07T12:00+03:00", inherited.rules("nights").first().string("closesAt"))
+                val explicit =
+                    """[{"date":"2026-11-06","mode":"open","open":"00:00","close":"12:00","nextDay":false}]"""
+                val saved = ok(path, RECIPIENT, calendarBody(inherited, holidays = explicit), HttpMethod.Patch)
+                assertEquals("2026-11-06T00:00+03:00", saved.rules("nights").first().string("opensAt"))
+                assertEquals("2026-11-06T12:00+03:00", saved.rules("nights").first().string("closesAt"))
+                assertEquals(saved, ok(path, RECIPIENT))
+            }
+        }
+
     @Test
     fun `owner persists weekly rules holidays and date changes and replays after restart`() =
         database { source ->

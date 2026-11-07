@@ -173,7 +173,7 @@ describe('simplified onboarding', () => {
     expect(screen.queryByRole('checkbox')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Создать заведение' }));
     await screen.findByText('Не опубликован');
-    expect(screen.getByText('Бот не подключён')).toBeTruthy();
+    expect(screen.getByText('Отдельный бот клуба')).toBeTruthy();
     const create = fetch.mock.calls.find(([path]) =>
       String(path).endsWith('/clubs'),
     )!;

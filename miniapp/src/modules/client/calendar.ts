@@ -2,7 +2,7 @@ export interface Hours {
   open: string | null;
   close: string | null;
   nextDay: boolean;
-  startNextDay?: boolean;
+  startNextDay?: boolean | null;
 }
 
 export type Rule = Hours & { mode: 'open' | 'closed' };
@@ -39,6 +39,20 @@ export const defaultHours: Hours = {
   close: '06:00',
   nextDay: true,
 };
+
+// Legacy dated DTOs report false for an inherited opening day when no opening time is set.
+export function calendarDraft(view: Rules): Rules {
+  const inherited = (row: DateRule): DateRule => ({
+    ...row,
+    startNextDay:
+      row.open === null && !row.startNextDay ? null : row.startNextDay,
+  });
+  return {
+    weekly: view.weekly,
+    holidays: view.holidays.map(inherited),
+    exceptions: view.exceptions.map(inherited),
+  };
+}
 
 type Delta<K, T extends Rule> = { id: K; rule: T | null };
 
@@ -160,6 +174,8 @@ export function calendarValidation(
     if (rule?.mode !== 'open') continue;
     if (!rule.open || !rule.close)
       return 'Укажите время начала и окончания каждой открытой ночи.';
+    if (rule.startNextDay === null)
+      return 'Выберите день открытия для правила с собственными часами.';
     if (!rule.nextDay && wallSeconds(rule.open) >= wallSeconds(rule.close))
       return 'Если окончание не позже начала, выберите окончание на следующий день после открытия или измените время.';
   }

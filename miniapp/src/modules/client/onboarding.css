@@ -245,3 +245,48 @@
     width: 100%;
   }
 }
+
+.client-hall-rename {
+  margin-top: 14px;
+}
+.client-hall-rename input {
+  min-height: 44px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #72817b;
+  border-radius: 10px;
+  font-size: 16px;
+}
+.client-hall-rename-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.client-hall-card button {
+  min-height: 44px;
+}
+
+.ob-setup-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ob-setup-row {
+  border-top: 1px solid #72817b;
+  padding-top: 12px;
+  overflow-wrap: anywhere;
+}
+.ob-setup-row h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.ob-setup-row ul {
+  padding-inline-start: 1.25rem;
+  list-style: disc;
+}
+.ob-setup-row button {
+  min-height: 44px;
+  margin-top: 6px;
+}

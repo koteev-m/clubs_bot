@@ -23,21 +23,41 @@ function NightHours({
   hours,
   update,
   businessDate,
+  inherited = false,
 }: {
   hours: Hours;
   update: (hours: Hours) => void;
   businessDate: string;
+  inherited?: boolean;
 }) {
-  const description = describeNight(businessDate, hours);
+  const description =
+    hours.open && hours.close && hours.startNextDay !== null
+      ? describeNight(businessDate, hours)
+      : null;
   return (
     <>
       <Field label="Когда открываемся относительно дня вечеринки">
         <select
-          value={hours.startNextDay ? 'next' : 'same'}
+          value={
+            hours.startNextDay === null
+              ? 'schedule'
+              : hours.startNextDay
+                ? 'next'
+                : 'same'
+          }
           onChange={(event) =>
-            update({ ...hours, startNextDay: event.target.value === 'next' })
+            update({
+              ...hours,
+              startNextDay:
+                event.target.value === 'schedule'
+                  ? null
+                  : event.target.value === 'next',
+            })
           }
         >
+          {(inherited || hours.startNextDay === null) && (
+            <option value="schedule">По расписанию</option>
+          )}
           <option value="same">
             В день вечеринки · {weekdayName(businessDate)}
           </option>
@@ -79,8 +99,20 @@ function NightHours({
         дату.
       </p>
       <div aria-live="polite" className="po-notice">
-        <p>{description.text}</p>
-        <p>{description.dates}</p>
+        {description ? (
+          <>
+            <p>{description.text}</p>
+            <p>{description.dates}</p>
+          </>
+        ) : (
+          <p>
+            {hours.open && hours.close && hours.startNextDay === null
+              ? 'Для собственных часов выберите день открытия.'
+              : inherited
+                ? 'Если часы в этом правиле не заданы, сервер берёт их из расписания на эту дату, если оно есть. Действующий интервал показан в предпросмотре.'
+                : 'Укажите время открытия и закрытия для расчёта интервала.'}
+          </p>
+        )}
       </div>
     </>
   );
@@ -211,6 +243,7 @@ function DatedRules({
             <NightHours
               businessDate={row.date}
               hours={row}
+              inherited={row.open === null || row.close === null}
               update={(hours) =>
                 update(replaceDate(rows, row.date, { ...row, ...hours }))
               }

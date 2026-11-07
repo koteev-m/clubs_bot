@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, test, type Locator } from '@playwright/test';
 import type { ClientLayout } from '../src/modules/client/layout.api';
 
@@ -89,7 +90,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
           id: '1',
           name: 'Main',
           layoutRevision: '1',
-          plan: { contentType: 'image/png', sha256: 'A', sizeBytes: 80 },
+          plan: {
+            contentType: 'image/png',
+            sha256: createHash('sha256')
+              .update(Buffer.from(images.png, 'base64'))
+              .digest('hex'),
+            sizeBytes: 80,
+          },
           tables: [
             {
               id: '11',
@@ -107,7 +114,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
           id: '2',
           name: 'Welcome',
           layoutRevision: '1',
-          plan: { contentType: 'image/jpeg', sha256: 'B', sizeBytes: 80 },
+          plan: {
+            contentType: 'image/jpeg',
+            sha256: createHash('sha256')
+              .update(Buffer.from(images.jpeg, 'base64'))
+              .digest('hex'),
+            sizeBytes: 80,
+          },
           tables: [
             {
               id: '22',
@@ -162,7 +175,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
           firstImage = images.replacement;
           updateMain({
             layoutRevision: String(Number(layout.halls[0].layoutRevision) + 1),
-            plan: { contentType: 'image/png', sha256: 'A2', sizeBytes: 80 },
+            plan: {
+              contentType: 'image/png',
+              sha256: createHash('sha256')
+                .update(Buffer.from(images.replacement, 'base64'))
+                .digest('hex'),
+              sizeBytes: 80,
+            },
           });
           return route.fulfill({ json: layout });
         }
@@ -458,6 +477,48 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
           version: '1',
           permissions,
           availableActions: [],
+          canPreviewBooking: true,
+        },
+      });
+    const nights = {
+      clubId: '42',
+      timezone: 'Europe/Moscow',
+      name: 'Test club',
+      nights: [],
+    };
+    if (path.endsWith('/calendar'))
+      return route.fulfill({
+        json: {
+          ...nights,
+          version: '1',
+          canWrite: true,
+          weekly: [],
+          holidays: [],
+          exceptions: [],
+          invalidDates: [],
+        },
+      });
+    if (path.endsWith('/booking-rules'))
+      return route.fulfill({
+        json: {
+          ...nights,
+          version: '1',
+          canWrite: true,
+          invalidDates: [],
+          rules: {
+            cutoffMinutes: 120,
+            arrivalMinutes: null,
+            holdMinutes: null,
+            retentionMinutes: 30,
+          },
+        },
+      });
+    if (path.endsWith('/booking-preview'))
+      return route.fulfill({
+        json: {
+          ...nights,
+          bookingBlocker: 'GUEST_BOOKING_DISABLED',
+          halls: [],
         },
       });
     return route.fulfill({
@@ -564,9 +625,432 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
   await expect(openOrganization).toBeVisible();
   await expect.poll(nativeVisible).toBe(false);
   expect(await page.evaluate(() => history.length)).toBe(length);
+  const sections = [
+    ['Календарь клуба', 'calendar', 'Профиль клуба'],
+    ['Правила бронирования', 'booking-rules', 'Профиль клуба'],
+    ['Гостевой предпросмотр', 'booking-preview', 'Назад'],
+  ] as const;
+  for (const [name, screen, backLabel] of sections) {
+    await openOrganization.click();
+    await openClub.click();
+    await page.getByRole('button', { name, exact: true }).click();
+    const section = page.getByRole('heading', { name, level: 1 });
+    await expect(section).toBeVisible();
+    if (screen === 'calendar') {
+      const friday = page.getByRole('group', { name: 'Пятница' });
+      const open = friday.getByLabel('Проводим вечеринку');
+      await open.check();
+      page.once('dialog', (dialog) => dialog.dismiss());
+      await nativeBack();
+      await expect(open).toBeChecked();
+      await open.uncheck();
+    }
+    const entries = await page.evaluate(() => history.length);
+    await page.getByRole('button', { name: backLabel, exact: true }).click();
+    await expect(profileBack).toBeVisible();
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    await page.goForward();
+    await expect(section).toBeVisible();
+    await page.goBack();
+    await expect(profileBack).toBeVisible();
+    await profileBack.click();
+    await expect(openClub).toBeVisible();
+    await nativeBack();
+    await expect(openOrganization).toBeVisible();
+    await expect(page).not.toHaveURL(/screen=/);
+  }
   await close.click();
   await expect(page.locator('html')).toHaveAttribute(
     'data-native-close',
     'sent',
   );
+  for (const [name, screen] of sections) {
+    await page.goto(
+      entry.replace(
+        'screen=layout&resource=42&hall=1',
+        'screen=' + screen + '&resource=42',
+      ),
+    );
+    await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+    const entries = await page.evaluate(() => history.length);
+    await nativeBack();
+    await expect(profileBack).toBeVisible();
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+  }
+});
+
+test('on a narrow mobile screen rename stays in Welcome and survives reload and Back', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 620 });
+  await page.addInitScript((credential) => {
+    if (location.pathname !== '/app') return;
+    const url = new URL(location.href);
+    url.hash = new URLSearchParams({
+      tgWebAppData: credential,
+      tgWebAppVersion: '7.10',
+      tgWebAppPlatform: 'ios',
+    }).toString();
+    history.replaceState(history.state, '', url);
+  }, credential);
+  const permissions = ['client.club.read', 'client.club.layout.write'];
+  let layout: ClientLayout = {
+    id: '42',
+    clubId: '42',
+    clientId: '21',
+    permissions,
+    halls: [
+      { id: '1', name: 'Main', layoutRevision: '1', plan: null, tables: [] },
+      { id: '2', name: 'Welcome', layoutRevision: '1', plan: null, tables: [] },
+    ],
+  };
+  const patches: Array<{ body: unknown; key?: string }> = [];
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/profile'))
+      return route.fulfill({
+        json: {
+          id: '42',
+          clientId: '21',
+          clientName: 'Org',
+          name: 'Test club',
+          timezone: 'Europe/Moscow',
+          countryCode: 'RU',
+          city: 'Москва',
+          address: 'Test address',
+          unit: '',
+          description: '',
+          savedAt: '2026-11-01T00:00:00Z',
+          version: '1',
+          permissions,
+          availableActions: [],
+        },
+      });
+    if (path.endsWith('/layout')) return route.fulfill({ json: layout });
+    if (path.endsWith('/calendar'))
+      return route.fulfill({
+        json: {
+          clubId: '42',
+          timezone: 'Europe/Moscow',
+          nights: [],
+          invalidDates: [],
+        },
+      });
+    if (path.endsWith('/booking-rules'))
+      return route.fulfill({
+        json: {
+          clubId: '42',
+          timezone: 'Europe/Moscow',
+          version: '1',
+          nights: [],
+        },
+      });
+    if (path.endsWith('/halls/2') && request.method() === 'PATCH') {
+      const body = request.postDataJSON();
+      patches.push({ body, key: request.headers()['idempotency-key'] });
+      layout = {
+        ...layout,
+        halls: [
+          layout.halls[0],
+          { ...layout.halls[1], name: body.name, layoutRevision: '2' },
+        ],
+      };
+      return route.fulfill({ json: layout });
+    }
+    return route.fulfill({ status: 404, json: { code: 'not_found' } });
+  });
+
+  await page.goto(
+    entry.replace(
+      'screen=layout&resource=42&hall=1',
+      'screen=club&resource=42',
+    ),
+  );
+  const setup = page.getByRole('region', { name: 'Подготовка клуба' });
+  await expect(setup.getByText('Welcome · Схема не загружена')).toBeVisible();
+  await expect(
+    setup.getByText('Сформировано ближайших ночей: 0 из 0.'),
+  ).toBeVisible();
+  await expect(
+    setup.getByText(/Гостевое бронирование выключено/),
+  ).toBeVisible();
+  await setup.getByRole('button', { name: 'Залы и столы' }).tap();
+  const welcome = page.locator('.client-hall-card').filter({
+    has: page.getByRole('heading', { name: 'Welcome', exact: true }),
+  });
+  await welcome.getByRole('button', { name: 'Редактировать' }).tap();
+  const form = welcome.getByRole('form', {
+    name: 'Редактирование названия зала',
+  });
+  const name = form.getByRole('textbox', { name: 'Название зала' });
+  await expect(name).toHaveValue('Welcome');
+  await expect(
+    page.getByRole('form', { name: 'Редактирование названия зала' }),
+  ).toHaveCount(1);
+  expect(await contrast(name)).toBeGreaterThanOrEqual(4.5);
+  expect(
+    await name.evaluate((input) =>
+      parseFloat(getComputedStyle(input).fontSize),
+    ),
+  ).toBeGreaterThanOrEqual(16);
+  for (const button of await form.getByRole('button').all()) {
+    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await name.fill('Черновик');
+  await form.getByRole('button', { name: 'Отмена' }).tap();
+  await expect(form).toHaveCount(0);
+  expect(patches).toHaveLength(0);
+  await welcome.getByRole('button', { name: 'Редактировать' }).tap();
+  await name.fill('Welcome — вход');
+  await form.getByRole('button', { name: 'Сохранить' }).tap();
+  await expect(
+    page.getByRole('heading', { name: 'Welcome — вход', exact: true }),
+  ).toBeVisible();
+  expect(patches).toHaveLength(1);
+  expect(patches[0].key).toBeTruthy();
+  expect(patches[0].body).toEqual({
+    name: 'Welcome — вход',
+    expectedVersion: '1',
+  });
+
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Welcome — вход', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Назад', exact: true }).tap();
+  await expect(
+    setup.getByText('Welcome — вход · Схема не загружена'),
+  ).toBeVisible();
+  await page.goForward();
+  await expect(
+    page.getByRole('heading', { name: 'Welcome — вход', exact: true }),
+  ).toBeVisible();
+  expect(patches).toHaveLength(1);
+});
+
+const finalProfile = {
+  id: '42',
+  clientId: '21',
+  clientName: 'Synthetic client',
+  name: 'Private original venue',
+  description: '',
+  timezone: 'Europe/Moscow',
+  countryCode: 'RU',
+  city: 'Москва',
+  address: 'Private fixture address',
+  unit: '',
+  version: '1',
+  savedAt: '2026-11-07T00:00:00Z',
+  permissions: ['client.club.read', 'client.club.profile.write'],
+  availableActions: ['update'],
+  canPreviewBooking: true,
+};
+const profileEntry = entry.replace(
+  'screen=layout&resource=42&hall=1',
+  'screen=club&resource=42',
+);
+
+test('confirmed profile denial fences a delayed successful write through a temporary error and fresh authorization', async ({
+  page,
+}) => {
+  let readStatus = 200;
+  let saved = finalProfile;
+  let release!: () => void;
+  const writeGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let patchStarted = false;
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!path.endsWith('/profile'))
+      return route.fulfill({ status: 503, json: {} });
+    if (request.method() === 'PATCH') {
+      patchStarted = true;
+      await writeGate;
+      return route.fulfill({
+        json: { ...finalProfile, name: 'Late private write', version: '2' },
+      });
+    }
+    return route.fulfill({
+      status: readStatus,
+      json: readStatus === 200 ? saved : { code: 'not_found' },
+    });
+  });
+  await page.goto(profileEntry);
+  await page.getByLabel('Описание клуба').fill('Pending private edit');
+  await page.getByRole('button', { name: 'Сохранить профиль' }).click();
+  await expect.poll(() => patchStarted).toBe(true);
+  readStatus = 404;
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByText(/Доступ утрачен/)).toBeVisible();
+  const written = page.waitForResponse(
+    (response) => response.request().method() === 'PATCH',
+  );
+  release();
+  await written;
+  await expect(page.getByText(finalProfile.address)).toHaveCount(0);
+  await expect(page.getByText('Late private write')).toHaveCount(0);
+  await expect(page.getByText('Сохранено', { exact: true })).toHaveCount(0);
+  readStatus = 503;
+  await page
+    .getByRole('button', { name: 'Повторить загрузку', exact: true })
+    .click();
+  await expect(
+    page.getByText('Не удалось загрузить данные. Повторите попытку.'),
+  ).toBeVisible();
+  await expect(page.getByText(finalProfile.address)).toHaveCount(0);
+  saved = { ...finalProfile, name: 'Authorized recovery', version: '3' };
+  readStatus = 200;
+  await page
+    .getByRole('button', { name: 'Повторить загрузку', exact: true })
+    .click();
+  await expect(
+    page.getByRole('heading', { name: saved.name, level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByText(finalProfile.address)).toBeVisible();
+});
+
+test('a newer profile GET survives a delayed PATCH and a failed followup read', async ({
+  page,
+}) => {
+  let saved = finalProfile;
+  let readStatus = 200;
+  let release!: () => void;
+  const writeGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let patchStarted = false;
+  await page.route('**/api/**', async (route) => {
+    if (!new URL(route.request().url()).pathname.endsWith('/profile'))
+      return route.fulfill({ status: 503, json: {} });
+    if (route.request().method() === 'PATCH') {
+      patchStarted = true;
+      await writeGate;
+      return route.fulfill({
+        json: { ...finalProfile, description: 'My draft', version: '2' },
+      });
+    }
+    return route.fulfill({
+      status: readStatus,
+      json: readStatus === 200 ? saved : {},
+    });
+  });
+  await page.goto(profileEntry);
+  await page.getByLabel('Описание клуба').fill('My draft');
+  await page.getByRole('button', { name: 'Сохранить профиль' }).click();
+  await expect.poll(() => patchStarted).toBe(true);
+  saved = { ...finalProfile, name: 'Fresh from another tab', version: '3' };
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(
+    page.getByRole('heading', { name: saved.name, level: 1 }),
+  ).toBeVisible();
+  readStatus = 503;
+  release();
+  await expect(
+    page.getByText('Не удалось загрузить данные. Повторите попытку.'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: saved.name, level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Описание клуба')).toHaveValue('My draft');
+  await expect(page.getByText('Сохранено', { exact: true })).toHaveCount(0);
+});
+
+test('an image 404 and metadata 503 recover with the new full hall snapshot and clear it after revoke', async ({
+  page,
+}) => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nmWQAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const hash = createHash('sha256').update(png).digest('hex');
+  const hall = {
+    id: '1',
+    name: 'Main',
+    layoutRevision: '1',
+    plan: { contentType: 'image/png', sha256: hash, sizeBytes: png.length },
+    tables: [
+      {
+        id: '11',
+        hallId: '1',
+        tableNumber: 1,
+        label: 'Old position',
+        capacity: 4,
+        x: 0.2,
+        y: 0.3,
+      },
+    ],
+  };
+  const moved = {
+    ...hall,
+    layoutRevision: '2',
+    tables: [{ ...hall.tables[0], label: 'New position', x: 0.8, y: 0.7 }],
+  };
+  let layouts = 0;
+  let images = 0;
+  let revoked = false;
+  const methods: string[] = [];
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    methods.push(request.method());
+    if (revoked)
+      return route.fulfill({ status: 404, json: { code: 'not_found' } });
+    if (path.endsWith('/booking-preview'))
+      return route.fulfill({
+        json: {
+          clubId: '42',
+          name: finalProfile.name,
+          timezone: finalProfile.timezone,
+          bookingBlocker: 'GUEST_BOOKING_DISABLED',
+          nights: [],
+          halls: [layouts > 1 ? moved : hall],
+        },
+      });
+    if (path.endsWith('/layout')) {
+      ++layouts;
+      if (layouts === 2) return route.fulfill({ status: 503, json: {} });
+      return route.fulfill({
+        json: {
+          clubId: '42',
+          clientId: '21',
+          permissions: ['client.club.read'],
+          halls: [layouts > 2 ? moved : hall],
+        },
+      });
+    }
+    if (path.endsWith('/plan')) {
+      if (++images === 1) return route.fulfill({ status: 404, json: {} });
+      return route.fulfill({ contentType: 'image/png', body: png });
+    }
+    return route.fulfill({ status: 404, json: {} });
+  });
+  await page.goto(
+    entry.replace(
+      'screen=layout&resource=42&hall=1',
+      'screen=booking-preview&resource=42',
+    ),
+  );
+  await page.getByRole('button', { name: 'Повторить загрузку схемы' }).click();
+  await expect(page.getByTestId('hall-plan-image')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /#1 · New position/ }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: /Old position/ })).toHaveCount(
+    0,
+  );
+  await expect(page.getByTestId('table-marker-11')).toBeVisible();
+  expect(methods.every((method) => method === 'GET')).toBe(true);
+  revoked = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByText(/Доступ утрачен/)).toBeVisible();
+  await expect(page.getByTestId('hall-plan-image')).toHaveCount(0);
+  await expect(page.getByText('New position')).toHaveCount(0);
 });

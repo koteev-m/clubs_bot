@@ -35,6 +35,7 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     availableActions: [],
   };
   let view: BookingRulesView = {
+    clubId: club,
     name: profile.name,
     timezone: profile.timezone,
     version: '1',

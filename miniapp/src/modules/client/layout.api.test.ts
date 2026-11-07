@@ -1,3 +1,4 @@
+import { beforeEach } from 'vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClientLayout, createClientLayoutApi, LayoutState } from './layout.api';
 
@@ -14,7 +15,12 @@ const data = (version = '1'): ClientLayout => ({
       id: hall,
       name: 'Основной зал',
       layoutRevision: version,
-      plan: { contentType: 'image/png', sha256: 'synthetic', sizeBytes: 8 },
+      plan: {
+        contentType: 'image/png',
+        sha256:
+          '41c04b3f2d0c69a66494faa96f05b622709379f3a5251078e0cd39fa9c44d67e',
+        sizeBytes: 8,
+      },
       tables: [
         {
           id: table,
@@ -41,7 +47,15 @@ const deferred = <T>() => {
   });
   return { promise, resolve };
 };
+beforeEach(async () => {
+  const { webcrypto } = await vi.importActual<{ webcrypto: Crypto }>(
+    'node:crypto',
+  );
+  vi.stubGlobal('crypto', webcrypto);
+});
+
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -126,7 +140,7 @@ describe('client layout adapter', () => {
     });
     api.dispose();
   });
-  it('distinguishes an empty plan from a denied binary and terminally fences late data', async () => {
+  it('confirms a denied layout after a binary 404 and terminally fences late data', async () => {
     const late = deferred<Response>();
     const states: LayoutState[] = [];
     const lost = vi.fn();
@@ -134,6 +148,7 @@ describe('client layout adapter', () => {
       .mockResolvedValueOnce(json(data()))
       .mockImplementationOnce(() => late.promise)
       .mockResolvedValueOnce(json(data()))
+      .mockResolvedValueOnce(json({ code: 'not_found' }, 404))
       .mockResolvedValueOnce(json({ code: 'not_found' }, 404));
     const api = createClientLayoutApi(
       'signed-client',
@@ -152,6 +167,64 @@ describe('client layout adapter', () => {
     expect(states.at(-1)?.layout).toBeUndefined();
     await expect(api.load()).rejects.toMatchObject({ status: 404 });
   });
+  it.each([
+    ['temporary error', json({ code: 'internal_error' }, 503), 503],
+    ['new image', json(data('2')), 409],
+  ])(
+    'keeps the layout authorized after a binary 404 and %s',
+    async (_, metadata, status) => {
+      const changed = vi.fn();
+      const lost = vi.fn();
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(json(data()))
+        .mockResolvedValueOnce(json(data()))
+        .mockResolvedValueOnce(json({ code: 'not_found' }, 404))
+        .mockResolvedValueOnce(metadata)
+        .mockResolvedValueOnce(json(data('2')))
+        .mockResolvedValueOnce(json(data('2')))
+        .mockResolvedValueOnce(new Response('new image'))
+        .mockResolvedValueOnce(json(data('2')));
+      const api = createClientLayoutApi('synthetic', club, changed, lost);
+      await api.load();
+      await expect(
+        api.editor.fetchHallPlanBlob(club, hall),
+      ).rejects.toMatchObject({ status });
+      expect(lost).not.toHaveBeenCalled();
+      expect(changed.mock.lastCall?.[0].layout?.clubId).toBe(club);
+      expect((await api.load()).halls[0].layoutRevision).toBe('2');
+      expect((await api.editor.fetchHallPlanBlob(club, hall)).status).toBe(200);
+      api.dispose();
+    },
+  );
+
+  it('ignores a late refusal when an image metadata check is cancelled', async () => {
+    const late = deferred<Response>();
+    const lost = vi.fn();
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json(data()))
+      .mockResolvedValueOnce(json(data()))
+      .mockResolvedValueOnce(json({ code: 'not_found' }, 404))
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValueOnce(json(data()));
+    const api = createClientLayoutApi('synthetic', club, vi.fn(), lost);
+    await api.load();
+    const controller = new AbortController();
+    const plan = api.editor.fetchHallPlanBlob(
+      club,
+      hall,
+      undefined,
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+    controller.abort();
+    late.resolve(json({ code: 'not_found' }, 404));
+    await expect(plan).rejects.toMatchObject({ isAbort: true });
+    expect(lost).not.toHaveBeenCalled();
+    await expect(api.load()).resolves.toMatchObject({ clubId: club });
+    api.dispose();
+  });
+
   it('rechecks a raced image absence and clears the conflict only after an explicit refresh', async () => {
     const states: LayoutState[] = [];
     const lost = vi.fn();
@@ -240,13 +313,13 @@ describe('client plan response lifetime', () => {
   it.each(['dispose', 'deny', 'external abort'])(
     'does not expose a late private image body after %s',
     async (ending) => {
-      const body = deferred<Blob>();
-      const blob = vi.fn(() => body.promise);
+      const body = deferred<ArrayBuffer>();
+      const readBody = vi.fn(() => body.promise);
       const binary = new Response(null, {
         status: 200,
         headers: { 'Content-Type': 'image/png' },
       });
-      Object.defineProperty(binary, 'blob', { value: blob });
+      Object.defineProperty(binary, 'arrayBuffer', { value: readBody });
       const lost = vi.fn();
       vi.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(json(data()))
@@ -262,11 +335,11 @@ describe('client plan response lifetime', () => {
         null,
         external.signal,
       );
-      await vi.waitFor(() => expect(blob).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(readBody).toHaveBeenCalledTimes(1));
       if (ending === 'dispose') api.dispose();
       else if (ending === 'external abort') external.abort();
       else await expect(api.load()).rejects.toMatchObject({ status: 404 });
-      body.resolve(new Blob(['private image'], { type: 'image/png' }));
+      body.resolve(new TextEncoder().encode('private image').buffer);
       await expect(image).rejects.toMatchObject({ isAbort: true });
       if (ending !== 'deny') expect(lost).not.toHaveBeenCalled();
       api.dispose();
@@ -300,4 +373,63 @@ describe('client layout mutation denial', () => {
     expect(lost).toHaveBeenCalledTimes(1);
     api.dispose();
   });
+});
+
+it.each(['different bytes', 'moved tables', 'revoked grant'] as const)(
+  'withholds the image when its snapshot fails confirmation through %s',
+  async (change) => {
+    const states: LayoutState[] = [];
+    const lost = vi.fn();
+    const moved = data('2');
+    moved.halls[0].tables[0].x = 0.8;
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json(data()))
+      .mockResolvedValueOnce(
+        new Response(
+          change === 'different bytes' ? 'wrong bytes' : 'new image',
+        ),
+      )
+      .mockResolvedValueOnce(
+        change === 'revoked grant' ? json({}, 404) : json(moved),
+      );
+    const api = createClientLayoutApi(
+      'synthetic',
+      club,
+      (state) => states.push(state),
+      lost,
+    );
+    await expect(
+      api.editor.fetchHallPlanBlob(club, hall),
+    ).rejects.toMatchObject({
+      status: change === 'revoked grant' ? 404 : 409,
+    });
+    if (change === 'revoked grant') {
+      expect(lost).toHaveBeenCalledTimes(1);
+      expect(states.at(-1)?.layout).toBeUndefined();
+    } else {
+      expect(lost).not.toHaveBeenCalled();
+    }
+    expect(fetch).toHaveBeenCalledTimes(change === 'different bytes' ? 2 : 3);
+    api.dispose();
+  },
+);
+
+it('refuses an image before loading its bytes when a bound preview has old table coordinates', async () => {
+  const moved = data('2');
+  moved.halls[0].tables[0].x = 0.8;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(json(moved));
+  const api = createClientLayoutApi(
+    'synthetic',
+    club,
+    vi.fn(),
+    vi.fn(),
+    data().halls[0],
+  );
+  await expect(api.editor.fetchHallPlanBlob(club, hall)).rejects.toMatchObject({
+    status: 409,
+    code: 'version_conflict',
+  });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  api.dispose();
 });

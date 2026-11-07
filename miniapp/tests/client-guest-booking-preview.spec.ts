@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 
 const clubId = '9007199254740999';
@@ -56,7 +57,7 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
         plan: {
           contentType: 'image/png',
           sizeBytes: plan.length,
-          sha256: 'synthetic',
+          sha256: createHash('sha256').update(plan).digest('hex'),
         },
         tables: [
           {
@@ -81,7 +82,10 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
     if (revoked)
       return route.fulfill({ status: 404, json: { code: 'not_found' } });
     if (path.endsWith('/profile')) return route.fulfill({ json: profile });
-    if (path.endsWith('/layout')) return route.fulfill({ json: layout });
+    if (path.endsWith('/layout'))
+      return denyPlan
+        ? route.fulfill({ status: 404, json: { code: 'not_found' } })
+        : route.fulfill({ json: layout });
     if (path.endsWith('/plan'))
       return denyPlan
         ? route.fulfill({ status: 404, json: { code: 'not_found' } })
@@ -179,11 +183,13 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
   const refresh = page.getByRole('button', { name: 'Обновить занятость' });
   await refresh.click();
   await expect(
-    page.getByText(/Не удалось получить актуальный снимок/),
+    page
+      .getByRole('alert')
+      .filter({ hasText: /Не удалось получить актуальный снимок/ }),
   ).toBeVisible();
-  await expect(marker).toHaveAccessibleName(/Требуется настройка/);
+  await expect(marker).toHaveAccessibleName(/Доступность не проверена/);
   await expect(
-    card.getByText(/Доступность.*Требуется настройка/),
+    card.getByText(/Доступность.*Доступность не проверена/),
   ).toBeVisible();
   snapshotError = false;
   firstNightStatus = 'OCCUPIED';

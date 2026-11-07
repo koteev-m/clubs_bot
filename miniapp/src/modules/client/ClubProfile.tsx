@@ -10,9 +10,11 @@ import {
   useUnsavedChanges,
 } from './OnboardingShared';
 import { ClubProfile as Profile } from './onboarding.types';
+import ClubSetup from './ClubSetup';
 import { locationPresentation, timezoneLabel } from './profilePresentation';
 
 type Fields = Pick<Profile, 'name' | 'description' | 'timezone'>;
+const editableFields = ['name', 'description', 'timezone'] as const;
 const fieldsOf = (profile: Profile): Fields => ({
   name: profile.name,
   description: profile.description,
@@ -45,16 +47,7 @@ function validation(fields: Fields, savedTimezone: string): string | null {
   return null;
 }
 
-export default function ClubProfile({
-  credential,
-  id,
-  home,
-  reportDirty,
-  openLayout,
-  openCalendar,
-  openBookingRules,
-  openBookingPreview,
-}: {
+type Props = {
   credential: string;
   id: string;
   home: (clientId?: string) => void;
@@ -63,75 +56,190 @@ export default function ClubProfile({
   openCalendar?: () => void;
   openBookingRules?: () => void;
   openBookingPreview?: () => void;
-}) {
+};
+
+export default function ClubProfile(props: Props) {
+  return (
+    <ClubProfileEditor key={props.credential + ':' + props.id} {...props} />
+  );
+}
+
+function ClubProfileEditor({
+  credential,
+  id,
+  home,
+  reportDirty,
+  openLayout,
+  openCalendar,
+  openBookingRules,
+  openBookingPreview,
+}: Props) {
   const path = '/api/client/clubs/' + id + '/profile';
+  const [profile, setProfile] = useState<Profile>();
+  const [draft, setDraft] = useState<{ base: Profile; fields: Fields }>();
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
+  // Old responses stay fenced even after a fresh read restores access.
+  const authority = useRef({ denied: false, epoch: 0 });
+  const latest = useRef<Profile>();
+  const clientId = useRef<string>();
+  const cancelRead = useRef<() => void>(() => undefined);
+  const profileFields = useRef<HTMLHeadingElement>(null);
+  const deny = () => {
+    authority.current = { denied: true, epoch: authority.current.epoch + 1 };
+    cancelRead.current();
+    latest.current = undefined;
+    setDenied(true);
+    setProfile(undefined);
+    setDraft(undefined);
+    setValidationError(null);
+  };
+  const checkProfile = (received: Profile) => {
+    if (
+      received.id !== id ||
+      (clientId.current && received.clientId !== clientId.current) ||
+      !received.permissions.includes('client.club.read') ||
+      !/^[1-9][0-9]*$/.test(received.version)
+    )
+      throw new OnboardingError(404, 'not_found');
+  };
+  const onError = (error: unknown) => {
+    if (authorityLost(error)) deny();
+  };
   const remote = useRemote<Profile>(credential, path, undefined, {
     retainOnForeground: true,
+    onError,
+    onSuccess: (received) => {
+      checkProfile(received);
+      clientId.current = received.clientId;
+      authority.current.denied = false;
+      setDenied(false);
+      if (
+        !latest.current ||
+        BigInt(received.version) >= BigInt(latest.current.version)
+      ) {
+        latest.current = received;
+        setProfile(received);
+      }
+    },
   });
-  const command = useCommand<Profile>(credential);
-  const [profile, setProfile] = useState<Profile>();
-  const [fields, setFields] = useState<Fields>();
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const lastRemote = useRef<Profile>();
-  const conflict =
-    command.error instanceof OnboardingError && command.error.status === 409;
+  cancelRead.current = remote.cancel;
+  const command = useCommand<Profile>(credential, { onError });
+  const versionConflict =
+    command.error instanceof OnboardingError &&
+    command.error.code === 'version_conflict';
   const reload = remote.refresh;
-
   useEffect(() => {
-    if (authorityLost(command.error) || remote.error) {
-      setProfile(undefined);
-      setFields(undefined);
-    } else if (remote.data && remote.data !== lastRemote.current) {
-      lastRemote.current = remote.data;
-      setProfile(remote.data);
-      // A conflict refresh must not silently replace the user's unsaved input.
-      setFields((current) => current ?? fieldsOf(remote.data!));
-    }
-  }, [remote.data, remote.error, command.error]);
+    if (versionConflict && !denied) reload();
+  }, [versionConflict, reload, denied]);
   useEffect(() => {
-    if (conflict) reload();
-  }, [conflict, reload]);
-  const dirty = Boolean(
-    profile &&
-      fields &&
-      JSON.stringify(fields) !== JSON.stringify(fieldsOf(profile)),
-  );
+    if (!denied && authorityLost(command.error)) command.reset();
+  }, [denied, command]);
+  const fields = draft?.fields ?? (profile && fieldsOf(profile));
+  const dirty = Boolean(draft);
+  const conflict =
+    versionConflict ||
+    Boolean(draft && profile && draft.base.version !== profile.version);
   const leave = useUnsavedChanges(dirty || command.unknown, reportDirty);
   useTelegramClosingConfirmation(dirty || command.saving || command.unknown);
-  const accept = (result: Profile) => {
+  const edit = (base: Profile, changes: Partial<Fields>) => {
+    setDraft((current) => {
+      const original = current?.base ?? base;
+      const initial = fieldsOf(original);
+      const next = { ...(current?.fields ?? initial), ...changes };
+      return JSON.stringify(initial) === JSON.stringify(next)
+        ? undefined
+        : { base: original, fields: next };
+    });
+  };
+  const accept = (result: Profile, epoch: number) => {
+    if (authority.current.denied || authority.current.epoch !== epoch)
+      return false;
+    checkProfile(result);
+    if (
+      latest.current &&
+      BigInt(latest.current.version) > BigInt(result.version)
+    ) {
+      reload();
+      return false;
+    }
+    latest.current = result;
     setProfile(result);
-    setFields(fieldsOf(result));
+    setDraft(undefined);
     setValidationError(null);
+    reload();
+    return true;
   };
   const canWrite = Boolean(
     profile?.permissions.includes('client.club.read') &&
       profile.permissions.includes('client.club.profile.write') &&
       profile.availableActions.includes('update'),
   );
+  const editedFields = draft
+    ? editableFields.filter(
+        (field) => draft.fields[field] !== draft.base[field],
+      )
+    : [];
+  const canReapply =
+    canWrite &&
+    !command.blocked &&
+    !remote.loading &&
+    !remote.error &&
+    draft &&
+    profile &&
+    draft.base.version !== profile.version &&
+    editedFields.every(
+      (field) =>
+        profile[field] === draft.base[field] ||
+        profile[field] === draft.fields[field],
+    );
+  const reapply = () => {
+    if (!canReapply || !draft || !profile) return;
+    const next = fieldsOf(profile);
+    for (const field of editedFields) next[field] = draft.fields[field];
+    setDraft(
+      editedFields.some((field) => next[field] !== profile[field])
+        ? { base: profile, fields: next }
+        : undefined,
+    );
+    command.reset();
+    setValidationError(null);
+  };
   const refresh = () => {
-    if (!leave()) return;
+    if (command.blocked || !leave()) return;
     // Only an authoritative command replay resolves an unknown mutation result.
     // Reloading the profile never creates a new intent or abandons its key.
-    if (!command.unknown) command.reset();
-    setProfile(undefined);
-    setFields(undefined);
+    command.reset();
+    setDraft(undefined);
     setValidationError(null);
     remote.refresh();
   };
   const back = () => {
-    if (leave()) home(profile?.clientId);
+    if (!command.saving && leave())
+      home(denied ? undefined : profile?.clientId);
   };
   const location =
     profile && locationPresentation(profile.city, profile.region);
   return (
     <Shell
-      title={profile?.name ?? 'Профиль клуба'}
+      title={(!denied && profile?.name) || 'Профиль клуба'}
       subtitle="Профиль заведения"
       back={back}
       backLabel="Организация и другие заведения"
     >
       <RemoteState {...remote} />
-      {profile && fields && !remote.loading && !remote.error && (
+      {denied && !remote.error && (
+        <div role="alert">
+          <p>
+            Доступ утрачен или запись недоступна. Вернитесь в кабинет и обновите
+            данные.
+          </p>
+          <button type="button" className="ob-button" onClick={reload}>
+            Повторить загрузку
+          </button>
+        </div>
+      )}
+      {profile && fields && !denied && (
         <>
           <div className="po-context">
             <span>
@@ -139,14 +247,6 @@ export default function ClubProfile({
             </span>
             <span className="po-context-badge">Не опубликован</span>
           </div>
-          <p className="po-muted">
-            Заведение пока недоступно гостям и для бронирования.
-          </p>
-          <p className="po-notice">Бот не подключён</p>
-          <p className="po-muted">
-            Night Concierge открывает доступ к платформе. Отдельный
-            брендированный бот клуба подключается отдельно.
-          </p>
           <section className="po-card ob-card">
             <h2>Сохранённое заведение</h2>
             <dl className="po-details">
@@ -170,78 +270,78 @@ export default function ClubProfile({
               уточнения местоположения.
             </p>
           </section>
-          {openLayout && profile.permissions.includes('client.club.read') && (
-            <button
-              className="po-card ob-card ob-row"
-              onClick={() => {
-                if (leave()) openLayout();
-              }}
-            >
-              <strong>Залы и столы</strong>
-              <small>
-                {profile.permissions.includes('client.club.layout.write')
-                  ? 'Настроить схему и столы'
-                  : 'Просмотреть схему и столы'}
-              </small>
-            </button>
-          )}
-          {openCalendar && profile.permissions.includes('client.club.read') && (
-            <button
-              className="po-card ob-card ob-row"
-              onClick={() => {
-                if (leave()) openCalendar();
-              }}
-            >
-              <strong>Календарь клуба</strong>
-              <small>
-                {profile.permissions.includes('client.club.calendar.write')
-                  ? 'Настроить рабочие ночи'
-                  : 'Посмотреть рабочие ночи'}
-              </small>
-            </button>
-          )}
-          {openBookingRules && profile.permissions.includes('client.club.read') && (
-            <button
-              className="po-card ob-card ob-row"
-              onClick={() => {
-                if (leave()) openBookingRules();
-              }}
-            >
-              <strong>Правила бронирования</strong>
-              <small>Настройки и предпросмотр по календарю клуба</small>
-            </button>
-          )}
-          {openBookingPreview &&
-            profile.canPreviewBooking && (
-              <button
-                className="po-card ob-card ob-row"
-                onClick={() => {
-                  if (leave()) openBookingPreview();
-                }}
-              >
-                <strong>Гостевой предпросмотр</strong>
-                <small>Ночи, схема зала и карточки столов</small>
-              </button>
+          {profile.id === id &&
+            profile.permissions.includes('client.club.read') && (
+              <ClubSetup
+                key={profile.clientId + ':' + id + ':' + profile.timezone}
+                credential={credential}
+                profile={profile}
+                openProfile={
+                  canWrite ? () => profileFields.current?.focus() : undefined
+                }
+                openLayout={
+                  openLayout &&
+                  (() => {
+                    if (leave()) openLayout();
+                  })
+                }
+                openCalendar={
+                  openCalendar &&
+                  (() => {
+                    if (leave()) openCalendar();
+                  })
+                }
+                openBookingRules={
+                  openBookingRules &&
+                  (() => {
+                    if (leave()) openBookingRules();
+                  })
+                }
+                openBookingPreview={
+                  openBookingPreview &&
+                  (() => {
+                    if (leave()) openBookingPreview();
+                  })
+                }
+              />
             )}
+          <h2 tabIndex={-1} ref={profileFields}>
+            Настройки профиля
+          </h2>
           <form
             noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              if (!canWrite || command.blocked || conflict || !dirty) return;
-              const problem = validation(fields, profile.timezone);
+              if (
+                !canWrite ||
+                command.blocked ||
+                conflict ||
+                remote.loading ||
+                remote.error ||
+                !draft
+              )
+                return;
+              const problem = validation(fields, draft.base.timezone);
               setValidationError(problem);
               if (problem) return;
+              const epoch = authority.current.epoch;
               command.run(
                 path,
-                { ...fields, expectedVersion: profile.version },
-                accept,
+                { ...fields, expectedVersion: draft.base.version },
+                (result) => accept(result, epoch),
                 'PATCH',
               );
             }}
           >
             <fieldset
               className="ob-fields"
-              disabled={!canWrite || command.blocked || conflict}
+              disabled={
+                !canWrite ||
+                command.blocked ||
+                conflict ||
+                remote.loading ||
+                Boolean(remote.error)
+              }
             >
               <Field label="Отображаемое название заведения">
                 <input
@@ -249,7 +349,7 @@ export default function ClubProfile({
                   maxLength={255}
                   required
                   onChange={(event) =>
-                    setFields({ ...fields, name: event.target.value })
+                    edit(profile, { name: event.target.value })
                   }
                 />
               </Field>
@@ -263,7 +363,7 @@ export default function ClubProfile({
                   maxLength={2000}
                   rows={5}
                   onChange={(event) =>
-                    setFields({ ...fields, description: event.target.value })
+                    edit(profile, { description: event.target.value })
                   }
                 />
               </Field>
@@ -282,7 +382,7 @@ export default function ClubProfile({
                       autoCapitalize="none"
                       spellCheck={false}
                       onChange={(event) =>
-                        setFields({ ...fields, timezone: event.target.value })
+                        edit(profile, { timezone: event.target.value })
                       }
                     />
                   </Field>
@@ -307,28 +407,54 @@ export default function ClubProfile({
               <button
                 className="po-primary"
                 type="submit"
-                disabled={command.blocked || conflict || !dirty}
+                disabled={
+                  command.blocked ||
+                  conflict ||
+                  remote.loading ||
+                  Boolean(remote.error) ||
+                  !dirty
+                }
               >
                 Сохранить профиль
               </button>
             )}
           </form>
           {conflict && (
-            <p className="po-muted">
-              Актуальный профиль перечитан. Ваш ввод сохранён на экране;
-              загрузите актуальные данные перед новым сохранением.
-            </p>
+            <section className="po-notice" role="status">
+              <p>
+                Профиль изменился. Ваш черновик сохранён на экране.
+                {canReapply
+                  ? ' Вы можете перенести свои правки на актуальную версию и проверить их перед сохранением.'
+                  : ' Чтобы начать с актуальной версии, загрузите профиль и подтвердите сброс черновика.'}
+              </p>
+              {canReapply && (
+                <button type="button" className="ob-button" onClick={reapply}>
+                  Перенести мои правки на актуальный профиль
+                </button>
+              )}
+            </section>
           )}
           <button
             className="ob-button"
             onClick={refresh}
-            disabled={command.saving}
+            disabled={command.blocked}
           >
             Загрузить актуальный профиль
           </button>
         </>
       )}
-      <CommandState command={command} refresh={refresh} />
+      {!denied && (
+        <CommandState
+          command={{
+            ...command,
+            retry: () => {
+              const epoch = authority.current.epoch;
+              command.retryWith((result) => accept(result, epoch));
+            },
+          }}
+          refresh={command.unknown ? undefined : refresh}
+        />
+      )}
     </Shell>
   );
 }
