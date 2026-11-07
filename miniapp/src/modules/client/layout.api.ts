@@ -5,12 +5,18 @@ import {
   HallEditorApi,
 } from '../admin/pages/layoutEditor.types';
 
+export interface ClientLayoutZone {
+  id: string;
+  name: string;
+  tableCount: number;
+}
 export interface ClientLayoutTable {
   id: string;
   hallId: string;
   tableNumber: number;
   label: string;
   capacity: number;
+  zoneId?: string | null;
   bookingDeposit?: string | null;
   bookingLinked?: boolean;
   bookingLinkStatus?:
@@ -27,6 +33,7 @@ export interface ClientLayoutHall {
   name: string;
   layoutRevision: string;
   tableCount?: number;
+  zones?: ClientLayoutZone[];
   tables: ClientLayoutTable[];
   plan: null | { contentType: string; sha256: string; sizeBytes: number };
 }
@@ -55,6 +62,7 @@ interface Pending {
   method: string;
   body: string | File;
   headers: Record<string, string>;
+  zone?: { confirmed?: () => void };
 }
 export interface LayoutState {
   layout?: ClientLayout;
@@ -78,6 +86,7 @@ export function createClientLayoutApi(
   let pending: Pending | undefined;
   let saving = false;
   let generation = 0;
+  let authorityEpoch = 0;
   let denied = false;
   let readSequence = 0;
   let acceptedRead = 0;
@@ -105,6 +114,7 @@ export function createClientLayoutApi(
     if (lifetime.signal.aborted || denied) return;
     denied = true;
     generation += 1;
+    authorityEpoch += 1;
     current = undefined;
     pending = undefined;
     saving = false;
@@ -139,7 +149,10 @@ export function createClientLayoutApi(
     try {
       const response = await fetch(path, {
         ...options,
-        headers: { 'X-Telegram-Init-Data': credential, ...options.headers },
+        headers: {
+          'X-Telegram-Init-Data': credential,
+          ...options.headers,
+        },
         signal: controller.signal,
         cache: 'no-store',
         credentials: 'same-origin',
@@ -195,8 +208,17 @@ export function createClientLayoutApi(
     publish();
     return layout;
   };
+  const olderThanCurrent = (layout: ClientLayout) =>
+    current?.halls.some((saved) => {
+      const incoming = layout.halls.find((item) => item.id === saved.id);
+      return (
+        incoming &&
+        BigInt(incoming.layoutRevision) < BigInt(saved.layoutRevision)
+      );
+    });
   const load = async (signal?: AbortSignal, adopt = true) => {
     const started = generation;
+    const startedAuthority = authorityEpoch;
     const sequence = ++readSequence;
     let layout: ClientLayout;
     try {
@@ -207,6 +229,7 @@ export function createClientLayoutApi(
       if (
         !signal?.aborted &&
         started === generation &&
+        startedAuthority === authorityEpoch &&
         sequence >= acceptedRead
       )
         publish(error as AdminApiError);
@@ -215,12 +238,32 @@ export function createClientLayoutApi(
     if (signal?.aborted)
       throw new AdminApiError('Запрос отменён', { isAbort: true });
     validate(layout);
+    if (current && startedAuthority !== authorityEpoch) return current;
+    // Rights are independent of hall revisions. Even an older read can prove
+    // write loss; no response issued before that observation may restore it.
+    if (
+      current?.permissions.includes('client.club.layout.write') &&
+      !layout.permissions.includes('client.club.layout.write')
+    ) {
+      authorityEpoch += 1;
+      current = { ...current, permissions: layout.permissions };
+      if (observedLayout)
+        observedLayout = { ...observedLayout, permissions: layout.permissions };
+      // Keep an unknown command's original intent/key for explicit server replay.
+      publish();
+    }
     if (current && started !== generation) return current;
     if (current && sequence < acceptedRead)
       return adopt && !pending && observedLayout
         ? accept(observedLayout)
         : current;
     acceptedRead = sequence;
+    if (current && olderThanCurrent(layout)) {
+      current = { ...current, permissions: layout.permissions };
+      observedLayout = current;
+      publish();
+      return current;
+    }
     observedLayout = layout;
     if (!current || (adopt && !pending)) return accept(layout);
     if (!pending && revisions(current) !== revisions(layout))
@@ -242,6 +285,7 @@ export function createClientLayoutApi(
     if (saving) throw new AdminApiError('Дождитесь завершения операции.');
     saving = true;
     generation += 1;
+    const startedAuthority = authorityEpoch;
     publish();
     try {
       const result = await request(command.path, {
@@ -254,6 +298,15 @@ export function createClientLayoutApi(
       saving = false;
       generation += 1;
       validate(layout);
+      if (startedAuthority !== authorityEpoch) {
+        throw new AdminApiError(
+          'Права изменились. Загрузите актуальные данные клуба.',
+          {
+            status: 409,
+            code: 'authority_changed',
+          },
+        );
+      }
       const newer = [current, observedLayout].find((snapshot) =>
         snapshot?.halls.some((saved) => {
           const returned = layout.halls.find((item) => item.id === saved.id);
@@ -267,7 +320,10 @@ export function createClientLayoutApi(
         current = newer;
         throw versionConflict();
       }
-      return accept(layout);
+      const accepted = accept(layout);
+      // Retained with the original intent, so replay completes only its originating form.
+      command.zone?.confirmed?.();
+      return accepted;
     } catch (error) {
       const normalized = error as AdminApiError;
       saving = false;
@@ -282,6 +338,7 @@ export function createClientLayoutApi(
     body: object | File,
     method = 'POST',
     version?: string,
+    zone?: Pending['zone'],
   ) => {
     if (pending || saving)
       throw new AdminApiError('Сначала повторите незавершённую операцию.');
@@ -301,6 +358,7 @@ export function createClientLayoutApi(
         'Idempotency-Key': crypto.randomUUID(),
         ...(version ? { 'X-Layout-Version': version } : {}),
       },
+      zone,
     };
     return execute(pending);
   };
@@ -458,12 +516,69 @@ export function createClientLayoutApi(
   return {
     halls,
     editor,
+    zones: {
+      create: (
+        id: string,
+        name: string,
+        expectedVersion: string,
+        confirmed?: () => void,
+      ) =>
+        mutate(
+          '/halls/' + id + '/zones',
+          { name, expectedVersion },
+          'POST',
+          undefined,
+          { confirmed },
+        ),
+      update: (
+        id: string,
+        zone: string,
+        name: string,
+        expectedVersion: string,
+        confirmed?: () => void,
+      ) =>
+        mutate(
+          '/halls/' + id + '/zones/' + zone,
+          { name, expectedVersion },
+          'PATCH',
+          undefined,
+          { confirmed },
+        ),
+      remove: (id: string, zone: string, expectedVersion: string) =>
+        mutate(
+          '/halls/' + id + '/zones/' + zone + '/remove',
+          {
+            expectedVersion,
+          },
+          'POST',
+          undefined,
+          {},
+        ),
+      assign: (
+        id: string,
+        table: string,
+        zoneId: string,
+        expectedVersion: string,
+        confirmed?: () => void,
+      ) =>
+        mutate(
+          '/halls/' + id + '/tables/' + table,
+          { zoneId, expectedVersion },
+          'PATCH',
+          undefined,
+          { confirmed },
+        ),
+    },
     load,
     async revalidate() {
       await load(undefined, false);
     },
     async retry() {
-      if (pending && !saving) return execute(pending);
+      if (pending && !saving) {
+        const command = pending;
+        const layout = await execute(command);
+        return { layout, refreshEditor: !command.zone };
+      }
     },
     dispose() {
       lifetime.abort();

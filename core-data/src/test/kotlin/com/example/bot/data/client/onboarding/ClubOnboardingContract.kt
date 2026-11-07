@@ -35,7 +35,17 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             assertEquals(approved.id("clientId"), association.long("client_id"))
             val grants = fixture.rows("SELECT * FROM client_club_grants ORDER BY permission_code")
             assertEquals(
-                setOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT, WRITE_CALENDAR, WRITE_BOOKING_RULES),
+                setOf(
+                    READ_CLUB,
+                    WRITE_PROFILE,
+                    WRITE_LAYOUT,
+                    WRITE_CALENDAR,
+                    WRITE_BOOKING_RULES,
+                    READ_FINANCE,
+                    WRITE_FINANCE,
+                    READ_MODULES,
+                    WRITE_MODULES,
+                ),
                 grants.map { it["permission_code"] }.toSet(),
             )
             assertTrue(grants.all { it.active() && it.long("user_id") == approved.id("authorUserId") })
@@ -134,7 +144,7 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             )
             assertEquals(1, fixture.count("client_club_onboarding"))
             assertEquals(1, fixture.rows("SELECT * FROM audit_log WHERE action='client.club.create'").size)
-            assertEquals(5, fixture.count("client_club_grants"))
+            assertEquals(9, fixture.count("client_club_grants"))
         }
 
     @Test

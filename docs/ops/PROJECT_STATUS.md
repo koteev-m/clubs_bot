@@ -1,5 +1,85 @@
 # Project status checkpoint
 
+## Owner cabinet configuration — P2 replay fix, 2026-11-07
+
+- **OWNER_CABINET_CONFIG_FIX_READY**, продолжение `CLB-owner-cabinet-config`.
+  Исправлен единственный подтверждённый P2 внешнего review; прежние продуктовые
+  ограничения общего кандидата `PARTIAL_BLOCKED` не пересматривались.
+  [Focused handoff](owner-cabinet-config-fix.md).
+- Тот же worktree `/private/tmp/clb-owner-cabinet-config`, ветка
+  `codex/owner-cabinet-config`, HEAD/base
+  `019793d187cf5e95672308bf2d696e73cf376677`; `PROJECT_IDENTITY_OK`.
+  Начальный кандидат совпал с сохранённым manifest. Индекс пуст.
+- До исправления regression терял `Черновик A` после replay B. Теперь зоны
+  имеют стабильный key клуба/зала; callback подтверждённой команды завершает
+  только исходную форму. Прочие черновики сохраняют значения/свои версии,
+  pristine поля получают свежие серверные данные. Отмена локальна;
+  права/версии/идемпотентность проверяются прежним adapter. Read revoke
+  очищает формы, смена зала/клуба не переносит drafts/confirmation.
+- Regression RED до исправления, GREEN после. Vitest **372/372**,
+  TypeScript/ESLint, mobile Chromium/WebKit **34/34**, actual packaged Ktor/H2
+  replay/conflict/reopen journey **2/2**. Vite/dist validator и strict
+  `:app-bot:installDist` прошли; 5 ресурсов dist идентичны обоим JAR.
+- Один новый CLOSED financial-report contract: **H2 1/1, PostgreSQL 16 1/1**,
+  core-data ktlint/Detekt PASS. Снимки статей/суммы/флаги/порядок сохраняются
+  после template update и отключения используемой категории. Категория
+  доступна display projection. Названия категорий/браслетов остаются live
+  lookup по прежней модели; новый snapshot contract не вводился.
+- Production backend, API и V074 не менялись; полный тяжёлый набор повторно
+  не запускался. Независимый focused review трёх production frontend files
+  не выявил findings. Evidence, исходный кандидат, narrow diff и SHA-256:
+  `/private/tmp/clb-owner-config-fix-evidence`.
+- Реальный Telegram WebView/физический iPhone, hosted CI и staging/prod
+  не проверялись. Disposable PostgreSQL и browser fixture завершены.
+  Другие worktree не менялись; commit/push/PR/merge/deploy не выполнялись.
+  Единственный следующий шаг — ограниченный независимый review P2 fix
+  и нового evidence сохранности закрытого финансового отчёта.
+
+## Owner cabinet configuration — локальный кандидат, 2026-11-07
+
+- **PARTIAL_BLOCKED**, техническая метка `CLB-owner-cabinet-config`, не новый
+  зарегистрированный номер CLB. Безопасные независимые разделы завершены;
+  активация дополнительных модулей и allocation configuration остаются
+  за конкретными продуктовыми контрактами. Подробный
+  [handoff, inventory и evidence](owner-cabinet-config.md).
+- `PROJECT_IDENTITY_OK`, repository `koteev-m/clubs_bot`. Отдельный worktree
+  `/private/tmp/clb-owner-cabinet-config`, ветка `codex/owner-cabinet-config`.
+  HEAD/base и проверенный при preflight `origin/main`:
+  `019793d187cf5e95672308bf2d696e73cf376677`. Индекс пуст, коммитов нет.
+  Чужие изменения исходного checkout сохранены.
+- Из профиля конкретного клуба работают зоны/назначение физических столов,
+  canonical финансовый шаблон и общее правило раннего прихода. ClubSetup
+  показывает сохранённые значения и ограничения. Client-only светлая/тёмная
+  тема реагирует на Telegram themeChanged; внутренний/Telegram BackButton
+  сохраняют контекст. Guest runtime и публичность клуба не включаются.
+- V074 для H2/PostgreSQL добавляет версии и четыре exact grants в прежнюю
+  модель. Upgrade ограничен зафиксированным активным создателем клуба;
+  отозванные grant tombstones, чужие membership и legacy роли исключены.
+  Реальные суммы, закрытие смен, reward issuance и music publication
+  недоступны. Исходная V073 и immutable concept/profile fields не меняются.
+- Ordinary JVM: **1469 passed, 1 skipped**; full disposable PostgreSQL 16:
+  **1852 passed, 11 skipped**, 0 failures/errors. Coverage, Detekt, ktlint,
+  log policy и strict resolved production dependency graph прошли.
+  Vitest **365/365**, TypeScript, ESLint, Vite/dist validator прошли.
+  Mobile Chromium/WebKit **34/34**, actual packaged Ktor/H2 owner journey
+  **2/2**. Пять ресурсов dist совпадают с обоими JAR, core-data JAR также.
+  Ingress contract, secret scan, scope/whitespace/link checks и независимый
+  focused review зафиксированы в `/private/tmp/clb-owner-config-evidence`.
+- Исправлены findings по отзыву только записи и поздним HTTP-ответам,
+  лишнему восстановлению booking-rule grant вне scope, нумерации migration,
+  upgrade fixtures и WebKit select overflow. Полные успешные backend checks
+  переиспользованы после финальной CSS-дельты; повторены затронутые frontend,
+  browser и packaging checks. Базовые skips/warnings раскрыты в handoff.
+- Нужны решения по `DEC-013` (loyalty/check-in и безопасная активация),
+  `DEC-022` (contests), `DEC-014` (DJ/music moderation/publication) и
+  стартовому allocation catalogue/configuration slice `DEC-031`.
+  Не проверены физический iPhone/Telegram WebView, hosted CI и stage/prod.
+  Успешный staging deploy base — сообщение пользователя, не новое runtime evidence.
+- Разрешения ограничены локальной реализацией, disposable проверками и
+  документацией. Commit, push, PR, merge, deploy, реальные данные и runtime
+  mutations не выполнялись. Единственный следующий шаг — независимый review
+  локального кандидата и продуктовых ограничений до публикации.
+
 ## Owner setup — исправления финального review, 2026-11-07
 
 - **OWNER_SETUP_FINAL_FINDINGS_FIXED** для ограниченного независимого review.

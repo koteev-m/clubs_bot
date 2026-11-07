@@ -65,6 +65,14 @@ def main():
                 cases = [
                     ("PATCH", "/api/client/applications/1", 502),
                     ("PATCH", "/api/client/clubs/1/profile", 502),
+                    *[("PATCH", "/api/client/clubs/1/" + suffix, 502) for suffix in (
+                        "calendar", "booking-rules", "modules-settings", "halls/2", "halls/2/tables/3", "halls/2/zones/4",
+                    )],
+                    *[("PATCH", "/api/client/clubs/1/" + suffix, 405) for suffix in (
+                        "finance/template", "modules-settings/extra", "modules-settings/", "halls/0",
+                        "halls/02", "halls/2/zones/04", "halls/2/zones/4/remove", "halls/2/tables/3/extra",
+                        "halls/2/plan", "halls/2/zones", "halls/2/tables/0",
+                    )],
                     ("PATCH", "/api/client/clubs/01/profile", 405),
                     ("PATCH", "/api/client/clubs/1", 405),
                     ("PATCH", "/api/client/clubs/1/profile/extra", 405),

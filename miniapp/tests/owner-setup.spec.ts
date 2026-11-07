@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { contrast, telegramTheme } from './telegram-theme';
 import type { ClientLayout } from '../src/modules/client/layout.api';
 
 const credential = new URLSearchParams({
@@ -11,40 +12,6 @@ const entry =
   '/app?mode=client&screen=layout&resource=42&hall=1#tgWebAppData=' +
   encodeURIComponent(credential) +
   '&tgWebAppVersion=7.10&tgWebAppPlatform=ios';
-
-async function contrast(locator: Locator, pseudo?: string) {
-  return locator.evaluate((element, pseudo) => {
-    const style = getComputedStyle(element, pseudo);
-    const rgb = (value: string) =>
-      value
-        .match(/[\d.]+/g)!
-        .slice(0, 3)
-        .map(Number);
-    const luminance = (color: number[]) =>
-      color
-        .map((part) => {
-          const channel = part / 255;
-          return channel <= 0.04045
-            ? channel / 12.92
-            : ((channel + 0.055) / 1.055) ** 2.4;
-        })
-        .reduce(
-          (sum, part, index) => sum + part * [0.2126, 0.7152, 0.0722][index],
-          0,
-        );
-    let parent: Element | null = element;
-    let background = getComputedStyle(element).backgroundColor;
-    while (background === 'rgba(0, 0, 0, 0)' && parent?.parentElement) {
-      parent = parent.parentElement;
-      background = getComputedStyle(parent).backgroundColor;
-    }
-    const values = [
-      luminance(rgb(style.color)),
-      luminance(rgb(background)),
-    ].sort((a, b) => a - b);
-    return (values[1] + 0.05) / (values[0] + 0.05);
-  }, pseudo);
-}
 
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`independent halls and accessible table creation in Telegram ${colorScheme} theme`, async ({
@@ -200,6 +167,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       return route.fulfill({ status: 404, json: { code: 'not_found' } });
     });
     await page.goto(entry);
+    await telegramTheme(page, colorScheme);
     const plan = page.getByAltText('План зала');
     const imageColor = () =>
       plan.evaluate((element) => {

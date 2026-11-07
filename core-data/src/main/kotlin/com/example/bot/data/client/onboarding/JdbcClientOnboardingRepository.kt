@@ -34,6 +34,8 @@ class JdbcClientOnboardingRepository(
                     operation !in
                         setOf(
                             OnboardingRead.CLUB_LAYOUT_GET,
+                            OnboardingRead.CLUB_FINANCE_GET,
+                            OnboardingRead.CLUB_MODULE_SETTINGS_GET,
                             OnboardingRead.CLUB_PLAN_GET,
                             OnboardingRead.CLUB_CALENDAR_GET,
                             OnboardingRead.CLUB_NIGHT_EVENT_CANDIDATE,
@@ -80,6 +82,11 @@ class JdbcClientOnboardingRepository(
                         ClubNightEventLinks(
                             session,
                         ).classify(required(resourceId))
+                    OnboardingRead.CLUB_MODULE_SETTINGS_GET ->
+                        ClubModuleSettingsOperations(
+                            session,
+                        ).get(required(resourceId))
+                    OnboardingRead.CLUB_FINANCE_GET -> ClubFinanceOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_LAYOUT_GET -> ClubLayoutOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_PLAN_GET -> ClubLayoutOperations(session).plan(required(resourceId), body)
                     OnboardingRead.PLATFORM_INVITATION_GET -> invitations.get(required(resourceId), platform = true)
@@ -189,6 +196,11 @@ class JdbcClientOnboardingRepository(
                     session,
                 ).update(required(resourceId), body)
             OnboardingMutation.CLUB_NIGHT_EVENT_LINK -> ClubNightEventLinks(session).link(required(resourceId), body)
+            OnboardingMutation.CLUB_MODULE_SETTINGS_UPDATE ->
+                ClubModuleSettingsOperations(session).update(required(resourceId), body)
+            OnboardingMutation.CLUB_FINANCE_UPDATE -> ClubFinanceOperations(session).update(required(resourceId), body)
+            OnboardingMutation.CLUB_ZONE_CREATE, OnboardingMutation.CLUB_ZONE_UPDATE,
+            OnboardingMutation.CLUB_ZONE_REMOVE,
             OnboardingMutation.CLUB_HALL_CREATE, OnboardingMutation.CLUB_HALL_UPDATE,
             OnboardingMutation.CLUB_TABLE_CREATE, OnboardingMutation.CLUB_TABLE_BATCH_CREATE,
             OnboardingMutation.CLUB_TABLE_UPDATE,
@@ -225,6 +237,8 @@ class JdbcClientOnboardingRepository(
             "club_booking_rules" -> ClubBookingRulesOperations(session).get(command.long("result_id"), write = true)
             "club_calendar" -> ClubCalendarOperations(session).get(command.long("result_id"), write = true)
             "club_night_event_link" -> ClubNightEventLinks(session).receipt(command.long("result_id"))
+            "club_module_settings" -> ClubModuleSettingsOperations(session).get(command.long("result_id"), write = true)
+            "club_finance" -> ClubFinanceOperations(session).get(command.long("result_id"), write = true)
             "club_layout" -> ClubLayoutOperations(session).get(command.long("result_id"), write = true)
             else -> error("Invalid stored command result")
         }

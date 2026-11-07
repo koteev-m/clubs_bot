@@ -7,6 +7,8 @@ import { authorityLost, OnboardingError } from './onboarding.api';
 import { useRemote } from './onboarding.hooks';
 import type { ClubProfile } from './onboarding.types';
 import { availabilityReasons } from './tableAvailability';
+import { FinanceView, validFinance } from './finance.types';
+import { ModuleSettingsView, validModules } from './modules.types';
 
 const configured = 'Настроено';
 const needsSetup = 'Требует настройки';
@@ -95,6 +97,8 @@ export default function ClubSetup({
   profile,
   openProfile,
   openLayout,
+  openFinance,
+  openModules,
   openCalendar,
   openBookingRules,
   openBookingPreview,
@@ -103,12 +107,46 @@ export default function ClubSetup({
   profile: ClubProfile;
   openProfile?: () => void;
   openLayout?: () => void;
+  openFinance?: () => void;
+  openModules?: () => void;
   openCalendar?: () => void;
   openBookingRules?: () => void;
   openBookingPreview?: () => void;
 }) {
   const base = '/api/client/clubs/' + profile.id;
   const options = { retainOnForeground: true };
+  const canReadFinance = profile.permissions.includes(
+    'client.club.finance.read',
+  );
+  const canReadModules = profile.permissions.includes(
+    'client.club.modules.read',
+  );
+  const modulesRead = useRemote<ModuleSettingsView>(
+    credential,
+    canReadModules ? base + '/modules-settings' : null,
+    undefined,
+    options,
+  );
+  const modules =
+    modulesRead.data?.clubId === profile.id &&
+    modulesRead.data.clientId === profile.clientId &&
+    /^[1-9][0-9]*$/.test(modulesRead.data.version) &&
+    validModules(modulesRead.data)
+      ? modulesRead.data
+      : undefined;
+  const financeRead = useRemote<FinanceView>(
+    credential,
+    canReadFinance ? base + '/finance/template' : null,
+    undefined,
+    options,
+  );
+  const finance =
+    financeRead.data?.clubId === profile.id &&
+    financeRead.data.clientId === profile.clientId &&
+    /^[1-9][0-9]*$/.test(financeRead.data.version) &&
+    validFinance(financeRead.data)
+      ? financeRead.data
+      : undefined;
   const layoutRead = useRemote<ClientLayout>(
     credential,
     base + '/layout',
@@ -560,6 +598,87 @@ export default function ClubSetup({
           }}
         />
         <Row title="Связи столов для бронирования" check={tableLinks} />
+        <Row
+          title="Зоны залов"
+          check={
+            layout
+              ? {
+                  status:
+                    halls.length > 0 &&
+                    halls.every(
+                      (hall) =>
+                        (hall.zones?.length ?? 0) > 0 &&
+                        hall.tables.every((table) =>
+                          hall.zones?.some((zone) => zone.id === table.zoneId),
+                        ),
+                    )
+                      ? configured
+                      : needsSetup,
+                  detail: (
+                    <ul>
+                      {halls.map((hall) => (
+                        <li key={hall.id}>
+                          {hall.name} · Зон: {hall.zones?.length ?? 0} · Столов
+                          без подтверждённой зоны:{' '}
+                          {hall.tables.filter((table) => !table.zoneId).length}
+                        </li>
+                      ))}
+                    </ul>
+                  ),
+                  action: openLayout
+                    ? { label: 'Настроить зоны', open: openLayout }
+                    : undefined,
+                }
+              : unavailable(layoutRead)
+          }
+        />
+        <Row
+          title="Финансовый шаблон"
+          check={{
+            ...(finance
+              ? {
+                  status:
+                    finance.bracelets.some((item) => item.enabled) &&
+                    finance.revenueArticles.some((item) => item.enabled)
+                      ? configured
+                      : needsSetup,
+                  detail: `В шаблоне: типов браслетов ${finance.bracelets.filter((item) => item.enabled).length}, категорий ${finance.revenueGroups.filter((item) => item.enabled).length}, статей ${finance.revenueArticles.filter((item) => item.enabled).length}. Это не готовность денежных операций.`,
+                }
+              : canReadFinance
+                ? unavailable(financeRead)
+                : {
+                    status: unverified,
+                    detail: 'Нет права чтения финансовых настроек этого клуба.',
+                  }),
+            action:
+              openFinance && canReadFinance && !authorityLost(financeRead.error)
+                ? { label: 'Финансовые настройки', open: openFinance }
+                : undefined,
+          }}
+        />
+        <Row
+          title="Дополнительные модули"
+          check={{
+            ...(modules
+              ? {
+                  status:
+                    modules.earlyWindowMinutes === null
+                      ? needsSetup
+                      : 'Правило настроено · запуск недоступен',
+                  detail: `Ранний приход: ${modules.earlyWindowMinutes === null ? 'время не задано' : modules.earlyWindowMinutes + ' мин после начала ночи'}. Лояльность, награды, розыгрыши и музыка требуют дальнейших решений и подключения.`,
+                }
+              : canReadModules
+                ? unavailable(modulesRead)
+                : {
+                    status: unverified,
+                    detail: 'Нет права чтения настроек модулей этого клуба.',
+                  }),
+            action:
+              openModules && canReadModules && !authorityLost(modulesRead.error)
+                ? { label: 'Настройки модулей', open: openModules }
+                : undefined,
+          }}
+        />
         <Row
           title="Связи ночей с событиями"
           check={{

@@ -32,10 +32,11 @@ internal class ClubLayoutViews(
         val plan = sql.row("SELECT content_type,sha256,size_bytes FROM hall_plans WHERE hall_id=?", hallId)
         val tables =
             sql.rows(
-                "SELECT ht.*,bt.min_deposit AS booking_min_deposit,bt.active AS booking_active," +
+                "SELECT ht.*,hz.id AS zone_record_id,bt.min_deposit AS booking_min_deposit," +
+                    "bt.active AS booking_active," +
                     "CASE WHEN bt.table_number=ht.table_number AND bt.capacity=ht.capacity " +
                     "THEN bt.id END AS verified_table_id " +
-                    "FROM hall_tables ht " +
+                    "FROM hall_tables ht LEFT JOIN hall_zones hz ON hz.hall_id=ht.hall_id AND hz.zone_id=ht.zone_id " +
                     "LEFT JOIN tables bt ON bt.id=ht.booking_table_id AND bt.club_id=ht.booking_club_id " +
                     "WHERE ht.hall_id=?" + (if (preview) "" else " AND ht.is_active=TRUE") +
                     " ORDER BY ht.table_number,ht.id",
@@ -47,6 +48,7 @@ internal class ClubLayoutViews(
             put("layoutRevision", hall.getValue("layout_revision"))
             put("tableCount", tables.size)
             put("tables", JsonArray(tables.map { table(it, hall, clubId, preview) }))
+            if (!preview) put("zones", zones(hallId))
             put(
                 "plan",
                 plan?.let {
@@ -59,6 +61,23 @@ internal class ClubLayoutViews(
             )
         }
     }
+
+    private fun zones(hallId: Long): JsonArray =
+        JsonArray(
+            sql
+                .rows(
+                    "SELECT hz.*, (SELECT COUNT(*) FROM hall_tables ht WHERE ht.hall_id=hz.hall_id " +
+                        "AND ht.zone_id=hz.zone_id) AS table_count " +
+                        "FROM hall_zones hz WHERE hz.hall_id=? ORDER BY hz.sort_order,hz.id",
+                    hallId,
+                ).map { zone ->
+                    buildJsonObject {
+                        put("id", zone.getValue("id"))
+                        put("name", zone.getValue("name"))
+                        put("tableCount", zone.long("table_count"))
+                    }
+                },
+        )
 
     private fun table(
         table: DbRow,
@@ -75,6 +94,7 @@ internal class ClubLayoutViews(
             put("bookingLinked", table["booking_table_id"] != null)
             put("placed", table.placed())
             if (!preview) {
+                put("zoneId", table["zone_record_id"])
                 put("bookingDeposit", table["booking_min_deposit"])
                 val issue =
                     if (!hall.active() || !table.active()) "LAYOUT_INACTIVE" else table.bookingTableIssue(clubId)

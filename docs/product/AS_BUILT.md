@@ -872,3 +872,24 @@ Detailed disposition is in [CONCEPT_CODE_GAP.md](CONCEPT_CODE_GAP.md). The mater
 - Pilot/readiness/reports оставить historical и позднее переместить в явно названный archive без удаления audit history.
 - `docs/concept_gap_review.md`, `docs/audit_p25_notes.md` и block reports не использовать как current status после принятия новой системы; добавить banner/cross-link в отдельной docs migration задаче.
 - Не архивировать/редактировать старые документы до отдельного решения и scope-authorized изменения.
+
+<a id="owner-cabinet-config-local"></a>
+## Локальная дельта кабинета владельца, 2026-11-07
+
+`CLB-owner-cabinet-config`, base `019793d187cf5e95672308bf2d696e73cf376677`,
+ветка `codex/owner-cabinet-config`: локальный source candidate, не новый runtime
+snapshot. Цепочка зон: `ClientLayoutRoutes` → `ClubLayoutOperations`/
+`ClubLayoutZones` → существующие `hall_zones`/`hall_tables`. Цепочка финансов и
+модулей: `ClientOnboardingRoutes` → `JdbcClientOnboardingRepository` →
+`ClubFinanceOperations`/`ClubModuleSettingsOperations` → канонические финансовые
+таблицы и `club_gamification_settings`. V074 добавляет только версии и exact grants;
+нового хранилища финансовых/модульных данных нет.
+
+`ClientAccess`/`ClubProfile`/`ClubSetup` открывают `ClubLayout`/`ClubZones`,
+`ClubFinance` и `ClubModules` в клиентском контексте. Legacy admin API не являются
+путём авторизации. Общий hook конфигурации и layout adapter не принимают старые
+ответы после отзыва полномочий; неизвестные команды сохраняют intent/key.
+Caddy пропускает только точные owner configuration PATCH paths; это transport,
+а не выдача прав. Границы, инвентаризация, команды и результаты проверок —
+[owner-cabinet-config](../ops/owner-cabinet-config.md) и
+[checkpoint](../ops/PROJECT_STATUS.md). Deploy и реальные данные не затрагивались.

@@ -508,3 +508,18 @@ publication, live Telegram menu behavior and Stage rollout remain outside this t
 [AS_BUILT §4.17](AS_BUILT.md#client-onboarding-b-local) identifies the source chain.
 Final verdict is conditional on completed checks and independent review in the
 [checkpoint](../ops/PROJECT_STATUS.md), not on this delta table alone.
+
+## Локальная дельта owner configuration, 2026-11-07
+
+Техническая метка `CLB-owner-cabinet-config`, base
+`019793d187cf5e95672308bf2d696e73cf376677`; это source/evidence delta, не runtime.
+
+| Requirements | Реализуемая граница | Оставшийся gap |
+|---|---|---|
+| `ONB-004` | Управление зонами из существующего layout, назначение физических столов без смены ID/координат, безопасное удаление пустой зоны | Staff seating/session operations вне блока |
+| `ONB-006`, `FIN-004/005` | Канонические браслеты/категории/статьи, порядок/флаги/отключение через exact client grants | Распределение депозитов: конкретный каталог и правила `DEP-005`/`DEC-031`; финансовые роли и смена `DEC-012` не приняты этим блоком |
+| `LOY-002`, `ONB-007` | Чтение canonical flags, сохранение окна раннего прихода, честные статусы/ограничения модулей | `DEC-013` entrance-first начисление; `DEC-022` условия розыгрышей; table loyalty journey; `DEC-014` DJ/модерация/публикация и per-club enable model |
+| `CLNT-006/009` | Единая клиентская навигация, четыре exact grants, V074, audit/idempotency/version/revoke | Реальный Telegram WebView, runtime и полный guest/staff/multi-bot контур не подтверждаются локальными проверками |
+
+[Инвентаризация и evidence](../ops/owner-cabinet-config.md). Ни presence backend
+таблиц, ни source candidate не означает готовность запуска модулей или приёма гостей.

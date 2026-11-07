@@ -668,3 +668,114 @@ it('keeps a preview refusal through a temporary recheck and restores entry only 
   );
   await screen.findByRole('button', { name: 'Гостевой предпросмотр' });
 });
+
+it('summarizes saved finance and module settings without declaring guest or reward readiness', async () => {
+  const configuredProfile = {
+    ...profile,
+    permissions: [
+      ...profile.permissions,
+      'client.club.finance.read',
+      'client.club.modules.read',
+    ],
+  };
+  const finance = {
+    clubId: '42',
+    clientId: '21',
+    version: '2',
+    canWrite: true,
+    bracelets: [{ id: '1', name: 'Гостевой', enabled: true, orderIndex: 0 }],
+    revenueGroups: [{ id: '2', name: 'Бар', enabled: true, orderIndex: 0 }],
+    revenueArticles: [
+      {
+        id: '3',
+        groupId: '2',
+        name: 'Напитки',
+        enabled: true,
+        orderIndex: 0,
+        includeInTotal: true,
+        showSeparately: false,
+      },
+    ],
+  };
+  const ids = [
+    'stamps',
+    'early_arrival',
+    'badges',
+    'prizes',
+    'contests',
+    'table_loyalty',
+    'music',
+  ];
+  const modules = {
+    clubId: '42',
+    clientId: '21',
+    version: '2',
+    name: 'Клуб',
+    canWrite: true,
+    settingsPresent: true,
+    earlyWindowMinutes: 180,
+    flags: {
+      stampsEnabled: false,
+      earlyEnabled: false,
+      badgesEnabled: false,
+      prizesEnabled: false,
+      contestsEnabled: false,
+      tablesLoyaltyEnabled: false,
+    },
+    modules: ids.map((id) => ({
+      id,
+      status: id === 'early_arrival' ? 'configured' : 'unavailable',
+      blockedBy: 'DEC-013',
+      savedEnabled: false,
+      activationAvailable: false,
+    })),
+  };
+  let unavailable = false;
+  const reads = { ...defaultReads, profile: configuredProfile };
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (input, options) => {
+      expect(options?.method).toBe('GET');
+      const suffix = String(input).replace('/api/client/clubs/42/', '');
+      if (['finance/template', 'modules-settings'].includes(suffix)) {
+        if (unavailable)
+          return new Response(JSON.stringify({ code: 'not_found' }), {
+            status: 404,
+          });
+        return new Response(
+          JSON.stringify(suffix === 'finance/template' ? finance : modules),
+        );
+      }
+      return new Response(
+        JSON.stringify(reads[suffix as keyof typeof reads] ?? {}),
+      );
+    });
+  render(<ClientAccess initialToken={null} />);
+  await waitFor(() =>
+    expect(row('Финансовый шаблон').getByText('Настроено')).toBeTruthy(),
+  );
+  expect(
+    row('Дополнительные модули').getByText(
+      'Правило настроено · запуск недоступен',
+    ),
+  ).toBeTruthy();
+  expect(
+    row('Дополнительные модули').getByText(/180 мин после начала ночи/),
+  ).toBeTruthy();
+  expect(screen.getByText(/Гостевое бронирование выключено/)).toBeTruthy();
+  unavailable = true;
+  fireEvent(window, new Event('focus'));
+  await waitFor(() =>
+    expect(
+      row('Финансовый шаблон').getByText('Состояние пока невозможно проверить'),
+    ).toBeTruthy(),
+  );
+  expect(
+    row('Дополнительные модули').queryByText(
+      'Правило настроено · запуск недоступен',
+    ),
+  ).toBeNull();
+  expect(
+    fetch.mock.calls.every(([, options]) => options?.method === 'GET'),
+  ).toBe(true);
+});

@@ -83,7 +83,17 @@ internal class DirectClubOperations(
             session.now,
             session.now,
         )
-        listOf(READ_CLUB, WRITE_PROFILE, WRITE_LAYOUT, WRITE_CALENDAR, WRITE_BOOKING_RULES).forEach { permission ->
+        listOf(
+            READ_CLUB,
+            WRITE_PROFILE,
+            WRITE_LAYOUT,
+            WRITE_CALENDAR,
+            WRITE_BOOKING_RULES,
+            READ_FINANCE,
+            WRITE_FINANCE,
+            READ_MODULES,
+            WRITE_MODULES,
+        ).forEach { permission ->
             sql.update(
                 "INSERT INTO client_club_grants(client_id,user_id,club_id,permission_code,is_active," +
                     "created_at,updated_at) VALUES (?,?,?,?,TRUE,?,?)",
@@ -133,7 +143,13 @@ internal class DirectClubOperations(
                         listOf(READ_CLUB) +
                             (if (canWrite) listOf(WRITE_PROFILE) else emptyList()) +
                             (if (canLayout) listOf(WRITE_LAYOUT) else emptyList()) +
-                            (if (canCalendar) listOf(WRITE_CALENDAR) else emptyList())
+                            (if (canCalendar) listOf(WRITE_CALENDAR) else emptyList()) +
+                            listOf(
+                                READ_FINANCE,
+                                WRITE_FINANCE,
+                                READ_MODULES,
+                                WRITE_MODULES,
+                            ).filter { hasGrant(profile, it) }
                     ).map(::JsonPrimitive),
                 ),
             )

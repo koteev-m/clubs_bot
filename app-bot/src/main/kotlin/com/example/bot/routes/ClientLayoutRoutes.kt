@@ -41,6 +41,13 @@ internal fun Application.registerClientLayoutRoutes(repository: ClientOnboarding
             get("/layout") { http.read(call) }
             post("/halls") { http.mutate(call, OnboardingMutation.CLUB_HALL_CREATE) }
             patch("/halls/{hallId}") { http.mutate(call, OnboardingMutation.CLUB_HALL_UPDATE, "hallId") }
+            post("/halls/{hallId}/zones") { http.mutate(call, OnboardingMutation.CLUB_ZONE_CREATE, "hallId") }
+            patch("/halls/{hallId}/zones/{zoneId}") {
+                http.mutate(call, OnboardingMutation.CLUB_ZONE_UPDATE, "hallId", "zoneId")
+            }
+            post("/halls/{hallId}/zones/{zoneId}/remove") {
+                http.mutate(call, OnboardingMutation.CLUB_ZONE_REMOVE, "hallId", "zoneId")
+            }
             post("/halls/{hallId}/tables") { http.mutate(call, OnboardingMutation.CLUB_TABLE_CREATE, "hallId") }
             post(
                 "/halls/{hallId}/tables/batch",
@@ -75,7 +82,19 @@ private class ClientLayoutHttp(
         val body = call.layoutBody()
         val ids = resourceIds.associateWith { JsonPrimitive(call.layoutId(it).toString()) }
         // Resource identity belongs to the route. A JSON body cannot redirect a parent lookup.
-        if (body.keys.any { it in setOf("clubId", "clientId", "hallId", "tableId") }) invalidLayout()
+        if (body.keys.any {
+                it in
+                    setOf(
+                        "clubId",
+                        "clientId",
+                        "hallId",
+                        "tableId",
+                    ) ||
+                    it in resourceIds
+            }
+        ) {
+            invalidLayout()
+        }
         call.respond(repository.mutate(call.layoutActor(), operation, clubId, JsonObject(body + ids), key))
     }
 
@@ -170,7 +189,7 @@ private suspend fun ApplicationCall.layoutResponse(block: suspend () -> Unit) {
                 "payload_too_large" -> HttpStatusCode.PayloadTooLarge
                 "unsupported_media_type" -> HttpStatusCode.UnsupportedMediaType
                 "version_conflict", "idempotency_conflict", "hall_name_conflict", "table_number_conflict",
-                "table_link_required", "hall_plan_required",
+                "table_link_required", "hall_plan_required", "zone_name_conflict", "zone_in_use", "last_zone",
                 ->
                     HttpStatusCode.Conflict
                 else -> HttpStatusCode.InternalServerError

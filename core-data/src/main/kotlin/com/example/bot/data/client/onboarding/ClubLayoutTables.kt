@@ -47,8 +47,8 @@ internal class ClubLayoutTables(
         hallId: Long,
         body: JsonObject,
     ): Long {
-        body.only(TABLE_FIELDS + HALL_FIELDS + "tableId")
-        if (TABLE_FIELDS.none { it in body }) fail("validation_error")
+        body.only(TABLE_FIELDS + HALL_FIELDS + listOf("tableId", "zoneId"))
+        if (TABLE_FIELDS.none { it in body } && "zoneId" !in body) fail("validation_error")
         val id = body.id("tableId")
         val old =
             sql.row("SELECT * FROM hall_tables WHERE id=? AND hall_id=? AND is_active=TRUE", id, hallId)
@@ -71,6 +71,10 @@ internal class ClubLayoutTables(
             sql.update("UPDATE hall_tables SET table_number=?,capacity=? WHERE id=?", number, capacity, id)
         } else {
             updateBooking(clubId, bookingId, number, capacity, body)
+        }
+        if ("zoneId" in body) {
+            val zone = ClubLayoutZones(session).key(hallId, body.id("zoneId"))
+            sql.update("UPDATE hall_tables SET zone_id=? WHERE id=? AND hall_id=?", zone, id, hallId)
         }
         updateLayout(id, hallId, old, label, body)
         return id
