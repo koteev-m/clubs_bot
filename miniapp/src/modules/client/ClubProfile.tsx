@@ -20,6 +20,11 @@ const fieldsOf = (profile: Profile): Fields => ({
   description: profile.description,
   timezone: profile.timezone,
 });
+const capabilitiesOf = (profile: Profile) => [
+  ...profile.permissions,
+  ...profile.availableActions.map((action) => 'action:' + action),
+  ...(profile.canPreviewBooking ? ['preview'] : []),
+];
 
 function countryName(code: string): string {
   try {
@@ -52,9 +57,11 @@ type Props = {
   id: string;
   home: (clientId?: string) => void;
   reportDirty: (dirty: boolean) => void;
+  reportPending?: (pending: boolean) => void;
   openLayout?: () => void;
   openFinance?: () => void;
   openModules?: () => void;
+  openTeam?: () => void;
   openCalendar?: () => void;
   openBookingRules?: () => void;
   openBookingPreview?: () => void;
@@ -71,9 +78,11 @@ function ClubProfileEditor({
   id,
   home,
   reportDirty,
+  reportPending,
   openLayout,
   openFinance,
   openModules,
+  openTeam,
   openCalendar,
   openBookingRules,
   openBookingPreview,
@@ -84,13 +93,21 @@ function ClubProfileEditor({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
   // Old responses stay fenced even after a fresh read restores access.
-  const authority = useRef({ denied: false, epoch: 0 });
+  const authority = useRef({
+    denied: false,
+    epoch: 0,
+    capabilities: [] as string[],
+  });
   const latest = useRef<Profile>();
   const clientId = useRef<string>();
   const cancelRead = useRef<() => void>(() => undefined);
   const profileFields = useRef<HTMLHeadingElement>(null);
   const deny = () => {
-    authority.current = { denied: true, epoch: authority.current.epoch + 1 };
+    authority.current = {
+      denied: true,
+      epoch: authority.current.epoch + 1,
+      capabilities: [],
+    };
     cancelRead.current();
     latest.current = undefined;
     setDenied(true);
@@ -116,19 +133,43 @@ function ClubProfileEditor({
     onSuccess: (received) => {
       checkProfile(received);
       clientId.current = received.clientId;
+      const capabilities = capabilitiesOf(received);
+      if (
+        authority.current.capabilities.some(
+          (capability) => !capabilities.includes(capability),
+        )
+      )
+        authority.current.epoch++;
       authority.current.denied = false;
+      authority.current.capabilities = capabilities;
       setDenied(false);
       if (
         !latest.current ||
         BigInt(received.version) >= BigInt(latest.current.version)
       ) {
         latest.current = received;
-        setProfile(received);
+      } else {
+        // Configuration versions do not version grants. A fresh read's authority
+        // applies even when its configuration snapshot is older than a command.
+        latest.current = {
+          ...latest.current,
+          permissions: received.permissions,
+          availableActions: received.availableActions,
+          canPreviewBooking: received.canPreviewBooking,
+        };
       }
+      setProfile(latest.current);
     },
   });
   cancelRead.current = remote.cancel;
   const command = useCommand<Profile>(credential, { onError });
+  // A refused club must not trap someone who can still use other clubs.
+  // Staying here retains the original command for a later authorized replay.
+  const navigationBlocked = command.blocked && !denied;
+  useEffect(() => {
+    reportPending?.(navigationBlocked);
+    return () => reportPending?.(false);
+  }, [navigationBlocked, reportPending]);
   const versionConflict =
     command.error instanceof OnboardingError &&
     command.error.code === 'version_conflict';
@@ -219,9 +260,14 @@ function ClubProfileEditor({
     remote.refresh();
   };
   const back = () => {
-    if (!command.saving && leave())
+    if (!navigationBlocked && leave())
       home(denied ? undefined : profile?.clientId);
   };
+  const openSection = (open?: () => void) =>
+    open &&
+    (() => {
+      if (!command.blocked && leave()) open();
+    });
   const location =
     profile && locationPresentation(profile.city, profile.region);
   return (
@@ -229,6 +275,7 @@ function ClubProfileEditor({
       title={(!denied && profile?.name) || 'Профиль клуба'}
       subtitle="Профиль заведения"
       back={back}
+      backDisabled={navigationBlocked}
       backLabel="Организация и другие заведения"
     >
       <RemoteState {...remote} />
@@ -280,45 +327,17 @@ function ClubProfileEditor({
                 key={profile.clientId + ':' + id + ':' + profile.timezone}
                 credential={credential}
                 profile={profile}
+                navigationBlocked={command.blocked}
                 openProfile={
                   canWrite ? () => profileFields.current?.focus() : undefined
                 }
-                openFinance={
-                  openFinance &&
-                  (() => {
-                    if (leave()) openFinance();
-                  })
-                }
-                openModules={
-                  openModules &&
-                  (() => {
-                    if (leave()) openModules();
-                  })
-                }
-                openLayout={
-                  openLayout &&
-                  (() => {
-                    if (leave()) openLayout();
-                  })
-                }
-                openCalendar={
-                  openCalendar &&
-                  (() => {
-                    if (leave()) openCalendar();
-                  })
-                }
-                openBookingRules={
-                  openBookingRules &&
-                  (() => {
-                    if (leave()) openBookingRules();
-                  })
-                }
-                openBookingPreview={
-                  openBookingPreview &&
-                  (() => {
-                    if (leave()) openBookingPreview();
-                  })
-                }
+                openFinance={openSection(openFinance)}
+                openModules={openSection(openModules)}
+                openTeam={openSection(openTeam)}
+                openLayout={openSection(openLayout)}
+                openCalendar={openSection(openCalendar)}
+                openBookingRules={openSection(openBookingRules)}
+                openBookingPreview={openSection(openBookingPreview)}
               />
             )}
           <h2 tabIndex={-1} ref={profileFields}>

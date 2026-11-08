@@ -26,6 +26,7 @@ internal class CanonicalBookingH2Test {
             assertEquals(1, flyway(source, "71").migrate().migrationsExecuted)
             assertEquals(1, flyway(source, "72").migrate().migrationsExecuted)
             assertEquals(1, flyway(source, "73").migrate().migrationsExecuted)
+            assertEquals(1, flyway(source, "74").migrate().migrationsExecuted)
             assertEquals(1, flyway(source).migrate().migrationsExecuted)
             flyway(source).validate()
             source.seedPhysicalTable()

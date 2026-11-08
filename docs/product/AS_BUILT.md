@@ -893,3 +893,31 @@ Caddy пропускает только точные owner configuration PATCH p
 а не выдача прав. Границы, инвентаризация, команды и результаты проверок —
 [owner-cabinet-config](../ops/owner-cabinet-config.md) и
 [checkpoint](../ops/PROJECT_STATUS.md). Deploy и реальные данные не затрагивались.
+
+<a id="owner-team-local"></a>
+## Локальная дельта команды клуба, 2026-11-08
+
+`CLB-owner-team`, base `81c2822e6a3d6d53e863e106d4a34cf24720ac8a`, worktree
+`/private/tmp/clb-owner-team-worktree-20261108`, ветка `codex/clb-owner-team-20261108`.
+Это локальный source/packaged-test candidate, не новый deployed snapshot.
+Authority — прямое принятие [§29.16 PRODUCT_SPEC](PRODUCT_SPEC.md#owner-team-contract)
+и [staff-контракта](../ops/owner-team-contract.md).
+
+| Цепочка | Bounded evidence | Фактическая граница |
+|---|---|---|
+| Owner API | `app-bot/src/main/kotlin/com/example/bot/routes/ClientOnboardingRoutes.kt:91-94`, `clientApplicationEndpoints`; `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubTeamOperations.kt:9-74`, `get/update/receipt` | GET/POST team в существующем защищённом client namespace; owner = immutable creator + exact read/team.manage, не legacy role |
+| Authority и revoke | `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubStaffAccess.kt:33-220`, `owner/protectTarget/replace/platformRevoke`; `OnboardingSql.kt`, `requireClubGrant` | Fresh DB grants, shared client lock, явные fixed packages, защита владельцев, platform revoke без обходного staff restore |
+| Invitation | `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/StaffInvitationOperations.kt:12-255`, `issue/recipient/claim/ownerAction/confirm`; `InvitationOperations.kt`, staff-purpose dispatch | Hash-only secret, один кандидат, семь суток, отдельное owner confirmation, атомарные grants/command/audit; старые ссылки до disable не возвращают доступ |
+| Persistence | `core-data/src/main/resources/db/migration/{h2,postgresql}/V075__client_club_staff.sql` | Existing invitations/grants/commands/audit; role/version metadata в client_club_staff, invitation-purpose/FKs, team_version; bounded unique-creator bootstrap без revival tombstones |
+| UI | `miniapp/src/modules/client/ClientAccess.tsx:65-75,375-455,520-710`; `ClubTeam.tsx`, `TeamEditor`; `ClubSetup.tsx:740-770` | Команда в выбранном клубе, одноразовая ссылка, code/confirmation, role preview/reason, disable/fresh invitation; saved summary без требования обязательной команды |
+| Authorization regression | `ClubOnboardingOperations.kt`, profile `get`; `JdbcClientOnboardingRepository.kt`, read transaction policy; `ClientOnboardingPostgresIT.kt`, `profile read waiting on client lock` | Profile GET не авторизует из RR snapshot до committed revoke; frontend authority epochs не возвращают старые permissions |
+
+Production registration переиспользует существующий `clientOnboardingRoutes`/server-selected
+platform connection; нет параллельного auth service, bot registry, role catalogue или
+операционной выдачи. Roles metadata не авторизуют endpoints. Финансовые и module grants
+дают только существующие configuration APIs. Публикация/guest cutover, деньги/смены,
+QR/check-in, rewards/contests/music и Managed Bots этим кандидатом не запускаются.
+
+Точные итоговые команды, results, final bytes, self-review findings и unverified —
+[handoff](../ops/owner-team.md) и его manifest/evidence. Реальный Telegram WebView,
+физический iPhone, hosted CI и stage/prod отдельно не проверялись.

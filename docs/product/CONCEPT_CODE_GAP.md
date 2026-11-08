@@ -523,3 +523,21 @@ Final verdict is conditional on completed checks and independent review in the
 
 [Инвентаризация и evidence](../ops/owner-cabinet-config.md). Ни presence backend
 таблиц, ни source candidate не означает готовность запуска модулей или приёма гостей.
+
+## ONB-008 / client staff: принятый контракт и локальная дельта, 2026-11-08
+
+Прямое утверждение владельца в `CLB-owner-team` закрывает именно staff-specific
+matrix/invitation/restore choices; прежние DEC-004/005/040/041 не переписываются.
+[PRODUCT_SPEC §29.16](PRODUCT_SPEC.md#owner-team-contract)
+задаёт точные fixed CLUB packages и owner-only управление.
+
+| Requirement | Source chain / локальный результат | Сохраняемая граница |
+|---|---|---|
+| ONB-008, RBAC-001/006 | Client team routes → ClubTeamOperations/StaffInvitationOperations → existing grants/commands/audit; V075 → ClubTeam/ClientAccess/ClubSetup | Не legacy user_roles и не операционный Host/manager/admin shell |
+| RBAC-005, CLNT-009 | Transactional audit, fixed target scope, version/idempotency, fresh owner authority, revoke/restore fencing; shared H2/PG contract + Ktor tests | Публичный rollout и live data/migration не разрешены локальным PASS |
+| CLNT-002/006 | Один сотрудник видит только explicitly granted clubs, включая явный выбор среди нескольких разрешённых пространств; старые ссылки не восстанавливают доступ | Membership не означает всю сеть; transfer/delegation вне slice |
+
+[AS_BUILT local evidence](AS_BUILT.md#owner-team-local) отделено от deployed revision;
+[handoff](../ops/owner-team.md) фиксирует команды, ошибки/исправления и final manifest.
+DEC-013/014/022 и initial allocation catalogue/configuration boundary DEC-031
+не закрыты и не подменяются новыми staff permissions.

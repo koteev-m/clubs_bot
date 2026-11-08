@@ -69,6 +69,7 @@ object ClientOnboardingBrowserFixture {
                 "owner" -> OWNER
                 "recipient" -> 998102L
                 "foreign" -> 998103L
+                "staff" -> 998104L
                 else -> error("Unknown synthetic persona")
             }
         val fields =

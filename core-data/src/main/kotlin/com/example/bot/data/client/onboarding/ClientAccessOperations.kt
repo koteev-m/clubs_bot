@@ -42,7 +42,8 @@ internal class ClientAccessOperations(
                         "(SELECT COUNT(*) FROM client_memberships m JOIN clients c ON c.id=m.client_id " +
                         "WHERE m.is_active=TRUE AND c.is_active=TRUE AND c.archived_at IS NULL) AS active_members," +
                         "(SELECT COUNT(*) FROM client_invitations i JOIN clients c ON c.id=i.client_id " +
-                        "WHERE c.archived_at IS NULL AND i.status IN ('issued','claimed') AND i.expires_at>?) " +
+                        "WHERE c.archived_at IS NULL AND i.purpose='client' AND i.status IN " +
+                        "('issued','claimed') AND i.expires_at>?) " +
                         "AS open_invitations",
                     session.now,
                 ),
@@ -220,6 +221,7 @@ internal class ClientAccessOperations(
         clientId: Long,
         userId: Long,
     ) {
+        ClubStaffAccess(session).platformRevoke(clientId, userId)
         sql.update(
             "UPDATE client_membership_grants SET is_active=FALSE,version=version+1,updated_at=? " +
                 "WHERE client_id=? AND user_id=?",
@@ -271,9 +273,24 @@ internal class ClientAccessOperations(
                 grant.only(listOf("clubId", "permission"))
                 val clubId = grant.id("clubId")
                 val permission = grant.string("permission")
+                if (sql.row(
+                        "SELECT user_id FROM client_club_staff WHERE client_id=? AND club_id=? AND user_id=?",
+                        clientId,
+                        clubId,
+                        userId,
+                    ) != null
+                ) {
+                    fail("invalid_transition")
+                }
+                if (permission == MANAGE_TEAM &&
+                    ClubStaffAccess(session).creator(clubId) != userId
+                ) {
+                    fail("validation_error")
+                }
                 if (permission !in
                     setOf(
                         READ_CLUB,
+                        MANAGE_TEAM,
                         WRITE_PROFILE,
                         WRITE_LAYOUT,
                         WRITE_CALENDAR,

@@ -31,6 +31,32 @@ async function open(page: Page, path: string, initData: string) {
   if (sameDocument) await page.reload();
 }
 
+// A single club opens directly; several memberships require an explicit space.
+async function selectSpace(page: Page, clientName: string, clubName?: string) {
+  await page.waitForFunction(
+    ({ clientName, clubName }) =>
+      [...document.querySelectorAll('h1')].some(
+        (heading) =>
+          heading.textContent === clientName ||
+          (clubName && heading.textContent === clubName),
+      ) ||
+      [...document.querySelectorAll('button')].some((button) =>
+        button.textContent?.includes(clientName),
+      ),
+    { clientName, clubName },
+  );
+  if (
+    clubName &&
+    (await page.getByRole('heading', { name: clubName, exact: true }).isVisible())
+  ) {
+    await page.getByRole('button', { name: 'Организация и другие заведения', exact: true }).click();
+  } else {
+    const space = page.getByRole('button', { name: new RegExp(clientName) });
+    if (await space.isVisible()) await space.click();
+  }
+  await expect(page.getByRole('heading', { name: clientName, exact: true })).toBeVisible();
+}
+
 test("packaged JDBC journey accepts once, creates privately under limit, reopens and raises capacity", async ({
   browser,
   request,
@@ -78,6 +104,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   await expect(recipient.getByRole("checkbox")).toHaveCount(0);
   await recipient.getByRole("button", { name: "Принять приглашение" }).click();
   await expect(recipient.locator(".ob-code")).toHaveCount(0);
+  await selectSpace(recipient, clientName);
   await expect(recipient.getByText("Разрешено всего: 1")).toBeVisible();
   await recipient
     .getByRole("button", { name: "Создать заведение", exact: true })
@@ -149,6 +176,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
     fullPage: true,
   });
   await open(recipient, "/app", recipientCredential);
+  await selectSpace(recipient, clientName, 'Synthetic First Venue');
   await expect(
     recipient.getByRole("button", { name: /Synthetic First Venue/ }),
   ).toBeVisible();
@@ -180,6 +208,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   await owner.getByRole("button", { name: "Сохранить лимит" }).click();
   await expect(owner.getByText("Разрешено всего: 2")).toBeVisible();
   await open(recipient, "/app", recipientCredential);
+  await selectSpace(recipient, clientName, 'Synthetic First Venue');
   await recipient
     .getByRole("button", { name: "Создать заведение", exact: true })
     .click();
@@ -382,6 +411,7 @@ test("lost committed invitation response replays one client and requires explici
     recipient.getByRole("heading", { name: "Приглашение клиента" }),
   ).toBeVisible();
   await recipient.getByRole("button", { name: "Принять приглашение" }).click();
+  await selectSpace(recipient, clientName);
   await expect(recipient.getByText("Разрешено всего: 1")).toBeVisible();
   for (const page of [owner, recipient]) {
     const storage = await page.evaluate(() =>

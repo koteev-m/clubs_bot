@@ -85,6 +85,7 @@ internal class DirectClubOperations(
         )
         listOf(
             READ_CLUB,
+            MANAGE_TEAM,
             WRITE_PROFILE,
             WRITE_LAYOUT,
             WRITE_CALENDAR,
@@ -145,11 +146,16 @@ internal class DirectClubOperations(
                             (if (canLayout) listOf(WRITE_LAYOUT) else emptyList()) +
                             (if (canCalendar) listOf(WRITE_CALENDAR) else emptyList()) +
                             listOf(
+                                WRITE_BOOKING_RULES,
+                                MANAGE_TEAM,
                                 READ_FINANCE,
                                 WRITE_FINANCE,
                                 READ_MODULES,
                                 WRITE_MODULES,
-                            ).filter { hasGrant(profile, it) }
+                            ).filter {
+                                hasGrant(profile, it) &&
+                                    (it != MANAGE_TEAM || ClubStaffAccess(session).owns(clubId))
+                            }
                     ).map(::JsonPrimitive),
                 ),
             )

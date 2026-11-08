@@ -7,7 +7,7 @@ const external = process.env.CLB_ONBOARDING_BASE_URL;
 export default defineConfig({
   testDir: './tests',
   testMatch: external
-    ? 'onboarding-integrated.spec.ts'
+    ? ['onboarding-integrated.spec.ts', 'owner-team-integrated.spec.ts']
     : 'onboarding-production.spec.ts',
   outputDir: join(tmpdir(), 'clubs-onboarding-playwright-' + randomUUID()),
   workers: 1,

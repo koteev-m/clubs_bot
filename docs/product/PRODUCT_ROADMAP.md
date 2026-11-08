@@ -423,3 +423,17 @@ The historical CLB-126 evidence closes the local support transport finding; it d
 - Не включать disputed additions из прежнего `AGENTS.md` snapshot без собственной item-level classification; accepted initial eight реализуются только в своих future-phase boundaries и не считаются соответствующими current code автоматически.
 - Не включать campaigns, Guest Mode, paid broadcasts, bot-to-bot или business updates только потому, что код/platform primitive существует.
 - Каждая phase заканчивается end-to-end staging smoke с persistence и authorization, а не только render/UI demo.
+
+## Уточнение последовательности: команда клуба, 2026-11-08
+
+`CLB-owner-team`: staff-specific решения по ONB-008/RBAC-001/005/006 прямо приняты
+владельцем; [точная матрица и lifecycle](PRODUCT_SPEC.md#owner-team-contract).
+Локальный срез продолжает существующий кабинет: owner-only team management,
+двухэтапное Telegram invitation, фиксированные client grants, role change/disable
+и повторный допуск новым приглашением. Owner configuration, membership и legacy
+roles не смешиваются. [Implementation/verification handoff](../ops/owner-team.md).
+
+Следующий delivery gate — независимое review локального кандидата; отдельные
+publication/rollout/runtime permissions не следуют из принятия или local PASS.
+Операционные пакеты Host/manager/admin, публичный guest cutover, DJ/finance manager,
+Managed Bots и disputed modules не становятся выполненными этим outcome.

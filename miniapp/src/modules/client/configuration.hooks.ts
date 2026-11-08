@@ -82,7 +82,7 @@ export function useClubConfiguration<T extends ConfigurationView>(
   useEffect(() => {
     if (!denied && authorityLost(command.error)) command.reset();
   }, [denied, command]);
-  const run = (body: object, saved: () => void, method = 'POST') => {
+  const run = (body: object, saved: (received: T) => void, method = 'POST') => {
     if (
       !view?.canWrite ||
       denied ||
@@ -109,7 +109,7 @@ export function useClubConfiguration<T extends ConfigurationView>(
         }
         latest.current = received;
         setView(received);
-        saved();
+        saved(received);
         refresh();
         return true;
       },

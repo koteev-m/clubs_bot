@@ -24,6 +24,7 @@ internal class InvitationOperations(
     fun resolve(body: JsonObject): JsonObject {
         body.only(listOf("token"))
         val row = byToken(body)
+        if (row["purpose"] == "staff") return StaffInvitationOperations(session).recipient(row, preview = true)
         authorizeRecipient(row, preview = true)
         return view(row, platform = false)
     }
@@ -34,6 +35,10 @@ internal class InvitationOperations(
     ): JsonObject {
         if (platform) session.owner()
         val row = row(id)
+        if (row["purpose"] == "staff") {
+            if (platform) fail("not_found")
+            return StaffInvitationOperations(session).recipient(row, preview = false)
+        }
         if (!platform) authorizeRecipient(row, preview = false)
         return view(row, platform)
     }
@@ -62,6 +67,17 @@ internal class InvitationOperations(
     ): MutationResult {
         body.only(listOf("token", "expectedVersion"))
         val invitation = locked(id)
+        return if (invitation["purpose"] == "staff") {
+            StaffInvitationOperations(session).claim(invitation, body)
+        } else {
+            claimClient(invitation, body)
+        }
+    }
+
+    private fun claimClient(
+        invitation: DbRow,
+        body: JsonObject,
+    ): MutationResult {
         session.requireUnarchived(invitation.long("client_id"))
         if (invitation["token_hash"] != digest(token(body))) fail("not_found")
         val claimant = invitation["claimant_user_id"]?.toLong()
@@ -103,6 +119,7 @@ internal class InvitationOperations(
         session.owner()
         body.only(listOf("expectedVersion"))
         val invitation = locked(id)
+        if (invitation["purpose"] != "client") fail("not_found")
         session.requireUnarchived(invitation.long("client_id"))
         session.version(invitation, body)
         return when (operation) {
@@ -132,8 +149,10 @@ internal class InvitationOperations(
     fun forClient(clientId: Long): JsonArray =
         JsonArray(
             sql
-                .rows("SELECT * FROM client_invitations WHERE client_id=? ORDER BY id DESC", clientId)
-                .map { view(it, platform = true) },
+                .rows(
+                    "SELECT * FROM client_invitations WHERE client_id=? AND purpose='client' ORDER BY id DESC",
+                    clientId,
+                ).map { view(it, platform = true) },
         )
 
     private fun confirm(invitation: DbRow): MutationResult {

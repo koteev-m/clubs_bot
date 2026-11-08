@@ -87,6 +87,41 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
     }
 
     @Test
+    fun `profile read waiting on client lock cannot authorize from a revoked snapshot`() =
+        runBlocking<Unit> {
+            val club = create(approved())
+            fixture.source.connection.use { blocker ->
+                blocker.autoCommit = false
+                val sql = OnboardingSql(blocker)
+                val blockerId = checkNotNull(sql.row("SELECT pg_backend_pid() AS pid")).long("pid").toInt()
+                sql.row("SELECT id FROM clients WHERE id=? FOR UPDATE", club.id("clientId"))
+                coroutineScope {
+                    val outcome =
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            try {
+                                fixture.repository.read(fixture.alice, OnboardingRead.CLUB_PROFILE_GET, club.id("id"))
+                                "unexpected_success"
+                            } catch (failure: OnboardingFailure) {
+                                failure.code
+                            }
+                        }
+                    try {
+                        awaitBlockedMutation(blockerId)
+                        sql.update(
+                            "UPDATE client_club_grants SET is_active=FALSE WHERE club_id=? AND permission_code=?",
+                            club.id("id"),
+                            READ_CLUB,
+                        )
+                        blocker.commit()
+                    } finally {
+                        blocker.rollback()
+                    }
+                    assertEquals("not_found", outcome.await())
+                }
+            }
+        }
+
+    @Test
     fun `claim waiting for the client lock cannot use a pre expiry timestamp`() =
         runBlocking<Unit> {
             assertExpiryAfterLock(OnboardingMutation.INVITATION_CLAIM, "not_found")

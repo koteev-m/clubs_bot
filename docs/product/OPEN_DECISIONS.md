@@ -1061,3 +1061,23 @@
 - **Relation:** `DEC-040/041` задают клиентские границы и одобрение клуба; `DEC-007` — AMEND guest entry; `DEC-017` — KEEP explicit cutover; `DEC-039` — KEEP platform identity. Managed Bots не принимают автоматически отложенные bot-to-bot, Business Bots, Guest Mode или AI capabilities.
 - **Official verification, 2026-10-27:** [Managed Bots](https://core.telegram.org/bots/features#managed-bots), [ManagedBotUpdated](https://core.telegram.org/bots/api#managedbotupdated), [getManagedBotToken](https://core.telegram.org/bots/api#getmanagedbottoken) прочитаны. Поддержка Telegram не доказывает поддержку установленного SDK; конкретная проверка и gaps — [delta review](CONCEPT_CODE_GAP.md#client-bot-delta).
 - **Traceability:** `CLNT-007`–`CLNT-010`; [технические решения](PRODUCT_ROADMAP.md#client-open-design) остаются предложениями до отдельного принятия.
+
+
+## Уточнение DEC-004/005/040/041: staff-контракт, 2026-11-08
+
+**ACCEPTED_DECISION**, прямое утверждение владельца продукта в продолжении
+`CLB-owner-team`, без нового DEC/CLB номера. Все пять подготовленных пунктов и
+технические инварианты приняты с явными уточнениями: creator как owner этого
+этапа; только owner team.manage; фиксированные CLUB packages; приглашение/claim/
+owner confirmation; никакого восстановления inactive membership владельцем;
+атомарная замена/disable; повторный допуск только новым приглашением и двумя
+подтверждениями. Точная матрица и границы — [PRODUCT_SPEC §29.16](PRODUCT_SPEC.md#owner-team-contract)
+и [staff-контракт](../ops/owner-team-contract.md).
+
+DEC-004 остаётся набором ролей, не самостоятельной permission matrix. DEC-005
+сохраняет legacy OWNER/GLOBAL и target distinction floor manager; новых legacy
+assignments нет. DEC-040/041 сохраняют client isolation и отдельную platform
+authority. Прямое принятие нового пустого client cabinet из AMEND 2026-10-29
+не переносится на staff invitation к существующим private данным. Принятие
+контракта не означает implementation/release/runtime acceptance; DEC-013/014/022
+и initial allocation catalogue/configuration boundary DEC-031 не изменяются.
