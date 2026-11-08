@@ -9,6 +9,8 @@ import GuestBookingPreview from './GuestBookingPreview';
 import ClubLayout from './ClubLayout';
 import ClubFinance from './ClubFinance';
 import ClubModules from './ClubModules';
+import ClubTeam from './ClubTeam';
+import { roleNames } from './team.types';
 import { scrubClientLaunchUrl } from './clientEntry';
 import { useCommand, useRemote } from './onboarding.hooks';
 import {
@@ -37,6 +39,7 @@ type Screen =
   | { type: 'calendar'; id: string }
   | { type: 'finance'; id: string }
   | { type: 'modules'; id: string }
+  | { type: 'team'; id: string }
   | { type: 'booking-rules'; id: string }
   | { type: 'booking-preview'; id: string }
   | { type: 'layout'; id: string; hallId?: string }
@@ -64,6 +67,7 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'booking-rules')
     return { type: 'booking-rules', id };
   if (params.get('screen') === 'finance') return { type: 'finance', id };
+  if (params.get('screen') === 'team') return { type: 'team', id };
   if (params.get('screen') === 'modules') return { type: 'modules', id };
   if (params.get('screen') === 'calendar') return { type: 'calendar', id };
   if (params.get('screen') === 'club') return { type: 'club', id };
@@ -296,6 +300,8 @@ function ClientWorkspace({
   if (screen.type === 'invitation')
     return (
       <InvitationScreen
+        key={credential + ':' + (token ? 'token' : screen.id)}
+        reportPending={reportSectionPending}
         command={invitationCommand}
         credential={credential}
         token={token}
@@ -369,8 +375,17 @@ function ClientWorkspace({
         reportPending={reportSectionPending}
       />
     );
-  if (screen.type === 'finance' || screen.type === 'modules') {
-    const Component = screen.type === 'finance' ? ClubFinance : ClubModules;
+  if (
+    screen.type === 'finance' ||
+    screen.type === 'modules' ||
+    screen.type === 'team'
+  ) {
+    const Component =
+      screen.type === 'team'
+        ? ClubTeam
+        : screen.type === 'finance'
+          ? ClubFinance
+          : ClubModules;
     return (
       <Component
         key={screen.type + ':' + screen.id}
@@ -424,9 +439,11 @@ function ClientWorkspace({
           goBack(clientId ? { type: 'space', id: clientId } : { type: 'home' })
         }
         reportDirty={reportDirty}
+        reportPending={reportSectionPending}
         openLayout={() => navigate({ type: 'layout', id: screen.id })}
         openFinance={() => navigate({ type: 'finance', id: screen.id })}
         openModules={() => navigate({ type: 'modules', id: screen.id })}
+        openTeam={() => navigate({ type: 'team', id: screen.id })}
         openCalendar={() => navigate({ type: 'calendar', id: screen.id })}
         openBookingRules={() =>
           navigate({ type: 'booking-rules', id: screen.id })
@@ -520,6 +537,7 @@ function InvitationScreen({
   resolved,
   claimed,
   command,
+  reportPending,
 }: {
   credential: string;
   token: string | null;
@@ -528,78 +546,150 @@ function InvitationScreen({
   resolved: (id: string) => void;
   claimed: () => void;
   command: ReturnType<typeof useCommand<Invitation>>;
+  reportPending: (value: boolean) => void;
 }) {
+  const [current, setCurrent] = useState<Invitation>();
+  const latest = useRef<Invitation>();
+  const authority = useRef({ epoch: 0, denied: false });
+  const cancel = useRef<() => void>(() => undefined);
+  const readError = (error: unknown) => {
+    if (!authorityLost(error)) return;
+    authority.current = { epoch: authority.current.epoch + 1, denied: true };
+    latest.current = undefined;
+    setCurrent(undefined);
+    cancel.current();
+  };
   const remote = useRemote<Invitation>(
     credential,
     token ? '/api/client/invitations/resolve' : '/api/client/invitations/' + id,
     token ? { token } : undefined,
+    {
+      onError: readError,
+      onSuccess: (received) => {
+        if (
+          !/^[1-9][0-9]*$/.test(received.id) ||
+          !/^[1-9][0-9]*$/.test(received.version) ||
+          (id && received.id !== id)
+        )
+          throw new Error('Invalid invitation response');
+        authority.current = {
+          epoch: authority.current.epoch + 1,
+          denied: false,
+        };
+        if (
+          !latest.current ||
+          BigInt(received.version) >= BigInt(latest.current.version)
+        ) {
+          latest.current = received;
+          setCurrent(received);
+        }
+      },
+    },
   );
-  const [current, setCurrent] = useState<Invitation>();
-  const invitation = current;
+  cancel.current = remote.cancel;
   useEffect(() => {
-    if (authorityLost(command.error) || remote.error) setCurrent(undefined);
-    else if (remote.data) setCurrent(remote.data);
-  }, [remote.data, remote.error, command.error]);
+    if (authorityLost(command.error)) readError(command.error);
+  }, [command.error]);
+  useEffect(() => {
+    reportPending(command.blocked && !authority.current.denied);
+    return () => reportPending(false);
+  }, [command.blocked, current, reportPending]);
   useEffect(() => {
     if (remote.data && id !== remote.data.id) resolved(remote.data.id);
   }, [id, remote.data, resolved]);
   useEffect(() => {
-    if (
-      remote.data?.status === 'accepted' &&
-      remote.data.acceptanceMode === 'direct'
-    )
+    if (current?.status === 'accepted' && current.acceptanceMode === 'direct')
       home();
-  }, [remote.data, home]);
+  }, [current, home]);
   const refresh = () => {
     setCurrent(undefined);
     remote.refresh();
   };
+  const accept = (result: Invitation, epoch: number) => {
+    if (
+      authority.current.denied ||
+      authority.current.epoch !== epoch ||
+      (latest.current &&
+        BigInt(result.version) < BigInt(latest.current.version))
+    ) {
+      remote.refresh();
+      return false;
+    }
+    latest.current = result;
+    setCurrent(result);
+    claimed();
+    if (result.status === 'accepted' && result.acceptanceMode === 'direct')
+      home();
+    return true;
+  };
+  const invitation = current;
+  const staff = invitation?.acceptanceMode === 'staff';
   return (
-    <Shell title="Приглашение клиента" back={home}>
+    <Shell
+      title={staff ? 'Приглашение в команду' : 'Приглашение клиента'}
+      back={() => {
+        if (!command.blocked || authority.current.denied) home();
+      }}
+      backDisabled={command.blocked && !authority.current.denied}
+    >
       <RemoteState {...remote} />
       {invitation && (
         <>
-          <div className="po-card ob-card">
-            <h2>{invitation.clientName}</h2>
+          <section className="po-card ob-card">
+            <h2>
+              {invitation.clientName}
+              {staff ? ` · ${invitation.clubName}` : ''}
+            </h2>
             <p>{invitationLabels[invitation.status]}</p>
+            {staff && invitation.role && (
+              <p>
+                Роль: {roleNames[invitation.role]}. Только этот клуб.
+                Операционные права не выдаются.
+              </p>
+            )}
             <p className="po-muted">
-              Действует до{' '}
+              Принять до{' '}
               {new Date(invitation.expiresAt).toLocaleString('ru-RU')}
             </p>
-          </div>
+          </section>
           {invitation.status === 'issued' && token && (
             <>
               <p>
-                {invitation.acceptanceMode === 'direct'
-                  ? 'Примите приглашение, чтобы открыть свой кабинет.'
-                  : 'Это прежнее приглашение: после принятия потребуется подтверждение владельца платформы.'}
+                {staff
+                  ? 'Подтвердите свой Telegram-аккаунт. Доступ появится только после отдельного подтверждения владельцем клуба.'
+                  : invitation.acceptanceMode === 'direct'
+                    ? 'Примите приглашение, чтобы открыть свой кабинет.'
+                    : 'Это прежнее приглашение: после принятия потребуется подтверждение владельца платформы.'}
               </p>
               <button
                 className="po-primary"
-                disabled={command.blocked}
-                onClick={() =>
+                disabled={
+                  command.blocked || remote.loading || remote.revalidating
+                }
+                onClick={() => {
+                  const epoch = authority.current.epoch;
                   command.run(
                     '/api/client/invitations/' + invitation.id + '/claim',
                     { token, expectedVersion: invitation.version },
-                    (result) => {
-                      setCurrent(result);
-                      claimed();
-                      if (
-                        result.status === 'accepted' &&
-                        result.acceptanceMode === 'direct'
-                      )
-                        home();
-                    },
-                  )
-                }
+                    (result) => accept(result, epoch),
+                  );
+                }}
               >
-                {command.saving ? 'Принимаем…' : 'Принять приглашение'}
+                {command.saving
+                  ? 'Принимаем…'
+                  : staff
+                    ? 'Подтвердить Telegram-аккаунт'
+                    : 'Принять приглашение'}
               </button>
             </>
           )}
           {invitation.status === 'claimed' && (
             <section className="po-card ob-card">
-              <h2>Ожидаем подтверждение платформы</h2>
+              <h2>
+                {staff
+                  ? 'Ожидаем подтверждение владельца клуба'
+                  : 'Ожидаем подтверждение платформы'}
+              </h2>
               <p>
                 Сообщите этот одноразовый код отправителю в исходном личном
                 чате:
@@ -609,6 +699,12 @@ function InvitationScreen({
                 Код нужен для сверки человека. Сам по себе он не предоставляет
                 доступ.
               </p>
+              {staff && (
+                <p>
+                  Клубные разрешения пока не выданы. После подтверждения
+                  откройте Mini App заново или обновите статус.
+                </p>
+              )}
             </section>
           )}
           {invitation.status === 'accepted' && (
@@ -616,8 +712,7 @@ function InvitationScreen({
               Открыть кабинет
             </button>
           )}
-          {(invitation.status === 'revoked' ||
-            invitation.status === 'expired') && (
+          {['revoked', 'expired'].includes(invitation.status) && (
             <p className="po-notice">
               Обратитесь к отправителю за новым приглашением.
             </p>
@@ -631,7 +726,16 @@ function InvitationScreen({
           </button>
         </>
       )}
-      <CommandState command={command} refresh={refresh} />
+      <CommandState
+        command={{
+          ...command,
+          retry: () => {
+            const epoch = authority.current.epoch;
+            command.retryWith((result) => accept(result, epoch));
+          },
+        }}
+        refresh={command.unknown ? undefined : refresh}
+      />
     </Shell>
   );
 }

@@ -127,6 +127,105 @@ it('ignores a pre-denial PATCH even after a new GET has restored access', async 
   expect(screen.queryByText('Сохранено')).toBeNull();
 });
 
+it.each(['current', 'older', 'restored'])(
+  'keeps a write revocation from a %s GET after a late PATCH',
+  async (snapshot) => {
+    const write = deferred();
+    let saved = { ...profile, version: '3' };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
+      if (options?.method === 'PATCH') return write.promise;
+      if (!String(path).endsWith('/profile')) return response({}, 404);
+      return response(saved);
+    });
+    render(<ClubProfile {...props} />);
+    await startSave();
+    saved = {
+      ...saved,
+      version: snapshot === 'older' ? '2' : '3',
+      permissions: ['client.club.read'],
+      availableActions: [],
+    };
+    fireEvent.focus(window);
+    await screen.findByText('Профиль доступен только для просмотра.');
+    if (snapshot === 'restored') {
+      saved = { ...profile, version: '5' };
+      fireEvent.focus(window);
+      await screen.findByRole('button', { name: 'Сохранить профиль' });
+    }
+    await act(async () =>
+      write.resolve(
+        response({ ...profile, name: 'Obsolete writer', version: '6' }),
+      ),
+    );
+    expect(screen.queryByText('Obsolete writer')).toBeNull();
+    if (snapshot !== 'restored')
+      expect(
+        screen.queryByRole('button', { name: 'Сохранить профиль' }),
+      ).toBeNull();
+    expect(screen.queryByText('Сохранено')).toBeNull();
+    // Reauthorizing does not make a response from the previous authority epoch valid.
+    saved = { ...profile, version: '5' };
+    fireEvent.focus(window);
+    await screen.findByRole('button', { name: 'Сохранить профиль' });
+  },
+);
+
+it('permits leaving an inaccessible club after an unknown command without trapping the user', async () => {
+  let allowed = true;
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const home = vi.fn();
+  const reportPending = vi.fn();
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
+    if (options?.method === 'PATCH') return response({}, 503);
+    if (!String(path).endsWith('/profile')) return response({}, 503);
+    return response(
+      allowed ? profile : { code: 'not_found' },
+      allowed ? 200 : 404,
+    );
+  });
+  render(<ClubProfile {...props} home={home} reportPending={reportPending} />);
+  await startSave();
+  await screen.findByText('Результат операции пока неизвестен');
+  allowed = false;
+  fireEvent.focus(window);
+  await screen.findByText(/Доступ утрачен/);
+  expect(reportPending).toHaveBeenLastCalledWith(false);
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Организация и другие заведения' }),
+  );
+  expect(home).toHaveBeenCalledWith(undefined);
+});
+
+it('does not let a late PATCH restore other revoked configuration capabilities', async () => {
+  const write = deferred();
+  const all = {
+    ...profile,
+    permissions: [...profile.permissions, 'client.club.finance.read'],
+  };
+  let saved = all;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
+    if (options?.method === 'PATCH') return write.promise;
+    if (!String(path).endsWith('/profile')) return response({}, 503);
+    return response(saved);
+  });
+  const openFinance = vi.fn();
+  render(<ClubProfile {...props} openFinance={openFinance} />);
+  await screen.findByRole('button', { name: 'Финансовые настройки' });
+  await startSave();
+  saved = profile;
+  fireEvent.focus(window);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: 'Финансовые настройки' }),
+    ).toBeNull(),
+  );
+  await act(async () => write.resolve(response({ ...all, version: '2' })));
+  expect(
+    screen.queryByRole('button', { name: 'Финансовые настройки' }),
+  ).toBeNull();
+  expect(screen.queryByText('Сохранено')).toBeNull();
+});
+
 it.each(['club', 'identity'])(
   'fences a late private PATCH after a %s switch',
   async (context) => {
@@ -274,3 +373,47 @@ it('retains the original unknown command and key across denial and successful au
   expect(attempts[1].headers).toEqual(attempts[0].headers);
   expect(screen.getByDisplayValue('My pending edit')).toBeTruthy();
 });
+
+it.each(['saving', 'unknown'])(
+  'keeps the profile and command key while %s instead of opening another section',
+  async (outcome) => {
+    const write = deferred();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const openFinance = vi.fn();
+    const home = vi.fn();
+    const reportPending = vi.fn();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
+      if (options?.method === 'PATCH')
+        return outcome === 'saving' ? write.promise : response({}, 503);
+      if (!String(path).endsWith('/profile')) return response({}, 503);
+      return response({
+        ...profile,
+        permissions: [...profile.permissions, 'client.club.finance.read'],
+      });
+    });
+    const view = render(
+      <ClubProfile
+        {...props}
+        home={home}
+        reportPending={reportPending}
+        openFinance={openFinance}
+      />,
+    );
+    await startSave();
+    if (outcome === 'unknown')
+      await screen.findByText('Результат операции пока неизвестен');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Финансовые настройки' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Организация и другие заведения',
+      }),
+    );
+    expect(openFinance).not.toHaveBeenCalled();
+    expect(home).not.toHaveBeenCalled();
+    expect(reportPending).toHaveBeenLastCalledWith(true);
+    view.unmount();
+    expect(reportPending).toHaveBeenLastCalledWith(false);
+  },
+);

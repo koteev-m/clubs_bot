@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { TeamView, validTeam } from './team.types';
 import type { BookingRulesView } from './ClubBookingRules';
 import type { Preview } from './GuestBookingPreview';
 import type { CalendarView } from './calendar';
@@ -75,7 +76,15 @@ function isPlaced(table: ClientLayoutTable) {
   );
 }
 
-function Row({ title, check }: { title: string; check: Check }) {
+function Row({
+  title,
+  check,
+  disabled,
+}: {
+  title: string;
+  check: Check;
+  disabled?: boolean;
+}) {
   return (
     <li className="ob-setup-row">
       <h3>{title}</h3>
@@ -84,7 +93,12 @@ function Row({ title, check }: { title: string; check: Check }) {
       </p>
       <div className="po-muted">{check.detail}</div>
       {check.action && (
-        <button type="button" className="ob-button" onClick={check.action.open}>
+        <button
+          type="button"
+          className="ob-button"
+          onClick={check.action.open}
+          disabled={disabled}
+        >
           {check.action.label}
         </button>
       )}
@@ -95,26 +109,43 @@ function Row({ title, check }: { title: string; check: Check }) {
 export default function ClubSetup({
   credential,
   profile,
+  navigationBlocked = false,
   openProfile,
   openLayout,
   openFinance,
   openModules,
+  openTeam,
   openCalendar,
   openBookingRules,
   openBookingPreview,
 }: {
   credential: string;
   profile: ClubProfile;
+  navigationBlocked?: boolean;
   openProfile?: () => void;
   openLayout?: () => void;
   openFinance?: () => void;
   openModules?: () => void;
+  openTeam?: () => void;
   openCalendar?: () => void;
   openBookingRules?: () => void;
   openBookingPreview?: () => void;
 }) {
   const base = '/api/client/clubs/' + profile.id;
   const options = { retainOnForeground: true };
+  const canReadTeam = profile.permissions.includes('client.club.team.manage');
+  const teamRead = useRemote<TeamView>(
+    credential,
+    canReadTeam ? base + '/team' : null,
+    undefined,
+    options,
+  );
+  const team =
+    teamRead.data?.clubId === profile.id &&
+    teamRead.data.clientId === profile.clientId &&
+    validTeam(teamRead.data)
+      ? teamRead.data
+      : undefined;
   const canReadFinance = profile.permissions.includes(
     'client.club.finance.read',
   );
@@ -547,8 +578,13 @@ export default function ClubSetup({
         </div>
       )}
       <ul className="ob-setup-list">
-        <Row title="Профиль клуба" check={profileCheck} />
         <Row
+          disabled={navigationBlocked}
+          title="Профиль клуба"
+          check={profileCheck}
+        />
+        <Row
+          disabled={navigationBlocked}
           title="Залы и отдельные схемы"
           check={{
             ...layoutCheck,
@@ -561,6 +597,7 @@ export default function ClubSetup({
           }}
         />
         <Row
+          disabled={navigationBlocked}
           title="Столы и размещение"
           check={{
             ...tablesCheck,
@@ -574,6 +611,7 @@ export default function ClubSetup({
           }}
         />
         <Row
+          disabled={navigationBlocked}
           title="Календарь и сформированные ночи"
           check={{
             ...calendarCheck,
@@ -586,6 +624,7 @@ export default function ClubSetup({
           }}
         />
         <Row
+          disabled={navigationBlocked}
           title="Правила бронирования"
           check={{
             ...rulesCheck,
@@ -597,8 +636,13 @@ export default function ClubSetup({
                 : undefined,
           }}
         />
-        <Row title="Связи столов для бронирования" check={tableLinks} />
         <Row
+          disabled={navigationBlocked}
+          title="Связи столов для бронирования"
+          check={tableLinks}
+        />
+        <Row
+          disabled={navigationBlocked}
           title="Зоны залов"
           check={
             layout
@@ -633,6 +677,7 @@ export default function ClubSetup({
           }
         />
         <Row
+          disabled={navigationBlocked}
           title="Финансовый шаблон"
           check={{
             ...(finance
@@ -657,6 +702,7 @@ export default function ClubSetup({
           }}
         />
         <Row
+          disabled={navigationBlocked}
           title="Дополнительные модули"
           check={{
             ...(modules
@@ -680,6 +726,7 @@ export default function ClubSetup({
           }}
         />
         <Row
+          disabled={navigationBlocked}
           title="Связи ночей с событиями"
           check={{
             ...nightLinks,
@@ -693,6 +740,33 @@ export default function ClubSetup({
           }}
         />
         <Row
+          disabled={navigationBlocked}
+          title="Команда"
+          check={{
+            ...(team
+              ? {
+                  status: team.members.some(
+                    (member) => !member.owner && member.active,
+                  )
+                    ? 'Доступ сотрудников настроен'
+                    : 'Команда пока не добавлена',
+                  detail: `Активных сотрудников: ${team.members.filter((member) => !member.owner && member.active).length}. Ожидающих приглашений: ${team.invitations.filter((item) => ['issued', 'claimed'].includes(item.status)).length}. Команда не является обязательным условием подготовки или разрешением публичного запуска.`,
+                }
+              : canReadTeam
+                ? unavailable(teamRead)
+                : {
+                    status: 'Доступно владельцу',
+                    detail:
+                      'Управлять командой может только подтверждённый владелец этого клуба с отдельным разрешением.',
+                  }),
+            action:
+              openTeam && canReadTeam && !authorityLost(teamRead.error)
+                ? { label: 'Команда клуба', open: openTeam }
+                : undefined,
+          }}
+        />
+        <Row
+          disabled={navigationBlocked}
           title="Отдельный бот клуба"
           check={{
             status: unverified,

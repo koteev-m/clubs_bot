@@ -37,6 +37,7 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             assertEquals(
                 setOf(
                     READ_CLUB,
+                    MANAGE_TEAM,
                     WRITE_PROFILE,
                     WRITE_LAYOUT,
                     WRITE_CALENDAR,
@@ -144,7 +145,7 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             )
             assertEquals(1, fixture.count("client_club_onboarding"))
             assertEquals(1, fixture.rows("SELECT * FROM audit_log WHERE action='client.club.create'").size)
-            assertEquals(9, fixture.count("client_club_grants"))
+            assertEquals(10, fixture.count("client_club_grants"))
         }
 
     @Test
@@ -357,7 +358,7 @@ internal abstract class ClubOnboardingContract : ClubOnboardingTestBase() {
             val users = old.rows("SELECT * FROM users ORDER BY id")
             old.migrate()
             assertEquals(
-                clubs.map { it + ("calendar_version" to "1") },
+                clubs.map { it + ("calendar_version" to "1") + ("team_version" to "1") },
                 old.rows("SELECT * FROM clubs ORDER BY id"),
             )
             assertEquals(users, old.rows("SELECT * FROM users ORDER BY id"))

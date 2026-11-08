@@ -1117,3 +1117,50 @@ additive расширение выдаёт новые scopes только под
 Готовность конфигурации не означает публикацию клуба или разрешение принимать
 гостей. Персонал, guest cutover, Managed Bots, платежи и AI остаются отдельными
 блоками. Реализация и проверки описаны в [локальном отчёте](../ops/owner-cabinet-config.md).
+
+
+<a id="owner-team-contract"></a>
+### 29.16. Команда выбранного клуба — принято 2026-11-08
+
+Прямое утверждение владельца в продолжении `CLB-owner-team` принимает
+[staff-контракт](../ops/owner-team-contract.md) целиком. Это уточняет ONB-008,
+RBAC-001/005/006, DEC-004/005/040/041; прежние записи и immutable concept
+сохраняются. Принятый target не означает опубликованный или deployed runtime.
+
+- Управляет только immutable creator этого клуба с активными client/membership/
+  mapping, read и новым exact `client.club.team.manage`. Передача владения и
+  делегирование вне scope. Ни legacy GLOBAL/OWNER, ни membership сами не дают прав.
+- Host/ENTRY_MANAGER: `client.club.read`. MANAGER: read, profile.write,
+  layout.write, calendar.write, booking_rules.write. CLUB_ADMIN дополнительно
+  finance.read/write, modules.read/write. Все suffixes имеют `client.club.`.
+  Owner сохраняет существующие подтверждённые grants; новое team.manage выдаётся
+  только при законных предпосылках, inactive tombstones автоматически не оживают.
+- Сотрудник видит только конкретный клуб и доступные разделы. Название роли —
+  metadata; сервер проверяет реальные active grants. Нет operational permissions,
+  client.application.manage, platform authority или записи в user_roles.
+- Приглашение: одноразовая Telegram-ссылка, secret >=256 бит, hash-only storage,
+  семь суток для принятия, выдача secret только один раз. Fresh signed identity,
+  явный claim фиксирует одного кандидата, затем owner сверяет код в исходном
+  личном чате и подтверждает отдельно. До confirm клубных grants нет.
+- Активная membership переиспользуется, отсутствующая может быть создана;
+  inactive membership платформы owner не восстанавливает. Весь пакет должен
+  помещаться в текущие права выдающего при окончательном confirm.
+- Смена роли: причина, полный новый пакет и explicit confirmation; атомарная
+  замена. Disable прекращает все client grants пользователя только этого клуба
+  после commit, сохраняя membership/другие клубы/историю/audit. Повторный допуск
+  только через новое приглашение и два подтверждения. Ссылки до disable не
+  восстанавливают доступ; platform membership restore не обходит эту границу.
+- Mutation, grants, durable command result и audit атомарны; версии, expiry,
+  concurrent operations и replay проверяются под текущей authority. Старый HTTP
+  response не возвращает отозванные права. Новый permission не заменяет global
+  admin flag и не открывает legacy AdminShell.
+
+Owner UX: Мои клубы → клуб → Команда → роль/пакет → создать/передать ссылку →
+проверить кандидата/код → подтвердить → изменить роль/отключить. Employee UX:
+Telegram invitation → подтвердить аккаунт → код/ожидание → owner confirm →
+повторный вход → только разрешённый клуб. Реальные saved states команды входят
+в подготовку клуба без превращения команды в обязательный readiness criterion.
+
+Не открываются guest runtime/publication, деньги/смены, QR/check-in, музыка,
+Managed Bots или модули за DEC-013/014/022/031. Implementation evidence и DoD
+фиксируются отдельно в [handoff](../ops/owner-team.md), а не статусом принятия.

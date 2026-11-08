@@ -12,6 +12,7 @@ export default defineConfig({
     'client-booking-rules.spec.ts',
     'client-guest-booking-preview.spec.ts',
     'owner-setup.spec.ts',
+    'owner-profile-access.spec.ts',
   ],
   outputDir: join(tmpdir(), `clubs-owner-ux-${randomUUID()}`),
   use: {

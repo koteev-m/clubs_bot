@@ -33,6 +33,10 @@ class JdbcClientOnboardingRepository(
                 readOnly =
                     operation !in
                         setOf(
+                            OnboardingRead.CLUB_PROFILE_GET,
+                            OnboardingRead.CLUB_TEAM_GET,
+                            OnboardingRead.INVITATION_RESOLVE,
+                            OnboardingRead.INVITATION_STATUS,
                             OnboardingRead.CLUB_LAYOUT_GET,
                             OnboardingRead.CLUB_FINANCE_GET,
                             OnboardingRead.CLUB_MODULE_SETTINGS_GET,
@@ -66,6 +70,7 @@ class JdbcClientOnboardingRepository(
                             body,
                         )
                     OnboardingRead.CLIENT_APPLICATION_GET -> applications.get(required(resourceId), platform = false)
+                    OnboardingRead.CLUB_TEAM_GET -> ClubTeamOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_PROFILE_GET -> ClubOnboardingOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_BOOKING_RULES_GET ->
                         ClubBookingRulesOperations(session).get(required(resourceId))
@@ -212,6 +217,7 @@ class JdbcClientOnboardingRepository(
                 ClubOnboardingOperations(
                     session,
                 ).create(required(resourceId), body)
+            OnboardingMutation.CLUB_TEAM_UPDATE -> ClubTeamOperations(session).update(required(resourceId), body)
             OnboardingMutation.CLUB_PROFILE_UPDATE ->
                 ClubOnboardingOperations(
                     session,
@@ -238,6 +244,8 @@ class JdbcClientOnboardingRepository(
             "club_calendar" -> ClubCalendarOperations(session).get(command.long("result_id"), write = true)
             "club_night_event_link" -> ClubNightEventLinks(session).receipt(command.long("result_id"))
             "club_module_settings" -> ClubModuleSettingsOperations(session).get(command.long("result_id"), write = true)
+            "staff_invitation" -> ClubTeamOperations(session).receipt(command.long("result_id"))
+            "club_team" -> ClubTeamOperations(session).get(command.long("result_id"))
             "club_finance" -> ClubFinanceOperations(session).get(command.long("result_id"), write = true)
             "club_layout" -> ClubLayoutOperations(session).get(command.long("result_id"), write = true)
             else -> error("Invalid stored command result")

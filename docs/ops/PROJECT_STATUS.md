@@ -1,5 +1,94 @@
 # Project status checkpoint
 
+## CLB-owner-team — P2 screenshot isolation fix, 2026-11-08
+
+- **OWNER_TEAM_P2_FIX: PASS. READY_FOR_FOCUSED_REVIEW: YES.** Исправлены два
+  write-target в `owner-team-integrated.spec.ts`: штатный `test.info().outputPath`
+  вместо абсолютного старого evidence. Assertions и production не менялись.
+- Первый пустой H2 прогон выявил verification error старого `selectSpace`;
+  только locator имени Back приведён к существующей подписи ClubProfile.
+  Clean packaged Ktor/H2 Chromium **4/4**, WebKit **4/4**; staff repeat **1/1 +
+  1/1**, TypeScript/ESLint/diff/scope PASS. OS sandbox запрещал старые записи;
+  исходное evidence **75/75** и manifest неизменны; повтор не перезаписал screenshots.
+- Прежние **53** пути сохранены; delta — два specs и два ops docs. Backend,
+  frontend production, V075, права/контракт/dist неизменны. Прежние JVM/PG/
+  security/static/Vitest/package checks переиспользованы по hashes.
+- Тот же worktree/branch/base, PROJECT_IDENTITY_OK; active instructions clubs_bot,
+  foreign = 0. Новый evidence: `/private/tmp/clb-owner-team-p2-fix-20261108T135231Z`.
+  [Подробности](owner-team.md). Только локальные правки, без commit/push/PR/deploy.
+  Один следующий шаг — focused review P2 fix перед отдельным решением о публикации.
+
+## CLB-owner-team — принятый staff-срез, 2026-11-08
+
+- **OWNER_CABINET_STATUS: READY_FOR_REVIEW.** Владелец явно утвердил весь
+  [staff-контракт](owner-team-contract.md); прежний blocker ниже исторический.
+  Реализованы команда конкретного клуба, одноразовый Telegram claim → код →
+  отдельное owner confirmation, fixed grants, смена роли и disable/fresh admission.
+  [Handoff, точный inventory и evidence](owner-team.md).
+- Существующий зарегистрированный worktree
+  `/private/tmp/clb-owner-team-worktree-20261108`, ветка
+  `codex/clb-owner-team-20261108`, HEAD/base
+  `81c2822e6a3d6d53e863e106d4a34cf24720ac8a`. PROJECT_IDENTITY_OK;
+  active instructions clubs_bot, active foreign = 0. Новый clone/worktree не
+  создавался; guard, чужие worktrees/изменения основного checkout сохранены.
+- Только immutable creator + active client/membership/mapping + exact read/team.manage.
+  Host: read; Manager: profile/layout/calendar/booking_rules; Club Admin: также
+  finance/modules configuration. Нет application.manage, GLOBAL, legacy или
+  операционной выдачи. V075 H2/PostgreSQL переиспользует invitations/grants/
+  commands/audit; assignment metadata не является authority. Grant tombstones
+  автоматически не восстанавливаются. Platform membership restore staff grants
+  не возвращает. Старые, включая неиспользованные до disable, ссылки fenced.
+- Fresh client lock/authorization, optimistic versions, command/audit transaction,
+  idempotency и stale-response fences проверены. Исправлены profile RR revoke
+  race и неполная booking_rules permission projection. Прежний UX/security patch
+  сохранён. Команда — optional saved status, не условие публичной готовности.
+- Ordinary JVM **1483 passed / 1 skipped**, full PostgreSQL 16 **1879 passed /
+  11 skipped**. Targeted H2/Ktor, migrations/constraints/concurrency/audit PASS.
+  Coverage/Detekt/ktlint/log policy/strict dependency graph/installDist PASS.
+  Vitest **385/385**, TypeScript/ESLint/Vite/dist PASS; mobile Chromium/WebKit
+  **42/42**, actual packaged Ktor/H2 journeys **8/8**. Оба JAR совпадают с dist.
+  Secret/scope/identity evidence и ограничения перечислены в handoff.
+- Настоящий Telegram WebView/iPhone, hosted CI, stage/prod и отдельные native
+  support IT не проверены. DEC-013/014/022/031 restrictions сохранены; guest
+  runtime, платежи/смены, QR/check-in, rewards/music/Managed Bots не открыты.
+- Только локальные правки/tests/docs, без commit/push/PR/merge/deploy и live data.
+  Один следующий шаг — независимый review локального кандидата, затем отдельное
+  решение о публикации. Этот checkpoint не выдаёт publication permission.
+
+## CLB-owner-team — исторический этап до утверждения, 2026-11-08
+
+- **OWNER_CABINET_STATUS: PARTIAL_BLOCKED.** Завершён независимый профильный
+  UX/security срез. Staff grants/invitation lifecycle не реализованы: точная
+  матрица и политика для доступа к существующему клубу требуют подтверждения
+  [предложенного контракта](owner-team-contract.md). Вопрос отправлен, acceptance
+  не получен. [Handoff, файлы и evidence](owner-team.md).
+- Разрешён и создан один зарегистрированный worktree
+  `/private/tmp/clb-owner-team-worktree-20261108`, ветка
+  `codex/clb-owner-team-20261108`, HEAD/base и подтверждённый remote main
+  `81c2822e6a3d6d53e863e106d4a34cf24720ac8a`. Guard:
+  `PROJECT_IDENTITY_OK`, expected-head PASS; active instructions clubs_bot,
+  active foreign instructions = 0. Guard не менялся; старый clone, все
+  существующие worktrees и чужие изменения основного checkout сохранены.
+- Profile capability revocation применяется независимо от configuration version;
+  старые PATCH не восстанавливают permissions после отзыва/повторного допуска.
+  Pending/unknown команда сохраняет intent/key при internal/browser/Telegram
+  Back; confirmed read denial позволяет покинуть недоступный клуб. Self-review
+  обнаружил и исправил exit trap; отдельная RED/GREEN regression сохранена.
+- Vitest **379/379**, TypeScript/ESLint, Vite/dist validator PASS. Mobile
+  Chromium/WebKit **42/42**. Targeted Ktor/H2 **41/41**, без skips; log policy,
+  strict resolved dependency graph и финальный installDist PASS. Packaged H2
+  journey **2/2**; финальный secret/scope manifest фиксируется в handoff/evidence.
+  Backend, SQL, role enum и migrations не изменены; full JVM/PG/Kotlin static
+  gates не переобъявляются заново пройденными.
+- DEC-013/014/022 и catalogue/configuration boundary DEC-031 сохраняются.
+  Персонал не объявлен обязательным условием readiness; guest runtime,
+  публичность, реальные платежи, Managed Bots и операционные роли не включены.
+  Реальные Telegram WebView/iPhone, hosted CI и stage/prod не проверялись.
+- Только локальные изменения, disposable tests и docs. Commit/push/PR/merge/
+  deploy и реальные данные не затрагивались. Один следующий шаг: утвердить
+  или скорректировать staff-контракт и продолжить его реализацию в этом worktree
+  до независимого review; публикация текущего блока пока не предлагается.
+
 ## Owner cabinet configuration — P2 replay fix, 2026-11-07
 
 - **OWNER_CABINET_CONFIG_FIX_READY**, продолжение `CLB-owner-cabinet-config`.

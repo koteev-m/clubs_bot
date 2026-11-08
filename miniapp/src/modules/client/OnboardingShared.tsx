@@ -16,6 +16,7 @@ export function Shell({
   subtitle,
   owner = false,
   back,
+  backDisabled = false,
   backLabel = 'Назад',
   closeAtRoot = false,
   children,
@@ -25,6 +26,7 @@ export function Shell({
   subtitle?: string;
   owner?: boolean;
   back?: () => void;
+  backDisabled?: boolean;
   backLabel?: string;
   closeAtRoot?: boolean;
   children: React.ReactNode;
@@ -96,7 +98,12 @@ export function Shell({
         </header>
         <main className="po-main">
           {back && (
-            <button className="po-back" type="button" onClick={back}>
+            <button
+              className="po-back"
+              type="button"
+              onClick={back}
+              disabled={backDisabled}
+            >
               <ArrowLeft size={18} aria-hidden="true" /> {backLabel}
             </button>
           )}

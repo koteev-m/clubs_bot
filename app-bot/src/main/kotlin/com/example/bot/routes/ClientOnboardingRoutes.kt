@@ -89,6 +89,8 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     get("/clubs/{id}/booking-preview/nights/{nightId}/halls/{hallId}/availability") {
         api.read(call, OnboardingRead.CLUB_TABLE_AVAILABILITY_GET, "id", pathIds = listOf("nightId", "hallId"))
     }
+    get("/clubs/{id}/team") { api.read(call, OnboardingRead.CLUB_TEAM_GET, "id") }
+    post("/clubs/{id}/team") { api.mutate(call, OnboardingMutation.CLUB_TEAM_UPDATE, "id") }
     get("/clubs/{id}/profile") { api.read(call, OnboardingRead.CLUB_PROFILE_GET, "id") }
     patch("/clubs/{id}/profile") { api.mutate(call, OnboardingMutation.CLUB_PROFILE_UPDATE, "id") }
 }
@@ -154,9 +156,6 @@ private class OnboardingHttp(
                 .getAll("Idempotency-Key")
                 ?.singleOrNull()
         if (key == null || !COMMAND_KEY.matches(key)) throw OnboardingFailure("validation_error")
-        val issuesLink = operation in invitationIssuers
-        // This refusal happens before persistence, so callers can distinguish it from a lost response.
-        if (issuesLink && username == null) throw OnboardingFailure(ErrorCodes.INVITATION_LINK_UNAVAILABLE)
         var body =
             call.onboardingBody(
                 if (operation ==
@@ -167,6 +166,13 @@ private class OnboardingHttp(
                     MAX_BODY_BYTES
                 },
             )
+        val issuesLink =
+            operation in invitationIssuers ||
+                (
+                    operation == OnboardingMutation.CLUB_TEAM_UPDATE &&
+                        (body["action"] as? JsonPrimitive)?.content == "invite"
+                )
+        if (issuesLink && username == null) throw OnboardingFailure(ErrorCodes.INVITATION_LINK_UNAVAILABLE)
         if (operation == OnboardingMutation.CLUB_CREATE) body = OnboardingLocations.creationBody(body)
         if (operation in memberMutations) {
             val userId = call.positiveId("userId").toString()

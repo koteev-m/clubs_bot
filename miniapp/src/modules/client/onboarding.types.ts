@@ -1,5 +1,9 @@
 export interface Invitation {
-  acceptanceMode?: 'direct' | 'legacy';
+  acceptanceMode?: 'direct' | 'legacy' | 'staff';
+  clubId?: string;
+  clubName?: string;
+  role?: 'ENTRY_MANAGER' | 'MANAGER' | 'CLUB_ADMIN';
+  permissions?: string[];
   id: string;
   clientId: string;
   clientName: string;
