@@ -55,6 +55,12 @@
 
 ## `DEC-004` — MVP role set
 
+**AMEND 2026-11-09, принято владельцем:** прежний целевой набор ниже сохраняется
+как история. Актуальные девять ролей, обязанности и границы безопасного перехода
+заданы в [датированном уточнении](#owner-manager-model-decision) и
+[PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model). Принятие не меняет
+техническую матрицу staff от 2026-11-08 и не выполняет миграцию пользователей.
+
 - **Context:** source role catalogue шире текущего enum.
 - **Source tension:** отдельные Host, floor manager, club manager, admin, finance manager, DJ, global promoter, Owner.
 - **Code tension:** `Role` содержит OWNER, GLOBAL_ADMIN, HEAD_MANAGER, CLUB_ADMIN, MANAGER, ENTRY_MANAGER, PROMOTER, GUEST.
@@ -81,6 +87,14 @@
 - **Status:** `ACCEPTED_DECISION`.
 
 ## `DEC-005` — различия Host, entrance manager, floor manager, club manager и admin
+
+**AMEND 2026-11-09, принято владельцем:** целевые обязанности разделены между
+Менеджером (включая столы), Менеджером входа и Управляющим клуба; отдельного Host
+в основном target catalogue больше нет. [Новое уточнение](#owner-manager-model-decision)
+заменяет только противоречащие target names/duties. Исторические `ENTRY_MANAGER`,
+`MANAGER`, `CLUB_ADMIN`, legacy assignments и GLOBAL semantics сохраняются до
+отдельной безопасной миграции; никакого механического соответствия новой роли
+одному старому пакету не установлено.
 
 **Уточнение от 2026-10-27 (принято владельцем):** DEC-040 сохраняет исторические GLOBAL назначения и их legacy semantics; новый клиент не получает Role.OWNER/GLOBAL. Пользователь, клиент и клуб различны; членство клиента не выдаёт сотруднику права на все его клубы. Новые клубные действия требуют клиентской принадлежности, конкретного club scope и explicit permission; platform-owner identity остаётся отдельной authority по DEC-039.
 
@@ -1081,3 +1095,48 @@ authority. Прямое принятие нового пустого client cabi
 не переносится на staff invitation к существующим private данным. Принятие
 контракта не означает implementation/release/runtime acceptance; DEC-013/014/022
 и initial allocation catalogue/configuration boundary DEC-031 не изменяются.
+
+<a id="owner-manager-model-decision"></a>
+## Уточнение DEC-004/005/040/041: управление клубом — 2026-11-09
+
+- **Status:** `ACCEPTED_DECISION`; direct owner instruction 2026-11-09, новая
+  локальная задача `CLB-owner-manager-ux`, base `16761e43887036688028358524847db1af0e5326`.
+  Новый номер решения/карточки не создаётся.
+- **AMEND целевого catalogue:** Владелец сети, Владелец клуба, Управляющий сети,
+  Управляющий клуба, Менеджер, Менеджер входа, Финансовый менеджер, Промоутер, Гость.
+  Отдельного Host нет; обязанности по столам входят в Менеджера. Менеджер входа
+  отдельно отвечает за QR/списки/поиск/приход/отказ. DJ, Администратор клуба,
+  Менеджер зала и прежние сетевые административные должности не входят в актуальный
+  основной target catalogue. Старые формулировки DEC-004/005 остаются историей.
+- **KEEP технической совместимости:** существующие ENTRY_MANAGER/MANAGER/CLUB_ADMIN
+  и их fixed client CLUB packages из решения 2026-11-08 не переименовываются,
+  grants не расширяются, assignments не мигрируются. Legacy roles/records/contracts
+  сохраняются до отдельной безопасной миграции. Отсутствие Host в target не разрешает
+  удалить его технические записи или выдать ENTRY_MANAGER QR/check-in.
+- **AMEND owner/preparation UX:** владелец контролирует свой клуб и результаты,
+  ответственный выполняет разрешённую конфигурацию в одной Mini App. После private
+  creation — делегировать / самостоятельно / позже. Отдельный сохраняемый процесс
+  подготовки, передача на проверку, owner accept/return с причиной; состояние
+  подготовки не является публичностью или booking authorization. Владелец сохраняет
+  отдельный доступ к уже разрешённым настройкам и полной проверке готовности.
+- **KEEP invitation/access invariants:** прежний двухэтапный staff flow; temporary
+  CLUB_ADMIN только целиком по существующей authority и без ownership/team/денег.
+  Назначение не авторизует само по себе, каждый write/replay проверяет current
+  membership/grants/assignment и exact club/client. Снятие задачи и отзыв grants —
+  отдельные действия. Versions/idempotency/audit/atomicity/revoke fences обязательны.
+- **AMEND calendar UX, KEEP domain contracts:** три области с default upcoming;
+  business date отдельно от фактических дат открытия/закрытия, явный выбор при
+  неоднозначности; weekly/holiday/exception/IANA/DST/version/protected-data contracts
+  сохраняются. Save rules и materialize persistent nights раздельны; auto
+  booking/event/HOLD/publication и изменение связанных bookings исключены.
+- **Сеть — принятая модель, будущая реализация:** управляющий сети видит только
+  назначенные клубы/реальные показатели/готовность. Полные настройки, network grants,
+  GLOBAL authority и рабочий сетевой кабинет не создаются; координационные действия
+  требуют отдельной permission model. Владелец сети и клуба не владельцы платформы.
+- **Будущие решения:** precise nine-role permission matrix, безопасные mappings и
+  migrations, network coordination authority; новые роли не разрешают прежние
+  pending operational decisions DEC-006/012/014. Границы DEC-013/022/031 сохранены.
+- **Traceability:** [PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model),
+  [принятый контракт](../ops/owner-manager-contract.md),
+  [roadmap](PRODUCT_ROADMAP.md#owner-manager-sequence).
+  Принятие не равно local PASS, публикации, deployed revision или runtime readiness.

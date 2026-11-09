@@ -29,7 +29,9 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.nio.charset.CharacterCodingException
 
 /** HTTP only: identity comes from the shared early signature guard; persistence rechecks authority. */
@@ -83,12 +85,15 @@ private fun Route.clientApplicationEndpoints(api: OnboardingHttp) {
     patch("/clubs/{id}/booking-rules") { api.mutate(call, OnboardingMutation.CLUB_BOOKING_RULES_UPDATE, "id") }
     get("/clubs/{id}/calendar") { api.read(call, OnboardingRead.CLUB_CALENDAR_GET, "id") }
     patch("/clubs/{id}/calendar") { api.mutate(call, OnboardingMutation.CLUB_CALENDAR_UPDATE, "id") }
+    post("/clubs/{id}/calendar/commands/resolve") { api.resolveCalendar(call) }
     get("/calendar/nights/{id}/legacy-event") { api.read(call, OnboardingRead.CLUB_NIGHT_EVENT_CANDIDATE, "id") }
     post("/calendar/nights/{id}/legacy-event") { api.mutate(call, OnboardingMutation.CLUB_NIGHT_EVENT_LINK, "id") }
     get("/clubs/{id}/booking-preview") { api.read(call, OnboardingRead.CLUB_BOOKING_PREVIEW_GET, "id") }
     get("/clubs/{id}/booking-preview/nights/{nightId}/halls/{hallId}/availability") {
         api.read(call, OnboardingRead.CLUB_TABLE_AVAILABILITY_GET, "id", pathIds = listOf("nightId", "hallId"))
     }
+    get("/clubs/{id}/preparation") { api.read(call, OnboardingRead.CLUB_PREPARATION_GET, "id") }
+    patch("/clubs/{id}/preparation") { api.mutate(call, OnboardingMutation.CLUB_PREPARATION_UPDATE, "id") }
     get("/clubs/{id}/team") { api.read(call, OnboardingRead.CLUB_TEAM_GET, "id") }
     post("/clubs/{id}/team") { api.mutate(call, OnboardingMutation.CLUB_TEAM_UPDATE, "id") }
     get("/clubs/{id}/profile") { api.read(call, OnboardingRead.CLUB_PROFILE_GET, "id") }
@@ -146,6 +151,25 @@ private class OnboardingHttp(
         )
     }
 
+    suspend fun resolveCalendar(call: ApplicationCall) =
+        call.safeOnboarding {
+            val key =
+                call.request.headers
+                    .getAll("Idempotency-Key")
+                    ?.singleOrNull()
+            if (key == null || !COMMAND_KEY.matches(key)) throw OnboardingFailure("validation_error")
+            val request = call.onboardingBody(CALENDAR_BODY_BYTES)
+            repository.read(
+                call.onboardingActor(),
+                OnboardingRead.CLUB_CALENDAR_COMMAND_RESOLVE,
+                call.positiveId("id"),
+                buildJsonObject {
+                    put("request", request)
+                    put("key", key)
+                },
+            )
+        }
+
     suspend fun mutate(
         call: ApplicationCall,
         operation: OnboardingMutation,
@@ -169,7 +193,11 @@ private class OnboardingHttp(
         val issuesLink =
             operation in invitationIssuers ||
                 (
-                    operation == OnboardingMutation.CLUB_TEAM_UPDATE &&
+                    operation in
+                        setOf(
+                            OnboardingMutation.CLUB_TEAM_UPDATE,
+                            OnboardingMutation.CLUB_PREPARATION_UPDATE,
+                        ) &&
                         (body["action"] as? JsonPrimitive)?.content == "invite"
                 )
         if (issuesLink && username == null) throw OnboardingFailure(ErrorCodes.INVITATION_LINK_UNAVAILABLE)

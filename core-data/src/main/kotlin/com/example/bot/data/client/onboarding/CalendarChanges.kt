@@ -38,7 +38,7 @@ internal data class CalendarTimes(
 )
 
 internal fun JsonObject.calendarChanges(): List<CalendarChange> {
-    only(listOf("expectedVersion", "timezone", "weekly", "holidays", "exceptions", "reconcile"))
+    only(listOf("expectedVersion", "timezone", "weekly", "holidays", "exceptions", "reconcile", "reconciliationDate"))
     val changes =
         CalendarRuleTable.entries.flatMap { table ->
             val rows = this[table.name.lowercase()] as? JsonArray ?: fail("validation_error")
@@ -92,8 +92,11 @@ private fun JsonObject.calendarDay(): Int =
         ?.intOrNull
         ?.takeIf { it in 1..DayOfWeek.entries.size } ?: fail("validation_error")
 
-private fun JsonObject.calendarDate(): LocalDate {
-    val value = string("date")?.takeIf(DATE::matches) ?: fail("validation_error")
+internal fun JsonObject.reconciliationDate(): LocalDate? =
+    if ("reconciliationDate" in this) calendarDate("reconciliationDate") else null
+
+private fun JsonObject.calendarDate(key: String = "date"): LocalDate {
+    val value = string(key)?.takeIf(DATE::matches) ?: fail("validation_error")
     return try {
         LocalDate.parse(value).takeIf { it.year in 1..LAST_CALENDAR_YEAR } ?: fail("validation_error")
     } catch (_: DateTimeParseException) {

@@ -1,5 +1,108 @@
 # Project status checkpoint
 
+
+## OWNER_MANAGER_UX — unknown recovery P2 fix, 2026-11-09
+
+- **OWNER_MANAGER_UNKNOWN_RECOVERY_FIX: PASS. READY_FOR_FOCUSED_REVIEW: YES.**
+  [Дельта, контракты, проверки и ограничения](owner-manager-unknown-recovery-fix.md).
+- Тот же worktree `/private/tmp/clb-owner-manager-ux-20261109`, branch
+  `codex/owner-manager-ux-20261109`, HEAD/base/merge-base/origin main preflight
+  `16761e43887036688028358524847db1af0e5326`; PROJECT_IDENTITY_OK, active foreign=0.
+  Исходные86 paths совпали с manifest и сохранены в отдельном baseline/evidence:
+  `/private/tmp/clb-owner-manager-unknown-79qu19w9`.
+- Read-only calendar command resolver использует existing durable receipt и
+  actor/client locks/current grants; отсутствующий receipt не исполняет mutation.
+  Immutable-body retry проверяет fresh plan/consent ref до dispatch. Unknown
+  сохраняется при retry409/непринятом retry DTO; обычные consumers/first4xx прежние.
+- RED2unit/4browser; финально Vitest461/461, mobile84/84, Ktor/H2 recovery8/8,
+  full JVM1511 passed/1 skipped, PG153/153, TS/ESLint/affected ktlint/Detekt/Vite/
+  dist/JAR PASS. Packaged12/12 включает реальную no-op receipt recovery без2-гоPATCH.
+  Bounded security/invariant review не оставил подтверждённых findings.
+- Calendar policy, affected dates, grants/roles, delegation, V076 и protected
+  context cleanup сохранены. No receipt-history/cancel infrastructure: absence
+  остаётся snapshot fact; несовместимый intent сохраняется с read-only recovery.
+- Только local code/tests/docs/disposable fixtures, без publication/deploy/live
+  data. Внешний предыдущий review остаётся FINDINGS/READY_FOR_DRAFT_PR:NO.
+  Один следующий шаг — независимый focused review новой unknown дельты/manifest.
+
+
+## OWNER_MANAGER_UX — calendar P2 fix, 2026-11-09
+
+- **OWNER_MANAGER_CALENDAR_FIX: PASS. READY_FOR_FOCUSED_REVIEW: YES.** Исправлены
+  удалённые dated rules вне horizon и устаревшее DST consent после fresh GET.
+  [Полная дельта, metadata necessity, invariants и проверки](owner-manager-calendar-fix.md).
+- Тот же registered worktree `/private/tmp/clb-owner-manager-ux-20261109`, branch
+  `codex/owner-manager-ux-20261109`, HEAD/base/origin main preflight
+  `16761e43887036688028358524847db1af0e5326`. PROJECT_IDENTITY_OK, active foreign=0.
+  Исходные78 paths сохранены по manifest; новый кандидат86 paths, source/grants/
+  V076/preparation/privacy fixes сохранены. Evidence `/private/tmp/clb-owner-manager-calendar-rx84a1o5`.
+- Полный finite server candidate set получает необходимые all-stored-date metadata
+  из existing club.read; optional PATCH day fence закрывает клубную полночь через
+  прежний version_conflict. Resolver/persistence/authority не изменены. Consent
+  принадлежит exact plan ID и отзывается синхронно до render; dispatch/retry fenced.
+- RED обоих P2; Vitest448/448, TS/ESLint, mobile Chromium/WebKit70/70, packaged10/10,
+  новый H2/Ktor8/8, full JVM1503 passed/1 skipped, PG145/145, ktlint/Detekt, Vite/
+  dist/JAR PASS. Bounded A–E review PASS после confirmed fixes (partial inheritance,
+  Apia expiry и version-only unknown retry). Secret scan/manifest — final evidence.
+- Ограничение: unknown intent при изменении inputs с той же version сохраняется,
+  но retry блокируется без актуального plan/consent; отдельный receipt-resolution
+  contract не добавлен. Real Telegram WebView/hosted CI/stage/prod не проверялись.
+- Внешний focused review прежнего78-path кандидата остаётся FINDINGS/READY_FOR_DRAFT_PR:NO;
+  новая локальная дельта требует повторного review. Никаких commit/push/PR/merge/
+  deploy/live data или staff changes. Один следующий шаг — независимый focused review.
+
+
+## OWNER_MANAGER_UX — P2 fix, 2026-11-09
+
+- **OWNER_MANAGER_P2_FIX: PASS. READY_FOR_FOCUSED_REVIEW: YES.** Два подтверждённых
+  P2 исправлены локально: общий club request epoch очищает весь Cabinet при отказе
+  и блокирует late200/401/403; DST planner учитывает business-date lookback3.
+  [Дельта, проверки, reuse и новый manifest](owner-manager-p2-fix.md).
+- Тот же worktree `/private/tmp/clb-owner-manager-ux-20261109`, branch
+  `codex/owner-manager-ux-20261109`, HEAD/base `16761e43887036688028358524847db1af0e5326`.
+  PROJECT_IDENTITY_OK, active foreign=0. Прежние69 paths до edits совпали с manifest;
+  baseline и прежний review/evidence сохранены. Новый evidence:
+  `/private/tmp/clb-owner-manager-p2-e0kht3wk`.
+- RED обоих исходных дефектов; final Vitest422/422, TS/full ESLint, browser P2
+  Chromium/WebKit12/12 и mobile54/54 aggregate, packaged10/10, H2/Ktor17/17, Vite/
+  strict package/dist PASS. Прежние backend17 paths/V076/grants/dependencies без
+  изменений; heavy JVM/PG/static suites reused по inputs, не переобъявлены новыми.
+- Scoped security review помог устранить производный stale403 global event race;
+  финальных confirmed findings нет. Formal independent review прежнего кандидата
+  остаётся FINDINGS/READY_FOR_DRAFT_PR:NO до нового отдельного verdict.
+- Только local code/tests/docs/disposable checks. Нет commit/push/PR/merge/deploy,
+  stage/prod/live data или изменения permissions. Один следующий шаг — повторный
+  независимый focused review P2-дельты и manifest.
+
+
+## CLB-owner-manager-ux — управление и подготовка, 2026-11-09
+
+- **OWNER_MANAGER_UX_STATUS: READY_FOR_REVIEW.** Новая local задача: private creation
+  → self/later/delegation → настройка → submit → owner accept/return. Обзор отделён
+  от настроек/готовности; календарь upcoming/weekly/special. [Handoff](owner-manager-ux.md).
+- Worktree `/private/tmp/clb-owner-manager-ux-20261109`, branch
+  `codex/owner-manager-ux-20261109`, HEAD/base `16761e43887036688028358524847db1af0e5326`;
+  origin/main подтверждён preflight, PR #566 merged. PROJECT_IDENTITY_OK; active
+  Clubs Bot instructions, foreign=0; основной checkout/чужие changes/worktrees сохранены.
+- V076 H2/PG — только durable task, без новых permissions. Creator authority,
+  действующий полный CLUB_ADMIN, прежние claim+owner confirmation, atomic version/
+  command/audit, revocation/admission fence и hash результата. Grants/assignments не
+  мигрировались; снятие задачи и отзыв доступа разделены. Девять target roles приняты
+  2026-11-09 в [новом контракте](owner-manager-contract.md); сеть DOC_ONLY.
+- Ordinary JVM 1495 passed / 1 skipped; full PostgreSQL16 + coverage/Detekt/ktlint/
+  log/strict dependency/package PASS: 1904 passed / 11 штатных skipped. Vitest402/402,
+  TS/ESLint/Vite/dist PASS; mobile Chromium/WebKit42/42; final packaged Ktor/H2 new
+  journey2/2 и прежние journeys8/8. Full inventory/checks/reuse/verification fixes — в handoff.
+- Focused self-review и независимый bounded review завершены, confirmed findings
+  закрыты. 12 final screenshots, manifest/logs/SARIF:
+  `/private/tmp/clb-owner-manager-evidence-20261109`. Старые evidence не перезаписаны.
+- Только local edits/tests/docs/disposable DB. Commit/push/PR/merge/deploy, stage/prod,
+  live data и protected access mutations не разрешены и не выполнялись. Успешный stage
+  deploy #566 — сообщение пользователя, не проверка новой локальной версии.
+- Непроверены real Telegram/device/hosted CI и отдельно включаемые native support IT;
+  DST second-occurrence и новая RBAC/network permission matrix — future scope.
+  Один следующий шаг — пользовательская приёмка локального кандидата/screenshots.
+
 ## CLB-owner-team — P2 screenshot isolation fix, 2026-11-08
 
 - **OWNER_TEAM_P2_FIX: PASS. READY_FOR_FOCUSED_REVIEW: YES.** Исправлены два

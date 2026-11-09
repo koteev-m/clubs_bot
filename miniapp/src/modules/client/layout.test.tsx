@@ -71,7 +71,7 @@ beforeEach(async () => {
   window.history.replaceState(
     {},
     '',
-    '/app?mode=client&screen=club&resource=' + club,
+    '/app?mode=client&screen=settings&resource=' + club,
   );
   vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -86,9 +86,11 @@ beforeEach(async () => {
   vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(
     200,
   );
-  vi.spyOn(HTMLImageElement.prototype, 'naturalHeight', 'get').mockReturnValue(
-    100,
-  );
+  vi.spyOn(
+    HTMLImageElement.prototype,
+    'naturalHeight',
+    'get',
+  ).mockReturnValue(100);
 });
 afterEach(() => {
   cleanup();
@@ -175,8 +177,10 @@ describe('cabinet uses the shared layout editor', () => {
         throw new Error('Unexpected synthetic path ' + path);
       });
     render(<ClientAccess initialToken={null} />);
-    await screen.findByRole('heading', { name: 'Свой клуб' });
-    fireEvent.click(screen.getByRole('button', { name: /Залы и столы/ }));
+    await screen.findByRole('heading', { name: 'Настройки клуба' });
+    fireEvent.click(
+      screen.getByRole('button', { name: /Залы, зоны и столы/ }),
+    );
     await screen.findByText('Залов нет');
     expect(screen.queryByLabelText('JSON схемы')).toBeNull();
     fireEvent.change(screen.getByLabelText('Название', { exact: true }), {
@@ -217,8 +221,16 @@ describe('cabinet uses the shared layout editor', () => {
       target: { value: '6' },
     });
     const marker = screen.getByTestId('table-marker-' + table);
-    fireEvent.pointerDown(marker, { clientX: 100, clientY: 50, pointerId: 1 });
-    fireEvent.pointerMove(marker, { clientX: 140, clientY: 70, pointerId: 1 });
+    fireEvent.pointerDown(marker, {
+      clientX: 100,
+      clientY: 50,
+      pointerId: 1,
+    });
+    fireEvent.pointerMove(marker, {
+      clientX: 140,
+      clientY: 70,
+      pointerId: 1,
+    });
     fireEvent.pointerUp(marker, { clientX: 140, clientY: 70, pointerId: 1 });
     expect(window.confirm).toHaveBeenCalled();
     expect(patches).toHaveLength(1);
@@ -296,15 +308,23 @@ describe('cabinet uses the shared layout editor', () => {
       return json(layout);
     });
     render(<ClientAccess initialToken={null} />);
-    await screen.findByRole('button', { name: /Залы и столы/ });
-    fireEvent.click(screen.getByRole('button', { name: /Залы и столы/ }));
+    await screen.findByRole('button', { name: /Залы, зоны и столы/ });
+    fireEvent.click(
+      screen.getByRole('button', { name: /Залы, зоны и столы/ }),
+    );
     await screen.findByText('Доступный зал');
     expect(screen.queryByRole('button', { name: 'Создать' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Редактировать' }),
+    ).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Открыть зал' }));
     await screen.findByTestId('hall-plan-image');
-    fireEvent.click(screen.getByRole('button', { name: '#1 · Частный стол' }));
-    expect(screen.getByRole('region', { name: 'Карточка стола' })).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole('button', { name: '#1 · Частный стол' }),
+    );
+    expect(
+      screen.getByRole('region', { name: 'Карточка стола' }),
+    ).toBeTruthy();
     expect(screen.getByLabelText('Заменить схему')).toHaveProperty(
       'disabled',
       true,
@@ -314,7 +334,9 @@ describe('cabinet uses the shared layout editor', () => {
     fireEvent(window, new Event('pageshow'));
     await screen.findByText(/Доступ утрачен или запись недоступна/);
     expect(screen.queryByTestId('hall-plan-image')).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Карточка стола' })).toBeNull();
+    expect(
+      screen.queryByRole('region', { name: 'Карточка стола' }),
+    ).toBeNull();
     expect(screen.queryByText('Частный стол')).toBeNull();
     await waitFor(() =>
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:private-plan'),
@@ -322,11 +344,13 @@ describe('cabinet uses the shared layout editor', () => {
     act(() => {
       for (const back of [...backs]) back();
     });
-    await waitFor(() => expect(window.location.search).not.toContain('hall='));
+    await waitFor(() =>
+      expect(window.location.search).not.toContain('hall='),
+    );
     expect(window.location.search).toContain('screen=layout');
     fireEvent.click(screen.getByRole('button', { name: /^Назад$/ }));
     await waitFor(() =>
-      expect(window.location.search).toContain('screen=club'),
+      expect(window.location.search).toContain('screen=settings'),
     );
   });
 });
@@ -359,20 +383,24 @@ describe('cabinet mutation access loss', () => {
         },
       ],
     };
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, options) => {
-      if (options?.method === 'PATCH') {
-        revoked = true;
-        return json({ code: 'not_found' }, 404);
-      }
-      if (revoked) return json({ code: 'not_found' }, 404);
-      if (String(input).endsWith('/profile')) return json(profile);
-      return json(layout);
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (input, options) => {
+        if (options?.method === 'PATCH') {
+          revoked = true;
+          return json({ code: 'not_found' }, 404);
+        }
+        if (revoked) return json({ code: 'not_found' }, 404);
+        if (String(input).endsWith('/profile')) return json(profile);
+        return json(layout);
+      },
+    );
     render(<ClientAccess initialToken={null} />);
     fireEvent.click(
-      await screen.findByRole('button', { name: /Залы и столы/ }),
+      await screen.findByRole('button', { name: /Залы, зоны и столы/ }),
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Открыть зал' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Открыть зал' }),
+    );
     fireEvent.click(await screen.findByRole('button', { name: '#1 · Стол' }));
     fireEvent.change(screen.getByLabelText('Название', { exact: true }), {
       target: { value: 'Изменённый стол' },
@@ -385,10 +413,12 @@ describe('cabinet mutation access loss', () => {
       screen.queryByRole('button', { name: 'Повторить ту же операцию' }),
     ).toBeNull();
     act(() => window.history.back());
-    await waitFor(() => expect(window.location.search).not.toContain('hall='));
+    await waitFor(() =>
+      expect(window.location.search).not.toContain('hall='),
+    );
     act(() => window.history.back());
     await waitFor(() =>
-      expect(window.location.search).toContain('screen=club'),
+      expect(window.location.search).toContain('screen=settings'),
     );
   });
 });

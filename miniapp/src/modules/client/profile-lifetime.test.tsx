@@ -64,14 +64,16 @@ it.each([403, 404])(
     const write = deferred();
     let readStatus = 200;
     let saved = profile;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
-      if (options?.method === 'PATCH') return write.promise;
-      if (!String(path).endsWith('/profile')) return response({}, 404);
-      return response(
-        readStatus === 200 ? saved : { code: 'not_found' },
-        readStatus,
-      );
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (path, options) => {
+        if (options?.method === 'PATCH') return write.promise;
+        if (!String(path).endsWith('/profile')) return response({}, 404);
+        return response(
+          readStatus === 200 ? saved : { code: 'not_found' },
+          readStatus,
+        );
+      },
+    );
     render(<ClubProfile {...props} />);
     await startSave();
     readStatus = status;
@@ -86,12 +88,18 @@ it.each([403, 404])(
     expect(screen.queryByText('Private late name')).toBeNull();
     expect(screen.queryByText('Сохранено')).toBeNull();
     readStatus = 503;
-    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
-    await screen.findByText('Не удалось загрузить данные. Повторите попытку.');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Повторить загрузку' }),
+    );
+    await screen.findByText(
+      'Не удалось загрузить данные. Повторите попытку.',
+    );
     expect(screen.queryByText(profile.address)).toBeNull();
     saved = { ...profile, name: 'Restored venue', version: '3' };
     readStatus = 200;
-    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Повторить загрузку' }),
+    );
     await screen.findByRole('heading', { name: saved.name, level: 1 });
     expect(screen.getByText(profile.address)).toBeTruthy();
   },
@@ -132,11 +140,13 @@ it.each(['current', 'older', 'restored'])(
   async (snapshot) => {
     const write = deferred();
     let saved = { ...profile, version: '3' };
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
-      if (options?.method === 'PATCH') return write.promise;
-      if (!String(path).endsWith('/profile')) return response({}, 404);
-      return response(saved);
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (path, options) => {
+        if (options?.method === 'PATCH') return write.promise;
+        if (!String(path).endsWith('/profile')) return response({}, 404);
+        return response(saved);
+      },
+    );
     render(<ClubProfile {...props} />);
     await startSave();
     saved = {
@@ -183,16 +193,16 @@ it('permits leaving an inaccessible club after an unknown command without trappi
       allowed ? 200 : 404,
     );
   });
-  render(<ClubProfile {...props} home={home} reportPending={reportPending} />);
+  render(
+    <ClubProfile {...props} home={home} reportPending={reportPending} />,
+  );
   await startSave();
   await screen.findByText('Результат операции пока неизвестен');
   allowed = false;
   fireEvent.focus(window);
   await screen.findByText(/Доступ утрачен/);
   expect(reportPending).toHaveBeenLastCalledWith(false);
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Организация и другие заведения' }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: 'Мои заведения' }));
   expect(home).toHaveBeenCalledWith(undefined);
 });
 
@@ -238,14 +248,16 @@ it.each(['club', 'identity'])(
       name: 'Other club',
       address: 'Other address',
     };
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
-      if (options?.method === 'PATCH') {
-        signal = options.signal as AbortSignal;
-        return write.promise;
-      }
-      if (!String(path).endsWith('/profile')) return response({}, 404);
-      return response(String(path).includes('/200/') ? other : profile);
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (path, options) => {
+        if (options?.method === 'PATCH') {
+          signal = options.signal as AbortSignal;
+          return write.promise;
+        }
+        if (!String(path).endsWith('/profile')) return response({}, 404);
+        return response(String(path).includes('/200/') ? other : profile);
+      },
+    );
     const view = render(<ClubProfile {...props} />);
     await startSave();
     view.rerender(
@@ -382,15 +394,17 @@ it.each(['saving', 'unknown'])(
     const openFinance = vi.fn();
     const home = vi.fn();
     const reportPending = vi.fn();
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (path, options) => {
-      if (options?.method === 'PATCH')
-        return outcome === 'saving' ? write.promise : response({}, 503);
-      if (!String(path).endsWith('/profile')) return response({}, 503);
-      return response({
-        ...profile,
-        permissions: [...profile.permissions, 'client.club.finance.read'],
-      });
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (path, options) => {
+        if (options?.method === 'PATCH')
+          return outcome === 'saving' ? write.promise : response({}, 503);
+        if (!String(path).endsWith('/profile')) return response({}, 503);
+        return response({
+          ...profile,
+          permissions: [...profile.permissions, 'client.club.finance.read'],
+        });
+      },
+    );
     const view = render(
       <ClubProfile
         {...props}
@@ -407,7 +421,7 @@ it.each(['saving', 'unknown'])(
     );
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Организация и другие заведения',
+        name: 'Настройки клуба',
       }),
     );
     expect(openFinance).not.toHaveBeenCalled();

@@ -228,6 +228,69 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
         }
 
     @Test
+    fun `preparation submit waiting on client lock rechecks committed configuration permission revocation`() =
+        runBlocking<Unit> {
+            val club = create(approved())
+            val started =
+                fixture.repository.mutate(
+                    fixture.alice,
+                    OnboardingMutation.CLUB_PREPARATION_UPDATE,
+                    club.id("id"),
+                    buildJsonObject {
+                        put("action", "self")
+                        put("expectedVersion", "1")
+                    },
+                    "preparation-lock-start",
+                )
+            fixture.source.connection.use { blocker ->
+                blocker.autoCommit = false
+                val sql = OnboardingSql(blocker)
+                val blockerId = checkNotNull(sql.row("SELECT pg_backend_pid() AS pid")).long("pid").toInt()
+                sql.row("SELECT id FROM clients WHERE id=? FOR UPDATE", club.id("clientId"))
+                coroutineScope {
+                    val outcome =
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            try {
+                                fixture.repository.mutate(
+                                    fixture.alice,
+                                    OnboardingMutation.CLUB_PREPARATION_UPDATE,
+                                    club.id("id"),
+                                    buildJsonObject {
+                                        put("action", "submit")
+                                        put("expectedVersion", started.getValue("version"))
+                                    },
+                                    "preparation-lock-submit",
+                                )
+                                "unexpected_success"
+                            } catch (failure: OnboardingFailure) {
+                                failure.code
+                            }
+                        }
+                    try {
+                        awaitBlockedMutation(blockerId)
+                        sql.update(
+                            "UPDATE client_club_grants SET is_active=FALSE WHERE club_id=? AND permission_code=?",
+                            club.id("id"),
+                            WRITE_PROFILE,
+                        )
+                        blocker.commit()
+                    } finally {
+                        blocker.rollback()
+                    }
+                    assertEquals("not_found", outcome.await())
+                }
+            }
+            assertEquals(
+                "in_progress",
+                fixture
+                    .rows(
+                        "SELECT status FROM client_club_preparation WHERE club_id=${club.id("id")}",
+                    ).single()["status"],
+            )
+            assertEquals(0, fixture.rows("SELECT * FROM audit_log WHERE action='client.preparation.submit'").size)
+        }
+
+    @Test
     fun `layout and image reads waiting on client lock see committed read grant revocation`() =
         runBlocking<Unit> {
             val club = create(approved())
@@ -240,7 +303,11 @@ internal class ClientOnboardingPostgresIT : OnboardingContract() {
                         buildJsonObject { put("name", "Waiting read") },
                         "layout-waiting-read-hall",
                     ).firstHall()
-            listOf(OnboardingRead.CLUB_LAYOUT_GET, OnboardingRead.CLUB_PLAN_GET).forEach { operation ->
+            listOf(
+                OnboardingRead.CLUB_LAYOUT_GET,
+                OnboardingRead.CLUB_PLAN_GET,
+                OnboardingRead.CLUB_PREPARATION_GET,
+            ).forEach { operation ->
                 fixture.execute(
                     "UPDATE client_club_grants SET is_active=TRUE WHERE club_id=${club.id(
                         "id",

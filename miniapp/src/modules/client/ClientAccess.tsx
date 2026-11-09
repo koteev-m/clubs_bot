@@ -3,6 +3,7 @@ import { useInitData } from '../auth/hooks/useInitData';
 import NewClub, { blankNewVenue } from './NewClub';
 import { authorityLost } from './onboarding.api';
 import ClubProfile from './ClubProfile';
+import ClubCabinet from './ClubCabinet';
 import ClubCalendar from './ClubCalendar';
 import ClubBookingRules from './ClubBookingRules';
 import GuestBookingPreview from './GuestBookingPreview';
@@ -36,6 +37,10 @@ type Screen =
   | { type: 'space'; id: string }
   | { type: 'application'; id: string }
   | { type: 'club'; id: string }
+  | { type: 'profile'; id: string }
+  | { type: 'settings'; id: string }
+  | { type: 'readiness'; id: string }
+  | { type: 'preparation-choice'; id: string }
   | { type: 'calendar'; id: string }
   | { type: 'finance'; id: string }
   | { type: 'modules'; id: string }
@@ -52,7 +57,8 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'client-space') return { type: 'space', id };
   if (params.get('screen') === 'application')
     return { type: 'application', id };
-  if (params.get('screen') === 'invitation') return { type: 'invitation', id };
+  if (params.get('screen') === 'invitation')
+    return { type: 'invitation', id };
   if (params.get('screen') === 'new-club') return { type: 'new', id };
   if (params.get('screen') === 'layout') {
     const hallId = params.get('hall');
@@ -70,6 +76,13 @@ function savedScreen(): Screen {
   if (params.get('screen') === 'team') return { type: 'team', id };
   if (params.get('screen') === 'modules') return { type: 'modules', id };
   if (params.get('screen') === 'calendar') return { type: 'calendar', id };
+  for (const type of [
+    'profile',
+    'settings',
+    'readiness',
+    'preparation-choice',
+  ] as const)
+    if (params.get('screen') === type) return { type, id };
   if (params.get('screen') === 'club') return { type: 'club', id };
   return { type: 'home' };
 }
@@ -145,7 +158,8 @@ function ClientWorkspace({
   const drafts = useRef(
     new Map<string, { fields: NewVenueFields; previous?: ClubApplication }>(),
   );
-  if (draftClient) drafts.current.set(draftClient, { fields: draft, previous });
+  if (draftClient)
+    drafts.current.set(draftClient, { fields: draft, previous });
   const pendingClient = useRef('');
   pendingClient.current = createClub.blocked ? draftClient : '';
   const dirty = useRef(false);
@@ -229,6 +243,30 @@ function ClientWorkspace({
   );
   const goBack = (parent: Screen) => {
     if (approvedBack.current !== null) return;
+    const current = savedScreen();
+    const previous = String(window.history.state?.clientPrevious ?? '').split(
+      ':',
+    );
+    // Configuration sections can be opened from the hub or readiness review.
+    // Restore only a known parent in this same club, never a URL-supplied tenant.
+    if (
+      position.current > 0 &&
+      'id' in current &&
+      'id' in parent &&
+      current.id === parent.id &&
+      current.type !== 'club' &&
+      [
+        'club',
+        'settings',
+        'readiness',
+        'profile',
+        'preparation-choice',
+      ].includes(previous[0]) &&
+      previous[1] === current.id &&
+      previous[2] === ''
+    ) {
+      parent = { type: previous[0], id: current.id } as Screen;
+    }
     if (
       position.current > 0 &&
       window.history.state?.clientPrevious === screenKey(parent)
@@ -339,7 +377,7 @@ function ClientWorkspace({
           setDraft(blankNewVenue);
           setDraftClient('');
           setPrevious(undefined);
-          navigate({ type: 'club', id: club.id });
+          navigate({ type: 'preparation-choice', id: club.id });
         }}
       />
     );
@@ -429,14 +467,52 @@ function ClientWorkspace({
         reportPending={reportSectionPending}
       />
     );
-  if (screen.type === 'club')
+  if (
+    ['club', 'settings', 'readiness', 'preparation-choice'].includes(
+      screen.type,
+    ) &&
+    'id' in screen &&
+    screen.id
+  )
+    return (
+      <ClubCabinet
+        key={screen.type + ':' + screen.id}
+        credential={credential}
+        id={screen.id}
+        mode={
+          screen.type === 'settings'
+            ? 'settings'
+            : screen.type === 'readiness'
+              ? 'readiness'
+              : screen.type === 'preparation-choice'
+                ? 'choice'
+                : 'overview'
+        }
+        back={(clientId) =>
+          goBack(
+            screen.type === 'club'
+              ? clientId
+                ? { type: 'space', id: clientId }
+                : { type: 'home' }
+              : { type: 'club', id: screen.id! },
+          )
+        }
+        open={(type) => navigate({ type, id: screen.id! })}
+        leaveClub={() => goBack({ type: 'home' })}
+        reportDirty={reportDirty}
+        reportPending={reportSectionPending}
+      />
+    );
+  if (screen.type === 'profile')
     return (
       <ClubProfile
         key={screen.id}
         credential={credential}
         id={screen.id}
         home={(clientId) =>
-          goBack(clientId ? { type: 'space', id: clientId } : { type: 'home' })
+          goBack(
+            clientId ? { type: 'settings', id: screen.id } : { type: 'home' },
+          )
         }
         reportDirty={reportDirty}
         reportPending={reportSectionPending}
@@ -501,8 +577,8 @@ function ClientHome({
         <section className="po-card po-empty">
           <h2>Нет доступных клиентских пространств</h2>
           <p>
-            Откройте приглашение или обратитесь к отправителю для подтверждения
-            доступа.
+            Откройте приглашение или обратитесь к отправителю для
+            подтверждения доступа.
           </p>
         </section>
       )}
@@ -522,8 +598,8 @@ function ClientHome({
         Обновить кабинет
       </button>
       <p className="po-muted">
-        Для повторного входа используйте Mini App или кнопку «Открыть кабинет» в
-        меню бота.
+        Для повторного входа используйте Mini App или кнопку «Открыть кабинет»
+        в меню бота.
       </p>
     </Shell>
   );
@@ -561,7 +637,9 @@ function InvitationScreen({
   };
   const remote = useRemote<Invitation>(
     credential,
-    token ? '/api/client/invitations/resolve' : '/api/client/invitations/' + id,
+    token
+      ? '/api/client/invitations/resolve'
+      : '/api/client/invitations/' + id,
     token ? { token } : undefined,
     {
       onError: readError,
@@ -765,15 +843,17 @@ function ClientSpace({
       {remote.data && (
         <>
           <section className="po-card ob-card">
-            <p>Разрешено всего: {remote.data.allowedClubs ?? 'не настроено'}</p>
+            <p>
+              Разрешено всего: {remote.data.allowedClubs ?? 'не настроено'}
+            </p>
             <p>
               Создано: {remote.data.createdClubs ?? remote.data.clubs.length}
             </p>
             <p>Можно добавить: {remote.data.availableClubs ?? 0}</p>
             {remote.data.allowedClubs == null && (
               <p>
-                Для нового заведения владелец платформы должен установить лимит.
-                Существующие заведения доступны.
+                Для нового заведения владелец платформы должен установить
+                лимит. Существующие заведения доступны.
               </p>
             )}
             {remote.data.allowedClubs != null &&

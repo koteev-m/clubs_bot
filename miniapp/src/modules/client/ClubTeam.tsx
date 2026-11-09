@@ -168,7 +168,9 @@ function TeamEditor({
               userId: intent.target,
               expectedMemberVersion: intent.targetVersion,
               reason: intent.reason.trim(),
-              ...(intent.action === 'change_role' ? { role: intent.role } : {}),
+              ...(intent.action === 'change_role'
+                ? { role: intent.role }
+                : {}),
             }),
       },
       () => setIntent(undefined),
@@ -199,12 +201,22 @@ function TeamEditor({
       {view && (
         <>
           <p className="po-notice">
-            Права действуют только в этом клубе. Операционные действия, денежные
-            операции и управление платформой не выдаются. Команда не является
-            обязательным условием подготовки клуба.
+            Права действуют только в этом клубе. Операционные действия,
+            денежные операции и управление платформой не выдаются. Команда не
+            является обязательным условием подготовки клуба.
+          </p>
+          <p className="po-muted">
+            Сейчас выдаются прежние технические пакеты доступа. Они сохраняют
+            свои разрешения и не заменяют новую продуктовую модель ролей.
+            ENTRY_MANAGER даёт просмотр конфигурации, без QR и отметок входа;
+            CLUB_ADMIN не даёт управление командой, денежные операции или
+            владение.
           </p>
           {link && (
-            <section className="po-card ob-card" aria-label="Новое приглашение">
+            <section
+              className="po-card ob-card"
+              aria-label="Новое приглашение"
+            >
               <h2>Приглашение создано</h2>
               <p>
                 Передайте ссылку сотруднику в личном чате. После принятия
@@ -225,7 +237,9 @@ function TeamEditor({
                     await navigator.clipboard.writeText(link);
                     setLinkMessage('Ссылка скопирована');
                   } catch {
-                    setLinkMessage('Выделите ссылку и скопируйте её вручную.');
+                    setLinkMessage(
+                      'Выделите ссылку и скопируйте её вручную.',
+                    );
                   }
                 }}
               >
@@ -274,7 +288,12 @@ function TeamEditor({
             <form
               onSubmit={(event) => {
                 event.preventDefault();
-                if (blocked || !label.trim() || !selected?.assignable || intent)
+                if (
+                  blocked ||
+                  !label.trim() ||
+                  !selected?.assignable ||
+                  intent
+                )
                   return;
                 state.run(
                   {
@@ -309,8 +328,8 @@ function TeamEditor({
                 />
               </Field>
               <p className="po-muted">
-                Подпись помогает вам найти приглашение. Username не используется
-                для выдачи прав.
+                Подпись помогает вам найти приглашение. Username не
+                используется для выдачи прав.
               </p>
               <Field label="Роль нового сотрудника">
                 <select
@@ -389,7 +408,9 @@ function TeamEditor({
                     Проверить кандидата №{invitation.id}
                   </button>
                 )}
-                {invitation.availableActions.includes('revoke_invitation') && (
+                {invitation.availableActions.includes(
+                  'revoke_invitation',
+                ) && (
                   <button
                     type="button"
                     className="ob-button"
@@ -435,8 +456,8 @@ function TeamEditor({
                 </p>
                 {!member.membershipActive && (
                   <p>
-                    Доступ к организации отключён платформой. Владелец клуба не
-                    может восстановить его.
+                    Доступ к организации отключён платформой. Владелец клуба
+                    не может восстановить его.
                   </p>
                 )}
                 <Permissions values={member.permissions} />
@@ -543,8 +564,8 @@ function TeamEditor({
               )}
               {intent.action === 'disable' && (
                 <p>
-                  Все разрешения сотрудника в этом клубе будут отключены. Другие
-                  клубы и история сохранятся.
+                  Все разрешения сотрудника в этом клубе будут отключены.
+                  Другие клубы и история сохранятся.
                 </p>
               )}
               {intent.action === 'confirm' && (

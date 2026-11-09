@@ -7,6 +7,9 @@ export default defineConfig({
   testDir: './tests',
   testMatch: [
     'owner-ux-map.spec.ts',
+    'owner-manager-p2.spec.ts',
+    'owner-manager-calendar.spec.ts',
+    'owner-manager-unknown.spec.ts',
     'owner-map-preview.spec.ts',
     'client-calendar.spec.ts',
     'client-booking-rules.spec.ts',

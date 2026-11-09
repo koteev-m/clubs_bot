@@ -260,6 +260,7 @@ internal class StaffInvitationOperations(
                 put("after", strings(access.permissions(clientId, clubId, userId)))
             },
         )
+        ClubPreparationOperations(session).confirmed(row)
     }
 
     fun view(

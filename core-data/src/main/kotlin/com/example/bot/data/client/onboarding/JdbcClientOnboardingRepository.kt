@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.sql.Connection
 import java.sql.SQLException
 import java.time.Clock
@@ -35,6 +37,7 @@ class JdbcClientOnboardingRepository(
                         setOf(
                             OnboardingRead.CLUB_PROFILE_GET,
                             OnboardingRead.CLUB_TEAM_GET,
+                            OnboardingRead.CLUB_PREPARATION_GET,
                             OnboardingRead.INVITATION_RESOLVE,
                             OnboardingRead.INVITATION_STATUS,
                             OnboardingRead.CLUB_LAYOUT_GET,
@@ -42,6 +45,7 @@ class JdbcClientOnboardingRepository(
                             OnboardingRead.CLUB_MODULE_SETTINGS_GET,
                             OnboardingRead.CLUB_PLAN_GET,
                             OnboardingRead.CLUB_CALENDAR_GET,
+                            OnboardingRead.CLUB_CALENDAR_COMMAND_RESOLVE,
                             OnboardingRead.CLUB_NIGHT_EVENT_CANDIDATE,
                             OnboardingRead.CLUB_BOOKING_RULES_GET,
                             OnboardingRead.CLUB_BOOKING_PREVIEW_GET,
@@ -70,6 +74,7 @@ class JdbcClientOnboardingRepository(
                             body,
                         )
                     OnboardingRead.CLIENT_APPLICATION_GET -> applications.get(required(resourceId), platform = false)
+                    OnboardingRead.CLUB_PREPARATION_GET -> ClubPreparationOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_TEAM_GET -> ClubTeamOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_PROFILE_GET -> ClubOnboardingOperations(session).get(required(resourceId))
                     OnboardingRead.CLUB_BOOKING_RULES_GET ->
@@ -83,6 +88,8 @@ class JdbcClientOnboardingRepository(
                             checkNotNull(snapshotAt),
                         )
                     OnboardingRead.CLUB_CALENDAR_GET -> ClubCalendarOperations(session).get(required(resourceId))
+                    OnboardingRead.CLUB_CALENDAR_COMMAND_RESOLVE ->
+                        resolveCalendarCommand(session, required(resourceId), body)
                     OnboardingRead.CLUB_NIGHT_EVENT_CANDIDATE ->
                         ClubNightEventLinks(
                             session,
@@ -115,7 +122,7 @@ class JdbcClientOnboardingRepository(
         withContext(dispatcher) {
             validateActor(actor)
             if (!Regex("[A-Za-z0-9._:-]{8,128}").matches(idempotencyKey)) fail("validation_error")
-            val requestHash = digest(operation.name + ":" + resourceId + ":" + canonical(body).toString())
+            val requestHash = commandRequestHash(operation, resourceId, body)
             val keyHash = digest(idempotencyKey)
             var attempt = 0
             while (true) {
@@ -174,6 +181,50 @@ class JdbcClientOnboardingRepository(
             error("Unreachable transaction retry")
         }
 
+    /** Read-only business resolution: absence never executes or cancels a delayed command. */
+    private fun resolveCalendarCommand(
+        session: OnboardingSession,
+        clubId: Long,
+        body: JsonObject,
+    ): JsonObject {
+        body.only(listOf("request", "key"))
+        val request = body["request"] as? JsonObject ?: fail("validation_error")
+        val key = body.string("key")?.takeIf { Regex("[A-Za-z0-9._:-]{8,128}").matches(it) } ?: fail("validation_error")
+        val clientId = session.requireClubGrant(clubId, WRITE_CALENDAR)
+        val userId = session.userId ?: fail("not_found")
+        // The client lock establishes fresh authority first. Unlike mutations,
+        // resolution never waits for the actor lock, so this order cannot cycle.
+        if (!session.sql.tryLockActor(userId)) {
+            return buildJsonObject { put("status", "indeterminate") }
+        }
+        val existing =
+            session.sql.row(
+                "SELECT * FROM client_commands WHERE actor_user_id=? AND connection_key=? AND key_hash=?",
+                userId,
+                session.actor.connectionKey,
+                digest(key),
+            )
+        if (existing != null) {
+            val sameScope =
+                existing["result_type"] == "club_calendar" &&
+                    existing.long("result_id") == clubId &&
+                    existing.long("client_id") == clientId
+            val expectedHash = commandRequestHash(OnboardingMutation.CLUB_CALENDAR_UPDATE, clubId, request)
+            if (!sameScope || existing["request_hash"] != expectedHash) fail("idempotency_conflict")
+        }
+        return buildJsonObject {
+            put("status", if (existing == null) "not_committed_at_snapshot" else "completed")
+            // client_commands stores only the resource pointer, not historical JSON.
+            put("calendar", ClubCalendarOperations(session).get(clubId, write = true))
+        }
+    }
+
+    private fun commandRequestHash(
+        operation: OnboardingMutation,
+        resourceId: Long?,
+        body: JsonObject,
+    ): String = digest(operation.name + ":" + resourceId + ":" + canonical(body).toString())
+
     private fun execute(
         session: OnboardingSession,
         operation: OnboardingMutation,
@@ -217,6 +268,10 @@ class JdbcClientOnboardingRepository(
                 ClubOnboardingOperations(
                     session,
                 ).create(required(resourceId), body)
+            OnboardingMutation.CLUB_PREPARATION_UPDATE ->
+                ClubPreparationOperations(
+                    session,
+                ).update(required(resourceId), body)
             OnboardingMutation.CLUB_TEAM_UPDATE -> ClubTeamOperations(session).update(required(resourceId), body)
             OnboardingMutation.CLUB_PROFILE_UPDATE ->
                 ClubOnboardingOperations(
@@ -246,6 +301,11 @@ class JdbcClientOnboardingRepository(
             "club_module_settings" -> ClubModuleSettingsOperations(session).get(command.long("result_id"), write = true)
             "staff_invitation" -> ClubTeamOperations(session).receipt(command.long("result_id"))
             "club_team" -> ClubTeamOperations(session).get(command.long("result_id"))
+            "club_preparation", "prep_invite", "prep_submit" ->
+                ClubPreparationOperations(session).receipt(
+                    command.long("result_id"),
+                    command["result_type"] == "prep_submit",
+                )
             "club_finance" -> ClubFinanceOperations(session).get(command.long("result_id"), write = true)
             "club_layout" -> ClubLayoutOperations(session).get(command.long("result_id"), write = true)
             else -> error("Invalid stored command result")

@@ -91,7 +91,9 @@ describe('private club onboarding B', () => {
   });
 
   it('keeps old approved data as history with explicit reuse and no approval consumption action', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => response(approved));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      response(approved),
+    );
     render(<ClientAccess initialToken={null} />);
     await screen.findByText('Synthetic Street 1');
     expect(screen.getByText('Test Unit')).toBeTruthy();
@@ -104,7 +106,7 @@ describe('private club onboarding B', () => {
   });
 
   it('saves only mutable profile fields and reopens the saved club through its own client', async () => {
-    go('club', '100');
+    go('profile', '100');
     let stored = { ...profile };
     const fetch = vi
       .spyOn(globalThis, 'fetch')
@@ -153,7 +155,9 @@ describe('private club onboarding B', () => {
     fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
       target: { value: 'Europe/Paris' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText('Сохранено');
     const saved = fetch.mock.calls.find(
       ([, options]) => options?.method === 'PATCH',
@@ -168,8 +172,14 @@ describe('private club onboarding B', () => {
       screen.getByText(/Последнее успешное сохранение/).querySelector('time')
         ?.dateTime,
     ).toBe('2026-10-28T13:00:00Z');
+    fireEvent.click(screen.getByRole('button', { name: 'Настройки клуба' }));
     fireEvent.click(
-      screen.getByRole('button', { name: 'Организация и другие заведения' }),
+      await screen.findByRole('button', { name: 'Назад к клубу' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Организация и другие заведения',
+      }),
     );
     await screen.findByRole('heading', {
       name: 'Synthetic Client',
@@ -179,6 +189,12 @@ describe('private club onboarding B', () => {
     expect(screen.queryByText('Synthetic Venue')).toBeNull();
     fireEvent.click(
       await screen.findByRole('button', { name: /Saved synthetic club/ }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Перейти к настройкам' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^Профиль Название/ }),
     );
     await screen.findByLabelText('Отображаемое название заведения');
     expect(value('Описание клуба')).toBe('Synthetic description');
@@ -198,7 +214,7 @@ describe('private club onboarding B', () => {
   ])(
     'renders source location %s / %s without losing distinguishing details',
     async (city, region, unit, expectedRegion) => {
-      go('club', '100');
+      go('profile', '100');
       vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
         response({ ...profile, city, region, unit }),
       );
@@ -211,15 +227,12 @@ describe('private club onboarding B', () => {
         expect(
           screen.getByText(expectedRegion, { selector: 'dd' }),
         ).toBeTruthy();
-      expect(screen.queryByText('Помещение', { selector: 'dt' }) !== null).toBe(
-        Boolean(unit.trim()),
-      );
+      expect(
+        screen.queryByText('Помещение', { selector: 'dt' }) !== null,
+      ).toBe(Boolean(unit.trim()));
       if (unit.trim())
         expect(screen.getByText(unit, { selector: 'dd' })).toBeTruthy();
-      expect(screen.getByText('Отдельный бот клуба')).toBeTruthy();
-      expect(
-        screen.getByText(/Night Concierge открывает доступ к платформе/),
-      ).toBeTruthy();
+      expect(screen.queryByText('Отдельный бот клуба')).toBeNull();
       expect(screen.queryByRole('button', { name: /Подключ/ })).toBeNull();
       expect(screen.getByText('Организация:', { exact: false })).toBeTruthy();
     },
@@ -228,7 +241,7 @@ describe('private club onboarding B', () => {
   it.each(['Asia/Kathmandu', 'America/New_York', 'Future/Server_Zone'])(
     'preserves the saved %s zone during ordinary edits, even with older browser zone data',
     async (timezone) => {
-      go('club', '100');
+      go('profile', '100');
       const fetch = vi
         .spyOn(globalThis, 'fetch')
         .mockImplementation((_path, options) =>
@@ -266,7 +279,7 @@ describe('private club onboarding B', () => {
   );
 
   it('validates the name and timezone and leaves readonly location out of mutation payload', async () => {
-    go('club', '100');
+    go('profile', '100');
     const fetch = vi
       .spyOn(globalThis, 'fetch')
       .mockImplementation(() => response(profile));
@@ -277,15 +290,22 @@ describe('private club onboarding B', () => {
         target: { value: ' ' },
       },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Укажите название клуба/);
-    fireEvent.change(screen.getByLabelText('Отображаемое название заведения'), {
-      target: { value: 'Valid synthetic name' },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Отображаемое название заведения'),
+      {
+        target: { value: 'Valid synthetic name' },
+      },
+    );
     fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
       target: { value: 'Unknown/Synthetic' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Укажите часовой пояс IANA/);
     expect(
       fetch.mock.calls.filter(([, options]) => options?.method === 'PATCH'),
@@ -295,7 +315,7 @@ describe('private club onboarding B', () => {
   it.each(['client.club.read', 'client.club.profile.write', 'GLOBAL'])(
     'a single %s permission never renders a save action',
     async (permission) => {
-      go('club', '100');
+      go('profile', '100');
       vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
         response({
           ...profile,
@@ -326,7 +346,7 @@ describe('private club onboarding B', () => {
   );
 
   it('a failed profile read can be retried and server validation preserves unsaved input', async () => {
-    go('club', '100');
+    go('profile', '100');
     let reads = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation((_path, options) => {
       if (options?.method === 'PATCH')
@@ -336,17 +356,25 @@ describe('private club onboarding B', () => {
         : response(profile);
     });
     render(<ClientAccess initialToken={null} />);
-    await screen.findByText('Не удалось загрузить данные. Повторите попытку.');
+    await screen.findByText(
+      'Не удалось загрузить данные. Повторите попытку.',
+    );
     expect(screen.queryByText('Synthetic Street 1')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Повторить загрузку' }),
+    );
     fireEvent.change(
       await screen.findByLabelText('Отображаемое название заведения'),
       {
         target: { value: 'Preserved synthetic input' },
       },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
-    await screen.findByText('Проверьте заполненные поля и повторите действие.');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
+    await screen.findByText(
+      'Проверьте заполненные поля и повторите действие.',
+    );
     expect(value('Отображаемое название заведения')).toBe(
       'Preserved synthetic input',
     );
@@ -354,7 +382,7 @@ describe('private club onboarding B', () => {
   });
 
   it('profile conflict reads current server version, preserves input and requires explicit reload before saving', async () => {
-    go('club', '100');
+    go('profile', '100');
     let reads = 0;
     const fetch = vi
       .spyOn(globalThis, 'fetch')
@@ -374,7 +402,9 @@ describe('private club onboarding B', () => {
         target: { value: 'Unsaved synthetic input' },
       },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Запись уже изменена/);
     await screen.findByRole('heading', { name: 'Concurrent name', level: 1 });
     expect(value('Отображаемое название заведения')).toBe(
@@ -396,7 +426,9 @@ describe('private club onboarding B', () => {
       screen.getByRole('button', { name: 'Загрузить актуальный профиль' }),
     );
     await waitFor(() =>
-      expect(value('Отображаемое название заведения')).toBe('Concurrent name'),
+      expect(value('Отображаемое название заведения')).toBe(
+        'Concurrent name',
+      ),
     );
     expect(
       fetch.mock.calls.filter(([, options]) => options?.method === 'PATCH'),
@@ -404,7 +436,7 @@ describe('private club onboarding B', () => {
   });
 
   it('does not send a stale name under a newer version after a delayed foreground read', async () => {
-    go('club', '100');
+    go('profile', '100');
     let resolveForeground!: (result: Response) => void;
     const foreground = new Promise<Response>((resolve) => {
       resolveForeground = resolve;
@@ -454,7 +486,7 @@ describe('private club onboarding B', () => {
   });
 
   it('unknown profile save keeps exactly the same command across retry', async () => {
-    go('club', '100');
+    go('profile', '100');
     let patches = 0;
     const fetch = vi
       .spyOn(globalThis, 'fetch')
@@ -472,7 +504,9 @@ describe('private club onboarding B', () => {
         target: { value: 'Saved once' },
       },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText('Результат операции пока неизвестен');
     fireEvent.click(
       screen.getByRole('button', { name: 'Повторить ту же операцию' }),
@@ -486,7 +520,7 @@ describe('private club onboarding B', () => {
   });
 
   it('revoked profile access removes private data and unsaved fields', async () => {
-    go('club', '100');
+    go('profile', '100');
     vi.spyOn(globalThis, 'fetch').mockImplementation((_path, options) =>
       options?.method === 'PATCH'
         ? response({ code: 'not_found' }, 404)
@@ -499,7 +533,9 @@ describe('private club onboarding B', () => {
         target: { value: 'Unsaved private name' },
       },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     await screen.findByText(/Доступ утрачен/);
     expect(screen.queryByText('Synthetic Street 1')).toBeNull();
     expect(
@@ -508,7 +544,7 @@ describe('private club onboarding B', () => {
   });
 
   it('account switch clears the old profile and rejects a late successful mutation response', async () => {
-    go('club', '100');
+    go('profile', '100');
     let resolveOld: (result: Response) => void = () => {};
     const fetch = vi
       .spyOn(globalThis, 'fetch')
@@ -532,7 +568,9 @@ describe('private club onboarding B', () => {
         target: { value: 'Old private account' },
       },
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     auth.initData = 'synthetic-client-b';
     view.rerender(<ClientAccess initialToken={null} />);
     await screen.findByText(/Доступ утрачен/);
@@ -549,7 +587,7 @@ describe('private club onboarding B', () => {
 });
 
 it('final review regression: a delayed save must never restore the club after a confirmed GET revoke', async () => {
-  go('club', profile.id);
+  go('profile', profile.id);
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   let revoked = false;
   let lateRecheck = false;
@@ -571,7 +609,9 @@ it('final review regression: a delayed save must never restore the club after a 
     fireEvent.change(await screen.findByLabelText('Описание клуба'), {
       target: { value: 'Local edit' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     revoked = true;
     fireEvent.focus(window);
     await screen.findByText(/Доступ утрачен/);
@@ -579,7 +619,11 @@ it('final review regression: a delayed save must never restore the club after a 
     lateRecheck = true;
     await act(async () =>
       resolveWrite(
-        await response({ ...profile, version: '2', description: 'Local edit' }),
+        await response({
+          ...profile,
+          version: '2',
+          description: 'Local edit',
+        }),
       ),
     );
     await screen.findByRole('button', { name: 'Повторить загрузку' });
@@ -591,7 +635,7 @@ it('final review regression: a delayed save must never restore the club after a 
 });
 
 it('final review regression: delayed valid replay cannot replace a newer profile when the next GET fails', async () => {
-  go('club', profile.id);
+  go('profile', profile.id);
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   let reads = 0,
     writes = 0;
@@ -619,7 +663,9 @@ it('final review regression: delayed valid replay cannot replace a newer profile
     fireEvent.change(await screen.findByLabelText('Описание клуба'), {
       target: { value: 'Local edit' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Сохранить профиль' }),
+    );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Повторить ту же операцию' }),
     );

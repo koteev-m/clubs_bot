@@ -10,7 +10,7 @@ const launch = new URLSearchParams({
   hash: 'synthetic',
 }).toString();
 const entry =
-  '/app?mode=client&screen=club&resource=' +
+  '/app?mode=client&screen=readiness&resource=' +
   clubId +
   '#tgWebAppData=' +
   encodeURIComponent(launch) +
@@ -82,6 +82,10 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
     if (revoked)
       return route.fulfill({ status: 404, json: { code: 'not_found' } });
     if (path.endsWith('/profile')) return route.fulfill({ json: profile });
+    if (path.endsWith('/calendar'))
+      return route.fulfill({ json: { clubId, name: profile.name, timezone: profile.timezone, version: '1', canWrite: false, weekly: [], holidays: [], exceptions: [], nights: [], invalidDates: [] } });
+    if (path.endsWith('/booking-rules'))
+      return route.fulfill({ json: { clubId, timezone: profile.timezone, version: '1', nights: [] } });
     if (path.endsWith('/layout'))
       return denyPlan
         ? route.fulfill({ status: 404, json: { code: 'not_found' } })
@@ -92,7 +96,10 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
         : route.fulfill({ contentType: 'image/png', body: plan });
     if (path.endsWith('/availability')) {
       if (snapshotError)
-        return route.fulfill({ status: 500, json: { code: 'internal_error' } });
+        return route.fulfill({
+          status: 500,
+          json: { code: 'internal_error' },
+        });
       const first = path.includes('/nights/21/');
       return route.fulfill({
         json: {
@@ -205,7 +212,11 @@ test('opens the owner preview with one read-only snapshot on map, list and card'
   await page.getByRole('button', { name: 'Назад' }).click();
   await expect(guests).toHaveValue('4');
   page.once('dialog', (dialog) => dialog.accept());
+  // Readiness is still authorized; inject the plan denial only after its
+  // metadata read finishes, so this tests the preview's lost-plan handling.
+  const readyLayout = page.waitForResponse((response) => response.url().endsWith('/layout') && response.ok());
   await page.getByRole('button', { name: 'Назад' }).click();
+  await readyLayout;
   denyPlan = true;
   await open();
   await expect(

@@ -2,9 +2,9 @@ import type { ConfigurationView } from './configuration.hooks';
 import type { Invitation } from './onboarding.types';
 export type StaffRole = 'ENTRY_MANAGER' | 'MANAGER' | 'CLUB_ADMIN';
 export const roleNames: Record<StaffRole, string> = {
-  ENTRY_MANAGER: 'Host / менеджер входа',
-  MANAGER: 'Менеджер клуба',
-  CLUB_ADMIN: 'Администратор клуба',
+  ENTRY_MANAGER: 'ENTRY_MANAGER · просмотр клуба',
+  MANAGER: 'MANAGER · основные настройки',
+  CLUB_ADMIN: 'CLUB_ADMIN · полный пакет настроек',
 };
 export const permissionNames: Record<string, string> = {
   'client.club.read': 'Просмотр клуба, профиля, залов, календаря и правил',

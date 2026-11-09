@@ -236,7 +236,7 @@ export default function ClubBookingRules({
       back={() => {
         if (!command.blocked && leave()) back();
       }}
-      backLabel="Профиль клуба"
+      backLabel="Назад"
     >
       <RemoteState {...remote} />
       {view && (

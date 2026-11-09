@@ -15,13 +15,14 @@ export function useClubConfiguration<T extends ConfigurationView>(
   id: string,
   suffix: string,
   validate: (view: T) => boolean,
+  authorityFields: (keyof T)[] = ['canWrite'],
 ) {
   const path = '/api/client/clubs/' + id + suffix;
   const [view, setView] = useState<T>();
   const [denied, setDenied] = useState(false);
   const latest = useRef<T>();
   const clientId = useRef<string>();
-  const authority = useRef({ denied: false, epoch: 0, canWrite: false });
+  const authority = useRef({ denied: false, epoch: 0, snapshot: '' });
   const cancelRead = useRef<() => void>(() => undefined);
   const check = (received: T) => {
     if (
@@ -39,7 +40,7 @@ export function useClubConfiguration<T extends ConfigurationView>(
     authority.current = {
       denied: true,
       epoch: authority.current.epoch + 1,
-      canWrite: false,
+      snapshot: '',
     };
     cancelRead.current();
     latest.current = undefined;
@@ -54,9 +55,15 @@ export function useClubConfiguration<T extends ConfigurationView>(
       clientId.current = received.clientId;
       authority.current.denied = false;
       // Grant revocation does not increment the configuration version.
-      if (authority.current.canWrite && !received.canWrite)
+      const snapshot = JSON.stringify(
+        authorityFields.map((key) => received[key]),
+      );
+      if (
+        authority.current.snapshot &&
+        authority.current.snapshot !== snapshot
+      )
         authority.current.epoch++;
-      authority.current.canWrite = received.canWrite;
+      authority.current.snapshot = snapshot;
       setDenied(false);
       if (
         !latest.current ||
@@ -65,7 +72,10 @@ export function useClubConfiguration<T extends ConfigurationView>(
         latest.current = received;
         setView(received);
       } else {
-        latest.current = { ...latest.current, canWrite: received.canWrite };
+        const freshAuthority = Object.fromEntries(
+          authorityFields.map((key) => [key, received[key]]),
+        );
+        latest.current = { ...latest.current, ...freshAuthority };
         setView(latest.current);
       }
     },
@@ -82,7 +92,11 @@ export function useClubConfiguration<T extends ConfigurationView>(
   useEffect(() => {
     if (!denied && authorityLost(command.error)) command.reset();
   }, [denied, command]);
-  const run = (body: object, saved: (received: T) => void, method = 'POST') => {
+  const run = (
+    body: object,
+    saved: (received: T) => void,
+    method = 'POST',
+  ) => {
     if (
       !view?.canWrite ||
       denied ||

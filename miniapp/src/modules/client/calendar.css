@@ -51,3 +51,87 @@
   gap: 0.15rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.3);
 }
+
+.cc-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.cc-tabs button {
+  min-height: 3.5rem;
+  min-width: 0;
+  border: 1px solid var(--client-border, rgba(148, 163, 184, 0.4));
+  border-radius: 0.75rem;
+  padding: 0.6rem 0.3rem;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.cc-tabs button[aria-selected='true'] {
+  color: var(--ob-primary-text, #fff);
+  background: var(--po-accent, #2563eb);
+  border-color: transparent;
+}
+
+.cc-preview summary {
+  min-height: 2.75rem;
+  padding-block: 0.7rem;
+  cursor: pointer;
+}
+
+.cc-preview li,
+.cc-result li {
+  overflow-wrap: anywhere;
+}
+
+.cc-confirm,
+.cc-result,
+.cc-result li {
+  display: grid;
+  min-width: 0;
+  gap: 0.65rem;
+}
+
+.cc-result {
+  list-style: none;
+  padding: 0;
+}
+
+.cc-result li {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+  padding-bottom: 0.65rem;
+}
+
+[role='tabpanel'][hidden] {
+  display: none;
+}
+
+.cc-confirm select {
+  display: block;
+  min-height: 2.75rem;
+  max-width: 100%;
+  width: 100%;
+  margin-top: 0.5rem;
+  color: inherit;
+  background: var(--ob-soft, #1e2a23);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.cc-rule .po-notice {
+  display: block;
+}
+
+.cc-rule .po-notice p + p {
+  margin-top: 0.6rem;
+}
+
+.cc-confirm .cc-rules.po-notice {
+  display: grid;
+}

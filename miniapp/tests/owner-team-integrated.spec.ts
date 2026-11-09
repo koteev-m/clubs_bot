@@ -39,7 +39,11 @@ async function api(
   expect(response.status()).toBe(200);
   return response.json();
 }
-async function open(page: Page, credential: string, path = '/app?mode=client') {
+async function open(
+  page: Page,
+  credential: string,
+  path = '/app?mode=client',
+) {
   await page.goto(
     path +
       '#' +
@@ -59,7 +63,10 @@ async function confirm(owner: Page, code: string) {
     })
     .check();
   await owner
-    .getByRole('button', { name: 'Подтвердить изменение доступа', exact: true })
+    .getByRole('button', {
+      name: 'Подтвердить изменение доступа',
+      exact: true,
+    })
     .click();
   await expect(
     owner.getByRole('region', { name: 'Подтверждение изменения доступа' }),
@@ -170,7 +177,9 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   await owner
     .getByRole('button', { name: 'Команда клуба', exact: true })
     .click();
-  await expect(owner).toHaveURL(new RegExp(`screen=team&resource=${club.id}`));
+  await expect(owner).toHaveURL(
+    new RegExp(`screen=team&resource=${club.id}`),
+  );
   await telegramTheme(owner, 'dark');
   await expect(owner.getByLabel('Подпись получателя')).toBeVisible();
   await owner.getByLabel('Роль нового сотрудника').selectOption('CLUB_ADMIN');
@@ -198,7 +207,10 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   let employeeCredential = await identity(request, 'staff', parameter);
   await open(employee, employeeCredential);
   await employee
-    .getByRole('button', { name: 'Подтвердить Telegram-аккаунт', exact: true })
+    .getByRole('button', {
+      name: 'Подтвердить Telegram-аккаунт',
+      exact: true,
+    })
     .click();
   await expect(
     employee.getByRole('heading', {
@@ -222,6 +234,10 @@ test('owner team packaged journey binds the employee and scopes role changes dis
     .getByRole('button', { name: 'Открыть кабинет', exact: true })
     .click();
   await selectEmployeeClub(employee, name, club.name);
+  await employee
+    .getByRole('button', { name: 'Перейти к настройкам', exact: true })
+    .click();
+  await employee.getByRole('button', { name: /^Профиль/ }).click();
   await expect(
     employee.getByRole('heading', { name: club.name, exact: true, level: 1 }),
   ).toBeVisible();
@@ -231,7 +247,10 @@ test('owner team packaged journey binds the employee and scopes role changes dis
     }),
   ).toBeVisible();
   await expect(
-    employee.getByRole('button', { name: 'Финансовые настройки', exact: true }),
+    employee.getByRole('button', {
+      name: 'Финансовые настройки',
+      exact: true,
+    }),
   ).toHaveCount(0);
   await expect(
     employee.getByRole('button', { name: 'Команда клуба', exact: true }),
@@ -267,7 +286,10 @@ test('owner team packaged journey binds the employee and scopes role changes dis
     })
     .check();
   await owner
-    .getByRole('button', { name: 'Подтвердить изменение доступа', exact: true })
+    .getByRole('button', {
+      name: 'Подтвердить изменение доступа',
+      exact: true,
+    })
     .click();
   await expect(
     owner.getByRole('region', { name: 'Подтверждение изменения доступа' }),
@@ -280,6 +302,10 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   employeeCredential = await identity(request, 'staff');
   await open(employee, employeeCredential);
   await selectEmployeeClub(employee, name, club.name);
+  await employee
+    .getByRole('button', { name: 'Перейти к настройкам', exact: true })
+    .click();
+  await employee.getByRole('button', { name: /^Профиль/ }).click();
   await expect(
     employee.getByRole('button', { name: 'Сохранить профиль', exact: true }),
   ).toBeVisible();
@@ -289,7 +315,9 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   await employee
     .getByRole('button', { name: 'Сохранить профиль', exact: true })
     .click();
-  await expect(employee.getByText('Сохранено', { exact: true })).toBeVisible();
+  await expect(
+    employee.getByText('Сохранено', { exact: true }),
+  ).toBeVisible();
   const saved = await api(
     request,
     employeeCredential,
@@ -299,7 +327,11 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   await telegramTheme(employee, 'light');
   expect(
     await contrast(
-      employee.getByRole('heading', { name: club.name, exact: true, level: 1 }),
+      employee.getByRole('heading', {
+        name: club.name,
+        exact: true,
+        level: 1,
+      }),
     ),
   ).toBeGreaterThanOrEqual(4.5);
   expect(
@@ -313,14 +345,19 @@ test('owner team packaged journey binds the employee and scopes role changes dis
       exact: true,
     })
     .click();
-  await owner.getByLabel('Причина изменения доступа').fill('Synthetic revoke');
+  await owner
+    .getByLabel('Причина изменения доступа')
+    .fill('Synthetic revoke');
   await owner
     .getByRole('checkbox', {
       name: 'Проверил пакет прав и подтверждаю изменение',
     })
     .check();
   await owner
-    .getByRole('button', { name: 'Подтвердить изменение доступа', exact: true })
+    .getByRole('button', {
+      name: 'Подтвердить изменение доступа',
+      exact: true,
+    })
     .click();
   await expect(
     owner.getByRole('region', { name: 'Подтверждение изменения доступа' }),
@@ -344,7 +381,10 @@ test('owner team packaged journey binds the employee and scopes role changes dis
   employeeCredential = await identity(request, 'staff', replacement);
   await open(employee, employeeCredential);
   await employee
-    .getByRole('button', { name: 'Подтвердить Telegram-аккаунт', exact: true })
+    .getByRole('button', {
+      name: 'Подтвердить Telegram-аккаунт',
+      exact: true,
+    })
     .click();
   const newCode = (await employee.locator('.ob-code').textContent())!;
   await owner.evaluate(() => window.dispatchEvent(new Event('focus')));

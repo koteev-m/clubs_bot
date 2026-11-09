@@ -32,6 +32,9 @@ internal class ClubOperationalNights(
     fun cancellations(now: Instant): List<CalendarNight> =
         stored(now).filter { it.cancelled }.map { it.night }.take(MAX_CANCELLED_PREVIEW)
 
+    /** Complete stored-date component of reconciliation, including cancelled nights beyond the preview. */
+    fun reconciliationDates(now: Instant): List<LocalDate> = stored(now).map { it.night.businessDate }
+
     fun reconcile(
         previous: CalendarSchedule,
         schedule: CalendarSchedule,

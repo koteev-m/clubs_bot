@@ -921,3 +921,101 @@ QR/check-in, rewards/contests/music и Managed Bots этим кандидато�
 Точные итоговые команды, results, final bytes, self-review findings и unverified —
 [handoff](../ops/owner-team.md) и его manifest/evidence. Реальный Telegram WebView,
 физический iPhone, hosted CI и stage/prod отдельно не проверялись.
+
+<a id="owner-manager-local"></a>
+## Локальная дельта управления и подготовки, 2026-11-09
+
+Новая задача `CLB-owner-manager-ux`, registered worktree
+`/private/tmp/clb-owner-manager-ux-20261109`, ветка
+`codex/owner-manager-ux-20261109`, base/fetched `origin/main`
+`16761e43887036688028358524847db1af0e5326` (merged PR #566).
+`PROJECT_IDENTITY_OK`; active repo/task instructions clubs_bot, active foreign = 0.
+Ни main baseline, ни сообщение пользователя об успешном прежнем staging deploy
+не доказывают runtime этой новой локальной дельты. Ниже — source wiring candidate;
+фактические checks/screenshots/review/непроверенное — в
+[итоговом handoff](../ops/owner-manager-ux.md) и [checkpoint](../ops/PROJECT_STATUS.md).
+
+Authority — [принятое решение 2026-11-09](PRODUCT_SPEC.md#owner-manager-model) и
+[контракт](../ops/owner-manager-contract.md). Прежний staff-контракт сохранён.
+
+| Цепочка | Bounded source evidence | Фактический предел |
+|---|---|---|
+| Client entry → кабинет | `miniapp/src/modules/client/ClientAccess.tsx:33–89,244–271,360–370,459–491`, `Screen`/`savedScreen`/`preparation-choice`/`ClubCabinet`; `miniapp/src/modules/client/ClubCabinet.tsx:33–108,110–190,200–273,303–341,415–441`, `Cabinet`/`Settings`/`NextNight` | В existing client routes добавлены overview/settings/readiness/choice. Владелец видит контроль и отдельный вход в настройки; сотрудник — разрешённую конфигурацию. `ClubSetup` сохранён отдельной диагностикой, не главной страницей |
+| Preparation API → repository | `app-bot/src/main/kotlin/com/example/bot/routes/ClientOnboardingRoutes.kt:92–93`, GET/PATCH `/api/client/clubs/{id}/preparation`; `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/JdbcClientOnboardingRepository.kt:31–41,74,222–223,255–259`, `CLUB_PREPARATION_GET/UPDATE`/`replay`; `Caddyfile:24–29`, exact PATCH allowlist | Existing verified client identity/error envelope/command adapter; transport path не выдаёт permissions. Все reads используют fresh client lock, без RR authorization snapshot |
+| Process → persistence → response | `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubPreparationOperations.kt:15–108,110–173,206–251`, `get/update/transition/save/receipt`; `core-data/src/main/resources/db/migration/{h2,postgresql}/V076__club_preparation.sql:1–28`, `client_club_preparation` | Шесть сохраняемых состояний, task version, client/club/member/invitation FKs, reason, submitted configuration hash. Команда/audit/transition в прежней transaction; task record не хранит grants |
+| Делегирование → Telegram → confirm | `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubPreparationOperations.kt:98–108,175–204,274–297`, `invite/confirmed/assignedActive`; `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/StaffInvitationOperations.kt:262–264`, `confirm` → `ClubPreparationOperations.confirmed`; `miniapp/src/modules/client/ClubPreparation.tsx:36–160,267–389`, `Preparation` | Только полный existing CLUB_ADMIN через прежний two-step staff flow. После confirm атомарно привязывается совпадающий pending task; текущие membership/grants/staff admission проверяются заново. Старый assignee после disable/re-admission не получает task authority автоматически |
+| Review и конфликты | `core-data/src/main/kotlin/com/example/bot/data/client/onboarding/ClubPreparationOperations.kt:80–95,142–170,262–297,333–350`, `configuration/changed/transition/receipt`; `miniapp/src/modules/client/ClubPreparation.tsx:123–145,406–504`, `run`/accept/return/unassign; `miniapp/src/modules/client/configuration.hooks.ts:53–81,108–131`, `authorityFields` | Submitted config digest сверяется с сохранёнными versions профиля/календаря/заловых layouts/booking rules/finance/modules. Текущие изменения требуют повторной передачи; accept/return доступны creator authority, return сохраняет причину. Unassign не меняет staff grants |
+| Calendar UI → existing calendar API | `miniapp/src/modules/client/ClubCalendar.tsx:36–152,162–300,447–510`, `areas`/`CalendarPreview`/`ClubCalendarSession`; `miniapp/src/modules/client/CalendarRulesEditor.tsx:24–130,287–369`, `NightHours`/`CalendarRulesEditor`; `miniapp/src/modules/client/calendar.ts:261–387,406–447`, `wallTimeOptions/calendarPlan` | Default upcoming, weekly и special dates; реальные даты открытия/закрытия, preview/confirm перед отдельными save и materialize. Бизнес-дата, IANA TZ, exception > holiday > weekly и backend protected-data checks не менялись |
+| DST boundary | `miniapp/src/modules/client/calendar.ts:261–387,406–447`, `wallTimeOptions/calendarPlan`; `miniapp/src/modules/client/ClubCalendar.tsx:554–608,646–668`, overlap choice/gap confirmation; `core-domain/src/main/kotlin/com/example/bot/time/CalendarRulePreview.kt:154–176`, `CalendarWindow.resolve` | Новый UI останавливает gap и просит изменить часы, overlap требует явного выбора первого canonical вхождения. Выбор второго вхождения current backend contract не поддерживает; UI не обещает его. Серверный resolver и старые callers не изменены |
+
+Это не nine-role RBAC migration: technical ENTRY_MANAGER/MANAGER/CLUB_ADMIN,
+legacy assignments и packages сохраняются. Новый target catalogue принят отдельно
+и не превращает configuration permissions в QR/check-in/деньги/сеть. Network manager
+cabinet, network grants и GLOBAL authority не добавлены; метрики/отчёты без
+подтверждённого источника показывают отсутствие данных. Состояние подготовки не
+смешивается с публичностью и не авторизует guest booking.
+
+Local source и disposable tests не подтверждают real Telegram WebView/iPhone,
+hosted CI, live migrations, stage/prod или guest cutover. Публикация и deploy не
+разрешены; immutable concept, реальные данные и другие проекты не затронуты.
+
+
+### OWNER_MANAGER_UX — локальная P2-дельта, 2026-11-09
+
+После внешнего review 69-path candidate исправлены cross-request revocation fence
+и DST business-date lookback. `ClubCabinet` теперь владеет request scope
+(`clubRequestScope.tsx`), `useRemote/useCommand` проверяют scope/lifetime до late
+callbacks, а `onboardingRequest.isCurrent` — до глобального authority-события.
+Закрытый клуб очищается целиком; explicit retry требует нового profile GET.
+`calendarPlan` проверяет club today−3…today+55 и dated rules в lookback, включая
+opening/closing текущего дня от прежней business date. Backend resolver, permissions,
+V076 и server frozen/dependency safeguards не менялись. Это local source/package
+candidate, не runtime rollout и не новый accepted permission contract.
+[Exact delta, RED/GREEN evidence и review boundary](../ops/owner-manager-p2-fix.md).
+
+
+## Локальная календарная P2-дельта OWNER_MANAGER_UX — 2026-11-09
+
+Существующий кандидат на base `16761e43887036688028358524847db1af0e5326`, worktree
+`/private/tmp/clb-owner-manager-ux-20261109`, без публикации/развёртывания. После
+внешнего review78-path snapshot calendar planner учитывает полный finite server
+candidate set: horizon−3…+55, previous/new dated rules, explicit changed/remove keys
+и все stored dates (включая отменённые, скрытые за preview8). Для этого GET `/calendar`
+additive возвращает `reconciliation:{businessDate,storedDates}` под прежней authority/
+client lock; optional PATCH `reconciliationDate` отвергает stale clubday до apply
+существующим `version_conflict`. Нет новой persistence/grants/ролей.
+
+DST approval связан с rules/affected dates/instants/TZ/version/day/operation ID;
+source change синхронно очищает approval ref, dispatch пересчитывает план, unknown
+retry не переносит consent. Более высокая calendar version допускает только replay
+старого receipt/conflict; иные same-version расхождения блокируют retry, сохраняя
+original body/key. Partial legacy hours и expiry (включая full-day Apia gap) согласованы
+с прежним resolver/V067, без дополнительного поля closing-day override.
+
+Local evidence: Vitest448/448, browser70/70, packaged10/10, H2/Ktor8/8,
+full JVM1503 passed/1 skipped, PostgreSQL145/145, affected lint/static и package checks.
+Это snapshot локального wiring и evidence, не product reprioritization, publication
+approval или runtime proof. [Дельта и ограничения](../ops/owner-manager-calendar-fix.md).
+
+
+## Локальная unknown recovery дельта OWNER_MANAGER_UX — 2026-11-09
+
+Тот же unpublished worktree/base `16761e43887036688028358524847db1af0e5326`.
+POST `/api/client/clubs/{id}/calendar/commands/resolve` — business read с original
+body/Idempotency-Key header, shared fresh Telegram guard и current read+calendar.write
+authority. Existing client_commands receipt/reference используется без миграций:
+completed возвращает confirmed committed outcome и current authorized calendar;
+actor busy → indeterminate; отсутствие под serialization lock → только
+not_committed_at_snapshot, без execute/new command/audit/config writes.
+
+UI read-only resolution отделён от guarded immutable-body retry. Retry рассчитывает
+DST от fresh refs/body, а не React render; A→B→A не восстанавливает consent. Scoped
+calendar option сохраняет unknown/body/key при retry4xx/409 или непринятом retry
+payload до read-only completion/safe monotonic obsolete proof. Current view не
+выдаётся за historical JSON, отсутствие не означает отмену delayed original.
+
+Local checks: Vitest461/461, mobile84/84, packaged12/12 (реальный no-op lost response),
+new Ktor/H2 recovery8/8, full JVM1511 passed/1 skipped, PostgreSQL153/153,
+affected lint/static/package checks. Grants, 9-role target, preparation, V076,
+calendar/DST resolver и protected context cleanup прежние. Это local wiring/evidence,
+не production rollout/approval. [Handoff/границы](../ops/owner-manager-unknown-recovery-fix.md).

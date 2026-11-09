@@ -17,6 +17,7 @@ export async function onboardingRequest<T>(
     body?: unknown;
     signal?: AbortSignal;
     key?: string;
+    isCurrent?: () => boolean;
   } = {},
 ): Promise<T> {
   if (!credential) throw new OnboardingError(401, 'unauthorized');
@@ -54,6 +55,7 @@ export async function onboardingRequest<T>(
           : 'request_failed';
       if (
         !controller.signal.aborted &&
+        (options.isCurrent?.() ?? true) &&
         ([401, 403].includes(response.status) ||
           (response.status === 404 &&
             /\/clients\/[1-9][0-9]*\/onboarding$/.test(path))) &&

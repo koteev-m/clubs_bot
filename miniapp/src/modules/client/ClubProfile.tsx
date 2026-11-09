@@ -10,7 +10,6 @@ import {
   useUnsavedChanges,
 } from './OnboardingShared';
 import { ClubProfile as Profile } from './onboarding.types';
-import ClubSetup from './ClubSetup';
 import { locationPresentation, timezoneLabel } from './profilePresentation';
 
 type Fields = Pick<Profile, 'name' | 'description' | 'timezone'>;
@@ -79,13 +78,7 @@ function ClubProfileEditor({
   home,
   reportDirty,
   reportPending,
-  openLayout,
   openFinance,
-  openModules,
-  openTeam,
-  openCalendar,
-  openBookingRules,
-  openBookingPreview,
 }: Props) {
   const path = '/api/client/clubs/' + id + '/profile';
   const [profile, setProfile] = useState<Profile>();
@@ -263,11 +256,6 @@ function ClubProfileEditor({
     if (!navigationBlocked && leave())
       home(denied ? undefined : profile?.clientId);
   };
-  const openSection = (open?: () => void) =>
-    open &&
-    (() => {
-      if (!command.blocked && leave()) open();
-    });
   const location =
     profile && locationPresentation(profile.city, profile.region);
   return (
@@ -276,14 +264,14 @@ function ClubProfileEditor({
       subtitle="Профиль заведения"
       back={back}
       backDisabled={navigationBlocked}
-      backLabel="Организация и другие заведения"
+      backLabel={denied ? 'Мои заведения' : 'Настройки клуба'}
     >
       <RemoteState {...remote} />
       {denied && !remote.error && (
         <div role="alert">
           <p>
-            Доступ утрачен или запись недоступна. Вернитесь в кабинет и обновите
-            данные.
+            Доступ утрачен или запись недоступна. Вернитесь в кабинет и
+            обновите данные.
           </p>
           <button type="button" className="ob-button" onClick={reload}>
             Повторить загрузку
@@ -296,7 +284,7 @@ function ClubProfileEditor({
             <span>
               Организация: <strong>{profile.clientName}</strong>
             </span>
-            <span className="po-context-badge">Не опубликован</span>
+            <span className="po-context-badge">Сохранённый профиль</span>
           </div>
           <section className="po-card ob-card">
             <h2>Сохранённое заведение</h2>
@@ -316,30 +304,11 @@ function ClubProfileEditor({
               ))}
             </dl>
             <p className="po-muted">
-              Часовой пояс сохранён в профиле заведения. Если страна, город или
-              адрес указаны неверно, обратитесь к владельцу платформы для
+              Часовой пояс сохранён в профиле заведения. Если страна, город
+              или адрес указаны неверно, обратитесь к владельцу платформы для
               уточнения местоположения.
             </p>
           </section>
-          {profile.id === id &&
-            profile.permissions.includes('client.club.read') && (
-              <ClubSetup
-                key={profile.clientId + ':' + id + ':' + profile.timezone}
-                credential={credential}
-                profile={profile}
-                navigationBlocked={command.blocked}
-                openProfile={
-                  canWrite ? () => profileFields.current?.focus() : undefined
-                }
-                openFinance={openSection(openFinance)}
-                openModules={openSection(openModules)}
-                openTeam={openSection(openTeam)}
-                openLayout={openSection(openLayout)}
-                openCalendar={openSection(openCalendar)}
-                openBookingRules={openSection(openBookingRules)}
-                openBookingPreview={openSection(openBookingPreview)}
-              />
-            )}
           <h2 tabIndex={-1} ref={profileFields}>
             Настройки профиля
           </h2>
@@ -425,7 +394,9 @@ function ClubProfileEditor({
               )}
             </fieldset>
             {!canWrite && (
-              <p className="po-muted">Профиль доступен только для просмотра.</p>
+              <p className="po-muted">
+                Профиль доступен только для просмотра.
+              </p>
             )}
             {validationError && (
               <p className="po-notice" role="alert">
@@ -476,6 +447,19 @@ function ClubProfileEditor({
           >
             Загрузить актуальный профиль
           </button>
+          {openFinance &&
+            profile.permissions.includes('client.club.finance.read') && (
+              <button
+                type="button"
+                className="ob-button"
+                disabled={command.blocked}
+                onClick={() => {
+                  if (!command.blocked && leave()) openFinance();
+                }}
+              >
+                Финансовые настройки
+              </button>
+            )}
         </>
       )}
       {!denied && (
