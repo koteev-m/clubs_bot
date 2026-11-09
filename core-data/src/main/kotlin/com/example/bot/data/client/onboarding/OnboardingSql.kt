@@ -5,6 +5,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.sql.Connection
 import java.sql.PreparedStatement
+import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -82,6 +83,32 @@ internal class OnboardingSql(
         // NO KEY UPDATE serializes commands without blocking those checks.
         val lock = if (connection.metaData.databaseProductName == "PostgreSQL") " FOR NO KEY UPDATE" else " FOR UPDATE"
         row("SELECT id FROM users WHERE id=?" + lock, userId) ?: fail("not_found")
+    }
+
+    /** Preserve a previously acquired client lock when a non-waiting actor probe cannot complete. */
+    fun tryLockActor(userId: Long): Boolean {
+        val savepoint = connection.setSavepoint()
+        val vendor = connection.metaData.databaseProductName
+        return try {
+            val lock = if (vendor == "PostgreSQL") " FOR NO KEY UPDATE NOWAIT" else " FOR UPDATE NOWAIT"
+            row("SELECT id FROM users WHERE id=?" + lock, userId) ?: fail("not_found")
+            true
+        } catch (failure: SQLException) {
+            connection.rollback(savepoint)
+            val actorBusy =
+                when (vendor) {
+                    "PostgreSQL" -> failure.sqlState == "55P03"
+                    "H2" -> failure.sqlState == "HYT00" && failure.errorCode == H2_LOCK_TIMEOUT
+                    else -> false
+                }
+            if (actorBusy) {
+                false
+            } else {
+                throw failure
+            }
+        } finally {
+            connection.releaseSavepoint(savepoint)
+        }
     }
 
     fun provision(actor: OnboardingActor): Long {
@@ -237,3 +264,5 @@ internal class OnboardingSession(
 }
 
 private const val IDENTITY_DISPLAY_LIMIT = 255
+
+private const val H2_LOCK_TIMEOUT = 50200

@@ -91,7 +91,9 @@ test('distinct owner sections keep navigation inside mobile viewport through scr
   });
   await page.goto('/app?mode=platform-owner' + telegramHash);
   await expect(page.getByText('Организации вне архива')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Настройки/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Настройки/ })).toHaveCount(
+    0,
+  );
   await page.getByRole('button', { name: 'Клубы', exact: true }).click();
   await expect(
     page.getByRole('heading', { name: 'Клуб 0', exact: true }),
@@ -206,7 +208,9 @@ test('archive is reversible, filtered and explains revoked access', async ({
   await expect(
     page.getByText(/Отзыв доступа отключает пользователя/),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Архивировать организацию' }).click();
+  await page
+    .getByRole('button', { name: 'Архивировать организацию' })
+    .click();
   await expect(
     page.getByRole('button', { name: 'Восстановить организацию' }),
   ).toBeVisible();
@@ -216,7 +220,9 @@ test('archive is reversible, filtered and explains revoked access', async ({
   ).toBeVisible();
   await page.getByLabel('Список организаций').selectOption('archived');
   await page.getByRole('button', { name: /Организация A/ }).click();
-  await page.getByRole('button', { name: 'Восстановить организацию' }).click();
+  await page
+    .getByRole('button', { name: 'Восстановить организацию' })
+    .click();
   await expect(
     page.getByRole('button', { name: 'Архивировать организацию' }),
   ).toBeVisible();
@@ -246,6 +252,25 @@ test('single club opens directly with organization path; multiple contexts keep 
         },
       });
     if (path.endsWith('/profile')) return route.fulfill({ json: profile });
+    if (path.endsWith('/preparation'))
+      return route.fulfill({
+        json: {
+          clubId: profile.id,
+          clientId: profile.clientId,
+          name: profile.name,
+          version: '1',
+          status: 'unassigned',
+          published: false,
+          reason: null,
+          assignee: null,
+          invitation: null,
+          canManage: true,
+          canWrite: true,
+          canSubmit: false,
+          canInvite: false,
+          configurationChanged: false,
+        },
+      });
     if (path.endsWith('/onboarding'))
       return route.fulfill({
         json: {
@@ -257,26 +282,42 @@ test('single club opens directly with organization path; multiple contexts keep 
     return route.fulfill({ json: { items: [], nextCursor: null } });
   });
   await page.goto('/app?mode=client' + telegramHash);
-  await expect(page.getByRole('heading', { name: profile.name })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: profile.name }),
+  ).toBeVisible();
   await expect(page).toHaveURL(/screen=club&resource=100/);
-  await expect(page.getByText('Не опубликован', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Не опубликован', { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Открыть проверку готовности', exact: true })
+    .click();
   await expect(
     page.getByText('Отдельный бот клуба', { exact: true }),
   ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Назад к клубу', exact: true })
+    .click();
   await page
     .getByRole('button', { name: 'Организация и другие заведения' })
     .click();
   await expect(
     page.getByRole('button', { name: 'Создать заведение', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: /Первый клуб.*Открыть клуб/ }).click();
-  await expect(page.getByRole('heading', { name: profile.name })).toBeVisible();
+  await page
+    .getByRole('button', { name: /Первый клуб.*Открыть клуб/ })
+    .click();
+  await expect(
+    page.getByRole('heading', { name: profile.name }),
+  ).toBeVisible();
   await page.goBack();
   await expect(
     page.getByText('Организация · клиентское пространство'),
   ).toBeVisible();
   await page.goForward();
-  await expect(page.getByRole('heading', { name: profile.name })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: profile.name }),
+  ).toBeVisible();
   multiple = true;
   await page.goto('/app?mode=client' + telegramHash);
   await expect(

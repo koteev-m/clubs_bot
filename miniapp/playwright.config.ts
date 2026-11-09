@@ -7,6 +7,10 @@ export default defineConfig({
   testDir: './tests',
   testIgnore: [
     'onboarding-integrated.spec.ts',
+    'owner-manager-integrated.spec.ts',
+    'owner-manager-p2.spec.ts',
+    'owner-manager-calendar.spec.ts',
+    'owner-manager-unknown.spec.ts',
     'onboarding-production.spec.ts',
     // These suites exercise the packaged entry with playwright.owner-ux.config.ts.
     'owner-ux-map.spec.ts',

@@ -1,13 +1,16 @@
 import { createServer } from 'node:http';
+import process from 'node:process';
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = resolve(root, 'dist');
+const port = Number(process.env.CLB_BROWSER_PORT || '5183');
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid local test port');
 const legacy = resolve(root, 'src/main/resources/miniapp');
 const server = createServer(async (request, response) => {
-  const url = new URL(request.url, 'http://127.0.0.1:5183');
+  const url = new URL(request.url, 'http://127.0.0.1:' + port);
   let file;
   if (url.pathname === '/app' || url.pathname === '/app/') {
     const mode = url.searchParams.get('mode');
@@ -53,4 +56,4 @@ const server = createServer(async (request, response) => {
     response.writeHead(404).end();
   }
 });
-server.listen(5183, '127.0.0.1');
+server.listen(port, '127.0.0.1');

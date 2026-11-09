@@ -437,3 +437,45 @@ roles не смешиваются. [Implementation/verification handoff](../ops/
 publication/rollout/runtime permissions не следуют из принятия или local PASS.
 Операционные пакеты Host/manager/admin, публичный guest cutover, DJ/finance manager,
 Managed Bots и disputed modules не становятся выполненными этим outcome.
+
+<a id="owner-manager-sequence"></a>
+## Уточнение последовательности: управление и подготовка, 2026-11-09
+
+Основание — [принятое уточнение](OPEN_DECISIONS.md#owner-manager-model-decision)
+и [PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model), без нового DEC/CLB номера.
+Новый основной target catalogue содержит ровно девять ролей: Владелец сети,
+Владелец клуба, Управляющий сети, Управляющий клуба, Менеджер, Менеджер входа,
+Финансовый менеджер, Промоутер, Гость. Исторические placements выше сохраняются;
+их устаревшие role names не возвращают Host/DJ/Админа клуба/Менеджера зала в
+основной target catalogue и не являются инструкцией мигрировать assignments.
+
+Последовательность outcomes:
+
+1. Сохранить текущую client/club isolation и staff contract PR #566, затем добавить
+   сохраняемый процесс подготовки поверх той же authority, без новых permissions.
+   Двухэтапное приглашение и выдача полного допустимого CLUB_ADMIN предшествуют
+   работе назначенного сотрудника; до owner confirmation grants нет.
+2. Разделить контроль владельца и выполнение подготовки: понятный обзор, честные
+   данные, короткая навигация, осознанный переход к настройкам и отдельная диагностика.
+   Самостоятельная подготовка, делегирование, повторное открытие, возврат с причиной,
+   accept, revoke/isolation/concurrency/replay — обязательный сквозной результат.
+3. Переработать календарь в рамках прежней domain model: upcoming / weekly / special
+   dates, конкретный интервал, сохранение отдельно от формирования. Проверить
+   midnight/DST/holiday/protected bookings/config versions и мобильные 320/390 px,
+   темы, Back/history/drafts, stale responses и packaged Ktor journeys.
+4. После local tests, screenshots и focused review — отдельное решение о публикации
+   и rollout. Сообщение пользователя о предыдущем staging deploy не подтверждает
+   runtime новой локальной дельты. Commit/push/PR/deploy текущей задачей запрещены.
+5. Отдельно спроектировать переход к девяти-role RBAC: точные permission matrices,
+   mapping существующих packages, audit/rollback-safe migration и compatibility.
+   Ни массовая миграция, ни переименование ENTRY_MANAGER/MANAGER/CLUB_ADMIN не входят
+   в текущий этап. Новые operational permissions требуют отдельных решений.
+6. Только после отдельной network permission model — кабинет управляющего сети:
+   назначенные клубы, реальные сравнимые показатели, контроль подготовки и явно
+   ограниченная координация. Без автоматического GLOBAL или полного доступа к настройкам.
+
+Границы: ownership не передаётся; staff packages, legacy assignments, immutable
+concept и другие проекты сохраняются; guest cutover, денежные операции, остальные
+рабочие кабинеты, Managed Bots и disputed modules не включаются. DEC-006/012/014
+и DEC-013/022/031 не закрыты новым catalogue. Acceptance решения, локальный
+implementation evidence и runtime release checkpoints учитываются раздельно.

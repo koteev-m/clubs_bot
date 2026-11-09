@@ -1,0 +1,76 @@
+.cm-actions,
+.cm-preparation,
+.cm-delegation,
+.cm-sections {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.cm-status {
+  font-size: 1.1rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.cm-preparation form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.cm-preparation input,
+.cm-preparation select,
+.cm-preparation textarea {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.cm-preparation button,
+.cm-actions button {
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cm-delegation {
+  border-top: 1px solid var(--po-line);
+  padding-top: 16px;
+}
+.cm-section {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  width: 100%;
+  min-height: 88px;
+  padding-right: 40px;
+  color: var(--ob-text);
+  font: inherit;
+  cursor: pointer;
+}
+.cm-section span,
+.cm-section small {
+  color: var(--po-muted);
+  overflow-wrap: anywhere;
+}
+.cm-section .cm-chevron {
+  position: absolute;
+  right: 16px;
+  top: 24px;
+  font-size: 1.3rem;
+  color: var(--ob-text);
+}
+.cm-section:focus-visible {
+  outline: 2px solid var(--po-accent);
+  outline-offset: 3px;
+}
+.cm-unassign summary {
+  min-height: 44px;
+  padding-top: 10px;
+  cursor: pointer;
+}
+.cm-unassign p {
+  margin: 8px 0 14px;
+}
+@media (min-width: 620px) {
+  .cm-sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

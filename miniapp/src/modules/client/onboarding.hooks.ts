@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { OnboardingError, onboardingRequest } from './onboarding.api';
+import { useClubRequestScope } from './clubRequestScope';
 
 export function useRemote<T>(
   credential: string,
@@ -15,6 +16,8 @@ export function useRemote<T>(
     onError?: (error: unknown) => void;
   } = {},
 ) {
+  const scope = useClubRequestScope();
+  const sequence = useRef({ value: 0 });
   const callbacks = useRef({ onSuccess, onError });
   callbacks.current = { onSuccess, onError };
   const activeRead = useRef<AbortController>();
@@ -32,6 +35,7 @@ export function useRemote<T>(
     loading: boolean;
   }>({ loading: true });
   const cancel = useCallback(() => {
+    sequence.current.value++;
     activeRead.current?.abort();
     setState({ loading: false });
   }, []);
@@ -41,24 +45,60 @@ export function useRemote<T>(
       return;
     }
     const controller = new AbortController();
+    const lifecycle = sequence.current;
+    const requestSequence = ++lifecycle.value;
+    const ticket = scope?.capture(credential, path);
+    const current = () =>
+      lifecycle.value === requestSequence &&
+      !controller.signal.aborted &&
+      (!scope || scope.current(ticket));
+    const untrack = scope?.track(ticket, () => controller.abort());
+    const cleanup = () => {
+      lifecycle.value++;
+      controller.abort();
+      untrack?.();
+    };
     activeRead.current = controller;
-    const request = { path, serialized, credential, attempt, foregroundEpoch };
+    if (!current()) return cleanup;
+    const request = {
+      path,
+      serialized,
+      credential,
+      attempt,
+      foregroundEpoch,
+    };
+    let responseReceived = false;
     onboardingRequest<T>(credential, path, {
       signal: controller.signal,
+      isCurrent: current,
       body: serialized === undefined ? undefined : JSON.parse(serialized),
     })
       .then((data) => {
-        if (controller.signal.aborted) return;
+        responseReceived = true;
+        if (!current()) return;
         callbacks.current.onSuccess?.(data);
+        if (!current()) return;
         setState({ ...request, data, loading: false });
       })
       .catch((error) => {
-        if (controller.signal.aborted) return;
+        if (!current()) return;
+        if (!responseReceived)
+          scope?.reject(
+            ticket,
+            error,
+            path,
+            serialized === undefined ? 'GET' : 'POST',
+          );
         callbacks.current.onError?.(error);
         setState({ ...request, error, loading: false });
-      });
-    return () => controller.abort();
-  }, [credential, path, serialized, attempt, foregroundEpoch]);
+      })
+      .finally(untrack);
+    return () => {
+      lifecycle.value++;
+      controller.abort();
+      untrack?.();
+    };
+  }, [credential, path, serialized, attempt, foregroundEpoch, scope]);
   const refresh = useCallback(() => {
     cancel();
     setAttempt((value) => value + 1);
@@ -109,14 +149,23 @@ interface PendingCommand<T> {
 }
 export function useCommand<T>(
   credential: string,
-  { onError }: { onError?: (error: unknown) => void } = {},
+  {
+    onError,
+    preserveUnknownOnRetryFailure = false,
+  }: {
+    onError?: (error: unknown) => void;
+    preserveUnknownOnRetryFailure?: boolean;
+  } = {},
 ) {
+  const scope = useClubRequestScope();
+  const sequence = useRef({ value: 0 });
   const callbacks = useRef({ onError });
   callbacks.current = { onError };
   const [state, setState] = useState<{
     saving: boolean;
     unknown: boolean;
     success: boolean;
+    resolving?: boolean;
     error?: unknown;
   }>({
     saving: false,
@@ -128,10 +177,13 @@ export function useCommand<T>(
   const lifetime = useRef(new AbortController());
   useEffect(() => {
     const controller = new AbortController();
+    const lifecycle = sequence.current;
+    lifecycle.value++;
     lifetime.current = controller;
     executing.current = false;
     setState({ saving: false, unknown: false, success: false });
     return () => {
+      lifecycle.value++;
       controller.abort();
       pending.current = null;
     };
@@ -140,30 +192,60 @@ export function useCommand<T>(
     if (executing.current) return;
     executing.current = true;
     const controller = lifetime.current;
+    const commandSequence = sequence.current.value;
+    const lifecycle = sequence.current;
+    const ticket = scope?.capture(credential, command.path);
+    const current = () =>
+      lifecycle.value === commandSequence &&
+      !controller.signal.aborted &&
+      (!scope || scope.current(ticket));
+    const untrack = scope?.track(ticket, () => controller.abort());
+    if (!current()) {
+      untrack?.();
+      executing.current = false;
+      return;
+    }
     setState({ saving: true, unknown: false, success: false });
+    let responseReceived = false;
     try {
       const result = await onboardingRequest<T>(credential, command.path, {
         method: command.method,
         body: command.body,
         key: command.key,
         signal: controller.signal,
+        isCurrent: current,
       });
-      if (controller.signal.aborted) return;
-      pending.current = null;
+      responseReceived = true;
+      if (!current()) return;
+      if (!preserveUnknownOnRetryFailure) pending.current = null;
       const accepted = command.onSuccess(result);
-      setState({ saving: false, unknown: false, success: accepted !== false });
-    } catch (error) {
-      if (controller.signal.aborted) return;
       const unknown =
-        error instanceof OnboardingError &&
-        (command.unknown || error.code !== 'invitation_link_unavailable') &&
-        (error.status === 0 || error.status >= 500);
+        preserveUnknownOnRetryFailure &&
+        Boolean(command.unknown) &&
+        accepted === false;
+      command.unknown = unknown;
+      if (!unknown) pending.current = null;
+      setState({
+        saving: false,
+        unknown,
+        success: !unknown && accepted !== false,
+      });
+    } catch (error) {
+      if (!current()) return;
+      if (!responseReceived)
+        scope?.reject(ticket, error, command.path, command.method);
+      const unknown =
+        (preserveUnknownOnRetryFailure && Boolean(command.unknown)) ||
+        (error instanceof OnboardingError &&
+          (command.unknown || error.code !== 'invitation_link_unavailable') &&
+          (error.status === 0 || error.status >= 500));
       command.unknown = unknown;
       if (!unknown) pending.current = null;
       callbacks.current.onError?.(error);
       setState({ saving: false, unknown, success: false, error });
     } finally {
-      if (!controller.signal.aborted) executing.current = false;
+      untrack?.();
+      if (lifecycle.value === commandSequence) executing.current = false;
     }
   };
   const retry = (onSuccess?: PendingCommand<T>['onSuccess']) => {
@@ -171,8 +253,64 @@ export function useCommand<T>(
     if (onSuccess) pending.current.onSuccess = onSuccess;
     void execute(pending.current);
   };
+  // Receipt lookup is a business read: it never enters execute/retry. The
+  // original request and key stay private and unchanged while outcome is unknown.
+  const resolve = async <R>(
+    path: string,
+    onResult: (data: R) => boolean | 'obsolete',
+  ) => {
+    const command = pending.current;
+    if (!command?.unknown || executing.current) return;
+    executing.current = true;
+    const controller = lifetime.current;
+    const lifecycle = sequence.current;
+    const requestSequence = lifecycle.value;
+    const ticket = scope?.capture(credential, path);
+    const current = () =>
+      lifecycle.value === requestSequence &&
+      !controller.signal.aborted &&
+      pending.current === command &&
+      (!scope || scope.current(ticket));
+    const untrack = scope?.track(ticket, () => controller.abort());
+    if (!current()) {
+      untrack?.();
+      executing.current = false;
+      return;
+    }
+    setState({ saving: false, unknown: true, success: false, resolving: true });
+    let responseReceived = false;
+    try {
+      const data = await onboardingRequest<R>(credential, path, {
+        method: 'POST',
+        body: command.body,
+        key: command.key,
+        signal: controller.signal,
+        isCurrent: current,
+      });
+      responseReceived = true;
+      if (!current()) return;
+      const completed = onResult(data);
+      if (!current()) return;
+      if (completed) pending.current = null;
+      setState({
+        saving: false,
+        unknown: !completed,
+        success: completed === true,
+      });
+    } catch (error) {
+      if (!current()) return;
+      if (!responseReceived) scope?.reject(ticket, error, path, 'POST');
+      callbacks.current.onError?.(error);
+      setState({ saving: false, unknown: true, success: false, error });
+    } finally {
+      untrack?.();
+      if (lifecycle.value === requestSequence) executing.current = false;
+    }
+  };
   return {
     ...state,
+    resolving: Boolean(state.resolving),
+    resolve,
     blocked: state.saving || state.unknown,
     run(
       path: string,

@@ -24,7 +24,7 @@ nightconcierge.help {
   # Only exact client configuration paths accept PATCH; identity and grants remain server-side.
   @deny_patch {
     method PATCH
-    not path_regexp clientPatch ^/api/client/(applications/[1-9][0-9]*|clubs/[1-9][0-9]*/(profile|calendar|booking-rules|modules-settings|halls/[1-9][0-9]*(/(tables|zones)/[1-9][0-9]*)?))$
+    not path_regexp clientPatch ^/api/client/(applications/[1-9][0-9]*|clubs/[1-9][0-9]*/(profile|calendar|preparation|booking-rules|modules-settings|halls/[1-9][0-9]*(/(tables|zones)/[1-9][0-9]*)?))$
   }
   respond @deny_patch 405
 

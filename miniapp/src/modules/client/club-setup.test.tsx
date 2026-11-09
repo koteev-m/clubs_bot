@@ -60,7 +60,10 @@ const otherNight = {
   opensAt: '2026-11-14T22:00+03:00',
   closesAt: '2026-11-15T04:00+03:00',
 };
-const verified = (item: typeof night) => ({ ...item, eventStatus: 'VERIFIED' });
+const verified = (item: typeof night) => ({
+  ...item,
+  eventStatus: 'VERIFIED',
+});
 const previewWith = (nights: unknown[]) => ({
   ...(defaultReads['booking-preview'] as object),
   nights,
@@ -81,7 +84,9 @@ function respond(reads: Record<string, unknown>) {
   return vi
     .spyOn(globalThis, 'fetch')
     .mockImplementation(async (input, options) => {
-      const match = String(input).match(/^\/api\/client\/clubs\/42\/([^/]+)$/);
+      const match = String(input).match(
+        /^\/api\/client\/clubs\/42\/([^/]+)$/,
+      );
       expect(options?.method).toBe('GET');
       expect(options?.cache).toBe('no-store');
       expect(options?.headers).toHaveProperty(
@@ -111,7 +116,7 @@ beforeEach(() => {
   window.history.replaceState(
     {},
     '',
-    '/app?mode=client&screen=club&resource=42',
+    '/app?mode=client&screen=readiness&resource=42',
   );
 });
 afterEach(() => {
@@ -127,7 +132,9 @@ it('shows missing setup in an empty club and never uses the platform bot as club
   expect(
     row('Залы и отдельные схемы').getByText('Требует настройки'),
   ).toBeTruthy();
-  expect(row('Столы и размещение').getByText('Требует настройки')).toBeTruthy();
+  expect(
+    row('Столы и размещение').getByText('Требует настройки'),
+  ).toBeTruthy();
   expect(
     row('Календарь и сформированные ночи').getByText(
       'Сформировано ближайших ночей: 0 из 0.',
@@ -137,7 +144,9 @@ it('shows missing setup in an empty club and never uses the platform bot as club
     row('Правила бронирования').getByText(/Действуют исходные значения/),
   ).toBeTruthy();
   expect(
-    row('Отдельный бот клуба').getByText('Состояние пока невозможно проверить'),
+    row('Отдельный бот клуба').getByText(
+      'Состояние пока невозможно проверить',
+    ),
   ).toBeTruthy();
   expect(row('Отдельный бот клуба').queryByRole('button')).toBeNull();
   expect(screen.getByText(/Гостевое бронирование выключено/)).toBeTruthy();
@@ -215,7 +224,9 @@ it('separates hall plans, physical placement, persisted rules and failed booking
     row('Залы и отдельные схемы').getByText('Main · Схема сохранена'),
   ).toBeTruthy();
   expect(
-    row('Столы и размещение').getByText('На схемах размещено столов: 1 из 3.'),
+    row('Столы и размещение').getByText(
+      'На схемах размещено столов: 1 из 3.',
+    ),
   ).toBeTruthy();
   expect(
     row('Календарь и сформированные ночи').getByText(
@@ -224,7 +235,9 @@ it('separates hall plans, physical placement, persisted rules and failed booking
   ).toBeTruthy();
   expect(row('Правила бронирования').getByText('Настроено')).toBeTruthy();
   expect(
-    row('Связи столов для бронирования').getByText(/Стол отключён для продаж/),
+    row('Связи столов для бронирования').getByText(
+      /Стол отключён для продаж/,
+    ),
   ).toBeTruthy();
   expect(
     row('Связи столов для бронирования').getByText(
@@ -309,7 +322,9 @@ it('labels confirmed missing connections separately from a failed or mismatched 
   reads.profile = 404;
   fireEvent.focus(window);
   await screen.findByText(/Доступ утрачен/);
-  expect(screen.queryByRole('region', { name: 'Подготовка клуба' })).toBeNull();
+  expect(
+    screen.queryByRole('region', { name: 'Подготовка клуба' }),
+  ).toBeNull();
   expect(screen.queryByText(/Тестовый клуб/)).toBeNull();
 });
 
@@ -317,7 +332,9 @@ it('does not request setup details when the profile belongs to another client', 
   const fetch = respond({ profile: 404 });
   render(<ClientAccess initialToken={null} />);
   await screen.findByText(/Доступ утрачен/);
-  expect(screen.queryByRole('region', { name: 'Подготовка клуба' })).toBeNull();
+  expect(
+    screen.queryByRole('region', { name: 'Подготовка клуба' }),
+  ).toBeNull();
   expect(fetch.mock.calls.map(([path]) => path)).toEqual([
     '/api/client/clubs/42/profile',
   ]);
@@ -383,7 +400,11 @@ it.each([
   async (_, rules, links) => {
     const reads = {
       ...defaultReads,
-      calendar: { clubId: '42', nights: [night, otherNight], invalidDates: [] },
+      calendar: {
+        clubId: '42',
+        nights: [night, otherNight],
+        invalidDates: [],
+      },
       'booking-rules': { clubId: '42', version: '2', nights: rules },
       'booking-preview': previewWith(links),
     };
@@ -508,7 +529,11 @@ it('final review regression: timezone update must invalidate prior verified even
     .mockImplementation(async (path, options) => {
       if (options?.method === 'PATCH') saved = true;
       const key = String(path).split('/').at(-1) as keyof typeof before;
-      const nextProfile = { ...profile, timezone: 'Asia/Tokyo', version: '2' };
+      const nextProfile = {
+        ...profile,
+        timezone: 'Asia/Tokyo',
+        version: '2',
+      };
       const data =
         saved && key === 'profile'
           ? nextProfile
@@ -524,11 +549,22 @@ it('final review regression: timezone update must invalidate prior verified even
     });
   render(<ClientAccess initialToken={null} />);
   await screen.findByText('Связь и время события проверены: 1 из 1.');
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Редактировать профиль' }),
+  );
+  await screen.findByLabelText('Часовой пояс IANA');
   fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
     target: { value: 'Asia/Tokyo' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
   await screen.findByText('Сохранено');
+  window.history.replaceState(
+    {},
+    '',
+    '/app?mode=client&screen=readiness&resource=42',
+  );
+  fireEvent.popState(window, { state: { clientPosition: 99 } });
+  await screen.findByText('Связь не подтверждает расписание ночи: 1.');
   expect(
     fetch.mock.calls.filter(([path]) =>
       String(path).endsWith('/booking-preview'),
@@ -609,10 +645,21 @@ it('invalidates shifted night intervals until all timezone reads recover and ver
   });
   render(<ClientAccess initialToken={null} />);
   await screen.findByText('Связь и время события проверены: 1 из 1.');
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Редактировать профиль' }),
+  );
+  await screen.findByLabelText('Часовой пояс IANA');
   fireEvent.change(screen.getByLabelText('Часовой пояс IANA'), {
     target: { value: 'Asia/Tokyo' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Сохранить профиль' }));
+  await screen.findByText('Сохранено');
+  window.history.replaceState(
+    {},
+    '',
+    '/app?mode=client&screen=readiness&resource=42',
+  );
+  fireEvent.popState(window, { state: { clientPosition: 99 } });
   await waitFor(() => expect(pending).toHaveLength(3));
   for (const title of [
     'Календарь и сформированные ночи',
@@ -638,7 +685,9 @@ it('invalidates shifted night intervals until all timezone reads recover and ver
   phase = 'verified';
   fireEvent.focus(window);
   await waitFor(() =>
-    expect(row('Связи ночей с событиями').getByText('Настроено')).toBeTruthy(),
+    expect(
+      row('Связи ночей с событиями').getByText('Настроено'),
+    ).toBeTruthy(),
   );
 });
 
@@ -767,7 +816,9 @@ it('summarizes saved finance and module settings without declaring guest or rewa
   fireEvent(window, new Event('focus'));
   await waitFor(() =>
     expect(
-      row('Финансовый шаблон').getByText('Состояние пока невозможно проверить'),
+      row('Финансовый шаблон').getByText(
+        'Состояние пока невозможно проверить',
+      ),
     ).toBeTruthy(),
   );
   expect(

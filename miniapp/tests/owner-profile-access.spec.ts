@@ -93,6 +93,12 @@ for (const theme of ['light', 'dark'] as const) {
         }),
     );
     await page.getByRole('button', { name: 'Клуб A1 Открыть клуб' }).click();
+    await page
+      .getByRole('button', {
+        name: /Перейти к настройкам|Открыть настройки клуба/,
+      })
+      .click();
+    await page.getByRole('button', { name: /^Профиль/ }).click();
     await telegramTheme(page, theme);
     await page
       .getByRole('textbox', { name: 'Описание клуба', exact: true })
@@ -108,7 +114,7 @@ for (const theme of ['light', 'dark'] as const) {
     ).toBeDisabled();
     await expect(
       page.getByRole('button', {
-        name: 'Организация и другие заведения',
+        name: 'Настройки клуба',
         exact: true,
       }),
     ).toBeDisabled();
@@ -129,7 +135,7 @@ for (const theme of ['light', 'dark'] as const) {
         history.back();
       });
     });
-    await expect(page).toHaveURL(/screen=club&resource=100/);
+    await expect(page).toHaveURL(/screen=profile&resource=100/);
     await expect(
       page.getByText('Результат операции пока неизвестен', { exact: true }),
     ).toBeVisible();
@@ -144,12 +150,28 @@ for (const theme of ['light', 'dark'] as const) {
     ).toHaveValue(saved.description);
     await page
       .getByRole('button', {
+        name: 'Настройки клуба',
+        exact: true,
+      })
+      .click();
+    await expect(page).toHaveURL(/screen=settings&resource=100/);
+    await page
+      .getByRole('button', { name: 'Назад к клубу', exact: true })
+      .click();
+    await page
+      .getByRole('button', {
         name: 'Организация и другие заведения',
         exact: true,
       })
       .click();
     await expect(page).toHaveURL(/screen=client-space&resource=20/);
     await page.getByRole('button', { name: 'Клуб A1 Открыть клуб' }).click();
+    await page
+      .getByRole('button', {
+        name: /Перейти к настройкам|Открыть настройки клуба/,
+      })
+      .click();
+    await page.getByRole('button', { name: /^Профиль/ }).click();
     await expect(
       page.getByRole('textbox', { name: 'Описание клуба', exact: true }),
     ).toHaveValue(saved.description);
@@ -187,7 +209,7 @@ test('an older profile snapshot revokes write and a late PATCH cannot restore it
     return route.fulfill({ json: saved });
   });
   await page.goto(
-    '/app?mode=client&screen=club&resource=100#' +
+    '/app?mode=client&screen=profile&resource=100#' +
       new URLSearchParams({
         tgWebAppData: credential,
         tgWebAppVersion: '7.10',
@@ -244,7 +266,7 @@ test('revoking read during an unknown command still permits returning to the cab
     });
   });
   await page.goto(
-    '/app?mode=client&screen=club&resource=100#' +
+    '/app?mode=client&screen=profile&resource=100#' +
       new URLSearchParams({
         tgWebAppData: credential,
         tgWebAppVersion: '7.10',
@@ -264,7 +286,7 @@ test('revoking read during an unknown command still permits returning to the cab
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(page.getByText(/Доступ утрачен/)).toBeVisible();
   const back = page.getByRole('button', {
-    name: 'Организация и другие заведения',
+    name: 'Мои заведения',
     exact: true,
   });
   await expect(back).toBeEnabled();

@@ -13,7 +13,9 @@ async function identity(
   startParam?: string,
 ): Promise<string> {
   const response = startParam
-    ? await request.post("/fixture/identity/" + role, { data: { startParam } })
+    ? await request.post("/fixture/identity/" + role, {
+        data: { startParam },
+      })
     : await request.get("/fixture/identity/" + role);
   expect(response.ok()).toBe(true);
   return (await response.json()).initData;
@@ -32,29 +34,42 @@ async function open(page: Page, path: string, initData: string) {
 }
 
 // A single club opens directly; several memberships require an explicit space.
-async function selectSpace(page: Page, clientName: string, clubName?: string) {
+async function selectSpace(
+  page: Page,
+  clientName: string,
+  clubName?: string,
+) {
   await page.waitForFunction(
     ({ clientName, clubName }) =>
-      [...document.querySelectorAll('h1')].some(
+      [...document.querySelectorAll("h1")].some(
         (heading) =>
           heading.textContent === clientName ||
           (clubName && heading.textContent === clubName),
       ) ||
-      [...document.querySelectorAll('button')].some((button) =>
+      [...document.querySelectorAll("button")].some((button) =>
         button.textContent?.includes(clientName),
       ),
     { clientName, clubName },
   );
   if (
     clubName &&
-    (await page.getByRole('heading', { name: clubName, exact: true }).isVisible())
+    (await page
+      .getByRole("heading", { name: clubName, exact: true })
+      .isVisible())
   ) {
-    await page.getByRole('button', { name: 'Организация и другие заведения', exact: true }).click();
+    await page
+      .getByRole("button", {
+        name: "Организация и другие заведения",
+        exact: true,
+      })
+      .click();
   } else {
-    const space = page.getByRole('button', { name: new RegExp(clientName) });
+    const space = page.getByRole("button", { name: new RegExp(clientName) });
     if (await space.isVisible()) await space.click();
   }
-  await expect(page.getByRole('heading', { name: clientName, exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: clientName, exact: true }),
+  ).toBeVisible();
 }
 
 test("packaged JDBC journey accepts once, creates privately under limit, reopens and raises capacity", async ({
@@ -82,7 +97,10 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   });
   await open(owner, "/app", ownerCredential);
   await expect(
-    owner.getByRole("heading", { name: "Управление платформой", exact: true }),
+    owner.getByRole("heading", {
+      name: "Управление платформой",
+      exact: true,
+    }),
   ).toBeVisible();
   await owner.getByRole("button", { name: "Пригласить клиента" }).click();
   const clientName = "Synthetic simplified " + Date.now();
@@ -102,7 +120,9 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
     recipient.getByRole("heading", { name: "Приглашение клиента" }),
   ).toBeVisible();
   await expect(recipient.getByRole("checkbox")).toHaveCount(0);
-  await recipient.getByRole("button", { name: "Принять приглашение" }).click();
+  await recipient
+    .getByRole("button", { name: "Принять приглашение" })
+    .click();
   await expect(recipient.locator(".ob-code")).toHaveCount(0);
   await selectSpace(recipient, clientName);
   await expect(recipient.getByText("Разрешено всего: 1")).toBeVisible();
@@ -156,17 +176,25 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
     recipient.getByText("Результат операции пока неизвестен"),
   ).toBeVisible();
   const replay = recipient.waitForResponse(
-    (r) => r.url().endsWith("/clients/" + issued.clientId + "/clubs") && r.ok(),
+    (r) =>
+      r.url().endsWith("/clients/" + issued.clientId + "/clubs") && r.ok(),
   );
   await recipient
     .getByRole("button", { name: "Повторить ту же операцию" })
     .click();
   const firstClub = await (await replay).json();
+  await recipient
+    .getByRole("button", { name: "Назначить позже", exact: true })
+    .click();
   expect(commands).toHaveLength(2);
   expect(commands[0]).toEqual(commands[1]);
   await expect(
     recipient.getByText("Не опубликован", { exact: true }),
   ).toBeVisible();
+  await recipient
+    .getByRole("button", { name: "Открыть настройки клуба", exact: true })
+    .click();
+  await recipient.getByRole("button", { name: /^Профиль/ }).click();
   await expect(
     recipient.getByText("Synthetic Street 1, помещение 2", { exact: true }),
   ).toBeVisible();
@@ -176,7 +204,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
     fullPage: true,
   });
   await open(recipient, "/app", recipientCredential);
-  await selectSpace(recipient, clientName, 'Synthetic First Venue');
+  await selectSpace(recipient, clientName, "Synthetic First Venue");
   await expect(
     recipient.getByRole("button", { name: /Synthetic First Venue/ }),
   ).toBeVisible();
@@ -208,7 +236,7 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   await owner.getByRole("button", { name: "Сохранить лимит" }).click();
   await expect(owner.getByText("Разрешено всего: 2")).toBeVisible();
   await open(recipient, "/app", recipientCredential);
-  await selectSpace(recipient, clientName, 'Synthetic First Venue');
+  await selectSpace(recipient, clientName, "Synthetic First Venue");
   await recipient
     .getByRole("button", { name: "Создать заведение", exact: true })
     .click();
@@ -221,6 +249,9 @@ test("packaged JDBC journey accepts once, creates privately under limit, reopens
   await recipient.getByLabel("Полный адрес").fill("Synthetic Street 2");
   await recipient
     .getByRole("button", { name: "Создать заведение", exact: true })
+    .click();
+  await recipient
+    .getByRole("button", { name: "Назначить позже", exact: true })
     .click();
   await expect(
     recipient.getByRole("heading", {
@@ -295,19 +326,22 @@ test("lost committed invitation response replays one client and requires explici
   let committed:
     | { id: string; clientId: string; invitationLink: string }
     | undefined;
-  await owner.route("**/api/platform/onboarding/invitations", async (route) => {
-    commands.push({
-      key: route.request().headers()["idempotency-key"],
-      body: route.request().postData(),
-    });
-    if (commands.length === 1) {
-      const response = await route.fetch();
-      expect(response.ok()).toBe(true);
-      committed = await response.json();
-      return route.abort();
-    }
-    return route.continue();
-  });
+  await owner.route(
+    "**/api/platform/onboarding/invitations",
+    async (route) => {
+      commands.push({
+        key: route.request().headers()["idempotency-key"],
+        body: route.request().postData(),
+      });
+      if (commands.length === 1) {
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        committed = await response.json();
+        return route.abort();
+      }
+      return route.continue();
+    },
+  );
   await open(owner, "/app?mode=platform-owner", ownerCredential);
   await owner.getByRole("button", { name: "Пригласить клиента" }).click();
   await owner.getByLabel("Название клиента или компании").fill(clientName);
@@ -410,7 +444,9 @@ test("lost committed invitation response replays one client and requires explici
   await expect(
     recipient.getByRole("heading", { name: "Приглашение клиента" }),
   ).toBeVisible();
-  await recipient.getByRole("button", { name: "Принять приглашение" }).click();
+  await recipient
+    .getByRole("button", { name: "Принять приглашение" })
+    .click();
   await selectSpace(recipient, clientName);
   await expect(recipient.getByText("Разрешено всего: 1")).toBeVisible();
   for (const page of [owner, recipient]) {
@@ -506,6 +542,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   });
   await expect(clubProfile.or(clubButton)).toBeVisible();
   if (await clubButton.isVisible()) await clubButton.click();
+  await page
+    .getByRole("button", { name: "Открыть проверку готовности", exact: true })
+    .click();
   const setup = page.getByRole("region", { name: "Подготовка клуба" });
   await expect(
     setup.getByText("Добавьте зал и загрузите его схему."),
@@ -527,10 +566,14 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await rename.getByLabel("Название зала").fill("Первый зал");
   await page.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(page.getByText("Первый зал", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Открыть зал", exact: true })
+    .click();
   await page.getByRole("button", { name: "Добавить столы" }).click();
   await page.getByLabel("Номер нового стола").fill("1");
-  await page.getByRole("button", { name: "Создать стол", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Создать стол", exact: true })
+    .click();
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
     "base64",
@@ -545,7 +588,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   const image = page.getByTestId("hall-plan-image");
   await expect(image).toBeVisible();
   await expect
-    .poll(() => image.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+    .poll(() =>
+      image.evaluate((img) => (img as HTMLImageElement).naturalWidth),
+    )
     .toBeGreaterThan(0);
   const stage = page.getByTestId("hall-plan-stage");
   await stage.click({ position: { x: 150, y: 90 } });
@@ -557,7 +602,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await page
     .getByRole("button", { name: "Сохранить и завершить", exact: true })
     .click();
-  await expect(page.getByRole("button", { name: "#1 · У окна" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "#1 · У окна" }),
+  ).toBeVisible();
   const zones = page.getByRole("region", { name: "Зоны зала" });
   await zones.getByLabel("Новая зона").fill("Балкон");
   await zones.getByRole("button", { name: "Добавить зону" }).click();
@@ -577,7 +624,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   const draftZone = zones.getByLabel(/^Название зоны/).first();
   const originalZoneName = await draftZone.inputValue();
   const draftZoneForm = zones.locator("form").filter({
-    has: page.getByLabel("Название зоны «" + originalZoneName + "»", { exact: true }),
+    has: page.getByLabel("Название зоны «" + originalZoneName + "»", {
+      exact: true,
+    }),
   });
   await draftZone.fill("Несохранённая зона A");
   const zoneCommands: { key: string | undefined; body: string | null }[] = [];
@@ -598,7 +647,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   );
   await zones.getByLabel("Новая зона").fill("Зона B после повтора");
   await zones.getByRole("button", { name: "Добавить зону" }).click();
-  await page.getByRole("button", { name: "Повторить ту же операцию" }).click();
+  await page
+    .getByRole("button", { name: "Повторить ту же операцию" })
+    .click();
   await expect(
     zones.getByLabel("Название зоны «Зона B после повтора»"),
   ).toBeVisible();
@@ -627,7 +678,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await expect(
     zones.getByLabel("Зона стола 1 · У окна").locator("option:checked"),
   ).toHaveText("Терраса");
-  await assignment.getByRole("button", { name: "Отменить изменения" }).click();
+  await assignment
+    .getByRole("button", { name: "Отменить изменения" })
+    .click();
   await zones
     .getByLabel("Зона стола 1 · У окна")
     .selectOption({ label: "Терраса" });
@@ -700,10 +753,15 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   );
   await page.getByLabel("Название", { exact: true }).fill("У окна");
   await nativeBack();
-  await expect(page.getByRole("button", { name: "Открыть зал" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Открыть зал" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Layout acceptance club", exact: true }),
+    page.getByRole("heading", {
+      name: "Проверка готовности",
+      exact: true,
+    }),
   ).toBeVisible();
   await page.getByRole("button", { name: /Залы и столы/ }).click();
   await page.getByRole("button", { name: "Открыть зал" }).click();
@@ -721,7 +779,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     (response) => response.url().endsWith("/plan/remove") && response.ok(),
   );
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Удалить изображение схемы" }).click();
+  await page
+    .getByRole("button", { name: "Удалить изображение схемы" })
+    .click();
   const removed = await (await removedResponse).json();
   expect(removed.halls[0].plan).toBeNull();
   expect(removed.halls[0].tables).toEqual(before.halls[0].tables);
@@ -736,7 +796,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   expect(paths.some((path) => path.startsWith("/api/admin/"))).toBe(false);
   const calendarPath = `/api/client/clubs/${profile.id}/calendar`;
   const headers = { "X-Telegram-Init-Data": credential };
-  const calendar = await (await request.get(calendarPath, { headers })).json();
+  const calendar = await (
+    await request.get(calendarPath, { headers })
+  ).json();
   const savedCalendar = await request.patch(calendarPath, {
     headers: {
       ...headers,
@@ -785,8 +847,12 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await page.getByRole("button", { name: /#1 · У окна.*Недоступен/ }).click();
   await expect(page.getByText("Стол отключён для продаж.")).toBeVisible();
   await page.getByRole("button", { name: "Назад", exact: true }).click();
-  await page.getByRole("button", { name: "Залы и столы", exact: true }).click();
-  await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Залы и столы", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Открыть зал", exact: true })
+    .click();
   await expect(image).toBeVisible();
   await expect(zones.getByLabel("Название зоны «Терраса»")).toHaveValue(
     "Терраса",
@@ -810,22 +876,30 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
     .getByLabel("Название", { exact: true })
     .fill("Браслет владельца");
   await bracelets.getByLabel("Порядок отображения").fill("2");
-  await bracelets.getByRole("button", { name: "Сохранить настройку" }).click();
+  await bracelets
+    .getByRole("button", { name: "Сохранить настройку" })
+    .click();
   await expect(
     bracelets.getByRole("heading", { name: "Браслет владельца" }),
   ).toBeVisible();
   await categories
     .getByRole("button", { name: "Добавить категорию", exact: true })
     .click();
-  await categories.getByLabel("Название", { exact: true }).fill("Услуги клуба");
-  await categories.getByRole("button", { name: "Сохранить настройку" }).click();
+  await categories
+    .getByLabel("Название", { exact: true })
+    .fill("Услуги клуба");
+  await categories
+    .getByRole("button", { name: "Сохранить настройку" })
+    .click();
   await expect(
     categories.getByRole("heading", { name: "Услуги клуба" }),
   ).toBeVisible();
   await articles
     .getByRole("button", { name: "Добавить статью", exact: true })
     .click();
-  await articles.getByLabel("Название", { exact: true }).fill("Входные билеты");
+  await articles
+    .getByLabel("Название", { exact: true })
+    .fill("Входные билеты");
   await articles
     .getByLabel("Категория выручки")
     .selectOption({ label: "Услуги клуба" });
@@ -840,14 +914,18 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
       expect(
         await contrast(page.locator(".client-cabinet")),
       ).toBeGreaterThanOrEqual(4.5);
-      expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(
+        44,
+      );
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
       await page.screenshot({
-        path: test.info().outputPath(`owner-config-${name}-${colorScheme}.png`),
+        path: test
+          .info()
+          .outputPath(`owner-config-${name}-${colorScheme}.png`),
       });
     }
   };
@@ -885,7 +963,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await setup
     .getByRole("button", { name: "Настройки модулей", exact: true })
     .click();
-  await page.getByLabel("Ранний приход · минут после начала ночи").fill("180");
+  await page
+    .getByLabel("Ранний приход · минут после начала ночи")
+    .fill("180");
   await captureConfiguration(
     "modules",
     page.getByRole("button", { name: "Сохранить правило" }),
@@ -946,7 +1026,9 @@ test("cabinet layout zones finance modules persist and clear revoked access", as
   await setup
     .getByRole("button", { name: "Залы и столы", exact: true })
     .click();
-  await page.getByRole("button", { name: "Открыть зал", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Открыть зал", exact: true })
+    .click();
   const foreign = await request.get(layoutPath, {
     headers: { "X-Telegram-Init-Data": foreignCredential },
   });

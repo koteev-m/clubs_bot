@@ -80,38 +80,42 @@ afterEach(() => {
 
 describe('owner UX and client navigation', () => {
   it('keeps overview, clubs and access distinct, with no placeholder settings', async () => {
-    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
-      const path = String(input);
-      if (path.endsWith('/summary'))
-        return reply({
-          clients: 2,
-          archivedClients: 1,
-          clubs: 1,
-          activeMembers: 0,
-          openInvitations: 0,
-        });
-      if (path.endsWith('/clubs/search'))
-        return reply(
-          page([
-            {
-              id: '100',
-              name: 'Клуб A',
-              clientId: '20',
-              clientName: 'Организация A',
-              published: false,
-              clientActive: true,
-              clientArchived: false,
-            },
-          ]),
-        );
-      return reply(page([detail]));
-    });
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input) => {
+        const path = String(input);
+        if (path.endsWith('/summary'))
+          return reply({
+            clients: 2,
+            archivedClients: 1,
+            clubs: 1,
+            activeMembers: 0,
+            openInvitations: 0,
+          });
+        if (path.endsWith('/clubs/search'))
+          return reply(
+            page([
+              {
+                id: '100',
+                name: 'Клуб A',
+                clientId: '20',
+                clientName: 'Организация A',
+                published: false,
+                clientActive: true,
+                clientArchived: false,
+              },
+            ]),
+          );
+        return reply(page([detail]));
+      });
     render(<PlatformOnboarding credential="signed-owner" />);
     await screen.findByText('Организации вне архива');
     const entries = history.length;
     fireEvent.click(screen.getByRole('button', { name: 'Обзор' }));
     expect(history.length).toBe(entries);
-    expect(screen.queryByText('История заявок', { selector: 'h2' })).toBeNull();
+    expect(
+      screen.queryByText('История заявок', { selector: 'h2' }),
+    ).toBeNull();
     expect(screen.queryByRole('button', { name: /Настройки/ })).toBeNull();
     expect(
       fetch.mock.calls.some(([path]) =>
@@ -145,7 +149,9 @@ describe('owner UX and client navigation', () => {
               ...detail,
               archived: body.status === 'archived',
               name:
-                body.status === 'archived' ? 'Архивная компания' : detail.name,
+                body.status === 'archived'
+                  ? 'Архивная компания'
+                  : detail.name,
             },
           ]),
         );
@@ -306,9 +312,11 @@ describe('owner UX and client navigation', () => {
     const view = render(<ClientAccess initialToken={null} />);
     await screen.findByRole('heading', { name: 'Сохранённый клуб' });
     expect(location.search).toContain('screen=club&resource=100');
-    expect(screen.getByText('Не опубликован')).toBeTruthy();
+    expect(screen.getByText('Статус: проверка недоступна')).toBeTruthy();
     expect(
-      screen.getByText(/Гостевое бронирование выключено/),
+      screen.getByText(
+        'Подтверждённые отчёты о работе клуба в этом кабинете пока не подключены.',
+      ),
     ).toBeTruthy();
     const event = telegram.onEvent.mock.calls.findLast(
       ([name]) => name === 'viewportChanged',
@@ -336,12 +344,18 @@ describe('owner UX and client navigation', () => {
       reply(
         String(path).endsWith('/context')
           ? {
-              clients: [detail, { ...detail, id: '21', name: 'Организация B' }],
+              clients: [
+                detail,
+                { ...detail, id: '21', name: 'Организация B' },
+              ],
             }
           : {
               ...detail,
               permissions: [],
-              clubs: [profile, { ...profile, id: '101', name: 'Второй клуб' }],
+              clubs: [
+                profile,
+                { ...profile, id: '101', name: 'Второй клуб' },
+              ],
             },
       ),
     );

@@ -101,7 +101,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
             },
           ],
         },
-        { id: '3', name: 'Empty', layoutRevision: '1', plan: null, tables: [] },
+        {
+          id: '3',
+          name: 'Empty',
+          layoutRevision: '1',
+          plan: null,
+          tables: [],
+        },
       ],
     };
     const writes: string[] = [];
@@ -141,7 +147,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
           writes.push(path);
           firstImage = images.replacement;
           updateMain({
-            layoutRevision: String(Number(layout.halls[0].layoutRevision) + 1),
+            layoutRevision: String(
+              Number(layout.halls[0].layoutRevision) + 1,
+            ),
             plan: {
               contentType: 'image/png',
               sha256: createHash('sha256')
@@ -186,10 +194,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
       buffer: Buffer.from(images.replacement, 'base64'),
     };
     const replace = page.getByLabel('Заменить схему', { exact: true });
-    await page.getByRole('button', { name: 'Предпросмотр для гостя' }).click();
+    await page
+      .getByRole('button', { name: 'Предпросмотр для гостя' })
+      .click();
     await expect(replace).toBeDisabled();
     await expect(
-      page.getByText('Вернитесь к редактированию, чтобы изменить изображение.'),
+      page.getByText(
+        'Вернитесь к редактированию, чтобы изменить изображение.',
+      ),
     ).toBeVisible();
     await page
       .getByRole('button', { name: 'Вернуться к редактированию' })
@@ -219,7 +231,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       });
       expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(44);
       await open.click();
-      await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name, level: 1 }),
+      ).toBeVisible();
     };
     await switchHall('2');
     await expect(
@@ -249,7 +263,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(form.getByRole('alert')).toContainText(
       '№7 уже занят в зале «Main»',
     );
-    expect(await contrast(form.getByRole('alert'))).toBeGreaterThanOrEqual(4.5);
+    expect(await contrast(form.getByRole('alert'))).toBeGreaterThanOrEqual(
+      4.5,
+    );
     await number.focus();
     expect(
       await number.evaluate(
@@ -376,10 +392,13 @@ for (const mode of ['client', 'cabinet']) {
     });
     await page.goto(
       entry
-        .replace('screen=layout&resource=42&hall=1', 'screen=club&resource=42')
+        .replace(
+          'screen=layout&resource=42&hall=1',
+          'screen=settings&resource=42',
+        )
         .replace('mode=client', 'mode=' + mode),
     );
-    const open = page.getByRole('button', { name: /Залы и столы/ });
+    const open = page.getByRole('button', { name: /Залы, зоны и столы/ });
     await open.scrollIntoViewIfNeeded();
     const target = (await open.boundingBox())!;
     await page.mouse.move(
@@ -545,6 +564,9 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
 
   await openOrganization.click();
   await openClub.click();
+  await page
+    .getByRole('button', { name: 'Открыть проверку готовности', exact: true })
+    .click();
   await page.getByRole('button', { name: /Залы и столы/ }).click();
   const openHall = page.getByRole('button', { name: 'Открыть зал' });
   await openHall.click();
@@ -586,6 +608,12 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
   await nativeBack();
   await expect(openHall).toBeVisible();
   await nativeBack();
+  await expect(
+    page.getByRole('heading', { name: 'Проверка готовности', exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Назад к клубу', exact: true })
+    .click();
   await expect(profileBack).toBeVisible();
   await profileBack.click();
   await expect(openClub).toBeVisible();
@@ -594,17 +622,26 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
   await expect.poll(nativeVisible).toBe(false);
   expect(await page.evaluate(() => history.length)).toBe(length);
   const sections = [
-    ['Календарь клуба', 'calendar', 'Профиль клуба'],
-    ['Правила бронирования', 'booking-rules', 'Профиль клуба'],
+    ['Календарь клуба', 'calendar', 'Назад'],
+    ['Правила бронирования', 'booking-rules', 'Назад'],
     ['Гостевой предпросмотр', 'booking-preview', 'Назад'],
   ] as const;
   for (const [name, screen, backLabel] of sections) {
     await openOrganization.click();
     await openClub.click();
+    await page
+      .getByRole('button', {
+        name: 'Открыть проверку готовности',
+        exact: true,
+      })
+      .click();
     await page.getByRole('button', { name, exact: true }).click();
     const section = page.getByRole('heading', { name, level: 1 });
     await expect(section).toBeVisible();
     if (screen === 'calendar') {
+      await page
+        .getByRole('tab', { name: 'Постоянное расписание', exact: true })
+        .click();
       const friday = page.getByRole('group', { name: 'Пятница' });
       const open = friday.getByLabel('Проводим вечеринку');
       await open.check();
@@ -615,11 +652,19 @@ test('owner Back uses browser parents, protects a draft, and exposes native clos
     }
     const entries = await page.evaluate(() => history.length);
     await page.getByRole('button', { name: backLabel, exact: true }).click();
-    await expect(profileBack).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Проверка готовности', exact: true }),
+    ).toBeVisible();
     expect(await page.evaluate(() => history.length)).toBe(entries);
     await page.goForward();
     await expect(section).toBeVisible();
     await page.goBack();
+    await expect(
+      page.getByRole('heading', { name: 'Проверка готовности', exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('button', { name: 'Назад к клубу', exact: true })
+      .click();
     await expect(profileBack).toBeVisible();
     await profileBack.click();
     await expect(openClub).toBeVisible();
@@ -669,7 +714,13 @@ test('on a narrow mobile screen rename stays in Welcome and survives reload and 
     permissions,
     halls: [
       { id: '1', name: 'Main', layoutRevision: '1', plan: null, tables: [] },
-      { id: '2', name: 'Welcome', layoutRevision: '1', plan: null, tables: [] },
+      {
+        id: '2',
+        name: 'Welcome',
+        layoutRevision: '1',
+        plan: null,
+        tables: [],
+      },
     ],
   };
   const patches: Array<{ body: unknown; key?: string }> = [];
@@ -732,7 +783,7 @@ test('on a narrow mobile screen rename stays in Welcome and survives reload and 
   await page.goto(
     entry.replace(
       'screen=layout&resource=42&hall=1',
-      'screen=club&resource=42',
+      'screen=readiness&resource=42',
     ),
   );
   const setup = page.getByRole('region', { name: 'Подготовка клуба' });
@@ -821,7 +872,7 @@ const finalProfile = {
 };
 const profileEntry = entry.replace(
   'screen=layout&resource=42&hall=1',
-  'screen=club&resource=42',
+  'screen=profile&resource=42',
 );
 
 test('confirmed profile denial fences a delayed successful write through a temporary error and fresh authorization', async ({
@@ -1006,14 +1057,16 @@ test('an image 404 and metadata 503 recover with the new full hall snapshot and 
       'screen=booking-preview&resource=42',
     ),
   );
-  await page.getByRole('button', { name: 'Повторить загрузку схемы' }).click();
+  await page
+    .getByRole('button', { name: 'Повторить загрузку схемы' })
+    .click();
   await expect(page.getByTestId('hall-plan-image')).toBeVisible();
   await expect(
     page.getByRole('button', { name: /#1 · New position/ }),
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: /Old position/ })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole('button', { name: /Old position/ }),
+  ).toHaveCount(0);
   await expect(page.getByTestId('table-marker-11')).toBeVisible();
   expect(methods.every((method) => method === 'GET')).toBe(true);
   revoked = true;

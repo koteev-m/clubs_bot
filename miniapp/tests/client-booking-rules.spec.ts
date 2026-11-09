@@ -8,7 +8,7 @@ const launch = new URLSearchParams({
   hash: 'synthetic',
 }).toString();
 const entry =
-  '/app?mode=client&screen=club&resource=' +
+  '/app?mode=client&screen=settings&resource=' +
   club +
   '#tgWebAppData=' +
   encodeURIComponent(launch) +
@@ -54,7 +54,8 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path.endsWith('/profile')) return route.fulfill({ json: profile });
-    if (!path.endsWith('/booking-rules')) return route.fulfill({ status: 404 });
+    if (!path.endsWith('/booking-rules'))
+      return route.fulfill({ status: 404 });
     if (request.method() === 'GET') return route.fulfill({ json: view });
     const { expectedVersion, ...rules } = request.postDataJSON();
     patches.push({
@@ -115,9 +116,11 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     page.getByText('Результат операции пока неизвестен'),
   ).toBeVisible();
   await expect(page.getByText('Сохранено', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Профиль клуба' }).click();
+  await page.getByRole('button', { name: 'Назад', exact: true }).click();
   await expect(hold).toHaveValue('12');
-  await page.getByRole('button', { name: 'Повторить ту же операцию' }).click();
+  await page
+    .getByRole('button', { name: 'Повторить ту же операцию' })
+    .click();
   await expect(page.getByText('Сохранено', { exact: true })).toBeVisible();
   expect(patches).toHaveLength(2);
   expect(patches[0].key).toBeTruthy();
@@ -129,7 +132,7 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     holdMinutes: 12,
     retentionMinutes: 45,
   });
-  await page.getByRole('button', { name: 'Профиль клуба' }).click();
+  await page.getByRole('button', { name: 'Назад', exact: true }).click();
   await open();
   await expect(hold).toHaveValue('12');
   await expect(retention).toHaveValue('45');
@@ -138,6 +141,8 @@ test('configures and reopens saved rules on mobile after retrying the exact comm
     page.locator('time[datetime="2026-10-25T02:30+01:00"]'),
   ).toBeVisible();
   await expect(
-    page.getByText(/Проверьте правила: онлайн-бронирование остаётся открытым/),
+    page.getByText(
+      /Проверьте правила: онлайн-бронирование остаётся открытым/,
+    ),
   ).toBeVisible();
 });

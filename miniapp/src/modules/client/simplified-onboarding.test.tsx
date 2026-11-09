@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ClientAccess from './ClientAccess';
 import PlatformOnboarding from './PlatformOnboarding';
 
-const auth = vi.hoisted(() => ({ initData: 'signed-client', refreshEpoch: 0 }));
+const auth = vi.hoisted(() => ({
+  initData: 'signed-client',
+  refreshEpoch: 0,
+}));
 vi.mock('../auth/hooks/useInitData', () => ({ useInitData: () => auth }));
 vi.mock('../../app/providers/TelegramProvider', () => ({
   useTelegram: () => ({}),
@@ -74,6 +77,23 @@ function mockApi(create = () => reply(profile), current = context) {
       return reply({ cities, hasMore: false });
     if (url.endsWith('/clubs')) return create();
     if (url.endsWith('/profile')) return reply(profile);
+    if (url.endsWith('/preparation'))
+      return reply({
+        clubId: profile.id,
+        clientId: profile.clientId,
+        name: profile.name,
+        version: '1',
+        status: 'unassigned',
+        published: false,
+        assignee: null,
+        invitation: null,
+        reason: null,
+        canManage: true,
+        canSubmit: false,
+        canInvite: true,
+        canWrite: true,
+        configurationChanged: false,
+      });
     return reply({ items: [], nextCursor: null });
   });
 }
@@ -171,9 +191,11 @@ describe('simplified onboarding', () => {
     expect(screen.queryByLabelText('Часовой пояс')).toBeNull();
     expect(screen.queryByLabelText('Комментарий')).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Создать заведение' }));
-    await screen.findByText('Не опубликован');
-    expect(screen.getByText('Отдельный бот клуба')).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Создать заведение' }),
+    );
+    await screen.findByText('Кто будет настраивать клуб?');
+    expect(await screen.findByText(/Клуб не опубликован/)).toBeTruthy();
     const create = fetch.mock.calls.find(([path]) =>
       String(path).endsWith('/clubs'),
     )!;
@@ -188,14 +210,18 @@ describe('simplified onboarding', () => {
         /\/(submit|approve)$/.test(String(path)),
       ),
     ).toBe(false);
-    expect(location.search).toContain('screen=club&resource=100');
+    expect(location.search).toContain(
+      'screen=preparation-choice&resource=100',
+    );
   });
 
   it('retains input and shows a refusal next to create, then permits a corrected retry', async () => {
     mockApi(() => reply({ code: 'club_limit_reached' }, 409));
     render(<ClientAccess initialToken={null} />);
     await fill();
-    fireEvent.click(screen.getByRole('button', { name: 'Создать заведение' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Создать заведение' }),
+    );
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Лимит заведений исчерпан');
     expect(alert.closest('form')).toBeTruthy();
@@ -220,7 +246,9 @@ describe('simplified onboarding', () => {
     );
     const view = render(<ClientAccess initialToken={null} />);
     await fill();
-    fireEvent.click(screen.getByRole('button', { name: 'Создать заведение' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Создать заведение' }),
+    );
     await screen.findByText('Результат операции пока неизвестен');
     pop('client-space', 0);
     await screen.findByText('Можно добавить: 1');
@@ -233,7 +261,7 @@ describe('simplified onboarding', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Повторить ту же операцию' }),
     );
-    await screen.findByText('Не опубликован');
+    await screen.findByText('Кто будет настраивать клуб?');
     const commands = fetch.mock.calls.filter(([path]) =>
       String(path).endsWith('/clubs'),
     );
@@ -248,7 +276,9 @@ describe('simplified onboarding', () => {
     const fetch = mockApi(() => Promise.reject(new Error('lost')));
     const view = render(<ClientAccess initialToken={null} />);
     await fill();
-    fireEvent.click(screen.getByRole('button', { name: 'Создать заведение' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Создать заведение' }),
+    );
     await screen.findByText('Результат операции пока неизвестен');
     auth.initData = 'signed-another';
     view.rerender(<ClientAccess initialToken={null} />);
@@ -256,7 +286,9 @@ describe('simplified onboarding', () => {
     expect(
       (screen.getByLabelText('Название заведения') as HTMLInputElement).value,
     ).toBe('');
-    expect(screen.queryByText('Результат операции пока неизвестен')).toBeNull();
+    expect(
+      screen.queryByText('Результат операции пока неизвестен'),
+    ).toBeNull();
     expect(
       fetch.mock.calls.filter(([path]) => String(path).endsWith('/clubs')),
     ).toHaveLength(1);
@@ -380,8 +412,9 @@ describe('simplified onboarding', () => {
     let finish!: (body: unknown) => void;
     vi.spyOn(globalThis, 'fetch').mockImplementation((_path, options) => {
       if (
-        (options?.headers as Record<string, string>)['X-Telegram-Init-Data'] ===
-        'signed-client'
+        (options?.headers as Record<string, string>)[
+          'X-Telegram-Init-Data'
+        ] === 'signed-client'
       )
         return Promise.resolve({
           ok: false,

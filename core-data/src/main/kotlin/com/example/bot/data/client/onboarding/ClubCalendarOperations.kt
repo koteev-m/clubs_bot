@@ -43,8 +43,11 @@ internal class ClubCalendarOperations(
         if (club.active()) fail("calendar_night_cutover_required")
         val changes = body.calendarChanges()
         val zone = ZoneId.of(checkNotNull(club["timezone"]))
-        val previous = rules(clubId).schedule(zone)
         val now = session.now
+        if (body.reconciliationDate()?.let { it != now.atZone(zone).toLocalDate() } == true) {
+            fail("version_conflict")
+        }
+        val previous = rules(clubId).schedule(zone)
         changes.forEach { apply(clubId, it) }
         val updatedVersion = version + 1
         val reconciled =
@@ -94,6 +97,13 @@ internal class ClubCalendarOperations(
             put("timezone", zone.id)
             put("version", club["calendar_version"])
             put("canWrite", session.hasClubGrant(clientId, clubId, WRITE_CALENDAR))
+            put(
+                "reconciliation",
+                buildJsonObject {
+                    put("businessDate", now.atZone(zone).toLocalDate().toString())
+                    put("storedDates", JsonArray(nights.reconciliationDates(now).map { JsonPrimitive(it.toString()) }))
+                },
+            )
             put("weekly", JsonArray(rules.weekly.map { it.ruleView(CalendarRuleTable.WEEKLY) }))
             put("holidays", JsonArray(rules.holidays.map { it.ruleView(CalendarRuleTable.HOLIDAYS) }))
             put("exceptions", JsonArray(rules.exceptions.map { it.ruleView(CalendarRuleTable.EXCEPTIONS) }))

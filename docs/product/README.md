@@ -79,3 +79,15 @@ Decision log содержит 42 records: 22 `ACCEPTED_DECISION` и 20 `DECISION
 ## Область первой базовой линии
 
 Документы описывают repository на exact `origin/main` commit, а не развёрнутую внешнюю среду. VPS, Telegram API, реальные secrets, runtime data и deployment не проверялись. Поэтому утверждения о фактически запущенном экземпляре остаются `UNKNOWN`, если их нельзя доказать packaging и application wiring.
+
+## Актуальное уточнение модели управления, 2026-11-09
+
+Прямо принят новый основной набор из девяти ролей и ограниченный процесс
+делегирования подготовки: [PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model),
+[decision addendum](OPEN_DECISIONS.md#owner-manager-model-decision),
+[контракт](../ops/owner-manager-contract.md),
+[последовательность](PRODUCT_ROADMAP.md#owner-manager-sequence).
+Он заменяет конфликтующие target названия/обязанности DEC-004/005 и сохраняет
+технические пакеты и исторический staff-контракт 2026-11-08. Это target acceptance,
+не автоматическая миграция RBAC, не новые network/GLOBAL grants и не runtime evidence.
+Источник `CONCEPT_SOURCE.md` и прежние решения не переписываются.

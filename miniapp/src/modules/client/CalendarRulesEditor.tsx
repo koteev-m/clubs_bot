@@ -1,10 +1,12 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Field } from './OnboardingShared';
 import {
+  dateLabel,
   defaultHours,
   describeNight,
   Hours,
   nextWeekday,
+  shiftDate,
   Rule,
   Rules,
 } from './calendar';
@@ -36,8 +38,9 @@ function NightHours({
       : null;
   return (
     <>
-      <Field label="Когда открываемся относительно дня вечеринки">
+      <Field label="День открытия">
         <select
+          aria-label="День открытия"
           value={
             hours.startNextDay === null
               ? 'schedule'
@@ -59,9 +62,13 @@ function NightHours({
             <option value="schedule">По расписанию</option>
           )}
           <option value="same">
-            В день вечеринки · {weekdayName(businessDate)}
+            День вечеринки · {weekdayName(businessDate)},{' '}
+            {dateLabel(businessDate)}
           </option>
-          <option value="next">После полуночи · на следующий день</option>
+          <option value="next">
+            Следующий день · {weekdayName(shiftDate(businessDate, 1))},{' '}
+            {dateLabel(shiftDate(businessDate, 1))}
+          </option>
         </select>
       </Field>
       <div className="cc-times">
@@ -84,20 +91,26 @@ function NightHours({
           />
         </Field>
       </div>
-      <label className="ob-check">
-        <input
-          type="checkbox"
-          checked={hours.nextDay}
+      <Field label="День закрытия">
+        <select
+          aria-label="День закрытия"
+          value={hours.nextDay ? 'next' : 'same'}
           onChange={(event) =>
-            update({ ...hours, nextDay: event.target.checked })
+            update({ ...hours, nextDay: event.target.value === 'next' })
           }
-        />
-        <span>Закрытие на следующий день после открытия</span>
-      </label>
-      <p className="po-muted">
-        Не отмечайте, если открытие и закрытие приходятся на одну календарную
-        дату.
-      </p>
+        >
+          <option value="same">
+            {weekdayName(shiftDate(businessDate, hours.startNextDay ? 1 : 0))},{' '}
+            {dateLabel(shiftDate(businessDate, hours.startNextDay ? 1 : 0))} · в
+            день открытия
+          </option>
+          <option value="next">
+            {weekdayName(shiftDate(businessDate, hours.startNextDay ? 2 : 1))},{' '}
+            {dateLabel(shiftDate(businessDate, hours.startNextDay ? 2 : 1))} ·
+            после дня открытия
+          </option>
+        </select>
+      </Field>
       <div aria-live="polite" className="po-notice">
         {description ? (
           <>
@@ -147,14 +160,19 @@ function DatedRules({
   update,
   disabled,
   readOnly,
+  selectedDate,
 }: {
   holiday?: boolean;
+  selectedDate?: string;
   rows: DatedRule[];
   update: (rows: DatedRule[]) => void;
   disabled: boolean;
   readOnly: boolean;
 }) {
-  const [date, setDate] = useState('');
+  const [date, setDate] = useState(selectedDate ?? '');
+  useEffect(() => {
+    if (selectedDate) setDate(selectedDate);
+  }, [selectedDate]);
   const heading = useId();
   const canAdd =
     /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date) &&
@@ -169,7 +187,9 @@ function DatedRules({
   return (
     <section className="po-card ob-card cc-rules" aria-labelledby={heading}>
       <h2 id={heading}>
-        {holiday ? 'Праздничные даты' : 'Изменения на конкретные даты'}
+        {holiday
+          ? 'Праздничные исключения'
+          : 'Добавить, изменить или отменить ночь'}
       </h2>
       <p className="po-muted">
         {holiday
@@ -270,12 +290,16 @@ export function CalendarRulesEditor({
   disabled,
   readOnly,
   referenceDate,
+  section = 'all',
+  selectedDate,
 }: {
   value: Rules;
   onChange: (rules: Rules) => void;
   disabled: boolean;
   readOnly: boolean;
   referenceDate: string;
+  section?: 'weekly' | 'special' | 'all';
+  selectedDate?: string;
 }) {
   const updateDay = (day: number, rule: Rule | null) => {
     const weekly = value.weekly.filter((row) => row.day !== day);
@@ -284,55 +308,62 @@ export function CalendarRulesEditor({
   };
   return (
     <div className="cc-rules">
-      <section className="po-card ob-card cc-rules">
-        <h2>Рабочая неделя</h2>
-        <p className="po-muted">
-          Выберите день, к которому относится вечеринка. Например, вечеринка
-          пятницы может открыться в субботу в 00:00 и закончиться в субботу в
-          12:00. Даты ниже — ближайший пример каждого недельного правила.
-          Исключения, праздники и перевод часов учитываются в расчёте после
-          сохранения.
-        </p>
-        {weekdays.map((name, index) => {
-          const day = index + 1;
-          const row = value.weekly.find((rule) => rule.day === day);
-          return (
-            <fieldset className="cc-rule" key={day} disabled={disabled}>
-              <legend>{name}</legend>
-              <label className="ob-check">
-                <input
-                  type="checkbox"
-                  checked={Boolean(row)}
-                  onChange={(event) =>
-                    updateDay(day, event.target.checked ? open : null)
-                  }
-                />
-                <span>Проводим вечеринку</span>
-              </label>
-              {row && (
-                <NightHours
-                  businessDate={nextWeekday(referenceDate, day)}
-                  hours={row}
-                  update={(hours) => updateDay(day, { ...row, ...hours })}
-                />
-              )}
-            </fieldset>
-          );
-        })}
-      </section>
-      <DatedRules
-        rows={value.exceptions}
-        update={(exceptions) => onChange({ ...value, exceptions })}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
-      <DatedRules
-        holiday
-        rows={value.holidays}
-        update={(holidays) => onChange({ ...value, holidays })}
-        disabled={disabled}
-        readOnly={readOnly}
-      />
+      {section !== 'special' && (
+        <section className="po-card ob-card cc-rules">
+          <h2>Постоянное расписание</h2>
+          <p className="po-muted">
+            Выберите день, к которому относится вечеринка. Например, вечеринка
+            пятницы может открыться в субботу в 00:00 и закончиться в субботу в
+            12:00. Даты ниже — ближайший пример каждого недельного правила.
+            Исключения, праздники и перевод часов учитываются в расчёте после
+            сохранения.
+          </p>
+          {weekdays.map((name, index) => {
+            const day = index + 1;
+            const row = value.weekly.find((rule) => rule.day === day);
+            return (
+              <fieldset className="cc-rule" key={day} disabled={disabled}>
+                <legend>{name}</legend>
+                <label className="ob-check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(row)}
+                    onChange={(event) =>
+                      updateDay(day, event.target.checked ? open : null)
+                    }
+                  />
+                  <span>Проводим вечеринку</span>
+                </label>
+                {row && (
+                  <NightHours
+                    businessDate={nextWeekday(referenceDate, day)}
+                    hours={row}
+                    update={(hours) => updateDay(day, { ...row, ...hours })}
+                  />
+                )}
+              </fieldset>
+            );
+          })}
+        </section>
+      )}
+      {section !== 'weekly' && (
+        <>
+          <DatedRules
+            selectedDate={selectedDate}
+            rows={value.exceptions}
+            update={(exceptions) => onChange({ ...value, exceptions })}
+            disabled={disabled}
+            readOnly={readOnly}
+          />
+          <DatedRules
+            holiday
+            rows={value.holidays}
+            update={(holidays) => onChange({ ...value, holidays })}
+            disabled={disabled}
+            readOnly={readOnly}
+          />
+        </>
+      )}
     </div>
   );
 }

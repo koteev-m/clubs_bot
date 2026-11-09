@@ -541,3 +541,36 @@ matrix/invitation/restore choices; прежние DEC-004/005/040/041 не пе�
 [handoff](../ops/owner-team.md) фиксирует команды, ошибки/исправления и final manifest.
 DEC-013/014/022 и initial allocation catalogue/configuration boundary DEC-031
 не закрыты и не подменяются новыми staff permissions.
+
+<a id="owner-manager-gap"></a>
+## Управление клубом: target/source/implementation delta, 2026-11-09
+
+Прямое решение владельца — [PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model)
+и [decision addendum](OPEN_DECISIONS.md#owner-manager-model-decision). Это новая
+локальная задача `CLB-owner-manager-ux`, base `16761e43887036688028358524847db1af0e5326`
+(merged PR #566), без нового DEC/CLB номера. Следующие item-level dispositions
+относятся ровно к принятому 2026-11-09 scope, а не ко всем существующим capabilities.
+
+| Concept / историческое решение | Принятая классификация | Новый target и оставшаяся граница |
+|---|---|---|
+| Role catalogue source L60–71 и DEC-004 | **AMEND** | Девять ролей: Владелец сети, Владелец клуба, Управляющий сети, Управляющий клуба, Менеджер, Менеджер входа, Финансовый менеджер, Промоутер, Гость. Не доказательство nine-role RBAC implementation |
+| Host / table duties и смешение с входом | **AMEND** | Отдельного Host нет; столы — Менеджеру. Менеджер входа отдельно: QR/списки/поиск/приход/отказ; действующий ENTRY_MANAGER остаётся read configuration |
+| DJ/Админ клуба/Менеджер зала/прежние сетевые административные названия в основном catalogue | **AMEND** | Исключены из актуального основного target набора; исторические records/contracts сохраняются, capabilities не удаляются и не запускаются автоматически |
+| ENTRY_MANAGER/MANAGER/CLUB_ADMIN fixed client packages от 2026-11-08 | **KEEP** | Имена и actual grants не меняются. Temporary full CLUB_ADMIN допускает настройку, не ownership/team/денежные операции; future mappings требуют безопасной миграции |
+| Legacy assignments, OWNER/GLOBAL semantics, grant tombstones | **KEEP** | Нет массовой миграции, удаления/восстановления или расширения authority; новая preparation assignment не является grant |
+| Owner as creator и двухэтапное staff invitation | **KEEP** | Server identity/client/club/grants, claim + отдельное owner confirmation, whole-package issuance, version/idempotency/audit остаются обязательны |
+| Owner control и delegated preparation | **AMEND** | Сохраняемый workflow и два представления в одной Mini App; технический readiness отдельно, настройки владельцу по existing grants; принятие подготовки не публикует клуб |
+| Управляющий сети | **AMEND** target direction | Назначенные клубы, реальные показатели/контроль подготовки и coordination. Конкретные permissions и implementation — future gap, без нового GLOBAL/network grant/cabinet |
+| CAL-001/002/003 domain contracts | **KEEP** | Business date, IANA TZ, weekly/holiday/exception priority, DST, protected-data/version checks; UX трёх областей меняется, связанное booking state не трогается |
+
+Existing PR #566 source implements fixed packages/invitations/team, не новый
+полный nine-role RBAC. Новый локальный source delta должен отдельно показать
+entry → route → operations → persistence → response/UI в [AS_BUILT](AS_BUILT.md#owner-manager-local).
+Фактические результаты и непроверенное находятся в [checkpoint](../ops/PROJECT_STATUS.md);
+наличие target текста или локального source не доказывает deployment.
+
+Следующий RBAC-переход требует точных matrices/mappings/migration policy,
+compatibility и audit/rollback verification. DEC-006 promoter scope, DEC-012
+финансы, DEC-014 музыка и ограничения DEC-013/022/031 не закрыты новым catalogue.
+Новые кабинеты остальных ролей, network authority, guest booking cutover и денежные
+операции остаются вне этого локального scope.
