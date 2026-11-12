@@ -1,5 +1,8 @@
 package com.example.bot.data.promoter
 
+import com.example.bot.data.client.onboarding.OnboardingSql
+import com.example.bot.data.client.onboarding.blocksLegacyClubAuthorityWrite
+import com.example.bot.data.client.onboarding.long
 import com.example.bot.data.db.isUniqueViolation
 import com.example.bot.data.db.withTxRetry
 import com.example.bot.data.security.Role
@@ -8,22 +11,24 @@ import com.example.bot.data.security.UsersTable
 import com.example.bot.promoter.admin.PromoterAccessUpdateResult
 import com.example.bot.promoter.admin.PromoterAdminProfile
 import com.example.bot.promoter.admin.PromoterAdminRepository
-import java.time.Clock
-import java.time.Instant
-import java.time.ZoneOffset
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.selectAll
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
-import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
+import org.jetbrains.exposed.sql.update
+import java.sql.Connection
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 
 private object PromoterClubAccessTable : Table("promoter_club_access") {
     val clubId = long("club_id")
@@ -88,7 +93,21 @@ class PromoterAdminRepositoryImpl(
         enabled: Boolean,
     ): PromoterAccessUpdateResult =
         withTxRetry {
-            newSuspendedTransaction(context = Dispatchers.IO, db = db) {
+            newSuspendedTransaction(
+                context = Dispatchers.IO,
+                db = db,
+                transactionIsolation = Connection.TRANSACTION_READ_COMMITTED,
+            ) {
+                val sql = OnboardingSql(TransactionManager.current().connection.connection as Connection)
+                val mapping = sql.row("SELECT client_id FROM client_clubs WHERE club_id=?", clubId)
+                if (mapping != null) {
+                    val clientId = mapping.long("client_id")
+                    sql.row("SELECT id FROM clients WHERE id=? FOR UPDATE", clientId)
+                        ?: return@newSuspendedTransaction PromoterAccessUpdateResult.NotFound
+                    if (sql.blocksLegacyClubAuthorityWrite(clientId, clubId, promoterId)) {
+                        return@newSuspendedTransaction PromoterAccessUpdateResult.NotFound
+                    }
+                }
                 UsersTable
                     .selectAll()
                     .where { UsersTable.id eq promoterId }
@@ -111,7 +130,10 @@ class PromoterAdminRepositoryImpl(
         val now = Instant.now(clock).atOffset(ZoneOffset.UTC)
         val updated =
             PromoterClubAccessTable.update(
-                where = { (PromoterClubAccessTable.clubId eq clubId) and (PromoterClubAccessTable.promoterUserId eq promoterId) },
+                where = {
+                    (PromoterClubAccessTable.clubId eq clubId) and
+                        (PromoterClubAccessTable.promoterUserId eq promoterId)
+                },
             ) {
                 it[accessEnabled] = enabled
                 it[updatedAt] = now
@@ -139,7 +161,10 @@ class PromoterAdminRepositoryImpl(
                 throw ex
             }
             PromoterClubAccessTable.update(
-                where = { (PromoterClubAccessTable.clubId eq clubId) and (PromoterClubAccessTable.promoterUserId eq promoterId) },
+                where = {
+                    (PromoterClubAccessTable.clubId eq clubId) and
+                        (PromoterClubAccessTable.promoterUserId eq promoterId)
+                },
             ) {
                 it[accessEnabled] = enabled
                 it[updatedAt] = now

@@ -73,6 +73,9 @@ open class ClientNightEventLinksRoutesDataTest : ClientOnboardingRoutesTestBase(
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "73"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "74"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor, "75"))
+            assertEquals(1, migrateBookingRulesFixture(source, vendor, "76"))
+            assertEquals(1, migrateBookingRulesFixture(source, vendor, "77"))
+            assertEquals(1, migrateBookingRulesFixture(source, vendor, "78"))
             assertEquals(1, migrateBookingRulesFixture(source, vendor))
             assertEquals("0", source.linkCount())
             assertEquals(

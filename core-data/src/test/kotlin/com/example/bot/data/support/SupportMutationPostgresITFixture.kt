@@ -5,6 +5,7 @@ import com.example.bot.audit.StandardAuditAction
 import com.example.bot.audit.StandardAuditEntityType
 import com.example.bot.data.security.PermissionCode
 import com.example.bot.data.security.Role
+import com.example.bot.data.testing.freshPostgresSchema
 import com.example.bot.support.SupportServiceError
 import com.example.bot.support.SupportServiceResult
 import com.example.bot.support.Ticket
@@ -88,22 +89,7 @@ open class SupportMutationPostgresITFixture {
 
     @BeforeEach
     fun cleanDatabase() {
-        dropAuditFailureConstraint()
-        transaction(database) {
-            exec(
-                """
-                TRUNCATE TABLE
-                    audit_log,
-                    ticket_messages,
-                    tickets,
-                    user_role_permissions,
-                    user_roles,
-                    users,
-                    clubs
-                RESTART IDENTITY CASCADE
-                """.trimIndent(),
-            )
-        }
+        freshPostgresSchema(postgres)
     }
 
     @AfterEach

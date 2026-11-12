@@ -1,0 +1,2205 @@
+{
+  "synthetic_only": true,
+  "status": "PROPOSED",
+  "source_revision": "5550b944990d8c1c93c0a5012d31db209f93ea6d",
+  "state": {
+    "now": 1000000,
+    "source_present": true,
+    "writer_guard": true,
+    "fault": null,
+    "maintenance_current": true,
+    "clients": {
+      "c1": {
+        "active": true,
+        "archived": false,
+        "mapping_epoch": 1,
+        "lifecycle": 1
+      },
+      "c2": {
+        "active": true,
+        "archived": false,
+        "mapping_epoch": 1,
+        "lifecycle": 1
+      }
+    },
+    "mappings": {
+      "A": {
+        "client": "c1",
+        "created_at": 1,
+        "published": false
+      },
+      "B": {
+        "client": "c1",
+        "created_at": 1,
+        "published": false
+      },
+      "C": {
+        "client": "c1",
+        "created_at": 1,
+        "published": false
+      },
+      "Z": {
+        "client": "c2",
+        "created_at": 1,
+        "published": false
+      }
+    },
+    "connections": {
+      "platform": {
+        "bot": 3001,
+        "kind": "PLATFORM",
+        "client": null,
+        "version": 1,
+        "generation": 1,
+        "current_binding": "platform-first"
+      },
+      "brand": {
+        "bot": 3002,
+        "kind": "BRANDED",
+        "client": "c1",
+        "version": 1,
+        "generation": 1,
+        "current_binding": "brand-first"
+      },
+      "pending": {
+        "bot": 3003,
+        "kind": "BRANDED",
+        "client": "c1",
+        "version": 1,
+        "generation": 1,
+        "current_binding": "pending-first"
+      }
+    },
+    "bindings": {
+      "platform-first": {
+        "root": "platform",
+        "status": "ACTIVE",
+        "clubs": null,
+        "credential_ref": "ref-p1"
+      },
+      "brand-first": {
+        "root": "brand",
+        "status": "ACTIVE",
+        "clubs": [
+          "A",
+          "B"
+        ],
+        "credential_ref": "ref-b1"
+      },
+      "pending-first": {
+        "root": "pending",
+        "status": "PENDING",
+        "clubs": [
+          "A"
+        ],
+        "credential_ref": "ref-new1"
+      }
+    },
+    "credential_attestations": {
+      "ref-p1": {
+        "root": "platform",
+        "bot": 3001,
+        "material": "material-p1"
+      },
+      "ref-p2": {
+        "root": "platform",
+        "bot": 3001,
+        "material": "material-p2"
+      },
+      "ref-b1": {
+        "root": "brand",
+        "bot": 3002,
+        "material": "material-b1"
+      },
+      "ref-b2": {
+        "root": "brand",
+        "bot": 3002,
+        "material": "material-b2"
+      },
+      "ref-new1": {
+        "root": "pending",
+        "bot": 3003,
+        "material": "material-new1"
+      },
+      "ref-b1-alias": {
+        "root": "brand",
+        "bot": 3002,
+        "material": "material-b1"
+      }
+    },
+    "retired_credentials": [],
+    "authorities": {
+      "c1/A/1": {
+        "active": true,
+        "ref": "authority-c1-A-1"
+      },
+      "c1/B/1": {
+        "active": true,
+        "ref": "authority-c1-B-1"
+      },
+      "c1/C/1": {
+        "active": true,
+        "ref": "authority-c1-C-1"
+      },
+      "c2/Z/2": {
+        "active": true,
+        "ref": "authority-c2-Z-2"
+      }
+    },
+    "intents": {
+      "iA": {
+        "actor": 1,
+        "client": "c1",
+        "club": "A",
+        "issuer_ref": "authority-c1-A-1",
+        "admission_epoch": 1,
+        "policy_version": 1,
+        "issuer_member_version": 1
+      },
+      "iB": {
+        "actor": 1,
+        "client": "c1",
+        "club": "B",
+        "issuer_ref": "authority-c1-B-1",
+        "admission_epoch": 1,
+        "policy_version": 1,
+        "issuer_member_version": 1
+      },
+      "iC": {
+        "actor": 1,
+        "client": "c1",
+        "club": "C",
+        "issuer_ref": "authority-c1-C-1",
+        "admission_epoch": 1,
+        "policy_version": 1,
+        "issuer_member_version": 1
+      },
+      "iZ": {
+        "actor": 2,
+        "client": "c2",
+        "club": "Z",
+        "issuer_ref": "authority-c2-Z-2",
+        "admission_epoch": 1,
+        "policy_version": 1,
+        "issuer_member_version": 1
+      },
+      "iPlatform": {
+        "actor": 99,
+        "client": "c1",
+        "club": "A",
+        "issuer_ref": "authority-c1-A-99",
+        "admission_epoch": 1,
+        "policy_version": 1,
+        "issuer_member_version": 1
+      }
+    },
+    "admission_epochs": {
+      "c1": 1,
+      "c2": 1
+    },
+    "policy_version": 1,
+    "mutations": [],
+    "audit": [],
+    "receipts": {},
+    "legacy_permissions": {
+      "c1/A/1": [
+        "legacy.club.read"
+      ],
+      "c2/Z/2": [
+        "legacy.club.read"
+      ]
+    },
+    "issuer_memberships": {
+      "c1/1": {
+        "active": true,
+        "version": 1
+      },
+      "c2/2": {
+        "active": true,
+        "version": 1
+      }
+    },
+    "retired_materials": [],
+    "audience_intents": {
+      "c1/A": {
+        "approved": true,
+        "client": "c1",
+        "club": "A"
+      },
+      "c1/B": {
+        "approved": true,
+        "client": "c1",
+        "club": "B"
+      },
+      "c1/C": {
+        "approved": true,
+        "client": "c1",
+        "club": "C"
+      },
+      "c2/Z": {
+        "approved": true,
+        "client": "c2",
+        "club": "Z"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "platform-two-independent-clients",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c2",
+          "club": "Z",
+          "user": 2,
+          "audience_intent": "c2/Z",
+          "as": "q"
+        },
+        {
+          "op": "target",
+          "intent": "iZ",
+          "proof": "q",
+          "key": "u"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 2,
+      "risk": "One platform root, separate exact intents and authorities; no tenant wildcard."
+    },
+    {
+      "id": "platform-identity-without-authority",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 99,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iPlatform",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "AUTHORITY_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "platform-cannot-substitute-other-client-intent",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iZ",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "ACTOR_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "platform-exact-private-club-intent",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t",
+          "operation": "issue"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "branded-single-explicit-club",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "scope",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "clubs": [
+            "A"
+          ]
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "branded-finite-subset",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "B",
+          "user": 1,
+          "audience_intent": "c1/B",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iB",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "branded-neighbor-club",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "C",
+          "user": 1,
+          "audience_intent": "c1/C",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "AUDIENCE_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "branded-other-client",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c2",
+          "club": "Z",
+          "user": 2,
+          "audience_intent": "c2/Z",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "AUDIENCE_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "new-club-never-inherits-branded-scope",
+      "operations": [
+        {
+          "op": "event",
+          "action": "new_club",
+          "client": "c1",
+          "club": "D"
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "D",
+          "user": 1,
+          "audience_intent": "c1/D",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "AUDIENCE_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "new-club-conservatively-fences-old-proof",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "event",
+          "action": "new_club",
+          "client": "c1",
+          "club": "D"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "STALE_PROOF"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "initial-pending-no-authority-before-activation",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "pending",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "maintenance",
+          "action": "activate",
+          "root": "pending",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "proof",
+          "root": "pending",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "BINDING_INACTIVE",
+        "COMMITTED",
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "wrong-bot-key",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p",
+          "signed_as": "ref-p1"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "unknown-connection",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "unknown",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "CONNECTION_UNKNOWN"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "identity-only-without-staff",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 7,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "ACTOR_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "strict-300-second-expiry",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p",
+          "age": 300
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "future-date-denied",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p",
+          "age": -1
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "expires-after-wait",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p",
+          "age": 299
+        },
+        {
+          "op": "event",
+          "action": "tick",
+          "seconds": 1
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "IDENTITY_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "token-rotation-no-overlap",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "maintenance",
+          "action": "rotate_start",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "maintenance",
+          "action": "rotate_finish",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "finish",
+          "credential_ref": "ref-b2"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "oldkey",
+          "signed_as": "ref-b1"
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "fresh"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "fresh",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "BINDING_INACTIVE",
+        "COMMITTED",
+        "STALE_PROOF",
+        "IDENTITY_DENIED",
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "rotation-finish-audit-failure-stays-disabled",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "rotate_start",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "rotate_finish",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "finish",
+          "credential_ref": "ref-b2",
+          "audit_failure": true
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "AUDIT_FAILURE",
+        "BINDING_INACTIVE"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "rotation-credential-must-match-bot",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "rotate_start",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "rotate_finish",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "finish",
+          "credential_ref": "ref-p2"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "CREDENTIAL_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "revoke-blocks-old-proof-and-late-response",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "BINDING_INACTIVE"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "revoked-never-reactivates",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "activate",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "activate"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "TERMINAL"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "revoke-wins-against-rotation-completion",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "rotate_start",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "revoke"
+        },
+        {
+          "op": "maintenance",
+          "action": "rotate_finish",
+          "root": "brand",
+          "version": 3,
+          "generation": 3,
+          "key": "finish",
+          "credential_ref": "ref-b2"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "TERMINAL"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "replacement-keeps-old-tombstone-new-binding-id",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "replace",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "replace",
+          "new_binding": "brand-second",
+          "credential_ref": "ref-b2"
+        },
+        {
+          "op": "maintenance",
+          "action": "activate",
+          "root": "brand",
+          "version": 3,
+          "generation": 3,
+          "key": "activate"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "new"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "new",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "STALE_PROOF",
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "replacement-rejects-old-credential",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "replace",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "replace",
+          "new_binding": "brand-second",
+          "credential_ref": "ref-b1"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "CREDENTIAL_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "same-created-at-mapping-aba",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "event",
+          "action": "mapping_aba",
+          "client": "c1",
+          "club": "A"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "STALE_PROOF"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "mapping-writer-coverage-unknown",
+      "operations": [
+        {
+          "op": "event",
+          "action": "guard_missing"
+        },
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "FENCE_UNKNOWN"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "scope-change-invalidates-prior-generation",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "maintenance",
+          "action": "scope",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "clubs": [
+            "A"
+          ]
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "STALE_PROOF"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "scope-change-cannot-add-foreign-club",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "scope",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "clubs": [
+            "A",
+            "Z"
+          ]
+        }
+      ],
+      "expected_outcomes": [
+        "AUDIENCE_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "empty-scope-not-activation",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "scope",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "clubs": []
+        }
+      ],
+      "expected_outcomes": [
+        "AUDIENCE_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "confirm-before-revoke",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "COMMITTED",
+        "BINDING_INACTIVE"
+      ],
+      "expected_mutations": 1,
+      "risk": "Earlier committed operation remains; no later action/replay accepted."
+    },
+    {
+      "id": "revoke-before-confirm",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "BINDING_INACTIVE"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "confirm-before-scope-update",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "maintenance",
+          "action": "scope",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "clubs": [
+            "A"
+          ]
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "scope-update-before-confirm",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "maintenance",
+          "action": "scope",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "clubs": [
+            "A"
+          ]
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "STALE_PROOF"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "concurrent-cas-one-winner",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "disable",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "revoke"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "retry"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "CAS_CONFLICT",
+        "COMMITTED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "two-concurrent-revokes",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "second"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "CAS_CONFLICT"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "same-command-replay-does-not-bump-generation",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "disable",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "disable",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "REPLAY_CURRENT"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "old-maintenance-receipt-after-reactivation",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "disable",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "activate",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "activate"
+        },
+        {
+          "op": "maintenance",
+          "action": "disable",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "COMMITTED",
+        "STALE_RECEIPT"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "target-replay-current-no-double-issuance",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "REPLAY_CURRENT"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "old-target-receipt-after-revoke",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "COMMITTED",
+        "BINDING_INACTIVE"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "same-key-new-intent-conflicts",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t",
+          "operation": "issue"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "IDEMPOTENCY_CONFLICT"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "target-audit-failure-exact-rollback",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t",
+          "audit_failure": true
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "AUDIT_FAILURE"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "revoke-audit-failure-exact-rollback",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "audit_failure": true
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "AUDIT_FAILURE",
+        "IDENTITY_ONLY"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "source-missing",
+      "operations": [
+        {
+          "op": "event",
+          "action": "source_missing"
+        },
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "SOURCE_MISSING"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "database-failure-after-preflight",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "event",
+          "action": "db_failure"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "SOURCE_ERROR"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "configuration-failure",
+      "operations": [
+        {
+          "op": "event",
+          "action": "config_failure"
+        },
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "SOURCE_ERROR"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "cancellation-does-not-publish-proof",
+      "operations": [
+        {
+          "op": "event",
+          "action": "cancel"
+        },
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "CANCELLED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "issuer-authority-revoked-after-preflight",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "event",
+          "action": "revoke_authority",
+          "authority": "c1/A/1"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "AUTHORITY_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "policy-changes-during-wait",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "event",
+          "action": "policy_change"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "POLICY_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "recipient-admission-changes-during-wait",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "event",
+          "action": "admission_change",
+          "client": "c1"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "ADMISSION_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "maintenance-proof-not-a-target-role",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "disable",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "actor": 1
+        }
+      ],
+      "expected_outcomes": [
+        "MAINTENANCE_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "maintenance-identity-expires",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "disable",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "age": 300
+        }
+      ],
+      "expected_outcomes": [
+        "MAINTENANCE_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "identity-reparent-forbidden",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "reparent",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        }
+      ],
+      "expected_outcomes": [
+        "IMMUTABLE_IDENTITY"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "platform-root-cannot-be-restricted-by-scope-update",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "scope",
+          "root": "platform",
+          "version": 1,
+          "generation": 1,
+          "key": "m",
+          "clubs": [
+            "A"
+          ]
+        }
+      ],
+      "expected_outcomes": [
+        "INVALID_TRANSITION"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "retired-material-under-new-reference",
+      "operations": [
+        {
+          "op": "maintenance",
+          "action": "rotate_start",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "rotate_finish",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "finish",
+          "credential_ref": "ref-b1-alias"
+        }
+      ],
+      "expected_outcomes": [
+        "COMMITTED",
+        "CREDENTIAL_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "old-receipt-after-replacement",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "brand",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "maintenance",
+          "action": "replace",
+          "root": "brand",
+          "version": 2,
+          "generation": 2,
+          "key": "replace",
+          "new_binding": "brand-second",
+          "credential_ref": "ref-b2"
+        },
+        {
+          "op": "maintenance",
+          "action": "activate",
+          "root": "brand",
+          "version": 3,
+          "generation": 3,
+          "key": "activate"
+        },
+        {
+          "op": "proof",
+          "root": "brand",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "new"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "new",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "IDENTITY_ONLY",
+        "IDEMPOTENCY_CONFLICT"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "membership-revoked-after-preflight",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "event",
+          "action": "revoke_membership",
+          "member": "c1/1"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "EVENT",
+        "MEMBERSHIP_DENIED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "independent-client-survives-other-member-revoke",
+      "operations": [
+        {
+          "op": "event",
+          "action": "revoke_membership",
+          "member": "c1/1"
+        },
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c2",
+          "club": "Z",
+          "user": 2,
+          "audience_intent": "c2/Z",
+          "as": "p"
+        },
+        {
+          "op": "target",
+          "intent": "iZ",
+          "proof": "p",
+          "key": "t"
+        }
+      ],
+      "expected_outcomes": [
+        "EVENT",
+        "IDENTITY_ONLY",
+        "COMMITTED"
+      ],
+      "expected_mutations": 1,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "global-platform-revoke-fences-both-clients",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "c1/A",
+          "as": "p"
+        },
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c2",
+          "club": "Z",
+          "user": 2,
+          "audience_intent": "c2/Z",
+          "as": "q"
+        },
+        {
+          "op": "maintenance",
+          "action": "revoke",
+          "root": "platform",
+          "version": 1,
+          "generation": 1,
+          "key": "m"
+        },
+        {
+          "op": "target",
+          "intent": "iA",
+          "proof": "p",
+          "key": "t"
+        },
+        {
+          "op": "target",
+          "intent": "iZ",
+          "proof": "q",
+          "key": "u"
+        }
+      ],
+      "expected_outcomes": [
+        "IDENTITY_ONLY",
+        "IDENTITY_ONLY",
+        "COMMITTED",
+        "BINDING_INACTIVE",
+        "BINDING_INACTIVE"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    },
+    {
+      "id": "platform-without-server-scope-intent",
+      "operations": [
+        {
+          "op": "proof",
+          "root": "platform",
+          "client": "c1",
+          "club": "A",
+          "user": 1,
+          "audience_intent": "missing",
+          "as": "p"
+        }
+      ],
+      "expected_outcomes": [
+        "PLATFORM_INTENT_REQUIRED"
+      ],
+      "expected_mutations": 0,
+      "risk": "Fail closed; no role or scope inferred from channel identity."
+    }
+  ],
+  "source_sha256": {
+    "docs/product/ROLE_TARGET_TRUSTED_BINDING_CONTRACT_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "365b75f22a149f68e889b37014cb12e709ad7e88c168f0d4fd6d283f635b69b8"
+    },
+    "docs/product/PRODUCT_SPEC.md": {
+      "algorithm": "SHA-256",
+      "digest": "706cc2b1af7bba84e2f6db1d33487e40ec4ec2d63ce1ce67d7b48ea367406968"
+    },
+    "docs/product/OPEN_DECISIONS.md": {
+      "algorithm": "SHA-256",
+      "digest": "e1c3bb72ea71d1a7523e4c2289d989b5e045337a70cccf37a1817d68424cc31c"
+    },
+    "docs/product/MANAGED_BOTS_DIRECTION.md": {
+      "algorithm": "SHA-256",
+      "digest": "daee34f78dd5808a50386f493f655403edbf204c089372cf404d24673c9d3589"
+    },
+    "docs/product/ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "f62c116e4855c9f307388aaa9c5ccfbc7db59739d5575429973e5ecd82b8d19c"
+    },
+    "docs/product/ROLE_TARGET_IDENTITY_CONTRACT_PROPOSED.md": {
+      "algorithm": "SHA-256",
+      "digest": "a7253d0bb2aa9f194f017aeb565d1aad999a7ce9806ea684184713762f40e4e6"
+    },
+    "core-domain/src/main/kotlin/com/example/bot/config/AppConfig.kt": {
+      "algorithm": "SHA-256",
+      "digest": "002cb6ffb765d914e582b7bbde26c6007ad1a78e227a0f6bfea955c246d428c6"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/ClientContextAuth.kt": {
+      "algorithm": "SHA-256",
+      "digest": "cdb2b9e094697f4ba991a4ab356b7484888eabc29d17092cd8837f6f65dc6643"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/TargetIdentityVerifier.kt": {
+      "algorithm": "SHA-256",
+      "digest": "05931a70f45c383932537d7b56bc99ed7ade2ba5725b2b2c96de8387ca4089cb"
+    },
+    "app-bot/src/main/kotlin/com/example/bot/plugins/target/CanonicalTargetAudienceProvider.kt": {
+      "algorithm": "SHA-256",
+      "digest": "808e4762e0cd31f131fb73c0a3da944068bad4e6663f326343a60c923d6f6f26"
+    },
+    "core-data/src/main/kotlin/com/example/bot/data/client/JdbcCanonicalClientAudienceRepository.kt": {
+      "algorithm": "SHA-256",
+      "digest": "5ffed5f9e31394f4653ef68e82b312d5dc07ded3e9ac1be7450d123c91e62698"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V061__client_context.sql": {
+      "algorithm": "SHA-256",
+      "digest": "2b56b810d74509cbbb528368aa89a9605a97c46089a05c89806d696bc8dc14c6"
+    },
+    "core-data/src/main/resources/db/migration/postgresql/V066__client_archive.sql": {
+      "algorithm": "SHA-256",
+      "digest": "de999b2b11b30295943417e556e396c44fe2ce73e352bca0b4753bd29dff3f67"
+    }
+  }
+}

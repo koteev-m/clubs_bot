@@ -1,5 +1,6 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.client.assignments.PlatformMembershipSourceRevocation
 import com.example.bot.data.security.Role
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -116,6 +117,7 @@ internal class ClubStaffAccess(
         userId: Long,
         role: String?,
     ) {
+        session.requireLegacyClubAuthorityWrite(clientId, clubId, userId)
         sql.update(
             "UPDATE client_club_grants SET is_active=FALSE,updated_at=? WHERE client_id=? AND club_id=? AND user_id=?",
             session.now,
@@ -175,7 +177,13 @@ internal class ClubStaffAccess(
     fun platformRevoke(
         clientId: Long,
         userId: Long,
+        revocation: PlatformMembershipSourceRevocation? = null,
     ) {
+        if (revocation == null) {
+            session.requireLegacyClientAuthorityWrite(clientId, userId)
+        } else {
+            revocation.consume(session, clientId, userId)
+        }
         val affected =
             sql.rows(
                 "SELECT club_id FROM client_club_grants WHERE client_id=? AND user_id=? UNION " +

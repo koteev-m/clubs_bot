@@ -1,8 +1,8 @@
 package com.example.bot.data.booking.core
 
+import com.example.bot.data.testing.freshPostgresSchema
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
@@ -45,22 +45,7 @@ abstract class PostgresIntegrationTest {
 
     @BeforeEach
     fun cleanDatabase() {
-        check(::database.isInitialized) { "database not initialised" }
-        transaction(database) {
-            exec(
-                """
-                TRUNCATE TABLE
-                    booking_outbox,
-                    audit_log,
-                    booking_holds,
-                    bookings,
-                    events,
-                    tables,
-                    clubs
-                RESTART IDENTITY CASCADE
-                """.trimIndent(),
-            )
-        }
+        freshPostgresSchema(postgres)
     }
 
     @AfterAll

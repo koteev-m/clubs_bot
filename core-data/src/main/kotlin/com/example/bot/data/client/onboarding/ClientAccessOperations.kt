@@ -1,5 +1,6 @@
 package com.example.bot.data.client.onboarding
 
+import com.example.bot.data.client.assignments.PlatformMembershipSourceRevocation
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -140,14 +141,28 @@ internal class ClientAccessOperations(
         session.version(member, body)
         val restore = operation == OnboardingMutation.MEMBER_RESTORE
         if (restore == member.active()) fail("invalid_transition")
-        if (restore) restoreScopes(clientId, userId, body) else disableScopes(clientId, userId)
-        sql.update(
-            "UPDATE client_memberships SET is_active=?,version=version+1,updated_at=? WHERE client_id=? AND user_id=?",
-            restore,
-            session.now,
-            clientId,
-            userId,
-        )
+        val revocation =
+            PlatformMembershipSourceRevocation.prepare(
+                session,
+                clientId,
+                userId,
+                member.long("version"),
+                restore,
+            )
+        if (restore) restoreScopes(clientId, userId, body, revocation) else disableScopes(clientId, userId, revocation)
+        if (sql.update(
+                "UPDATE client_memberships SET is_active=?,version=version+1,updated_at=? " +
+                    "WHERE client_id=? AND user_id=? AND version=? AND is_active=?",
+                restore,
+                session.now,
+                clientId,
+                userId,
+                member.long("version"),
+                member.active(),
+            ) != 1
+        ) {
+            fail("version_conflict")
+        }
         session.audit(
             if (restore) "client.member.restore" else "client.member.revoke",
             clientId,
@@ -220,8 +235,9 @@ internal class ClientAccessOperations(
     private fun disableScopes(
         clientId: Long,
         userId: Long,
+        revocation: PlatformMembershipSourceRevocation,
     ) {
-        ClubStaffAccess(session).platformRevoke(clientId, userId)
+        ClubStaffAccess(session).platformRevoke(clientId, userId, revocation)
         sql.update(
             "UPDATE client_membership_grants SET is_active=FALSE,version=version+1,updated_at=? " +
                 "WHERE client_id=? AND user_id=?",
@@ -241,6 +257,7 @@ internal class ClientAccessOperations(
         clientId: Long,
         userId: Long,
         body: JsonObject,
+        revocation: PlatformMembershipSourceRevocation,
     ) {
         session.requireUnarchived(clientId)
         if (!session.client(clientId).active()) fail("not_found")
@@ -253,7 +270,7 @@ internal class ClientAccessOperations(
                     (it as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content ?: fail("validation_error")
                 }.toSet()
         if (requestedPermissions.any { it != MANAGE }) fail("validation_error")
-        disableScopes(clientId, userId)
+        disableScopes(clientId, userId, revocation)
         requestedPermissions.forEach { permission ->
             if (sql.update(
                     "UPDATE client_membership_grants SET is_active=TRUE,updated_at=? " +
@@ -273,6 +290,7 @@ internal class ClientAccessOperations(
                 grant.only(listOf("clubId", "permission"))
                 val clubId = grant.id("clubId")
                 val permission = grant.string("permission")
+                revocation.requireLegacyRestoreAllowed(clubId)
                 if (sql.row(
                         "SELECT user_id FROM client_club_staff WHERE client_id=? AND club_id=? AND user_id=?",
                         clientId,

@@ -1,5 +1,6 @@
 package com.example.bot.data.security
 
+import com.example.bot.data.testing.freshPostgresSchema
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
@@ -58,9 +59,7 @@ class ExposedUserIdentityProvisionerIT {
 
     @BeforeEach
     fun cleanDatabase() {
-        transaction(database) {
-            exec("TRUNCATE TABLE users RESTART IDENTITY CASCADE")
-        }
+        freshPostgresSchema(postgres)
     }
 
     @AfterAll

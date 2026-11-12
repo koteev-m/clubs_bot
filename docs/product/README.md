@@ -1,5 +1,38 @@
 # Product rebaseline: как читать документы
 
+Следующий узкий [trusted TARGET binding contract](ROLE_TARGET_TRUSTED_BINDING_CONTRACT_PROPOSED.md)
+имеет статус **PROPOSED**: multi-client platform entry, single-client branded scope,
+terminal binding incarnations, durable generation/mapping epoch и commit-time
+revalidation. Registry/credentials/runtime activation этим не реализуются.
+
+Локально реализован [read-only TARGET identity/audience verifier](../ops/role-target-identity-verifier.md).
+Он не подключён к production authorization и не выдаёт assignments. Invitation
+protocol/ownership/proof v2 и activation остаются отдельными PROPOSED границами.
+
+
+Следующий проект технического протокола:
+[SIGNED TARGET identity/admission](ROLE_TARGET_IDENTITY_CONTRACT_PROPOSED.md) —
+**PROPOSED**, separate ownership/audience proof, two-stage invitation, typed
+unclaimed-invitation cutoffs, atomic Confirm и explicit regrant. Он дополняет
+assignment contract; не является activation или новой принятой permission matrix.
+[Source-aware platform adapter](../ops/role-platform-revoke-adapter.md) реализован
+локально; identity/invitation markers и proof v2 требуют будущего отдельного этапа.
+
+
+Технический следующий этап после принятой восьмиролевой модели:
+[ROLE_ASSIGNMENT_CONTRACT_PROPOSED](ROLE_ASSIGNMENT_CONTRACT_PROPOSED.md) — один
+контракт source-based assignments/delegations/effective permissions, scoped
+revoke/full disable, all-writer compatibility и migration gates. Пять направлений
+приняты для [локальной inactive foundation](../ops/role-assignment-foundation.md);
+production policy/activation/cutover остаются закрыты. Existing grants и рабочая
+авторизация не переходят на новую модель автоматически.
+
+Текущая role model принята 2026-11-10: **восемь ролей и один Владелец бизнеса** —
+[PRODUCT_SPEC §29.18](PRODUCT_SPEC.md#business-role-model-20261110),
+[решение](OPEN_DECISIONS.md#role-model-20261110-decision). Девять ролей 2026-11-09
+сохраняют историю; технические варианты находятся в
+[PROPOSED-контракте](ROLE_WORKSPACES_PROPOSED.md#role-model-20261110).
+
 Этот каталог отделяет исходный продуктовый замысел от целевого контракта и от фактически подключённого поведения repository. Первая базовая линия снята на commit `df7685facb52a6e5731a520669dfa2c73f6ccf24` 2026-08-17. Проценты готовности не используются: у требований нет согласованной весовой формулы.
 
 ## Порядок чтения
@@ -57,7 +90,11 @@ Initial eight repository/source conflict items классифицированы 
 | `ACCEPTED_DECISION` | Прямо принято пользователем и записано в decision record. |
 | `ACCEPTED_NOT_IMPLEMENTED` | Product slice принят как target boundary, но его end-to-end production implementation не выполнена. |
 
-Decision log содержит 42 records: 22 `ACCEPTED_DECISION` и 20 `DECISION_REQUIRED`. 16 records, принятых до `DEC-037`, сохраняют историю принятия (датированные уточнения `DEC-003/005/007/017` внесены 2026-10-27) (`DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-026`, `DEC-028`–`DEC-036`), а `DEC-001`, `DEC-002`, `DEC-006` и `DEC-027` остаются pending. `DEC-037` — seventeenth accepted record и отдельное operational security/governance decision; `DEC-038` — eighteenth accepted record и отдельное operational security/governance decision, узко заменяющее provider/VNC host-authentication prerequisite только для exact stage endpoint/Ed25519 fingerprint при сохранении strict checking и всех остальных execution gates. Эти два operational records не входят в product overlay. `DEC-039` — nineteenth accepted record: Telegram identity владельца платформы, read-only доступ к кабинету и изоляция будущих владельцев клубов; он добавлен в overlay `PRODUCT_SPEC.md` без изменения 170 immutable source requirements и прежних legacy OWNER/GLOBAL semantics. `DEC-040`–`DEC-042`, принятые 2026-10-27, добавляют клиентскую изоляцию, отдельные заявки на клубы и брендированные Managed Bots подключения; новая функциональность `ACCEPTED_NOT_IMPLEMENTED`. Target/UX/acceptance находятся в [PRODUCT_SPEC](PRODUCT_SPEC.md#client-onboarding-contract), адресная дельта кода — в [CONCEPT_CODE_GAP](CONCEPT_CODE_GAP.md#client-bot-delta), первая задача — в [roadmap](PRODUCT_ROADMAP.md#client-first-implementation). Узкий read-contract §28 отдельно принят владельцем 2026-10-27; его локальная реализация описана в [bounded AS_BUILT delta](AS_BUILT.md#client-read-local) и не завершает onboarding/multi-bot outcome. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
+Decision log содержит 42 records: 26 `ACCEPTED_DECISION` и 16 `DECISION_REQUIRED`. 16 records, принятых до `DEC-037`, сохраняют историю принятия (датированные уточнения `DEC-003/005/007/017` внесены 2026-10-27) (`DEC-003`, `DEC-004`, `DEC-005`, `DEC-007`, `DEC-017`, `DEC-025`, `DEC-026`, `DEC-028`–`DEC-036`), а `DEC-001`, `DEC-002` и `DEC-027` остаются pending. `DEC-006` принят 2026-11-10 для explicit same-network club assignments/promoter booking; analytics/quotas/rewards этим scope-решением не принимаются. `DEC-037` — seventeenth accepted record и отдельное operational security/governance decision; `DEC-038` — eighteenth accepted record и отдельное operational security/governance decision, узко заменяющее provider/VNC host-authentication prerequisite только для exact stage endpoint/Ed25519 fingerprint при сохранении strict checking и всех остальных execution gates. Эти два operational records не входят в product overlay. `DEC-039` — nineteenth accepted record: Telegram identity владельца платформы, read-only доступ к кабинету и изоляция будущих владельцев клубов; он добавлен в overlay `PRODUCT_SPEC.md` без изменения 170 immutable source requirements и прежних legacy OWNER/GLOBAL semantics. `DEC-040`–`DEC-042`, принятые 2026-10-27, добавляют клиентскую изоляцию, отдельные заявки на клубы и брендированные Managed Bots подключения; новая функциональность `ACCEPTED_NOT_IMPLEMENTED`. Target/UX/acceptance находятся в [PRODUCT_SPEC](PRODUCT_SPEC.md#client-onboarding-contract), адресная дельта кода — в [CONCEPT_CODE_GAP](CONCEPT_CODE_GAP.md#client-bot-delta), первая задача — в [roadmap](PRODUCT_ROADMAP.md#client-first-implementation). Узкий read-contract §28 отдельно принят владельцем 2026-10-27; его локальная реализация описана в [bounded AS_BUILT delta](AS_BUILT.md#client-read-local) и не завершает onboarding/multi-bot outcome. Рекомендации имеют отдельные dispositions/defaults и не становятся принятым выбором через wording, dependency или существование кода.
+
+Сводный count сверяет актуальный `Status` всех 42 records: учитывает ранее принятые
+2026-11-03 DEC-008/009/018 и принятое 2026-11-10 уточнение DEC-006. Прежние
+исторические ordinal/count формулировки не создают новых решений.
 
 ## Правила доказательности
 
@@ -80,7 +117,7 @@ Decision log содержит 42 records: 22 `ACCEPTED_DECISION` и 20 `DECISION
 
 Документы описывают repository на exact `origin/main` commit, а не развёрнутую внешнюю среду. VPS, Telegram API, реальные secrets, runtime data и deployment не проверялись. Поэтому утверждения о фактически запущенном экземпляре остаются `UNKNOWN`, если их нельзя доказать packaging и application wiring.
 
-## Актуальное уточнение модели управления, 2026-11-09
+## Историческое уточнение модели управления, 2026-11-09
 
 Прямо принят новый основной набор из девяти ролей и ограниченный процесс
 делегирования подготовки: [PRODUCT_SPEC §29.17](PRODUCT_SPEC.md#owner-manager-model),
@@ -91,3 +128,36 @@ Decision log содержит 42 records: 22 `ACCEPTED_DECISION` и 20 `DECISION
 технические пакеты и исторический staff-контракт 2026-11-08. Это target acceptance,
 не автоматическая миграция RBAC, не новые network/GLOBAL grants и не runtime evidence.
 Источник `CONCEPT_SOURCE.md` и прежние решения не переписываются.
+
+## Исторический проект девяти рабочих кабинетов — PROPOSED, 2026-11-09
+
+[Матрица прав, evidence, кабинеты и безопасный переход](ROLE_WORKSPACES_PROPOSED.md)
+подготовлены на main после PR #567. Это проект для отдельного принятия, не overlay
+утверждённых permissions. Существующие staff packages, grants и статусы решений
+не меняются. В документе отдельно указаны блокеры полного операционного кабинета
+и первый безопасный local этап без выдачи новых прав.
+
+## Актуальное уточнение: восемь ролей, 2026-11-10
+
+[Прямое решение](OPEN_DECISIONS.md#role-model-20261110-decision) объединяет прежних
+владельцев сети/клуба в одну роль Владелец бизнеса, принимает target hierarchy
+owner → необязательный network manager → club manager → lower staff и отдельное
+configuration delegation менеджеру. Scope и финансовая capability проверяются
+независимо на сервере. DEC-006 принят для explicit same-network club assignments
+и own promoter bookings; attribution CLUB/конкретный promoter отделяется от
+financial mode. Подробности не дублируются: [target](PRODUCT_SPEC.md#business-role-model-20261110),
+[gaps](CONCEPT_CODE_GAP.md#role-model-20261110-gap),
+[последовательность](PRODUCT_ROADMAP.md#role-model-20261110-sequence).
+
+Exact permission/delegation/writer/schema/migration, attribution corrections/UI,
+финансовые режимы, rewards, music upload и emergency recovery остаются PROPOSED/
+открытыми в своих границах. Accepted product direction не изменяет existing grants,
+packages/legacy assignments, production RBAC или runtime. Новых DEC ID нет;
+immutable concept и 170 source rows сохранены.
+
+### Inactive TARGET binding foundation
+
+[Local V078/lifecycle/mapping evidence](../ops/role-target-binding-foundation.md)
+records the bounded accepted implementation of the
+[trusted-binding contract](ROLE_TARGET_TRUSTED_BINDING_CONTRACT_PROPOSED.md#0-accepted-local-foundation--2026-11-11).
+No actual connection, credential resolver or TARGET authorization is activated.
